@@ -221,6 +221,7 @@ def save_breadcrumb(app) -> None:
             "last_session_id": rstate.last_session_id,
             "iteration_attempted": rstate.iteration_attempted,
             "stale_session_id": rstate.stale_session_id,
+            "stale_pane_session_id": rstate.stale_pane_session_id,
             "history": [
                 {
                     "iteration": h.iteration,
@@ -331,6 +332,8 @@ async def consume_breadcrumb(app) -> None:
                 iteration_attempted=bool(
                     loop_data.get("iteration_attempted", False)),
                 stale_session_id=loop_data.get("stale_session_id", "") or "",
+                stale_pane_session_id=(
+                    loop_data.get("stale_pane_session_id", "") or ""),
             )
             for h in loop_data.get("history", []):
                 rstate.history.append(ReviewIteration(

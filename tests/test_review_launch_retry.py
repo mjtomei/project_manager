@@ -823,6 +823,95 @@ def test_retry_never_adopts_a_historical_panes_verdict(tmp_path, monkeypatch):
     assert result.latest_verdict == VERDICT_LAUNCH_FAILED
 
 
+def test_retry_never_adopts_the_window_that_was_live_at_episode_start(
+        tmp_path, monkeypatch):
+    """A review window already open when the episode started is the
+    historical window, not this iteration's attempt.
+
+    Iteration 1 of a fresh loop has no ``last_session_id`` and its (new)
+    transcript dir holds no earlier symlink, so nothing identifies that
+    pane as old.  A first attempt that fails *before* ``--fresh`` replaces
+    the window (route down, workdir gone, a tmux error on the kill) then
+    leaves it live; the retry must replace it rather than record its older
+    review's verdict for an iteration that never ran.
+    """
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    from pm_core import tmux
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    old = str(uuid.uuid4())  # a pre-existing review of older code
+    (tmp_path / f"{old}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{old}.jsonl")
+    launches = []
+
+    def fake_launch(pr_id, pm_root, *, iteration=0, loop_id="",
+                    transcript=None, attempt=1, workdir=None,
+                    stale_session_id=""):
+        launches.append(attempt)
+        raise ReviewLaunchError("container setup failed", retryable=True)
+
+    monkeypatch.setattr(review_loop, "_launch_review_window", fake_launch)
+    state = ReviewLoopState(pr_id=PR)
+    result = _run(state, tmp_path)
+    assert launches == [1, 2, 3], (
+        "the pre-existing window's verdict must not be adopted")
+    assert result.history == []
+    assert result.latest_verdict == VERDICT_LAUNCH_FAILED
+    assert result.launch_retryable is True
+    assert state.stale_pane_session_id == old
+
+
+def test_discovery_replaces_the_window_that_was_live_at_episode_start(
+        tmp_path, monkeypatch):
+    """Discovery-level form of the same guard (breadcrumb-restored state)."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    sid = str(uuid.uuid4())
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{sid}.jsonl")
+    state = ReviewLoopState(pr_id=PR, iteration=1,
+                            iteration_attempted=True, launch_attempts=1,
+                            stale_pane_session_id=sid)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 1,
+                                           allow_recovery=True)
+    assert disc.kind == "launch"
+
+
+def test_discovery_still_adopts_a_session_started_after_the_stale_one(
+        tmp_path, monkeypatch):
+    """The stale-pane guard must not swallow the case it was traded against:
+    a route/other driver launching the same iteration *after* the episode
+    started is a new owner and is adopted, not killed."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    old = str(uuid.uuid4())
+    fresh = str(uuid.uuid4())
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr(review_loop, "_other_loop_owner", lambda _s: "")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: tmp_path / f"{fresh}.jsonl")
+    state = ReviewLoopState(pr_id=PR, iteration=1,
+                            iteration_attempted=True, launch_attempts=1,
+                            stale_pane_session_id=old)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 1,
+                                           allow_recovery=True)
+    assert disc.kind == "adopt"
+    assert disc.session_id == fresh
+
+
 def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     sid = str(uuid.uuid4())
@@ -1102,6 +1191,8 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
         retry_episodes=1, retry_ready_at=time.time() + 60,
         last_session_id="sid-1",
         iteration_attempted=True,
+        stale_session_id="sid-0",
+        stale_pane_session_id="sid-pane-0",
         _transcript_dir=str(tmp_path),
     )
     app = MagicMock()
@@ -1129,6 +1220,7 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
     assert loop["last_launch_artifact"] == "/tmp/a.log"
     assert loop["last_session_id"] == "sid-1"
     assert loop["iteration_attempted"] is True
+    assert loop["stale_pane_session_id"] == "sid-pane-0"
 
 
 # ---------------------------------------------------------------------------

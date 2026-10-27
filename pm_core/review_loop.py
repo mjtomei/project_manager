@@ -168,6 +168,14 @@ class ReviewLoopState:
     # run's iteration N; adopting its verdict would fabricate one.  Only a
     # session id different from this one can be this loop's own attempt.
     stale_session_id: str = ""
+    # Session id of the review window's pane *before* this loop first
+    # attempted the iteration.  That window is the historical one, not
+    # this iteration's attempt: a first attempt that fails before
+    # ``--fresh`` replaces it (route down, workdir gone, a tmux error on
+    # the kill) leaves it live, and iteration 1 has no ``last_session_id``
+    # or earlier symlink to recognise it by.  Adopting it would record an
+    # older review's verdict for an iteration that never ran.
+    stale_pane_session_id: str = ""
 
 
 def _match_verdict(line: str) -> str | None:
@@ -480,6 +488,35 @@ def _transcript_session_id(transcript: str | None) -> str | None:
         return None
 
 
+def _live_review_pane_session(pr_data: dict) -> str:
+    """Session id of the review window's pane right now, or "".
+
+    Used to snapshot the historical window when an iteration's retry
+    episode starts: whatever pane is live *then* belongs to an earlier
+    run, so rediscovery must replace it instead of adopting its verdict.
+    Total by design — a missing tmux session/window or an unresolvable
+    session just means "nothing to exclude".
+    """
+    session = _get_pm_session()
+    if not session:
+        return ""
+    try:
+        from pm_core.claude_launcher import (
+            pane_transcript_path, session_id_from_transcript,
+        )
+        workdir = pr_data.get("workdir")
+        pane_id = _find_review_claude_pane(
+            session, _compute_review_window_name(pr_data), workdir)
+        if not pane_id:
+            return ""
+        path = pane_transcript_path(pane_id, workdir)
+        return (session_id_from_transcript(path) or "") if path else ""
+    except Exception:
+        _log.debug("review_loop: episode-start pane snapshot failed",
+                   exc_info=True)
+        return ""
+
+
 def _landed_verdict(transcript: str | None) -> str | None:
     """The verdict already recorded for an *idle* pane's transcript, or None.
 
@@ -566,6 +603,11 @@ def _is_historical_session(state: ReviewLoopState, transcript_dir: str,
         # The symlink that was already there when this loop first attempted
         # the iteration: an earlier run's session, never this attempt.
         return True
+    if getattr(state, "stale_pane_session_id", "") == session_id:
+        # The pane that was already live in the review window when this
+        # loop first attempted the iteration: the historical window (e.g.
+        # a manual review of older code), never this attempt.
+        return True
     try:
         from pm_core.claude_launcher import session_id_from_transcript
         pattern = re.compile(
@@ -601,7 +643,11 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
     attempt: the symlink is only this attempt's when its session id is not
     the one that was already there when the episode started
     (``state.stale_session_id``) — a launch that fails before the child
-    writes the symlink leaves the older one in place.
+    writes the symlink leaves the older one in place.  The review window
+    that was already live when the episode started is historical for the
+    same reason (``state.stale_pane_session_id``): a launch that fails
+    before ``--fresh`` replaces it leaves that window (and its older
+    review's verdict) in place.
     """
     pr_id = state.pr_id
     workdir = pr_data.get("workdir")
@@ -1040,6 +1086,10 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         # launch fails before the child replaces it, rediscovery must not
         # mistake an earlier run's iteration-N transcript for this attempt.
         state.stale_session_id = _transcript_session_id(transcript) or ""
+        # Same for the live review window: it is the historical window, and
+        # a first attempt that fails before ``--fresh`` replaces it must not
+        # have its (older code's) verdict adopted on the retry.
+        state.stale_pane_session_id = _live_review_pane_session(pr_data)
 
     # A merge-restart may land mid-backoff: honour the remaining delay.
     if state.next_retry_at > time.time():

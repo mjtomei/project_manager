@@ -335,6 +335,7 @@ class TestConsumeBreadcrumbReviewLoops:
                     "launch_retryable": True,
                     "retry_episodes": 0,
                     "iteration_attempted": True,
+                    "stale_pane_session_id": "sid-pane-0",
                     "_transcript_dir": str(tmp_path),
                     "history": [{"iteration": 1, "verdict": "NEEDS_WORK"}],
                 }
@@ -375,6 +376,9 @@ class TestConsumeBreadcrumbReviewLoops:
         # The saved bounded budget survives the restart.
         assert state.launch_attempts == 2
         assert state.retry_episodes == 0
+        # The episode-start window snapshot survives too: the resumed loop
+        # must still recognise that pane as the historical window.
+        assert state.stale_pane_session_id == "sid-pane-0"
         msgs = [c.args[0] for c in app.log_message.call_args_list]
         assert not any("retrying review launch" in m for m in msgs), (
             "the restored loop must be resumed, not re-armed")

@@ -25,6 +25,7 @@ from pm_core.review_loop import (
     VERDICT_LAUNCH_FAILED,
     VERDICT_HOLD,
     VERDICT_CLOSED,
+    VERDICT_ERROR,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
@@ -378,7 +379,7 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     # verdict to the user instead of silently dismissing.
     final_state = ("failed"
                    if state.latest_verdict in (
-                       "ERROR", "KILLED", VERDICT_LAUNCH_FAILED,
+                       VERDICT_ERROR, "KILLED", VERDICT_LAUNCH_FAILED,
                        VERDICT_HOLD)
                    else "done")
     extras = {
@@ -531,7 +532,7 @@ def _poll_loop_state_inner(app) -> None:
             f"Review loop done for {state.pr_id}: {verdict_icon} "
             f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
         )
-        if state.latest_verdict in ("ERROR", VERDICT_LAUNCH_FAILED,
+        if state.latest_verdict in (VERDICT_ERROR, VERDICT_LAUNCH_FAILED,
                                     VERDICT_HOLD) and state.latest_output:
             # Truncate for display but show enough to be useful
             err_text = state.latest_output[:300]

@@ -573,3 +573,41 @@ verdict keyword on its own JSON-string-bounded line, so a mid-turn
 fabrication would need the reviewer to emit a bare verdict line and keep
 talking, and requiring an idle event would strand completed reviews on hosts
 without hooks installed.
+
+## Review iteration 10 (385e) — refinements
+
+Findings from the tenth review pass, applied on top of iteration 9:
+
+1. **A retry must not adopt the window that was already open when the
+   episode started (correctness fix — fabricated verdict).** Iterations 1,
+   3 and 5 stopped rediscovery from adopting a stale *symlink* or a pane
+   whose session was identifiable as historical (`last_session_id`,
+   `stale_session_id`, a lower-numbered transcript).  Nothing identified a
+   *pre-existing review window* for iteration 1 of a fresh loop: its
+   transcript dir is new (no symlink) and there is no `last_session_id`, so
+   a first attempt that fails **before** `--fresh` replaces the window
+   (route down, workdir gone, a tmux error on the kill — the child returns
+   before the kill or raises during it) left that window live, and the
+   retry adopted its older review's verdict — e.g. `PASS` — for an
+   iteration that never ran, with zero launches.  `ReviewLoopState`
+   now snapshots `stale_pane_session_id` (the review window's session id)
+   when the episode starts, `_is_historical_session` treats it as
+   historical (so the window is replaced by the fresh launch), and the
+   field round-trips through the breadcrumb so a restart mid-episode keeps
+   the guard.  A session that appears *after* the episode started (a
+   sign-off route or another driver racing the retry) still differs from
+   the snapshot and is adopted — the iteration-2 regression is preserved.
+   Covered by
+   `test_retry_never_adopts_the_window_that_was_live_at_episode_start`
+   (fails pre-fix: records the old `PASS` with no launch),
+   `test_discovery_replaces_the_window_that_was_live_at_episode_start`, and
+   `test_discovery_still_adopts_a_session_started_after_the_stale_one`;
+   the breadcrumb round-trip tests cover persistence.
+2. **`VERDICT_ERROR` used instead of the literal.** `review_loop_ui` still
+   compared `latest_verdict` against `"ERROR"` while the new outcomes use
+   the constants; the two failure tuples now use `VERDICT_ERROR`.
+
+Not changed (documented residuals): `review_loop.py` is ~1470 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9).
