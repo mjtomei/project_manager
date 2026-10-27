@@ -76,7 +76,8 @@ Rules, in order:
    only calls it after a successful `json.loads`).
 2. `all_mode` present and truthy → reject the **whole** autostart state
    (`targets={}`, `error="saved auto-start state requested all-mode
-   (whole backlog); all-mode autostart is removed — re-add explicit targets"`).
+   (whole backlog); all-mode autostart has been removed"`; the consumer
+   appends the remedy so it is not repeated twice in one message).
    A truthy `all_mode` is an explicit request for wildcard authority and is
    never narrowed into a partial restore.
 3. `auto_start` present and not a `bool` → reject (wrong type).
@@ -239,7 +240,9 @@ No **[UNRESOLVED]** ambiguities.
 - `targets` is a string / null / number / bool → reject.
 - `targets` list with `{}`, `{"pr_id": ""}`, `{"pr_id": 3}`,
   `{"pr_id": "a", "wait_for_merge": "yes"}` → reject whole set.
-- `targets` list with duplicate ids → first record wins (stable order).
+- `targets` list with duplicate ids → reject the whole set. First-wins
+  could silently drop the other record's `wait_for_merge` merge gate, and
+  our own writer (a dict keyed by id) never emits duplicates.
 - Corrupt/truncated JSON → OFF, diagnostic, quarantined.
 - `auto_start: true` + `targets: []` → reject.
 - `auto_start: "true"` (string) → reject (wrong type).

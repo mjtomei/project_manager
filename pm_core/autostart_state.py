@@ -211,15 +211,13 @@ class BreadcrumbTargets:
 # gate, and coercing it could widen a hold.
 _RECORD_TYPES = {"wait_for_merge": bool, "added_at": str, "source": str}
 
+# Diagnostics name the problem only; the consumer (``consume_breadcrumb``)
+# appends the actionable remedy so it is not repeated twice in one message.
 _ALL_MODE_ERROR = (
     "saved auto-start state requested all-mode (whole backlog); all-mode "
-    "autostart has been removed — re-add explicit targets with "
-    "`pm autostart add PR_ID...`"
+    "autostart has been removed"
 )
-_TARGETLESS_ERROR = (
-    "saved auto-start state has no target PRs (add explicit targets with "
-    "`pm autostart add PR_ID...`)"
-)
+_TARGETLESS_ERROR = "saved auto-start state has no target PRs"
 
 
 def _valid_pr_id(value) -> bool:
@@ -230,13 +228,20 @@ def _valid_pr_id(value) -> bool:
 
 def _parse_target_entries(raw: list) -> tuple[dict[str, dict], str | None]:
     """Parse a current-format ``targets`` list; reject the whole set on
-    any malformed entry (never restore a partial authority)."""
+    any malformed entry (never restore a partial authority).
+
+    Duplicate ids are rejected too: keeping only the first record could
+    silently drop the other's ``wait_for_merge`` merge gate, and our own
+    writer (a dict keyed by id) never emits duplicates.
+    """
     targets: dict[str, dict] = {}
     for i, entry in enumerate(raw):
         if isinstance(entry, str):
             if not _valid_pr_id(entry):
                 return {}, f"targets[{i}] is not a valid PR id"
-            targets.setdefault(entry, make_target_record("breadcrumb"))
+            if entry in targets:
+                return {}, f"targets[{i}] duplicates target {entry!r}"
+            targets[entry] = make_target_record("breadcrumb")
             continue
         if not isinstance(entry, dict):
             return {}, (f"targets[{i}] must be a PR id string or a record "
@@ -244,6 +249,8 @@ def _parse_target_entries(raw: list) -> tuple[dict[str, dict], str | None]:
         pr_id = entry.get("pr_id")
         if not _valid_pr_id(pr_id):
             return {}, f"targets[{i}] has a missing or invalid pr_id"
+        if pr_id in targets:
+            return {}, f"targets[{i}] duplicates target {pr_id!r}"
         rec = {k: v for k, v in entry.items() if k != "pr_id"}
         for key, typ in _RECORD_TYPES.items():
             if key in rec and not isinstance(rec[key], typ):
@@ -251,7 +258,7 @@ def _parse_target_entries(raw: list) -> tuple[dict[str, dict], str | None]:
                             f"({type(rec[key]).__name__})")
         rec.setdefault("added_at", now_iso())
         rec.setdefault("source", "breadcrumb")
-        targets.setdefault(pr_id, rec)
+        targets[pr_id] = rec
     return targets, None
 
 
@@ -771,8 +778,6 @@ def format_text(status: dict) -> str:
         r = row["run"]
         indent = "  " * row["depth"]
         mark = "◎ " if row["kind"] == "target" else "└ "
-        if row["kind"] == "run":
-            mark = ""
         # The default policy goes unlabelled in text (only holds show).
         labels = [lbl for lbl, _ in policy_labels(row) if lbl != "auto-merge"]
         pol = f" [{'; '.join(labels)}]" if labels else ""

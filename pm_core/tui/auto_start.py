@@ -336,11 +336,17 @@ async def consume_breadcrumb(app) -> None:
         data = json.loads(breadcrumb.read_text())
     except Exception as e:
         _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
+        # Fail closed exactly like a rejected parse: a corrupt file must not
+        # leave any pre-existing in-memory scope active.
+        app._auto_start = False
+        app._auto_start_targets = {}
+        app._auto_start_run_id = None
         _quarantine_breadcrumb(breadcrumb)
         app.log_message(
             "Auto-start: saved state is unreadable "
             f"({type(e).__name__}); auto-start remains off. Re-add targets "
             "with `pm autostart add PR_ID...`.", force=True, sticky=10)
+        app._update_display()
         return
 
     parsed = autostart_state.targets_from_breadcrumb(data)
@@ -886,13 +892,14 @@ def _prune_completed_targets(app, prs: list[dict]) -> None:
 async def check_and_start(app) -> None:
     """Advance every in-scope PR one scheduler step.
 
-    Scope is the union of the target closures (or everything in explicit
-    all-mode).  Launches ready PRs (pending with deps merged, plus
-    restartable in_progress PRs — ``pm pr start --background`` no-ops when
-    the window exists), each at most once even across concurrent passes
-    (``_auto_start_launching``), then starts review/QA loops.  Scope is
-    re-checked after every ``await`` so a removal that lands mid-pass takes
-    effect.  Completed targets are removed individually.
+    Scope is the union of the target closures; an empty target set is OFF
+    (there is no all-PR mode).  Launches ready PRs (pending with deps
+    merged, plus restartable in_progress PRs — ``pm pr start --background``
+    no-ops when the window exists), each at most once even across
+    concurrent passes (``_auto_start_launching``), then starts review/QA
+    loops.  Scope is re-checked after every ``await`` so a removal that
+    lands mid-pass takes effect.  Completed targets are removed
+    individually.
     """
     if not is_enabled(app):
         return

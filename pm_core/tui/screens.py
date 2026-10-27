@@ -723,7 +723,7 @@ class AutoRunsScreen(ModalScreen):
             return None
         owner = None
         for r in rows[:idx + 1]:
-            if r["kind"] in ("target", "run"):
+            if r["kind"] == "target":
                 owner = r["pr_id"]
         return (owner, rows[idx]["pr_id"])
 

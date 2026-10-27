@@ -156,6 +156,18 @@ class TestBreadcrumbParserFailClosed:
         assert result.targets == {}, "a partial restore could widen authority"
         assert result.error
 
+    @pytest.mark.parametrize("entries", [
+        ["pr-a", "pr-a"],
+        ["pr-a", {"pr_id": "pr-a", "wait_for_merge": True}],
+        [{"pr_id": "pr-a"}, {"pr_id": "pr-a"}],
+    ])
+    def test_duplicate_targets_reject_whole_set(self, entries):
+        """First-wins could silently drop the other record's merge gate."""
+        result = st.targets_from_breadcrumb(
+            {"auto_start": True, "targets": entries})
+        assert result.targets == {} and result.error
+        assert "duplicate" in result.error
+
     def test_empty_targets_with_auto_start_request_is_rejected(self):
         result = st.targets_from_breadcrumb(
             {"auto_start": True, "targets": [], "run_id": "r"})
@@ -345,17 +357,36 @@ class TestConsumeFailClosed:
 
     def test_malformed_stop_marks_keep_autostart_off(self, tmp_path):
         """A malformed merge-gate set must not be silently dropped while
-        autostart resumes and auto-merges without holds."""
-        app = FakeApp([_pr("pr-a")], tmp_path)
+        autostart resumes and auto-merges without holds.  Safe non-autostart
+        state (review-loop progress) is still restored."""
+        app = FakeApp([_pr("pr-a", status="qa")], tmp_path)
         _write_breadcrumb(tmp_path, {
             "auto_start": True,
             "targets": [{"pr_id": "pr-a"}],
             "stop_before_merge": {"pr-a": "yes"},
+            "review_loops": {"pr-a": {"iteration": 2, "history": []}},
         })
         _consume(app, tmp_path)
         assert app._auto_start is False
         assert app.launched == []
         assert any("stop_before_merge" in m for m in app.logs)
+        # Autostart is off, so restored loop state cannot merge anything.
+        assert app._review_loops["pr-a"].iteration == 2
+
+    def test_corrupt_json_clears_pre_existing_scope(self, tmp_path):
+        """A corrupt file must fail closed even if this app somehow already
+        had autostart state: the rejected restore never leaves a scope live."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        app._auto_start = True
+        app._auto_start_targets = {"pr-a": {}}
+        app._auto_start_run_id = "stale"
+        _write_breadcrumb(tmp_path, "{not json")
+        _consume(app, tmp_path)
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        assert app._auto_start_run_id is None
+        assert auto_start.managed_ids(app) == set()
+        assert _rejected_files(tmp_path)
 
 
 class TestSaveNeverPersistsWildcard:
@@ -370,6 +401,29 @@ class TestSaveNeverPersistsWildcard:
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
         assert "all_mode" not in data
         assert [t["pr_id"] for t in data["targets"]] == ["pr-a"]
+
+    def test_mixed_policies_roundtrip_exactly(self, tmp_path):
+        """Save→consume reproduces the same targets, order and holds."""
+        prs = [_pr("pr-a"), _pr("pr-b")]
+        app = FakeApp(prs, tmp_path)
+        app._auto_start = True
+        app._auto_start_targets = {
+            "pr-b": {**st.make_target_record("key:O"), st.WAIT_KEY: True},
+            "pr-a": st.make_target_record("cli"),
+        }
+        app._auto_start_run_id = "run"
+        app._stop_before_merge = {"pr-a"}
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            (tmp_path / "merge-restart").touch()
+            auto_start.save_breadcrumb(app)
+
+        fresh = FakeApp(prs, tmp_path)
+        _consume(fresh, tmp_path)
+        assert auto_start.get_targets(fresh) == ["pr-b", "pr-a"]
+        assert fresh._auto_start_targets["pr-b"][st.WAIT_KEY] is True
+        assert st.WAIT_KEY not in fresh._auto_start_targets["pr-a"]
+        assert fresh._auto_start_run_id == "run"
+        assert "pr-a" in fresh._stop_before_merge
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +502,8 @@ class TestAllModeCommandRejected:
         assert app.workers == []
 
     def test_usage_does_not_advertise_all(self):
-        assert "all" not in auto_start.USAGE.split("|")
+        # ``all`` was the last verb; a bare-token check would miss it.
+        assert " all" not in auto_start.USAGE
 
     def test_status_mode_is_never_all(self):
         s = st.build_status({"prs": [_pr("pr-a")], "targets": {},
