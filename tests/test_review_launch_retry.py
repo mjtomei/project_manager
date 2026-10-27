@@ -272,6 +272,75 @@ def test_restart_between_iterations_does_not_adopt_the_old_run(
         resumed, _pr(tmp_path), str(tmp_path)) is None
 
 
+def test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run(
+        tmp_path, monkeypatch):
+    """An adopted iteration clears ``iteration_attempted`` too.
+
+    The restart handoff adopts the in-flight iteration, then
+    ``run_review_loop_sync`` bumps the counter and only inside
+    ``_run_iteration_with_retry`` re-snapshots the next episode.  A merge
+    restart landing in that window persisted the adopted iteration's
+    ``True`` for the *next* iteration number, so the resumed handoff
+    allowed recovery and adopted an earlier run's
+    ``review-<pr>-i<N>.jsonl`` verdict (e.g. ``PASS``) for an iteration this
+    loop never launched — the same fabrication the completion-path reset
+    closes for a normally finished iteration.
+    """
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
+
+    # An earlier run of this PR already produced iteration 3 with a PASS.
+    old_sid = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i3.jsonl", old_sid)
+    (tmp_path / f"{old_sid}.jsonl").write_text(json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
+    }) + "\n")
+
+    # The state a merge restart would persist right after the bump.
+    at_bump: list[tuple[int, bool]] = []
+    orig = review_loop._run_iteration_with_retry
+
+    def spy(state, *args, **kwargs):
+        at_bump.append((state.iteration, state.iteration_attempted))
+        return orig(state, *args, **kwargs)
+
+    # The loop resumes with iteration 2 in flight (launched before restart).
+    state = ReviewLoopState(
+        pr_id=PR, iteration=2, retry_iteration=2, launch_attempts=1,
+        iteration_attempted=True, _transcript_dir=str(tmp_path),
+        history=[ReviewIteration(iteration=1, verdict=VERDICT_NEEDS_WORK,
+                                 output="")])
+    with patch.object(review_loop, "_run_iteration_with_retry",
+                      side_effect=spy), \
+         patch.object(review_loop, "_adopt_in_flight_review",
+                      return_value="ok\n\n**NEEDS_WORK**"), \
+         patch.object(review_loop, "_run_claude_review",
+                      return_value="fresh\n\n**PASS**") as run:
+        result = _run(state, tmp_path, max_iterations=3)
+    assert run.call_count == 1, "iteration 3 must run its own review"
+    assert result.latest_verdict == VERDICT_PASS
+    assert at_bump == [(3, False)]
+
+    # Resuming on that persisted state must relaunch, not adopt the old
+    # iteration-3 transcript.
+    resumed = ReviewLoopState(pr_id=PR, iteration=3, retry_iteration=2,
+                              iteration_attempted=at_bump[-1][1])
+    resumed.history.extend([
+        ReviewIteration(iteration=1, verdict=VERDICT_NEEDS_WORK, output=""),
+        ReviewIteration(iteration=2, verdict=VERDICT_NEEDS_WORK, output=""),
+    ])
+    assert review_loop._adopt_in_flight_review(
+        resumed, _pr(tmp_path), str(tmp_path)) is None
+
+
+def test_whitespace_only_stderr_falls_back_to_stdout():
+    """A child that prints only whitespace to stderr must still surface the
+    real error it wrote to stdout."""
+    assert review_loop._concise_launch_detail("  \n\t\n", "real failure\n") \
+        == "real failure"
+
+
 def test_recovered_attempt_is_adopted_not_relaunched(tmp_path, monkeypatch):
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)

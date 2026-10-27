@@ -649,3 +649,38 @@ verdict without requiring an idle hook event (rationale in iteration 9);
 `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
 the bounded claim wait, so a second TUI driving the same PR reports
 "needs attention" for a review another loop is actually running.
+
+## Review iteration 2 (0688) — refinements
+
+Findings from the next review pass, applied on top of iteration 1 (0688):
+
+1. **An adopted iteration clears `iteration_attempted` too (correctness fix —
+   fabricated verdict).** Iteration 1 (0688) cleared the flag inside
+   `_run_iteration_with_retry` when an iteration produced its verdict, but
+   the *restart handoff* path bypasses that function: `run_review_loop_sync`
+   calls `_adopt_in_flight_review` directly, so a resumed loop that adopted
+   its in-flight iteration left `iteration_attempted=True` and then bumped
+   the counter.  A merge restart in that window persisted `True` for the
+   *next* iteration number, and the resumed handoff — which passes
+   `allow_recovery=iteration_attempted or launch_attempts > 0` — adopted an
+   earlier run's `review-<pr>-i<N>.jsonl` verdict (e.g. `PASS`) for an
+   iteration this loop never launched.  The adopt branch now calls
+   `_reset_launch_retry(state)` when adoption succeeds (nothing to adopt
+   still relaunches the same iteration with its episode intact).  Covered by
+   `test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run`
+   (fails pre-fix: the flag persisted at the bump is `True`, and the next
+   iteration adopts the old `PASS` instead of running its own review).
+2. **A whitespace-only stderr no longer hides a stdout error.** The concise
+   UI detail did `(stderr or stdout or "").strip()`; whitespace is truthy,
+   so a child that wrote only whitespace to stderr reported "no output from
+   the launch command" while the real error sat on stdout (and only in the
+   artifact).  Each stream is stripped before the fallback.  Covered by
+   `test_whitespace_only_stderr_falls_back_to_stdout` (fails pre-fix).
+
+Not changed (documented residuals): `review_loop.py` is ~1490 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9);
+`other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED` after
+the bounded claim wait, so a second TUI driving the same PR reports
+"needs attention" for a review another loop is actually running.

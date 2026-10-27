@@ -218,7 +218,9 @@ def _as_text(value) -> str:
 
 def _concise_launch_detail(stderr: str, stdout: str) -> str:
     """The shortest actionable line of a failed launch's output."""
-    text = (stderr or stdout or "").strip()
+    # Strip *before* choosing a stream: whitespace-only stderr is truthy, and
+    # ``stderr or stdout`` would then hide the real error on stdout.
+    text = (stderr or "").strip() or (stdout or "").strip()
     if not text:
         return "no output from the launch command"
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -1326,6 +1328,16 @@ def run_review_loop_sync(
                     if output is None:
                         # Nothing live to adopt — rerun the same iteration.
                         state.iteration -= 1
+                    else:
+                        # The adopted iteration is complete: clear its retry
+                        # episode and ``iteration_attempted`` here too.  The
+                        # counter is bumped below and only then does
+                        # ``_run_iteration_with_retry`` re-snapshot the next
+                        # episode; a merge restart in that window would
+                        # otherwise persist this iteration's ``True`` for the
+                        # *next* iteration number and let the restart handoff
+                        # adopt an earlier run's transcript for it.
+                        _reset_launch_retry(state)
                 if output is None:
                     state.iteration += 1
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
