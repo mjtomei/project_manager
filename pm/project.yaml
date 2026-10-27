@@ -34032,7 +34032,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T05:44:43.921006+00:00'
+  updated_at: '2026-10-27T05:57:58.919315+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34860,6 +34860,30 @@ prs:
       not a command).'
     created_at: '2026-10-27T05:44:43Z'
     last_edited: '2026-10-27T05:44:43Z'
+  - id: note-ef51d33
+    text: 'review-loop c70c i2 (second fix): the resolver REFUSED `project.active_pr`
+      as a real field conflict — but that is the TUI selected-PR cursor, persisted
+      by `pm_core.tui` on every cursor move, so every branch pm was used on differs
+      from the base there. Verified against this repo own merge with current master
+      (450a6362): `project.active_pr` was the ONLY non-record conflict (`pr-089af69`
+      base -> `pr-a49bb25` ours / `pr-e102089` theirs), so the real #250 shape could
+      never resolve and sign-off could only route SIGNOFF_IMPL — the exact restart
+      this PR exists to remove. The minimal test fixtures have no active_pr, which
+      is why QA/tests missed it. Now: both sides changing it merges to the NEW BASE
+      value (shared state; the branch cursor belongs to its author and pm rewrites
+      it on the next keystroke), deterministically, and the branch value is not counted
+      as a lost change (same treatment as the bookkeeping timestamps). Exemption is
+      that one path only: a real `project` field both sides changed, a deleted-vs-edited
+      cursor, and deliberate UI prefs (`project.hide_merged`) still conflict. Re-verified
+      end-to-end: resolving HEAD vs origin/master now succeeds — 499 unique PR records,
+      none lost from either side, deterministic bytes. So the next sign-off should
+      auto-resolve this PR own integration (it was the manual impl merge before).
+      Tests: 2 new (unit + real git, mutation-checked); full suite 3683 passed, 1
+      skipped, 1 known pre-existing hook-installer env failure. Spec R1/R9 synced.
+      Branch is 144 commits behind master (master moved past 211a6128 since the last
+      merge); the only conflict now is the metadata one, which sign-off resolves.'
+    created_at: '2026-10-27T05:57:58Z'
+    last_edited: '2026-10-27T05:57:58Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
