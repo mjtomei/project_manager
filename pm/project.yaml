@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T21:46:31.185734+00:00'
+  updated_at: '2026-10-27T23:42:36.702333+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14461,6 +14461,38 @@ prs:
       window names.'
     created_at: '2026-10-27T20:18:03Z'
     last_edited: '2026-10-27T20:18:03Z'
+  - id: note-03d2740
+    text: 'S56 refine (2026-10-27, a696fa52): live probe under nested rootless Podman
+      3.4.4 (vfs private store, host-binary mini image): the PM PID-1 loop (_PID1_REAPER)
+      kept zombies=0/procs=3 over 3 runs of a 50-orphan double-fork workload, while
+      a sleep-infinity control grew 50/100/150 zombies. CAVEAT for QA: nested containers
+      get no cgroup of their own (/proc/self/cgroup 0::/, cgroupfs manager, PidsLimit
+      0), so podman stats PIDs, which pm container restart prints as "PIDs X/0 ->
+      Y/0", is the SHARED outer-cgroup counter: two different containers showed the
+      same 225. Per-container zombie/proc evidence must come from podman exec ps inside
+      the container, and stats only shows growth or no growth. pm container status
+      prints no PID line unless usage >= 80% of a nonzero limit, so it never shows
+      one here. Run any sleep-infinity control AFTER the PM-container iterations and
+      remove it before the restart, or its zombies inflate the shared counter. restart
+      --force ends the impl exec client; end the session by re-running pm pr start
+      (reuses the ID) and then exiting the fake.'
+    created_at: '2026-10-27T23:25:20Z'
+    last_edited: '2026-10-27T23:25:20Z'
+  - id: note-16c4c0e
+    text: 'QA S56 (2026-10-27, a696fa52, real nested rootless Podman 3.4.4 overlay,
+      unmodified build-base, fake impl): PASS, no code change. PM PID-1 reaper kept
+      zombies 0 / procs 6 across 10 runs of the 50-orphan workload; sleep-infinity
+      control 0→50→100 zombies. stats PIDs +30 over 10 runs = +3 host conmon zombies
+      per iteration under the outer sandbox PID 1 (pr-2111fa0), shared counter. restart
+      refused with live pane %5 (exit 1), --force "PIDs 273/0 → 278/0" (outer pids.current
+      247→238 = noise), same ID, newer StartedAt, marker sha intact. Plain pm pr start
+      after the forced restart only FOCUSES the companion-only window (pre-existing
+      fast path, filed pr-bbad0d0); close the companion, then pm pr start reuses the
+      same ID with no setup. Ctrl-D → container gone in 2 s, status running 0, failed
+      0. Evidence /pm-captures/scenarios/56/manifest.md. Fixture tip: podman stats/inspect
+      pad template tabs to spaces, so split on whitespace.'
+    created_at: '2026-10-27T23:42:36Z'
+    last_edited: '2026-10-27T23:42:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34564,6 +34596,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T20:20:59.054521+00:00'
   updated_at: '2026-10-27T20:20:59.054521+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bbad0d0
+  plan: bugs
+  title: 'Bug: pm pr start only focuses an impl window whose Claude pane is gone (companion
+    pane alive) instead of relaunching Claude'
+  branch: pm/pr-bbad0d0-bug-pm-pr-start-only-focuses-an-impl-window-whose-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_start fast path (~L803-829): if a window named
+    for the PR exists, plain `pm pr start P` just select_window()s it (adding a companion
+    if missing) and returns, without checking that the registered impl Claude pane
+    is still alive. Repro (pr-1139060 QA S56, 2026-10-27): container mode, `pm pr
+    start P --companion`; end the Claude pane (e.g. `pm container restart --force
+    <impl container>` kills the podman exec client, or the agent exits) while the
+    companion shell stays open. `pm pr start P` then prints "Switched to existing
+    window" and leaves the user in a companion-only window with no Claude session;
+    the user must close the companion (or use --fresh) to get a relaunch. Expected:
+    when the window has no live impl-claude pane (pane registry role impl-claude),
+    relaunch it in the existing window (reusing the healthy container) or at least
+    say so and suggest --fresh.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:41:35.011226+00:00'
+  updated_at: '2026-10-27T23:41:35.011226+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
