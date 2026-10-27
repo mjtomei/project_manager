@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T21:18:37.036441+00:00'
+  updated_at: '2026-10-27T21:52:17.810814+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37218,6 +37218,24 @@ prs:
       leaves the file untouched, but it should get the same guard.'
     created_at: '2026-10-27T21:18:36Z'
     last_edited: '2026-10-27T21:18:36Z'
+  - id: note-5039eba
+    text: 'review-loop 640d i10: closed the note/dependency *write* path gaps i9 left
+      open. (1) pm pr note add/edit/delete (the canonical handoff channel) indexed
+      n["id"]/n["text"] and appended to whatever notes held — a scalar notes value
+      or a non-mapping member raised AttributeError/TypeError/KeyError and the write
+      was lost; _notes_of repairs a scalar, _note_id/_note_text read a malformed member
+      as "not a note", and the commands preserve it instead of dropping hand-written
+      state. (2) _apply_pr_edit (editor watcher) guarded the same way for notes/description/depends_on;
+      it keeps a member the template cannot show and sorts by a text stamp. (3) graph.deps_of
+      is now the single reader of depends_on in prompt_gen (every prompt builder),
+      autostart_state, the TUI tree layout/edge canvas, the reload old-deps snapshot,
+      the auto-start scheduler and the plan prompts. (4) _format_pr_notes dedupes
+      only by a string id, so a hand-edited list/mapping id no longer raises TypeError
+      out of every prompt. Each fix has a test that fails on 32677974; full suite
+      4009 passed, 1 skipped (/pm-captures/review-640d-i10/full-suite-final.log).
+      No feature-code change: the sign-off/integration review found no new defect.'
+    created_at: '2026-10-27T21:52:17Z'
+    last_edited: '2026-10-27T21:52:17Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
