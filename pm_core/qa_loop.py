@@ -3081,25 +3081,24 @@ def _poll_tmux_verdicts(
                         scenario.index,
                     )
 
-            if verdict:
+            if hit is not None:
                 state.scenario_verdicts[scenario.index] = verdict
                 # Record which attempt/turn produced the verdict so a
                 # resumed run never trusts a verdict from a superseded
                 # attempt (see _drop_foreign_verdicts).
-                if hit is not None:
-                    state.scenario_verdict_sources[scenario.index] = {
-                        "pr_id": state.pr_id,
-                        "loop_id": state.loop_id,
-                        "scenario": scenario.index,
-                        "session_id": scenario.session_id or "",
-                        "turn_id": hit.turn_id,
-                        "timestamp": hit.timestamp,
-                    }
+                state.scenario_verdict_sources[scenario.index] = {
+                    "pr_id": state.pr_id,
+                    "loop_id": state.loop_id,
+                    "scenario": scenario.index,
+                    "session_id": scenario.session_id or "",
+                    "turn_id": hit.turn_id,
+                    "timestamp": hit.timestamp,
+                }
                 # Read the reason from the very turn the verdict came from
                 # (hit.text) rather than re-scanning the transcript: a
                 # re-scan could land on a newer wakeup turn appended in
                 # between and report a different turn's reason.
-                reason = extract_reason_from_text(hit.text) if hit else ""
+                reason = extract_reason_from_text(hit.text)
                 if reason:
                     state.scenario_verdict_reasons[scenario.index] = reason
                 pending.discard(scenario.index)

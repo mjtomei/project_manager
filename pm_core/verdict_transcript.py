@@ -133,6 +133,12 @@ _NON_TASK_TEXT_PREFIXES = (
     "# Autonomous loop check",
     "# Autonomous loop tick",
     "<task-notification>",
+    # Harness marker written when the user hits Esc / stops the turn
+    # (``[Request interrupted by user]`` and the ``for tool use`` variant).
+    # It is not a new task: the user asked for nothing, so a verdict emitted
+    # before the interruption still stands.  A follow-up instruction the user
+    # types afterwards is a separate record and remains a task boundary.
+    "[Request interrupted by user",
     # qa_loop's own "your verdict must be alone on its line" nudge.
     "Reminder: your verdict must appear alone",
 )

@@ -282,3 +282,22 @@ These extend the requirements above; they are implemented and covered by tests.
   transcripts: 21 such false positives before the gate, none after, and
   `VerdictHit.text` now always contains the verdict, so `poll_for_verdict`'s
   returned text cannot disagree with the detected verdict.
+- **A user interruption is transparent (review 5e61 i3).** Claude Code writes
+  `[Request interrupted by user]` (and `[Request interrupted by user for tool
+  use]`) as a plain user record when the user hits Esc / stops the turn. It is a
+  harness marker, not a task: the user asked for nothing, so a verdict emitted
+  before the interruption still stands. Treating it as a barrier made the
+  task-scoped scan *lose* a verdict the pre-PR latest-turn scan still found (a
+  corpus sweep over ~33k local transcripts showed exactly that: the interruption
+  variant was one of only two old-vs-new differences that dropped a verdict).
+  A follow-up instruction the user types after interrupting is a separate record
+  and remains a task boundary, so nothing leaks past real new work.
+- **`Stop hook feedback:` stays a barrier (review 5e61 i3, re-checked).** pm's own
+  Stop hook never writes feedback (the receiver prints nothing), so in practice
+  the record only appears when a hook *errors* — 193,105 of 193,107 occurrences
+  in the local corpus are `can't open file '/home/pm/.pm/hook_receiver.py'`
+  failures. Dropping the barrier would therefore not buy verdict recovery in any
+  reachable environment: the same receiver serves the `idle_prompt` hook, so when
+  the Stop hook fails the QA loop's hook gate never opens and nothing is polled.
+  Keeping it preserves the one case that matters — a third-party Stop hook that
+  injects real rework instructions (1 occurrence in the corpus).
