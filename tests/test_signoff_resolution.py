@@ -3792,3 +3792,139 @@ def test_integrate_cli_apply_checks_the_base_once_before_applying(w, monkeypatch
     rec = pr_entry(w)["integration"]
     assert rec["resolution"]["applied_merge_sha"]
     assert git(w.wd, "rev-parse", "HEAD") == rec["resolution"]["applied_merge_sha"]
+
+
+def test_pr_show_reads_malformed_path_lists_as_absent(w):
+    """``pm pr show`` is the reader the omission markers point at.
+
+    ``integration_pointer`` tells a session to run it, so a hand-edited
+    non-list ``overlap``/``conflicts`` must read as absent there instead of
+    raising out of the command (an int broke ``len()``, a string was joined
+    character by character) — the same contract every other reader follows.
+    """
+    rec = _metadata_conflict(w)
+
+    def _malformed(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["overlap"] = 5
+        integ["conflicts"] = "not-a-list"
+        integ["overlap_total"] = "garbage"
+    store.locked_update(w.pm_dir, _malformed)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Integration" in r.output
+    # No invented paths: the malformed values are not rendered as lists.
+    assert "Overlap" not in r.output
+    assert "Conflicts" not in r.output
+    # The rest of the record is still rendered.
+    assert f"Base sha: {rec['base_sha']}" in r.output
+
+    # A list of non-strings renders through ``str`` instead of raising out of
+    # ``join``.
+    def _non_strings(d):
+        store.get_pr(d, PR)["integration"]["conflicts"] = [1, 2]
+    store.locked_update(w.pm_dir, _non_strings)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Conflicts (2): 1, 2" in r.output
+
+    # A non-mapping ``integration`` / ``signoff_return`` is no record to print.
+    def _scalars(d):
+        entry = store.get_pr(d, PR)
+        entry["integration"] = "garbage"
+        entry["signoff_return"] = 7
+    store.locked_update(w.pm_dir, _scalars)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Integration" not in r.output
+    assert "## Sign-off return" not in r.output
+
+
+def test_a_non_utf8_launch_stamp_does_not_crash_the_driver(w):
+    """A stamp file that cannot be decoded reads as "no stamp".
+
+    ``_launch_stamp_lines`` is read on every sign-off driver tick; a
+    non-UTF-8 file raises ``UnicodeDecodeError`` (a ``ValueError``, not an
+    ``OSError``), which the old guard let escape — taking the tick down
+    instead of treating the run as unstamped.
+    """
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    stamp = signoff.signoff_launch_stamp(transcript)
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_bytes(b"\xff\xfe\x00 not utf-8")
+    assert signoff.signoff_launched_sha(w.tdir, PR) is None
+    assert signoff.signoff_launched_base(w.tdir, PR) is None
+    # A decodable stamp still works (the guard is not a blanket "unreadable").
+    signoff.stamp_signoff_launch(transcript, "a" * 40, "b" * 40)
+    assert signoff.signoff_launched_sha(w.tdir, PR) == "a" * 40
+    assert signoff.signoff_launched_base(w.tdir, PR) == "b" * 40
+
+
+def test_the_return_text_says_how_many_behaviour_changes_it_omitted():
+    """A trimmed behaviour list must name what it dropped.
+
+    The return block shows the first 10 changes; ``compact`` keeps at most
+    30 and records the real total in ``base_behavior_count``.  Without a
+    marker the routed step would under-read how much of the base's
+    behaviour-relevant change it was asked to weigh.
+    """
+    changes = [f"`pm/project.yaml`: project.model_config.k{i} changed (1 -> 2)"
+               for i in range(25)]
+    pr = {"id": PR, "status": "in_progress", "signoff_return": {
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reviewed_head": "a" * 40,
+        "reason": "the base changed model settings",
+        "integration": {"status": "clean", "base_branch": "master",
+                        "base_sha": "b" * 40, "target_repo": "repo",
+                        "base_behavior_changes": changes}}}
+    text = signoff.format_signoff_return(pr)
+    assert changes[9] in text and changes[10] not in text
+    assert "… 15 more" in text
+
+    # ``base_behavior_count`` records the record's real total when the stored
+    # list is itself bounded: report that remainder, not the stored list's.
+    pr["signoff_return"]["integration"]["base_behavior_changes"] = changes[:30]
+    pr["signoff_return"]["integration"]["base_behavior_count"] = 35
+    text = signoff.format_signoff_return(pr)
+    assert "… 25 more" in text
+
+
+def test_the_return_record_keeps_the_real_behaviour_total(w):
+    """The returned copy of the behaviour list keeps the record's total.
+
+    ``compact`` stores at most 30 changes and records the real length in
+    ``base_behavior_count``.  Without carrying it into ``signoff_return``, the
+    return text's "… N more" marker would count against the bounded list and
+    under-report how much of the base the routed step must weigh.
+    """
+    _metadata_conflict(w)
+    changes = [f"`pm/project.yaml`: project.model_config.k{i} changed (1 -> 2)"
+               for i in range(30)]
+
+    def _record(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["base_behavior_changes"] = changes
+        integ["base_behavior_count"] = 35
+    store.locked_update(w.pm_dir, _record)
+
+    pr = pr_entry(w)
+    ret = signoff.build_return_record(
+        pr, SIGNOFF_REVIEW, "review",
+        reviewed_head=pr["integration"]["head"])
+    assert ret["integration"]["base_behavior_count"] == 35
+    text = signoff.format_signoff_return(dict(pr, signoff_return=ret))
+    assert "… 25 more" in text
+
+
+def test_a_coerced_conflict_reason_says_the_list_is_abbreviated():
+    """The coerced reason names at most 5 conflicts; say so when trimmed."""
+    rec = {"head": "a" * 40, "base_sha": "b" * 40, "base_branch": "master",
+           "status": integration.CONFLICT,
+           "conflicts": [f"f{i}.py" for i in range(8)]}
+    verdict, reason = signoff.effective_verdict(SIGNOFF_MERGE, rec, "a" * 40)
+    assert verdict == SIGNOFF_IMPL
+    assert "f0.py" in reason and "f5.py" not in reason
+    assert "… 3 more" in reason

@@ -229,7 +229,11 @@ def _launch_stamp_lines(tdir: Path, pr_id: str) -> list[str]:
     try:
         return signoff_launch_stamp(
             signoff_transcript(tdir, pr_id)).read_text().split()
-    except OSError:
+    except (OSError, ValueError):
+        # The stamp is a sidecar file in the session dir, not project.yaml, but
+        # the same rule holds: an unreadable one reads as "no stamp" instead of
+        # taking the driver tick down.  A non-UTF-8 file raises
+        # UnicodeDecodeError (a ValueError) — not an OSError.
         return []
 
 
@@ -551,10 +555,14 @@ def effective_verdict(verdict: str | None, integration: dict | None,
         base = integ.revision_of(rec.get("base_sha"))
         conflicts = rec.get("conflicts")
         conflicts = conflicts if isinstance(conflicts, list) else []
+        shown = ", ".join(str(c) for c in conflicts[:5])
+        if len(conflicts) > 5:
+            # Say that the list is abbreviated (the record has them all).
+            shown += f", … {len(conflicts) - 5} more"
         return SIGNOFF_IMPL, (
             f"{verdict} coerced to {SIGNOFF_IMPL}: merging "
             f"{rec.get('base_branch')}@{(base or '?')[:8]} "
-            f"conflicts ({', '.join(str(c) for c in conflicts[:5])}); "
+            f"conflicts ({shown}); "
             "reconciling it is implementation work")
     if of_head and rec.get("status") == integ.RESOLVED:
         resolution = integ.resolution_of(rec)
@@ -1082,12 +1090,14 @@ def build_return_record(pr: dict, verdict: str, hop: str, *,
             "target_repo", "base_branch", "base_sha", "merge_base", "status",
             "conflicts", "overlap", "error", "resolution",
             "base_behavior_changes")}
-        # ``compact`` caps each list at _YAML_LIST_LIMIT and records the real
-        # length separately; the return block's omission marker reports how
-        # many paths of the record are not shown, so carry the totals too.
-        # Absent on a legacy/hand-written record — the marker then falls back
-        # to its list-relative count.
-        for key in ("conflicts_total", "overlap_total"):
+        # ``compact`` caps each list (paths at _YAML_LIST_LIMIT, behaviour
+        # changes at _BEHAVIOR_LIMIT) and records the real length separately;
+        # the return block's omission markers report how much of the record is
+        # not shown, so carry the totals too — otherwise the returned copy
+        # under-reports "… N more" against its own bounded list.  Absent on a
+        # legacy/hand-written record — the marker then falls back to its
+        # list-relative count.
+        for key in ("conflicts_total", "overlap_total", "base_behavior_count"):
             if rec.get(key) is not None:
                 integ[key] = rec[key]
     now = datetime.now(timezone.utc).isoformat()
@@ -1386,9 +1396,22 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         behavior = integ.get("base_behavior_changes")
         behavior = behavior if isinstance(behavior, list) else []
         if behavior:
+            shown = behavior[:10]
+            # The record's real total, not just this list's: ``compact`` keeps
+            # at most _BEHAVIOR_LIMIT changes and records the full length
+            # separately, so a trimmed listing must say how much it dropped —
+            # the same rule the sign-off prompt's behaviour block follows.
+            stored_total = integ.get("base_behavior_count")
+            total = (stored_total
+                     if isinstance(stored_total, int)
+                     and not isinstance(stored_total, bool)
+                     and stored_total > len(behavior)
+                     else len(behavior))
+            more = total - len(shown)
             lines.append(
                 "The new base also changes behaviour-relevant configuration: "
-                + "; ".join(str(b) for b in behavior[:10])
+                + "; ".join(str(b) for b in shown)
+                + (f"; … {more} more" if more > 0 else "")
                 + ". Assess whether the evidence still covers it.")
     applied = _mapping(rec.get("applied"))
     applied_merge = applied.get("merge_sha")

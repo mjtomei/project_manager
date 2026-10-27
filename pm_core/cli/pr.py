@@ -618,7 +618,12 @@ def pr_show(pr_id: str):
         integration record and the sign-off return's copy of it.
         """
         for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
-            vals = record.get(key) or []
+            # Hand-edited state: a non-list value is not a list of paths — an
+            # int would raise out of ``len()`` and a string would be joined
+            # character by character — so it reads as absent, the same
+            # contract every other reader of the record follows.
+            raw = record.get(key)
+            vals = [str(v) for v in raw] if isinstance(raw, list) else []
             total = record.get(f"{key}_total")
             if (not isinstance(total, int) or isinstance(total, bool)
                     or total < len(vals)):
@@ -633,7 +638,11 @@ def pr_show(pr_id: str):
     # The sign-off return is a separate prompt block from the notes (it is a
     # different document), so its omission marker points here rather than at
     # `pm pr note list`, which does not contain it.  Print the whole record.
-    ret = pr_entry.get("signoff_return") or {}
+    # Hand-edited state: a non-mapping value is no record to print (``.get``
+    # on a scalar would raise out of the command), so it reads as absent — the
+    # same contract every reader of these records follows.
+    ret = pr_entry.get("signoff_return")
+    ret = ret if isinstance(ret, dict) else {}
     if ret:
         click.echo("\n## Sign-off return")
         for label, key in (
@@ -647,12 +656,14 @@ def pr_show(pr_id: str):
             val = ret.get(key)
             if val:
                 click.echo(f"{label}: {val}")
-        applied = ret.get("applied") or {}
+        applied = ret.get("applied")
+        applied = applied if isinstance(applied, dict) else {}
         if applied.get("merge_sha"):
             click.echo(f"Applied merge: {applied['merge_sha']}")
         if ret.get("apply_error"):
             click.echo(f"Apply error: {ret['apply_error']}")
-        ret_integ = ret.get("integration") or {}
+        ret_integ = ret.get("integration")
+        ret_integ = ret_integ if isinstance(ret_integ, dict) else {}
         if ret_integ:
             # A return integration can legitimately lack a field: an ERROR
             # record (e.g. the base fetch failed) carries ``base_sha: null``.
@@ -665,7 +676,8 @@ def pr_show(pr_id: str):
             click.echo(f"Integration: {ret_integ.get('status') or '?'} "
                        f"with {base}")
             _path_list_lines(ret_integ)
-    integ = pr_entry.get("integration") or {}
+    integ = pr_entry.get("integration")
+    integ = integ if isinstance(integ, dict) else {}
     if integ:
         click.echo("\n## Integration")
         for label, key in (

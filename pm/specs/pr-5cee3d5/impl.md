@@ -544,6 +544,26 @@ tests):
     verification, not a crash) and `_verify_github_merge` renders every
     revision/tree through a short helper, so a hand-edited `candidate_tree`
     records the mismatch instead of raising `TypeError`.
+    `pm pr show` — the reader `integration_pointer` tells a session to run —
+    renders the overlap/conflict path lists through the same contract: a
+    non-list `overlap`/`conflicts` (an int broke `len()`, a string was joined
+    character by character) reads as absent instead of raising out of the
+    command, and a list of non-strings renders through `str`. A non-mapping
+    `integration` / `signoff_return` (or `applied` / the return's nested
+    `integration`) is no record to print — `.get` on a scalar raised out of
+    the command — so it reads as absent there too. The sign-off
+    launch stamp is a sidecar file, not project.yaml, but the same rule
+    applies to reading it: a non-UTF-8 stamp raises `UnicodeDecodeError` (a
+    `ValueError`, not an `OSError`), so it reads as "no stamp" instead of
+    taking every sign-off driver tick down. Two listings in the return text
+    also name their real remainder instead of trimming silently: the
+    behaviour-change line shows the first 10 and reports "… N more" from the
+    record's total (`base_behavior_count` when `compact` bounded the stored
+    list), and the coerced-conflict reason shows the first 5 and says
+    "… N more".  ``build_return_record`` carries `base_behavior_count` beside
+    its copy of the list (like `conflicts_total`/`overlap_total`), so the
+    return block's marker reports the record's remainder and not just the
+    bounded copy's.
 
 ## Implicit requirements
 
