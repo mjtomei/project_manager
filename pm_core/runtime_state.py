@@ -221,8 +221,10 @@ def _locked_action_mutate(pr_id: str, action: str, mutate):
     Returns whatever *mutate* returns, or ``None`` when the file cannot be
     read/written.  Used by the launch-lease helpers below, which need a
     compare-and-set the plain :func:`set_action_state` merge cannot express.
-    The action entry is written back with a fresh ``updated_at`` even when
-    the mutator only refreshes a lease.
+    The action entry is written back with a fresh ``updated_at`` when the
+    mutator changed it (a lease refresh counts).  A no-op mutate — a lost
+    claim, or releasing a lease another owner holds — writes nothing, so it
+    cannot create a ``{updated_at}`` stub for a never-recorded action.
     """
     path = runtime_path(pr_id)
     try:
@@ -250,13 +252,15 @@ def _locked_action_mutate(pr_id: str, action: str, mutate):
                 cur = actions.get(action) or {}
                 if not isinstance(cur, dict):
                     cur = {}
+                before = dict(cur)
                 result = mutate(cur)
-                cur["updated_at"] = _now_iso()
-                actions[action] = cur
-                f.seek(0)
-                f.truncate()
-                json.dump(data, f, indent=2, sort_keys=True)
-                f.flush()
+                if cur != before:
+                    cur["updated_at"] = _now_iso()
+                    actions[action] = cur
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(data, f, indent=2, sort_keys=True)
+                    f.flush()
                 return result
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)

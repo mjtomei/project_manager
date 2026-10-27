@@ -722,14 +722,21 @@ def qa_progress_input(state) -> dict:
 
 def review_progress_input(state) -> dict:
     """Summarise a ReviewLoopState-like object into a ``review_loops`` entry."""
+    verdict = getattr(state, "latest_verdict", "") or ""
+    # A HOLD is the trust/permission prompt the pane is sitting at.  Report
+    # that, not an earlier attempt's launch error from the same episode —
+    # matching the runtime_state mirror (`_on_complete_from_thread`).
+    error = getattr(state, "last_launch_error", "") or ""
+    if verdict == "HOLD":
+        error = getattr(state, "latest_output", "") or error
     return {
         "running": bool(getattr(state, "running", False)),
         "iteration": getattr(state, "iteration", 0) or 0,
-        "verdict": getattr(state, "latest_verdict", "") or "",
+        "verdict": verdict,
         "input_required": bool(getattr(state, "input_required", False)),
         # Failed-launch retry evidence (LAUNCH_FAILED / HOLD outcomes).
         "retryable": bool(getattr(state, "launch_retryable", False)),
         "attempts": int(getattr(state, "launch_attempts", 0) or 0),
-        "error": getattr(state, "last_launch_error", "") or "",
+        "error": error,
         "artifact": getattr(state, "last_launch_artifact", "") or "",
     }

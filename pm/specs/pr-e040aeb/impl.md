@@ -526,3 +526,50 @@ lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
 show the previous episode's attempt count while the resumed loop runs; the
 launch artifact's prompt copy can name the stale session's prompt when the
 failed attempt died before rewriting the transcript symlink.
+
+## Review iteration 9 (385e) — refinements
+
+Findings from the ninth review pass, applied on top of iteration 8:
+
+1. **A HOLD names the hold prompt in the live status path too.**
+   Iteration 8 made `_on_complete_from_thread` record `latest_output` for
+   `HOLD` in `runtime_state`, but `pm autostart status` is built from the
+   *live* loop state via `autostart_state.review_progress_input`, which still
+   reported `last_launch_error`.  A hold that followed a retried attempt
+   therefore showed the earlier attempt's launch error instead of the
+   trust/permission prompt.  `review_progress_input` now prefers
+   `latest_output` for `HOLD`, matching the mirror.  Covered by
+   `test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error`.
+2. **The restart-handoff adopt path owns the launch lease from its first
+   poll.** `_adopt_in_flight_review` polls a live review without going
+   through `_claim_launch`, and `_lease_keepalive` only refreshed after
+   `_LEASE_REFRESH_SECONDS` (30 s), so for that window
+   `review_loop_owns_launch()` reported no owner and another driver could
+   launch over the adopted session.  The keepalive's first check now claims
+   immediately (a stopping loop still never claims).  Covered by
+   `test_lease_keepalive_claims_on_the_first_check`.
+3. **The artifact no longer attaches a previous run's prompt.** The
+   documented iteration-7 residual: a launch that died before the child
+   rewrote the iteration's transcript symlink left the *previous* session in
+   place, and the artifact copied that session's prompt file — evidence from
+   the wrong attempt.  `stale_session_id` is now threaded into
+   `_launch_review_window`/`_write_launch_artifact`; when the symlink still
+   names it the artifact records `prompt: (skipped — …)` instead of a copy.
+   Covered by `test_artifact_does_not_copy_a_stale_sessions_prompt`.
+4. **A no-op lease mutate writes nothing.** `_locked_action_mutate` always
+   wrote the action entry back with a fresh `updated_at`, so releasing a
+   lease this owner never held created a `{updated_at}` stub (a phantom
+   runs-popup entry) and a lost claim rewrote another loop's entry.  The
+   write is skipped when the mutator changed nothing.  Covered by
+   `test_release_without_a_matching_owner_leaves_no_stub_entry`.
+
+Not changed (documented residuals): `review_loop.py` is ~1400 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); the retry re-arm's `_progress` label can
+show the previous episode's attempt count while the resumed loop runs.
+Discovery still adopts a transcript verdict without requiring an idle hook
+event (`_verdict_output_if_present`); the extractor only matches a bare
+verdict keyword on its own JSON-string-bounded line, so a mid-turn
+fabrication would need the reviewer to emit a bare verdict line and keep
+talking, and requiring an idle event would strand completed reviews on hosts
+without hooks installed.

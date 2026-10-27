@@ -386,6 +386,29 @@ def test_artifact_copies_the_failed_attempts_complete_prompt(tmp_path):
     assert "prompt_copy" in Path(ei.value.artifact).read_text()
 
 
+def test_artifact_does_not_copy_a_stale_sessions_prompt(tmp_path):
+    """A launch that died before the child rewrote the iteration's symlink
+    leaves the previous run's session in place.  Its prompt file is not this
+    attempt's, so the artifact must say so instead of attaching it."""
+    wd = tmp_path / "wd"
+    (wd / "pm" / "prompts").mkdir(parents=True)
+    stale = str(uuid.uuid4())
+    transcript = tmp_path / "review-pr-001-i2.jsonl"
+    transcript.symlink_to(tmp_path / f"{stale}.jsonl")
+    (wd / "pm" / "prompts" / f"pm_prompt_{stale}.txt").write_text("old task")
+    with patch.object(review_loop.subprocess, "run",
+                      return_value=MagicMock(returncode=1, stdout="",
+                                             stderr="boom")):
+        with pytest.raises(ReviewLaunchError) as ei:
+            review_loop._launch_review_window(
+                PR, str(tmp_path), iteration=2, transcript=str(transcript),
+                workdir=str(wd), stale_session_id=stale)
+    assert not list((tmp_path / "launch-artifacts").glob("*.prompt.txt"))
+    body = Path(ei.value.artifact).read_text()
+    assert "prompt: (skipped" in body
+    assert stale in body
+
+
 def test_window_not_found_and_missing_transcript_are_retryable(tmp_path,
                                                                monkeypatch):
     from pm_core import tmux
@@ -543,7 +566,8 @@ def test_real_launch_recovery_collects_its_own_verdict(tmp_path, monkeypatch):
     attempts = []
 
     def fake_launch(pr_id, pm_root, *, iteration=0, loop_id="",
-                    transcript=None, attempt=1, workdir=None):
+                    transcript=None, attempt=1, workdir=None,
+                    stale_session_id=""):
         attempts.append(attempt)
         if attempt == 1:
             raise ReviewLaunchError("container setup failed", retryable=True,
@@ -926,6 +950,27 @@ def test_launch_lease_is_exclusive_and_expires():
     assert rs.get_action_lease("pr-lease", "review-loop", 60) is None
 
 
+def test_release_without_a_matching_owner_leaves_no_stub_entry():
+    """Releasing a lease this owner never held must not create a
+    ``{updated_at}`` action stub (a phantom runs-popup entry)."""
+    from pm_core import runtime_state as rs
+    rs.release_action_lease("pr-stub", "review-loop", "loop:x")
+    assert rs.get_action_state("pr-stub", "review-loop") == {}
+
+
+def test_lease_keepalive_claims_on_the_first_check(monkeypatch):
+    """The restart-handoff adopt path polls a live review without going
+    through ``_claim_launch``; it must own the lease from the first check,
+    not ``_LEASE_REFRESH_SECONDS`` later."""
+    state = ReviewLoopState(pr_id=PR)
+    claims: list = []
+    monkeypatch.setattr("pm_core.runtime_state.claim_action_lease",
+                        lambda *a, **k: claims.append(a) or True)
+    check = review_loop._lease_keepalive(state)
+    assert check() is False
+    assert claims, "the adopt path must claim the launch lease immediately"
+
+
 def test_review_loop_owns_launch_only_for_loop_leases():
     from pm_core import runtime_state as rs
     assert review_loop.review_loop_owns_launch("pr-own") == ""
@@ -1018,6 +1063,29 @@ def test_autostart_status_shows_the_retryable_launch_failure():
     assert "review launch failed (retryable)" in run["reason"]
     assert "container setup failed" in run["reason"]
     assert "/tmp/a.log" in run["reason"]
+
+
+def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
+    """The live status input must name the trust prompt a HOLD is sitting
+    at, matching the runtime_state mirror — not an earlier attempt's launch
+    error from the same episode."""
+    from pm_core import autostart_state as st
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=2,
+        latest_verdict=VERDICT_HOLD,
+        latest_output="workspace trust prompt in review pane",
+        last_launch_error="container setup failed")
+    status = st.build_status({
+        "prs": [{"id": PR, "title": "T", "status": "in_review",
+                 "workdir": "/tmp/wd"}],
+        "targets": {PR: {}},
+        "enabled": True,
+        "review_loops": {PR: st.review_progress_input(state)},
+    })
+    run = next(r for r in status["runs"] if r["pr_id"] == PR)
+    assert run["state"] == "failed"
+    assert "trust prompt" in run["reason"]
+    assert "container setup failed" not in run["reason"]
 
 
 # ---------------------------------------------------------------------------

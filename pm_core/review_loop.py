@@ -225,6 +225,7 @@ def _write_launch_artifact(*, transcript: str | None, pr_id: str,
                            cmd: list[str], returncode: int | None,
                            stdout: str, stderr: str,
                            workdir: str | None = None,
+                           stale_session_id: str = "",
                            note: str = "") -> str | None:
     """Persist a failed launch attempt's complete output.
 
@@ -232,6 +233,12 @@ def _write_launch_artifact(*, transcript: str | None, pr_id: str,
     run dir.  The full (untruncated) stderr is the actionable artifact; the
     failed attempt's prompt file is copied too when it still exists (a
     container-setup failure skips the command's trailing ``rm -f``).
+
+    *stale_session_id* is the session the iteration's transcript symlink
+    pointed at before this loop first attempted the iteration.  A launch
+    that died before the child rewrote that symlink leaves it in place, so
+    its prompt file belongs to a *previous* run: copy nothing rather than
+    attach the wrong prompt to this failure.
     """
     if not transcript:
         return None
@@ -260,7 +267,11 @@ def _write_launch_artifact(*, transcript: str | None, pr_id: str,
             sid = None
         if sid:
             parts.append(f"session_id: {sid}")
-        if workdir and sid:
+        if workdir and sid and sid == stale_session_id:
+            parts.append(
+                f"prompt: (skipped — the transcript symlink still points at "
+                f"the previous run's session {sid})")
+        elif workdir and sid:
             prompt_file = Path(workdir) / "pm" / "prompts" / f"pm_prompt_{sid}.txt"
             if prompt_file.exists():
                 try:
@@ -289,7 +300,8 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
                           loop_id: str = "",
                           transcript: str | None = None,
                           attempt: int = 1,
-                          workdir: str | None = None) -> list[str]:
+                          workdir: str | None = None,
+                          stale_session_id: str = "") -> list[str]:
     """Launch a review window via ``pm pr review --fresh --review-loop``.
 
     Returns the command that was run (for the failure artifact).  Raises
@@ -317,6 +329,7 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
             transcript=transcript, pr_id=pr_id, iteration=iteration,
             loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
             stdout=stdout, stderr=stderr, workdir=workdir,
+            stale_session_id=stale_session_id,
             note=f"launch timed out after {_LAUNCH_TIMEOUT}s")
         detail = _concise_launch_detail(stderr, stdout)
         msg = (f"Review window launch timed out after {_LAUNCH_TIMEOUT}s: "
@@ -337,7 +350,7 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
             transcript=transcript, pr_id=pr_id, iteration=iteration,
             loop_id=loop_id, attempt=attempt, cmd=cmd,
             returncode=result.returncode, stdout=stdout, stderr=stderr,
-            workdir=workdir)
+            workdir=workdir, stale_session_id=stale_session_id)
         detail = _concise_launch_detail(stderr, stdout)
         msg = f"Review window launch failed (rc={result.returncode}): {detail}"
         if artifact:
@@ -715,10 +728,17 @@ def _lease_keepalive(state: ReviewLoopState) -> Callable[[], bool]:
     """A ``stop_check`` that refreshes the loop's launch lease.
 
     Long reviews outlive the lease TTL; refreshing keeps other drivers from
-    treating the loop as dead.  Always returns False (never stops the poll).
+    treating the loop as dead.  The first check claims immediately: the
+    restart-handoff adopt path polls a live review without going through
+    ``_claim_launch``, so until it holds the lease another driver
+    (``pm pr auto-sequence``) would treat that launch as unowned.
+    Always returns False (never stops the poll).
     """
     from pm_core import runtime_state as _rs
-    last = {"t": time.monotonic()}
+    # ``last`` starts one refresh interval in the past so the very first
+    # ``_check`` claims; a plain ``time.monotonic()`` would leave the adopt
+    # path unowned for ``_LEASE_REFRESH_SECONDS``.
+    last = {"t": time.monotonic() - _LEASE_REFRESH_SECONDS}
 
     def _check() -> bool:
         if state.stop_requested:
@@ -771,10 +791,12 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
 
     window_name = _compute_review_window_name(pr_data)
     workdir = pr_data.get("workdir")
+    stale_session_id = getattr(state, "stale_session_id", "") if state else ""
 
     cmd = _launch_review_window(
         pr_id, pm_root, iteration=iteration, loop_id=loop_id,
-        transcript=transcript, attempt=attempt, workdir=workdir) or []
+        transcript=transcript, attempt=attempt, workdir=workdir,
+        stale_session_id=stale_session_id) or []
 
     # Wait briefly for the window to appear
     time.sleep(_WINDOW_WAIT)
@@ -785,6 +807,7 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
             transcript=transcript, pr_id=pr_id, iteration=iteration,
             loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
             stdout="", stderr="", workdir=workdir,
+            stale_session_id=stale_session_id,
             note=f"window '{window_name}' not found after launch")
         msg = f"Review window '{window_name}' not found after launch"
         if artifact:
@@ -801,6 +824,7 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
             transcript=transcript, pr_id=pr_id, iteration=iteration,
             loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
             stdout="", stderr="", workdir=workdir,
+            stale_session_id=stale_session_id,
             note="launch produced no transcript session id")
         msg = "Review window launched but produced no transcript session id"
         if artifact:
