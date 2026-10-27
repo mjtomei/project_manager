@@ -36141,3 +36141,70 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-049649a
+  plan: bugs
+  title: Remove all-PR autostart and fail closed on malformed or targetless saved
+    state
+  branch: pm/pr-049649a-remove-all-pr-autostart-and-fail-closed-on-malform
+  status: pending
+  depends_on: []
+  description: 'Remove every route to whole-backlog/all-PR autostart. Autostart must
+    require a validated explicit nonempty collection of target PR IDs; only their
+    dependency closures may run. User explicitly requested removing the feature entirely,
+    not just fixing the malformed-state case.
+
+
+    Incident 2026-10-27 18:52 UTC: recovery supplied a targets mapping instead of
+    the required list in ~/.pm/autostart-resume.json, with auto_start=true and all_mode=false.
+    targets_from_breadcrumb fell through to legacy targetless migration and returned
+    all_mode=true. That broadened scope, dropped per-target wait_for_merge gates,
+    merged #254, started unrelated work and created drafts #265/#266. Evidence: /home/matt/.local/state/pm-pr-shepherd/tui-popup-close-crash-20261027T185235Z/
+    (recovery-breadcrumb.json, incident.json, logs). The malformed input was a shepherd
+    error; the product must reject it without expanding authority.
+
+
+    Audit and remove ALL paths: TUI command-bar autostart all; any CLI/API/IPC variants;
+    keybindings; app._auto_start_all and other mode flags; watchers and background
+    drivers; scheduler targetless fallbacks; current and legacy breadcrumb/resume
+    migration; persisted all_mode=true; examples/docs/help and tests relying on whole-backlog
+    mode. Search callers and data flow, not only text occurrences. Preserve explicit
+    multi-target autostart and explicitly selected targets'' dependencies, per-target
+    manual merge holds, model routing and spec gates. Absence, empty targets, wrong
+    types, invalid IDs, malformed records, targetless legacy data, and all-mode requests
+    must fail closed or remain off with an actionable diagnostic; none may become
+    wildcard authority. Preserve/reject malformed evidence safely rather than silently
+    dropping merge gates. Valid legacy single-target data may migrate only to that
+    exact validated target with no broadened merge authority; define the conservative
+    handling explicitly.
+
+
+    Regressions must include command/IPC rejection, valid explicit multi-target and
+    dependency scheduling, empty/missing/dict/string/null targets, malformed records,
+    legacy auto_start/run_id without target, all_mode true, corrupt/truncated JSON,
+    reload/restart and watcher paths. Prove unrelated eligible PRs never start and
+    signed-off PRs held for manual merge never merge. Use isolated fixtures/fake launch
+    and merge callbacks; never test whole-backlog start or merge against a live PM
+    project. Do not merge any product PR or change global provider policy. Keep this
+    bug independent of the separate AutoRunsScreen dismissal crash.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T19:03:40.643246+00:00'
+  updated_at: '2026-10-27T19:03:40.643246+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
