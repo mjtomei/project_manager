@@ -141,8 +141,11 @@ _NON_TASK_SENTINELS = frozenset({
 # boundary even though it is a system (``isMeta``) record.
 _STOP_HOOK_PREFIX = "Stop hook feedback:"
 
-_SYSTEM_REMINDER_OPEN_RE = re.compile(r"^\s*<system-reminder\b[^>]*>", re.I)
-_SYSTEM_REMINDER_CLOSE_RE = re.compile(r"</system-reminder>\s*$", re.I)
+# Text-block gate for the backward scan: ``"type": "text"`` in a content
+# block, tolerating the same key/value spacing as ``_ASSISTANT_RE``.
+_TEXT_BLOCK_RE = re.compile(r'"type"\s*:\s*"text"')
+_SYSTEM_REMINDER_BLOCK_RE = re.compile(
+    r"<system-reminder\b[^>]*>.*?</system-reminder>", re.I | re.S)
 
 
 def _record_text(rec: object) -> str:
@@ -189,26 +192,20 @@ def _is_tool_result_record(rec: dict) -> bool:
 
 
 def _unwrap_system_reminder(text: str) -> str | None:
-    """Strip a surrounding ``<system-reminder>`` wrapper.
+    """Strip ``<system-reminder>`` blocks from a user record.
 
-    Returns ``None`` when the whole record is one reminder block — a system
-    notice, not a user prompt.  Otherwise returns the remaining text (the
-    prompt plus any appended reminder), which is classified normally.
+    Returns ``None`` when nothing but reminders remains — a system notice,
+    not a user prompt.  Otherwise returns the remaining text (the prompt
+    plus any appended reminder), which is classified normally.  Every block
+    is stripped, not just one at each end, so a record carrying several
+    notices is still recognised as transparent.  An unclosed reminder tag is
+    left in place, so the record is treated as a prompt (fail closed).
     """
     stripped = text.strip()
-    if not _SYSTEM_REMINDER_OPEN_RE.match(stripped):
+    if "<system-reminder" not in stripped.lower():
         return stripped
-    if not _SYSTEM_REMINDER_CLOSE_RE.search(stripped):
-        # Unclosed wrapper: cannot tell notice from prompt — keep as-is.
-        return stripped
-    # The open tag starts the record and the close tag ends it, with only
-    # one block: the whole record is a system notice, whatever it says.
-    if (stripped.count("<system-reminder") == 1
-            and stripped.count("</system-reminder>") == 1):
-        return None
-    remainder = _SYSTEM_REMINDER_OPEN_RE.sub("", stripped, count=1)
-    remainder = _SYSTEM_REMINDER_CLOSE_RE.sub("", remainder, count=1).strip()
-    return remainder
+    remainder = _SYSTEM_REMINDER_BLOCK_RE.sub("", stripped).strip()
+    return remainder or None
 
 
 def _user_record_is_non_task(rec: dict) -> bool:
@@ -228,6 +225,11 @@ def _user_record_is_non_task(rec: dict) -> bool:
     if unwrapped.startswith(_STOP_HOOK_PREFIX):
         return False
     if rec.get("isMeta") is True:
+        return True
+    # Compaction injects a "This session is being continued…" summary as a
+    # plain user record; it is harness-generated, not a new task, and the
+    # pre-compaction turns stay in the file behind it.
+    if rec.get("isCompactSummary") is True:
         return True
     if not unwrapped:
         return True
@@ -257,6 +259,41 @@ def _verdict_patterns(verdicts: tuple[str, ...]) -> list[tuple[str, re.Pattern]]
         ))
         for v in ordered
     ]
+
+
+def _turn_text(lines: list[str], verdict_idx: int, verdict_text: str,
+               after_texts: list[str]) -> str:
+    """Concatenate the assistant text of the turn holding *verdict_idx*.
+
+    ``after_texts`` are the text records the backward scan already collected
+    (newest first) between the verdict record and the end of its turn.  The
+    walk below adds the records that precede the verdict in the same turn, so
+    the returned text covers the whole turn — callers such as the
+    concretization / verification flows parse markers (``REFINED_STEPS_*``,
+    ``FLAGGED_*``) that may sit in an earlier text record than the verdict.
+    Tool results belong to the turn; any other user record opened it and ends
+    the walk.
+    """
+    before: list[str] = []
+    for idx in range(verdict_idx - 1, -1, -1):
+        line = lines[idx]
+        if _ASSISTANT_RE.search(line):
+            if _TEXT_BLOCK_RE.search(line):
+                piece = _record_text(_parse_record(line))
+                if piece:
+                    before.append(piece)
+            continue
+        if _USER_RE.search(line):
+            rec = _parse_record(line)
+            if rec is not None and _is_tool_result_record(rec):
+                continue
+            break
+        # Meta/unknown record inside the turn — skip.
+    chunks = list(reversed(before))
+    if verdict_text:
+        chunks.append(verdict_text)
+    chunks.extend(reversed(after_texts))
+    return "\n".join(chunks)
 
 
 def find_verdict_turn(
@@ -294,9 +331,8 @@ def find_verdict_turn(
                 if verdict in line and pat.search(line):
                     rec = _parse_record(line)
                     this_text = _record_text(rec)
-                    turn_text = "\n".join(
-                        reversed(segment_texts + ([this_text] if this_text else []))
-                    )
+                    turn_text = _turn_text(
+                        lines, idx, this_text, segment_texts)
                     return VerdictHit(
                         verdict=verdict,
                         text=turn_text,
@@ -306,7 +342,7 @@ def find_verdict_turn(
                     )
             # Only text-bearing records contribute to the turn text; skip
             # the JSON parse for thinking/tool_use-only records.
-            if '"type":"text"' in line or '"type": "text"' in line:
+            if _TEXT_BLOCK_RE.search(line):
                 this_text = _record_text(_parse_record(line))
                 if this_text:
                     segment_texts.append(this_text)
@@ -415,17 +451,7 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     turn_lines.reverse()  # back to file order
     chunks: list[str] = []
     for raw in turn_lines:
-        try:
-            rec = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        msg = rec.get("message") if isinstance(rec, dict) else None
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                piece = block.get("text")
-                if isinstance(piece, str):
-                    chunks.append(piece)
+        piece = _record_text(_parse_record(raw))
+        if piece:
+            chunks.append(piece)
     return "\n".join(chunks)

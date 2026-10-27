@@ -2852,6 +2852,11 @@ def _poll_tmux_verdicts(
                     _log.warning("Scenario %d failed verification %d times — "
                                  "marking NEEDS_WORK", scenario_idx, fails)
                     state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                    # This verdict comes from verification, not from the
+                    # worker's turn: drop the recorded source so the resume
+                    # identity check cannot attribute it to a stale attempt
+                    # (see _drop_foreign_verdicts).
+                    state.scenario_verdict_sources.pop(scenario_idx, None)
                     state.scenario_verdict_reasons[scenario_idx] = (
                         f"failed verification: {reason}"
                     )
@@ -2922,6 +2927,9 @@ def _poll_tmux_verdicts(
                                      "window gone, marking INPUT_REQUIRED",
                                      scenario_idx)
                         state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                        # Loop-derived verdict, not the worker's turn —
+                        # drop the PASS source (see _drop_foreign_verdicts).
+                        state.scenario_verdict_sources.pop(scenario_idx, None)
                         state.scenario_verdict_reasons[scenario_idx] = (
                             "window gone during PASS verification before a "
                             "re-checked verdict could be recorded"

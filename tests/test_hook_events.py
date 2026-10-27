@@ -346,6 +346,66 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch, tmp_path):
     assert elapsed < 2.0, f"hook path was too slow ({elapsed}s)"
 
 
+def test_poll_for_verdict_returns_the_verdict_turn(tmp_hooks_home, monkeypatch,
+                                                   tmp_path):
+    """pr-8efa789: a /loop wakeup postscript after the verdict must not
+    replace the returned text — callers parse reasons/markers out of the
+    turn that carried the verdict."""
+    import json as _json
+    hook_events = _reload_hook_events()
+    from pm_core.hook_install import ensure_hooks_installed
+    ensure_hooks_installed(tmp_hooks_home / ".claude" / "settings.json")
+    assert hook_events.hooks_available()
+
+    from pm_core import loop_shared
+
+    sid = "12345678-1234-1234-1234-123456789abc"
+    postscript = "Already submitted INPUT_REQUIRED; ending the loop."
+    transcript_target = tmp_path / f"{sid}.jsonl"
+    transcript_target.write_text("\n".join([
+        _json.dumps({"type": "user", "message": {
+            "role": "user", "content": [
+                {"type": "text", "text": "run scenario 44"}]}}),
+        _json.dumps({"type": "assistant", "message": {
+            "role": "assistant", "content": [
+                {"type": "text", "text": "Reason: CP4/CP5 not exercised\n"
+                                          "INPUT_REQUIRED"}]}}),
+        _json.dumps({"type": "user", "isMeta": True, "message": {
+            "role": "user", "content": [
+                {"type": "text", "text": "# Autonomous loop tick "
+                                          "(dynamic pacing)"}]}}),
+        _json.dumps({"type": "assistant", "message": {
+            "role": "assistant", "content": [
+                {"type": "text", "text": postscript}]}}),
+    ]) + "\n")
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    import pm_core.tmux as tmux_mod
+    monkeypatch.setattr(tmux_mod, "pane_exists", lambda pane_id: True)
+
+    def writer():
+        time.sleep(0.1)
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 5)
+
+    t = threading.Thread(target=writer)
+    t.start()
+    try:
+        content = loop_shared.poll_for_verdict(
+            pane_id="%0",
+            transcript_path=str(transcript_link),
+            verdicts=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+            wait_timeout=5,
+            log_prefix="test",
+        )
+    finally:
+        t.join()
+    assert content is not None
+    assert "INPUT_REQUIRED" in content
+    assert "CP4/CP5 not exercised" in content
+    assert postscript not in content
+
+
 def test_session_id_from_transcript(tmp_path):
     from pm_core.claude_launcher import session_id_from_transcript
 

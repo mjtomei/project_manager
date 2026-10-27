@@ -460,3 +460,59 @@ def test_find_verdict_turn_carries_identity(tmp_path: Path) -> None:
     assert hit.timestamp == "2026-05-13T14:00:00.000Z"
     assert "Reason: verified" in hit.text
     assert SCENARIO_44_POSTSCRIPT not in hit.text
+
+
+def test_hit_text_covers_whole_verdict_turn(tmp_path: Path) -> None:
+    """Markers written in an earlier record of the verdict's turn must be in
+    ``hit.text``: poll_for_verdict callers (concretization, verification
+    reasons) parse them out of the returned text."""
+    from pm_core.loop_shared import extract_between_markers
+    from pm_core.verdict_transcript import find_verdict_turn
+
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("REFINED_STEPS_START\n1. run the scenario"),
+        _assistant_line("REFINED_STEPS_END"),
+    ])
+    hit = find_verdict_turn(p, ("REFINED_STEPS_END", "REFINER_REJECT_END"))
+    assert hit is not None
+    assert extract_between_markers(
+        hit.text, "REFINED_STEPS_START", "REFINED_STEPS_END") == (
+            "1. run the scenario")
+    # The turn walk must not cross the user record that opened it.
+    assert "go" not in hit.text
+
+
+def test_compaction_summary_is_transparent(tmp_path: Path) -> None:
+    """Claude Code appends a compaction summary as a plain user record; it
+    must not hide a verdict emitted before compaction."""
+    summary = json.dumps({
+        "type": "user",
+        "isCompactSummary": True,
+        "message": {"role": "user", "content": [{
+            "type": "text",
+            "text": "This session is being continued from a previous "
+                    "conversation that ran out of context. The summary "
+                    "below covers the earlier portion of the conversation.",
+        }]},
+    })
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        summary,
+        _assistant_line("Continuing after compaction; nothing to add."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
+
+
+def test_multiple_system_reminder_blocks_are_transparent(tmp_path: Path) -> None:
+    """A record carrying several reminder blocks is a system notice, not a
+    task boundary."""
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        _user_line("<system-reminder>\nNotice one.\n</system-reminder>\n"
+                   "<system-reminder>\nNotice two.\n</system-reminder>"),
+        _assistant_line("Acknowledged; nothing to add."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"
