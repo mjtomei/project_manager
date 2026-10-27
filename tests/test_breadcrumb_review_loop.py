@@ -167,6 +167,19 @@ class TestSaveBreadcrumbReviewLoops:
 
         assert not (tmp_path / "autostart-resume.json").exists()
 
+    def test_nothing_to_persist_is_logged_at_info(self, tmp_path):
+        """The merge-restart path leaves a trace in the INFO debug log even
+        when there is nothing to persist."""
+        app = _make_app(auto_start=False)
+        (tmp_path / "merge-restart").touch()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+                patch("pm_core.tui.auto_start._log") as log:
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(app)
+
+        log.info.assert_any_call("save_breadcrumb: nothing to persist, skipping")
+
     def test_saves_manual_loop_without_auto_start(self, tmp_path):
         """A manually-started review loop is saved even without auto-start."""
         state = _make_running_state("pr-001", iteration=2)

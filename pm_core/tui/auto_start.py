@@ -239,7 +239,7 @@ def save_breadcrumb(app) -> None:
             data["watchers"] = watchers_data
 
     if not data:
-        _log.debug("save_breadcrumb: nothing to persist, skipping")
+        _log.info("save_breadcrumb: nothing to persist, skipping")
         return
 
     breadcrumb = pm_home() / _BREADCRUMB_FILE
