@@ -2942,10 +2942,36 @@ def _poll_tmux_verdicts(
     # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
     # entering ``pending``, so their slots would otherwise stay empty until
     # a later verdict triggers ``_launch_next_queued``.
+    def _mem_waiting_state() -> tuple[frozenset[int], str]:
+        # Queued scenarios whose launch is blocked on memory (rather than
+        # on a concurrency slot) show as waiting_memory with the reason.
+        return (frozenset(sc.index for sc in _launch_queue)
+                if _mem_wait_reason else frozenset(), _mem_wait_reason)
+
+    def _write_loop_status(mem_waiting: frozenset[int]) -> None:
+        with verification_lock:
+            verifying_snapshot = set(verifying)
+        _reasons = dict(state.scenario_verdict_reasons)
+        for _i in mem_waiting:
+            _reasons[_i] = f"waiting for memory: {_mem_wait_reason}"
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           scenario_0=state.scenario_0,
+                           verifying_scenarios=verifying_snapshot,
+                           queued_scenarios=_queued_indices,
+                           verification_failures=verification_failures,
+                           memory_waiting_scenarios=set(mem_waiting),
+                           verdict_reasons=_reasons)
+
     while _launch_next_queued():
         pass  # stops once the cap is reached or memory is short
 
-    _prev_mem_waiting: tuple[frozenset[int], str] = (frozenset(), "")
+    # Show this first attempt's outcome now: on a busy lock it took a
+    # minute (a resumed run adopts, then enqueues), and the loop's next
+    # attempt would wait that long again before its status write (QA S60).
+    _prev_mem_waiting = _mem_waiting_state()
+    if _prev_mem_waiting != (frozenset(), ""):
+        _write_loop_status(_prev_mem_waiting[0])
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -3308,28 +3334,12 @@ def _poll_tmux_verdicts(
             _lq_keepalive(list(_pending_entry_ids))
             _last_keepalive = time.monotonic()
 
-        # Queued scenarios whose launch is blocked on memory (rather than
-        # on a concurrency slot) show as waiting_memory with the reason.
-        _mem_waiting: set[int] = (
-            {sc.index for sc in _launch_queue} if _mem_wait_reason else set())
-        _mem_state = (frozenset(_mem_waiting), _mem_wait_reason)
+        _mem_state = _mem_waiting_state()
         _mem_waiting_changed = _mem_state != _prev_mem_waiting
         _prev_mem_waiting = _mem_state
 
         if verdicts_changed or completed_verifications or _mem_waiting_changed:
-            with verification_lock:
-                verifying_snapshot = set(verifying)
-            _reasons = dict(state.scenario_verdict_reasons)
-            for _i in _mem_waiting:
-                _reasons[_i] = f"waiting for memory: {_mem_wait_reason}"
-            _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts,
-                               scenario_0=state.scenario_0,
-                               verifying_scenarios=verifying_snapshot,
-                               queued_scenarios=_queued_indices,
-                               verification_failures=verification_failures,
-                               memory_waiting_scenarios=_mem_waiting,
-                               verdict_reasons=_reasons)
+            _write_loop_status(_mem_state[0])
 
     # Stop requested or loop finished: release this run's queue entries
     # (_execute_and_finalize also does this if the loop raises).

@@ -14,6 +14,7 @@ import pytest
 
 from pm_core import launch_queue as lq
 from pm_core import memory_governor as mg
+from pm_core import qa_loop
 from pm_core.qa_loop import (
     QALoopState,
     QAScenario,
@@ -448,6 +449,27 @@ class TestQueuedAdmission:
                        sorted((e["id"], e["instance"])
                               for e in _queue_entries())))
         assert seen[0] == sorted((eid, lq._INSTANCE) for eid in old)
+
+    def test_busy_lock_reason_shown_before_first_poll(self, tmp_path):
+        """QA S60: a resumed run's first admission attempt (adopt, then
+        enqueue) waits out the busy lock twice; its reason reaches the
+        status pane right away, not only after the next attempt waits
+        the lock out again."""
+        s2 = _scenario(2, launched=False)
+        state = _state([s2])
+        seen = []
+
+        def at_sleep(n):
+            if n == 1:
+                seen.extend(_waiting_writes(qa_loop._write_status_file))
+
+        with _governor(used_g=44), \
+             patch("pm_core.launch_queue.enqueue",
+                   side_effect=lq.GovernorLockTimeout("busy")):
+            _drive(tmp_path, state, queued=[s2], max_sleeps=1,
+                   on_sleep=at_sleep)
+        assert seen and 2 in seen[-1][0]
+        assert "governor lock busy" in seen[-1][1][2]
 
 
 class TestKeepaliveDuringLaunch:
