@@ -175,6 +175,10 @@ verifier's FLAGGED rule is asserted there too, not only the prose paragraph.
 - A persistent observer/reaper started by the caller survives both success and
   timeout (different process group).
 - A zombie child (already exited, unreaped) must not be treated as live work.
+- Recipe render script: an unreadable GIF (ffprobe prints nothing) falls back
+  to the even-rounding filter instead of aborting under `set -e` before
+  ffmpeg — `read` carries `|| true`; asserted by
+  `TestRenderScript::test_unreadable_gif_falls_back_to_even_rounding`.
 - `timeout` missing → usage failure (exit 2) with an actionable message.
 - `-c` with extra positional args → usage error.
 - Pipe: `pytest ... | tail` under pipefail → non-zero on test failure.

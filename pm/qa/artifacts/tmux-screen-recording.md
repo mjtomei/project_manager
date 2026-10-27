@@ -131,8 +131,10 @@ export cast mp4
       # A pane large enough to blow that budget is already crisp at native
       # size; then just round dimensions down to even (H.264 requires even).
       vf="scale=trunc(iw/2)*2:trunc(ih/2)*2"
+      # `|| true`: an unreadable GIF must fall back to the even-rounding
+      # filter, not abort under `set -e` before ffmpeg gets a chance.
       IFS=, read -r gw gh < <(ffprobe -v error -select_streams v:0 \
-          -show_entries stream=width,height -of csv=p=0 "$cast.gif")
+          -show_entries stream=width,height -of csv=p=0 "$cast.gif") || true
       if [ -n "$gw" ] && [ -n "$gh" ] && \
          [ "$((gw * 2))" -le 4096 ] && [ "$((gh * 2))" -le 2304 ]; then
           vf="scale=iw*2:ih*2:flags=neighbor"

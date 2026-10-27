@@ -31078,7 +31078,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T06:23:13.703014+00:00'
+  updated_at: '2026-10-27T06:40:31.778549+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31117,6 +31117,19 @@ prs:
       fails on origin/master too).'
     created_at: '2026-10-27T06:23:13Z'
     last_edited: '2026-10-27T06:23:13Z'
+  - id: note-85bca45
+    text: 'Review loop i5: fixed the render script''s dead fallback — `IFS=, read
+      ... < <(ffprobe ...)` ran under `set -e`, so an unreadable GIF aborted the render
+      before ffmpeg ever ran and the documented even-rounding filter fallback was
+      unreachable; both recording recipes now carry `|| true`. Added `TestRenderScript::test_unreadable_gif_falls_back_to_even_rounding`
+      (stub agg/ffprobe/ffmpeg), which fails without the fix. New file: 49 pass; related
+      suites 376 pass. Full suite in the review container: 3726 passed — the remaining
+      failures are environment-only (push-proxy rejects pushes to master, so test_merge_publish/test_signoff_integration
+      cannot run; missing markdown dep; the 2 known git_ops/hook_events baseline failures
+      reproduced on origin/master; 2 flaky tmux HUP tests that pass in isolation).
+      No change to wait-for-job.sh. (2026-10-27)'
+    created_at: '2026-10-27T06:40:31Z'
+    last_edited: '2026-10-27T06:40:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

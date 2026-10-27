@@ -19,6 +19,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import textwrap
 import time
 from pathlib import Path
 
@@ -537,6 +538,58 @@ class TestRecipes:
         assert os.access(copied, os.X_OK)
         assert scenario.artifact_paths == [
             f"{scratch}/qa-artifacts/recipe.md"]
+
+
+def _render_script(name):
+    """Extract the helper's ``-c '...'`` render script from a recipe."""
+    block = _render_block(_recipe_text(name))
+    m = re.search(r"-c '\n(.*?)\n    '\s*$", block, re.S)
+    assert m, f"{name}: no -c render script found"
+    return textwrap.dedent(m.group(1))
+
+
+class TestRenderScript:
+    """The render script itself, driven with stub renderers.
+
+    The script runs under ``set -e``, so a bare ``read`` from an ffprobe that
+    produced no output would abort the render before ffmpeg — making the
+    recipe's documented even-rounding fallback dead code.  An unreadable GIF
+    should still reach ffmpeg with the safe default filter.
+    """
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_unreadable_gif_falls_back_to_even_rounding(self, name, tmp_path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        ffmpeg_args = tmp_path / "ffmpeg.args"
+
+        def stub(prog, body):
+            p = bin_dir / prog
+            p.write_text("#!/bin/sh\n" + body + "\n")
+            p.chmod(0o755)
+
+        stub("agg", ': > "$4"')          # writes the GIF it was asked for
+        stub("ffprobe", "exit 1")        # fails and prints nothing
+        stub("ffmpeg",
+             'printf "%s\\n" "$@" > "$FFMPEG_ARGS"\n'
+             'for last; do :; done\n: > "$last"')
+
+        cast = tmp_path / "recording.cast"
+        cast.write_text("cast")
+        mp4 = tmp_path / "recording.mp4"
+        env = dict(
+            os.environ,
+            PATH=f"{bin_dir}:{os.environ.get('PATH', '')}",
+            FFMPEG_ARGS=str(ffmpeg_args),
+            cast=str(cast), mp4=str(mp4),
+        )
+        r = subprocess.run(
+            ["bash", "-o", "pipefail", "-c", _render_script(name)],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        assert r.returncode == 0, r.stderr
+        assert "scale=trunc(iw/2)*2:trunc(ih/2)*2" in ffmpeg_args.read_text()
+        assert mp4.exists()
 
 
 # ---------------------------------------------------------------------------
