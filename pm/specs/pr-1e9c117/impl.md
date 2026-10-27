@@ -123,3 +123,21 @@ No **[UNRESOLVED]** items.
 - `pm_core/cli/qa.py`: docstring sentence about the mount.
 - `tests/test_captures_dir_mount.py`: rewrite the unset test, add the cases
   in R6.
+
+## 6. Implementation record (2739187c)
+
+- Fix as above; tests rewritten to 12 cases in
+  `tests/test_captures_dir_mount.py` (5 fail on the pre-fix tree because the
+  mount is returned instead of the host path; all 12 pass post-fix).
+- Full suite: 3747 passed, 1 skipped. The 60 failures in `test_git_ops`,
+  `test_merge_publish`, `test_signoff_integration` and `test_hook_events` are
+  identical on the pre-fix tree (environment: the sandbox's git, not this
+  change).
+- Evidence (`$(pm qa captures-path pr-1e9c117)`):
+  - `impl/pre-fix/nested-throwaway-overwrites-mount/` — recording + manifest
+    of the incident reproduced against a pre-fix tree copy (bd21fabf).
+  - `impl/pre-fix/failing-tests-on-prefix.txt` — pre-fix test run.
+  - `impl/post-fix/nested-throwaway-fails-closed/` — recording + manifest of
+    the same repro post-fix, including the owning-PR positive control.
+- The repro binds a sandbox over `/pm-captures` inside `unshare -rm`, so the
+  live evidence dir was never written by the nested project.
