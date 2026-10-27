@@ -48,6 +48,36 @@ def _get_selected_pr(app) -> tuple[str | None, dict | None]:
     return pr_id, pr
 
 
+def park_and_kill_review_window(session: str | None, pr: dict | None) -> bool:
+    """Park the attached session and kill the PR's review window, if open.
+
+    Shared by the ``z d`` / ``zz d`` supersede paths and the explicit fresh
+    autostart reset (``autostart_fresh``): a running iteration blocks in
+    ``_poll_for_verdict`` (which does not check ``stop_requested``) until its
+    pane is gone, so the window must be killed to make the loop exit.
+
+    Best-effort: failures are logged, never raised.  Returns True when a
+    window was found and killed.
+    """
+    if not session or not pr:
+        return False
+    from pm_core import tmux as tmux_mod
+    from pm_core import home_window
+    from pm_core.cli.helpers import _pr_display_id
+    win_name = f"review-{_pr_display_id(pr)}"
+    try:
+        win = tmux_mod.find_window_by_name(session, win_name)
+        if not win:
+            return False
+        home_window.park_if_on(session, win["id"])
+        tmux_mod.kill_window(session, win_name)
+        return True
+    except Exception:
+        _log.debug("review_loop_ui: kill of review window %s failed",
+                   win_name, exc_info=True)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # z d  — kill running loop and open a fresh review
 # ---------------------------------------------------------------------------
@@ -74,20 +104,7 @@ def stop_loop_or_fresh_review(app) -> None:
         # _poll_for_verdict (which doesn't check stop_requested)
         # detects pane-gone, raises PaneKilledError, and the loop
         # exits at once instead of running to completion.
-        from pm_core import tmux as tmux_mod
-        from pm_core.cli.helpers import _pr_display_id
-        if pr and app._session_name:
-            win_name = f"review-{_pr_display_id(pr)}"
-            try:
-                from pm_core import home_window
-                win = tmux_mod.find_window_by_name(app._session_name, win_name)
-                if win:
-                    home_window.park_if_on(app._session_name, win["id"])
-                tmux_mod.kill_window(app._session_name, win_name)
-            except Exception:
-                _log.debug(
-                    "review_loop_ui: kill of review window for z d failed"
-                    " for %s", pr_id, exc_info=True)
+        park_and_kill_review_window(app._session_name, pr)
         _log.info("review_loop_ui: z d killed running loop for %s", pr_id)
         app.log_message(
             f"[bold]Stopped review loop[/] for {pr_id} — opening fresh review")
@@ -133,20 +150,7 @@ def start_or_stop_loop(app) -> None:
         # doesn't check stop_requested) until the pane is gone.
         # Killing the review window makes that poll return None →
         # PaneKilledError → the loop exits.
-        from pm_core import tmux as tmux_mod
-        from pm_core.cli.helpers import _pr_display_id
-        if pr and app._session_name:
-            win_name = f"review-{_pr_display_id(pr)}"
-            try:
-                from pm_core import home_window
-                win = tmux_mod.find_window_by_name(app._session_name, win_name)
-                if win:
-                    home_window.park_if_on(app._session_name, win["id"])
-                tmux_mod.kill_window(app._session_name, win_name)
-            except Exception:
-                _log.debug("review_loop_ui: kill of review window for"
-                           " supersede failed for %s", pr_id,
-                           exc_info=True)
+        park_and_kill_review_window(app._session_name, pr)
         _log.info("review_loop_ui: superseding running loop for %s "
                   "with a fresh one", pr_id)
 

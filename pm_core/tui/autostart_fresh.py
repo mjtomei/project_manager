@@ -297,18 +297,10 @@ def _kill_review_window(app, pr: dict) -> None:
     session = getattr(app, "_session_name", None)
     if not session:
         return
-    from pm_core import tmux as tmux_mod
-    name = _review_window_name(pr)
-    try:
-        win = tmux_mod.find_window_by_name(session, name)
-        if win:
-            from pm_core import home_window
-            home_window.park_if_on(session, win["id"])
-            tmux_mod.kill_window(session, name)
-            _log.info("autostart_fresh: killed review window %s", name)
-    except Exception:
-        _log.debug("autostart_fresh: kill review window %s failed", name,
-                   exc_info=True)
+    from pm_core.tui.review_loop_ui import park_and_kill_review_window
+    if park_and_kill_review_window(session, pr):
+        _log.info("autostart_fresh: killed review window %s",
+                  _review_window_name(pr))
 
 
 def retire_downstream(app, pr: dict) -> None:

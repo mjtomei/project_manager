@@ -926,7 +926,6 @@ class TestResume:
         assert auto_start.get_targets(restarted) == []
 
     def test_resume_skips_advanced_prs(self, project):
-        app = FakeApp(store.load(project)["prs"], project)
         autostart_fresh.reset_pr(project, "pr-a", "test")
         data = store.load(project)
         store.get_pr(data, "pr-a")["status"] = "in_review"
