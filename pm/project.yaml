@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T05:38:42.743704+00:00'
+  updated_at: '2026-10-27T07:38:24.622490+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25635,6 +25635,27 @@ prs:
       reproduce identically on origin/master (git-version/env).'
     created_at: '2026-10-27T05:38:42Z'
     last_edited: '2026-10-27T05:38:42Z'
+  - id: note-d3976fa
+    text: 'Review-loop 7d34 i1 (15eaa55b): fixed a real gap vs the spec implicit requirement
+      "do not nudge a completed outcome". Recovery scanned the transcript only at
+      the idle event, which can race the transcript write; MissingOutputRecovery.handle
+      now takes verdict_check and returns "completed" when the outcome appears during
+      the settle window (unit + poll_for_verdict + QA-tick-loop tests; planner re-reads
+      and accepts the plan). Also: stop_check is honoured before nudging even with
+      settle=0 and is passed from the QA tick loop (no messages during teardown);
+      planner checks stop_requested before check_response so a stop cannot surface
+      a spurious INPUT_REQUIRED; exhaustion message names the pane left open; spec
+      updated (completed status, reason list incl. no_progress, scenario reason format).
+      Tests: 38 in test_loop_recovery.py, 453 across loop/QA/review/watcher/autostart
+      suites. Full suite: 3767 passed, 1 skipped; 55F+17E reproduce identically on
+      origin/master (test_merge_publish, test_signoff_integration, test_markdown_render,
+      test_hook_events; test_git_ops::test_keeps_unpushed_merge also fails on master
+      standalone). Merge coordination with pr-8efa789 stands: keep find_verdict_turn
+      as the verdict test in poll_for_verdict/_poll_tmux_verdicts and run recovery
+      only when it finds no hit; recovery classifies with read_latest_assistant_text
+      only after that scan fails.'
+    created_at: '2026-10-27T07:38:24Z'
+    last_edited: '2026-10-27T07:38:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
