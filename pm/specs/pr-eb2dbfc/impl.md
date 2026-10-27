@@ -275,6 +275,7 @@ the outer cgroup, so `podman stats` and `memory.peak` report the
 - **Capture points:** Before a running container is removed, read its cgroup peak (fallback: a `<runtime> stats` snapshot; see A8). Integration points:
   - `container.py:remove_container()` — called from cleanup and orphan removal; samples only a *running* container (one inspect), and `create_container()`'s pre-create cleanup passes `capture=False` (nothing is running there).
   - `container.py:stop_container()` — captures itself, then removes with `capture=False`.
+  - `pm session kill` — `sample_session_containers()` samples every running session container *before* tmux is killed (that fires each pane's exec EXIT trap, `rm -f`, which would remove pm-launched containers unsampled), then `cleanup_session_containers()` removes those with `capture=False` (QA S56).
   - Both go through `memory_governor.capture_and_record()`.
 - **Container age:** Derived from `docker inspect --format '{{.State.StartedAt}}'` at capture time. Age = now - started_at.
 - Stats file format — individual samples with age, not just averages:

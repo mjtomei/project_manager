@@ -1663,11 +1663,40 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
     return count
 
 
-def cleanup_session_containers(session_tag: str) -> int:
+def sample_session_containers(session_tag: str) -> set[str]:
+    """Record a memory sample for every running container of a session.
+
+    ``pm session kill`` calls this before killing tmux: that fires each
+    pane's exec EXIT trap (``rm -f``), which removes pm-launched containers
+    without a sample before :func:`cleanup_session_containers` reaches
+    them.  Returns the names sampled, so the cleanup does not sample them
+    twice.  Best-effort: a failed listing samples nothing.
+    """
+    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
+    result = _run_runtime(
+        "ps", "--filter", f"name={prefix}",
+        "--format", "{{.Names}}",
+        check=False, timeout=30,
+    )
+    if result.returncode != 0:
+        return set()
+    sampled = set()
+    for line in result.stdout.strip().splitlines():
+        cname = line.strip()
+        if cname.startswith(prefix):
+            _capture_memory_sample(cname)
+            sampled.add(cname)
+    return sampled
+
+
+def cleanup_session_containers(session_tag: str,
+                               sampled: set[str] = frozenset()) -> int:
     """Remove all containers belonging to a session.
 
     Filters by ``pm-{session_tag}-`` which matches every container whose
-    name was generated with this session tag embedded.
+    name was generated with this session tag embedded.  Containers in
+    *sampled* already have their memory sample
+    (:func:`sample_session_containers`) and are removed without another.
 
     Returns the number of containers removed.
     """
@@ -1684,7 +1713,10 @@ def cleanup_session_containers(session_tag: str) -> int:
     for line in result.stdout.strip().splitlines():
         cname = line.strip()
         if cname:
-            remove_container(cname)
+            if cname in sampled:
+                remove_container(cname, capture=False)
+            else:
+                remove_container(cname)
             count += 1
 
     if count:

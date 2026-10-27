@@ -612,6 +612,17 @@ def session_kill(start_dir):
         click.echo(f"No session '{session_name}' found.", err=True)
         raise SystemExit(1)
 
+    # Sample container memory while the panes still hold their containers:
+    # killing tmux fires each pane's exec EXIT trap, which removes them.
+    session_tag = session_name.removeprefix("pm-")
+    sampled: set[str] = set()
+    if session_tag:
+        from pm_core.container import sample_session_containers
+        try:
+            sampled = sample_session_containers(session_tag)
+        except Exception:
+            _log.debug("Pre-kill memory sampling failed", exc_info=True)
+
     # Kill grouped sessions first, then the base
     for g in tmux_mod.list_grouped_sessions(session_name, socket_path=socket_path):
         tmux_mod.kill_session(g, socket_path=socket_path)
@@ -619,11 +630,10 @@ def session_kill(start_dir):
     pane_layout.set_force_mobile(session_name, False)
 
     # Clean up containers and push proxies belonging to this session
-    session_tag = session_name.removeprefix("pm-")
     if session_tag:
         from pm_core.container import cleanup_session_containers
         from pm_core.push_proxy import stop_session_proxies
-        n_containers = cleanup_session_containers(session_tag)
+        n_containers = cleanup_session_containers(session_tag, sampled)
         n_proxies = stop_session_proxies(session_tag)
         if n_containers or n_proxies:
             _log.info("Session kill cleanup: %d container(s), %d proxy(ies)",

@@ -1152,6 +1152,55 @@ class TestCleanupContainers:
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
+    def test_cleanup_session_skips_resampling_sampled(self, mock_docker, mock_rm):
+        mock_docker.return_value = MagicMock(
+            returncode=0,
+            stdout="pm-repo-abc-impl-pr1\npm-repo-abc-review-pr2\n",
+        )
+        cleanup_session_containers("repo-abc", {"pm-repo-abc-impl-pr1"})
+        mock_rm.assert_any_call("pm-repo-abc-impl-pr1", capture=False)
+        mock_rm.assert_any_call("pm-repo-abc-review-pr2")
+
+    @patch("pm_core.container._capture_memory_sample")
+    @patch("pm_core.container._run_runtime")
+    def test_sample_session_containers(self, mock_docker, mock_cap):
+        """Regression (QA S56): session kill samples running containers
+        before killing tmux, whose pane EXIT traps remove them unsampled."""
+        from pm_core.container import sample_session_containers
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-repo-abc-impl-pr1\npm-repo-abc-review-pr2\n")
+        assert sample_session_containers("repo-abc") == {
+            "pm-repo-abc-impl-pr1", "pm-repo-abc-review-pr2"}
+        assert mock_docker.call_args[0][:3] == ("ps", "--filter", "name=pm-repo-abc-")
+        assert [c.args[0] for c in mock_cap.call_args_list] == [
+            "pm-repo-abc-impl-pr1", "pm-repo-abc-review-pr2"]
+        mock_cap.reset_mock()
+        mock_docker.return_value = MagicMock(returncode=125, stdout="")
+        assert sample_session_containers("repo-abc") == set()
+        mock_cap.assert_not_called()
+
+    def test_session_kill_samples_before_killing_tmux(self, tmp_path):
+        from click.testing import CliRunner
+        from pm_core.cli.session import session_kill
+        order = []
+        with patch("pm_core.cli.session.tmux_mod") as tm, \
+             patch("pm_core.paths.get_session_tag", return_value="repo-abc"), \
+             patch("pm_core.container.sample_session_containers",
+                   side_effect=lambda t: order.append("sample") or {"pm-repo-abc-impl-pr1"}), \
+             patch("pm_core.container.cleanup_session_containers",
+                   side_effect=lambda t, s: order.append(("cleanup", s)) or 1), \
+             patch("pm_core.push_proxy.stop_session_proxies", return_value=0), \
+             patch("pm_core.cli.session.pane_layout"):
+            tm.has_tmux.return_value = True
+            tm.session_exists.return_value = True
+            tm.list_grouped_sessions.return_value = []
+            tm.kill_session.side_effect = lambda *a, **k: order.append("kill")
+            result = CliRunner().invoke(session_kill, ["--dir", str(tmp_path)])
+        assert result.exit_code == 0, result.output
+        assert order == ["sample", "kill", ("cleanup", {"pm-repo-abc-impl-pr1"})]
+
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
     def test_cleanup_all(self, mock_docker, mock_rm):
         mock_docker.return_value = MagicMock(
             returncode=0,
