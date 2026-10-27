@@ -1654,18 +1654,23 @@ class TestPollLoopNoRouteGating:
         assert not any(m.startswith("Launched scenario") for m in msgs), msgs
         assert sc.pane_id is None
 
+    @pytest.mark.parametrize("fake", [False, True])
     @pytest.mark.parametrize("mode", ["container", "tmux"])
     def test_scenario_setup_error_stops_before_any_launch(
-            self, tmp_path, pm_home_dir, mode):
+            self, tmp_path, pm_home_dir, mode, fake):
         """A routed refiner/worker whose provider cannot be set up stops
         the run before any scenario is prepared (RQ53): no workdir, no
-        window, no container, no wait."""
+        window, no container, no wait.  Fake-claude sessions too: their
+        command build resolves the provider before the fake branch, so
+        they would hit the same error after cloning."""
         from pm_core import qa_loop
         _write_providers(pm_home_dir, model="")
         sc = qa_loop.QAScenario(index=1, title="t", focus="f")
         state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
         state.scenarios = [sc]
-        with patch("pm_core.qa_loop.create_scenario_workdir") as clone, \
+        with patch("pm_core.paths.fake_claude_config_for_type",
+                   return_value={"verdict": "PASS"} if fake else None), \
+             patch("pm_core.qa_loop.create_scenario_workdir") as clone, \
              patch("pm_core.container.load_container_config"), \
              patch("pm_core.container.create_qa_container") as create, \
              patch("pm_core.tmux.new_window_get_pane") as window:

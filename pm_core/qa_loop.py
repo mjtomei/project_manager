@@ -1873,12 +1873,13 @@ def _require_scenario_setup(pr_data: dict, data: dict, *, container: bool,
                             session_tag: str | None) -> None:
     """Raise the provider setup error a refiner / worker launch would hit
     (:func:`check_qa_providers`), before any scenario is prepared, so it
-    stops the run once instead of failing each scenario."""
+    stops the run once instead of failing each scenario.
+
+    Fake-claude sessions are checked too: ``build_claude_shell_cmd``
+    resolves the provider (and raises its setup error) before it takes the
+    fake branch."""
     from pm_core import worker_route
-    from pm_core.paths import fake_claude_config_for_type
     for st in worker_route.ROUTED_SESSION_TYPES:
-        if fake_claude_config_for_type(st, session_tag) is not None:
-            continue
         worker_route.require_setup(
             _resolve_qa_model(pr_data, data, session_type=st),
             container=container)
