@@ -233,6 +233,7 @@ def retire_in_memory(app, pr: dict) -> None:
     from pm_core import runtime_state as _rs
     pr_id = pr["id"]
     now = now_iso()
+    tracker = getattr(app, "_pane_idle_tracker", None)
 
     loop = app._review_loops.pop(pr_id, None)
     if loop is not None and getattr(loop, "running", False):
@@ -244,6 +245,17 @@ def retire_in_memory(app, pr: dict) -> None:
     if qa is not None and getattr(qa, "running", False):
         qa.stop_requested = True
     (getattr(app, "_self_driving_qa", None) or {}).pop(pr_id, None)
+    if qa is not None and tracker is not None:
+        # ``poll_qa_state`` unregisters a finished run's scenario keys; a
+        # popped loop never reaches that path, so drop them here.  This must
+        # happen *before* the SUPERSEDED sentinel below: unregistering a
+        # ``qa:`` key clears the qa runtime mirror, which would wipe it.
+        for sc in getattr(qa, "scenarios", None) or []:
+            try:
+                tracker.unregister(f"qa:{pr_id}:s{sc.index}")
+            except Exception:
+                _log.debug("autostart_fresh: qa tracker cleanup failed for "
+                           "%s", pr_id, exc_info=True)
 
     # A resumed turn fires no hook at its start, so the tracker still holds
     # the *previous* turn's idle flag; left alone, the status row would claim
@@ -251,7 +263,6 @@ def retire_in_memory(app, pr: dict) -> None:
     # wait.  Clear it: the next idle_prompt is this turn's end.  Only the
     # stale idle flag is wrong — a live permission prompt (waiting_for_input)
     # must keep its own status reason.
-    tracker = getattr(app, "_pane_idle_tracker", None)
     if tracker is not None:
         try:
             if tracker.is_idle(pr_id):
@@ -703,6 +714,18 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
         if change["action"] == "already_waiting":
             handoffs[pr_id] = "already_waiting"
             continue
+        if tracker is not None:
+            try:
+                # Refresh pane liveness/idle exactly as ``_poll_impl_idle``
+                # does before its handoff check.  A pane that died since the
+                # last poll still reads as live, and its (possibly finalized)
+                # transcript as a completed turn — advancing here would start
+                # the review over a dead session instead of waiting for the
+                # scheduler's relaunch.
+                tracker.poll(pr_id)
+            except Exception:
+                _log.debug("autostart_fresh: pre-handoff poll failed for %s",
+                           pr_id, exc_info=True)
         if tracker is not None and handoff_ready(app, pr, tracker):
             try:
                 from pm_core.tui.review_loop_ui import _auto_review_idle_prs

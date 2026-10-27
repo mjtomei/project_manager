@@ -658,3 +658,24 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   failing handoff launch was retried on "the next 1 s tick ... every second";
   ``_poll_impl_idle`` runs on every fifth 1 s tick (~5 s), which is what the
   i9 note, the code comment and the test docstring already say.
+
+## Review-iteration notes (4e99 i1)
+
+* **A dead pane no longer hands off on a stale tracker entry** — the
+  immediate handoff in ``fresh_start`` read the tracker without polling it,
+  unlike ``_poll_impl_idle``.  A pane that died since the last 5 s poll still
+  reads as live (``is_gone`` False), and its run-dir transcript — possibly
+  already finalized into a snapshot — still ends in a completed turn, so the
+  reset could start the fresh review over the old, unreworked code instead of
+  waiting for the scheduler's in-progress relaunch (spec ambiguity 5).
+  ``fresh_start`` now polls the PR's pane first, exactly as the poll path
+  does.  Pinned by
+  ``TestFreshStart::test_dead_pane_does_not_hand_off_immediately``.
+* **Retiring a running QA loop drops its scenario tracker keys** —
+  ``poll_qa_state`` unregisters a finished run's ``qa:<pr>:s<n>`` keys, but
+  ``retire_in_memory`` pops the loop so that path never runs; the keys (and
+  their runtime mirror) leaked until the next restart.  The retirement now
+  unregisters them *before* writing the ``SUPERSEDED`` sentinel, because
+  ``_runtime_mirror_clear`` would otherwise wipe the freshly written qa
+  entry.  Pinned by
+  ``TestRetirement::test_qa_scenario_tracker_keys_are_dropped``.

@@ -546,6 +546,32 @@ class TestFreshStart:
         assert len(calls) == 1
         assert calls[0][0][0] == "pr-a"
 
+    def test_dead_pane_does_not_hand_off_immediately(self, project, tmp_path):
+        # A pane that died since the last poll leaves a stale "live" tracker
+        # entry whose transcript still ends in a completed turn.  The
+        # immediate handoff must poll first (as ``_poll_impl_idle`` does) and
+        # wait for the scheduler's relaunch instead of starting a review over
+        # the old, unreworked code.
+        from pm_core.pane_idle import PaneIdleTracker
+
+        native = tmp_path / "11111111-2222-3333-4444-555555555555.jsonl"
+        native.write_text(json.dumps({
+            "type": "assistant",
+            "message": {"role": "assistant", "stop_reason": "end_turn",
+                        "content": [{"type": "text", "text": "done"}]},
+        }) + "\n")
+        app = self._app(project)
+        tracker = PaneIdleTracker()
+        tracker.register("pr-a", "%1", str(native))
+        app._pane_idle_tracker = tracker
+        with patch("pm_core.pane_idle.tmux_mod.pane_exists",
+                   return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs") as rev:
+            out = autostart_fresh.fresh_start(app, ["pr-a"])
+        rev.assert_not_called()
+        assert out["ok"] and out["handoff"]["pr-a"] == "waiting"
+        assert tracker.is_gone("pr-a")
+
     def test_repeated_call_does_not_duplicate(self, project):
         app = self._app(project)
         with patch.object(autostart_fresh, "handoff_ready",
@@ -1134,6 +1160,39 @@ class TestRetirement:
         assert written["review-loop"][1]["verdict"] == "SUPERSEDED"
         assert written["review-loop"][1]["previous_verdict"] == "NEEDS_WORK"
         assert written["qa"][1]["verdict"] == "SUPERSEDED"
+
+    def test_qa_scenario_tracker_keys_are_dropped(self):
+        # ``poll_qa_state`` unregisters a finished run's scenario keys; a
+        # popped loop never reaches that path, so the retirement must drop
+        # them itself — and before the SUPERSEDED sentinel, because
+        # unregistering a ``qa:`` key clears the qa runtime mirror.
+        from pm_core.qa_loop import QAScenario
+
+        class _Tracker:
+            def __init__(self):
+                self.dropped = []
+
+            def is_idle(self, key):
+                return False
+
+            def mark_active(self, key):
+                pass
+
+            def unregister(self, key):
+                self.dropped.append(key)
+
+        app = FakeApp([_pr()])
+        tracker = _Tracker()
+        app._pane_idle_tracker = tracker
+        qa = QALoopState(pr_id="pr-a")
+        qa.scenarios = [QAScenario(index=1, title="a", focus="f"),
+                        QAScenario(index=2, title="b", focus="f")]
+        app._qa_loops["pr-a"] = qa
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert tracker.dropped == ["qa:pr-a:s1", "qa:pr-a:s2"]
 
     def test_live_loop_is_stopped(self):
         app = FakeApp([_pr()])
