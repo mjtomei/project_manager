@@ -301,7 +301,9 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
 4. Signed-off PR in a `wait_for_merge` closure is not merged after restore
    (fake merge callback not called); unrelated signed-off PR is not merged.
 5. `handle_command(["all"])` → `all_mode_removed`, state unchanged, no
-   worker queued; bare `autostart` when off still usage-errors.
+   worker queued; the same verb via IPC (`--reply`) writes a non-ok reply
+   with `status.mode == "off"` and changes nothing; bare `autostart` when
+   off still usage-errors.
 6. Watcher prompt with explicit empty targets → restrictive scope block;
    with `None` → unchanged; with targets → managed set.
 7. `build_status` with `all_mode`/`enabled` hints but no targets → `off`;

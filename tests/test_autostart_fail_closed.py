@@ -722,6 +722,26 @@ class TestAllModeCommandRejected:
         assert auto_start.get_targets(app) == []
         assert app.workers == []
 
+    def test_ipc_all_is_rejected_and_replies_off(self, tmp_path):
+        """A stale CLI sending the removed ``all`` verb (``--reply``) gets a
+        non-ok reply and no state change — IPC is a second entry point that
+        must not become wildcard authority either."""
+        app = FakeApp([_pr("pr-a"), _pr("pr-b")], tmp_path)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            result = auto_start.handle_command(app, ["all", "--reply", "rid"])
+        assert result["ok"] is False
+        assert result["error"] == "all_mode_removed"
+        payload = json.loads(
+            (tmp_path / "autostart-replies" / "rid.json").read_text())
+        assert payload["ok"] is False
+        assert payload["error"] == "all_mode_removed"
+        assert payload["status"]["mode"] == "off"
+        assert payload["status"]["targets"] == []
+        assert payload["status"]["runs"] == []
+        assert app._auto_start is False
+        assert auto_start.get_targets(app) == []
+        assert app.workers == []
+
     def test_usage_does_not_advertise_all(self):
         # ``all`` was the last verb; a bare-token check would miss it.
         verbs = [seg.strip() for seg in auto_start.USAGE.split("|")]
