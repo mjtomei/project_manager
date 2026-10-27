@@ -147,7 +147,11 @@ All four poller families use one shared helper so behaviour cannot drift.
   settle window can be pushed forward forever and the poller hangs — the very
   bug this PR fixes. In the QA tick loop the settle window is measured from
   when the no-verdict episode began, not from the latest event timestamp, for
-  the same reason.
+  the same reason. The tick loop also evaluates the settle/nudge on **every**
+  tick while an episode is open, not only when a *fresh* event passes the
+  turn-boundary gate: the realistic shape is one `idle_prompt` per turn, so a
+  worker that ends its turn without a verdict and then waits for input emits
+  no further event and would otherwise never be nudged at all.
 * **Preserve attempt identity and partial work.** Recovery happens in the
   *same* pane/session; no relaunch, no transcript rewrite, no replayed tests.
 * **Not missing-output failures:** active tool/monitor progress (no

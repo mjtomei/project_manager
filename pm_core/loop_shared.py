@@ -57,8 +57,8 @@ def find_claude_pane(session: str, window_name: str) -> str | None:
 VERDICT_NO_VERDICT = "NO_VERDICT"
 
 # Recovery defaults (overridable via ~/.pm/settings/*).
-DEFAULT_MAX_MISSING = 3            # recovery nudges per session
-DEFAULT_SETTLE_SECONDS = 5.0       # wait for a newer idle before nudging
+DEFAULT_MAX_MISSING = 3             # recovery nudges per session
+DEFAULT_SETTLE_SECONDS = 5.0        # wait for a newer idle before nudging
 DEFAULT_RESPONSE_TIMEOUT = 3600.0   # nudge -> next idle deadline (0 = off)
 # Consecutive "settle deferrals" tolerated before giving up.  A hook refresh
 # (a session that keeps re-emitting idle_prompt for the *same* turn — e.g. a

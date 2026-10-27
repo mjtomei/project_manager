@@ -3094,42 +3094,54 @@ def _poll_tmux_verdicts(
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
             last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
-            if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
-                # No new idle_prompt — skip this scenario this tick.
-                # Stop fires per-turn (not just at session end); relying
-                # on it here would drift from spec R9 and introduce
-                # false turn-boundary signals for multi-turn work.
-                continue
+            fresh = (ev is not None and ev_ts > last_ts
+                     and ev.get("event_type") == "idle_prompt")
 
-            # Read verdict straight from the JSONL transcript.  The hook
-            # event is the turn-boundary gate; the transcript is the
-            # source of truth for what the agent actually said.
-            verdict = extract_verdict_from_transcript(
-                scenario.transcript_path, ALL_VERDICTS,
-            )
+            verdict = None
+            if fresh:
+                # A fresh idle_prompt is the turn boundary; the transcript
+                # is the source of truth for what the agent actually said.
+                # (Stop fires per-turn too, so it is deliberately ignored
+                # here to avoid false turn-boundary signals.)
+                _last_scenario_hook_ts[scenario.index] = ev_ts
+                verdict = extract_verdict_from_transcript(
+                    scenario.transcript_path, ALL_VERDICTS,
+                )
+                if verdict is None:
+                    # A turn ended without its verdict: open (or continue)
+                    # a no-verdict episode.  Its settle window is measured
+                    # from when the episode began — not from the latest
+                    # event — so a hook refresh (a held-open FakeClaude
+                    # re-announcing the same turn) cannot push the nudge
+                    # forward forever.
+                    _no_verdict_since.setdefault(scenario.index, time.time())
 
-            # Bounded missing-output recovery: an idle_prompt without a
+            # Bounded missing-output recovery: an idle turn without a
             # verdict means the worker ended a turn without its outcome.
             # Ask the same session for its own standalone outcome (or to
             # resume after an empty/connection-loss turn), deferring to a
             # newer hook event (native retry / queued input).  After the
             # configured attempts the worker is marked INPUT_REQUIRED
             # instead of hanging the whole QA run.
-            if verdict is None and pane_id:
+            #
+            # This runs on *every* tick while an episode is open, not only
+            # when a new event arrives: a worker that emits one no-verdict
+            # idle and then goes silent (the common shape) would otherwise
+            # never be nudged at all, because no further idle_prompt would
+            # ever pass the fresh-event gate.
+            if verdict is None and scenario.index in _no_verdict_since:
+                if not pane_id:
+                    continue
                 rec = _recovery_for(scenario, pane_id)
-                if rec.enabled:
-                    # Non-blocking settle: acknowledge the event but wait
-                    # before nudging, so a newer turn (native retry / queued
-                    # input) supersedes it.  Measure the window from when
-                    # this episode began — not from the latest event — so a
-                    # hook refresh cannot push it forward forever.
-                    since = _no_verdict_since.setdefault(
-                        scenario.index, time.time())
-                    _last_scenario_hook_ts[scenario.index] = ev_ts
-                    if (time.time() - since) < _recovery_settle:
-                        continue
+                if not rec.enabled:
+                    # Recovery disabled: legacy behaviour — leave the
+                    # worker running; a later turn may still produce it.
+                    _no_verdict_since.pop(scenario.index, None)
+                elif (time.time()
+                      - _no_verdict_since[scenario.index]) >= _recovery_settle:
                     try:
-                        rec.handle(scenario.transcript_path, ev_ts)
+                        rec.handle(scenario.transcript_path,
+                                   ev_ts or last_ts)
                     except VerdictRecoveryExhausted as e:
                         _recovery_exhausted(scenario, e)
                         pending.discard(scenario.index)
@@ -3139,10 +3151,6 @@ def _poll_tmux_verdicts(
                     # A nudge was sent — the next no-verdict turn starts a
                     # fresh settle window.
                     _no_verdict_since.pop(scenario.index, None)
-                else:
-                    _last_scenario_hook_ts[scenario.index] = ev_ts
-            else:
-                _last_scenario_hook_ts[scenario.index] = ev_ts
 
             if verdict:
                 _recoveries.pop(scenario.index, None)

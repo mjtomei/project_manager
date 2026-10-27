@@ -262,9 +262,10 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
                  "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds",
-                 "verdict-recovery-max-attempts",
-                 "verdict-recovery-settle-seconds",
-                 "verdict-recovery-response-timeout"}
+                 "verdict-recovery-max-attempts"}
+# Seconds-valued settings read as floats (sub-second values are valid).
+_FLOAT_SETTINGS = {"verdict-recovery-settle-seconds",
+                   "verdict-recovery-response-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -290,7 +291,8 @@ _LIST_ALIASES = {"list", "ls", "l"}
 def _list_settings():
     """Print all settings and their current values."""
     from pm_core.paths import get_global_setting, get_global_setting_value
-    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | _FLOAT_SETTINGS
+                          | set(_ENUM_SETTINGS))
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
@@ -359,7 +361,8 @@ def set_cmd(setting, value):
     if value is None:
         raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
+    known = (_BOOLEAN_SETTINGS | _INT_SETTINGS | _FLOAT_SETTINGS
+             | set(_ENUM_SETTINGS))
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
@@ -378,6 +381,13 @@ def set_cmd(setting, value):
     elif setting in _INT_SETTINGS:
         try:
             int(value)
+        except ValueError:
+            click.echo(f"Setting '{setting}' takes an integer", err=True)
+            raise SystemExit(1)
+        set_global_setting_value(setting, value)
+    elif setting in _FLOAT_SETTINGS:
+        try:
+            float(value)
         except ValueError:
             click.echo(f"Setting '{setting}' takes a number", err=True)
             raise SystemExit(1)
