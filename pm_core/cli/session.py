@@ -1509,6 +1509,7 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
     import tty
 
     from pm_core import runtime_state as _rs
+    from pm_core.cli.helpers import tui_owner_problem
 
     pr_id, action, fresh = _parse_tui_action(tui_cmd)
     if not pr_id or not action:
@@ -1672,7 +1673,6 @@ def _wait_for_tui_command(session: str, tui_cmd: str,
             if now >= next_owner_check:
                 next_owner_check = now + _TUI_OWNER_CHECK_INTERVAL_S
                 try:
-                    from pm_core.cli.helpers import tui_owner_problem
                     owner_problem = tui_owner_problem(session)
                 except Exception:
                     owner_problem = None

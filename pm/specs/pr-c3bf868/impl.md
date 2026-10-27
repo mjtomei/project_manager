@@ -133,8 +133,13 @@ A2. *How is "exclusive ownership" made atomic without a lock file?*
     `FileExistsError` re-read and either refuse (live TUI) or unlink+retry.
     Two TUIs racing to start: one wins `O_EXCL`; the loser re-reads, sees a
     live pm TUI (or a just-created descriptor) and refuses. No litter, no
-    stale-lock pathology. A file caught mid-write parses as `None` and is
-    re-checked rather than blindly deleted.
+    stale-lock pathology. An *empty* file is ambiguous — the peer may be
+    between its `O_EXCL` create and its first write — so the claim waits
+    `_CLAIM_EMPTY_RETRIES` × `_CLAIM_RETRY_S` (2 × 50 ms) for the peer to
+    publish before treating it as stale. A non-empty unparsable file
+    (corrupt/undecodable) is unlinked immediately. (Without the wait, a
+    loser could delete the winner's just-created file and both TUIs would
+    run, each `publish` overwriting the other's descriptor.)
 
 A3. *Where does the "clear error" go?* `pm _tui` redirects stderr to
     `tui-stderr.log`, so a stderr print is not visible in the pane.
@@ -167,7 +172,9 @@ E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
     Undecodable bytes (`UnicodeDecodeError`) count as unreadable rather
     than propagating: a half-written pidfile must never crash the startup
     claim or the picker. A file that is present but unreadable is reported
-    as `stale_pidfile` and removed; a missing one is `no_pidfile`.
+    as `stale_pidfile` and removed; a missing one is `no_pidfile`. In the
+    startup claim an *empty* file is retried briefly first (a peer may be
+    mid-claim) and only then treated as stale (A2).
 E4. **Permission denied** (`EPERM`) on signal → return False with a message;
     do **not** delete the pidfile (the process is alive, just not ours).
 E5. **Legacy live TUI + `trigger_tui_reload`** → signals SIGUSR1 (A1).
@@ -229,3 +236,14 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     entered.
 11. spinner: `tui_owner_problem` continuously failing → aborts with a
     message instead of spinning (patched grace, pipe stdin).
+12. claim retry (A2): an empty file nobody writes is taken over; an empty
+    file a peer fills in within the retry window raises
+    `TuiPidfileConflict` and the peer's descriptor survives.
+13. identity: a zombie owner is reported as `process is a zombie`;
+    `tui_owner_problem` distinguishes `unreadable pidfile` from
+    `no pidfile`.
+14. descriptor parsing rejects `pid` values that `int()` would coerce
+    (bool/float/null) while still accepting a numeric string; the
+    `_install_reload_signal` conflict path sets `_startup_error`, exits
+    with code 2, and never publishes or releases a pidfile it does not
+    own.

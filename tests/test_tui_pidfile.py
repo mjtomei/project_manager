@@ -12,7 +12,6 @@ import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 import pytest
 
@@ -151,9 +150,16 @@ class TestParsePidfile:
 
     @pytest.mark.parametrize("text", ["", "  \n", "not-a-pid", "{}",
                                       '{"pid": "x"}', '{"pid": 0}',
-                                      "[1,2,3]", '{"pid": -5}'])
+                                      "[1,2,3]", '{"pid": -5}',
+                                      # bool/float/null must not coerce to a
+                                      # live PID via int().
+                                      '{"pid": true}', '{"pid": 1.5}',
+                                      '{"pid": null}', '{"pid": "1.5"}'])
     def test_corrupt_is_none(self, text):
         assert tpf.parse_pidfile(text) is None
+
+    def test_string_pid_is_accepted(self):
+        assert tpf.parse_pidfile('{"pid": "42"}').pid == 42
 
     def test_missing_file_is_none(self, tmp_path):
         assert tpf.read_pidfile(tmp_path / "nope.pid") is None
@@ -249,6 +255,39 @@ class TestClaim:
             assert tpf.read_pidfile(path).pid == os.getpid()
         finally:
             claim.release()
+
+    def test_takes_over_stale_empty_file(self, tmp_path):
+        """An empty file nobody is writing is stale, not a peer mid-claim."""
+        path = tmp_path / "tui-pm-test.pid"
+        path.write_text("")
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        try:
+            assert tpf.read_pidfile(path).pid == os.getpid()
+        finally:
+            claim.release()
+
+    def test_does_not_steal_empty_file_mid_claim(self, tmp_path,
+                                                 start_fake_tui):
+        """A peer between O_EXCL create and its first write must win."""
+        import threading
+        path = tmp_path / "tui-pm-test.pid"
+        sibling = start_fake_tui()
+        path.write_text("")  # peer created the file, has not written yet
+
+        def _publish():
+            time.sleep(0.01)
+            _write_json(path, sibling.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+
+        writer = threading.Thread(target=_publish)
+        writer.start()
+        try:
+            with pytest.raises(tpf.TuiPidfileConflict):
+                tpf.claim_tui_pidfile(path, SESSION)
+        finally:
+            writer.join()
+        # The peer's descriptor survived; we did not take the session.
+        assert tpf.read_pidfile(path).pid == sibling.pid
+        assert sibling.poll() is None
 
     def test_takes_over_binary_file(self, tmp_path):
         """Undecodable bytes must not crash the startup claim."""
@@ -436,6 +475,25 @@ class TestReload:
         assert helpers.tui_owner_problem(SESSION) == (
             "pid belongs to a different program")
 
+    def test_owner_problem_distinguishes_unreadable(self, ipc_paths):
+        pidfile, _queue = ipc_paths
+        pidfile.write_bytes(b"\xff\xfe\x00garbage")
+        assert helpers.tui_owner_problem(SESSION) == "unreadable pidfile"
+
+
+class TestIdentity:
+    def test_zombie_owner_is_not_live(self):
+        """kill(pid, 0) succeeds for a zombie; it must not look like a TUI."""
+        proc = subprocess.Popen(["true"])
+        try:
+            assert _wait_for(lambda: tpf.is_zombie(proc.pid))
+            desc = tpf.TuiPidfile(
+                pid=proc.pid, caps=frozenset({tpf.CAP_RELOAD}),
+                starttime=tpf.proc_starttime(proc.pid))
+            assert tpf.identity_problem(desc) == "process is a zombie"
+        finally:
+            proc.wait(timeout=5)
+
 
 # ---------------------------------------------------------------------------
 # Signal guards + app wiring
@@ -502,6 +560,35 @@ class TestSignalGuards:
         app._install_reload_signal()
 
         assert app._startup_error is None
+        assert app._pidfile_claim is None
+        assert not pidfile.exists()
+
+    def test_claim_conflict_sets_startup_error_and_exits(self, tmp_path,
+                                                         monkeypatch):
+        """A live sibling is surfaced and the app exits non-zero."""
+        pidfile = tmp_path / "tui-pm-test.pid"
+        queue = tmp_path / "tui-pm-test.cmd-queue"
+        monkeypatch.setattr(tpf, "pidfile_path", lambda session: pidfile)
+        monkeypatch.setattr(tpf, "command_queue_path", lambda session: queue)
+
+        def conflict(*args, **kwargs):
+            raise tpf.TuiPidfileConflict(
+                f"another TUI (pid 7) already owns session {SESSION!r}; "
+                f"refusing to start a second TUI")
+
+        monkeypatch.setattr(tpf, "claim_tui_pidfile", conflict)
+        app = ProjectManagerApp.__new__(ProjectManagerApp)
+        app._session_name = SESSION
+        app._pidfile_claim = None
+        app._startup_error = None
+        exits = []
+        app.exit = lambda **kw: exits.append(kw)
+
+        app._install_reload_signal()
+
+        assert "already owns" in (app._startup_error or "")
+        assert exits and exits[0].get("return_code") == 2
+        # We never owned the file, so nothing is published or released.
         assert app._pidfile_claim is None
         assert not pidfile.exists()
 

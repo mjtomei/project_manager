@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,12 @@ CAP_RELOAD = "sigusr1"
 CAP_COMMAND = "sigusr2"
 
 PIDFILE_VERSION = 1
+
+# An empty pidfile is ambiguous — a peer may have created it with
+# ``O_EXCL`` and not yet written its descriptor — so the claim waits this
+# many short intervals for a peer to publish before treating it as stale.
+_CLAIM_EMPTY_RETRIES = 2
+_CLAIM_RETRY_S = 0.05
 
 # argv element that identifies the TUI subcommand, plus the entry-point
 # names that may run it (console script ``pm``; ``python -m
@@ -94,9 +101,14 @@ def parse_pidfile(text: str | None) -> TuiPidfile | None:
             return None
         if not isinstance(data, dict):
             return None
-        try:
-            pid = int(data.get("pid"))
-        except (TypeError, ValueError):
+        raw_pid = data.get("pid")
+        if isinstance(raw_pid, bool):
+            return None
+        if isinstance(raw_pid, int):
+            pid = raw_pid
+        elif isinstance(raw_pid, str) and raw_pid.strip().isdigit():
+            pid = int(raw_pid.strip())
+        else:
             return None
         if pid <= 0:
             return None
@@ -288,8 +300,10 @@ def unlink_if_unchanged(path: Path, expected_text: str | None) -> bool:
     stale; re-reading here avoids deleting a pidfile a new TUI wrote in
     between.  ``None`` means the caller's read found nothing usable
     (missing, or undecodable bytes); the file is then removed only if it
-    is *still* unreadable, so a concurrent TUI's fresh descriptor — even
-    one caught empty mid-claim — is left alone.
+    is *still* unreadable, so a concurrent TUI's fresh descriptor is left
+    alone.  (A file caught empty mid-claim is handled by
+    :func:`claim_tui_pidfile`, which waits for the peer to publish rather
+    than removing it.)
     """
     if read_pidfile_text(path) != expected_text:
         return False
@@ -342,8 +356,10 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
     Creation is ``O_CREAT|O_EXCL`` so two TUIs starting at once cannot
     both win.  An existing file is taken over only when it is stale
     (dead PID, zombie, reused PID, non-TUI command line) or names this
-    very process (``exec`` restart).  A live sibling TUI raises
-    :class:`TuiPidfileConflict`.
+    very process (``exec`` restart).  An *empty* file is first given a
+    moment to be filled in by a peer that is between its ``O_EXCL``
+    create and its first write; only then is it treated as stale.  A live
+    sibling TUI raises :class:`TuiPidfileConflict`.
     """
     pid = os.getpid()
     claim = TuiPidfileClaim(
@@ -354,22 +370,26 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
         starttime=proc_starttime(pid),
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    for attempt in range(3):
+    # Worst case: wait out a mid-claim peer, then unlink a stale file,
+    # then create ours.
+    for attempt in range(_CLAIM_EMPTY_RETRIES + 2):
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
             raw = read_pidfile_text(path)
             existing = parse_pidfile(raw)
             if existing is None:
-                # Corrupt/empty.  On the first pass assume a stale file
-                # from a crashed TUI; after that, a peer is mid-claim.
-                if attempt == 0:
-                    unlink_if_unchanged(path, raw)
+                if raw == "" and attempt < _CLAIM_EMPTY_RETRIES:
+                    # Empty is ambiguous: a peer may have created the file
+                    # with O_EXCL and not written its descriptor yet.
+                    # Give it a moment to publish, otherwise two racing
+                    # TUIs could each take the file over and both run.
+                    time.sleep(_CLAIM_RETRY_S)
                     continue
-                raise TuiPidfileConflict(
-                    f"another TUI is starting for session {session!r}; "
-                    f"refusing to start a second TUI"
-                )
+                # Corrupt, undecodable, or an empty file nobody claimed:
+                # stale.  Remove it (only if unchanged) and try again.
+                unlink_if_unchanged(path, raw)
+                continue
             if existing.pid == pid:
                 # Same process (exec restart): refresh our descriptor.
                 _atomic_write(path, claim.descriptor_text())

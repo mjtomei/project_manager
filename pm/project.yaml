@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T20:02:45.788065+00:00'
+  updated_at: '2026-10-27T20:25:52.863049+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14697,6 +14697,25 @@ prs:
       TUIs.'
     created_at: '2026-10-27T20:02:45Z'
     last_edited: '2026-10-27T20:02:45Z'
+  - id: note-22dd049
+    text: 'Review loop 3591 i2 (2026-10-27): fixed the empty-pidfile mid-claim race
+      in claim_tui_pidfile. A peer between its O_EXCL create and its first write could
+      have its file deleted by a second TUI, after which both ran and each publish
+      clobbered the other descriptor; an empty file now gets 2x50 ms to be published
+      before being treated as stale, while a non-empty corrupt/undecodable file is
+      still unlinked immediately. Hardened parse_pidfile to reject bool/float/null
+      pid values that int() would coerce to a live PID (numeric strings still accepted).
+      tui_owner_problem now reports "unreadable pidfile" instead of "no pidfile" for
+      a present-but-undecodable file; hoisted the spinner tui_owner_problem import
+      out of the 1 Hz poll loop; dropped an unused Path import from the new test file.
+      Spec impl.md A2/E3/tests updated. New tests: empty-file takeover, mid-claim
+      non-steal (verified it fails with _CLAIM_EMPTY_RETRIES=0, i.e. it would have
+      caught the race), zombie-owner identity, unreadable-vs-missing message, pid
+      type hardening, and the _install_reload_signal conflict path (startup error
+      + exit 2, no publish/release). Full suite: 3863 passed, 1 skipped (pytest 8.4.2,
+      PATH=/usr/bin:/bin, markdown on PYTHONPATH).'
+    created_at: '2026-10-27T20:25:52Z'
+    last_edited: '2026-10-27T20:25:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

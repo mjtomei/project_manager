@@ -547,9 +547,10 @@ def tui_owner_problem(session: str) -> str | None:
     Identity-only: capabilities are deliberately not checked, so this is
     safe to poll while a TUI is starting up or restarting.
     """
-    raw = tui_pidfile.read_pidfile_text(_tui_pidfile_for_session(session))
+    path = _tui_pidfile_for_session(session)
+    raw = tui_pidfile.read_pidfile_text(path)
     if raw is None:
-        return "no pidfile"
+        return "unreadable pidfile" if path.exists() else "no pidfile"
     desc = tui_pidfile.parse_pidfile(raw)
     if desc is None:
         return "unreadable pidfile"
@@ -559,7 +560,7 @@ def tui_owner_problem(session: str) -> str | None:
 def _missing_cap_result(session: str, desc, cap: str) -> TuiIpcResult:
     """Explain that the live TUI cannot handle *cap*."""
     feature = ("command-queue" if cap == tui_pidfile.CAP_COMMAND else "reload")
-    if getattr(desc, "legacy", False):
+    if desc.legacy:
         return TuiIpcResult(
             False, "missing_capability",
             f"The TUI for session {session} predates the {feature} "
