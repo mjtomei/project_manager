@@ -73,7 +73,13 @@ THEN the PR branch gains a merge commit containing the fetched base, the
 record becomes up to date with the resolution provenance carried forward
 (`applied_merge_sha`, the pre-apply head/base/merge-base, the resolution
 digest), and every record from both sides is present in the branch's
-`pm/project.yaml`.
+`pm/project.yaml`. The merge is committed only if its tree equals the
+recorded candidate tree; a different result (a merge driver, or a branch that
+moved under the check) is aborted with a reason and nothing is committed.
+Two applies racing on the same workdir are serialized: the branch gains one
+merge commit, and the invocation that lost reports the branch's current
+integrated state — not a merge failure — while keeping the applied
+resolution visible.
 
 ### R3. All independent records survive publication
 GIVEN the applied, resolved candidate.
@@ -122,7 +128,10 @@ value produces the same readable conflict rather than a traceback, and a
 resolution pm could not reconcile is described as such ("pm could not
 reconcile it", with the unresolved conflicts listed) — never as a successful
 metadata resolution — and records no resolution delta path for a file it did
-not write.
+not write. The CLI labels every path of a failed attempt as `attempted … NOT
+resolved` (never `resolved`), and a resolution carried forward from an
+earlier, already-applied merge is labelled as earlier/already applied — the
+conflict the record now reports is a separate, current problem.
 
 ### R7. A clean merge with behavioural base changes is not an exemption
 GIVEN a base that merges cleanly but changed behaviour-relevant configuration
@@ -133,6 +142,14 @@ without an evidence/checks statement.
 THEN the check reports `clean` plus the behavioural changes, the report is
 refused at record time and the merge gate refuses without the statement; with
 a targeted-checks or reuse statement the approval is accepted.
+
+The same requirement survives the base moving *inside* the branch. Once a
+clean base is merged by a bounce, or implementation reconciles a conflicted
+base by hand, the next check's own base diff is empty (the base is an
+ancestor of HEAD) — but the base's behaviour-relevant changes, the changed
+file count and the overlap must still be shown, and the evidence/checks
+statement still required, including after a later benign re-check replaces
+the record. A summary pm could not compute is not an exemption either.
 
 ### R8. A dirty workdir cannot be approved; a later bounce can apply it
 GIVEN a resolved candidate and a PR workdir with uncommitted changes.
@@ -148,7 +165,10 @@ GIVEN unrelated dirty/untracked files in the PR workdir or main repo and
 existing captures/QA evidence.
 WHEN the user resolves, applies and merges.
 THEN those files and evidence files are preserved, and no stale base ref makes
-the PR diff include merged base commits.
+the PR diff include merged base commits. The review window's diff pane (and
+the prompts that name the PR diff) use the exact base the branch contains —
+the newest one when the branch carries more than one — so the pane's change
+summary and full diff show only the PR's own changes, not the base merge.
 
 ## Edge cases (Given / When / Then)
 
