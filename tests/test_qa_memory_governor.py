@@ -69,7 +69,7 @@ def _governor(target_g=48, used_g=30, proj_g=8, error="", running=()):
 def _drive(tmp_path, state, *, verdicts=None, use_containers=True,
            verify=False, verify_result=(True, ""), queued=None, cap=0,
            entry_id_map=None, pending_entry_ids=None, max_sleeps=400,
-           on_sleep=None):
+           on_sleep=None, mem_wait_reason="", mem_attempt_at=0.0):
     """Run _poll_tmux_verdicts with hook-driven verdict mocks.
 
     *verdicts* maps scenario index -> verdict its transcript holds.
@@ -78,6 +78,8 @@ def _drive(tmp_path, state, *, verdicts=None, use_containers=True,
     verdicts = verdicts or {}
     sleeps = []
     launched = []
+    launch_status = []
+    _drive.launch_status = launch_status
 
     def fake_sleep(secs):
         sleeps.append(secs)
@@ -88,7 +90,8 @@ def _drive(tmp_path, state, *, verdicts=None, use_containers=True,
             state.stop_requested = True
 
     def fake_launch(st, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=None, _status_scenarios=None):
+                    pm_root=None, _status_scenarios=None, _status_extra=None):
+        launch_status.append((_status_scenarios, _status_extra))
         for sc in st.scenarios:
             launched.append(sc.index)
             sc.window_name = f"qa-pr-1-s{sc.index}"
@@ -127,6 +130,7 @@ def _drive(tmp_path, state, *, verdicts=None, use_containers=True,
             lambda: None, queued_scenarios=queued, concurrency_cap=cap,
             use_containers=use_containers, entry_id_map=entry_id_map,
             pending_entry_ids=pending_entry_ids,
+            mem_wait_reason=mem_wait_reason, mem_attempt_at=mem_attempt_at,
         )
     return stop, write_status, launched
 
@@ -304,6 +308,59 @@ class TestQueuedAdmission:
              patch("pm_core.qa_loop._MEMORY_RETRY_INTERVAL", 3600):
             _drive(tmp_path, state, queued=[s2], max_sleeps=10)
         assert snap.call_count == 1
+
+    def test_refused_initial_batch_waits_out_retry_interval(self, tmp_path):
+        """Regression (QA S51): a head the initial batch just refused was
+        retried on the first poll, so two "not admitted" attempts landed
+        in the same second at the start of a fully blocked run."""
+        s1 = _scenario(1, launched=False)
+        state = _state([s1])
+        with _governor(used_g=44) as snap, \
+             patch("pm_core.qa_loop._MEMORY_RETRY_INTERVAL", 3600):
+            _, ws, launched = _drive(
+                tmp_path, state, queued=[s1], max_sleeps=5,
+                mem_wait_reason="initial refusal",
+                mem_attempt_at=time.monotonic())
+        assert snap.call_count == 0
+        assert launched == []
+        reasons = [w[1].get(1, "") for w in _waiting_writes(ws) if 1 in w[0]]
+        assert reasons and "initial refusal" in reasons[0]
+
+    def test_run_qa_sync_hands_initial_refusal_to_poll(self):
+        """The initial batch's reason and attempt time reach the poll loop
+        (run_qa_sync -> _execute_and_finalize -> _poll_tmux_verdicts)."""
+        import inspect
+        from pm_core import qa_loop
+        run_src = inspect.getsource(qa_loop.run_qa_sync)
+        assert "_mem_attempt_at = time.monotonic()" in run_src
+        assert "mem_attempt_at=_mem_attempt_at" in run_src
+        assert "mem_wait_reason=_mem_wait_reason" in run_src
+        fin_src = inspect.getsource(qa_loop._execute_and_finalize)
+        assert "mem_attempt_at=mem_attempt_at" in fin_src
+        assert "mem_wait_reason=mem_wait_reason" in fin_src
+
+    def test_queued_launch_keeps_rest_of_line_on_status(self, tmp_path):
+        """Regression (QA S51): the launch rewrote qa_status.json with no
+        queued info, so the scenarios still in line read "pending" for the
+        whole refiner run."""
+        queued = [_scenario(i, launched=False) for i in (2, 3, 4)]
+        state = _state(list(queued))
+        # Governor off, cap 1: s2 launches, s3/s4 stay queued.
+        _drive(tmp_path, state, queued=queued, cap=1, max_sleeps=2)
+        scenarios, extra = _drive.launch_status[0]
+        assert [s.index for s in scenarios] == [2, 3, 4]
+        assert extra["queued_scenarios"] == {3, 4}
+
+    def test_run_qa_sync_initial_launch_keeps_queued_on_status(self):
+        """The initial batch launch writes the whole run, with the queued
+        and memory-waiting scenarios (run_qa_sync wiring)."""
+        import inspect
+        from pm_core import qa_loop
+        run_src = inspect.getsource(qa_loop.run_qa_sync)
+        assert run_src.count("_status_scenarios=all_scenarios") == 2
+        assert run_src.count("_status_extra=status_extra") == 2
+        assert '"queued_scenarios": queued_indices' in run_src
+        assert '"memory_waiting_scenarios": _mem_waiting_indices' in run_src
 
     def test_stop_releases_all_entries(self, tmp_path):
         queued = [_scenario(i, launched=False) for i in (2, 3)]

@@ -1999,6 +1999,17 @@ def _install_artifact_files(pm_root: Path, scenario: QAScenario,
     scenario.artifact_paths = new_paths
 
 
+def _launch_status_kwargs(state: QALoopState,
+                          extra: dict | None) -> dict:
+    """Status-file kwargs for a launch: the caller's view of the rest of
+    the run (queued, waiting, verifying) plus the launch's own reasons."""
+    kwargs = dict(extra or {})
+    kwargs["verdict_reasons"] = {**kwargs.get("verdict_reasons", {}),
+                                 **state.scenario_verdict_reasons}
+    kwargs["scenario_0"] = state.scenario_0
+    return kwargs
+
+
 def _launch_scenarios_in_tmux(
     state: QALoopState,
     data: dict,
@@ -2008,6 +2019,7 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _status_extra: dict | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
@@ -2119,8 +2131,7 @@ def _launch_scenarios_in_tmux(
             state.pr_id,
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
-            scenario_0=state.scenario_0,
-            verdict_reasons=state.scenario_verdict_reasons,
+            **_launch_status_kwargs(state, _status_extra),
         )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
@@ -2218,6 +2229,7 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _status_extra: dict | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -2364,8 +2376,7 @@ def _launch_scenarios_in_containers(
             state.pr_id,
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
-            scenario_0=state.scenario_0,
-            verdict_reasons=state.scenario_verdict_reasons,
+            **_launch_status_kwargs(state, _status_extra),
         )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
@@ -2650,6 +2661,8 @@ def _poll_tmux_verdicts(
     pm_root: Path | None = None,
     entry_id_map: dict[int, str] | None = None,
     pending_entry_ids: set[str] | None = None,
+    mem_wait_reason: str = "",
+    mem_attempt_at: float = 0.0,
 ) -> None:
     """Poll tmux scenario windows for verdicts.
 
@@ -2660,6 +2673,9 @@ def _poll_tmux_verdicts(
 
     If *queued_scenarios* is provided, queued scenarios are launched as
     running scenarios complete, respecting *concurrency_cap*.
+    *mem_wait_reason* and *mem_attempt_at* (``time.monotonic()``) carry a
+    refused initial-batch admission over, so the head's first retry still
+    waits out the retry interval.
     """
     from pm_core import tmux as tmux_mod
 
@@ -2681,8 +2697,8 @@ def _poll_tmux_verdicts(
     _qa_run_id = _qa_run_key(state)
     _entry_id_map: dict[int, str] = dict(entry_id_map or {})
     _pending_entry_ids: set[str] = set(pending_entry_ids or set())
-    _mem_wait_reason = ""
-    _last_mem_attempt = 0.0
+    _mem_wait_reason = mem_wait_reason
+    _last_mem_attempt = mem_attempt_at
     _last_keepalive = 0.0
     # When each scenario's verdict was accepted (stop-on-idle keeps a
     # container whose session was resumed after this).
@@ -2864,6 +2880,13 @@ def _poll_tmux_verdicts(
         # Launch this single scenario by temporarily swapping state.scenarios
         orig = state.scenarios
         state.scenarios = [scenario]
+        # The launch writes the status file: keep the rest of the line
+        # (and any verifications) on it while the refiner runs.
+        with verification_lock:
+            _verifying_now = set(verifying)
+        status_extra = {"queued_scenarios": set(_queued_indices),
+                        "verifying_scenarios": _verifying_now,
+                        "verification_failures": dict(verification_failures)}
         try:
             if use_containers:
                 # The launch blocks on the refiner: keep the scenarios
@@ -2873,11 +2896,13 @@ def _poll_tmux_verdicts(
                     _launch_scenarios_in_containers(
                         state, data, pr_data, session, repo_root, workdir_path,
                         pm_root=pm_root, _status_scenarios=orig,
+                        _status_extra=status_extra,
                     )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _status_extra=status_extra,
                 )
         finally:
             state.scenarios = orig
@@ -2986,8 +3011,9 @@ def _poll_tmux_verdicts(
                     if pane_id is None:
                         pane_id = _get_scenario_pane(session, scenario.window_name)
                     if state.stop_requested:
-                        # Stopping tears the scenario windows down; a
-                        # re-evaluation request could not be answered.
+                        # The run is ending (z t also kills the scenario
+                        # windows; zz t keeps them): nothing would read a
+                        # re-evaluation.
                         pane_id = None
                     if pane_id:
                         followup_msg = (
@@ -4439,9 +4465,11 @@ def run_qa_sync(
     _entry_id_map: dict[int, str] = {}  # scenario index -> queue entry ID
     _pending_entry_ids: set[str] = set()
     _mem_wait_reason = ""
+    _mem_attempt_at = 0.0
     if use_containers and launch_scenarios:
         launch_scenarios, blocked, _entry_id_map, _pending_entry_ids, \
             _mem_wait_reason = _admit_initial_batch(state, launch_scenarios)
+        _mem_attempt_at = time.monotonic()
         queued_scenarios = blocked + queued_scenarios
 
     _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
@@ -4477,6 +4505,11 @@ def run_qa_sync(
     # as running scenarios complete (handled by _poll_tmux_verdicts).
     all_scenarios = state.scenarios
     state.scenarios = launch_scenarios
+    # The launch rewrites the status file: keep the queued (and waiting
+    # for memory) scenarios on it, or they vanish until the first verdict.
+    status_extra = {"queued_scenarios": queued_indices,
+                    "memory_waiting_scenarios": _mem_waiting_indices,
+                    "verdict_reasons": _initial_reasons}
     if use_containers:
         # Refiners can run for minutes: keep the scenarios that are
         # waiting for memory in line meanwhile.
@@ -4484,12 +4517,14 @@ def run_qa_sync(
         with keepalive_during(_pending_entry_ids):
             _launch_scenarios_in_containers(
                 state, data, pr_data, session, repo_root, workdir_path,
-                pm_root=pm_root,
+                pm_root=pm_root, _status_scenarios=all_scenarios,
+                _status_extra=status_extra,
             )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _status_extra=status_extra,
         )
     state.scenarios = all_scenarios
 
@@ -4515,6 +4550,8 @@ def run_qa_sync(
         notify=_notify,
         entry_id_map=_entry_id_map,
         pending_entry_ids=_pending_entry_ids,
+        mem_wait_reason=_mem_wait_reason,
+        mem_attempt_at=_mem_attempt_at,
     )
 
 
@@ -4534,6 +4571,8 @@ def _execute_and_finalize(
     notify: Callable[[], None],
     entry_id_map: dict[int, str] | None = None,
     pending_entry_ids: set[str] | None = None,
+    mem_wait_reason: str = "",
+    mem_attempt_at: float = 0.0,
 ) -> QALoopState:
     """Poll scenarios for verdicts, aggregate, persist, and finalize.
 
@@ -4563,7 +4602,9 @@ def _execute_and_finalize(
                             repo_root=repo_root,
                             pm_root=pm_root,
                             entry_id_map=entry_id_map,
-                            pending_entry_ids=pending_entry_ids)
+                            pending_entry_ids=pending_entry_ids,
+                            mem_wait_reason=mem_wait_reason,
+                            mem_attempt_at=mem_attempt_at)
     finally:
         if use_containers:
             # Never leave this run's memory reservations behind.
