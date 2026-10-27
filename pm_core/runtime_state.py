@@ -14,6 +14,10 @@ their PR ids, but each clone's actions are its own (S93: clone B's QA run of
 a PR overwrote clone A's INPUT_REQUIRED record, so A's auto-start relaunched
 QA, then handed the PR to sign-off on B's PASS, and A's picker showed B's
 run).  A process outside any pm session uses ``~/.pm/runtime/{pr_id}.json``.
+A session directory starts with the finished (``done``/``failed``) entries
+of the records an older pm wrote at that shared path, copied once when the
+directory is created, so a QA hold verdict (e.g. INPUT_REQUIRED) recorded
+before the upgrade still keeps auto-start from relaunching that PR's QA.
 
 Schema (v1)::
 
@@ -60,6 +64,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -100,9 +105,56 @@ def _runtime_dir() -> Path:
     d = pm_home() / "runtime"
     sess = _scope()
     if sess:
-        d = d / sess
+        shared, d = d, d / sess
+        if not d.is_dir():
+            _seed_session_dir(shared, d)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+_TERMINAL_STATES = ("done", "failed")
+
+
+def _seed_session_dir(shared: Path, d: Path) -> None:
+    """Create session directory *d* holding the finished entries of the
+    records at the *shared* path (written by a pm older than the
+    per-session layout).
+
+    Without them an upgrade forgot every recorded QA hold verdict, and
+    auto-start relaunched QA on PRs waiting for a human.  In-flight entries
+    are not carried: they belong to processes of the older pm, and a TUI
+    mount sweep of the new directory would never clear them.  The copy is
+    built aside and renamed into place, so it happens once per session and
+    a concurrent reader never sees it half-written.
+    """
+    try:
+        legacy = [p for p in shared.iterdir()
+                  if p.is_file() and p.suffix == ".json"]
+    except OSError:
+        return
+    tmp = shared / f".{d.name}.{os.getpid()}.seed"
+    try:
+        tmp.mkdir(parents=True, exist_ok=True)
+        for path in legacy:
+            data = _read_locked(path)
+            actions = data.get("actions") if isinstance(data, dict) else None
+            if not isinstance(actions, dict):
+                continue
+            kept = {a: {k: v for k, v in e.items() if k != "suppress_switch"}
+                    for a, e in actions.items()
+                    if isinstance(e, dict)
+                    and e.get("state") in _TERMINAL_STATES}
+            if kept:
+                (tmp / path.name).write_text(json.dumps(
+                    {"pr_id": data.get("pr_id") or path.stem,
+                     "actions": kept}, indent=2, sort_keys=True))
+        tmp.rename(d)
+    except OSError as e:
+        # Another process of this session created it first (or the copy
+        # failed): the caller creates/uses the directory as it is.
+        _log.debug("runtime_state: seeding %s skipped: %s", d, e)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def runtime_path(pr_id: str) -> Path:

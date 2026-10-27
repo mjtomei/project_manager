@@ -66,3 +66,61 @@ def test_scope_is_this_processes_pm_session_resolved_once(home, monkeypatch):
     rs.set_action_state("pr-p", "qa", "done", verdict="PASS")
     assert rs.runtime_path("pr-p") == home / ".pm" / "runtime" / "pm-A-1111" / "pr-p.json"
     assert rs.get_action_state("pr-p", "qa")["verdict"] == "PASS"
+
+
+def _write_legacy(home, pr_id, actions):
+    import json
+    shared = home / ".pm" / "runtime"
+    shared.mkdir(parents=True, exist_ok=True)
+    (shared / f"{pr_id}.json").write_text(
+        json.dumps({"pr_id": pr_id, "actions": actions}))
+
+
+def test_upgrade_keeps_a_hold_verdict_recorded_at_the_shared_path(
+        home, monkeypatch):
+    """Records an older pm wrote at ~/.pm/runtime/<pr>.json: a QA hold
+    verdict must survive the move to per-session directories, or auto-start
+    relaunches QA on a PR waiting for a human.  In-flight entries belong to
+    the older pm's processes and are not carried."""
+    _write_legacy(home, "pr-p", {
+        "qa": {"state": "done", "verdict": "INPUT_REQUIRED",
+               "updated_at": "2026-10-27T10:00:00+00:00",
+               "suppress_switch": True},
+        "review-loop": {"state": "running"},
+    })
+    _write_legacy(home, "pr-q", {"start": {"state": "running"}})
+    _as(monkeypatch, "pm-A-1111")
+    assert auto_start.recorded_qa_verdict("pr-p") == "INPUT_REQUIRED"
+    assert rs.get_action_state("pr-p", "review-loop") == {}
+    assert not rs.get_action_state("pr-p", "qa").get("suppress_switch")
+    assert not rs.runtime_path("pr-q").exists()
+    # The shared record is left as it was, and no seed directory remains.
+    shared = home / ".pm" / "runtime"
+    assert '"running"' in (shared / "pr-p.json").read_text()
+    assert sorted(p.name for p in shared.iterdir()) == [
+        "pm-A-1111", "pr-p.json", "pr-q.json"]
+
+
+def test_shared_path_is_copied_once_per_session(home, monkeypatch):
+    """After the copy, an older pm (another clone) writing the shared path
+    does not leak into this session's records."""
+    _write_legacy(home, "pr-p", {"qa": {"state": "done", "verdict": "PASS"}})
+    _as(monkeypatch, "pm-A-1111")
+    rs.set_action_state("pr-p", "qa", "done", verdict="INPUT_REQUIRED")
+    _write_legacy(home, "pr-p", {"qa": {"state": "done", "verdict": "PASS"}})
+    _write_legacy(home, "pr-new", {"qa": {"state": "done", "verdict": "PASS"}})
+    assert auto_start.recorded_qa_verdict("pr-p") == "INPUT_REQUIRED"
+    assert auto_start.recorded_qa_verdict("pr-new") is None
+
+
+def test_session_created_concurrently_is_left_as_it_is(home, monkeypatch):
+    """Another process of the session created the directory between the
+    check and the copy: its records stand and no seed directory is left."""
+    _write_legacy(home, "pr-p", {"qa": {"state": "done", "verdict": "PASS"}})
+    shared = home / ".pm" / "runtime"
+    d = shared / "pm-A-1111"
+    d.mkdir()
+    (d / "pr-p.json").write_text('{"pr_id": "pr-p", "actions": {}}')
+    rs._seed_session_dir(shared, d)
+    assert (d / "pr-p.json").read_text() == '{"pr_id": "pr-p", "actions": {}}'
+    assert sorted(p.name for p in shared.iterdir()) == ["pm-A-1111", "pr-p.json"]
