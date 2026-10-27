@@ -354,6 +354,14 @@ class TestGovernorSettingsAndStatus:
         assert "(unset)" in result.output
         mock_set.assert_called_once_with("container-system-memory-target", "")
 
+    @patch("pm_core.paths.set_global_setting_value")
+    def test_reserve_and_default_projection_off_unset(self, mock_set):
+        for key in ("system-memory-reserve", "system-memory-default-projection"):
+            result = self._invoke("set", key, "off")
+            assert result.exit_code == 0, result.output
+            assert "(unset)" in result.output
+            assert mock_set.call_args[0] == (f"container-{key}", "")
+
     def test_status_reports_unmeasurable_memory(self):
         from pm_core import memory_governor as mg
         snap = mg.MemorySnapshot(target_mb=48 * 1024,

@@ -166,17 +166,21 @@ def container_set(key: str, value: str):
             click.echo("Error: system-memory-history-size must be a positive integer",
                         err=True)
             raise SystemExit(1)
+    size_keys = ("system-memory-target", "system-memory-default-projection",
+                 "system-memory-reserve")
+    if key in size_keys and value.lower() in ("off", "none", "unset"):
+        # Unset: target off makes the governor inactive; the others fall
+        # back to their defaults (memory-limit projection, 10% reserve).
+        value = ""
     # Sizes need a unit: a bare number is bytes (the runtimes' --memory
     # convention), so "48" would be a 1 MiB target that refuses everything.
-    if (key in ("system-memory-target", "system-memory-default-projection",
-                "system-memory-reserve")
-            and value.lower() not in ("off", "none", "unset")
+    elif (key in size_keys
             and not value.strip().endswith("%")
             and not value.strip()[-1:].isalpha()):
         click.echo(f"Error: {key} needs a unit, e.g. {value.strip()}g",
                    err=True)
         raise SystemExit(1)
-    if key == "system-memory-reserve":
+    if key == "system-memory-reserve" and value:
         from pm_core.memory_governor import parse_reserve
         try:
             parse_reserve(value, 1024)
@@ -184,9 +188,7 @@ def container_set(key: str, value: str):
             click.echo(f"Error: system-memory-reserve must be a size (8g) or "
                        f"a percentage (10%), got {value!r}", err=True)
             raise SystemExit(1)
-    if key == "system-memory-target" and value.lower() in ("off", "none", "unset"):
-        value = ""  # governor inactive
-    elif key in ("system-memory-target", "system-memory-default-projection"):
+    if key in ("system-memory-target", "system-memory-default-projection") and value:
         from pm_core.memory_governor import parse_memory
         try:
             parse_memory(value)
