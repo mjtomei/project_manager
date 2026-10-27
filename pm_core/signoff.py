@@ -1363,9 +1363,13 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                                          integ.get("overlap_total"))))
         resolution = _resolution_of(integ)
         if resolution:
+            # Hand-edited state: a path that is not a non-empty string is not
+            # a path (the CLI, ``pm pr show`` and the launch read it as
+            # absent).  Do not render it as a resolved path here either —
+            # fall back to the file pm can only have resolved.
             paths = [p.get("path")
                      for p in _resolution_entries(resolution, "paths")
-                     if p.get("path")]
+                     if isinstance(p.get("path"), str) and p.get("path")]
             paths_text = ", ".join(f"`{p}`" for p in paths or ["project.yaml"])
             unresolved = _resolution_entries(resolution, "unresolved")
             carried = _carried_applied_resolution(integ)

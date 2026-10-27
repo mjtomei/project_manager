@@ -633,7 +633,11 @@ tests):
     path — and not a set member either: `unresolved_paths` collects only
     strings and the CLI / sign-off launch test membership on strings, so a
     hand-edited list/mapping `path` no longer raises `TypeError` (unhashable)
-    out of `pm pr signoff integrate` and the launch. An unhashable
+    out of `pm pr signoff integrate` and the launch, and no surface prints it
+    as a resolved path: `pm pr show`, `integrate` and the launch skip it, and
+    the sign-off prompt and the return text fall back to the file pm can only
+    have resolved (`project.yaml`, the same fallback `summary` uses) instead
+    of rendering the malformed value. An unhashable
     `base_behavior_changes` member is carried, not dropped: the carry-forward
     de-duplicates order-preservingly and skips only the de-duplication for a
     value `dict.fromkeys` would have raised on (which took every integration

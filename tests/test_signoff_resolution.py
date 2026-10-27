@@ -4762,6 +4762,42 @@ def test_a_non_string_resolution_path_is_not_reported_as_resolved(w):
     assert "resolved: [" not in r.output
 
 
+def test_a_non_string_resolution_path_is_not_rendered_by_prompt_or_return(w):
+    """Hand-edited state: no surface may print a malformed path as a path.
+
+    The CLI, ``pm pr show`` and the sign-off launch read a non-string
+    ``path`` as absent (it is not a path, and not a set member either).  The
+    sign-off prompt and the return text must follow the same contract: name
+    the file pm can only have resolved (the fallback ``summary`` uses) rather
+    than render the malformed value as if pm had resolved it.
+    """
+    _metadata_conflict(w)
+
+    def _set(d):
+        integ = store.get_pr(d, PR)["integration"]
+        resolution = dict(integ["resolution"])
+        resolution["paths"] = [dict(resolution["paths"][0],
+                                    path=["pm/project.yaml"])]
+        integ["resolution"] = resolution
+    store.locked_update(w.pm_dir, _set)
+
+    data = store.load(w.pm_dir)
+    with patch("pm_core.prompt_gen.store.find_project_root",
+               side_effect=FileNotFoundError):
+        text = prompt_gen.generate_signoff_prompt(data, PR)
+    assert "['pm/project.yaml']" not in text
+    assert "`pm/project.yaml`" in text
+
+    pr = pr_entry(w)
+    pr = dict(pr, status="in_progress", signoff_return={
+        "verdict": SIGNOFF_REVIEW, "hop": "review", "reason": "x",
+        "reviewed_head": pr["integration"]["head"],
+        "integration": pr["integration"]})
+    ret = signoff.format_signoff_return(pr)
+    assert "['pm/project.yaml']" not in ret
+    assert "`pm/project.yaml`" in ret
+
+
 def test_a_malformed_unresolved_value_is_never_labelled_resolved(w):
     """A truthy non-list ``unresolved`` is a refusal everywhere; the labels agree.
 

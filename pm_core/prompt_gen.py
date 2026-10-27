@@ -889,7 +889,15 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         else:
             lines.append("**Metadata conflict resolution (pm, by record id):**")
         for entry in integ.resolution_entries(resolution, "paths"):
-            bits = [f"`{entry.get('path')}`"]
+            # Hand-edited state: a path that is not a non-empty string is not
+            # a path (the CLI, ``pm pr show`` and the launch read it as
+            # absent).  Do not render it as one here either — name the file pm
+            # can only have resolved (the same fallback ``summary`` and the
+            # return text use) rather than print the malformed value.
+            path = entry.get("path")
+            if not (isinstance(path, str) and path):
+                path = "project.yaml"
+            bits = [f"`{path}`"]
             for key, label in (("added_ours", "added from the PR"),
                                ("added_theirs", "added from the base"),
                                ("merged_fields", "merged records"),

@@ -1992,8 +1992,11 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
             # not be applied has not done what was asked, even though the
             # (unapplied) record is still a mergeable-looking RESOLVED one.
             raise SystemExit(1)
-    if resolution.get("diff_path"):
-        click.echo(f"  resolution delta: {resolution['diff_path']}")
+    # Hand-edited state: only a string is a path (``pm pr show`` and the
+    # prompt read a malformed pointer as absent), so never print the value.
+    diff_path = resolution.get("diff_path")
+    if isinstance(diff_path, str) and diff_path:
+        click.echo(f"  resolution delta: {diff_path}")
     behavior = rec.get("base_behavior_changes")
     for change in (behavior if isinstance(behavior, list) else [])[:10]:
         click.echo(f"  base behaviour: {change}")
