@@ -91,7 +91,11 @@ and folds the legacy fields:
     preserving standalone manual holds (and now holding its closure too);
   - terminal (`merged`/`closed`) ids are dropped (nothing left to merge);
   - missing ids are kept (fail closed; the scheduler's normal
-    missing-target prune owns them later).
+    missing-target prune owns them later);
+  - a wrongly typed field still yields the ids it plausibly names (a
+    non-empty string, a mapping's keys), and unordered inputs (the old
+    in-memory `set`, mapping keys) are sorted so the migrated target order
+    is deterministic; a list/tuple keeps its recorded order.
 - Legacy single-target breadcrumb (`target: X`, no stop list) cannot tell
   `O` from `A`; fail closed and migrate it to a `wait_for_merge` target.
 - A bare-string entry in `targets` (no pm version wrote one) has an unknown
@@ -99,18 +103,21 @@ and folds the legacy fields:
 - A list entry with no recoverable id (wrong type, or a record missing
   `pr_id`) is dropped — there is nothing to hold — but still reports
   `migrated`, so the corrupt shape surfaces in the restart log.
-- Current-format keys without a usable `targets` list (`targets: null`, or
-  `all_mode` present with no `targets` key) are corrupt/mixed-version: honour
-  only a literal `all_mode: true` and never fall back to the legacy
-  "all ready PRs" inference, so a bad breadcrumb cannot enable whole-backlog
-  auto-merge. A non-list `targets` value fails closed the same way.
+- Current-format keys without a usable `targets` list (a non-list `targets`
+  value, `targets: null`, or `all_mode` present with no `targets` key) are
+  corrupt/mixed-version: drop the unusable list, honour only a literal
+  `all_mode: true`, and never fall back to the legacy "all ready PRs"
+  inference, so a bad breadcrumb cannot silently enable whole-backlog
+  auto-merge. All three shapes are handled identically.
 - `add_targets` runs *both* `policy` and `default_policy` through the legacy
   alias map and rejects an unknown value, so a bad default cannot fall
   through to the no-flag branch and drop a manual gate.
 - Legacy record fields are normalised:
-  - `wait_for_merge` truthy → `WAIT_KEY`; falsy → removed;
-  - `policy` / `merge_policy` == `stop_before_merge`/`wait_for_merge` →
-    `WAIT_KEY`; `auto_merge` → no flag; unknown → fail closed (`WAIT_KEY`);
+  - `wait_for_merge` truthy → `WAIT_KEY`; falsy → removed (and reported as a
+    legacy field — current records never carry a falsy flag);
+  - `policy` / `merge_policy` == `auto_merge`/`auto-merge` → no flag;
+    anything else (`stop_before_merge`, `wait_for_merge`, unknown, empty,
+    null) → fail closed (`WAIT_KEY`);
   - record-level `stop_before_merge` truthy → `WAIT_KEY`.
 - `migrated` is True whenever any legacy shape/field was interpreted.
 - Calling the parser twice on its own output is a no-op (idempotent).
@@ -208,7 +215,8 @@ No **[UNRESOLVED]** items.
   with `--auto-merge` → rejected before any mutation.
 - Breadcrumb with `targets` + legacy `stop_before_merge`: stop ids already
   in targets become wait; standalone ids become wait targets; terminal ids
-  dropped; parse is idempotent.
+  dropped; unordered legacy inputs (set / mapping keys) migrate in sorted
+  order; parse is idempotent.
 - Legacy single-target breadcrumb → wait target, `migrated` log.
 - Bare-string `targets` entry → wait target, `migrated` log.
 - Mixed record `{"policy": "stop_before_merge"}` / `{"wait_for_merge":

@@ -246,9 +246,16 @@ def test_breadcrumb_parse_is_idempotent():
     assert first == second
 
 
-def test_breadcrumb_malformed_targets_fails_closed():
+@pytest.mark.parametrize("bad_targets", [{"f": {}}, "f", 42])
+def test_breadcrumb_malformed_targets_matches_null_handling(bad_targets):
+    """A non-list ``targets`` value is corrupt: the unusable list is dropped
+    and the explicit ``all_mode`` flag is read exactly as for
+    ``targets: null`` (never the legacy "all ready PRs" inference)."""
     targets, all_mode, migrated = st.targets_from_breadcrumb(
-        {"targets": {"f": {}}, "all_mode": True})
+        {"targets": bad_targets, "all_mode": True})
+    assert targets == {} and all_mode is True and migrated
+    targets, all_mode, migrated = st.targets_from_breadcrumb(
+        {"targets": bad_targets, "all_mode": False})
     assert targets == {} and all_mode is False and migrated
 
 
@@ -292,6 +299,21 @@ def test_breadcrumb_stop_field_as_string_keeps_one_id():
          "stop_before_merge": "x"})
     assert list(targets) == ["f", "x"]
     assert targets["x"][st.WAIT_KEY] is True
+
+
+def test_breadcrumb_stop_ids_from_unordered_input_are_sorted():
+    """The old in-memory status input carried a set: the migrated target
+    order must be deterministic (sorted), not hash order.  A list keeps the
+    recorded order."""
+    def migrated_order(stop):
+        targets, _all, _mig = st.targets_from_breadcrumb(
+            {"auto_start": True, "targets": [{"pr_id": "f"}],
+             "stop_before_merge": stop})
+        return list(targets)
+
+    assert migrated_order({"y", "b", "x"}) == ["f", "b", "x", "y"]
+    assert migrated_order({"y": 1, "b": 1}) == ["f", "b", "y"]
+    assert migrated_order(["y", "b"]) == ["f", "y", "b"]
 
 
 def test_save_breadcrumb_never_writes_stop_field(tmp_path):

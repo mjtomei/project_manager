@@ -313,17 +313,13 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
                 # corrupt shape in the restart log rather than hiding it.
                 migrated = True
         all_mode = data.get("all_mode") is True
-    elif raw is not None:
-        # Malformed ``targets`` (not a list): fail closed — no targets and
-        # no all-mode, so a corrupt breadcrumb can never auto-merge the
-        # whole backlog.
-        migrated = True
     elif "targets" in data or "all_mode" in data:
-        # Current-format keys with no usable target list (``targets: null``
-        # or absent): a corrupt/mixed-version breadcrumb.  Honour the
-        # explicit ``all_mode`` flag (literal ``True`` only) and never fall
-        # back to the legacy "all ready PRs" inference, which would silently
-        # auto-merge the whole backlog.
+        # Current-format keys without a usable target list — a non-list
+        # ``targets`` value, ``targets: null``, or ``all_mode`` with no
+        # ``targets`` key: a corrupt/mixed-version breadcrumb.  Drop the
+        # unusable list, honour only the explicit ``all_mode`` flag (literal
+        # ``True``), and never fall back to the legacy "all ready PRs"
+        # inference, which would silently auto-merge the whole backlog.
         migrated = True
         all_mode = data.get("all_mode") is True
     else:
@@ -568,8 +564,9 @@ def build_status(inp: dict) -> dict:
     prs = inp.get("prs") or []
     pr_map = {p["id"]: p for p in prs if p.get("id")}
     targets: dict[str, dict] = inp.get("targets") or {}
-    if _legacy_ids(inp.get("stop_before_merge")):
-        targets = migrate_legacy_stop(prs, targets, inp["stop_before_merge"])
+    legacy_stop = inp.get("stop_before_merge")
+    if _legacy_ids(legacy_stop):
+        targets = migrate_legacy_stop(prs, targets, legacy_stop)
     all_mode = bool(inp.get("all_mode"))
     enabled = bool(inp.get("enabled", bool(targets) or all_mode))
     windows = inp.get("windows") or {}
