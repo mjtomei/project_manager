@@ -442,8 +442,10 @@ def run_review_loop_sync(
         # pane is gone.  Not on INPUT_REQUIRED (the user may still need
         # it) or ERROR (launch/poll failed; the reviewer may still be
         # starting or running), and not when the loop was stopped or
-        # superseded: ``z d`` / ``zz d`` kill the window and start a fresh
-        # review that reuses this container.
+        # superseded: ``z d`` / ``zz d`` start a fresh review under the
+        # same ``review-<pr>`` name (the killed window's exec EXIT trap
+        # removes the old container; the new review reuses or recreates
+        # it), and that container belongs to the new review.
         if (state.latest_verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK,
                                      VERDICT_KILLED)
                 and not state.stop_requested):

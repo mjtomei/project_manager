@@ -110,7 +110,16 @@ review loop stops its container only on PASS, NEEDS_WORK or KILLED —
 not INPUT_REQUIRED, not ERROR (a failed launch or poll may leave the
 reviewer starting or running), and not when the loop was stopped or
 superseded (`stop_requested`): `z d` / `zz d` kill the loop's window and
-start a fresh review that reuses the same `review-<pr>` container.
+start a fresh review under the same `review-<pr>` name.  Killing the window
+runs master's exec EXIT trap (`build_exec_cmd(cleanup=True)`, `rm -f`), which
+removes the container whatever the stop-idle policy is.  The fresh review
+then recreates it, or reuses it if it is still running.  Either way the
+container belongs to the new review.  `stop_container` pins the container
+ID it first saw.  It keeps a container that was recreated under the same
+name since then, and it removes by ID (review 3f45 i1, after QA S39).
+Window kill and fresh-review recreation are master lifecycle behaviour.
+They are not part of stop-on-idle, and #241's ownership work will
+revisit them.
 
 Container types are read from the label at the *end* of the name
 (`…-impl-pr-x`, `…-qa-pr-x-<loop>-sN`): the session tag comes from the

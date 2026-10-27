@@ -1049,6 +1049,16 @@ class TestRemoveContainer:
         mock_capture.assert_not_called()
         mock_docker.assert_any_call("rm", "-f", "pm-impl", check=False, timeout=30)
 
+    @patch("pm_core.container._run_runtime")
+    @patch("pm_core.push_proxy.stop_push_proxy")
+    def test_container_id_pins_removal(self, _proxy, mock_docker):
+        """Removing by ID never touches a newer same-named container."""
+        mock_docker.return_value = MagicMock(returncode=1)
+        remove_container("pm-review", capture=False, container_id="cid1")
+        mock_docker.assert_any_call("rm", "-f", "cid1", check=False, timeout=30)
+        mock_docker.assert_any_call("inspect", "cid1", check=False, timeout=5)
+        assert all("pm-review" not in c.args for c in mock_docker.call_args_list)
+
     @patch("pm_core.container.container_is_running")
     @patch("pm_core.container._run_runtime")
     @patch("pm_core.push_proxy.stop_push_proxy")
@@ -1341,7 +1351,7 @@ class TestStopContainer:
 
     @pytest.fixture
     def running(self):
-        with patch("pm_core.container.container_is_running", return_value=True), \
+        with patch("pm_core.container._running_container_id", return_value="cid1"), \
              patch("pm_core.container.foreign_exec_sessions", return_value=0) as f:
             yield f
 
@@ -1355,7 +1365,7 @@ class TestStopContainer:
         assert manager.mock_calls == [
             call.set_pane("%10", "remain-on-exit", "on"),
             call.set_pane("%11", "remain-on-exit", "on"),
-            call.remove("pm-qa-s1", capture=False),
+            call.remove("pm-qa-s1", capture=False, container_id="cid1"),
         ]
         # Checked before and again after the (slow) stats capture.
         assert running.call_count == 2
@@ -1367,7 +1377,8 @@ class TestStopContainer:
     def test_no_panes(self, mock_set_pane, mock_remove, running):
         assert stop_container("pm-qa-s1", pane_ids=None) is True
         mock_set_pane.assert_not_called()
-        mock_remove.assert_called_once_with("pm-qa-s1", capture=False)
+        mock_remove.assert_called_once_with("pm-qa-s1", capture=False,
+                                            container_id="cid1")
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.tmux.set_pane_option")
@@ -1375,19 +1386,20 @@ class TestStopContainer:
         mock_set_pane.side_effect = [None, RuntimeError("dead pane"), None]
         stop_container("pm-qa-s1", pane_ids=["%10", "%11", "%12"])
         assert mock_set_pane.call_count == 3
-        mock_remove.assert_called_once_with("pm-qa-s1", capture=False)
+        mock_remove.assert_called_once_with("pm-qa-s1", capture=False,
+                                            container_id="cid1")
 
     @patch("pm_core.container.remove_container")
     def test_keeps_container_with_foreign_exec_session(self, mock_remove):
         """A retained human session (someone attached) is never cut off."""
-        with patch("pm_core.container.container_is_running", return_value=True), \
+        with patch("pm_core.container._running_container_id", return_value="cid1"), \
              patch("pm_core.container.foreign_exec_sessions", return_value=1):
             assert stop_container("pm-qa-s1", pane_ids=["%10"]) is False
         mock_remove.assert_not_called()
 
     @patch("pm_core.container.remove_container")
     def test_keeps_container_when_ownership_unknown(self, mock_remove):
-        with patch("pm_core.container.container_is_running", return_value=True), \
+        with patch("pm_core.container._running_container_id", return_value="cid1"), \
              patch("pm_core.container.foreign_exec_sessions", return_value=None):
             assert stop_container("pm-qa-s1", pane_ids=["%10"]) is False
         mock_remove.assert_not_called()
@@ -1414,9 +1426,41 @@ class TestStopContainer:
 
     @patch("pm_core.container.remove_container")
     def test_not_running_is_left_alone(self, mock_remove):
-        with patch("pm_core.container.container_is_running", return_value=False):
+        with patch("pm_core.container._running_container_id", return_value=None):
             assert stop_container("pm-qa-s1") is False
         mock_remove.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    def test_keeps_container_recreated_under_same_name(self, mock_remove, running):
+        """An immediate review restart can recreate ``review-<pr>`` while
+        the old loop's stop thread is capturing stats: the new container
+        belongs to the new session and is never removed."""
+        with patch("pm_core.container._running_container_id",
+                   side_effect=["cid1", "cid1", "cid2"]):
+            assert stop_container("pm-review-pr-1", ["%10"]) is False
+        mock_remove.assert_not_called()
+
+    @patch("pm_core.container.remove_container")
+    def test_keeps_container_replaced_before_capture(self, mock_remove, running):
+        with patch("pm_core.container._running_container_id",
+                   side_effect=["cid1", "cid2"]):
+            assert stop_container("pm-review-pr-1", ["%10"]) is False
+        self.capture.assert_not_called()
+        mock_remove.assert_not_called()
+
+
+class TestRunningContainerId:
+    @pytest.mark.parametrize("rc,out,expected", [
+        (0, "true abc123\n", "abc123"),
+        (0, "false abc123\n", None),
+        (1, "", None),
+        (0, "true\n", None),
+    ])
+    def test_parses_inspect(self, rc, out, expected):
+        from pm_core.container import _running_container_id
+        with patch("pm_core.container._run_runtime",
+                   return_value=MagicMock(returncode=rc, stdout=out)):
+            assert _running_container_id("pm-x") == expected
 
 
 class TestForeignExecSessions:

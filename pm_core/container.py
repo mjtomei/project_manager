@@ -1042,7 +1042,8 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     return exec_part
 
 
-def remove_container(name: str, *, capture: bool = True) -> None:
+def remove_container(name: str, *, capture: bool = True,
+                     container_id: str | None = None) -> None:
     """Force-remove a container and its push proxy, then wait until it is gone.
 
     If another 'docker rm -f' is already in flight (e.g. the previous session's
@@ -1051,7 +1052,9 @@ def remove_container(name: str, *, capture: bool = True) -> None:
 
     Captures a running container's memory stats for the memory governor
     first, unless *capture* is False (the caller already captured them, or
-    knows the container is not running).
+    knows the container is not running).  With *container_id*, only that
+    container is removed and waited on, never a newer one created under
+    the same name in the meantime.
     """
     import time
     from pm_core.push_proxy import stop_push_proxy
@@ -1063,17 +1066,30 @@ def remove_container(name: str, *, capture: bool = True) -> None:
         _capture_memory_sample(name)
 
     stop_push_proxy(name)
-    _run_runtime("rm", "-f", name, check=False, timeout=30)
+    target = container_id or name
+    _run_runtime("rm", "-f", target, check=False, timeout=30)
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_runtime("inspect", name, check=False, timeout=5)
+        result = _run_runtime("inspect", target, check=False, timeout=5)
         if result.returncode != 0:
             return  # container is gone
         time.sleep(0.1)
     _log.warning("remove_container: %s still present after 10 s", name)
+
+
+def _running_container_id(name: str) -> str | None:
+    """ID of the running container named *name*, or None."""
+    result = _run_runtime(
+        "inspect", "-f", "{{.State.Running}} {{.Id}}", name,
+        check=False, timeout=10,
+    )
+    parts = result.stdout.split() if result.returncode == 0 else []
+    if len(parts) == 2 and parts[0] == "true":
+        return parts[1]
+    return None
 
 
 def _capture_memory_sample(name: str) -> None:
@@ -1196,11 +1212,22 @@ def stop_container(name: str, pane_ids: list[str] | None = None,
     that cannot be determined, or when *resumed* returns True (the
     session was picked up again).  Ownership and *resumed* are checked
     again after the stats capture — which takes seconds — immediately
-    before removal.  Returns True if the container was removed.
+    before removal.  The stop is pinned to the container running when it
+    starts: one recreated under the same name since (an immediate review
+    restart whose killed window's EXIT trap removed the old one) belongs
+    to the new session and is kept.  Returns True if the container was
+    removed.
     """
     pane_ids = list(pane_ids or [])
 
+    container_id = _running_container_id(name)
+    if not container_id:
+        _log.info("Stop-on-idle: %s is not running — nothing to stop", name)
+        return False
+
     def _keep_reason() -> str:
+        if _running_container_id(name) != container_id:
+            return "no longer running or replaced by a new container"
         if resumed is not None and resumed():
             return "session resumed since idle"
         foreign = foreign_exec_sessions(name, pane_ids)
@@ -1210,9 +1237,6 @@ def stop_container(name: str, pane_ids: list[str] | None = None,
             return f"{foreign} other exec session(s) open"
         return ""
 
-    if not container_is_running(name):
-        _log.info("Stop-on-idle: %s is not running — nothing to stop", name)
-        return False
     why = _keep_reason()
     if why:
         _log.info("Stop-on-idle: keeping %s — %s", name, why)
@@ -1234,7 +1258,7 @@ def stop_container(name: str, pane_ids: list[str] | None = None,
                 _log.debug("Failed to set remain-on-exit for pane %s", pid)
 
     # Stats were captured above; this also removes the push proxy.
-    remove_container(name, capture=False)
+    remove_container(name, capture=False, container_id=container_id)
     _log.info("Stop-on-idle: removed container %s", name)
     return True
 
