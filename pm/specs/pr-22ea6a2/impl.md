@@ -568,3 +568,23 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   the old controls.  Both now name the fresh chords (and plain `a` keeps its
   runs-popup meaning), and `autostart fresh` is listed among the command-bar
   verbs.  Pinned by `TestCli::test_tui_keys_lists_the_fresh_chords`.
+
+## Review-iteration notes (2aac i7)
+
+* **The handoff's primary transcript path now has a direct test** — R2/R3 say
+  the handoff reads the live implementation pane's *own* transcript (from its
+  start command), because a run-dir ``impl-<pr>.jsonl`` symlink can have been
+  finalized into a snapshot that stops tracking later turns.  Every existing
+  ``handoff_ready`` test passed ``app=None`` and therefore exercised only the
+  tracker fallback.  Two tests now pin both branches: the pane transcript
+  wins over a stale tracked copy, and the tracked path is used when the pane
+  cannot be resolved (restarted TUI).
+* **The null-``stop_reason`` reasoning is stated accurately** — the i3 note's
+  claim that "the 7252 ``text`` records are all followed by a user record or
+  EOF" no longer holds over the full local corpus: re-measured, 6 of 8416
+  ``stop_reason: null`` text records are followed by another assistant
+  record, one of them ~1.4 s later (a mid-message flush).  The *behavior* is
+  unchanged and still right — 8359 real transcripts end on a null
+  ``stop_reason`` text record, so requiring a set ``stop_reason`` would stall
+  the handoff on the majority of sessions — but the code comment (and this
+  note) now describe the residual risk instead of claiming it cannot happen.

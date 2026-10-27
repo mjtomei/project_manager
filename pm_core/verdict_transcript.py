@@ -231,12 +231,23 @@ def _turn_state_from_tail(text: str) -> str:
                 # is complete.  A trailing record with no answer text is
                 # therefore a turn still in progress — the thinking block of
                 # a turn whose answer (or tool call) has not been written
-                # yet.  Verified against real transcripts: every
-                # ``stop_reason: null`` thinking-only record is followed by
-                # another assistant record, while the answer ``text`` record
-                # is the last thing a turn writes.  Reading the former as
-                # "complete" would start the fresh-autostart review over
-                # in-flight work.
+                # yet.  Reading that as "complete" would start the
+                # fresh-autostart review over in-flight work.
+                #
+                # A ``text`` record, by contrast, ends the turn: measured
+                # over every transcript under ``~/.claude/projects``, the
+                # answer text is almost always the last thing a turn writes,
+                # and a null ``stop_reason`` on the *final* record is the
+                # common shape (a finished or killed session often never gets
+                # the closing flush — thousands of real transcripts end
+                # this way).  Requiring a set ``stop_reason`` would therefore
+                # stall the handoff on the majority of real sessions.  The
+                # cost is a rare mid-message text flush reading as complete
+                # for that moment (6 of ~8.4k records; the next block followed
+                # within ~1.5 s, or the record was an API-error retry of an
+                # already-finished answer).  The poll runs every second, so
+                # the exposure is small and the alternative failure (a
+                # handoff that never advances) is worse.
                 has_text = (
                     isinstance(content, str)
                     or (isinstance(content, list) and any(

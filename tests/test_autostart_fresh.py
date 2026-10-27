@@ -342,6 +342,38 @@ class TestHandoff:
         assert marker["awaiting_handoff"] is False
         assert marker["handoff_at"] and marker["review_started_at"]
 
+    def test_pane_transcript_wins_over_the_tracker_copy(self, tmp_path):
+        # The run-dir ``impl-<pr>.jsonl`` symlink is *finalized* (replaced by
+        # a snapshot) when auto-start is disabled, so the copy stops tracking
+        # later turns.  The handoff must read the live pane's own transcript
+        # from its start command, not that snapshot.
+        from types import SimpleNamespace
+        stale_dir = tmp_path / "stale"
+        stale_dir.mkdir()
+        stale = _transcript(stale_dir, [_busy()])
+        live_dir = tmp_path / "live"
+        live_dir.mkdir()
+        live = _transcript(live_dir, [_complete()])
+        pr = _marker_pr(st.now_iso())
+        app = SimpleNamespace(_session_name="sess")
+        with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+                   return_value="%1"), \
+             patch("pm_core.claude_launcher.pane_transcript_path",
+                   return_value=live):
+            assert autostart_fresh.handoff_ready(app, pr, _Tracker(stale))
+
+    def test_falls_back_to_the_tracked_transcript_without_a_pane(
+            self, tmp_path):
+        # A restarted TUI whose impl window cannot be found still has the
+        # tracker's registered path; the handoff must keep working from it.
+        from types import SimpleNamespace
+        path = _transcript(tmp_path, [_complete()])
+        pr = _marker_pr(st.now_iso())
+        app = SimpleNamespace(_session_name="sess")
+        with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+                   return_value=None):
+            assert autostart_fresh.handoff_ready(app, pr, _Tracker(path))
+
 
 def _poll_app(tmp_path, pr):
     """A minimal app for ``_poll_impl_idle`` with one tracked impl pane."""
