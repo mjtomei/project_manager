@@ -1658,6 +1658,45 @@ describe the project default; RQ39–RQ41 cover the PR-level routing.
       a sign-off verdict write that lands inside another process's hold
       logs one `advance … deferred` warning with no traceback and is
       retried. Host, fake-claude.
+    Done (run 593fc48613cc1d94): S83 (NEEDS_WORK, fix d6e599bf), S84
+    (NEEDS_WORK, fix bbaafe6d, filed pr-9aa36f5, pr-5887f3b), S85 (PASS,
+    open point x1 below).
+  - Thirty-third pass (S86+), delta-only, planner 2026-10-26. Product
+    changes since run 593fc48613cc1d94 have run live only in the scenario
+    that wrote them, or not at all: bbaafe6d (a review-loop launch whose
+    `pm pr review` child exits non-zero, e.g. route down, is an ERROR
+    verdict logged as one ERROR line, no traceback), d6e599bf ((1) the
+    `zz t` loop start clears a REQA return with NO_WAIT and leaves the
+    clear pending on the new run when busy; (2) a finished review loop in
+    the TUI gives way to a REVIEW return waiting on disk) and review a50f
+    i1 7bd12f64 (it gives way only once the poll tick announced the loop
+    and no review -> QA hand-off is pending). 7bd12f64 has never run live.
+    Consequence from review a50f: a TUI review return whose launch fails
+    is now retried once per 180 s claim expiry (before, the finished ERROR
+    loop blocked it). Controls: 0eeb8719 (before all three), d6e599bf
+    (before 7bd12f64), or HEAD with one commit reverted.
+    - S86: a REVIEW return written behind the TUI (`pm edit`, another
+      clone's sign-off) behind a finished, announced loop starts one fresh
+      review; a running loop is never replaced; an ordinary finished loop
+      without a return is not relaunched. S85 x1 is the natural
+      hand-off-pending case: hold 250 s, review delay 200 s, so the PASS
+      lands after the child gave up its clear but inside the hold. HEAD
+      must not start a second review while the hand-off moves the PR to
+      qa (d6e599bf control should). Where `awaiting: review` and the
+      expired claim end up is an observation. Concurrent `pm pr
+      auto-sequence` ticks during each return. Host, fake-claude.
+    - S87: `zz t` over a REQA re-run, inside and outside a hold: one
+      clear, after the release, no second run after INPUT_REQUIRED, ts
+      guard via `pm edit` during the hold, two PRs at once, a TUI restart
+      bound of one redundant run. Host, fake-claude.
+    - S88: a routed sign-off review return with the router down, in
+      container mode with real claude against the router and main stubs.
+      Each failed launch is one ERROR line, no traceback; retries come at
+      the claim-expiry cadence, never a hot loop, never a launch on main;
+      once the router is back, the next retry opens one routed review and
+      clears `awaiting`. An ordinary review loop with the router down is
+      ERROR and not relaunched. An unrouted PR keeps reaching main
+      throughout. Ticks run concurrently.
 
 ## 3. Edge cases
 
