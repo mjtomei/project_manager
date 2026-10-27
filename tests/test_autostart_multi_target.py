@@ -330,7 +330,8 @@ class TestKeys:
         auto_start.add_targets(app, ["b"])
         assert "(already a target)" not in shown[-1]
         auto_start.add_targets(app, ["a", "b"])
-        assert "a (wait-for-merge + deps), b (wait-for-merge + deps) (already a target)" in shown[-1]
+        assert ("a (wait-for-merge + deps), b (wait-for-merge + deps) "
+                "(already a target)") in shown[-1]
 
     def test_A_without_selection_never_enables_backlog(self):
         app = FakeApp([_pr("a")])

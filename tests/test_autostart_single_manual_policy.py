@@ -150,6 +150,15 @@ def test_cli_default_add_relies_on_owner_default(tmp_path, monkeypatch):
     assert req.call_args.args[1] == ["add", "f"]
 
 
+def test_tui_keys_help_names_wait_not_stop():
+    """R6: the key help presents one manual policy (``O`` waits)."""
+    from pm_core.cli import cli
+    res = CliRunner().invoke(cli, ["tui", "keys"])
+    assert res.exit_code == 0, res.output
+    assert "Add selected PR as target, wait for merge" in res.output
+    assert "stop before merge" not in res.output
+
+
 # ---------------------------------------------------------------------------
 # Breadcrumb / legacy record migration
 # ---------------------------------------------------------------------------
@@ -234,6 +243,14 @@ def test_breadcrumb_string_target_is_a_legacy_shape():
     assert list(targets) == ["f"] and migrated
     assert targets["f"].get(st.WAIT_KEY) is True
     assert targets["f"]["source"] == "legacy-breadcrumb"
+
+
+def test_breadcrumb_empty_string_target_is_dropped_and_reported():
+    """An empty string names no PR: like any other entry without a
+    recoverable id it is dropped (nothing to hold) but still reported."""
+    targets, _all, migrated = st.targets_from_breadcrumb(
+        {"auto_start": True, "targets": ["", {"pr_id": "f"}]})
+    assert list(targets) == ["f"] and migrated
 
 
 def test_breadcrumb_parse_is_idempotent():

@@ -3429,7 +3429,8 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
 
 # ---------------------------------------------------------------------------
-# Auto-sequence: chain start → review → QA on a single PR (stops before merge)
+# Auto-sequence: chain start → review → QA on a single PR (reports
+# ready_to_merge; the merge itself stays with the caller)
 # ---------------------------------------------------------------------------
 
 def _auto_seq_transcript_dir(root: Path, pr_id: str) -> Path:

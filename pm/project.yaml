@@ -36153,7 +36153,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/261
   gh_pr_number: 261
   created_at: '2026-10-27T04:42:06.128850+00:00'
-  updated_at: '2026-10-27T08:02:46.194842+00:00'
+  updated_at: '2026-10-27T08:24:32.289712+00:00'
   started_at: '2026-10-27T04:42:19.589247+00:00'
   reviewed_at: null
   merged_at: null
@@ -36260,6 +36260,17 @@ prs:
       boundary and merge gate; do not edit its workdir.'
     created_at: '2026-10-27T08:02:46Z'
     last_edited: '2026-10-27T08:02:46Z'
+  - id: note-83308cc
+    text: 'review-loop 77f6 i5: empty-string breadcrumb targets are now dropped (and
+      reported as a corrupt/legacy shape) instead of becoming a target with no id;
+      added regressions for that and for the `pm tui keys` O wording (R6); fixed a
+      stale "stops before merge" section comment in cli/pr.py; spec gains the #260/pr-22ea6a2
+      fresh-marker integration section. Focused suites 268 passed; full suite 3776
+      passed with only the pre-existing env failures (no gh / no markdown module /
+      local-repo fetch: test_signoff_integration 22, test_merge_publish 19+17, test_markdown_render
+      12, test_hook_events, test_git_ops — identical set on base 450a6362).'
+    created_at: '2026-10-27T08:24:32Z'
+    last_edited: '2026-10-27T08:24:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

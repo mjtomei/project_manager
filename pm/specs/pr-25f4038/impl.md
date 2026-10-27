@@ -100,9 +100,9 @@ and folds the legacy fields:
   `O` from `A`; fail closed and migrate it to a `wait_for_merge` target.
 - A bare-string entry in `targets` (no pm version wrote one) has an unknown
   policy; fail closed to `wait_for_merge` and report `migrated`.
-- A list entry with no recoverable id (wrong type, or a record missing
-  `pr_id`) is dropped — there is nothing to hold — but still reports
-  `migrated`, so the corrupt shape surfaces in the restart log.
+- A list entry with no recoverable id (wrong type, an empty string, or a
+  record missing `pr_id`) is dropped — there is nothing to hold — but still
+  reports `migrated`, so the corrupt shape surfaces in the restart log.
 - Current-format keys without a usable `targets` list (a non-list `targets`
   value, `targets: null`, or `all_mode` present with no `targets` key) are
   corrupt/mixed-version: drop the unusable list, honour only a literal
@@ -208,6 +208,18 @@ duplicate session and never consumes a stale sign-off.
    auto-start off there is no scheduler/merge path for a hold to gate.
 
 No **[UNRESOLVED]** items.
+
+## Integration with #260 / pr-22ea6a2 (`z a` fresh-autostart handoff)
+
+That PR persists a manual-policy choice in its fresh marker
+(`pr[FRESH_KEY]["policy"] = policy or POLICY_STOP`) and reads it back in
+`resume_fresh` (`policy = ... or POLICY_STOP`, unknown → `POLICY_STOP`).
+After this PR there is no `POLICY_STOP`: at integration map any persisted or
+marker `stop_before_merge` value (and `z O` / `--stop-before-merge`) to
+`POLICY_WAIT`, make `fresh_start` default to `POLICY_WAIT`, and fail closed
+on an unknown marker policy instead of defaulting to the removed constant.
+Preserve that PR's live-session adoption, new-handoff boundary and merge
+gate. Do not edit its workdir or depend on unfinished code.
 
 ## Edge cases to cover
 

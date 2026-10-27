@@ -292,7 +292,7 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
     raw = data.get("targets")
     if isinstance(raw, list):
         for entry in raw:
-            if isinstance(entry, str):
+            if isinstance(entry, str) and entry:
                 # No pm version wrote bare-string targets, so the record's
                 # policy is unknown: fail closed to the single manual policy
                 # (as for the legacy ``target: X`` shape) instead of letting
@@ -308,9 +308,10 @@ def targets_from_breadcrumb(data: dict, prs: list[dict] | None = None
                 rec.setdefault("source", "breadcrumb")
                 targets.setdefault(entry["pr_id"], rec)
             else:
-                # An entry with no recoverable id (wrong type, or a record
-                # missing ``pr_id``): nothing to hold, but surface the
-                # corrupt shape in the restart log rather than hiding it.
+                # An entry with no recoverable id (wrong type, an empty
+                # string, or a record missing ``pr_id``): nothing to hold,
+                # but surface the corrupt shape in the restart log rather
+                # than hiding it.
                 migrated = True
         all_mode = data.get("all_mode") is True
     elif "targets" in data or "all_mode" in data:
