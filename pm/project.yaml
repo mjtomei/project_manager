@@ -36394,8 +36394,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T08:55:07.647281+00:00'
-  updated_at: '2026-10-27T08:55:07.647281+00:00'
+  updated_at: '2026-10-27T19:56:07.792693+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a9b7ecf
+    text: 'Heads-up from pr-6566901 (review-loop d476 i2, 4fec787d): the QA verifier
+      re-verification follow-up no longer uses wait_for_follow_up_verdict. `_verify_single_scenario`
+      now calls the shared poll_for_verdict for that machine-driven re-check, so a
+      verifier that idles without VERIFIED/FLAGGED there gets the same settle/nudge/exhaustion
+      and surfaces "verifier produced no verdict: ..." (blocking finalize) instead
+      of hanging. Regression test: tests/test_loop_recovery.py::TestQARecoveryWiring::test_verifier_recheck_exhaustion_blocks_finalize.
+      When this bug PR is picked up, verify against current master first — it may
+      already be fixed and the PR can be closed.'
+    created_at: '2026-10-27T19:56:07Z'
+    last_edited: '2026-10-27T19:56:07Z'
