@@ -29,6 +29,10 @@ from typing import Callable
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
+from pm_core.prompt_bounds import (
+    ARTIFACT_PATHS_MAX as _ARTIFACT_PATHS_MAX,
+    bounded_join, bounded_lines,
+)
 from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
     find_claude_pane,
@@ -1506,10 +1510,18 @@ def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   base_branch: str,
                                   instruction_content: str | None = None,
                                   pr_id: str | None = None) -> str:
-    """Build a prompt that verifies and refines scenario steps against code."""
+    """Build a prompt that verifies and refines scenario steps against code.
+
+    The instruction file is inlined whole: it is instruction text, so it is
+    never truncated.  A prompt too large for one argv entry is delivered by
+    the launcher's file-backed bootstrap instead.
+    """
     this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
+        # The instruction file is inlined whole and never truncated; an
+        # over-limit prompt is delivered by the launcher's file-backed
+        # bootstrap instead.
         instruction_section = f"""
 ## Instruction File
 
@@ -1519,6 +1531,10 @@ does not need to read the file separately.
 
 {instruction_content}
 """
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
     return f"""You are refining the test steps for QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario
@@ -1526,7 +1542,7 @@ does not need to read the file separately.
 **Focus**: {scenario.focus}
 
 **Planned steps**:
-{scenario.steps}
+{steps_text}
 {instruction_section}
 ## Your Task
 
@@ -1633,9 +1649,10 @@ def _build_concretize_cmd(
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
 
-    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content,
-                                          pr_id=pr_data.get("id"))
+    prompt = _build_concretization_prompt(
+        scenario, pr_branch, base_branch,
+        instruction_content=instruction_content,
+        pr_id=pr_data.get("id"))
     claude_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
@@ -2021,7 +2038,9 @@ def _launch_scenarios_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
-        # Read instruction content before installing (sets absolute path on scenario)
+        # Read instruction content before installing (sets absolute path on
+        # scenario).  The concretizer inlines the file whole, so this is the
+        # only copy it needs.
         instruction_content: str | None = None
         if pm_root and scenario.instruction_path:
             src = pm_root / "qa" / scenario.instruction_path
@@ -2244,7 +2263,9 @@ def _launch_scenarios_in_containers(
             return
         scenario.worktree_path = str(clone_path)
 
-        # Read instruction content from source before installing
+        # Read instruction content from source before installing.  The
+        # concretizer inlines the file whole, so this is the only copy it
+        # needs.
         instruction_content: str | None = None
         if pm_root and scenario.instruction_path:
             src = pm_root / "qa" / scenario.instruction_path
@@ -3067,6 +3088,10 @@ def _poll_tmux_verdicts(
 # Maximum pane output lines to include in the verification prompt.
 # Large outputs are truncated to keep the prompt manageable.
 _VERIFICATION_MAX_PANE_LINES = 500
+# Byte cap for the inlined pane output.  The line bound alone does not bound
+# the prompt: transcripts carry long lines, so 500 of them can still exceed
+# the argv limit (and one enormous line defeats the line count entirely).
+_VERIFICATION_MAX_PANE_BYTES = 60_000
 
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
@@ -3103,18 +3128,16 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
             f"Read that file to review the scenario output.{format_hint}"
         )
     else:
-        text = pane_output or ""
-        lines = text.splitlines()
-        if len(lines) > _VERIFICATION_MAX_PANE_LINES:
-            # Keep both head and tail so the verifier sees setup AND verdict
-            head_lines = _VERIFICATION_MAX_PANE_LINES // 4
-            tail_lines = _VERIFICATION_MAX_PANE_LINES - head_lines
-            omitted = len(lines) - head_lines - tail_lines
-            text = (
-                "\n".join(lines[:head_lines])
-                + f"\n\n[... {omitted} lines omitted ...]\n\n"
-                + "\n".join(lines[-tail_lines:])
-            )
+        # Head/tail truncation so the verifier sees setup AND verdict; the
+        # byte cap keeps long transcript lines from defeating the line bound,
+        # and the marker points at the transcript for the full output.
+        text = bounded_lines(
+            pane_output or "",
+            max_lines=_VERIFICATION_MAX_PANE_LINES,
+            max_bytes=_VERIFICATION_MAX_PANE_BYTES,
+            pointer="the full scenario transcript on disk",
+            label="scenario output",
+        )
         output_section = (
             f"The scenario produced the verdict: **{verdict}**\n\n"
             f"Here is the full output from the scenario session:\n\n"
@@ -3131,7 +3154,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     artifact_check_block = ""
     artifact_judgment_bullet = ""
     if artifact_names:
-        recipe_bullets = "\n".join(f"- {n}" for n in artifact_names)
+        recipe_bullets = bounded_join(
+            artifact_names, lambda n: f"- {n}",
+            max_items=_ARTIFACT_PATHS_MAX,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more recipes; run `pm qa list` to see the library)"),
+        )
         where = captures_scenario_dir or (
             "the per-scenario captures directory the scenario worker was given")
         artifact_check_block = f"""
@@ -3170,6 +3198,11 @@ the artifact with no explanation are **not** valid reasons.
     # the judgment step shifts to Step 4.
     judgment_step_no = 4 if artifact_names else 3
 
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
+
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario Definition
@@ -3177,7 +3210,7 @@ the artifact with no explanation are **not** valid reasons.
 **Focus**: {scenario.focus}
 
 **Steps**:
-{scenario.steps}
+{steps_text}
 
 ## Scenario Output
 

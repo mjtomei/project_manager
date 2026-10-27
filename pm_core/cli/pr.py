@@ -543,6 +543,152 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
     emit_paged(out)
 
 
+def _note_line(n: dict) -> str:
+    """One note, as ``pm pr note list`` and ``pm pr show`` print it.
+
+    Both commands are on-demand readers for the PR-notes block prompt
+    builders abbreviate, so they must render a note identically — and they
+    must not crash on a shape the prompt builder accepts: ``_format_pr_notes``
+    deliberately tolerates notes without an ``id`` (hand-edited or legacy
+    ``project.yaml``), so the reader falls back to a placeholder rather than
+    raising ``KeyError`` and hiding every note behind a traceback.
+    """
+    ts = n.get("created_at", "")
+    ts_str = f" ({ts})" if ts else ""
+    # Tolerate a note with no ``text`` as well as no ``id`` (hand-edited or
+    # legacy project.yaml): both readers are the on-demand fallback for an
+    # abbreviated PR-notes block, so one malformed note must not raise and hide
+    # every note.  A present-but-null ``id:``/``text:`` is the same shape, so
+    # use ``or`` — a plain default would render the literal ``None``.
+    return f"  {n.get('id') or '?'}{ts_str}: {n.get('text') or ''}"
+
+
+@pr.command("show")
+@click.argument("pr_id")
+def pr_show(pr_id: str):
+    """Show a PR's full detail: description, tests, files, deps, notes,
+    sign-off return, and integration.
+
+    The on-demand companion to the abbreviated listings prompt builders
+    emit when a collection is too large to inline: sessions told to "run
+    `pm pr show <id>`" read the full record here.
+    """
+    root = state_root()
+    data = store.load(root)
+    pr_entry = _require_pr(data, pr_id)
+
+    click.echo(format_pr_line(pr_entry))
+    for label, key in (
+        ("Title", "title"),
+        ("Status", "status"),
+        ("Plan", "plan"),
+        ("Branch", "branch"),
+        ("Workdir", "workdir"),
+        ("GitHub", "gh_pr"),
+    ):
+        val = pr_entry.get(key)
+        if val:
+            click.echo(f"{label}: {val}")
+    deps = pr_entry.get("depends_on") or []
+    if deps:
+        click.echo(f"Depends on: {', '.join(deps)}")
+    for label, key in (
+        ("Description", "description"),
+        ("Tests", "tests"),
+        ("Files", "files"),
+    ):
+        val = (pr_entry.get(key) or "").strip()
+        if val:
+            click.echo(f"\n## {label}\n{val}")
+    notes = pr_entry.get("notes") or []
+    if notes:
+        click.echo("\n## Notes")
+        for n in notes:
+            click.echo(_note_line(n))
+    # Prompt builders abbreviate the integration overlap/conflict path lists
+    # and point sessions here for the rest, so print the record (and where its
+    # full form lives) rather than making that pointer a dead end.
+    def _path_list_lines(record: dict) -> None:
+        """Print overlap/conflict paths, naming the record's real total.
+
+        project.yaml keeps at most _YAML_LIST_LIMIT paths per list and records
+        the real total separately.  Report that total (and how many paths are
+        not shown) so the session reading this fallback does not mistake the
+        yaml copy for the whole record — the same rule for the top-level
+        integration record and the sign-off return's copy of it.
+        """
+        for label, key in (("Overlap", "overlap"), ("Conflicts", "conflicts")):
+            vals = record.get(key) or []
+            total = record.get(f"{key}_total")
+            if (not isinstance(total, int) or isinstance(total, bool)
+                    or total < len(vals)):
+                # Missing or malformed (hand-edited yaml) -> the yaml copy is
+                # all this reader can vouch for.
+                total = len(vals)
+            if vals or total:
+                more = (f" (+{total - len(vals)} more)"
+                        if total > len(vals) else "")
+                click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
+
+    # The sign-off return is a separate prompt block from the notes (it is a
+    # different document), so its omission marker points here rather than at
+    # `pm pr note list`, which does not contain it.  Print the whole record.
+    ret = pr_entry.get("signoff_return") or {}
+    if ret:
+        click.echo("\n## Sign-off return")
+        for label, key in (
+            ("Verdict", "verdict"),
+            ("Hop", "hop"),
+            ("Reviewed head", "reviewed_head"),
+            ("Reason", "reason"),
+            ("Original verdict", "original_verdict"),
+            ("Coerced reason", "coerced_reason"),
+        ):
+            val = ret.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        applied = ret.get("applied") or {}
+        if applied.get("merge_sha"):
+            click.echo(f"Applied merge: {applied['merge_sha']}")
+        if ret.get("apply_error"):
+            click.echo(f"Apply error: {ret['apply_error']}")
+        ret_integ = ret.get("integration") or {}
+        if ret_integ:
+            # A return integration can legitimately lack a field: an ERROR
+            # record (e.g. the base fetch failed) carries ``base_sha: null``.
+            # Render the placeholder rather than the literal ``None`` — the
+            # same rule the notes readers follow (a reader must not print a
+            # value the record does not hold).
+            base = (f"`{ret_integ.get('base_branch') or '?'}` @ "
+                    f"`{ret_integ.get('base_sha') or '?'}` from "
+                    f"`{ret_integ.get('target_repo') or '?'}`")
+            click.echo(f"Integration: {ret_integ.get('status') or '?'} "
+                       f"with {base}")
+            _path_list_lines(ret_integ)
+    integ = pr_entry.get("integration") or {}
+    if integ:
+        click.echo("\n## Integration")
+        for label, key in (
+            ("Target", "target_repo"),
+            ("Base branch", "base_branch"),
+            ("Base sha", "base_sha"),
+            ("Status", "status"),
+        ):
+            val = integ.get(key)
+            if val:
+                click.echo(f"{label}: {val}")
+        _path_list_lines(integ)
+        # A runtime-resolved reference, not a host path: sessions following the
+        # integration omission marker run inside a container, where the host
+        # ~/.pm/sessions/<tag>/captures/ path does not exist (the same
+        # host-vs-container split integration_pointer handles).  Resolving it
+        # here would also create that directory as a side effect.
+        click.echo(
+            "Full record: "
+            f"`$(pm qa captures-path {pr_entry.get('id', pr_id)})"
+            "/integration.json`")
+
+
 @pr.command("graph")
 def pr_graph():
     """Show static dependency graph."""
@@ -3305,9 +3451,7 @@ def pr_note_list(pr_id: str):
         click.echo(f"No notes on {_pr_display_id(pr_entry)}.")
         return
     for n in notes:
-        ts = n.get("created_at", "")
-        ts_str = f" ({ts})" if ts else ""
-        click.echo(f"  {n['id']}{ts_str}: {n['text']}")
+        click.echo(_note_line(n))
 
 
 @pr_note.command("delete")
