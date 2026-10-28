@@ -132,6 +132,20 @@ R8. **Gates preserved.** No pm-initiated merge to the base branch, no
     change to merge policy / wait-for-merge / spec gates; routing uses the
     existing qa→in_review NEEDS_WORK path only.
 
+R9. **Auto-sequence needs a live session.** Every auto-sequence branch
+    drives panes in the pm session, so its "paused: no pm tmux session"
+    guards must key on a session that exists, not on a name.
+    `_get_pm_session()` falls back to the cwd-derived name whenever tmux is
+    installed, so from a plain shell it returns a session that was never
+    created; a bare `if not pm_session` therefore never fires.  The
+    command now clears `pm_session` when `tmux_mod.session_exists()` says
+    the resolved name is not live — the same check the window-launching
+    paths already make — so the guard works for in_progress, in_review,
+    qa and sign_off alike.  Without it the qa branch launched a detached
+    driver that exited with "No pm session found" and wrote no
+    `qa_status.json`, so each tick re-launched it and reported
+    "running: qa (launched)" forever.
+
 ## Implicit requirements
 
 - The sync must not run on QA resume (`resume_qa_sync`): scenarios are

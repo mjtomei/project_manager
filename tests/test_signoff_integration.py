@@ -343,6 +343,7 @@ def _seq(tmp_path, pr_entry, **patches):
     with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
          patch("pm_core.cli.pr.store.load", return_value=data), \
          patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+         patch("pm_core.cli.pr.tmux_mod.session_exists", return_value=True), \
          patch("pm_core.cli.pr.pr_start") as start, \
          patch("pm_core.cli.pr.pr_review") as review, \
          patch("pm_core.cli.pr._launch_qa_detached") as qa, \

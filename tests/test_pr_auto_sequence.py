@@ -52,6 +52,20 @@ def runner():
     return CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _fake_session_is_live():
+    """Make the tests' fake ``pm-test`` a session that actually exists.
+
+    ``pr_auto_sequence`` resolves the session with ``_get_pm_session`` and
+    then confirms it exists (that helper falls back to a cwd-derived guess,
+    so a name alone does not mean a live session).  These tests patch
+    ``_get_pm_session`` to ``pm-test``, which no tmux server has; tests that
+    exercise the stale-name path patch ``session_exists`` themselves.
+    """
+    with patch("pm_core.cli.pr.tmux_mod.session_exists", return_value=True):
+        yield
+
+
 class TestPending:
     def test_pending_invokes_pr_start_background(self, runner, tmp_path):
         pr = _pr("pending")
@@ -259,6 +273,30 @@ class TestQA:
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
              patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
              patch("pm_core.cli.pr._get_pm_session", return_value=None), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, None)), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0
+        assert "paused: no pm tmux session" in result.output
+        mock_qa.assert_not_called()
+
+    def test_stale_session_name_pauses_instead_of_launching_qa(
+            self, runner, tmp_path):
+        """A name is not a session: ``_get_pm_session`` falls back to the
+        cwd-derived guess even with no pm session running, and the guard
+        used to trust it.  Outside a session the tick then launched a
+        detached driver that died with "No pm session found" and wrote no
+        qa_status.json, so every tick re-launched it and reported
+        "running: qa (launched)" forever.
+        """
+        pr = _pr("qa")
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session",
+                   return_value="pm-proj-deadbeef"), \
+             patch("pm_core.cli.pr.tmux_mod.session_exists",
+                   return_value=False), \
              patch("pm_core.cli.pr._qa_status_for",
                    return_value=(None, None)), \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:

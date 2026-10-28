@@ -3650,6 +3650,15 @@ def pr_auto_sequence(pr_id: str):
     pr_id = pr_entry["id"]
     status = pr_entry.get("status", "")
     pm_session = _get_pm_session()
+    if pm_session and not tmux_mod.session_exists(pm_session):
+        # _get_pm_session() falls back to the cwd-derived name even when no
+        # such session was ever created, so it is truthy from a plain shell
+        # with no pm session running.  Every branch below drives panes in
+        # the session, so a name alone must not count as one: the detached
+        # QA driver exits with "No pm session found" and writes no
+        # qa_status.json, which left each tick re-launching a doomed
+        # process and reporting "running: qa (launched)" forever.
+        pm_session = None
     tdir = _auto_seq_transcript_dir(root, pr_id)
     tdir.mkdir(parents=True, exist_ok=True)
 
