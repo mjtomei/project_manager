@@ -34345,7 +34345,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T13:23:08.735194+00:00'
+  updated_at: '2026-10-28T13:38:53.504265+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34517,6 +34517,27 @@ prs:
       all 54 pushed SHAs still ancestors of upstream. Captures: /pm-captures/scenarios/11/.'
     created_at: '2026-10-28T13:23:08Z'
     last_edited: '2026-10-28T13:23:08Z'
+  - id: note-5f6e175
+    text: 'QA S12 (early exits): stories 1-4 PASS. Story 5 FAILED and is fixed in
+      e665cd84: `pm pr auto-sequence` with no pm tmux session printed `running: qa
+      (launched)`, spawned a `pr qa-run-bg` that logged `ERROR [qa_loop] No pm session
+      found` and wrote no qa_status.json. Cause: the 0fe7b8af guard is `if not pm_session`,
+      but `_get_pm_session()` falls back to `_get_session_name_for_cwd()` whenever
+      tmux is installed, so it returns a name for a session that was never created;
+      the guard only fired with no tmux binary at all. `pr_auto_sequence` now clears
+      pm_session when `tmux_mod.session_exists()` is false (the idiom the review/merge
+      window launchers already use), so all four `paused: no pm tmux session` guards
+      (in_progress, in_review, qa, sign_off) work. Verified: no-session tick now prints
+      exactly `paused: no pm tmux session`, writes no status file, launches no driver;
+      control run with a live session but the caller outside tmux still reports `paused:
+      input_required (qa)` / `running: qa (launched)`, so it does not over-pause.
+      Tests: new TestQA.test_stale_session_name_pauses_instead_of_launching_qa, fixtures
+      in test_pr_auto_sequence/test_signoff_integration now model a live session,
+      spec R9. Full suite 4114 passed, 1 skipped, 1 env-only failure (test_hook_events
+      installer with PM_HOST_HOME set). Captures: /pm-captures/scenarios/12/ (story1..4,
+      pre-fix/, post-fix/).'
+    created_at: '2026-10-28T13:38:53Z'
+    last_edited: '2026-10-28T13:38:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
