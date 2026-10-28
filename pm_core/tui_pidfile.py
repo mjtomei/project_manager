@@ -348,6 +348,15 @@ def identity_problem(desc: TuiPidfile) -> str | None:
     An empty argv (``[]``) is a *known* non-TUI, not "unknown" — see
     :func:`proc_cmdline` — but it is only believed once the ``execve``
     window has closed (:func:`_settled_cmdline`).
+
+    A ``None`` cmdline means "cannot tell" (no procfs, or the read
+    failed) and skips the argv check, but the process may also have
+    *exited* while we were inspecting it — ``/proc/<pid>`` disappears
+    entirely once it is reaped, which is exactly when the read fails.
+    Liveness is therefore re-checked before concluding "this is a live
+    TUI": otherwise a stale pidfile whose dead owner was reaped mid-check
+    would make ``claim_tui_pidfile`` refuse to start (the failure mode
+    E18/E19 exist to prevent).
     """
     if not pid_alive(desc.pid):
         return "process is not running"
@@ -360,6 +369,11 @@ def identity_problem(desc: TuiPidfile) -> str | None:
     parts = _settled_cmdline(desc.pid)
     if parts is not None and not cmdline_is_tui(parts):
         return "pid belongs to a different program"
+    if parts is None and not pid_alive(desc.pid):
+        # The process went away between the liveness check and the
+        # cmdline read.  Off-procfs platforms also land here, but there
+        # `pid_alive` is still True, so this only reports a real exit.
+        return "process is not running"
     return None
 
 

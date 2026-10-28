@@ -416,6 +416,22 @@ E19. **An empty argv is also what `execve` serves.** For the few hundred
     A non-empty argv and `None` ("cannot tell") are returned
     immediately, so the ordinary path is unchanged.
 
+E20. **"Cannot tell" can also mean "it just exited".** `proc_cmdline`
+    returns `None` both when procfs is unavailable and when the read
+    fails — and the read fails exactly when `/proc/<pid>` has gone away,
+    i.e. when the process was reaped between `identity_problem`'s
+    liveness check and its argv read. `identity_problem` skips the argv
+    check on `None`, so a dead owner could be reported as "no problem":
+    `claim_tui_pidfile` then raised `TuiPidfileConflict` against a *dead*
+    TUI ("refusing to start a second TUI — stop pid N if it is not
+    visible") and `pm _tui` could not start until the stale file was
+    deleted by hand — the same failure class E18/E19 close, in the
+    opposite direction. Liveness is therefore re-checked when the argv
+    read was `None`; off-procfs platforms still report the pid alive, so
+    they keep degrading to the liveness check and nothing changes there.
+    (`submit_tui_command` / `trigger_tui_reload` were already safe here:
+    `_signal_tui` re-checks and reports `process is not running`.)
+
 ## Tests
 
 New `tests/test_tui_pidfile.py` (shared module + helper + app integration)
@@ -602,6 +618,17 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     read. A *permanently* empty argv is still rejected after the bounded
     grace (that test passes both ways by design: it pins that the grace
     does not weaken E18).
+40. an owner that was *reaped* between the liveness check and the argv
+    read (E20): with `proc_cmdline` returning `None` ("cannot tell") and
+    `pid_alive` flipping to `False` on the second call,
+    `identity_problem` reports `process is not running` instead of "no
+    problem", and `claim_tui_pidfile` takes the stale pidfile over
+    instead of raising `TuiPidfileConflict` — pre-fix it refused to
+    start (`pm _tui` could not run until the file was deleted by hand),
+    which both tests were verified to reproduce. A third test pins that
+    a *live* process with a "cannot tell" cmdline still degrades to the
+    liveness check (the off-procfs path), so the new re-check cannot
+    turn every non-Linux platform into "stale pidfile".
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

@@ -1342,6 +1342,61 @@ class TestIdentity:
         assert tpf.identity_problem(tpf.TuiPidfile(pid=2 ** 40)) == (
             "process is not running")
 
+    def test_owner_reaped_mid_check_is_not_a_live_tui(self, monkeypatch):
+        """A process that exits mid-check must not look like a live TUI.
+
+        ``/proc/<pid>`` vanishes once the process is reaped, so the
+        cmdline read returns ``None`` ("cannot tell") — the same value
+        that means "no procfs".  Concluding "live TUI" there would make
+        ``claim_tui_pidfile`` refuse to start against a dead owner.
+        """
+        alive_calls = []
+
+        def flaky_alive(pid):
+            alive_calls.append(pid)
+            return len(alive_calls) == 1
+
+        monkeypatch.setattr(tpf, "pid_alive", flaky_alive)
+        monkeypatch.setattr(tpf, "proc_cmdline", lambda pid: None)
+        desc = tpf.TuiPidfile(pid=DEAD_PID)
+
+        assert tpf.identity_problem(desc) == "process is not running"
+        assert len(alive_calls) == 2
+
+    def test_claim_takes_over_an_owner_that_was_reaped_mid_check(
+            self, tmp_path, monkeypatch):
+        """The claim must not refuse to start over a vanished owner.
+
+        Pre-fix ``identity_problem`` returned ``None`` here (the cmdline
+        check was skipped on a "cannot tell" read), so the claim raised
+        ``TuiPidfileConflict`` and ``pm _tui`` could not start until the
+        stale file was deleted by hand.
+        """
+        path = tmp_path / "tui-pm-test.pid"
+        _write_json(path, DEAD_PID, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        alive_calls = []
+
+        def flaky_alive(pid):
+            alive_calls.append(pid)
+            return len(alive_calls) == 1
+
+        monkeypatch.setattr(tpf, "pid_alive", flaky_alive)
+        monkeypatch.setattr(tpf, "proc_cmdline", lambda pid: None)
+
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        try:
+            assert tpf.read_pidfile(path).pid == os.getpid()
+        finally:
+            claim.release()
+
+    def test_cannot_tell_cmdline_of_a_live_process_still_degrades(
+            self, monkeypatch):
+        """Off-procfs ("cannot tell") keeps degrading to liveness."""
+        monkeypatch.setattr(tpf, "proc_cmdline", lambda pid: None)
+        desc = tpf.TuiPidfile(pid=os.getpid())
+
+        assert tpf.identity_problem(desc) is None
+
 
 class TestNonUtf8ProcStat:
     """A recycled PID may belong to a process with a non-UTF-8 ``comm``.
