@@ -342,3 +342,44 @@ def test_qa_thread_retries_deferred_release_after_completion(
     assert order[-1] == ("release", "pm-t")
     if crash:
         assert order == ["update", ("release", "pm-t")]
+
+
+def test_settled_verdict_is_persisted_before_its_container_is_released(
+        tmp_path, monkeypatch):
+    """A TUI restart right after a per-poll release must not relaunch the worker.
+
+    The poll's own snapshot is taken before verdicts are read. Releasing the
+    settled worker before the next snapshot left a window where a restart
+    resumed it as unverdicted, found its pane dead and relaunched it.
+    """
+    from pm_core import hook_events, tmux
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [qa_loop.QAScenario(
+        index=1, title="s1", focus="", window_name="qa-s1", pane_id="%1",
+        session_id="sid-1", transcript_path=str(tmp_path / "s1.jsonl"),
+        container_name="pm-t-qa-pr-aaaa-L-s1")]
+    on_disk = []
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        on_disk.append(qa_loop._load_resume_file(str(tmp_path))["scenario_verdicts"])
+        return False
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", lambda s: None)
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
+                        lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=[], concurrency_cap=1,
+        use_containers=True)
+
+    assert on_disk == [{"1": "PASS"}]

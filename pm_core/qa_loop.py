@@ -3066,6 +3066,13 @@ def _poll_tmux_verdicts(
                        and s.index not in released_indices
                        and s.index in state.scenario_verdicts]
             if settled and time.monotonic() >= release_retry_at:
+                # Persist these verdicts before their workers go away. The
+                # per-poll snapshot is taken before verdicts are read, so a
+                # TUI restart between this release and the next poll would
+                # resume them as unverdicted, find their panes dead and
+                # relaunch work that already settled.
+                _write_resume_file(state, use_containers, concurrency_cap,
+                                   _queued_indices, desired_cap=desired_cap)
                 if _release_scenario_containers(state, session, scenarios=settled,
                                                 kept_indices=kept_indices):
                     # A failed or deferred release (e.g. an unreadable
