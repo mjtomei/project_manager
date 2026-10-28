@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T00:31:48.501185+00:00'
+  updated_at: '2026-10-28T00:54:40.715032+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14670,6 +14670,16 @@ prs:
       exist.'
     created_at: '2026-10-28T00:31:48Z'
     last_edited: '2026-10-28T00:31:48Z'
+  - id: note-2b69a68
+    text: 'QA S57 incidental fix 025c8d53: the TUI periodic reconcile was in _SKIP_IF_BUSY,
+      so a tick that hit while a short scoped pass (pane-exit, qa-run-end, scoped
+      manual reap) held reaper.lock was silently dropped and late orphans waited an
+      extra 10 min (soak: 23:52 tick collided with the TUI qa-run-end pass; live repro
+      with a gated pm container reap --pr across the tick). Periodic now waits up
+      to 60 s on the reaper thread; auto/startup/keyring-pressure still skip. Post-fix
+      live: periodic ran at 00:53:52 right after the held manual pass. Evidence /pm-captures/scenarios/57/{pre-fix,post-fix}.'
+    created_at: '2026-10-28T00:54:40Z'
+    last_edited: '2026-10-28T00:54:40Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
