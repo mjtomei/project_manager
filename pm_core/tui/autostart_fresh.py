@@ -737,9 +737,11 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
                    + ", ".join(ids_ok)
                    + " — returned to implementation after feedback")
     else:
+        # Every PR in the call was already waiting: nothing was reset.
+        pronoun = "their" if len(ids_ok) > 1 else "its"
         confirm = ("Auto-start: "
                    + ", ".join(ids_ok)
-                   + " already waiting for its implementation turn")
+                   + f" already waiting for {pronoun} implementation turn")
     add = add_targets(app, ids_ok, policy=policy,
                       default_policy=default_policy, source=source,
                       confirm=confirm)

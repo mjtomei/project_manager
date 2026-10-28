@@ -645,6 +645,69 @@ class TestPollRouting:
         assert watched == []
 
 
+class TestHandoffConsumption:
+    """R3: the fresh handoff is consumed where the review actually starts.
+
+    ``consume_handoff`` was only covered directly; nothing pinned its call
+    site in ``_auto_review_idle_prs``.  That is what makes the status row
+    stop saying "waiting" and what keeps a later in_progress bounce from
+    being mistaken for this attempt.
+    """
+
+    def _app(self, project, awaiting=True):
+        data = store.load(project)
+        pr = store.get_pr(data, "pr-a")
+        pr["status"] = "in_progress"
+        if awaiting:
+            pr[FRESH_KEY] = {"requested_at": st.now_iso(),
+                             "from_status": "in_review", "source": "test",
+                             "attempt": 1, "policy": POLICY_STOP,
+                             "awaiting_handoff": True}
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._auto_start = True
+        app._auto_start_targets = {"pr-a": st.make_target_record("test")}
+        return app
+
+    def _start_review(self, project, app):
+        """Drive _auto_review_idle_prs with the real helper, mocked subprocess."""
+        from pm_core.tui import review_loop_ui
+        pr = store.get_pr(store.load(project), "pr-a")
+
+        def fake_run_command(_app, cmd, *a, **k):
+            # The real helper runs ``pr review --no-window``, which moves the
+            # PR to in_review on disk.
+            data = store.load(project)
+            store.get_pr(data, "pr-a")["status"] = "in_review"
+            store.save(data, project)
+
+        with patch("pm_core.tui.pr_view.run_command",
+                   side_effect=fake_run_command), \
+             patch.object(review_loop_ui, "_start_loop") as start_loop:
+            review_loop_ui._auto_review_idle_prs(app, [("pr-a", pr)])
+        start_loop.assert_called_once()
+        return store.get_pr(store.load(project), "pr-a")
+
+    def test_starting_the_review_consumes_the_marker(self, project):
+        app = self._app(project)
+        pr = self._start_review(project, app)
+        marker = st.fresh_marker(pr)
+        assert marker["awaiting_handoff"] is False
+        assert marker["handoff_at"]
+        assert marker["review_started_at"]
+        # The attempt's provenance survives consumption.
+        assert marker["attempt"] == 1
+        assert marker["requested_at"]
+
+    def test_an_ordinary_review_start_writes_no_marker(self, project):
+        # The consume is only for a real fresh attempt: an ordinary idle
+        # implementation must not gain a marker (the i1 no-spurious-write
+        # contract).
+        app = self._app(project, awaiting=False)
+        pr = self._start_review(project, app)
+        assert st.fresh_marker(pr) == {}
+
+
 # ---------------------------------------------------------------------------
 # fresh_start orchestration
 # ---------------------------------------------------------------------------
@@ -725,6 +788,25 @@ class TestFreshStart:
         assert first["changes"][0]["action"] == "fresh_reset"
         assert second["changes"][0]["action"] == "already_waiting"
         rev.assert_not_called()
+
+    def test_two_already_waiting_prs_read_as_a_plural(self, project):
+        # The all-already-waiting confirmation is the only message built from
+        # the whole call ("Auto-start: pr-a, pr-b already waiting for their
+        # implementation turn"), so it must agree in number.
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", workdir=str(project.parent / "wd-b")))
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._pane_idle_tracker = MagicMock()
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+            app.logs.clear()
+            out = autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+        assert [c["action"] for c in out["changes"]] == ["already_waiting"] * 2
+        assert any("already waiting for their implementation turn" in line
+                   for line in app.logs)
 
     def test_merge_in_progress_is_refused(self, project):
         app = self._app(project)

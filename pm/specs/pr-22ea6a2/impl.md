@@ -81,8 +81,12 @@ plain `A`).  All three are always a reset — they never toggle a target off.
      `merge_gate_refusal` can never adopt it.
 3. Be **idempotent** for repeated calls: a second fresh request while the PR
    is already `in_progress` with `awaiting_handoff` returns
-   `already_waiting` and changes nothing.  A fresh request while the PR is in
-   a later stage (`in_review`/`qa`/`sign_off`) starts a new attempt.
+   `already_waiting` and keeps the attempt (`requested_at`, `attempt`,
+   handoff baseline) intact.  The one thing it may change is the marker's
+   `policy`: an explicitly requested policy (`z O` / `z A` / a CLI flag)
+   replaces the recorded one so a TUI restart re-arms the target the user
+   last asked for.  A fresh request while the PR is in a later stage
+   (`in_review`/`qa`/`sign_off`) starts a new attempt.
 4. Leave plain `autostart add` / `A` / `O` untouched: they remain a
    continuation from the current phase and never rewind a PR.
 
@@ -165,13 +169,16 @@ Before/around the reset, retire the old attempt's live and in-memory state:
 
 * QA: `recorded_qa_verdict(pr_id, pr)` ignores a `runtime_state` `qa` record
   whose `updated_at` predates `fresh_autostart.requested_at` (in addition to
-  the existing open-return check).
+  the existing open-return check), and treats the reset's `SUPERSEDED`
+  retirement sentinel as "no verdict" so a discarded run can neither
+  suppress the new QA nor appear as a result.
 * Sign-off: `fresh_recorded_verdict` ignores a record whose `ts` predates
   `fresh_autostart.requested_at`; the reset also invalidates the current
   record and archives it.
 * Review: the old loop object is removed and late callbacks are fenced by
-  the runtime sentinel; the fresh loop overwrites the `i1` transcript
-  symlink when it launches.
+  the runtime sentinel (a terminal `review-loop` record with `SUPERSEDED`
+  and a fresh `loop_id`, which `_is_active_loop` compares against); the
+  fresh loop overwrites the `i1` transcript symlink when it launches.
 * Old `Stop`/`idle_prompt` events before `requested_at` never satisfy the
   handoff (R3's timestamp baseline).
 
@@ -754,3 +761,25 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   those as `failed: <id> (<error>): <message>` without failing the command.
   `TestCli::test_partial_failure_prints_a_failed_line` and
   `test_already_waiting_line_names_the_wait` now cover both lines.
+
+## Review-iteration notes (1149 i2)
+
+* **R3's marker consumption is pinned at its real call site** — the reset's
+  handoff is consumed in ``_auto_review_idle_prs`` (``awaiting_handoff=False``,
+  ``handoff_at``, ``review_started_at``), which is what stops the status row
+  saying "waiting" and keeps a later ``in_progress`` bounce from being
+  mistaken for this attempt.  Only ``consume_handoff`` itself was covered
+  before; ``TestHandoffConsumption`` now drives the real helper (mocked
+  ``pr_view.run_command`` + ``_start_loop``) and asserts both the consumed
+  marker (provenance kept) and that an ordinary idle implementation start
+  writes no marker at all (the i1 no-spurious-write contract).  Verified to
+  fail with the call site disabled.
+* **R1/R5 wording matches the code** — R1 item 3 no longer claims a repeated
+  request "changes nothing": an explicitly requested policy replaces the
+  marker's recorded one (the i1 refinement), while the attempt itself is
+  kept.  R5 now names the ``SUPERSEDED`` QA sentinel and the review-loop
+  sentinel's ``loop_id`` fence.
+* **The all-already-waiting confirmation is grammatical for several PRs** —
+  it said "pr-a, pr-b already waiting for its implementation turn"; it now
+  says "their" when more than one PR is in the call (TUI log line only; the
+  returned message is built per PR).
