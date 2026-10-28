@@ -2,7 +2,7 @@
 
 The target collection is owned by the running TUI (the session scheduler);
 these commands never run a scheduler of their own.  Each command is sent
-over the existing session command queue (``trigger_tui_command``: SIGUSR2 +
+over the existing session command queue (``submit_tui_command``: SIGUSR2 +
 ``tui-<session>.cmd-queue``) as ``autostart <verb> … --reply <id>``; the TUI
 applies it on its event loop and writes a JSON reply to
 ``~/.pm/autostart-replies/<id>.json`` which this command reads back.
@@ -18,11 +18,11 @@ import json
 import os
 import secrets
 import time
-from pathlib import Path
 
 import click
 
 from pm_core import store
+from pm_core.tui_pidfile import is_zombie, read_pidfile
 from pm_core.autostart_state import (
     POLICY_AUTO, POLICY_FLAGS, POLICY_WAIT, REPLY_DIR,
     TERMINAL_STATUSES, format_text,
@@ -30,7 +30,7 @@ from pm_core.autostart_state import (
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _canonical_session, _find_tui_pane, _resolve_pr_id,
-    _tui_pidfile_for_session, state_root, trigger_tui_command,
+    _tui_pidfile_for_session, state_root, submit_tui_command,
 )
 from pm_core.paths import configure_logger, pm_home
 
@@ -74,31 +74,21 @@ def _resolve_owner(session: str | None) -> tuple[str, int]:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
                     f"TUI for session {sess} is not running (no pidfile)",
                     session=sess)
+    desc = read_pidfile(pidfile)
+    if desc is None:
+        raise _Fail(EXIT_OWNER, "owner_unavailable",
+                    f"TUI for session {sess} is not running (stale pidfile)",
+                    session=sess)
+    pid = desc.pid
     try:
-        pid = int(pidfile.read_text().strip())
         os.kill(pid, 0)
-        if _is_zombie(pid):
+        if is_zombie(pid):
             raise ProcessLookupError(pid)
-    except (ValueError, OSError):
+    except OSError:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
                     f"TUI for session {sess} is not running (stale pidfile)",
                     session=sess)
     return sess, pid
-
-
-def _is_zombie(pid: int) -> bool:
-    """True when *pid* has exited but not been reaped yet.
-
-    ``kill(pid, 0)`` succeeds on a zombie, so a killed TUI whose tmux server
-    hasn't reaped it would look alive and the CLI would wait out the full
-    timeout before misreporting it as busy (``owner_timeout``).
-    """
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        return False  # no procfs (macOS) — fall back to kill(pid, 0)
-    # State is the first field after the parenthesised comm.
-    return stat.rpartition(")")[2].split()[:1] == ["Z"]
 
 
 def _validate(ids: tuple[str, ...], *, for_add: bool) -> list[str]:
@@ -139,9 +129,16 @@ def _request(session: str | None, args: list[str], timeout: float) -> dict:
     reply = pm_home() / REPLY_DIR / f"{reply_id}.json"
     cmd = " ".join(["autostart", *args, "--reply", reply_id])
     _log.info("autostart cli: session=%s pid=%d cmd=%r", sess, pid, cmd)
-    if not trigger_tui_command(sess, cmd):
+    result = submit_tui_command(sess, cmd)
+    if not result.ok:
+        # Surface the specific reason (missing capability, stale pidfile,
+        # ...) — a generic "could not signal" hides the fix ("restart the
+        # TUI") the user needs.
+        _log.warning("autostart dispatch failed: %s (%s)",
+                     result.reason, result.message)
+        fallback = f"could not signal the TUI for session {sess}"
         raise _Fail(EXIT_OWNER, "owner_unavailable",
-                    f"could not signal the TUI for session {sess}", session=sess)
+                    result.message or fallback, session=sess)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if reply.exists():

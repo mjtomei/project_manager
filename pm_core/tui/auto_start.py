@@ -34,6 +34,7 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
+from pm_core import tui_pidfile
 from pm_core import autostart_state
 from pm_core.autostart_state import (
     POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
@@ -42,7 +43,6 @@ from pm_core.tui._shell import _run_shell_async
 
 _log = configure_logger("pm.tui.auto_start")
 
-_MERGE_RESTART_MARKER = "merge-restart"
 _BREADCRUMB_FILE = "autostart-resume.json"
 _REPLY_MAX_AGE = 600  # seconds
 # How long a "targets +=" / "ON (all …)" confirmation holds the log line
@@ -153,23 +153,76 @@ def get_transcript_dir(app) -> Path:
     return root / "transcripts" / run_id
 
 
-def has_merge_restart_marker() -> bool:
-    """Check if the merge-restart marker file exists."""
-    return (pm_home() / _MERGE_RESTART_MARKER).exists()
+def has_merge_restart_marker(session: str | None = None) -> bool:
+    """Is there a merge-restart marker this *session* should act on?
+
+    See :func:`pm_core.tui_pidfile.has_merge_restart_marker`: the marker is
+    shared by every session, so one written by another session's restart is
+    not ours to consume.
+    """
+    return tui_pidfile.has_merge_restart_marker(session)
+
+
+def _app_session(app) -> str | None:
+    """The app's tmux session name, or None when it has no real one.
+
+    ``_session_name`` is only meaningful once the app has claimed its
+    pidfile; tests build stub apps whose attribute is not a string.
+    """
+    name = getattr(app, "_session_name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def discard_merge_restart_marker(session: str | None = None) -> bool:
+    """Remove an orphaned merge-restart marker; return True if one was there.
+
+    The marker's only consumer is :func:`save_breadcrumb`, which unlinks it
+    before the restarting process re-execs.  A marker still present when a
+    *new* TUI mounts was therefore never consumed: its restart request lost
+    a race, most often because a plain ``pm tui restart`` reached the old
+    TUI before a concurrent ``--breadcrumb`` caller had written the marker,
+    so the TUI restarted as ``reason=user`` and the marker was left behind.
+    Keeping it would make the next start — even a plain Ctrl+R days later —
+    behave as a merge restart and preserve state the user asked to drop.
+
+    Only this session's marker (or an unscoped legacy one) is removed; see
+    :func:`pm_core.tui_pidfile.clear_merge_restart_marker`.
+    """
+    if not tui_pidfile.clear_merge_restart_marker(session):
+        return False
+    _log.info("discard_merge_restart_marker: removed orphaned %s",
+              tui_pidfile.merge_restart_marker_path())
+    return True
+
+
+def resolve_mount_trigger(session: str | None = None) -> str:
+    """Label a TUI mount and drop any orphaned merge-restart marker.
+
+    Returns ``"merge_restart"`` when the mount followed a merge-restart
+    marker, ``"initial"`` otherwise.  Because :func:`save_breadcrumb`
+    always unlinks the marker before the old process re-execs, a marker
+    still present at mount was never consumed — see
+    :func:`discard_merge_restart_marker` — so it is removed here rather
+    than left to turn a later, unrelated start into a merge restart.
+    """
+    if not has_merge_restart_marker(session):
+        return "initial"
+    discard_merge_restart_marker(session)
+    return "merge_restart"
 
 
 def save_breadcrumb(app) -> None:
     """Save state to a breadcrumb file for resumption after restart.
 
     Called from action_restart when a merge-restart marker is present.
-    Always deletes the marker.  Persists auto-start state (if active),
+    Deletes this session's marker.  Persists auto-start state (if active),
     running review loops, and watcher state.  Writes a breadcrumb whenever
     there is *anything* worth preserving — even a manually-started review
     loop without auto-start.
     """
-    marker = pm_home() / _MERGE_RESTART_MARKER
-    marker.unlink(missing_ok=True)
-
+    # This is the marker's normal consumption path, so drop it without the
+    # "orphaned" wording used by resolve_mount_trigger.
+    tui_pidfile.clear_merge_restart_marker(_app_session(app))
     data: dict = {}
 
     # Persist auto-start state if active: the full target collection
@@ -244,6 +297,12 @@ def save_breadcrumb(app) -> None:
         return
 
     breadcrumb = pm_home() / _BREADCRUMB_FILE
+    # Record which session wrote it: the breadcrumb file is shared by every
+    # pm session under the same PM home, so two sessions restarting at once
+    # would otherwise restore each other's targets (see consume_breadcrumb).
+    session = _app_session(app)
+    if session:
+        data["session"] = session
     breadcrumb.write_text(json.dumps(data))
     _log.info("save_breadcrumb: wrote %s", data)
 
@@ -251,8 +310,10 @@ def save_breadcrumb(app) -> None:
 async def consume_breadcrumb(app) -> None:
     """Restore auto-start state from a breadcrumb file on startup.
 
-    If the breadcrumb exists, reads it, deletes it (always, even on error),
-    restores auto-start fields, and calls check_and_start.
+    If the breadcrumb exists and belongs to this session (or carries no
+    session, as legacy breadcrumbs do), reads it, deletes it (always, even
+    on error), restores auto-start fields, and calls check_and_start.  A
+    breadcrumb owned by another session is left untouched for its own mount.
     """
     breadcrumb = pm_home() / _BREADCRUMB_FILE
     if not breadcrumb.exists():
@@ -262,9 +323,42 @@ async def consume_breadcrumb(app) -> None:
         data = json.loads(breadcrumb.read_text())
     except Exception as e:
         _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
-        return
-    finally:
         breadcrumb.unlink(missing_ok=True)
+        return
+    if not isinstance(data, dict):
+        # Valid JSON but not a breadcrumb object (``[]``, ``null``, a bare
+        # string).  Every field below is read with ``.get``, so a corrupt
+        # file must be dropped here rather than raising out of the mount.
+        _log.warning("consume_breadcrumb: ignoring non-object breadcrumb "
+                     "(%s)", type(data).__name__)
+        breadcrumb.unlink(missing_ok=True)
+        return
+
+    # The breadcrumb file is shared by every pm session under this PM home.
+    # A breadcrumb written by a *different* session's restart belongs to that
+    # session's next mount: consuming it here would apply another project's
+    # targets (then drop them as "missing") and leave the owning session
+    # with nothing to restore.  Leave it in place for its owner.  A mount
+    # with no session name (``mine is None``) can never own a scoped
+    # breadcrumb, so it leaves those alone too.
+    #
+    # Only a non-empty *string* is a session name.  A wrong-typed value is
+    # corruption, not another session's request: treating it as an owner
+    # would strand the file forever (no mount could ever match it) and
+    # re-log it on every start, so it reads as unscoped — the same rule
+    # ``tui_pidfile._marker_owner`` applies.
+    owner = data.get("session")
+    if "session" in data and not isinstance(owner, str):
+        _log.warning("consume_breadcrumb: ignoring non-string session (%s)",
+                     type(owner).__name__)
+    owner = owner.split("~")[0] if isinstance(owner, str) else ""
+    mine = _app_session(app)
+    if owner and owner != mine:
+        _log.info("consume_breadcrumb: leaving breadcrumb for session %s "
+                  "(this session is %s)", owner, mine)
+        return
+
+    breadcrumb.unlink(missing_ok=True)
 
     # Restore auto-start state only if it was active before the restart.
     # Current breadcrumbs carry ``targets`` + ``all_mode``; a legacy
@@ -276,6 +370,10 @@ async def consume_breadcrumb(app) -> None:
         data, (app._data or {}).get("prs") or [])
     had_auto_start = bool(targets) or all_mode
     run_id = data.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        # The run id names a directory under ``transcripts/``; a wrong-typed
+        # value would raise ``TypeError`` out of the mount (``Path / 5``).
+        run_id = None
     _log.info("consume_breadcrumb: restoring targets=%s all_mode=%s run_id=%s "
               "migrated_legacy=%s", list(targets), all_mode, run_id, migrated)
 
@@ -294,9 +392,25 @@ async def consume_breadcrumb(app) -> None:
 
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
+    if not isinstance(review_loops_data, dict):
+        # Valid JSON, wrong shape (a list, a string, ...).  Every entry below
+        # is read structurally, and this whole function runs before the
+        # command queue is armed, so corruption must be dropped here rather
+        # than raising out of the mount (see the non-object check above).
+        _log.warning("consume_breadcrumb: ignoring non-object review_loops "
+                     "(%s)", type(review_loops_data).__name__)
+        review_loops_data = {}
     if review_loops_data:
         from pm_core.review_loop import ReviewLoopState, ReviewIteration
         for pr_id, loop_data in review_loops_data.items():
+            if not isinstance(loop_data, dict):
+                _log.warning("consume_breadcrumb: ignoring corrupt review "
+                             "loop entry %s (%s)", pr_id,
+                             type(loop_data).__name__)
+                continue
+            history = loop_data.get("history")
+            if not isinstance(history, list):
+                history = []
             rstate = ReviewLoopState(
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
@@ -321,10 +435,12 @@ async def consume_breadcrumb(app) -> None:
                 _ui_notified_retry=int(
                     loop_data.get("_ui_notified_retry", 0) or 0),
             )
-            for h in loop_data.get("history", []):
+            for h in history:
+                if not isinstance(h, dict):
+                    continue
                 rstate.history.append(ReviewIteration(
-                    iteration=h["iteration"],
-                    verdict=h["verdict"],
+                    iteration=h.get("iteration", 0),
+                    verdict=h.get("verdict", ""),
                     output="",  # not stored in breadcrumb
                     timestamp=h.get("timestamp", ""),
                 ))
@@ -391,22 +507,36 @@ async def consume_breadcrumb(app) -> None:
         _adopt_live_qa(app)
         await check_and_start(app)
 
-    # Resume watchers (list format, or legacy single-watcher dict)
+    # Resume watchers (list format, or legacy single-watcher dict).  Wrong
+    # shapes are dropped, not raised: see the review-loop guard above.
     watchers_data = data.get("watchers", [])
     watcher_data = data.get("watcher")  # legacy single-watcher breadcrumb
+    if not isinstance(watchers_data, list):
+        _log.warning("consume_breadcrumb: ignoring non-list watchers (%s)",
+                     type(watchers_data).__name__)
+        watchers_data = []
+    if not isinstance(watcher_data, dict):
+        watcher_data = None
     if not watchers_data and watcher_data:
-        watchers_data = [{"type": "auto-start", "meta_pm_root": watcher_data.get("meta_pm_root")}]
+        watchers_data = [{"type": "auto-start",
+                          "meta_pm_root": watcher_data.get("meta_pm_root")}]
     if watchers_data:
         from pm_core.tui import watcher_ui
         tdir = get_transcript_dir(app)
+        resumed = 0
         for wd in watchers_data:
+            if not isinstance(wd, dict):
+                _log.warning("consume_breadcrumb: ignoring corrupt watcher "
+                             "entry (%s)", type(wd).__name__)
+                continue
             watcher_ui.start_watcher(
                 app,
                 transcript_dir=str(tdir),
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
-        _log.info("consume_breadcrumb: resumed %d watcher(s)", len(watchers_data))
+            resumed += 1
+        _log.info("consume_breadcrumb: resumed %d watcher(s)", resumed)
 
     # Summarise last: the per-loop resume messages above (one of them
     # sticky) would otherwise overwrite this before it is ever painted.
