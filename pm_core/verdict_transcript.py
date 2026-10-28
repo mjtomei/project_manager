@@ -523,65 +523,41 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
 _LOCAL_COMMAND_PREFIXES = ("<command-name>", "<command-message>",
                            "<local-command-stdout>", "<local-command-stderr>")
 
-# Harness-generated user records that are not human input.  Claude Code and
-# pm's own loops write these as ``type: "user"`` records too: system notices,
-# background-task notifications, ``/loop`` and autonomous-loop ticks, scheduled
-# prompt firings, the Esc interrupt marker, and qa_loop's verdict nudge.  A
-# human prompt that merely has a reminder appended is still a prompt, so the
-# ``<system-reminder>`` blocks are stripped rather than rejected outright.
-# These mirror ``_user_record_is_non_task`` on master — once this branch is
-# merged onto it, that predicate (and ``find_verdict_turn``) supersede this.
-_NON_TASK_PREFIXES = (
-    "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]",
-    "# /loop tick",
-    "# Autonomous loop check",
-    "# Autonomous loop tick",
-    "<task-notification>",
-    "[Request interrupted by user",
-    "Reminder: your verdict must appear alone",
-)
-_NON_TASK_SENTINELS = frozenset({
-    "<<autonomous-loop>>",
-    "<<autonomous-loop-dynamic>>",
-    "<<loop.md>>",
-    "<<loop.md-dynamic>>",
-})
-_SYSTEM_REMINDER_BLOCK_RE = re.compile(
-    r"<system-reminder\b[^>]*>.*?</system-reminder>", re.I | re.S)
-
 
 def is_human_prompt_record(rec: object) -> bool:
     """True when a parsed JSONL record is a prompt the human submitted.
 
     Tool results are ``"type":"user"`` records too — they carry command
-    output, never a human decision, so they never count.  Neither do meta,
-    sidechain and compact-summary records, local slash-command echoes, or the
-    harness records in :data:`_NON_TASK_PREFIXES` (system reminders, task
-    notifications, loop ticks).  Counting one of those as an answer would
-    clear a wait nobody answered.
+    output, never a human decision, so they never count.  (A *mixed* record
+    that also carries real user text is a prompt, the same rule the verdict
+    scan uses.)  Neither do meta, sidechain and compact-summary records, local
+    slash-command echoes, or any harness record
+    :func:`_user_record_is_non_task` classifies as not starting a new task
+    (system reminders, task notifications, ``/loop`` ticks, scheduled firings,
+    the Esc interrupt marker, qa_loop's verdict nudge).  Counting one of those
+    as an answer would clear a wait nobody answered.
+
+    ``_user_record_is_non_task`` is the shared task-boundary predicate behind
+    :func:`find_verdict_turn`, so the two can never disagree about which
+    records are transparent.  It treats a Stop-hook record as a task boundary
+    (its instructions are new work), which is *not* a human answer, so the
+    ``isMeta`` check below stays explicit.
     """
     if not isinstance(rec, dict) or rec.get("type") != "user":
         return False
-    if rec.get("isMeta") or rec.get("isSidechain") or rec.get("isCompactSummary"):
+    if rec.get("isMeta") or rec.get("isSidechain"):
         return False
     msg = rec.get("message")
     content = msg.get("content") if isinstance(msg, dict) else None
-    if isinstance(content, str):
-        texts = [content]
-    elif isinstance(content, list):
+    if isinstance(content, list):
         blocks = [b for b in content if isinstance(b, dict)]
-        if not blocks or any(b.get("type") == "tool_result" for b in blocks):
-            return False
-        texts = [b.get("text") or "" for b in blocks if b.get("type") == "text"]
-        if not texts:
-            return True  # e.g. a pasted image
-    else:
+        if (blocks and not _record_text(rec).strip()
+                and not any(b.get("type") == "tool_result" for b in blocks)):
+            # No text at all — e.g. a pasted image — but still a human prompt.
+            return True
+    if _user_record_is_non_task(rec):
         return False
-    text = _SYSTEM_REMINDER_BLOCK_RE.sub("", "".join(texts)).strip()
-    if not text or text in _NON_TASK_SENTINELS:
-        return False
-    if any(text.startswith(p) for p in _NON_TASK_PREFIXES):
-        return False
+    text = _unwrap_system_reminder(_record_text(rec)) or ""
     return not text.startswith(_LOCAL_COMMAND_PREFIXES)
 
 

@@ -70,18 +70,25 @@ R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
 
 R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     with `"type":"user"` whose `message.content` is a string or contains a
-    non-`tool_result` block, and which is not `isMeta`, `isSidechain`,
-    `isCompactSummary`, a local slash-command echo (`<command-name>`,
-    `<local-command-stdout>`), or a harness-generated record — `<system-reminder>`
-    blocks (stripped; a record that is *only* reminders is not a prompt),
+    non-`tool_result` block, and which is not `isMeta`, `isSidechain`, a local
+    slash-command echo (`<command-name>`, `<local-command-stdout>`), or any
+    record the shared task-boundary predicate `_user_record_is_non_task`
+    classifies as not starting a new task — `<system-reminder>` blocks
+    (stripped; a record that is *only* reminders is not a prompt),
     `<task-notification>`, `/loop` and autonomous-loop ticks, scheduled prompt
-    firings, the `[Request interrupted by user…]` marker, and qa_loop's verdict
-    nudge.  Tool results and assistant output never count, so arbitrary tool
-    output is never treated as an answer, and a harness notice can never clear a
-    wait nobody answered.  (Hardened in review i1: these record shapes are real —
-    master's `_user_record_is_non_task` and its scenario replays show them —
-    and counting one as an answer is the same false-state class this PR fixes.)
-    Detection is driven by the transcript and hook events, with no timer.
+    firings, the `[Request interrupted by user…]` marker, qa_loop's verdict
+    nudge, and compact summaries.  Tool results and assistant output never
+    count, so arbitrary tool output is never treated as an answer, and a
+    harness notice can never clear a wait nobody answered.  (Hardened in review
+    i1: these record shapes are real — master's `_user_record_is_non_task` and
+    its scenario replays show them — and counting one as an answer is the same
+    false-state class this PR fixes.)  The predicate is *built on*
+    `_user_record_is_non_task` (integration, pr-a80bde5 SIGNOFF_IMPL) so the
+    answer predicate and the task-scoped verdict scan can never disagree about
+    which records are transparent; `isMeta` stays an explicit check because the
+    shared predicate treats a Stop-hook record as a task boundary, and a Stop
+    hook is harness input, not a human answer.  Detection is driven by the
+    transcript and hook events, with no timer.
 
 R5. **Repeated genuine INPUT_REQUIRED stays visible.**  When an idle follow-up
     turn ends INPUT_REQUIRED *after* a human response, the loop records it
@@ -94,6 +101,19 @@ R5. **Repeated genuine INPUT_REQUIRED stays visible.**  When an idle follow-up
     as one re-records INPUT_REQUIRED on every refreshed hook event (fake-claude
     re-emits `idle_prompt` every ~2 s), spinning `on_iteration` in a busy loop.
     (Added in review i2: `HumanResponseWatch.assistant_after_answer`.)
+
+R5b. **The follow-up verdict is read task-scoped.**  The waiter resolves the
+    follow-up with `verdict_transcript.find_verdict_turn` and returns that
+    *verdict turn's* text, never the transcript tail.  `find_verdict_turn`
+    crosses non-task wakeups (`/loop` ticks, Monitor task notifications) back to
+    the verdict of the task they interrupted, and stops at a genuine user
+    prompt.  Reading the tail instead lets a postscript after the verdict be
+    parsed as the follow-up: a PASS follow-up followed by a `/loop` wakeup turn
+    came back as NEEDS_WORK and launched another iteration (pr-a80bde5
+    SIGNOFF_IMPL; regression `test_follow_up_pass_survives_a_loop_tick_turn`).
+    Task-scoping also means the question being answered can never be re-delivered
+    as its own follow-up, because the human prompt that answers it is a task
+    boundary.
 
 R6. **Status reason** (`autostart_state._derive`): while `review.running` and
     `verdict == INPUT_REQUIRED` and not `input_required`, the reason is
@@ -108,7 +128,7 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
 ## Implicit requirements
 
 - The follow-up wait still ends only on a hook-driven idle with a verdict in the
-  latest assistant turn (`loop_shared` semantics).  Detecting a human response
+  current *task scope* (`find_verdict_turn`, R5b).  Detecting a human response
   changes only the displayed wait state, never the verdict.
 - The breadcrumb keeps writing `input_required`, which is used for the first paint
   before the resumed thread starts.  The resumed loop reconciles it at once (R2).
@@ -149,8 +169,9 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
 ## Edge cases
 
 - Merge INPUT_REQUIRED (`_merge_input_required_prs`), spec-pending holds,
-  stop-before-merge / wait-for-merge holds and QA INPUT_REQUIRED are separate
-  paths and stay unchanged.
+  `wait_for_merge` holds and QA INPUT_REQUIRED are separate paths and stay
+  unchanged.  (Master removed the old `stop_before_merge` policy; only
+  `wait_for_merge` exists now — this PR never touched either.)
 - Superseded loops (`_is_active_loop`) still skip runtime_state mirroring.
 - A fast answer: the human prompt and the INPUT_REQUIRED/verdict turn can all
   land between two polls.  Ordering is taken from the transcript scan done just
@@ -175,9 +196,14 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   (Added in review i3.)
 - Transcript symlink slug mismatch: the response watch resolves the path with the
   same session-id fallback as `_read_transcript_text`.
-- Master overlap (added in review i1): current `origin/master` already grew
-  `verdict_transcript.find_verdict_turn` / `_user_record_is_non_task` (task-scoped
-  verdict scan + "is this a real human prompt" predicate) while this branch was
-  based on an older master.  The Python files still auto-merge, but at sign-off
-  the local `is_human_prompt_record` non-task list and the latest-turn verdict
-  reads should be reconciled onto those helpers rather than kept in parallel.
+- Master overlap (review i1, **resolved at integration**): current
+  `origin/master` grew `verdict_transcript.find_verdict_turn` /
+  `_user_record_is_non_task` (task-scoped verdict scan + "is this a real human
+  prompt" predicate) while this branch was based on an older master.  The
+  branch is now merged onto master@89e3c501 and the two are reconciled:
+  `is_human_prompt_record` is built on `_user_record_is_non_task` (no duplicate
+  `_NON_TASK_*` lists), the waiter reads verdicts through `find_verdict_turn`
+  and returns `hit.text` (R5b), and `_adopt_in_flight_review` uses the same
+  helper.  `pm/project.yaml` was resolved with `store.merge_3way` (master's
+  newer registry state for every untouched entry; this branch's own PR entry
+  and notes winning true conflicts).

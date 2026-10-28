@@ -300,13 +300,23 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
                                 transcript: str | None = None) -> str | None:
     """Wait in the existing review pane for the follow-up to INPUT_REQUIRED.
 
-    Returns the assistant text of the follow-up turn once an idle turn
+    Returns the assistant text of the *verdict turn* once an idle turn
     carries a verdict: PASS / NEEDS_WORK, or INPUT_REQUIRED asked *after*
     the user answered (a new question).  An idle event for the same,
     still-unanswered INPUT_REQUIRED turn is ignored, as is a repeated idle
     for the turn the user just answered (Claude has not spoken since, so
     there is no new question).  Returns None when the pane disappears or a
     stop is requested.
+
+    The verdict comes from :func:`verdict_transcript.find_verdict_turn`,
+    which is task-scoped: it crosses non-task wakeups (``/loop`` ticks,
+    Monitor notifications) back to the verdict of the task they interrupted
+    and returns that turn's text.  Reading the transcript tail instead would
+    let a postscript after the verdict be parsed as the follow-up — a PASS
+    followed by a ``/loop`` wakeup turn would come back as NEEDS_WORK
+    (pr-a80bde5 sign-off).  The same scan stops at a genuine user prompt, so
+    the question being answered can never be re-delivered as its own
+    follow-up.
 
     Keeps ``state.input_required`` in step with the pane: False once a
     human prompt lands in the transcript (Claude is working on the
@@ -315,11 +325,7 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     """
     from pm_core import hook_events
     from pm_core.claude_launcher import session_id_from_transcript
-    from pm_core.verdict_transcript import (
-        HumanResponseWatch,
-        extract_verdict_from_transcript,
-        read_latest_assistant_text,
-    )
+    from pm_core.verdict_transcript import HumanResponseWatch, find_verdict_turn
 
     session = _get_pm_session()
     if not session:
@@ -337,6 +343,8 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
         return None
 
     window_name = _compute_review_window_name(pr_data)
+    # The watch anchors on the latest INPUT_REQUIRED turn, so an answer to an
+    # earlier round can never count as the answer to this one.
     watch = HumanResponseWatch(transcript, VERDICT_INPUT_REQUIRED)
     state.input_required = watch.answered_at is None
     # Start from the current idle event, not from now: after a TUI restart
@@ -365,13 +373,14 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
             continue
         idle_at = float(ev.get("timestamp") or 0) or time.time()
         hook_baseline = idle_at
-        verdict = extract_verdict_from_transcript(transcript, ALL_VERDICTS)
+        hit = find_verdict_turn(transcript, ALL_VERDICTS)
+        verdict = hit.verdict if hit else None
         # PASS / NEEDS_WORK ends the wait whatever the idle's age: an answer
         # record without a ``timestamp`` is dated when we saw it, which can
         # postdate the follow-up's idle when both land within one poll.
         if verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK):
             _log.info("review_loop: hook-driven follow-up verdict %s", verdict)
-            return read_latest_assistant_text(transcript) or verdict
+            return hit.text or hit.verdict
         if answered_at is None or idle_at < answered_at:
             # Still the unanswered question (or an idle from before the
             # answer while Claude now works on it).
@@ -387,7 +396,7 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
             continue
         if verdict == VERDICT_INPUT_REQUIRED:
             _log.info("review_loop: follow-up asked INPUT_REQUIRED again")
-            return read_latest_assistant_text(transcript) or verdict
+            return hit.text or hit.verdict
         _log.info("review_loop: %s idle after the answer without a verdict — "
                   "waiting on the user again", state.pr_id)
         watch.rearm()

@@ -107,11 +107,22 @@ class Pane:
         return text
 
 
+@pytest.fixture(autouse=True)
+def isolated_hooks(tmp_path, monkeypatch):
+    """Give every test its own hook-event directory.
+
+    ``hook_events._HOOKS_BASE`` is frozen from ``$HOME`` at import time, and in
+    a full-suite run that import can happen inside another test's patched
+    ``HOME`` — the ambient value is another test's (deleted) tmp_path.  Every
+    test here writes hook events, so point it at this test's ``tmp_path``.
+    """
+    hooks = tmp_path / "hooks"
+    hooks.mkdir(exist_ok=True)
+    monkeypatch.setattr(hook_events, "_HOOKS_BASE", hooks)
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    hooks = tmp_path / "hooks"
-    hooks.mkdir()
-    monkeypatch.setattr(hook_events, "_HOOKS_BASE", hooks)
     monkeypatch.setattr(rl, "_FOLLOW_UP_POLL", 0.05, raising=False)
     monkeypatch.setattr(rl, "_get_pm_session", lambda: "pm-test")
     pane_alive = {"alive": True}
@@ -211,6 +222,22 @@ class TestHumanPromptRecord:
         """A real answer carrying a reminder is still the human's answer."""
         assert is_human_prompt_record({"type": "user", "message": {"content": (
             "use option A\n\n<system-reminder>ide notice</system-reminder>")}})
+
+    def test_agrees_with_the_shared_task_boundary_predicate(self):
+        """Built on ``_user_record_is_non_task``, so the answer predicate and
+        the task-scoped verdict scan can never disagree about which records
+        are transparent to a task."""
+        from pm_core.verdict_transcript import _user_record_is_non_task
+        for text in (
+            "<system-reminder>ide notice</system-reminder>",
+            "<task-notification>x</task-notification>",
+            "# /loop tick\ncontinue",
+            "[Request interrupted by user]",
+            "Reminder: your verdict must appear alone on its line",
+        ):
+            rec = {"type": "user", "message": {"content": text}}
+            assert _user_record_is_non_task(rec), text
+            assert not is_human_prompt_record(rec), text
 
 
 class TestHumanResponseWatch:
@@ -450,6 +477,45 @@ class TestLiveFlow:
             panes[1].verdict("PASS")
             t.join(5)
             assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_follow_up_pass_survives_a_loop_tick_turn(self, env):
+        """Answer → PASS → ``/loop`` wakeup turn is still a PASS.
+
+        The waiter must return the *verdict turn*, not the transcript tail:
+        a ``/loop`` tick (a non-task wakeup) that Claude answers without a
+        verdict sits after the PASS, and parsing that reply would record
+        NEEDS_WORK and launch another iteration (pr-a80bde5 sign-off).
+        """
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        t, mock, p = _start(state, tdir, {1: it1})
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            panes[1].user("use option A")
+            _until(lambda: not state.input_required, what="answer clears wait")
+
+            # The follow-up verdict, then a /loop wakeup whose reply carries
+            # no verdict, then one idle for the whole turn.
+            panes[1].say("All good.\n\n**PASS**")
+            panes[1].harness("# /loop tick\ncontinue")
+            panes[1].say("Nothing new to do.")
+            panes[1].idle()
+
+            t.join(5)
+            assert not t.is_alive(), "a PASS follow-up must stop the loop"
+            assert mock.call_count == 1, "a PASS follow-up must not relaunch"
+            assert state.latest_verdict == "PASS"
+            assert [h.verdict for h in state.history] == ["PASS"]
+            assert state.input_required is False
         finally:
             state.stop_requested = True
             p.stop()
