@@ -850,6 +850,67 @@ def test_pr_review_does_not_demote_a_pr_merged_during_the_gate(w):
     assert pr(w)["status"] == "merged"
 
 
+def _return_during_gate(w, stage):
+    """A conflict return recorded by another driver inside the gate's fetch."""
+    return base_check.return_to_impl(
+        w.pm_dir, PR,
+        {"head": w.head, "base_sha": "b" * 40, "base_branch": "master",
+         "status": integration.CONFLICT, "conflicts": ["shared.txt"]},
+        stage)
+
+
+def test_pr_review_does_not_start_beside_a_return_recorded_during_the_gate(w):
+    """A conflict recorded inside the gate's fetch owns the PR.
+
+    The gate itself found the base clean, but another driver's check (the
+    TUI completion handoff) recorded a return in the same network window.
+    Writing in_review and launching a reviewer would then race the
+    implementation rework the return just started.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    set_pr(w, status="in_progress")
+
+    def _returned_during_gate(*_a, **_k):
+        _return_during_gate(w, base_check.STAGE_REVIEW)
+        return base_check.GateResult(base_check.PROCEED, base_check.STAGE_REVIEW)
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch("pm_core.base_check.gate", side_effect=_returned_during_gate), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", PR])
+    assert result.exit_code == 1, result.output
+    window.assert_not_called()
+    assert pr(w)["status"] == "in_progress"
+    assert base_check.open_return(pr(w)) is not None
+
+
+def test_qa_run_sync_waits_when_a_return_lands_during_the_gate(w):
+    """A conflict recorded inside the gate's fetch must not open a planner."""
+    from pm_core.qa_loop import QALoopState, run_qa_sync
+    set_pr(w, status="qa")
+    state = QALoopState(pr_id=PR)
+
+    def _returned_during_gate(*_a, **_k):
+        _return_during_gate(w, base_check.STAGE_QA)
+        return base_check.GateResult(base_check.PROCEED, base_check.STAGE_QA)
+
+    with patch("pm_core.qa_loop.get_pm_session", return_value="pm-test"), \
+         patch("pm_core.base_check.gate", side_effect=_returned_during_gate), \
+         patch("pm_core.qa_loop.create_qa_workdir") as mk:
+        # The guard must fire before the QA workdir/planner exists at all.
+        mk.side_effect = AssertionError("QA workdir created beside the rework")
+        run_qa_sync(state, w.pm_dir, pr(w))
+    mk.assert_not_called()
+    assert state.running is False
+    assert state.base_returned is True
+    assert "CONFLICTS" in state.base_return_reason
+    assert state.qa_workdir is None
+    assert pr(w)["status"] == "in_progress"
+
+
 def test_prompts_carry_the_return_block(w):
     from pm_core import prompt_gen
     with patch("pm_core.base_check.launch_impl", return_value=(True, "")):

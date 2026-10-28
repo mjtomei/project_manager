@@ -1780,7 +1780,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
-    entered = {"ok": False}
+    entered = {"ok": False, "why": ""}
+    from pm_core import base_check
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
@@ -1795,6 +1796,16 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         # the pre-review statuses may be advanced (in_review is idempotent —
         # a concurrent review may have written it already).
         if pr.get("status") not in ("in_progress", "in_review"):
+            entered["why"] = "left the pre-review phase during the base check"
+            return
+        # The base can also move *into* a conflict inside that same window
+        # (another driver's gate, or the TUI completion check, records a
+        # return).  The return owns the PR now: writing in_review and
+        # launching a reviewer would put a review writer beside the
+        # implementation rework the return just started.
+        if base_check.has_open_return(pr):
+            entered["why"] = ("was returned to implementation for a base "
+                              "conflict during the base check")
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
@@ -1803,8 +1814,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     store.locked_update(root, apply)
     if not entered["ok"]:
         click.echo(
-            f"PR {_pr_display_id(pr_entry)} left the pre-review phase during "
-            f"the base check; review not started.", err=True)
+            f"PR {_pr_display_id(pr_entry)} {entered['why']}; review not "
+            f"started.", err=True)
         raise SystemExit(1)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()

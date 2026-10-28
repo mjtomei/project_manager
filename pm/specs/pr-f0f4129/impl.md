@@ -96,10 +96,13 @@ already drops it because the status is no longer `qa`.
   status write / window creation, so both choke points re-check the PR is
   still eligible afterwards: `pr_review`'s `in_review` write refuses (exit 1,
   no window) unless the PR is still in a pre-review status
-  (`in_progress`/`in_review`), so neither a concurrent merge/close nor a
-  concurrent `qa`/`sign_off` transition is demoted back to `in_review`; and
-  `run_qa_sync` re-checks `merged`/`closed` after the gate. Neither may
-  demote a finished PR or start a writer against it.
+  (`in_progress`/`in_review`) and has no open base return — so neither a
+  concurrent merge/close, a concurrent `qa`/`sign_off` transition, nor a
+  conflict return another driver recorded inside the same fetch (which would
+  otherwise start a reviewer beside the rework that return just launched) is
+  demoted back to `in_review`; and `run_qa_sync` re-checks `merged`/`closed`
+  and an open base return after the gate. Neither may demote a finished PR or
+  start a writer against it.
 - **R4 — Clean integration continues.** `clean` / `up_to_date` / `in_base`
   resolve any open base return and let the caller proceed exactly as before.
   No review/QA reset, no status change, no re-run.
@@ -380,6 +383,11 @@ No unresolved ambiguities.
     yields an absolute target in every refreshed link.
 17. a `qa`/`sign_off` transition landing during the gate's fetch is not
     demoted to `in_review` (exit 1, no window).
+18. a base conflict return another driver records during the gate's fetch:
+    `pm pr review` does not write `in_review` (exit 1, no window) and the PR
+    stays `in_progress` with the return open.
+19. the same race at the QA choke point: `run_qa_sync` creates no QA workdir,
+    reports `base_returned`, and leaves the PR `in_progress`.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

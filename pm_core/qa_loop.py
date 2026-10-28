@@ -3829,6 +3829,22 @@ def run_qa_sync(
         state.running = False
         return state
 
+    # The base can also move into a conflict inside that same window (another
+    # driver's gate, or the TUI completion check, records a return).  The
+    # return owns the PR now: opening the planner would put a QA writer beside
+    # the implementation rework it just started.
+    landed = base_check.open_return(after_gate)
+    if landed is not None:
+        base_check.ensure_impl_status(pm_root, pr_id)
+        _log.info("QA not started for %s: a base return landed during the "
+                  "check", pr_id)
+        state.running = False
+        state.base_returned = True
+        state.base_return_reason = (
+            landed.get("reason")
+            or "a base integration conflict was recorded during the base check")
+        return state
+
     # Create QA workdir
     if not state.qa_workdir:
         qa_wd = create_qa_workdir(state.pr_id, state.loop_id)
