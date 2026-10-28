@@ -504,6 +504,10 @@ class ProjectManagerApp(App):
                 self._session_name = result.stdout.strip().split("~")[0]
             except Exception:
                 pass
+        # Panes launched by an earlier TUI (before a restart or crash) are
+        # adopted by the idle tracker; note where they end.
+        from pm_core.tui.review_loop_ui import note_pre_existing_panes
+        note_pre_existing_panes(self)
         # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).
         from pm_core.tui import perf
         perf.setup_event_loop(self._session_name)

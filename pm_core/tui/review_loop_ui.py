@@ -898,6 +898,85 @@ def _find_impl_pane(session: str, window_name: str) -> str | None:
     return None
 
 
+def _pane_native_transcript(app, pane_id: str, workdir: str | None):
+    """The session transcript named by *pane_id*'s start command (cached).
+
+    Resolved once per pane (None when no session id shows), so panes an
+    earlier TUI launched cost no tmux call per tick.
+    """
+    cache = getattr(app, "_pane_native_transcripts", None)
+    if cache is None:
+        cache = app._pane_native_transcripts = {}
+    if pane_id not in cache:
+        from pm_core.claude_launcher import pane_transcript_path
+        cache[pane_id] = pane_transcript_path(pane_id, workdir)
+    return cache[pane_id]
+
+
+def note_pre_existing_panes(app) -> None:
+    """Remember the newest tmux pane at TUI start (see ``_register_pane``).
+
+    tmux numbers panes in creation order and never reuses a number while
+    the server runs, so panes at or below this mark predate this TUI.
+    """
+    from pm_core import tmux as tmux_mod
+    try:
+        result = tmux_mod._run(tmux_mod._tmux_cmd(
+            "list-panes", "-a", "-F", "#{pane_id}"), text=True)
+        nums = [int(p[1:]) for p in result.stdout.split()
+                if p[1:].isdigit()]
+    except Exception:
+        nums = []
+    app._pre_existing_pane_max = max(nums) if nums else None
+
+
+def _predates_tui(app, pane_id: str) -> bool:
+    mark = getattr(app, "_pre_existing_pane_max", None)
+    num = pane_id[1:]
+    return mark is not None and num.isdigit() and int(num) <= mark
+
+
+def _register_pane(app, tracker, key: str, pane_id: str, transcript: str,
+                   workdir: str | None) -> bool:
+    """Register *pane_id* with the idle tracker; False if it can't be.
+
+    *transcript* is this TUI's run-dir symlink.  A pane an earlier TUI
+    launched (before a ``pm tui restart`` or a crash) has its symlink in
+    that TUI's run dir instead, so adopt it by the session transcript its
+    start command names.  Without that the pane is never idle-tracked
+    again: no verdict mirror, and stop-on-idle never removes its
+    container.  The fresh tracker state re-checks an already idle pane
+    once.  Only panes older than this TUI qualify: a pane this TUI
+    launched has its symlink here or is not meant to be tracked (a
+    review loop's iteration, which the loop stops itself; a session
+    started from a shell).  A session that has fired no hook yet (e.g.
+    still at the workspace-trust dialog) is left to the orphan trust
+    watch.
+    """
+    try:
+        tracker.register(key, pane_id, transcript)
+        return True
+    except ValueError:
+        pass
+    if not _predates_tui(app, pane_id):
+        return False
+    native = _pane_native_transcript(app, pane_id, workdir)
+    if not native:
+        return False
+    from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    sid = session_id_from_transcript(native)
+    if not sid or not hook_events.read_event(sid):
+        return False
+    try:
+        tracker.register(key, pane_id, str(native))
+    except ValueError:
+        return False
+    _log.info("idle tracker: adopted %s pane %s (session %s) launched by "
+              "an earlier TUI", key, pane_id, sid)
+    return True
+
+
 def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
                            seen: set[str]) -> None:
     """Trust-watch a Claude pane the idle tracker could not register.
@@ -910,9 +989,7 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
     approved workdir by cursor (the per-pane attempt budget spans
     restarts), else report once after the grace.
     """
-    from pm_core.claude_launcher import (
-        WorkspacePromptWatch, pane_transcript_path,
-    )
+    from pm_core.claude_launcher import WorkspacePromptWatch
     # Kept on the app across polls; created lazily so tests and callers
     # that never hit an orphan pane need no setup.
     if not hasattr(app, "_untracked_trust_watches"):
@@ -924,7 +1001,7 @@ def _watch_untracked_trust(app, pane_id: str, workdir: str | None,
         # Resolved once per pane: None (no session id in its command)
         # and finished watches stay cached, so the steady state after a
         # restart costs no tmux call per tick.
-        transcript = pane_transcript_path(pane_id, workdir)
+        transcript = _pane_native_transcript(app, pane_id, workdir)
         watches[pane_id] = transcript and WorkspacePromptWatch(
             pane_id, workdir=workdir, transcript_path=transcript)
     watch = watches[pane_id]
@@ -946,6 +1023,10 @@ def _prune_untracked_trust(app, seen: set[str]) -> None:
         if pane_id not in seen:
             watches.pop(pane_id, None)
             app._untracked_trust_reported.discard(pane_id)
+    native = getattr(app, "_pane_native_transcripts", None) or {}
+    for pane_id in list(native):
+        if pane_id not in seen:
+            native.pop(pane_id, None)
 
 
 def _poll_impl_idle(app) -> None:
@@ -998,12 +1079,10 @@ def _poll_impl_idle(app) -> None:
             if not tdir:
                 continue
             impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
-            try:
-                tracker.register(pr_id, pane_id, impl_transcript)
-            except ValueError:
-                # Symlink not yet created — try again next tick.  It never
-                # will be for a pane an earlier TUI launched: still watch
-                # that one for the trust dialog.
+            if not _register_pane(app, tracker, pr_id, pane_id,
+                                  impl_transcript, pr.get("workdir")):
+                # No session id anywhere — still watch the pane for the
+                # trust dialog.
                 _watch_untracked_trust(app, pane_id, pr.get("workdir"),
                                        untracked_seen)
                 continue
@@ -1140,12 +1219,8 @@ def _poll_impl_idle(app) -> None:
             if not tdir:
                 continue
             review_transcript = str(tdir / f"review-{pr_id}.jsonl")
-            try:
-                tracker.register(review_key, pane_id, review_transcript)
-            except ValueError:
-                # e.g. a review-loop pane left in flight across a TUI
-                # restart: the loop is gone but the pane may be at the
-                # trust dialog.
+            if not _register_pane(app, tracker, review_key, pane_id,
+                                  review_transcript, pr.get("workdir")):
                 _watch_untracked_trust(app, pane_id, pr.get("workdir"),
                                        untracked_seen)
                 continue

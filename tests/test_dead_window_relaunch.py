@@ -431,3 +431,19 @@ def test_tui_fast_path_skips_dead_window(tmp_path, action, window, dead):
     else:
         select.assert_called_once_with("pm-sess", "@3")
         run.assert_not_called()
+
+
+def test_review_loop_relauncher_logs_launch_stdout():
+    """The loop's pm pr review subprocess output (e.g. the dead-window
+    "Closed review window ... relaunching" line) reaches the debug log."""
+    import subprocess
+    from pm_core import review_loop
+    out = ("Closed review window 'review-pr-001' (its session has ended); "
+           "relaunching\nOpened review window 'review-pr-001'\n")
+    done = subprocess.CompletedProcess([], 0, stdout=out, stderr="")
+    with patch.object(review_loop.subprocess, "run", return_value=done), \
+         patch.object(review_loop, "_log") as log:
+        review_loop._launch_review_window("pr-001", "/tmp", iteration=1)
+    logged = [c.args for c in log.debug.call_args_list]
+    assert any("Closed review window 'review-pr-001'" in str(a[-1])
+               for a in logged)

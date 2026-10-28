@@ -177,7 +177,15 @@ session's transcript.  Sessions started from a shell (`pm pr start` /
 `pm pr review` without the TUI's hidden `--transcript`) are never
 idle-tracked, so stop-on-idle never removes their containers; they are
 removed when their window is killed or by `pm container cleanup`
-(QA S78).
+(QA S78).  A restarted TUI (`pm tui restart`, or a new one after a
+crash) adopts the panes an earlier TUI launched by the session
+transcript named in the pane's start command, once the session has
+fired a hook; their transcript symlinks live in the old TUI's run dir.
+Each still-idle session is then re-checked once.  A stop the restart
+cut off is redone, and an attached shell is reported again.  Panes
+newer than the TUI instance are never adopted: its own review-loop
+iterations are stopped by the loop, and shell-started sessions stay
+untracked (QA S86).
 
 Two timing and sampling questions came up in QA S38 (review 3f45 i3).
 - **Which removals record a sample.**  Every removal of a *running* pm

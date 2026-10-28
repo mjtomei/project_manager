@@ -140,6 +140,10 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
         raise RuntimeError(f"Review window launch failed (rc={result.returncode}): {detail}")
     _log.info("relauncher: pr=%s rc=%d elapsed=%.2fs",
               pr_id, result.returncode, elapsed)
+    # Lines such as "Closed review window ... relaunching" otherwise
+    # reach no surface for loop iterations.
+    _log.debug("relauncher: pr=%s stdout=%r", pr_id,
+               (result.stdout or "")[:1000])
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:

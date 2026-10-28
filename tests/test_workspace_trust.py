@@ -1058,3 +1058,77 @@ def test_tmux_guide_launch_goes_through_trust_boundary(home, tmp_path,
     guide_cli._run_guide()
     assert _projects()[str(wd)]["hasTrustDialogAccepted"] is True
     assert len(execs) == 3
+
+
+def test_impl_idle_sweep_adopts_idle_pane_after_restart(
+        home, tmp_path, monkeypatch):
+    """After a TUI restart the impl pane's transcript symlink is in the old
+    TUI's run dir.  A session past the trust dialog (it fired a hook) is
+    adopted by its native transcript, so an idle impl is re-checked once
+    for stop-on-idle.  Before the fix it was never tracked again and its
+    container was never removed (QA S86)."""
+    from types import SimpleNamespace
+    from pm_core.pane_idle import PaneIdleTracker
+    from pm_core.tui import review_loop_ui
+    wd = _pm_workdir(home)
+    sid = "6ca0ccf2-e478-4bbd-bdc2-b90ad8e2af11"
+    start_cmd_calls: list[str] = []
+
+    def _start_cmd(pane):
+        start_cmd_calls.append(pane)
+        return f"podman exec -it pm-x bash -c 'claude --session-id {sid}'"
+    monkeypatch.setattr("pm_core.tmux.pane_start_command", _start_cmd)
+    monkeypatch.setattr("pm_core.tmux.pane_exists", lambda pane: True)
+    monkeypatch.setattr(
+        review_loop_ui, "_find_impl_pane",
+        lambda session, name: "%7" if name == "pr-i" else None)
+    events: dict = {}
+    monkeypatch.setattr("pm_core.hook_events.read_event",
+                        lambda s: events.get(s))
+    stops: list[tuple] = []
+    monkeypatch.setattr(review_loop_ui, "_try_stop_idle_container",
+                        lambda app, pr_id, ctype, key:
+                        stops.append((pr_id, ctype, key)))
+    pr = {"id": "pr-i", "status": "in_review", "workdir": str(wd)}
+    app = SimpleNamespace(
+        _session_name="sess", _pane_idle_tracker=PaneIdleTracker(),
+        _data={"prs": [pr]}, _review_loops={}, _pending_merge_prs=set(),
+        _root=tmp_path / "pm",
+        _auto_start_run_id=None, log_message=lambda *a, **k: None,
+        _pre_existing_pane_max=6)
+    with patch("pm_core.tui.auto_start.is_enabled", return_value=False), \
+         patch.object(review_loop_ui, "_watch_untracked_trust",
+                      lambda app, pane, wd, seen: seen.add(pane)):
+        events[sid] = {"event_type": "idle_prompt", "timestamp": 5.0,
+                       "session_id": sid}
+        # %7 is newer than this TUI (its own review-loop iteration, or a
+        # session started from a shell): not adopted.
+        review_loop_ui._poll_impl_idle(app)
+        assert not app._pane_idle_tracker.is_tracked("pr-i")
+        assert start_cmd_calls == []
+        app._pre_existing_pane_max = 7
+        # No hook yet (e.g. at the trust dialog): left to the trust watch.
+        del events[sid]
+        review_loop_ui._poll_impl_idle(app)
+        assert not app._pane_idle_tracker.is_tracked("pr-i")
+        events[sid] = {"event_type": "idle_prompt", "timestamp": 5.0,
+                       "session_id": sid}
+        for _ in range(3):
+            review_loop_ui._poll_impl_idle(app)
+    assert app._pane_idle_tracker.is_tracked("pr-i")
+    assert stops == [("pr-i", "impl", "pr-i")]
+    assert start_cmd_calls == ["%7"]
+
+
+def test_note_pre_existing_panes_records_newest_pane(monkeypatch):
+    from types import SimpleNamespace
+    from pm_core.tui import review_loop_ui
+    monkeypatch.setattr(
+        "pm_core.tmux._run",
+        lambda cmd, **k: SimpleNamespace(stdout="%3\n%12\n%9\n"))
+    app = SimpleNamespace()
+    review_loop_ui.note_pre_existing_panes(app)
+    assert app._pre_existing_pane_max == 12
+    assert review_loop_ui._predates_tui(app, "%12")
+    assert not review_loop_ui._predates_tui(app, "%13")
+    assert not review_loop_ui._predates_tui(SimpleNamespace(), "%1")
