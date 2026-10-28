@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-bac971d
+  active_pr: pr-9966785
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T19:36:35.494842+00:00'
+  updated_at: '2026-10-28T19:49:53.570294+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35927,6 +35927,25 @@ prs:
       correctly.'
     created_at: '2026-10-28T19:36:35Z'
     last_edited: '2026-10-28T19:36:35Z'
+  - id: note-40f0957
+    text: 'QA S5 (2026-10-28) — PASS on all four stories (breadcrumb resume, in-flight
+      adoption, ownership-checked finalization across restart, malformed-breadcrumb
+      resilience, legacy review-<pr>-i<N> adoption). Evidence: /pm-captures/scenarios/5/{tui,cli}/.
+      Notable: (a) a plain `pm tui restart` (no --breadcrumb) does NOT consume a hand-written
+      ~/.pm/autostart-resume.json only — it is consumed exactly as written, and the
+      TUI writes no breadcrumb of its own without the merge-restart marker, so the
+      hand-written file is what the new TUI reads; (b) malformed `"iteration_sessions":
+      "truncated"` is ignored cleanly (i5 guard) and the loop still adopts + completes;
+      (c) a legacy-named review-<pr>-i<N>.jsonl with `iteration_sessions: {}` is adopted,
+      frozen to a regular file and archived under the SID derived from the link target
+      (sha256-identical). Local-backend setup gotcha: `pm push` only commits a pm/sync-*
+      branch; `git merge --ff-only <branch>` is needed before `pm autostart add`,
+      else pr start fails with "not committed on master yet". Incidental bug found
+      and filed separately: pr-9966785 (SIGNOFF_IMPL return leaves auto-start idle
+      up to 5 min — the TUI keeps a stale signoff_return.awaiting after the rework
+      launch because _relaunch_impl runs after the step() reload).'
+    created_at: '2026-10-28T19:49:53Z'
+    last_edited: '2026-10-28T19:49:53Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
@@ -38665,6 +38684,38 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T19:36:19.523510+00:00'
   updated_at: '2026-10-28T19:36:19.523510+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-9966785
+  plan: bugs
+  title: 'Bug: SIGNOFF_IMPL return leaves auto-start idle for up to 5 min — TUI keeps
+    stale signoff_return.awaiting after the rework launch'
+  branch: pm/pr-9966785-bug-signoff-impl-return-leaves-auto-start-idle-for
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/signoff_ui.py step(), hop == "impl" branch.
+    The hop calls app.run_worker(_relaunch_impl(...)) AFTER the _reload(app) at the
+    end of step() ("verdict record / hop status written behind the TUI''s back").
+    _relaunch_impl runs pm pr start --fresh in a subprocess, which calls clear_return_awaiting(root,
+    pr_id, "impl") and writes awaiting: null to project.yaml — but nothing reloads
+    app._data afterwards. review_loop_ui._poll_impl_idle reads return_awaiting(pr)
+    from the stale app._data, so it keeps logging "impl_idle: <pr> awaiting sign-off
+    rework launch" and skips auto-review until some other reload (the 300 s background
+    sync, a manual g, or a restart). Repro (QA S5 story 2, pr-9ee4d64, 2026-10-28):
+    fake-claude review {"PASS":100}, signoff [SIGNOFF_IMPL@5s, SIGNOFF_BLOCKED@5s];
+    pm autostart add <pr> --auto-merge; at 19:26:27 the log shows "Sign-off routed
+    <pr> back to implementation (SIGNOFF_IMPL)" and the rework impl session launches,
+    and project.yaml has signoff_return.awaiting: null, yet "awaiting sign-off rework
+    launch" repeats every 5 s from 19:28:57 until the 300 s sync at ~19:30:44 finally
+    reloads and the run advances. Expected: the rework launch should clear the guard
+    promptly (e.g. _reload(app) after _start_pr_quiet succeeds in _relaunch_impl).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T19:49:24.430536+00:00'
+  updated_at: '2026-10-28T19:49:24.430536+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
