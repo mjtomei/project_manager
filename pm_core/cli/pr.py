@@ -3788,6 +3788,14 @@ def pr_auto_sequence(pr_id: str):
         return
 
     if status == "qa":
+        if not pm_session:
+            # Every action below needs the pm session: launching QA (the
+            # detached driver exits with "No pm session found" and writes no
+            # qa_status.json), advancing to sign_off, or launching a review
+            # iteration.  Without this guard each tick re-launched a doomed
+            # driver and reported "running: qa (launched)" forever.
+            click.echo("paused: no pm tmux session")
+            return
         overall, _path = _qa_status_for(pr_id)
         if overall and _older_than(_path,
                                    (open_return(pr_entry) or {}).get("ts")):

@@ -34345,7 +34345,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T11:43:13.775331+00:00'
+  updated_at: '2026-10-28T12:03:19.306646+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34495,6 +34495,17 @@ prs:
       R1 updated. Ready for a fresh sign-off.'
     created_at: '2026-10-28T11:43:13Z'
     last_edited: '2026-10-28T11:43:13Z'
+  - id: note-68e02f4
+    text: 'review 5d72 i1 incidental fix: `pm pr auto-sequence` qa branch launched
+      a detached QA driver with no pm session; the driver exits "No pm session found"
+      and writes no qa_status.json, so every tick re-launched a doomed process and
+      reported "running: qa (launched)" forever (observed in QA S4). The qa branch
+      now pauses with "paused: no pm tmux session", matching the in_progress/in_review/sign_off
+      branches; new test tests/test_pr_auto_sequence.py::TestQA::test_no_session_pauses_instead_of_launching_qa.
+      Full suite 4113 passed, 1 skipped, 1 env-only failure (test_hook_events PM_HOST_HOME
+      != HOME; 20/20 pass unset).'
+    created_at: '2026-10-28T12:03:19Z'
+    last_edited: '2026-10-28T12:03:19Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high

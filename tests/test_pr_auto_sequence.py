@@ -250,6 +250,23 @@ class TestQA:
         assert "qa: needs_work" in result.output
         assert "iteration 2" in result.output
 
+    def test_no_session_pauses_instead_of_launching_qa(self, runner, tmp_path):
+        """Without a pm session the detached QA driver dies with "No pm
+        session found" and writes no qa_status.json; launching it anyway
+        re-spawned a doomed process every tick and reported it as running.
+        """
+        pr = _pr("qa")
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value=None), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, None)), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0
+        assert "paused: no pm tmux session" in result.output
+        mock_qa.assert_not_called()
+
     def test_no_status_no_window_launches_qa(self, runner, tmp_path):
         pr = _pr("qa")
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
