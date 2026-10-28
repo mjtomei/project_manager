@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T09:22:29.889972+00:00'
+  updated_at: '2026-10-28T09:36:50.642459+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37530,6 +37530,24 @@ prs:
       then chmod +x.'
     created_at: '2026-10-28T09:22:29Z'
     last_edited: '2026-10-28T09:22:29Z'
+  - id: note-3b96dcc
+    text: 'QA scenario 37 (concurrent operators: two simultaneous signoff integrate
+      --apply, two simultaneous note adds + TUI cursor move, signoff launch racing
+      an independent integrate check) PASS at 0b2cdf86 — no code change. Harness facts
+      for the next run: (1) real /usr/bin/git must precede ~/.local/bin on PATH or
+      the push-proxy wrapper makes `git fetch <local path>` fail ("does not appear
+      to be a git repository") and the check records status: error; (2) `pm session
+      mobile --no-force` before recording — the 200x50 recorder session resizes the
+      TUI window and turns the tech tree into one row (nav is h/l only; re-confirm
+      after attach); (3) once master itself contains integration/publication merges,
+      `git rev-list --count --merges PRE..HEAD` counts those too — use --first-parent
+      to count the PR branch own integration merge; (4) the two concurrent applies
+      serialized on both attempts (no "HEAD moved during apply" line, allowed by the
+      scenario) yet the record always ended up_to_date with the applied merge and
+      exactly one merge commit; (5) the TUI casts end blank because the attach client
+      detaching clears the screen — the casts were not edited. Captures: /pm-captures/scenarios/37/.'
+    created_at: '2026-10-28T09:36:50Z'
+    last_edited: '2026-10-28T09:36:50Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
