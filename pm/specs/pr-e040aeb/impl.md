@@ -1194,3 +1194,12 @@ conflicted in `pm/project.yaml` and `pm_core/review_loop.py`.
    `pr-25f4038`/`pr-16e45ba` identical to master's, no master id missing, and
    the only differences from master are this branch's own cross-PR notes and
    their later `updated_at` stamps.
+
+Verification of the integration: targeted suites
+(`test_review_launch_retry.py`, `test_breadcrumb_review_loop.py`,
+`test_review_loop.py`, `test_verdict_transcript.py`) 234 passed; full suite
+4187 passed, 1 skipped, 1 failed — the failure is
+`tests/test_hook_events.py::test_installer_writes_standalone_receiver`, which
+fails identically on a clean 89e3c501 worktree (documented pre-existing
+hook-installer env failure; the installer writes to the real `~/.pm`, not the
+test's tmp HOME).
