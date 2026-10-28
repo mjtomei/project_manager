@@ -482,6 +482,42 @@ class TestPollWaitingInLiveLoop:
         assert state.scenario_verdict_sources[1]["turn_id"] == "turn-pass"
         assert state.held is False
 
+    def test_follow_up_pass_is_independently_verified(self, tmp_path):
+        """R6: a follow-up PASS is not trusted because the worker said PASS.
+
+        The scenario's PASS verification was discarded when it entered
+        waiting, so the follow-up must go through the normal independent
+        verifier exactly like a first-pass verdict.
+        """
+        path = _write(
+            tmp_path / "s1.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"),
+            _user("I fixed it, please continue"),
+            _assistant("Reason: blocker resolved\nPASS", "turn-pass",
+                       "2026-05-13T14:33:00.000Z"))
+        state = _waiting_state(path)
+        # An earlier PASS for this scenario was verified; entering waiting
+        # discarded that, so the follow-up PASS must be verified afresh.
+        state.verified_scenarios = {1}
+
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", return_value=100), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=True), \
+             patch("pm_core.qa_loop._current_pr_head", return_value=None), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   return_value=(True, "", None)) as verify:
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work",
+                tmp_path / "status.json", lambda *a: None)
+
+        assert state.scenario_verdicts == {1: VERDICT_PASS}
+        verify.assert_called_once()
+        # The verifier's result was collected by the loop, not left dangling.
+        assert state.verified_scenarios == {1}
+
     def test_new_source_head_forces_needs_work(self, tmp_path):
         path = _write(
             tmp_path / "s1.jsonl", PROMPT,
@@ -797,6 +833,25 @@ class TestWaitingPersistence:
         rebuilt = build_resume_state(_load_resume_file(tmp_path))
         assert rebuilt.waiting_for_input == {1}
         assert rebuilt.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_waiting_entry_without_a_source_is_dropped_but_keeps_the_verdict(
+            self, tmp_path):
+        """A waiting entry with no recoverable attempt (its source or the
+        scenario is gone) can never be polled again: the wait is dropped but
+        the INPUT_REQUIRED verdict stays as terminal evidence (R3)."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.qa_workdir = str(tmp_path)
+        state.held = True
+        _write_resume_file(state, use_containers=False, concurrency_cap=0)
+
+        data = _load_resume_file(tmp_path)
+        data["waiting_input_sources"] = {}
+        rebuilt = build_resume_state(data)
+
+        assert rebuilt.waiting_for_input == set()
+        # Terminal evidence is preserved, unlike a superseded attempt.
+        assert rebuilt.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert rebuilt.held is False
 
     def test_superseded_run_never_rewrites_the_snapshot(self, tmp_path):
         """A fresh start clears the snapshot; the still-winding-down held

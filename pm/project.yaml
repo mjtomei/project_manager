@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T13:52:39.016671+00:00'
+  updated_at: '2026-10-28T15:16:57.742516+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9302,6 +9302,28 @@ prs:
       pass with it installed).'
     created_at: '2026-10-28T13:52:38Z'
     last_edited: '2026-10-28T13:52:38Z'
+  - id: note-a532db7
+    text: 'Review i11 (5865): no production-code changes needed — the implementation
+      matches the spec (R1-R8) and the iteration 6-15 notes. Closed two test gaps
+      against the spec''s own plan: (1) R6 "a follow-up PASS still requires normal
+      independent verification" had no test — every follow-up test ran with verification
+      disabled, skipping that branch. test_follow_up_pass_is_independently_verified
+      patches _verify_single_scenario and asserts the follow-up PASS invokes the verifier
+      and its result is collected (the scenario''s earlier PASS verification is not
+      inherited). (2) R3 splits the two resume drops: a superseded attempt drops the
+      wait AND its provisional verdict, while a waiting entry with no recoverable
+      attempt drops only the wait and keeps INPUT_REQUIRED as terminal evidence —
+      only the first was covered. test_waiting_entry_without_a_source_is_dropped_but_keeps_the_verdict
+      pins the second. Full suite: 4141 passed, 1 skipped (needs the markdown dep,
+      real git on PATH, PM_HOST_HOME unset). Observation, PRE-EXISTING and deliberately
+      not changed: stopping a run (zz t) while a scenario PASS is mid-verification
+      still aggregates that PASS — _poll_tmux_verdicts exits on stop_requested with
+      `verifying` non-empty, so the unverified PASS reaches _on_qa_complete. Unrelated
+      to the INPUT_REQUIRED wait; the manual merge gate is preserved (it hands off
+      to sign-off, not merge). Worth a separate bugs-plan PR — left unfiled to avoid
+      adding unrelated churn without a decision.'
+    created_at: '2026-10-28T15:16:57Z'
+    last_edited: '2026-10-28T15:16:57Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

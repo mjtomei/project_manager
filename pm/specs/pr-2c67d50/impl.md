@@ -560,3 +560,23 @@ covered by tests in `tests/test_qa_input_required.py` /
   still recovered.  Covered by
   `test_in_progress_run_with_live_owner_is_not_relaunched` and
   `test_in_progress_run_with_dead_owner_is_relaunched`.
+
+## 16. Implementation notes (review iteration 11)
+
+- **Test gap: a follow-up PASS is verified independently.** §5 requires the
+  follow-up PASS to go through the normal verifier, but no test exercised it:
+  the existing follow-up tests run with verification disabled, which skips
+  that branch entirely.
+  `test_follow_up_pass_is_independently_verified` patches
+  `_verify_single_scenario`, runs the live collector over a transcript whose
+  INPUT_REQUIRED is followed by a user answer and a PASS, and asserts the
+  verifier was invoked and its result collected (`verified_scenarios`), i.e.
+  the scenario's earlier PASS verification was not inherited.
+- **Test gap: an unrecoverable waiting entry keeps its verdict.** R3 splits
+  the two resume drops — a *superseded* attempt drops the wait *and* its
+  provisional verdict, while a waiting entry with no recoverable attempt
+  drops only the wait and keeps INPUT_REQUIRED as terminal evidence.  Only
+  the first was covered;
+  `test_waiting_entry_without_a_source_is_dropped_but_keeps_the_verdict`
+  pins the second.
+- No production-code changes were needed in this iteration.
