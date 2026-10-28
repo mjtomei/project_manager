@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-27T23:23:34.688691+00:00'
+  updated_at: '2026-10-28T00:33:18.796986+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14839,6 +14839,26 @@ prs:
       markdown on scratch PYTHONPATH). Pushed 8174e601.'
     created_at: '2026-10-27T23:23:34Z'
     last_edited: '2026-10-27T23:23:34Z'
+  - id: note-fdb71f6
+    text: 'Review loop 4060 i2 (2026-10-28): re-reviewed the i1 + 1e74 i1-i6 fixes
+      and the full pidfile/IPC path (claim/takeover, caps gating, pidfd delivery,
+      zombie/empty/binary races, unqueue, picker abort); no production defect found
+      in the signalling or capability logic. Two consistency gaps fixed: (a) `_read_tui_owner`
+      used `not raw.strip()` for the mid-claim window while `claim_tui_pidfile` retries
+      only a zero-length file, so a whitespace-only pidfile reported "starting" forever
+      on the caller side (never cleaned) but was unlinked immediately by the claim
+      side — both now key on `raw == ""`; (b) `on_mount` now takes its session name
+      from the launcher claim (`_session_for_claim`) instead of a second `tmux display-message`,
+      so a transient/renamed-session lookup can no longer leave the claimed descriptor
+      at `caps: []` for the life of the TUI (and `claim.path == pidfile`, so the claim
+      is never re-taken). Stale-owner popup text no longer reads "is not running (process
+      is not running)". Spec E3/I8 + tests 25/26 updated; 2 new tests. Full suite:
+      3888 passed, 1 skipped (pytest 8.4.2, PATH=/usr/bin:/bin, PM_HOST_HOME unset,
+      markdown on scratch PYTHONPATH). Pushed 819b66e9. Note for QA: the pidfile is
+      JSON now, so any recipe using `kill -USR1 $(cat ~/.pm/tui-*.pid)` no longer
+      works — use `pm pr edit`/any CLI mutation (which calls trigger_tui_reload) instead.'
+    created_at: '2026-10-28T00:33:18Z'
+    last_edited: '2026-10-28T00:33:18Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
