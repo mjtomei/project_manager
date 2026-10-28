@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T12:02:56.143774+00:00'
+  updated_at: '2026-10-28T12:22:35.308554+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39258,34 +39258,38 @@ prs:
       Captures: /pm-captures/scenarios/39/{story1-publish,story2-propagation-refusal,story3-merge-refused,story4-recovery-warning,story5-pull-fails,story6-retry-finalize,story7-scalar-signoff,story8-bad-sha,story9-bad-tree}.'
     created_at: '2026-10-28T11:52:27Z'
     last_edited: '2026-10-28T11:52:27Z'
-  - id: note-bd5fa36
-    text: 'QA scenario 40 (sync-detected merges checked + recorded) PASS at 72dd782a
-      — no code change. All six stories held live on the fake-github stand-in: a bad
-      merge is flagged with the exact WARNING and recorded once (merge_integrity.problem
-      + merge_sha + note), a second sync-github/sync adds nothing, a clean candidate
-      merge records nothing, no/legacy-head-only approvals record nothing, an unreadable
-      base warns "could not verify" and records nothing, a deleted workdir still checks
-      from the project repo, and all four hand-edited-state cases (scalar signoff,
-      non-mapping note, list note id, non-string approval candidate_tree) complete
-      without a traceback. Captures: /pm-captures/scenarios/40/. HARNESS FACTS for
-      the next run: (1) the pm fake-github tag is derived from the git root basename,
-      so re-running the fixture in the SAME directory reuses the same stand-in session;
-      if that session already merged pm/feature into its master, `git reset --hard
-      origin/master` lands the project on a base that already contains the PR head
-      (integration check reports `in_base`) and `pm pr signoff record` then fails
-      — use a fresh dir name per run or delete ~/.pm/sessions/<tag>. (2) Story 5(b)
-      says "pm pr sync behaves the same" with no workdir; it does not — `pm pr sync`
-      prints "No workdirs found. Run ''pm pr start'' on a PR first." and exits (documented
-      in its --help). The fallback-to-project-repo behaviour is demonstrated through
-      `pm pr sync-github`, which does run the check from $TEST_DIR. (3) The approval
-      binding the check compares is `signoff.integration.candidate_tree`, NOT the
-      top-level `pr["integration"]["candidate_tree"]`; hand-editing only the top-level
-      record leaves the clean merge unflagged (that was a fixture mistake, not a bug).
-      (4) With the TUI killed the tmux server is gone (the TUI is the pane command);
-      `pm pr start` still provisions the workdir fine once `pm fake-claude config
-      set ''{"_all": {}}''` is in place. (5) Put `set -x` AFTER `source /tmp/pm-venv/bin/activate`
-      or the activation trace fills the cast. (6) agg is absent from the image: fetch
-      agg-aarch64-unknown-linux-gnu v1.4.3 to ~/.local/bin and chmod +x.'
+  - id: note-c4fe250
+    text: 'QA scenario 40 (sync-detected merges checked + recorded) — re-evaluated:
+      story 5(b) is a REAL bug, now FIXED (commit "qa: pm pr sync falls back to the
+      project repo"). The first pass wrongly called it a scenario error; R3.5 of pr-2e06289
+      requires `pm pr sync` to fall back to "another workdir, or the project repo",
+      and pr-2e06289 impl.md resolves "Scope: CLI sync too? — yes". With the PR workdir
+      deleted and no other workdir, `pm pr sync` printed "No workdirs found. Run ''pm
+      pr start'' on a PR first." and exited 1: merge never detected, PR left sign_off,
+      no WARNING, no merge_integrity, no note. Fix: `pm_core/pr_sync.py::sync_prs`
+      and `pm_core/cli/pr.py::pr_sync` now fall back to `_resolve_repo_dir(root, data)`
+      when `find_workdir()` returns nothing — the same fallback `sync_from_github`
+      (pm pr sync-github) already had. Regression tests `test_sync_prs_falls_back_to_project_repo_with_no_workdir`
+      and `test_cli_pr_sync_workdir_gone_falls_back_to_project_repo` fail on the pre-fix
+      code with exactly that output and pass after. Live verification: the same fixture
+      that exited 1 now prints "  ✅ #1: merged" + the story-1 WARNING, records merge_integrity
+      {problem, merge_sha} and one Merge integrity note (note-0efbb5f). Captures:
+      /pm-captures/scenarios/40/pre-fix/story5b-sync/ (failing) and .../post-fix/story5b-sync/
+      (fixed). Everything else in the scenario still PASSES: stories 1, 2, 3, 4a,
+      4b, 5a, 6a-6d all held live on the fake-github stand-in. HARNESS FACTS for the
+      next run: (1) the pm fake-github tag derives from the git root basename, so
+      re-running the fixture in the SAME directory reuses the stand-in session; if
+      it already merged pm/feature into master, the project lands on a base that already
+      contains the PR head (integration reports in_base) and `pm pr signoff record`
+      fails — use a fresh dir name per run or delete ~/.pm/sessions/<tag>. (2) The
+      approval binding the check compares is `signoff.integration.candidate_tree`,
+      NOT the top-level `pr["integration"]["candidate_tree"]`. (3) With the TUI killed
+      the tmux server is gone (the TUI is the pane command); `pm pr start` still provisions
+      the workdir once `pm fake-claude config set ''{"_all": {}}''` is set. (4) Put
+      `set -x` AFTER activating the venv or the activation trace fills the cast. (5)
+      agg is absent: fetch agg-aarch64-unknown-linux-gnu v1.4.3 to ~/.local/bin and
+      chmod +x. (6) pytest needs `pytest<9` and the real /usr/bin/git first on PATH,
+      else the fixture push hits the QA git proxy.'
     created_at: '2026-10-28T12:01:22Z'
     last_edited: '2026-10-28T12:01:22Z'
   - id: note-c00b702
@@ -39312,6 +39316,7 @@ prs:
       Captures at /pm-captures/scenarios/43/{01b-two-syncs-live,02-sync-vs-recovery,02c-sync-vs-recovery-live,03b-two-recoveries-live}.'
     created_at: '2026-10-28T12:02:56Z'
     last_edited: '2026-10-28T12:02:56Z'
+    last_edited: '2026-10-28T12:22:35Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

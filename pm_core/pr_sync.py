@@ -197,8 +197,15 @@ def sync_prs(
         _log.debug("Skipping sync: %s", skip_reason)
         return SyncResult(synced=False, skipped_reason=skip_reason)
 
-    # Find a workdir to use for checking
+    # Find a workdir to use for checking.  When every workdir is gone the
+    # project repo is still a valid place to detect the merge and verify what
+    # it published — the same fallback :func:`sync_from_github` uses, so a
+    # removed workdir cannot turn a mismatch into a silent finalize.
     target_workdir = find_workdir(data)
+    if not target_workdir:
+        repo_dir = _resolve_repo_dir(root, data)
+        if repo_dir and git_ops.is_git_repo(str(repo_dir)):
+            target_workdir = str(repo_dir)
     if not target_workdir:
         _log.debug("No workdirs found for sync")
         return SyncResult(

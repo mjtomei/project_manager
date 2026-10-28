@@ -287,6 +287,25 @@ def test_sync_prs_workdir_gone_verifies_from_the_sync_workdir(sync_github):
     assert "merge_integrity" in pr_entry(sync_github)
 
 
+def test_sync_prs_falls_back_to_project_repo_with_no_workdir(sync_github):
+    """Every workdir gone: the merge is still detected and verified.
+
+    R3.5 (pr-2e06289): the check falls back to the directory the sync used,
+    "another workdir, or the project repo".  `sync_prs` bailed with "No
+    workdirs found" before it ever looked at the project repo, so removing the
+    PR's workdir made a merge of unreviewed commits finalize silently.
+    """
+    merge_on_remote(sync_github, extra=True)
+    shutil.rmtree(sync_github.wd)
+
+    result = pr_sync.sync_prs(sync_github.pm_dir, force=True)
+
+    assert PR in result.merged_prs
+    v = result.merge_integrity.get(PR)
+    assert v is not None and v.problem
+    assert "merge_integrity" in pr_entry(sync_github)
+
+
 # --- pr_sync.sync_from_github (startup / pm pr sync-github) ----------------
 
 def test_sync_from_github_records_integrity_for_unapproved_merge(sync_github):
@@ -414,6 +433,31 @@ def test_cli_pr_sync_records_integrity(sync_github):
     assert len(integrity_notes(sync_github)) == 1
     assert "WARNING:" in result.output
     assert "not the approved head" in result.output
+
+
+def test_cli_pr_sync_workdir_gone_falls_back_to_project_repo(sync_github):
+    """`pm pr sync` still detects + verifies when the workdir is gone.
+
+    The scenario's story 5(b): remove the PR's workdir (no other exists) and
+    sync.  The command used to exit 1 with "No workdirs found", never
+    finalizing the PR; it must fall back to the project repo and record the
+    mismatch like `pm pr sync-github` does.
+    """
+    merge_on_remote(sync_github, extra=True)
+    shutil.rmtree(sync_github.wd)
+
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=sync_github.pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = CliRunner().invoke(pr_mod.pr, ["sync"])
+
+    assert result.exit_code == 0, result.output
+    assert "No workdirs found" not in result.output
+    pr = pr_entry(sync_github)
+    assert pr["status"] == "merged"
+    assert "merge_integrity" in pr
+    assert len(integrity_notes(sync_github)) == 1
+    assert "WARNING:" in result.output
 
 
 def test_cli_pr_sync_approved_merge_records_nothing(sync_github):

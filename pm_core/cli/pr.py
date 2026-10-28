@@ -3349,7 +3349,8 @@ def pr_sync():
     """Check for merged PRs and unblock dependents (GitHub backend only).
 
     For local/vanilla backends, use 'pm pr merge' instead.
-    Needs at least one workdir to exist (created by 'pm pr start').
+    Works from any existing workdir, and from the project repo when every
+    workdir is gone.
     """
     root = state_root()
     data = store.load(root)
@@ -3367,20 +3368,16 @@ def pr_sync():
 
     backend = get_backend(data)
 
-    # Find any existing workdir to check merge status from
-    target_workdir = None
-    for p in prs:
-        wd = p.get("workdir")
-        if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
-            target_workdir = wd
-            break
+    # Find any existing workdir to check merge status from.  When every
+    # workdir is gone the project repo is still a valid place to detect the
+    # merge and verify what it published — the same fallback
+    # `pm pr sync-github` uses; losing a workdir must not turn a mismatch
+    # into a silent finalize.
+    target_workdir = pr_sync_mod.find_workdir(data)
     if not target_workdir:
-        workdirs_base = _workdirs_dir(data)
-        if workdirs_base.exists():
-            for d in workdirs_base.iterdir():
-                if d.is_dir() and git_ops.is_git_repo(d):
-                    target_workdir = str(d)
-                    break
+        repo_dir = _resolve_repo_dir(root, data)
+        if repo_dir and git_ops.is_git_repo(str(repo_dir)):
+            target_workdir = str(repo_dir)
 
     if not target_workdir:
         click.echo("No workdirs found. Run 'pm pr start' on a PR first.", err=True)
