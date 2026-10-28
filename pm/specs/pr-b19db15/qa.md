@@ -25,7 +25,11 @@ recording-recipe bugs that any worker following the recipe hits:
 - the tmux pm-session poll is bounded and waits on the computed session
   (`tmux has-session -t "$TARGET"`), not on any `pm-` session (which would
   also match the recipe's own `pm-recorder`); the web-UI `until curl` poll is
-  bounded, bounds each attempt, and stops the server it started.
+  bounded, bounds each attempt, and stops the server it started;
+- the render steps delete this run's outputs before rendering and check the
+  mp4 afterwards, so a failed render ends with no video and a clear error
+  instead of the previous run's mp4 (and the CLI scaffold documents the
+  escaped `bash -c` command form that actually survives its quoting).
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -141,6 +145,14 @@ run.
   `RECORDER_STOP_TIMEOUT` for a long command.
 - The web-UI server accepts the connection but never answers → the per-attempt
   curl bound keeps the deadline meaningful.
+- A render fails (no `agg`, unreadable cast, failed transcode) in a capture
+  directory that already holds a video → the render steps delete this run's
+  mp4/gif (and the web-UI webm) first and then check the mp4, so the run ends
+  with no video and an actionable error, never with the previous run's video
+  presented as this run's capture.
+- The CLI scaffold's `bash -c` command form → it must be pasted escaped
+  (`-c 'bash -c \"…\"'`); the unescaped form ends the outer double-quoted
+  argument, the recorder exits, and step 4 reports "asciinema wrote no cast".
 
 ## Pass / Fail criteria
 

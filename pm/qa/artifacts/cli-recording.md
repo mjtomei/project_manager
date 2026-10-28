@@ -97,10 +97,15 @@ where the CLI runs.
 #    aborted run first — `new-session` fails with "duplicate session: rec"
 #    while it exists — with `kill-session`, not `kill-server`: killing the
 #    server and reconnecting immediately races its exit ("server exited
-#    unexpectedly"). <command-to-record> sits inside single quotes below:
-#    use the double-quoted `bash -c "..."` form from above (or escape), not
-#    `bash -c '...'`, which ends the quoting and leaves asciinema with a
-#    broken command.
+#    unexpectedly"). <command-to-record> sits inside single quotes that are
+#    themselves inside the outer double-quoted argument, so a command with
+#    quotes of its own has to be escaped to survive both layers: for the
+#    `bash -c` form above, paste
+#        -c 'bash -c \"set -x; cmd-one; cmd-two\"'
+#    and note the outer shell expands `$` in it before asciinema sees it.
+#    Pasting the double-quoted form unescaped ends the outer string, so
+#    asciinema gets a broken command, exits, and step 4 reports "asciinema
+#    wrote no cast".
 tmux -L scaffold kill-session -t rec 2>/dev/null || true
 mkdir -p <capture-dir>/<short-name>
 rm -f <capture-dir>/<short-name>/recording.cast
@@ -181,6 +186,12 @@ magnitude slower and fragile). The intermediate GIF is discarded.
 
 ```
 cast=<capture-dir>/<short-name>/recording.cast
+# Remove this run's outputs before rendering: a failed render (no `agg`, an
+# unreadable cast, an ffmpeg error) then ends with *no* mp4, instead of
+# leaving the previous run's video in the capture directory — which the
+# manifest and the report would present as this run's evidence. The gif goes
+# too, so a failed `agg` cannot fall back to encoding an earlier one.
+rm -f "${cast%.cast}.mp4" "$cast.gif"
 agg --idle-time-limit 2 "$cast" "$cast.gif"
 # 2x nearest-neighbor upscale for crisp text — but only while the result
 # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
@@ -197,6 +208,13 @@ ffmpeg -y -i "$cast.gif" -vf "$vf" \
     -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
     -movflags +faststart "${cast%.cast}.mp4"
 rm -f "$cast.gif"
+# The mp4 is the required artifact: fail here, visibly, rather than leaving
+# the caller to notice the video is missing (or stale) later.
+test -s "${cast%.cast}.mp4" || {
+    echo "render produced no mp4 — check 'agg' is installed and the cast is" \
+        "readable" >&2
+    exit 1
+}
 ```
 
 Notes:

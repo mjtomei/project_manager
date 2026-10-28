@@ -151,6 +151,34 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    settle check that keeps a failed attach's error text from counting as a
    drawn TUI.
 
+R8. **A failed render must not leave the previous run's video, and the
+   recorded command must survive the scaffold's quoting.**
+   - The render steps delete this run's outputs before rendering:
+     `rm -f "${cast%.cast}.mp4" "$cast.gif"` in both recording recipes, and
+     `rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4"` before the
+     web-UI driver (plus the mp4 again before the transcode). `ffmpeg` does
+     not touch an existing output when it fails (verified: a missing input
+     leaves the old mp4 byte-for-byte), so without this a render that failed
+     — `agg` missing, unreadable cast, failed transcode — still ends with a
+     `recording.mp4` that the manifest and the report present as this run's
+     evidence; the stale gif likewise lets a failed `agg` encode an earlier
+     run. This is the same bug class as rendering a stale cast (R2), one
+     level up.
+   - Each render step then `test -s` the mp4 and exits 1 with an actionable
+     message ("render produced no mp4 — check 'agg' is installed and the cast
+     is readable" / "transcode produced no mp4 — check the driver's webm")
+     instead of exiting 0 with no video. The web-UI step keeps the webm until
+     the mp4 exists so a failed transcode can be retried.
+   - The CLI scaffold's `<command-to-record>` sits inside single quotes
+     inside the outer double-quoted `new-session` argument, so the recipe
+     documents the *escaped* form for the `bash -c` command form:
+     `-c 'bash -c \"set -x; cmd-one; cmd-two\"'` (and notes the outer shell
+     expands `$` first). Pasting the double-quoted form unescaped ends the
+     outer string — verified live: the shell splits the command into stray
+     words, the recorder exits immediately and the scaffold fails with
+     "asciinema wrote no cast". The escaped form was verified end to end with
+     real asciinema + tmux (rc 0, the cast holds the recorded output).
+
 ## Non-goals
 
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
@@ -162,16 +190,19 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"` |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check) |
-| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked |
+| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4 cleared + mp4 checked |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
 
 ## Verification plan
 
-1. Run `tests/test_qa_artifact_recording_recipes.py` — all pass.
+1. Run `tests/test_qa_artifact_recording_recipes.py` — all pass (including
+   the execution tests: a failed render with stub `agg`/`ffprobe`/`ffmpeg`
+   leaves no mp4/gif and exits non-zero, and the scaffold's documented
+   escaped command form reaches asciinema's `-c` intact).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios

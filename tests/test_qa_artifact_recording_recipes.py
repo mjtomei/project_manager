@@ -25,9 +25,17 @@ hits, regardless of how it waits for a background job:
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, and the pm-session poll
   waits on the computed session rather than any ``pm-`` session (which would
-  also match this recipe's own ``pm-recorder``).
+  also match this recipe's own ``pm-recorder``);
+- the render steps delete this run's outputs before rendering, so a failed
+  ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
+  run's mp4 (which the manifest would present as this run's evidence);
+- the CLI scaffold's ``<command-to-record>`` placeholder sits inside single
+  quotes inside the outer double-quoted argument, so the recipe has to show
+  the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
+  string and leaves asciinema with a broken command.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -61,6 +69,19 @@ def _scaffold_block(text):
         if "new-session" in block:
             return block
     raise AssertionError("no recorder scaffold block found")
+
+
+def _render_block(name):
+    """The fenced block under ``## Render to video`` (cast -> mp4)."""
+    section = _recipe_text(name).split("## Render to video", 1)[1]
+    return re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+
+
+def _stub_tool(bindir, name, body="exit 1\n"):
+    path = bindir / name
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+    return path
 
 
 class TestRecipes:
@@ -373,6 +394,57 @@ class TestRecipes:
         assert "RECORDER_STOP_TIMEOUT" in body, (
             "cli-recording: the stop failure does not say how to raise the bound")
 
+    def test_cli_scaffold_documents_the_escaped_command_form(self, tmp_path):
+        """``<command-to-record>`` needs escaping to survive both quote layers.
+
+        The placeholder sits inside single quotes that are themselves inside
+        the outer double-quoted argument, so the ``bash -c "..."`` form from
+        the command-form examples cannot be pasted as-is: its first ``"``
+        ends the outer string and the shell splits the command into stray
+        words (verified live — the recorder exits immediately and the block
+        fails with "asciinema wrote no cast"). The recipe therefore has to
+        show the escaped form. This test drives the recipe's own documented
+        example through the real statement: the ``tmux`` argument is captured
+        by a stub, then run the way tmux runs it (``sh -c``) against a stub
+        ``asciinema``, so the ``-c`` value has to arrive intact.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        line = next((ln[ln.index("-c 'bash -c \\\""):].strip()
+                     for ln in block.splitlines()
+                     if "-c 'bash -c \\\"" in ln), None)
+        assert line, (
+            "cli-recording: the scaffold does not show the escaped "
+            "`-c 'bash -c \\\"...\\\"'` form, so the documented way to paste "
+            "the `bash -c` command breaks the outer quoting")
+        escaped = line[len("-c '"):-1]
+
+        stmt_start = block.index("tmux -L scaffold new-session")
+        stmt = (block[stmt_start:block.index("\n\n", stmt_start)]
+                .replace("<capture-dir>", str(tmp_path))
+                .replace("<short-name>", "run")
+                .replace("<command-to-record>", escaped))
+
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        tmux_argv = tmp_path / "tmux-argv"
+        _stub_tool(bindir, "tmux",
+                   f'printf "%s\\n" "$@" > "{tmux_argv}"\n')
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+        r = subprocess.run(["bash", "-c", stmt], env=env,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        recorder_cmd = tmux_argv.read_text().splitlines()[-1]
+
+        asci_argv = tmp_path / "asciinema-argv"
+        _stub_tool(bindir, "asciinema",
+                   f'printf "%s\\n" "$@" > "{asci_argv}"\n')
+        subprocess.run(["sh", "-c", recorder_cmd], env=env,
+                       capture_output=True, text=True)
+        argv = asci_argv.read_text().splitlines()
+        assert argv[argv.index("-c") + 1] == 'bash -c "set -x; cmd-one; cmd-two"', (
+            "cli-recording: the recorded command does not survive the "
+            f"scaffold's quoting (asciinema got {argv!r})")
+
     def test_cli_scaffold_writes_the_cast_beside_the_render(self):
         """The scaffold must write the cast where the render step reads it.
 
@@ -383,6 +455,77 @@ class TestRecipes:
         """
         block = _scaffold_block(_recipe_text("cli-recording.md"))
         assert "<capture-dir>/<short-name>/recording.cast" in block
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_failed_render_leaves_no_video(name, tmp_path):
+    """A failed render must not leave the previous run's mp4 behind.
+
+    ``ffmpeg`` does not touch an existing output when it fails (verified: a
+    missing input leaves the old mp4 byte-for-byte), so without clearing the
+    outputs first, a render that failed — no ``agg`` installed, an unreadable
+    cast — still ends with a ``recording.mp4`` in the capture directory. The
+    manifest and the sign-off report then present the *previous* run's video
+    as this run's evidence, which is the same class of bug as rendering a
+    stale cast. The stale gif matters too: a failed ``agg`` would otherwise
+    let ``ffmpeg`` encode an earlier run's gif.
+    """
+    block = _render_block(name)
+    cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
+    block = (block.replace("<capture-dir>", str(tmp_path))
+                  .replace("<short-name>", "run"))
+    cast = Path(cast_rel.replace("<capture-dir>", str(tmp_path))
+                       .replace("<short-name>", "run"))
+    cast.parent.mkdir(parents=True, exist_ok=True)
+    cast.write_text('{"version": 2}\n')
+    mp4 = cast.with_suffix(".mp4")
+    mp4.write_bytes(b"previous run's video")
+    gif = cast.with_name(cast.name + ".gif")
+    gif.write_bytes(b"previous run's gif")
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for tool in ("agg", "ffprobe", "ffmpeg"):
+        _stub_tool(bindir, tool)
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        f"{name}: a failed render exits 0, so the worker's next step looks "
+        "like it has a video")
+    assert "render produced no mp4" in r.stderr, (
+        f"{name}: a failed render does not say what went wrong")
+    assert not mp4.exists(), (
+        f"{name}: a failed render left the previous run's recording.mp4 in "
+        "place, so the capture looks successful with a stale video")
+    assert not gif.exists(), (
+        f"{name}: a failed render left the previous run's gif in place")
+
+
+def test_web_ui_clears_a_previous_video():
+    """The web-UI capture must not transcode an earlier run's webm.
+
+    Playwright's video only lands as ``recording.webm`` when the driver gets
+    as far as renaming it, so a driver that fails leaves the *previous* run's
+    webm in the capture directory — and the finalize step then produces a
+    fresh-looking mp4 of that earlier run. Both the webm and the mp4 are
+    cleared before the driver starts, and the mp4 again before the transcode
+    (``ffmpeg`` leaves an existing output untouched when it fails).
+    """
+    text = _recipe_text("web-ui-recording.md")
+    capture = text.split("### 1. Start the UI under test", 1)[1].split(
+        "### 2.", 1)[0]
+    assert 'rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4"' in capture, (
+        "web-ui recipe keeps an earlier run's webm/mp4, so a failed driver "
+        "transcodes the previous run into this run's recording")
+    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
+    finalize_block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+    rm = finalize_block.index('rm -f "$CAPDIR/recording.mp4"')
+    assert rm < finalize_block.index("\nffmpeg "), (
+        "web-ui recipe only drops the old mp4 after the transcode")
+    assert 'test -s "$CAPDIR/recording.mp4"' in finalize_block, (
+        "web-ui recipe does not check that the transcode produced the mp4")
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

@@ -54,6 +54,11 @@ CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<s
 PORT=8000                    # the port your app serves on
 APP_URL="http://localhost:$PORT"
 mkdir -p "$CAPDIR"
+# A previous run's webm/mp4 must not survive a failed driver or transcode:
+# the finalize step would otherwise turn an earlier run's webm into a
+# fresh-looking mp4 of that run, which the report would present as this
+# run's evidence.
+rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4"
 
 # Launch the web UI on the chosen port and background it; keep the pid so
 # we can stop it in teardown. Replace APP_START with your app's command.
@@ -167,9 +172,20 @@ Playwright's native recording is VP8 webm, which iOS Safari cannot
 decode. Transcode to H.264 and keep only the mp4:
 
 ```bash
+# Drop the old mp4 first: ffmpeg leaves an existing output untouched when it
+# fails, so a failed transcode would otherwise keep the previous run's video
+# as this run's recording.
+rm -f "$CAPDIR/recording.mp4"
 ffmpeg -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
     -pix_fmt yuv420p -crf 18 -movflags +faststart \
     "$CAPDIR/recording.mp4"
+# The mp4 is the required artifact: fail here, visibly, rather than leaving
+# the caller to notice the video is missing later. The webm is kept until the
+# mp4 exists so a failed transcode can be retried without re-driving the UI.
+test -s "$CAPDIR/recording.mp4" || {
+    echo "transcode produced no mp4 — check the driver's webm" >&2
+    exit 1
+}
 rm -f "$CAPDIR/recording.webm"
 ```
 
