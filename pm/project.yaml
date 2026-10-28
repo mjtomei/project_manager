@@ -39412,6 +39412,38 @@ prs:
       one PR workdir (apply racing merge).'
     created_at: '2026-10-28T16:14:46Z'
     last_edited: '2026-10-28T16:14:46Z'
+  - id: note-fa4b76f
+    text: 'QA scenario 44 (hand-edited sign-off record at every reader, the status
+      popup, the review window and the merge gate) PASS at d35e22a4 — no code change.
+      All six triples held live on a throwaway local-backend project: (1) `pm pr list`
+      renders PR_A `{SIGNOFF_MERGE: true}` and PR_B `[SIGNOFF_MERGE]` as plain `[sign_off]`
+      rows (no icon) and PR_C `[sign_off ▲]`; `pm pr show` on A/B prints row+Title/Status/Branch/Notes
+      and no `## Sign-off`, on C prints Verdict/Approved head/Approved base; all exit
+      0. (2) TUI tech tree, `pm-home` and the Runs popup all read the malformed verdict
+      as absent. (3) `pm pr auto-sequence` on the list-verdict PR whose `sha` == workdir
+      HEAD exits 0 `advanced: sign_off_relaunched`, prints `Integration: up to date
+      with master@…` + `Opened sign-off window`, and the record is retired (no `##
+      Sign-off` afterwards). (4) `pm pr merge` with `signoff.integration.target_repo:
+      5` exits 1 with `target repository changed (5 -> <repo>)`, `pm pr show` marks
+      `Invalidated: …`, master unchanged. (5) `pm pr list -t` with `updated_at: 2020-01-01`
+      (a `datetime.date`) exits 0, renders `[2020-01-01]`, sorts it last. (6) `pm
+      pr review` with `project.base_branch: 5` opens the window and its diff pane
+      shows `=== Review: … ===` / `--- Change summary ---` / the `pr-d.txt` diff against
+      `master`. HARNESS FACTS for the next run: (a) `pm session home` and `pm autostart
+      add` both mutate state and drive sign-off — the auto-start driver RETIRES a
+      malformed `signoff` record on its first pass (`signoff: None`) and relaunches,
+      so do story 1 before adding an autostart target if you want PR_A to still carry
+      the mapping, or re-hand-edit it afterwards. (b) After the driver relaunches,
+      the TUI status line reads "Sign-off for <pr> is stale (HEAD moved) — re-running"
+      — that is the sign-off driver log (pm_core/tui/signoff_ui.py:288), NOT the Runs-popup
+      target row reason (which is "sign-off review running") and it does NOT interpolate
+      the malformed value; do not read it as the `routed {SIGNOFF_MERGE: True} stale
+      (HEAD moved)` bug the PR guards against. (c) `pm autostart remove <pr>` is needed
+      to quiet the driver before hand-editing project.yaml, or the driver rewrites
+      it. (d) A 200x50 attached client resizes the shared windows, which is what makes
+      the tech tree legible. Captures: /pm-captures/scenarios/44/{01-cli-list-show,02-tui-tech-tree-home-runs,03-cli-auto-sequence,04-cli-merge-refusal,05-cli-list-timestamps,06-review-window}.'
+    created_at: '2026-10-28T16:51:49Z'
+    last_edited: '2026-10-28T16:51:49Z'
   - id: note-7b47d2d
     text: 'QA scenario 46 PASS at d35e22a4 — no code change; all five triples held
       live (sync with every workdir gone: bad merge flagged with one Merge integrity
