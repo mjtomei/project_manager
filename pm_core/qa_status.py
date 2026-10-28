@@ -23,6 +23,7 @@ import re
 import select
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -112,18 +113,26 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
     lines.append("")
 
-    # Show error block if present (spec missing, no scenarios, etc.)
+    # Show error block if present (spec missing, no scenarios, launch
+    # failures, etc.).  A run that has scenarios keeps its table below the
+    # error: a launch failure is reported alongside the verdicts the other
+    # scenarios reached, and must not hide them.
     if error:
         lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
         lines.append("")
+        # Wrap to the pane: a terminal-wrapped line takes extra rows and
+        # scrolls the header off the top of the full-height render.
         for err_line in error.split("\n"):
-            lines.append(f"  {_RED}{err_line}{_RESET}")
+            for chunk in textwrap.wrap(err_line, max(cols - 2, 10),
+                                       break_on_hyphens=False) or [""]:
+                lines.append(f"  {_RED}{chunk}{_RESET}")
         lines.append("")
-        lines.append(f"{_DIM}  q: quit{_RESET}")
-        padded = [_pad_line(l, cols) for l in lines]
-        while len(padded) < rows:
-            padded.append(" " * cols)
-        return _CLEAR_SCREEN + "\n".join(padded)
+        if not scenarios:
+            lines.append(f"{_DIM}  q: quit{_RESET}")
+            padded = [_pad_line(l, cols) for l in lines]
+            while len(padded) < rows:
+                padded.append(" " * cols)
+            return _CLEAR_SCREEN + "\n".join(padded)
 
     # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
     title_width = max(cols - 28, 10)

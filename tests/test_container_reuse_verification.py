@@ -8,6 +8,12 @@ import pytest
 from pm_core import container as cm, container_reaper as reaper
 
 
+@pytest.fixture(autouse=True)
+def _workspace_mount_present(monkeypatch):
+    """These fakes script the setup probes; the mounted workdir is intact."""
+    monkeypatch.setattr(cm, "_workspace_mount_deleted", lambda target: False)
+
+
 @pytest.mark.parametrize("kind,stderr", [
     ("pids", "cannot fork"),
     ("memory", "cannot allocate memory"),
@@ -424,3 +430,71 @@ def test_reuse_os_error_is_a_classified_launch_error(monkeypatch, tmp_path):
     assert error.value.kind == "runtime"
     assert "No space left on device" in str(error.value)
     assert name in str(error.value)
+
+
+def _stale_mount_env(monkeypatch, tmp_path, *, retained=False, owners=()):
+    name, cid = "pm-tag-qa-pr-dddd-cli-pr-dddd-s1", "abandoned-allocation"
+    monkeypatch.setattr(cm, "current_container_id", lambda target: cid)
+    monkeypatch.setattr(cm, "container_is_running", lambda target: True)
+    monkeypatch.setattr(reaper, "is_retained", lambda *a: retained)
+    monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: list(owners))
+    monkeypatch.setattr(cm, "_workspace_mount_deleted", lambda target: target == cid)
+    remove, post = Mock(), Mock()
+    monkeypatch.setattr(cm, "remove_container", remove)
+    monkeypatch.setattr(cm, "_post_setup", post)
+    monkeypatch.setattr(cm, "_probe_setup",
+                        Mock(side_effect=AssertionError("stale mount must not be probed")))
+    return name, cid, remove, post
+
+
+def test_container_mounting_a_deleted_workdir_is_recreated(monkeypatch, tmp_path):
+    """A QA rerun re-clones the scenario clone at the same path; the old
+    container's /workspace is then an unlinked directory (every exec fails
+    getcwd).  It must be replaced, not finished in place or reported as a
+    failed setup verification."""
+    name, cid, remove, post = _stale_mount_env(monkeypatch, tmp_path)
+    assert cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None) is None
+    remove.assert_called_once_with(name, container_id=cid)
+    post.assert_not_called()
+
+
+@pytest.mark.parametrize("retained,owners,needle", [
+    (True, (), "pm container retain --release"),
+    (False, ("%7",), "%7"),
+])
+def test_deleted_workdir_container_with_owner_is_preserved(
+        monkeypatch, tmp_path, retained, owners, needle):
+    name, cid, remove, post = _stale_mount_env(
+        monkeypatch, tmp_path, retained=retained, owners=owners)
+    with pytest.raises(cm.ContainerLaunchError) as error:
+        cm._ensure_reusable(name, tmp_path, None, session_tag=None, pr_id=None)
+    assert "workdir was replaced" in str(error.value)
+    assert needle in str(error.value)
+    remove.assert_not_called()
+    post.assert_not_called()
+
+
+@pytest.mark.parametrize("rc,stdout,expected", [
+    (0, "0\n", True), (0, "2\n", False), (0, "1\n", False),
+    (1, "", False), (125, "", False),
+])
+def test_workspace_mount_deleted_probe(monkeypatch, rc, stdout, expected):
+    calls = []
+
+    def runtime(*args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, rc, stdout, "")
+
+    monkeypatch.undo()  # drop the autouse stub for the real probe
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    assert cm._workspace_mount_deleted("cid") is expected
+    assert calls == [("exec", "-w", "/", "cid", "stat", "-c", "%h", "/workspace")]
+
+
+def test_workspace_mount_probe_timeout_is_unknown(monkeypatch):
+    def runtime(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 10)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    assert cm._workspace_mount_deleted("cid") is False

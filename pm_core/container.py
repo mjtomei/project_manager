@@ -1347,6 +1347,22 @@ def _setup_complete(name: str) -> bool:
     return complete
 
 
+def _workspace_mount_deleted(name: str) -> bool:
+    """True when the host directory bind-mounted at /workspace was deleted.
+
+    An unlinked directory reports link count 0 through the mount.  The probe
+    runs from ``/`` because the default working directory is that same
+    directory.  Unknown (timeout, runtime error) is False: the existing
+    setup probes then decide.
+    """
+    try:
+        r = _run_runtime("exec", "-w", "/", name, "stat", "-c", "%h",
+                         _CONTAINER_WORKDIR, check=False, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0 and (r.stdout or "").strip() == "0"
+
+
 def _probe_setup(name: str) -> tuple[bool, str, str]:
     """``(complete, exec_failure_kind, stderr)`` for a running container.
 
@@ -1789,6 +1805,29 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
                 name, "incomplete",
                 f"live pane(s) {', '.join(owners)} still own the stopped container; "
                 "close that session before recreation", stage="be reused")
+        remove_container(name, container_id=container_id)
+        return None
+
+    if _workspace_mount_deleted(container_id):
+        # The host workdir it mounts was deleted (a QA rerun re-clones the
+        # scenario clone at the same path), so the container sees an empty
+        # unlinked directory and every exec fails getcwd().  Finishing or
+        # reusing it would run the worker against the wrong tree.
+        if container_reaper.is_retained(name, container_id):
+            raise launch_error(
+                name, "incomplete",
+                f"its mounted workdir was replaced on the host and the container "
+                f"is explicitly retained; run 'pm container retain --release "
+                f"{name}' before recreation", stage="be reused")
+        owners = container_reaper.live_owner_panes(name, container_id)
+        if owners:
+            raise launch_error(
+                name, "incomplete",
+                f"its mounted workdir was replaced on the host and live pane(s) "
+                f"{', '.join(owners)} still use it; close that session before "
+                f"recreation", stage="be reused")
+        _log.warning("Container %s mounts a deleted workdir — removing it "
+                     "before recreating", name)
         remove_container(name, container_id=container_id)
         return None
 
