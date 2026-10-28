@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T09:35:25.834434+00:00'
+  updated_at: '2026-10-28T09:49:08.700166+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26200,6 +26200,21 @@ prs:
       takes ~2 min.'
     created_at: '2026-10-28T09:35:25Z'
     last_edited: '2026-10-28T09:35:25Z'
+  - id: note-03f8c96
+    text: 'QA S24 (2026-10-28): PASS — all three roles accepted long legitimate turns
+      without a recovery nudge. Live: review PASS after 45s -> "Review loop done for
+      pr-cf29563: ✓ PASS (1 iteration)"; watcher READY after 35s (past the 30s grace)
+      -> "Watcher finished: 1 iteration(s), last verdict: READY"; two QA workers streaming
+      ~16s -> PASS (verified), FINALIZE_DONE, QA PASS note, no INPUT_REQUIRED/relaunch/window-died.
+      `pm log grep -i "recovery request"` empty throughout. One fixture fact for the
+      next run: QA scenario windows/numbering start at s3/s4, not s1/s2 — PR ids are
+      deterministic (sha256(title)[:7]) so an earlier run of this scenario on the
+      shared $HOME left ~/.pm/workdirs/qa/pr-cf29563-*/s-1,s-2, and qa_loop._next_scenario_offset
+      deliberately continues numbering from previous runs for the same PR. Not a defect;
+      do not flag it. Also: QA has a post-planning spec gate, so seed pm/specs/<pr>/qa.md
+      (or run `pm pr spec <pr> qa` with the fake config) before `pr qa`.'
+    created_at: '2026-10-28T09:49:08Z'
+    last_edited: '2026-10-28T09:49:08Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
