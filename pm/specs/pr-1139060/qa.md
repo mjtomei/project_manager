@@ -40,6 +40,15 @@ User-visible behavior added after `76081338` that fresh scenarios must cover:
 - Periodic reconciliation waits up to 60 s for a busy reaper lock held by a short scoped pass instead of skipping a whole interval; startup and keyring-pressure passes still skip (025c8d53).
 - Container commits work when the host git identity exists only in the system config (700b0157).
 
+Refresh on 2026-10-28 at HEAD `1bc65b72` (QA fixes from scenarios 58–63 plus review-loop ad53 i1). Scenarios 58–63 are locked historical evidence; fresh scenarios begin at 64. Results of the 58–63 run (aggregate NEEDS_WORK): S58 (whole PR life from implementation to merge) and S63 (periodic pass waits for a busy reaper lock) PASS. S59, S60, S61 and S62 held their stories only after in-run fixes (70cd9492, fd9bbdb4/eac0ccdd, 60ccb95e, d3d1b4fc), and review ad53 i1 then corrected 70cd9492 (1bc65b72), so those paths need clean reruns on the current head. The run that started after ad53 i1 (loop 088f8dc8) ended QA ERROR with no recorded message before any scenario ran; this planning pass replaces it.
+
+User-visible behavior added after `afc151b5` that fresh scenarios must cover:
+- Inventory outage at a full runtime: the run makes one floor launch, then waits for a readable inventory (log "wait for a readable container inventory"). Its settled workers whose release is unconfirmed, and workers a release deliberately kept (INPUT_REQUIRED or viewed), count as held. So INPUT_REQUIRED settlements during the outage do not each admit another launch. Peak at most L+1; after recovery the deferred releases run, the peak returns to at most L and the batch grows back (70cd9492, 1bc65b72).
+- A partial run-end release, or its deferred retry, logs which viewed/INPUT_REQUIRED workers it kept even when it released others (60ccb95e).
+- A container QA worker's workspace-trust dialog naming `/workspace` is accepted for the mounted PR workdir even where the host also has a `/workspace`. Any other path in a container worker's dialog is refused rather than mapped to a host directory (fd9bbdb4).
+- A TUI restart during a dead worker's retry backoff resumes the retry: the resumed run relaunches the worker, never polls the concretizer for a verdict and does not hang (eac0ccdd).
+- Removal races report the truth: several containers vanishing during one listing (e.g. `pm pr cleanup --resources` racing a pane-exit release) are retaken and do not leave "runtime inventory unavailable; proxy preserved". A review/sign-off `--fresh` replacement that removes the old allocation before the old pane's release records itself does not leave "owner release pending" in status when the inventory is complete. With an unreadable inventory, status still lists it (d3d1b4fc).
+
 Source grounding:
 - `pm_core/container.py`: serialized launch/reuse, completed setup/config probes, runtime cause classification, ID-specific EXIT cleanup, PID recovery, bounded creation and legacy cleanup.
 - `pm_core/container_reaper.py`: exact pane ownership, scope, retention, launch grace, pre-delete rechecks, bounded removal, persisted failures and unused-proxy cleanup.
@@ -91,6 +100,18 @@ Fresh scenarios 58–63 re-cover them on HEAD `afc151b5`:
 - workdirs/evidence: all
 - popups: none changed since S54 PASS; not re-run
 - locale: none changed since S55 PASS; not re-run
+
+Fresh scenarios 64–68 re-cover them on HEAD `1bc65b72`:
+- runtime namespace/identity: 64, 66, 68
+- locks/leases: 66
+- reaper outcomes: 66, 67
+- retention: 64, 67
+- tmux sockets/clients: 65, 67, 68
+- push proxies: 66, 68
+- headroom/queues: 64
+- process trees/PID: none changed since S61; not re-run
+- workdirs/evidence: all
+- popups/locale: none changed; not re-run
 
 ## Setup
 
@@ -145,6 +166,16 @@ Fresh scenarios 58–63 re-cover them on HEAD `afc151b5`:
     - Fresh PR branches have no upstream: push with `git push origin HEAD`. `pm pr review` on a sign_off PR moves it back to in_review; reset status with `pm pr edit --status` before re-running sign-off.
     - Plain `pm pr start` after a forced restart only focuses a companion-only window (pr-bbad0d0); close the companion first.
     - Deleted-cwd releases may log to `~/.pm/debug/default.log`; grep every `~/.pm/debug/*.log`.
+
+22. Fixture lessons from 58–63:
+    - A grouped session (recorder or viewer) whose name does not start with `pm-` breaks TUI QA start (pr-5d90350). Name viewer sessions `<pm-session>~N`.
+    - The fake planner needs a committed `pm/specs/<pr>/qa.md`. Interactive s0 consumes the first scripted `qa_scenario` fake entry. The fake config rejects non-dict `_` keys. Delete `~/.pm/sessions/<tag>/fake-claude.state` before a run whose launch cursor must restart.
+    - The PM debug log contains NUL bytes: use `grep -a`. `pm pr signoff` needs a shell inside the PM tmux session.
+    - QA scenario panes have no EXIT-trap release, so a closed INPUT_REQUIRED window is reclaimed only by a scoped reap, the next run-start reconcile or the ten-minute periodic pass.
+    - Impl/review/sign-off panes do have an EXIT release (removed within about 2 s of kill-window). The young-abandoned path needs the pane's process group SIGKILLed.
+    - The TUI periodic reconcile fires every 600 s from TUI start/restart; schedule faults away from it. For a fork-failure fault, use a strict soft limit; a limit equal to the current thread count lets forks through.
+    - tmux 3.2a `display -t <gone pane>` exits 0. Install a fake-claude stand-in (e.g. one that first shows a trust dialog) by link plus rename-over, never `mv`. Use `setsid nohup` for a long nested `build-base`.
+    - Long holds on a busy reaper lock need chained gates: inventory `ps` times out at 30 s and inspect at 60 s.
 
 ## Requirements — user stories
 
@@ -275,5 +306,7 @@ BLOCKED/unsupported is required if the worker cannot obtain real runtime/image/n
 
 22. A run-end release deferred by a runtime outage is retried as the whole run-end release (review 090d). A window that was viewed at run end but is no longer viewed when the retry runs is released by that retry; "viewed" is judged at release time. A window still viewed at retry time stays.
 23. A release recorded while the runtime identity probe failed carries no runtime domain. It never authorizes removal and `pm container status` shows it only as a diagnostic ("Unverifiable release records … not retried"), never as a retryable failure that makes `pm container reap` exit nonzero. Such records are currently never cleared even after their allocation is gone (S49 open item); that accumulation is tracked separately as pr-a4c4500 and is not an acceptance criterion here. QA does require that the stopped run's containers are actually removed after recovery.
+
+24. S59 open question (note-c91b547): with C holding a container retained for a human, C launched only while the running count was below L. A, which held no container of its own, then made its single at-least-one floor launch, reaching L+1. That matches resolution 21: the L+1 slot belongs to one floor launch by a run that holds nothing, and a run holding a retained container never launches at or above L. No cross-process coordination of the L+1 slot is required. Scenario Thens must not assert that every peak sample has a particular composition; they assert peak at most L+1, that the retaining run never launches at or above L, and that the retained container survives.
 
 No unresolved product ambiguities remain. This refresh records planning only; it does not claim runtime validation.
