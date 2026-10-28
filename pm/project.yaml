@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T16:14:46.314084+00:00'
+  updated_at: '2026-10-28T16:57:40.572013+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39412,6 +39412,26 @@ prs:
       one PR workdir (apply racing merge).'
     created_at: '2026-10-28T16:14:46Z'
     last_edited: '2026-10-28T16:14:46Z'
+  - id: note-7b47d2d
+    text: 'QA scenario 46 PASS at d35e22a4 — no code change; all five triples held
+      live (sync with every workdir gone: bad merge flagged with one Merge integrity
+      note, second sync silent, good merge silent with no note/record, sync-github
+      parity, --propagation-only recovery then refusal). Harness facts for the next
+      run: (1) `pm pr sync`/`sync-github` do their own `git fetch` against the project
+      repo, so the real /usr/bin/git must be first on PATH (the ~/.local/bin push-proxy
+      wrapper fails them). (2) The fake-github session tag keys both the stand-in
+      and the captures dir, so build each story in its own fresh directory outside
+      any git repo (/tmp/pm-s46-s1, -s3, -s4, -s5) — re-running in the same dir reuses
+      the stand-in and the PR is already merged. (3) `pm session` was started on a
+      private tmux socket (PM_TMUX_SOCKET=/tmp/s46-tmux.sock) and its TUI stopped
+      with `kill -TERM` on the pane pid, leaving a plain shell window; otherwise the
+      TUI 5-minute background sync can finalize the merge first. (4) Story 3 good-merge
+      fixture: run the teammate `git -C "$REMOTE" merge --no-ff feat-x` BEFORE any
+      new commit so the merge commit first parent is B1 and its tree equals the approved
+      candidate tree. (5) The approval report meta tags are `pm-signoff-verdict`/`pm-signoff-head`/`pm-signoff-base`
+      (12-char hashes); `pm pr signoff record` binds A and B1. (6) Captures at /pm-captures/scenarios/46/{story1-sync-workdir-gone,story2-second-sync,story3-good-merge-silent,story4-sync-github,story5-propagation-only-recovery}.'
+    created_at: '2026-10-28T16:57:40Z'
+    last_edited: '2026-10-28T16:57:40Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
