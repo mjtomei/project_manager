@@ -132,9 +132,13 @@ printf '%s\n' "$SERVER_PID" > "$CAPDIR/server.pid"
 # comes up, so stop with the reason and stop the server we started. Bound
 # each attempt too — a server that accepts the connection but never answers
 # would otherwise block inside one curl call and the deadline would never
-# be consulted.
+# be consulted. No `-f`, like the port pre-check above: readiness means "the
+# server answers", not "the root path returns 2xx". An app whose UI lives at
+# a subpath answers 404 at "/" and is up — with `-f` this poll runs out its
+# deadline, reports "app did not answer", and kills a healthy server
+# (verified: `curl -sf` exits 22 on that app while plain `curl` exits 0).
 deadline=$(( $(date +%s) + 120 ))
-until curl -sf --connect-timeout 2 --max-time 5 -o /dev/null "$APP_URL/"; do
+until curl -s --connect-timeout 2 --max-time 5 -o /dev/null "$APP_URL/"; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         echo "app did not answer on $APP_URL within 120s — check its startup output" >&2
         kill "$SERVER_PID" 2>/dev/null || true

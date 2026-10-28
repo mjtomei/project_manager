@@ -305,6 +305,51 @@ class TestRecipes:
                 "never wrote one can present the previous run's failure as "
                 "its own")
 
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_section_clears_the_previous_video(self, name):
+        """A failed capture must not leave the previous run's mp4 in place.
+
+        The render step clears ``recording.mp4`` and the intermediate
+        ``recording.gif`` before rendering, but a capture that *fails* exits
+        before that step ever runs — so without this the capture directory
+        keeps the earlier run's video, and the manifest and the sign-off
+        report present it as this run's recording. That is the same
+        stale-evidence bug as a leftover cast, one step earlier (the web-UI
+        recipe clears its mp4 in step 1 for exactly this reason).
+        """
+        text = _recipe_text(name)
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        rm = _statement(first_block, "rm -f ")
+        for artifact in ("recording.mp4", "recording.gif"):
+            assert artifact in rm, (
+                f"{name}: the first capture block keeps an earlier run's "
+                f"{artifact}, so a capture that fails before the render step "
+                "leaves the previous run's video as this run's")
+        scaffold_rm = _statement(_scaffold_block(text), "rm -f ")
+        for artifact in ("recording.mp4", "recording.gif"):
+            assert artifact in scaffold_rm, (
+                f"{name}: the scaffold's own cleanup keeps an earlier run's "
+                f"{artifact}")
+
+    def test_cli_capture_section_clears_a_stale_transcript(self):
+        """The `tee` fallback's transcript must not survive into a later run.
+
+        ``tee`` truncates, so a fallback run does not append — but a run that
+        takes the cast path writes no transcript at all, and the produced-files
+        list names ``transcript.log``, so the earlier fallback run's output
+        would be presented as this run's. The tmux recipe clears its
+        transcript for the same reason (there it is appended to).
+        """
+        text = _recipe_text("cli-recording.md")
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        assert "transcript.log" in _statement(first_block, "rm -f "), (
+            "cli-recording: the first capture block keeps an earlier run's "
+            "transcript.log, which the produced-files list names")
+        assert "transcript.log" in _statement(_scaffold_block(text), "rm -f "), (
+            "cli-recording: the scaffold keeps an earlier run's transcript.log")
+
     def test_tmux_readiness_wait_targets_the_computed_session(self):
         """The pm-session poll must not match the recipe's own recorder.
 
@@ -1031,6 +1076,66 @@ def test_render_succeeds_with_a_playable_mp4(name, tmp_path):
     assert r.returncode == 0, r.stderr
     assert mp4.read_bytes() == b"mp4"
     assert not gif.exists(), "the intermediate gif is left behind"
+
+
+def _run_render_without_ffmpeg(name, tmp_path):
+    """Run a recipe's render block on a PATH that holds no ``ffmpeg``.
+
+    A host may well have a real ``ffmpeg`` on ``PATH``, so the bindir carries
+    the block's other tools (stubbed ``agg``/``ffprobe``, symlinked coreutils)
+    and nothing else — the encoder has to be genuinely absent.
+    """
+    bash = shutil.which("bash")
+    block = _render_block(name)
+    cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
+    block = (block.replace("<capture-dir>", str(tmp_path))
+                  .replace("<short-name>", "run"))
+    cast = Path(cast_rel.replace("<capture-dir>", str(tmp_path))
+                       .replace("<short-name>", "run"))
+    cast.parent.mkdir(parents=True, exist_ok=True)
+    cast.write_text('{"version": 2}\n')
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "agg", (
+        'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
+    _stub_tool(bindir, "ffprobe", (
+        'case "$*" in *width,height*) echo 640,480 ;; *) echo h264 ;; esac\n'))
+    for tool in ("rm", "cat", "sh", "date", "uname", "mkdir", "chmod"):
+        for d in ("/bin", "/usr/bin"):
+            if (Path(d) / tool).exists():
+                os.symlink(str(Path(d) / tool), bindir / tool)
+                break
+    env = dict(os.environ, PATH=str(bindir))
+    r = subprocess.run([bash], input=block, env=env,
+                       capture_output=True, text=True)
+    return r, cast.with_suffix(".mp4"), cast.with_name(cast.name + ".gif")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_missing_encoder(name, tmp_path):
+    """A missing ``ffmpeg`` is not a bad gif.
+
+    The block checks the encoder's exit status (R12), so a host without
+    ``ffmpeg`` reaches the shell's "ffmpeg: command not found" (status 127)
+    and the block reports "ffmpeg failed on the gif" — sending the worker to
+    inspect the cast and ``agg`` for a tool that is not installed. Verified
+    against the pre-fix blocks: rc 1 with that message and no ``ffmpeg``
+    anywhere on PATH. This is the misdiagnosis the web-UI finalize step got
+    the same guard for (R22), in the recipes where a missing renderer is most
+    likely (the QA image used on 2026-10-27 had no ``agg`` either).
+    """
+    r, mp4, gif = _run_render_without_ffmpeg(name, tmp_path)
+
+    assert r.returncode != 0, r.stderr
+    assert "ffmpeg is not installed" in r.stderr, (
+        f"{name}: a missing encoder is not named: " + r.stderr)
+    assert "ffmpeg failed on the gif" not in r.stderr, (
+        f"{name}: a missing encoder is still reported as a bad gif: "
+        + r.stderr)
+    assert not gif.exists(), (
+        f"{name}: the render ran agg before noticing the encoder was missing")
+    assert not mp4.exists(), (
+        f"{name}: a render that could not run left an mp4 behind")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -1968,8 +2073,16 @@ case "$STUB_MODE" in
 esac
 # Call 1 is the recipe's own "is the port free?" pre-check; the app answers
 # from call 2 on.
-[ "$n" -ge 2 ] && exit 0
-exit 7
+[ "$n" -ge 2 ] || exit 7
+# `http404`: the app is up but every route — "/" included — is a 404, so
+# `curl -f` exits 22 while plain curl exits 0. Readiness has to mean "the
+# server answers", the same definition the port pre-check uses.
+if [ "$STUB_MODE" = http404 ]; then
+    case " $* " in
+      *" -f "*|*" -sf "*|*" -fs "*) exit 22 ;;
+    esac
+fi
+exit 0
 """
 
 
@@ -2044,6 +2157,27 @@ class TestWebUiStartExecution:
         assert r.returncode != 0, (
             "a server that never answers was reported as started")
         assert "did not answer" in r.stderr, r.stderr
+
+    def test_an_app_that_answers_404_at_root_is_ready(self, tmp_path):
+        """Readiness means "the server answers", not "the root returns 2xx".
+
+        The port pre-check above uses curl *without* ``-f`` on purpose — any
+        HTTP answer means the port is taken — but the readiness poll used
+        ``-sf``, so an app whose UI lives at a subpath (404 at "/") was
+        reported as "app did not answer on …" after the full deadline, and
+        the healthy server this block had just started was killed (verified:
+        ``curl -sf`` exits 22 on that app, plain ``curl`` exits 0). A
+        misdiagnosis of a working app, in the same block that refuses a port
+        something else answers on.
+        """
+        r, launched = _run_web_ui_start("http404", tmp_path)
+        assert r.returncode == 0, (
+            "an app that answers 404 at '/' was reported as not answering: "
+            + r.stderr)
+        deadline = time.time() + 5
+        while not launched.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        assert launched.exists(), "the recipe never launched the app"
 
     def test_a_failed_start_removes_the_pid_it_recorded(self, tmp_path):
         """The dead app's pid must not outlive it in ``server.pid``.
@@ -2461,6 +2595,48 @@ class TestCaptureFlowExecution:
             "the readiness failure does not say where the pane was saved: "
             + r.stderr)
         assert not cast.exists()
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_failed_capture_leaves_no_previous_video(self, name, tmp_path):
+        """A capture that fails must not leave the earlier run's video.
+
+        The render step clears the video pair before rendering, but a capture
+        that fails exits before that step ever runs. Verified with the pre-fix
+        blocks: an earlier ``recording.mp4`` and ``recording.gif`` seeded in
+        the capture directory survived the failed run, so the directory held
+        no cast at all but still held a video the manifest and the report
+        would present as this run's recording — the stale-cast bug one step
+        earlier.
+        """
+        raw = _scaffold_block(_recipe_text(name))
+        r, cast = _run_block(
+            raw, "norec", tmp_path, target=True,
+            files={"recording.mp4": "previous run",
+                   "recording.gif": "previous gif"})
+        cap = cast.parent
+        assert r.returncode != 0, r.stderr
+        assert not (cap / "recording.mp4").exists(), (
+            f"{name}: a failed capture left the previous run's recording.mp4 "
+            "as this capture's only video")
+        assert not (cap / "recording.gif").exists(), (
+            f"{name}: a failed capture left the previous run's gif behind")
+
+    def test_cli_failed_capture_leaves_no_previous_transcript(self, tmp_path):
+        """The `tee` fallback's transcript must not outlive a later run.
+
+        ``tee`` truncates, so the fallback itself never appends — but a run
+        that takes the cast path writes no transcript at all, and the
+        produced-files list names ``transcript.log``, so the earlier fallback
+        run's output would be read as this run's. The tmux recipe clears its
+        transcript in step 0 for the same reason.
+        """
+        raw = _scaffold_block(_recipe_text("cli-recording.md"))
+        r, cast = _run_block(raw, "norec", tmp_path,
+                             files={"transcript.log": "previous transcript"})
+        assert r.returncode != 0, r.stderr
+        assert not (cast.parent / "transcript.log").exists(), (
+            "a failed cli capture left the previous run's transcript.log, "
+            "which the produced-files list names")
 
     def test_cli_stop_timeout_saves_the_pane(self, tmp_path):
         """A failing wait must leave the pane where its message says it is.

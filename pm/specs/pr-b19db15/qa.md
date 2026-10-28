@@ -122,7 +122,13 @@ foreground render block,
   `codec_name=h264`; a render whose `agg`/`ffmpeg` fails partway (leaving a
   non-empty partial mp4) exits non-zero with the "render produced no mp4 — …"
   message and leaves no mp4, and a render with no cast at all says "there is
-  no cast to render" instead of blaming a missing `agg`;
+  no cast to render" instead of blaming a missing `agg`; a host with no
+  `ffmpeg` on `PATH` stops with "ffmpeg is not installed — the render step
+  needs it" instead of reporting the gif as failed;
+- a capture that fails (e.g. the recorder never writes a cast) leaves *no*
+  `recording.mp4`/`recording.gif` from the earlier run in the capture
+  directory — the render step's own cleanup never runs on that path — and the
+  earlier run's `transcript.log` is cleared with them;
 - `manifest.md` exists and its `## Files` section lists the produced files;
   on a host without asciinema the documented `| tee …` fallback writes
   `transcript.log` into the capture directory (not the worker's cwd), and the
@@ -156,7 +162,11 @@ session, stop the recorder, and render the cast,
   see because asciinema exits 0 either way); and driving from a
   fresh shell re-derives `$TARGET` (an empty one is refused), so the keys
   cannot auto-detect and drive a different TUI than the one recorded;
-- `recording.mp4` is fresh and H.264, and `manifest.md` lists the files.
+- `recording.mp4` is fresh and H.264, and `manifest.md` lists the files; a
+  capture that fails leaves no `recording.mp4`/`recording.gif` from the
+  earlier run behind (the render step's cleanup never runs on that path), and
+  a host with no `ffmpeg` stops with "ffmpeg is not installed — the render
+  step needs it" instead of reporting the gif as failed.
 
 ### R3 — Recipe readiness and stop waits are bounded, and stale files are cleared
 
@@ -166,13 +176,14 @@ session, stop the recorder, and render the cast,
 **Then** it exits within the stated deadline with an actionable message and
 cleans up (kills the recorder/session) instead of hanging or passing on the
 wrong session; and
-**Given** a cast, transcript, recorder status, or recorder session left by an
-earlier run,
+**Given** a cast, transcript, recorder status, recorder session, or render
+output (`recording.mp4`/`recording.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort with "recording already exists"
 or "duplicate session", the readiness wait does not pass on the previous
-run's recorder, the new cast is this run's, and the transcript holds only this
-run.
+run's recorder, the new cast is this run's, the transcript holds only this
+run, and a capture that fails before the render step still leaves no earlier
+run's video in the capture directory.
 
 ### R4 — The web-UI recipe's readiness wait is bounded and cleans up
 
@@ -187,6 +198,10 @@ run.
   the step fails at once with the "something already answers …" message and
   does not start the app — otherwise the readiness wait would pass against
   that server and the driver would record the wrong app;
+- an app that answers 404 at `/` (its UI lives at a subpath) counts as
+  answering: the readiness poll carries no `-f`, so the step proceeds
+  instead of running out its deadline, reporting "app did not answer", and
+  killing a server it had just started;
 - the Playwright driver starts in the image: `node driver.mjs` resolves
   `playwright` through the recipe's `node_modules` link (without it the run
   dies with `ERR_MODULE_NOT_FOUND`), and the recipe's resolution check

@@ -68,6 +68,12 @@ a leftover one would let a recorder that was torn down before it finished
 pass that check. `recorder-stderr.log` and `recorder-pane.log` are this
 run's failure evidence — asciinema's own diagnostics, and the pane's last
 screen when a wait gives up — so an earlier run's copies go too.
+The render outputs go with them: the render step clears `recording.mp4` and
+the intermediate `recording.gif` before it runs, but a capture that *fails*
+here exits before that step ever runs, so the previous run's video would
+otherwise sit in the capture directory as this run's — the same
+stale-evidence bug as a leftover cast, one step earlier. (The web-UI recipe
+clears its mp4 in step 1 for the same reason.)
 
 ```
 # 0. Clear what an earlier run left behind before anything writes into it:
@@ -84,8 +90,13 @@ mkdir -p <capture-dir> || {
     exit 1
 }
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
+      <capture-dir>/recording.mp4 <capture-dir>/recording.gif \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
       <capture-dir>/recorder-pane.log
+# The mp4 and the intermediate gif are here, not only in the render step: a
+# capture that fails below exits before that step runs, so the previous run's
+# video would otherwise be the only recording this capture directory holds —
+# a stale artifact the manifest and the report would present as this run's.
 # Failure paths below tear the recorder session down, so each one saves the
 # pane's last screen into the capture dir first — otherwise the messages that
 # point at the pane point at evidence that no longer exists. The save is
@@ -370,7 +381,9 @@ missing or stale video — so install `agg` first when `command -v agg` prints
 nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
 it is missing, since `curl -o` cannot; the asset is per architecture, verified
 with agg 1.9.0). The block is guarded on `command -v agg` for that reason, so
-pasting it on an image that already has `agg` does nothing:
+pasting it on an image that already has `agg` does nothing. The render block
+also checks that `ffmpeg` exists, because a missing encoder otherwise reads
+as a bad gif:
 
 ```
 # Install only when agg is missing. The bundled Dockerfile installs it, so
@@ -422,6 +435,18 @@ render_fail() {
 # is, so the worker does not go install a renderer it already has.
 [ -s "$cast" ] || render_fail \
     "there is no cast to render (the recording wrote nothing)"
+# A missing encoder is not a bad gif either. Without this check the shell
+# answers "ffmpeg: command not found" (status 127) and the encode below
+# reports "ffmpeg failed on the gif", sending the worker to inspect the cast
+# and `agg` for a tool that is simply not installed — the same misdiagnosis
+# as reporting a missing cast as an `agg` problem, one tool over. (The web-UI
+# recipe's finalize step guards this the same way.) Checked before the agg
+# render so a missing encoder costs no encode.
+command -v ffmpeg >/dev/null || {
+    echo "ffmpeg is not installed — the render step needs it; install it" \
+        "(e.g. 'apt-get install ffmpeg') and re-run this step" >&2
+    exit 1
+}
 agg --idle-time-limit 2 "$cast" "$cast.gif" || render_fail \
     "agg failed on the cast — is 'agg' installed?"
 # 2x nearest-neighbor upscale for crisp text — but only while the result

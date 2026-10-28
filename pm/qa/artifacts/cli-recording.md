@@ -39,8 +39,9 @@ substitutes the actual captures directory for `<capture-dir>`):
 
 ## Capture
 
-Before any of the forms below, create the capture directory and clear an
-earlier run's cast, recorder status and failure logs:
+Before any of the forms below, create the capture directory and clear what
+an earlier run left in it — the cast, the transcript, the rendered video and
+the recorder diagnostics:
 
 ```
 # A capture directory that cannot be created must stop the run here: every
@@ -52,6 +53,9 @@ mkdir -p <capture-dir>/<short-name> || {
     exit 1
 }
 rm -f <capture-dir>/<short-name>/recording.cast \
+      <capture-dir>/<short-name>/transcript.log \
+      <capture-dir>/<short-name>/recording.mp4 \
+      <capture-dir>/<short-name>/recording.gif \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
       <capture-dir>/<short-name>/recorder-pane.log
@@ -72,7 +76,12 @@ before it finished pass that check. `recorder-stderr.log` and
 `recorder-pane.log` are this run's failure evidence — asciinema's own
 diagnostics, and the pane's last screen when a wait gives up — so an earlier
 run's copies go with the rest; a stale one would be read as this run's
-failure.
+failure. The render outputs (`recording.mp4` and the intermediate
+`recording.gif`) and the `tee` fallback's `transcript.log` go too: the
+render step clears the video pair before it runs, but a capture that *fails*
+exits before that step ever runs, so the previous run's video would
+otherwise be the only recording in the capture directory — a stale artifact
+the manifest and the report would present as this run's evidence.
 
 ### One command, end-to-end
 
@@ -152,6 +161,9 @@ mkdir -p <capture-dir>/<short-name> || {
     exit 1
 }
 rm -f <capture-dir>/<short-name>/recording.cast \
+      <capture-dir>/<short-name>/transcript.log \
+      <capture-dir>/<short-name>/recording.mp4 \
+      <capture-dir>/<short-name>/recording.gif \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
       <capture-dir>/<short-name>/recorder-pane.log
@@ -310,7 +322,9 @@ missing or stale video — so install `agg` first when `command -v agg` prints
 nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
 it is missing, since `curl -o` cannot; the asset is per architecture, verified
 with agg 1.9.0). The block is guarded on `command -v agg` for that reason, so
-pasting it on an image that already has `agg` does nothing:
+pasting it on an image that already has `agg` does nothing. The render block
+also checks that `ffmpeg` exists, because a missing encoder otherwise reads
+as a bad gif:
 
 ```
 # Install only when agg is missing. The bundled Dockerfile installs it, so
@@ -363,6 +377,18 @@ render_fail() {
 # `tee transcript.log` fallback above produces no cast at all.)
 [ -s "$cast" ] || render_fail \
     "there is no cast to render (the recording wrote nothing)"
+# A missing encoder is not a bad gif either. Without this check the shell
+# answers "ffmpeg: command not found" (status 127) and the encode below
+# reports "ffmpeg failed on the gif", sending the worker to inspect the cast
+# and `agg` for a tool that is simply not installed — the same misdiagnosis
+# as reporting a missing cast as an `agg` problem, one tool over. (The web-UI
+# recipe's finalize step guards this the same way.) Checked before the agg
+# render so a missing encoder costs no encode.
+command -v ffmpeg >/dev/null || {
+    echo "ffmpeg is not installed — the render step needs it; install it" \
+        "(e.g. 'apt-get install ffmpeg') and re-run this step" >&2
+    exit 1
+}
 agg --idle-time-limit 2 "$cast" "$cast.gif" || render_fail \
     "agg failed on the cast — is 'agg' installed?"
 # 2x nearest-neighbor upscale for crisp text — but only while the result
