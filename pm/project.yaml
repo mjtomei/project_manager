@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T19:51:15.022500+00:00'
+  updated_at: '2026-10-28T19:56:34.581604+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37070,6 +37070,51 @@ prs:
       passed.'
     created_at: '2026-10-28T19:51:14Z'
     last_edited: '2026-10-28T19:51:14Z'
+  - id: note-f5baf20
+    text: 'QA scenario 18 (non-human transcript traffic never re-arms or clears the
+      wait): PASS on d41ed19f, live TUI + interactive stand-in, all 5 stories. (1)
+      wakeup turn after the answer: `# /loop tick` and `<task-notification>` turns
+      with a no-verdict reply + idle left the run running / "review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running)" / ir=false / fu=true / ⟳1 for 9 samples each (runs
+      popup RUNNING review #1/#2), no ⏸ re-arm, no new notice, verdict stayed INPUT_REQUIRED;
+      the real NEEDS_WORK then advanced one iteration with exactly one "follow-up
+      verdict=NEEDS_WORK". (2) /model local-command echo after the PASS: verdict stayed
+      PASS, "Review loop done: ✓ PASS (1 iteration)", row `waiting | review passed;
+      QA skipped (skip_qa); awaiting sign-off (hand-off on next scheduler pass)` with
+      ir=false/fu=false, loop exited ~0.1 s after the idle — the baa8-i3 regression
+      no longer reproduces. (3) unanswered wait + empty / tool_use+tool_result("50
+      passed", "PASS", "yes", "INPUT_REQUIRED") / system-reminder-only / task-notification
+      / interrupted records, each with an idle: every sample stayed waiting / INPUT_REQUIRED
+      / ir=true / ⏸1 on the same window, one notice, one polling line, zero follow-up
+      verdicts; the typed answer cleared it in ~1 s. (4) three typed answers in a
+      row (NEEDS_WORK and PASS variants): no re-arm, no "waiting on the user again",
+      one verdict each, NEEDS_WORK advanced one iteration, PASS ended the loop with
+      no further iteration. (5) restart with a follow-up verdict but no fresh idle:
+      answer + NEEDS_WORK/PASS appended, ~/.pm/hooks/<sid>.json overwritten with a
+      `stop` event, `pm tui restart --breadcrumb` — resumed loop logged "adopting
+      INPUT_REQUIRED wait …", "follow-up verdict NEEDS_WORK/PASS already in transcript",
+      advanced to iteration 2 / stopped on PASS; the adopt check read `running | review
+      resuming (iteration N)` with resuming=true, ir=false, fu=false. Evidence /pm-captures/scenarios/18/
+      (one continuous 200x50 TUI cast+mp4 covering all stories, pipe-pane transcript,
+      per-second status JSON/text/tree/popup samples, per-story evidence.md + manifest.md).
+      tests/test_review_input_required_state.py + test_verdict_transcript.py: 88 passed.
+      Observations, not failures: (a) at the answer→follow-up transition the tech-tree
+      frame can keep the pre-answer ⏸N for up to ~1 s before repainting ⟳N while the
+      status row/popup already read running/answered (the documented tree repaint
+      lag; no re-arm — ir never went true, no new notice, no extra polling line);
+      (b) on the PASS stories the scheduler sign-off hand-off ran within the same
+      second, so the intermediate "review passed; QA skipped" row was sampled directly
+      only in story 2 and is otherwise superseded by the sign-off row. Harness notes
+      for the next run: the stand-in can be driven entirely through a control dir
+      (append raw records, emit/suppress idles) and must stop idling once the human
+      answers, or a mid-turn idle makes the waiter take the prose branch; a private
+      PM_TMUX_SOCKET + PM_HOST_HOME=/home/matt starts the session cleanly (hook install
+      skips with a warning, which is fine because the stand-in writes ~/.pm/hooks/<sid>.json
+      itself); to re-run a review loop after a PASS, set the PR back to in_review
+      and do a clean `pm tui restart` (a breadcrumb restart or an autostart re-arm
+      keeps the completed run state), then `pm autostart add`.'
+    created_at: '2026-10-28T19:56:34Z'
+    last_edited: '2026-10-28T19:56:34Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
