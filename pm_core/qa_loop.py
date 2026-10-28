@@ -1011,6 +1011,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         # runtime) can grow back instead of staying serialized.
         "desired_cap": int(concurrency_cap if desired_cap is None
                            else desired_cap or 0),
+        # The container occupying this process's floor slot when this run
+        # made the floor launch. Process memory does not survive a TUI
+        # restart; without it another resumed run holding nothing would make
+        # a second floor launch while this one is still past the limit (L+2).
+        "floor_container": _own_floor_container(state),
         "finalize_verdict": state.finalize_verdict,
         "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
         "scenario_verdict_reasons": {
@@ -5002,41 +5007,6 @@ def _initial_container_batch(state: QALoopState, desired_cap: int) -> tuple[int,
     return cap, cap
 
 
-def _container_headroom_cap(cap: int, desired: int | None = None,
-                            active: int = 0) -> int:
-    """Re-clamp the run's *total* launch batch against a fresh running count.
-
-    ``container-max-running`` is opt-in (0 = unlimited), so the default path
-    performs no runtime inventory.  The verdict poll re-clamps before each
-    queued launch: a batch derived from an unreadable inventory at run start
-    (or from a momentarily full runtime) clamps to one, and re-clamping the
-    *already clamped* value could only keep or lower it — the run would stay
-    serialized long after the runtime recovered.  ``desired`` is therefore the
-    run's original batch size; the clamp is recomputed from it each time.
-
-    The limit counts every running pm container, *including this run's own
-    ``active`` workers*.  The headroom is therefore additional capacity, so
-    the batch this run may run is ``active + headroom`` (capped by ``desired``)
-    — comparing ``active`` directly to the headroom would stall a capped run at
-    roughly half the configured concurrency.
-    """
-    return _container_launch_room(cap, desired, active=active)[0]
-
-
-def _container_launch_room(cap: int, desired: int | None = None, active: int = 0,
-                           own: Collection[str] = ()) -> tuple[int, int]:
-    """Return ``(batch, held)``; see :func:`_container_launch_room_known`."""
-    return _container_launch_room_known(cap, desired, active=active, own=own)[:2]
-
-
-def _container_launch_room_known(cap: int, desired: int | None = None,
-                                 active: int = 0, own: Collection[str] = (),
-                                 ) -> tuple[int, int, bool]:
-    """Return ``(batch, held, known)``; see :func:`_container_admission`."""
-    room = _container_admission(cap, desired, active=active, own=own)
-    return room.batch, room.held, room.known
-
-
 class _Admission(NamedTuple):
     batch: int
     held: int
@@ -5052,6 +5022,15 @@ def _container_admission(cap: int, desired: int | None = None, active: int = 0,
                          own: Collection[str] = (), run: tuple | None = None,
                          ) -> _Admission:
     """Size the next launch from one inventory.
+
+    ``container-max-running`` is opt-in (0 = unlimited), so the default path
+    performs no runtime inventory.  The verdict poll re-clamps before each
+    queued launch from ``desired``, the run's original batch size: a batch
+    clamped to one at run start (unreadable inventory, momentarily full
+    runtime) re-clamped from the *already clamped* value could only keep or
+    lower it, and the run would stay serialized after the runtime recovered.
+    The limit counts every running pm container, including this run's own
+    ``active`` workers, so the headroom is additional capacity on top of them.
 
     ``known`` is False when the running-container inventory was unreadable.
 
@@ -5153,6 +5132,32 @@ def _floor_slot_taken(run: tuple, running_count: int | None, limit: int,
 def _claim_floor_slot(run: tuple, name: str) -> None:
     """Record that *run* made this process's floor launch of container *name*."""
     _floor_slot.update(run=run, name=name)
+
+
+def _own_floor_container(state: QALoopState) -> str | None:
+    """The container of *state*'s floor launch while it occupies the slot.
+
+    Reads a copy without :data:`_launch_admission_lock`, which is held across
+    runtime inventories: a resume snapshot must not wait on ``podman ps``.
+    """
+    slot = dict(_floor_slot)
+    return slot.get("name") if slot.get("run") == (state.pr_id, state.loop_id) else None
+
+
+def restore_floor_claim(state: QALoopState, resume_data: dict) -> None:
+    """Re-occupy the floor slot a resumed run held before a TUI restart.
+
+    Call before any resumed run's poll starts, so a run that holds nothing
+    cannot take the empty slot first.  A live claim is never overwritten,
+    and a stale one frees itself on the next readable inventory (see
+    :func:`_floor_slot_taken`).
+    """
+    name = resume_data.get("floor_container")
+    if not name or not resume_data.get("use_containers"):
+        return
+    with _launch_admission_lock:
+        if not _floor_slot:
+            _claim_floor_slot((state.pr_id, state.loop_id), name)
 
 
 def _execute_and_finalize(

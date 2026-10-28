@@ -1709,6 +1709,8 @@ class TestFakeClaudeConfigCLI:
     def _setup(self, tmp_path, monkeypatch, tag="test-tag"):
         monkeypatch.setattr("pm_core.paths.sessions_dir", lambda: tmp_path)
         monkeypatch.setattr("pm_core.paths.get_session_tag", lambda **kw: tag)
+        # Run inside a real pm tmux pane, the current session wins over the tag.
+        monkeypatch.setattr("pm_core.cli.helpers._get_current_pm_session", lambda: None)
         return tag
 
     def _run(self, args, **kw):

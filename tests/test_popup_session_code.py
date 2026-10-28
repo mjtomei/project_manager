@@ -123,6 +123,8 @@ def test_popup_config_uses_base_session_not_workdir(tmp_path, monkeypatch, capfd
     sock = os.path.join(sock_dir, "s")
     monkeypatch.setenv("PM_TMUX_SOCKET", sock)
     monkeypatch.setenv("TMUX", f"{sock},1,0")
+    # A pane ID inherited from a real tmux client names a pane on another server.
+    monkeypatch.delenv("TMUX_PANE", raising=False)
     subprocess.run(["tmux", "-S", sock, "new-session", "-d", "-s", SESSION],
                    check=True)
     try:

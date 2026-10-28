@@ -16,6 +16,12 @@ def test_invalid_owner_preserves_proxy(tmp_path, monkeypatch, contents):
     # The directory is found by name only: its owner record cannot be read,
     # so it is never listed as a releasable shared proxy.
     monkeypatch.setattr(push_proxy, "_pr_dir_candidates", lambda *a: [str(tmp_path)])
+    # Scan only this directory, never the host's real /tmp proxy dirs.
+    real_glob = push_proxy.glob.glob
+    monkeypatch.setattr(push_proxy.glob, "glob", lambda pattern, *a, **k: (
+        [str(tmp_path)] if pattern == f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}*"
+        else real_glob(pattern, *a, **k)))
+    monkeypatch.setattr(push_proxy, "_is_proxy_dir", lambda *a: True)
     monkeypatch.setattr(container, "containers_for_pr", lambda *a: set())
     remove = Mock()
     monkeypatch.setattr(push_proxy, "_kill_proxy_socket", remove)

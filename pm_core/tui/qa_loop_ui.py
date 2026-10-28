@@ -457,6 +457,7 @@ def _resume_incomplete_qa(app) -> None:
     project_data = None
 
     snapshots: dict[str, list[tuple[Path, dict]]] = {}
+    to_resume: list[tuple[str, object, dict]] = []
     for resume_file in qa_root.glob("*/qa_resume.json"):
         try:
             rdata = json.loads(resume_file.read_text())
@@ -526,11 +527,18 @@ def _resume_incomplete_qa(app) -> None:
                 qa_loop.clear_resume_file(state.qa_workdir)
             continue
 
-        # Still in progress — re-spawn the orchestration loop.
+        # Still in progress — re-spawn the orchestration loop once every
+        # resumed run has restored its floor claim (below).
+        qa_loop.restore_floor_claim(state, rdata)
+        app._qa_loops[pr_id] = state
+        to_resume.append((pr_id, state, pr))
+
+    # Spawned after the scan: a resumed poll that started before another
+    # run restored its floor claim could make a second floor launch (L+2).
+    for pr_id, state, pr in to_resume:
         def _on_update(s, _app=app):
             _app.call_from_thread(_on_qa_update, _app, s)
 
-        app._qa_loops[pr_id] = state
         app.log_message(f"Resuming QA for {pr_id} after restart...")
         _log.info("Resuming incomplete QA from disk: %s", pr_id)
         qa_loop.resume_qa_background(state, app._root, pr, _on_update)

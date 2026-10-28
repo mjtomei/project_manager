@@ -201,7 +201,7 @@ def test_unlimited_cap_costs_no_inventory_per_launch(monkeypatch):
     monkeypatch.setattr(container_mod, "max_running_containers", lambda: 0)
     monkeypatch.setattr(container_mod, "running_container_count",
                         lambda: pytest.fail("no inventory expected"))
-    assert qa_loop._container_headroom_cap(3) == 3
+    assert qa_loop._container_admission(3).batch == 3
 
 
 def test_reclamp_grows_a_reduced_batch_back_to_the_desired_size(monkeypatch):
@@ -214,10 +214,10 @@ def test_reclamp_grows_a_reduced_batch_back_to_the_desired_size(monkeypatch):
     from pm_core import container as container_mod
     monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 0)
-    assert qa_loop._container_headroom_cap(1, desired=4) == 4
-    assert qa_loop._container_headroom_cap(1, desired=0) == 4  # unlimited desired
+    assert qa_loop._container_admission(1, desired=4).batch == 4
+    assert qa_loop._container_admission(1, desired=0).batch == 4  # unlimited desired
     # No desired batch (older callers): unchanged behaviour.
-    assert qa_loop._container_headroom_cap(1) == 1
+    assert qa_loop._container_admission(1).batch == 1
 
 
 def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
@@ -319,13 +319,13 @@ def test_reclamp_counts_this_runs_active_workers_as_headroom(monkeypatch):
     monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
     # Three running containers, all this run's active workers: one slot left.
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 3)
-    assert qa_loop._container_headroom_cap(1, desired=4, active=3) == 4
+    assert qa_loop._container_admission(1, desired=4, active=3).batch == 4
     # A momentarily full runtime leaves no room to launch.
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 4)
-    assert qa_loop._container_headroom_cap(1, desired=4, active=2) == 2
+    assert qa_loop._container_admission(1, desired=4, active=2).batch == 2
     # Unknown inventory still launches one at a time.
     monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
-    assert qa_loop._container_headroom_cap(4, desired=4, active=2) == 1
+    assert qa_loop._container_admission(4, desired=4, active=2).batch == 1
 
 
 @pytest.mark.parametrize("verdict", ["PASS", "NEEDS_WORK", "INPUT_REQUIRED"])
@@ -608,13 +608,13 @@ def test_a_retained_container_consumes_launch_capacity(monkeypatch):
     inventory = _running(*A_WORKERS, B_IMPL, C1)
     monkeypatch.setattr(container_reaper, "list_containers", lambda: inventory)
 
-    batch, held = qa_loop._container_launch_room(1, desired=4, active=0, own={C1})
+    batch, held = qa_loop._container_admission(1, desired=4, active=0, own={C1})[:2]
     assert held == 1
     assert 0 + held >= batch, "C must not launch s2 into a full runtime"
 
     # Once A's workers are gone there is room again, and C launches.
     inventory = _running(B_IMPL, C1)
-    batch, held = qa_loop._container_launch_room(1, desired=4, active=0, own={C1})
+    batch, held = qa_loop._container_admission(1, desired=4, active=0, own={C1})[:2]
     assert (batch, held) == (4, 1) and 0 + held < batch
 
 
@@ -626,10 +626,10 @@ def test_a_run_holding_nothing_keeps_its_floor_launch(monkeypatch):
     monkeypatch.setattr(container_reaper, "list_containers",
                         lambda: _running(*A_WORKERS, B_IMPL))
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 5)
-    assert qa_loop._container_launch_room(1, desired=4, active=0) == (1, 0)
+    assert qa_loop._container_admission(1, desired=4, active=0)[:2] == (1, 0)
     # A settled scenario whose container is already released holds nothing.
-    assert qa_loop._container_launch_room(
-        1, desired=4, active=0, own={C1}) == (1, 0)
+    assert qa_loop._container_admission(
+        1, desired=4, active=0, own={C1})[:2] == (1, 0)
 
 
 def test_poll_defers_a_queued_launch_behind_a_retained_container(
@@ -773,21 +773,21 @@ def test_other_runs_dequeued_launch_counts_before_its_container_exists(monkeypat
     listed = [_info(f"pm-t-other-{i}") for i in range(8)]
     monkeypatch.setattr(container_reaper, "list_containers", lambda: list(listed))
     # Without a reservation, B (2 active) may grow to 3.
-    assert qa_loop._container_launch_room_known(2, desired=4, active=2) == (3, 0, True)
+    assert qa_loop._container_admission(2, desired=4, active=2)[:3] == (3, 0, True)
     token = qa_loop._reserve_launches(["pm-t-qa-pr-a-L-s8"])
     try:
-        batch, held, known = qa_loop._container_launch_room_known(2, desired=4, active=2)
+        batch, held, known = qa_loop._container_admission(2, desired=4, active=2)[:3]
         assert (batch, held, known) == (2, 0, True), "A's in-flight launch is in use"
         assert qa_loop._clamp_to_container_headroom(4) == 1
         # Once A's container exists it is counted once, not twice.
         listed.append(_info("pm-t-qa-pr-a-L-s8"))
         monkeypatch.setattr(container_mod, "running_container_count", lambda: 9)
-        assert qa_loop._container_launch_room_known(2, desired=4, active=2)[0] == 2
+        assert qa_loop._container_admission(2, desired=4, active=2)[:3][0] == 2
     finally:
         qa_loop._release_launches(token)
     assert qa_loop._inflight_launches == {}
     # A run holding nothing still gets its single floor launch into a full runtime.
-    assert qa_loop._container_launch_room_known(1, desired=4, active=0)[0] == 1
+    assert qa_loop._container_admission(1, desired=4, active=0)[:3][0] == 1
 
 
 def test_unreadable_inventory_counts_every_reservation(monkeypatch):
@@ -1276,7 +1276,7 @@ def test_reservation_turning_running_between_listings_is_not_missed(monkeypatch)
                         lambda: sum(i.running for i in snapshot()))
     token = qa_loop._reserve_launches(["pm-t-qa-pr-a-L-s8"])
     try:
-        assert qa_loop._container_launch_room_known(2, desired=4, active=2)[0] == 2
+        assert qa_loop._container_admission(2, desired=4, active=2)[:3][0] == 2
         calls[0] = 0
         assert qa_loop._clamp_to_container_headroom(4) == 1
     finally:

@@ -672,3 +672,63 @@ def test_resume_keeps_the_runs_verify_pass_snapshot(tmp_path):
     verify.assert_not_called()
     assert rebuilt.scenario_verdicts[1] == VERDICT_PASS
     assert qa_loop._unverified_passes(rebuilt) == []
+
+
+# ---------------------------------------------------------------------------
+# Floor slot across a TUI restart
+# ---------------------------------------------------------------------------
+
+def test_resume_snapshot_records_only_this_runs_floor_container(tmp_path):
+    state = _make_state(tmp_path)
+    qa_loop._claim_floor_slot((state.pr_id, state.loop_id), "pm-t-qa-pr-001-s1")
+    _write_resume_file(state, use_containers=True, concurrency_cap=1)
+    assert _load_resume_file(tmp_path)["floor_container"] == "pm-t-qa-pr-001-s1"
+
+    qa_loop._claim_floor_slot(("pr-002", "other"), "pm-t-qa-pr-002-s1")
+    _write_resume_file(state, use_containers=True, concurrency_cap=1)
+    assert _load_resume_file(tmp_path)["floor_container"] is None
+
+
+def test_restore_floor_claim_never_overwrites_a_live_claim(tmp_path):
+    state = _make_state(tmp_path)
+    data = {"use_containers": True, "floor_container": "pm-t-qa-pr-001-s1"}
+    qa_loop.restore_floor_claim(state, {**data, "use_containers": False})
+    assert qa_loop._floor_slot == {}
+    qa_loop.restore_floor_claim(state, data)
+    assert qa_loop._floor_slot == {"run": ("pr-001", "abc123"),
+                                   "name": "pm-t-qa-pr-001-s1"}
+    other = QALoopState(pr_id="pr-002")
+    qa_loop.restore_floor_claim(other, {**data, "floor_container": "x"})
+    assert qa_loop._floor_slot["name"] == "pm-t-qa-pr-001-s1"
+
+
+@pytest.mark.parametrize("holder", ["pr-001", "pr-002"])
+def test_resume_restores_every_floor_claim_before_any_poll_starts(tmp_path, holder):
+    """Two QA runs in one TUI at a full runtime: one made this process's floor
+    launch, the other waited behind it.  The slot lives in process memory, so
+    after a TUI restart the waiting run (holding nothing) could resume first
+    and make a second floor launch while the first was still past the limit
+    (L+2).  Every resumed run's claim is restored before any resumed poll
+    starts, whichever snapshot the scan reaches first."""
+    app = _make_app(tmp_path)
+    data = store.load(app._root)
+    data["prs"].append({**data["prs"][0], "id": "pr-002"})
+    store.save(data, app._root)
+    loops = {"pr-001": "loop1", "pr-002": "loop2"}
+    floor = f"pm-t-qa-{holder}-{loops[holder]}-s1"
+    for pr_id, loop in loops.items():
+        qa_dir = _seed_run(tmp_path, pr_id=pr_id, loop=loop)
+        snap = _load_resume_file(qa_dir)
+        snap.update(use_containers=True,
+                    floor_container=floor if pr_id == holder else None)
+        _resume_file_path(qa_dir).write_text(json.dumps(snap))
+
+    slots_at_spawn = []
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background",
+                      side_effect=lambda st, *a: slots_at_spawn.append(
+                          (st.pr_id, dict(qa_loop._floor_slot)))):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    claim = {"run": (holder, loops[holder]), "name": floor}
+    assert sorted(slots_at_spawn) == [("pr-001", claim), ("pr-002", claim)]
