@@ -33,7 +33,12 @@ hits, regardless of how it waits for a background job:
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
   run's mp4 (which the manifest would present as this run's evidence); the
-  web-UI driver's trace, screenshots and DOM dump are cleared the same way;
+  web-UI driver's trace, screenshots and DOM dump are cleared the same way,
+  and the web-UI finalize step refuses to run at all with no ``CAPDIR``
+  rather than aim its cleanup and ffmpeg at the filesystem root;
+- the render steps name their renderer prerequisite: the QA image ships
+  ``ffmpeg`` but not ``agg``, and the render now fails loudly, so the recipe
+  carries the per-architecture release-binary install line;
 - the CLI scaffold's ``<command-to-record>`` placeholder sits inside single
   quotes inside the outer double-quoted argument, so the recipe has to show
   the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
@@ -87,9 +92,17 @@ def _scaffold_block(text):
 
 
 def _render_block(name):
-    """The fenced block under ``## Render to video`` (cast -> mp4)."""
+    """The fenced block under ``## Render to video`` that renders the cast.
+
+    Selected by its own content (``agg --idle-time-limit``), not by position:
+    the section also documents the renderer prerequisite, which is itself a
+    fenced block.
+    """
     section = _recipe_text(name).split("## Render to video", 1)[1]
-    return re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+    for block in re.findall(r"```[a-z]*\n(.*?)```", section, re.S):
+        if "agg --idle-time-limit" in block:
+            return block
+    raise AssertionError(f"{name}: no render block found")
 
 
 def _stub_tool(bindir, name, body="exit 1\n"):
@@ -559,6 +572,107 @@ def test_failed_render_leaves_no_video(name, tmp_path):
         "place, so the capture looks successful with a stale video")
     assert not gif.exists(), (
         f"{name}: a failed render left the previous run's gif in place")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_documents_how_to_get_the_renderer(name):
+    """The render step fails without `agg`, so the recipe has to say how to get it.
+
+    The QA image ships `ffmpeg` but not `agg` (verified: `command -v agg`
+    prints nothing in the pm-dev image), and the render block now exits 1
+    rather than leave a missing or stale video. Without the install line the
+    failure message ("check 'agg' is installed") sends the worker nowhere:
+    the recipe never names a prerequisite, so the only remaining moves are to
+    substitute a different renderer or to report the capture as impossible.
+    The release-binary URL is the one verified against agg 1.9.0.
+    """
+    text = _recipe_text(name)
+    section = text.split("## Render to video", 1)[1]
+    install = section.find("agg-$(uname -m)-unknown-linux-gnu")
+    assert install != -1, (
+        f"{name}: the render section never says how to install 'agg', so a "
+        "worker whose image lacks it has no remedy for the render failure")
+    assert "chmod +x" in section, (
+        f"{name}: the downloaded agg binary is never made executable")
+    assert install < section.index("agg --idle-time-limit"), (
+        f"{name}: the agg install line comes after the render block")
+    assert re.search(r"^curl -fsSL", section, re.M), (
+        f"{name}: the agg prerequisite is not a runnable install command")
+
+
+def test_cli_stop_failure_names_the_interactive_remedy():
+    """The stop failure must not send an interactive recording to the wrong fix.
+
+    The block is pasted as one unit, and step 3 (driving the shell) is
+    comments, so a worker that pastes it whole for the ``-c bash`` form waits
+    out the stop bound with the shell still at its prompt. The message used to
+    offer only ``RECORDER_STOP_TIMEOUT`` — raising it for an interactive
+    recording just makes the same failure slower. It has to name the actual
+    remedy: ``exit`` in the recorded shell.
+    """
+    block = _scaffold_block(_recipe_text("cli-recording.md"))
+    stop = block[block.index("stop_timeout="):]
+    body = stop[:stop.index("\ndone")]
+    assert "interactive" in body and "'exit'" in body, (
+        "cli-recording: the stop timeout does not name the interactive "
+        "remedy ('exit' in the recorded shell), so raising "
+        "RECORDER_STOP_TIMEOUT is the only fix it suggests")
+
+
+def test_web_ui_finalize_refuses_an_unset_capdir(tmp_path):
+    """The finalize step must not run its new `rm -f` against the filesystem root.
+
+    Step 1's cleanup guards its screenshot glob with ``${CAPDIR:?}`` for
+    exactly this reason, and the blocks are pasted separately, so a worker
+    that runs step 3 in a fresh shell has no ``CAPDIR``: the ``rm -f`` then
+    targets ``/recording.mp4`` and ffmpeg is handed ``/recording.webm``. The
+    step stops with a message instead.
+    """
+    text = _recipe_text("web-ui-recording.md")
+    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
+    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = {k: v for k, v in os.environ.items() if k != "CAPDIR"}
+    env["PATH"] = f"{bindir}:{os.environ['PATH']}"
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "web-ui recipe's finalize step ran with no CAPDIR")
+    assert "CAPDIR" in r.stderr, (
+        "the finalize step does not say that CAPDIR is missing: " + r.stderr)
+    assert not called.exists(), (
+        "the finalize step ran ffmpeg with an unset CAPDIR, so it read and "
+        "wrote paths at the filesystem root")
+
+
+def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
+    """The guard must not break the step it protects."""
+    text = _recipe_text("web-ui-recording.md")
+    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
+    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # A real transcode stand-in: writes the mp4 the step checks for.
+    _stub_tool(bindir, "ffmpeg",
+               'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode == 0, r.stderr
+    assert (capdir / "recording.mp4").read_bytes() == b"mp4"
+    assert not (capdir / "recording.webm").exists(), (
+        "the finalize step keeps the webm although the mp4 exists")
 
 
 def _web_ui_driver_block():

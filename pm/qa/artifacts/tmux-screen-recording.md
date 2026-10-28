@@ -225,6 +225,20 @@ renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
 magnitude slower and fragile). The intermediate GIF is discarded.
 
+Two tools do the two stages. The QA image ships `ffmpeg` but **not**
+`agg`, and the block below fails instead of leaving a missing or stale
+video — so install `agg` first when `command -v agg` prints nothing
+(`~/.local/bin` is on `PATH` in the image; the asset is per architecture,
+verified with agg 1.9.0):
+
+```
+curl -fsSL \
+    https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
+    -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+```
+
+Don't substitute a different renderer: the mp4 is the required artifact.
+
 ```
 cast=<capture-dir>/recording.cast
 # Remove this run's outputs before rendering: a failed render (no `agg`, an

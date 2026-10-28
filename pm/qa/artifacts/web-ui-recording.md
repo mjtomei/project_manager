@@ -217,6 +217,11 @@ Playwright's native recording is VP8 webm, which iOS Safari cannot
 decode. Transcode to H.264 and keep only the mp4:
 
 ```bash
+# The placeholders above are shell variables; a block pasted into a fresh
+# shell has no CAPDIR, and `"$CAPDIR/recording.mp4"` then becomes
+# `/recording.mp4` — the cleanup and ffmpeg would run against the filesystem
+# root. Stop instead (step 1's cleanup guards its glob the same way).
+: "${CAPDIR:?CAPDIR is unset — set the placeholders from step 1 first}"
 # Drop the old mp4 first: ffmpeg leaves an existing output untouched when it
 # fails, so a failed transcode would otherwise keep the previous run's video
 # as this run's recording.

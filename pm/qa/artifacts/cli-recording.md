@@ -157,7 +157,8 @@ deadline=$(( $(date +%s) + stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         echo "recorder did not exit within ${stop_timeout}s — for a longer" \
-            "command set RECORDER_STOP_TIMEOUT; check the pane with" \
+            "command set RECORDER_STOP_TIMEOUT; an interactive recording" \
+            "needs 'exit' in the recorded shell (step 3); check the pane with" \
             "'tmux -L scaffold capture-pane -p -t rec'" >&2
         tmux -L scaffold kill-server 2>/dev/null
         exit 1
@@ -183,6 +184,20 @@ in the sign-off HTML report as a `<video controls>` element. `agg`
 renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
 magnitude slower and fragile). The intermediate GIF is discarded.
+
+Two tools do the two stages. The QA image ships `ffmpeg` but **not**
+`agg`, and the block below fails instead of leaving a missing or stale
+video — so install `agg` first when `command -v agg` prints nothing
+(`~/.local/bin` is on `PATH` in the image; the asset is per architecture,
+verified with agg 1.9.0):
+
+```
+curl -fsSL \
+    https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
+    -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+```
+
+Don't substitute a different renderer: the mp4 is the required artifact.
 
 ```
 cast=<capture-dir>/<short-name>/recording.cast

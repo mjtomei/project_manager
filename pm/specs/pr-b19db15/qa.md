@@ -29,7 +29,9 @@ recording-recipe bugs that any worker following the recipe hits:
 - the render steps delete this run's outputs before rendering and check the
   mp4 afterwards, so a failed render ends with no video and a clear error
   instead of the previous run's mp4 (and the CLI scaffold documents the
-  escaped `bash -c` command form that actually survives its quoting).
+  escaped `bash -c` command form that actually survives its quoting). The
+  render sections name `agg` as a prerequisite and carry its install line,
+  and the web-UI finalize step refuses to run with no `CAPDIR`.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -184,7 +186,18 @@ run.
   directory that already holds a video → the render steps delete this run's
   mp4/gif (and the web-UI webm) first and then check the mp4, so the run ends
   with no video and an actionable error, never with the previous run's video
-  presented as this run's capture.
+  presented as this run's capture. `agg` is the missing piece in the image:
+  the recipe's own install line (`agg-$(uname -m)-unknown-linux-gnu`, verified
+  as agg 1.9.0) has to make the same cast render to H.264; substituting a
+  different renderer is not a pass.
+- The web-UI finalize step is run in a fresh shell (no `CAPDIR`) → it stops
+  with the "CAPDIR is unset" message instead of aiming its `rm -f` and ffmpeg
+  at `/recording.mp4` / `/recording.webm`; with `CAPDIR` set it still produces
+  the mp4 and drops the webm.
+- The CLI no-TTY scaffold is pasted whole for the interactive `bash` form →
+  the stop step times out with the shell still at its prompt, and its failure
+  message names the remedy (`exit` in the recorded shell, step 3) rather than
+  only `RECORDER_STOP_TIMEOUT`.
 - A web-UI driver fails before it produces its outputs in a capture directory
   that already holds them → the driver step clears the previous run's webm,
   mp4, `trace.zip`, `dom.html` and screenshots first, so a failed run cannot

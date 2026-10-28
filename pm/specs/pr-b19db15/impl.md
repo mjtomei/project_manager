@@ -213,6 +213,13 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    stub `pm`/`curl`/`my-app` (`TestWebUiStartExecution`): it completes
    normally, it refuses a port something already answers on (and never
    starts the app), and a server that never answers fails at its deadline.
+   R10's three leftovers are covered too: both recording recipes carry the
+   `agg` install line *before* the render block (the render block is looked
+   up by its own content, `agg --idle-time-limit`, because the section now
+   holds a second fenced block), the CLI stop message names the interactive
+   remedy, and the web-UI finalize block is executed both ways — with no
+   `CAPDIR` it exits before ffmpeg runs, and with `CAPDIR` set a stub ffmpeg
+   still produces the mp4 and drops the webm.
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
@@ -277,6 +284,32 @@ R9. **The web-UI driver has to resolve Playwright before it can run.** The
    the old block continues into the driver after the check fails). Evidence:
    `/pm-captures/review-419c-i8/`.
 
+R10. **Name the renderer prerequisite, and never aim a cleanup at the
+   filesystem root.** Three leftovers of the same "a step that cannot do its
+   job has to say so, and must not act on a handle it does not have" class:
+   - The QA image ships `ffmpeg` but not `agg` (verified: `command -v agg`
+     prints nothing in the pm-dev image), and R8 made a missing renderer a
+     hard failure. Neither recording recipe named `agg` as a prerequisite or
+     said how to get it, so the new failure message ("check 'agg' is
+     installed") had no remedy in the recipe. Both render sections now carry
+     the per-architecture release-binary install
+     (`agg-$(uname -m)-unknown-linux-gnu` under
+     `github.com/asciinema/agg/releases/latest/download`; verified: agg 1.9.0
+     downloads, runs, and renders the recipe's own cast to H.264) and say not
+     to substitute a different renderer.
+   - The CLI scaffold is pasted as one block and step 3 (driving the shell)
+     is comments, so a worker that pastes it whole for the `-c bash` form
+     waits out the stop bound with the shell still at its prompt. The stop
+     failure offered only `RECORDER_STOP_TIMEOUT`, which for an interactive
+     recording just makes the same failure slower; it now names the actual
+     remedy (`exit` in the recorded shell, step 3).
+   - The web-UI finalize step's new `rm -f "$CAPDIR/recording.mp4"` (R8) was
+     unguarded, while step 1's cleanup guards its glob with `${CAPDIR:?}` for
+     exactly this reason. The blocks are pasted separately, so a worker
+     running step 3 in a fresh shell had no `CAPDIR`: the `rm -f` aimed at
+     `/recording.mp4` and ffmpeg at `/recording.webm`. The step now stops with
+     `: "${CAPDIR:?…}"` before either.
+
 ## Non-goals
 
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
@@ -288,9 +321,9 @@ R9. **The web-UI driver has to resolve Playwright before it can run.** The
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
