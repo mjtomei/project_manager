@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T16:49:08.661803+00:00'
+  updated_at: '2026-10-28T17:06:21.641317+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36848,6 +36848,36 @@ prs:
       and not in the final 121-sample post-restart window.'
     created_at: '2026-10-28T16:39:58Z'
     last_edited: '2026-10-28T16:39:58Z'
+  - id: note-89c334b
+    text: 'QA scenario 16 RE-EVALUATION (first PASS flagged): story 4s marker Then
+      is NOT met. Then requires "the running-wait marker ⏸1<spinner> never renders
+      before the adopt log line — during the check the marker is ⟳1". Millisecond
+      evidence (pipe-pane sink stamping every terminal chunk, replayed through pyte)
+      across three runs of the same restart-with-a-live-wait: the pane keeps the PRE-RESTART
+      ⏸1<spinner> frame until the new app paints, and that first post-mount paint
+      lands AFTER the adopt line, so ⟳1 is never rendered at all. Run 1 (branch head):
+      old ⏸1◐ 14.070-14.858, adopt 14.880. Run 2 (precise): old ⏸1◐ 24.420 -> blank
+      node (in_review spark-42, no marker) 24.445/24.881 -> ⏸1◐ 24.881; samples residual
+      ir=false 24.245, waiting ir=true 24.795 (adopt ~24.4-24.7). Run 3 (+ forced
+      _refresh_tech_tree on loop start): blank 20.974 -> ⏸1 21.455; adopt ~21.0-21.3.
+      Run 4 (+ await asyncio.sleep(0) after _start_loop): blank 33.029 -> ⏸1 33.505;
+      adopt ~33.0-33.4. Both attempted fixes were reverted; branch unchanged. Why
+      they cannot work: the adopt check runs in the loop thread while consume_breadcrumb
+      is still doing the mount (heal_registry, hook install, watcher setup, tmux subprocesses),
+      which blocks the UI event loop; a node refresh or a zero-delay yield only marks
+      the node dirty and the actual paint is deferred until the mount yields, by which
+      time the thread has set input_required=True. What IS correct: the status/runtime-state
+      publication path never shows a pre-adopt wait (only the documented resume row
+      with input_required=false), and the wait is visible after adoption on the same
+      pane/window with no relaunch; answering still gives follow-up NEEDS_WORK ->
+      iteration 2. To make the Then pass the resume must paint before the adopt check
+      — defer the loop start (or the adopt check) until after the first post-mount
+      render — which changes the core resume path and needs its own regression tests
+      plus the S1-S3 re-run the PR notes ask for. Captures: /pm-captures/scenarios/16/story4-marker-evidence.md
+      + story4-rerun-precise/, story4-post-fix-precise/, story4-post-fix-yield/ (each
+      with pane-stamped.jsonl, samples.log, adopt.log). Verdict for this run: INPUT_REQUIRED.'
+    created_at: '2026-10-28T17:06:21Z'
+    last_edited: '2026-10-28T17:06:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
