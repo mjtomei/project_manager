@@ -273,6 +273,25 @@ implementing and QA-ing it, and ship here (each has a PR note):
   added the liveness check inside `_find_tui_pane` made autostart fall
   through to another session's live TUI — do not move it back). Tests in
   `tests/test_cli_helpers.py` (`TestFindLiveTuiPane`).
+- `pm_core/cli/helpers.py::trigger_tui_restart` (review-loop af91 i2): it
+  resolved its target with `_find_tui_pane` (so it could send `C-r` to a
+  dead registry pane) and wrote the `merge-restart` marker *before*
+  sending. `save_breadcrumb` is the only consumer of that marker and it
+  only runs when the TUI really restarts, so a failed send left the
+  marker behind for good — the next start, even a plain Ctrl+R days
+  later, would then behave as a merge restart and preserve auto-start
+  state. It now resolves through `_find_live_tui_pane`, writes the marker
+  only when a live pane was found, and removes it again if the send
+  fails. Tests in `tests/test_cli_helpers.py` (`TestTriggerTuiRestart`).
+- `pm_core/cli/helpers.py::_find_live_tui_pane` (review-loop af91 i2):
+  with an explicit ``session`` and no ``tui`` entry in the registry,
+  ``_find_tui_pane`` returns ``(None, None)`` (it only consults the
+  registry for an explicit session), so ``pm tui view -s S`` reported
+  "No TUI pane found" for a hand-started TUI that had not yet been
+  healed into the registry — the same false negative the liveness
+  fallback exists to remove, on the other input shape. It now keeps the
+  requested session and runs the live-pane scan. Tests in
+  `TestFindLiveTuiPane` (`test_explicit_session_without_*`).
 
 ## Edge cases
 
@@ -643,6 +662,15 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     a *live* process with a "cannot tell" cmdline still degrades to the
     liveness check (the off-procfs path), so the new re-check cannot
     turn every non-Linux platform into "stale pidfile".
+41. pane discovery (incidental, af91 i2): `_find_live_tui_pane` with an
+    explicit session and no `tui` registry entry falls back to the live
+    `pm _tui` pane in that session instead of returning `(None, None)`,
+    and still reports `(None, session)` when there is none.
+    `trigger_tui_restart` writes the `merge-restart` marker only after a
+    live pane is resolved and removes it again when the send fails, so a
+    marker cannot outlive a restart that never happened. The four
+    meaningful tests were verified to fail against HEAD (the fifth pins
+    the no-live-pane case, which both versions satisfy).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

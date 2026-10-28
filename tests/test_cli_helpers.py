@@ -456,3 +456,75 @@ class TestFindLiveTuiPane:
         with patch("pm_core.cli.helpers.pane_registry.load_registry",
                    return_value=data):
             assert _find_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_explicit_session_without_a_registry_entry_falls_back(self):
+        """A hand-started TUI has no registry entry until heal_registry
+        runs; ``pm tui view -s S`` must still resolve its live pane.
+
+        ``_find_tui_pane`` only consults the registry when a session is
+        passed, so it returns ``(None, None)`` here — the live-pane scan
+        is what makes the explicit-session path work at all."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        empty = {"session": "pm-test", "windows": {}, "generation": "1"}
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=empty), \
+             self._panes('%3 pm-test bash\n'
+                         '%8 pm-test "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
+
+    def test_explicit_session_without_a_live_tui_still_reports_the_session(
+            self):
+        """The caller needs the session name for its error message."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        empty = {"session": "pm-test", "windows": {}, "generation": "1"}
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=empty), \
+             self._panes("%3 pm-test bash\n"):
+            assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+
+# ---------------------------------------------------------------------------
+# trigger_tui_restart
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerTuiRestart:
+    """The merge-restart marker must not outlive a restart that failed.
+
+    ``save_breadcrumb`` is the only consumer and it runs when the TUI
+    actually restarts, so a marker left behind by a failed send would make
+    the next start (even a plain Ctrl+R) behave as a merge restart.
+    """
+
+    def _run(self, tmp_path, pane, send_side_effect=None):
+        from pm_core.cli.helpers import trigger_tui_restart
+
+        marker = tmp_path / "merge-restart"
+        with patch("pm_core.cli.helpers.tmux_mod.has_tmux",
+                   return_value=True), \
+             patch("pm_core.cli.helpers._find_live_tui_pane",
+                   return_value=pane), \
+             patch("pm_core.cli.helpers.tmux_mod.send_keys_literal",
+                   side_effect=send_side_effect) as send, \
+             patch("pm_core.paths.pm_home", return_value=tmp_path):
+            trigger_tui_restart()
+        return marker, send
+
+    def test_writes_the_marker_and_sends_ctrl_r(self, tmp_path):
+        marker, send = self._run(tmp_path, ("%8", "pm-test"))
+        assert marker.exists()
+        send.assert_called_once_with("%8", "C-r")
+
+    def test_removes_the_marker_when_the_send_fails(self, tmp_path):
+        marker, send = self._run(tmp_path, ("%8", "pm-test"),
+                                 send_side_effect=RuntimeError("no pane"))
+        assert send.called
+        assert not marker.exists()
+
+    def test_writes_nothing_without_a_live_pane(self, tmp_path):
+        marker, send = self._run(tmp_path, (None, "pm-test"))
+        assert not marker.exists()
+        assert not send.called
+

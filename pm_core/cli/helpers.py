@@ -926,19 +926,35 @@ def trigger_tui_restart() -> None:
     Used after pulling new code so the TUI picks up the latest version.
     Writes a merge-restart marker so the TUI can distinguish this from
     a user-initiated Ctrl+R and preserve auto-start state.
+
+    The marker must not outlive a restart that never happened: it is
+    only consumed by ``save_breadcrumb`` when the TUI actually restarts,
+    so a leftover marker would make the *next* start (even a plain Ctrl+R
+    days later) behave as a merge restart.  It is therefore written after
+    a live pane is resolved and removed again if the send fails.
     """
+    marker = None
     try:
         if not tmux_mod.has_tmux():
             return
-        tui_pane, session = _find_tui_pane()
-        if tui_pane and session:
-            from pm_core.paths import pm_home
-            marker = pm_home() / "merge-restart"
-            marker.touch()
-            _log.debug("Wrote merge-restart marker %s", marker)
-            tmux_mod.send_keys_literal(tui_pane, "C-r")
-            _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
+        # Resolve a *live* pane: the registry keeps a dead ``tui`` entry
+        # until the next heal_registry pass, and send-keys to it fails.
+        tui_pane, session = _find_live_tui_pane()
+        if not (tui_pane and session):
+            _log.debug("trigger_tui_restart: no live TUI pane to restart")
+            return
+        from pm_core.paths import pm_home
+        marker = pm_home() / "merge-restart"
+        marker.touch()
+        _log.debug("Wrote merge-restart marker %s", marker)
+        tmux_mod.send_keys_literal(tui_pane, "C-r")
+        _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
+        if marker is not None:
+            try:
+                marker.unlink(missing_ok=True)
+            except OSError:
+                pass
         _log.debug("Could not trigger TUI restart: %s", e)
 
 
@@ -1383,7 +1399,15 @@ def _find_live_tui_pane(
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        return None, None
+        if not session:
+            return None, None
+        # An explicit session whose registry has no ``tui`` entry yet
+        # (a hand-started TUI before the first ``heal_registry`` pass,
+        # or an entry healed away) still has a live pane to find:
+        # ``_find_tui_pane`` only consults the registry when a session is
+        # given, so without this the caller reports "No TUI pane found"
+        # for a TUI that is running and owns the pidfile.
+        sess = session
     live_ids, live_tuis = _live_panes_and_tuis()
     if pane_id and pane_id in live_ids:
         return pane_id, sess

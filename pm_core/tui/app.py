@@ -4,9 +4,11 @@ import shlex
 from pathlib import Path
 
 from pm_core.paths import configure_logger
-# Re-exported (not used here since current_session_name moved to the
-# pane-targeted tmux helper): ``pm_core.tui.app`` stays the import surface
-# for the symbols extracted into submodules — see tests/test_tui_imports.py.
+# Re-exported for backward compatibility (the only in-file user,
+# ``on_mount``'s bare ``display-message`` lookup, moved into
+# ``current_session_name`` below): ``pm_core.tui.app`` stays the import
+# surface for the symbols extracted into submodules — see
+# tests/test_tui_imports.py.
 from pm_core.tui._shell import _run_shell  # noqa: F401
 
 _log = configure_logger("pm.tui")

@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T14:17:05.694137+00:00'
+  updated_at: '2026-10-28T14:51:48.304035+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16882,6 +16882,25 @@ prs:
       s live TUI - do not move it back). Tests: tests/test_cli_helpers.py::TestFindLiveTuiPane.'
     created_at: '2026-10-28T13:52:28Z'
     last_edited: '2026-10-28T13:52:28Z'
+  - id: note-3c7dd5b
+    text: 'Review loop af91 i2: fixed two stale-state gaps found in review, no production
+      behaviour changed on the QA-validated pidfile/IPC path. (a) helpers.trigger_tui_restart
+      resolved its target with _find_tui_pane (so it could send C-r to a dead registry
+      pane) and wrote the merge-restart marker BEFORE sending; save_breadcrumb is
+      the only consumer and only runs when the TUI really restarts, so a failed send
+      left the marker behind for good — the next start, even a plain Ctrl+R, would
+      then be treated as a merge restart. It now resolves through _find_live_tui_pane,
+      writes the marker only after a live pane is found, and removes it if the send
+      fails. (b) _find_live_tui_pane with an explicit session and no tui entry in
+      the registry returned (None, None) because _find_tui_pane only consults the
+      registry for an explicit session, so `pm tui view -s S` said "No TUI pane found"
+      for a hand-started TUI that had not been healed into the registry yet; it now
+      keeps the requested session and runs the live-pane scan. 5 new tests in tests/test_cli_helpers.py
+      (TestFindLiveTuiPane + TestTriggerTuiRestart); the 4 meaningful ones verified
+      to fail against HEAD. Full suite: 4228 passed, 1 skipped. Also corrected a misleading
+      re-export comment in tui/app.py.'
+    created_at: '2026-10-28T14:51:48Z'
+    last_edited: '2026-10-28T14:51:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
