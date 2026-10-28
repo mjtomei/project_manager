@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T08:17:17.962813+00:00'
+  updated_at: '2026-10-28T09:35:25.834434+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26186,6 +26186,20 @@ prs:
       to do inside a review iteration.'
     created_at: '2026-10-28T08:17:17Z'
     last_edited: '2026-10-28T08:17:17Z'
+  - id: note-40c21d8
+    text: 'QA S24 refiner (2026-10-28): verified live against the fake — review PASS
+      after 45s, watcher READY after 35s, and two QA workers streaming ~16s were all
+      accepted with no recovery nudge (empty `pm log grep -i "recovery request"`).
+      Two fixture facts for the worker: (1) the review window does NOT close when
+      the loop ends PASS — it stays open, so assert the TUI log line "Review loop
+      done for <pr>: ✓ PASS (1 iteration)" (via `pm log grep "log: Review loop done"`)
+      rather than a closed pane; (2) QA has a post-planning spec gate, so seed `$TEST_DIR/pm/specs/<pr>/qa.md`
+      (or run `pm pr spec <pr> qa` with the fake config set) before starting QA, else
+      it surfaces INPUT_REQUIRED "QA spec was not generated". QA grace is 30s, so
+      worker verdicts are accepted ~30s after the poll starts and the whole QA run
+      takes ~2 min.'
+    created_at: '2026-10-28T09:35:25Z'
+    last_edited: '2026-10-28T09:35:25Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
