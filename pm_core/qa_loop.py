@@ -4995,6 +4995,18 @@ def _execute_and_finalize(
             and state.latest_verdict == VERDICT_INPUT_REQUIRED
             and not state.stop_requested
         )
+        if not was_held:
+            # This result has not been recorded/transitioned by the TUI yet.
+            # Clear the flags *before* the pre-finalize snapshot below: that
+            # snapshot is what a restart during the (possibly long) finalize
+            # pane adopts, and a restored held run that just collected a
+            # follow-up still carries the previous held result's
+            # ``completion_processed=True``.  Adopting that snapshot would
+            # skip the new result's QA note and lifecycle transition
+            # altogether — the TUI's completed-run adoption only calls
+            # ``_on_qa_complete`` while the flag is false.
+            state.completion_processed = False
+            state._ui_complete_notified = False
 
         # Write final status file with overall verdict
         _write_status_file(status_path, state.pr_id, state.scenarios,
@@ -5037,9 +5049,6 @@ def _execute_and_finalize(
                     )
                 except Exception:
                     _log.exception("Failed to run QA finalize pane")
-            # This result has not been recorded/transitioned by the TUI yet.
-            state.completion_processed = False
-            state._ui_complete_notified = False
 
         # A held run is the genuine input wait; a NEEDS_WORK/PASS result
         # leaves QA (review / sign-off takes over) and any remaining

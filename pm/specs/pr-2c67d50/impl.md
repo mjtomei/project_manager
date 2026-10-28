@@ -161,9 +161,13 @@ transcript was truncated/rotated, `hit.timestamp > src["timestamp"]`.
   `(waiting)` suffix while keeping the canonical verdict/colour/counts.
 - `state.latest_output` says the scenario is waiting for input (answered in
   its worker pane) while other work continues.
-- `autostart_state._derive` needs no new input: while the run is live
-  `running=True` → running; once held `running=False` and verdict
-  `INPUT_REQUIRED` → `QA INPUT_REQUIRED — answer in QA window`. This
+- `autostart_state._derive`: while the run is live `running=True` → running;
+  once held `running=False` and verdict `INPUT_REQUIRED` →
+  `QA INPUT_REQUIRED — answer in the scenario worker pane (still watching
+  for a follow-up)`. `qa_progress_input` therefore carries `held` so the
+  reason can name the pane the user must answer in (the status dashboard
+  cannot accept the answer); a non-held `INPUT_REQUIRED` (a finished run
+  with no watcher) keeps the existing `answer in QA window` text. This
   satisfies "a single waiting scenario must not make the whole run WAITING
   while other runnable work proceeds".
 
@@ -636,3 +640,32 @@ covered by tests in `tests/test_qa_input_required.py` /
   used by all three paths.  Covered by
   `test_discard_qa_state_stops_and_supersedes`; the existing fresh-start
   and restart tests still pin the other two call sites.
+
+## 19. Implementation notes (review loop ab13, iteration 1)
+
+- **A restored held run's new result could be persisted as already
+  processed.** A run adopted from a held snapshot carries
+  `completion_processed=True` (the held result was noted before the
+  restart). When it collected a follow-up, `_execute_and_finalize` wrote
+  the pre-finalize snapshot (the one a restart during the possibly
+  minutes-long finalize pane adopts) *before* clearing the flag, so the
+  snapshot said `held=<new result>`, `latest_verdict=<new result>` and
+  `completion_processed=True`. On adoption, `_resume_incomplete_qa` skips
+  `_on_qa_complete` when the flag is set, so a follow-up PASS/NEEDS_WORK
+  lost its QA note *and* its lifecycle transition (no sign-off hand-off,
+  no return to review) and the snapshot was cleared as finished. The
+  flags are now cleared right after `was_held` is decided, before the
+  pre-finalize snapshot; a `was_held` run (restored, still waiting) keeps
+  them. Covered by
+  `test_restored_held_follow_up_clears_processed_before_the_pane`, which
+  fails on the previous ordering.
+- **The autostart status pointed a held run at the dashboard.** R5's
+  "needs no new input" held that a held run derives to `QA INPUT_REQUIRED
+  — answer in QA window`, but the status dashboard cannot accept the
+  answer: the wait is resolved in the scenario worker pane (the same
+  correction §18 made for `start_qa`). `qa_progress_input` now reports
+  `held` and `_derive` names the worker pane for a held run, keeping the
+  dashboard text for a finished `INPUT_REQUIRED` with no watcher.
+  Covered by `test_qa_held_run_points_at_the_worker_pane`,
+  `test_qa_input_required_without_a_watcher_keeps_the_dashboard_hint` and
+  `test_qa_progress_input_reports_a_held_run`.

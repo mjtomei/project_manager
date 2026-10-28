@@ -941,6 +941,57 @@ class TestFinalizeHoldsForInput:
         assert finalize.call_count == 1
         assert state.latest_verdict == VERDICT_PASS
 
+    def test_restored_held_follow_up_clears_processed_before_the_pane(
+            self, tmp_path):
+        """A restored held run carries the previous held result's
+        ``completion_processed=True``.  The snapshot written *before* the
+        (possibly long) finalize pane must already say False for the
+        follow-up result: a restart during that pane adopts the snapshot as
+        a completed run and would otherwise skip the new result's QA note
+        and lifecycle transition entirely."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.qa_workdir = str(tmp_path)
+        state.held = True
+        state.completion_processed = True
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+
+        snapshots: list[dict] = []
+
+        def _resume(state_, *_a, **_k):
+            snapshots.append({"held": state_.held,
+                              "latest_verdict": state_.latest_verdict,
+                              "processed": state_.completion_processed})
+
+        def _poll(_state, *_a, **_k):
+            # What the live loop's _clear_waiting + _accept_hit do when the
+            # follow-up arrives on the restored run's first iteration.
+            _state.waiting_for_input.clear()
+            _state.waiting_input_sources.clear()
+            _state.held = False
+            _state.scenario_verdicts = {1: VERDICT_PASS}
+
+        with patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._write_resume_file",
+                   side_effect=_resume), \
+             patch("pm_core.qa_loop._hold_for_follow_up",
+                   return_value=False), \
+             patch("pm_core.qa_loop._poll_tmux_verdicts",
+                   side_effect=_poll), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane",
+                   return_value="FINALIZE_DONE"):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        assert state.latest_verdict == VERDICT_PASS
+        follow_up = [s for s in snapshots
+                     if s["latest_verdict"] == VERDICT_PASS]
+        assert follow_up
+        assert all(s["processed"] is False for s in follow_up)
+
     def test_follow_up_reopens_and_re_finalizes(self, tmp_path):
         state = _waiting_state(tmp_path / "t.jsonl")
         calls = {"n": 0}

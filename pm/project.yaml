@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-16e45ba
+  active_pr: pr-5d53171
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T16:47:06.004966+00:00'
+  updated_at: '2026-10-28T17:43:06.877985+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9366,6 +9366,28 @@ prs:
       idle_prompt gate (spec §9). (2026-10-28T17:05:00Z)'
     created_at: '2026-10-28T16:47:05Z'
     last_edited: '2026-10-28T16:47:05Z'
+  - id: note-04a8758
+    text: 'Review ab13 i1: two fixes. (1) A restored held run carries completion_processed=True
+      from the previous held result; _execute_and_finalize cleared that flag only
+      *after* the finalize pane, so the pre-finalize snapshot (the one a restart during
+      that minutes-long pane adopts) still said processed=True. Adoption then skipped
+      _on_qa_complete, so a follow-up PASS/NEEDS_WORK lost its QA note AND its lifecycle
+      transition (PASS -> sign-off hand-off / NEEDS_WORK -> in_review) and the snapshot
+      was cleared as finished. The flags are now cleared right after was_held is decided;
+      a restored run that is still held keeps them. test_restored_held_follow_up_clears_processed_before_the_pane
+      fails on the old ordering. (2) autostart status: a held run derived to "QA INPUT_REQUIRED
+      — answer in QA window", but the dashboard cannot accept the answer; qa_progress_input
+      now reports held and _derive names the scenario worker pane (the same correction
+      iteration 13 made for start_qa). A finished non-held INPUT_REQUIRED keeps the
+      dashboard text. Observation, not changed: a held run''s runtime_state qa action
+      stays "running" (picker / pm pr list show [working]) because no waiting action
+      state exists; the TUI log, qa_status dashboard and autostart status all expose
+      the wait. Incidental bug filed: pr-5d53171 (stopping while a scenario PASS is
+      mid-verification still aggregates the unverified PASS as PASS; pre-existing,
+      iteration-11 observation). Full suite: 4149 passed, 1 skipped (markdown dep
+      installed, real git, PM_HOST_HOME unset).'
+    created_at: '2026-10-28T17:43:06Z'
+    last_edited: '2026-10-28T17:43:06Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
@@ -38634,6 +38656,45 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-5d53171
+  plan: bugs
+  title: 'Bug: stopping a QA run while a scenario PASS is mid-verification still aggregates
+    that PASS as verified'
+  branch: pm/pr-5d53171-bug-stopping-a-qa-run-while-a-scenario-pass-is-mid
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py _poll_tmux_verdicts (collection loop)
+    + _execute_and_finalize aggregation.
+
+
+    Repro: run a QA run with PASS verification enabled (qa-verify-pass). While a scenario
+    PASS is being verified (its verifier pane is still running, the status row shows
+    "verifying"), stop the run (zz t stop / t stop). _poll_tmux_verdicts exits on
+    stop_requested with `verifying` non-empty, so verification_results is never processed:
+    the scenario stays in scenario_verdicts as PASS but is absent from verified_scenarios.
+    _execute_and_finalize then aggregates scenario_verdicts and reports overall PASS
+    (TUI: "QA PASS — press i to sign off") even though the PASS was never independently
+    verified.
+
+
+    Expected: a stopped run must not aggregate an unverified PASS as PASS. Treat any
+    index still in `verifying` at stop as unverified (e.g. force INPUT_REQUIRED for
+    it, like the retries-exhausted path) so the verdict is never promoted without
+    verification. The manual merge gate still applies (sign-off re-verifies), so this
+    is a verdict-accuracy bug rather than a merge-safety one.
+
+
+    Found while reviewing pr-2c67d50 (review loop ab13 i1); pre-existing and unrelated
+    to the INPUT_REQUIRED hold.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T17:42:52.746109+00:00'
+  updated_at: '2026-10-28T17:42:52.746109+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
