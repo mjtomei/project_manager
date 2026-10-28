@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T01:41:13.371174+00:00'
+  updated_at: '2026-10-28T02:49:15.822896+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26007,6 +26007,33 @@ prs:
       Captures: /pm-captures/scenarios/9/.'
     created_at: '2026-10-28T01:41:13Z'
     last_edited: '2026-10-28T01:41:13Z'
+  - id: note-eccf022
+    text: 'Review-loop 9b1b i1 (5668aec6): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping, planner stop ordering and
+      the pr-8efa789 merge coordination all hold under adversarial tracing. Fixed
+      a drift risk and a test gap: (1) the two QA tick-loop exhaustion sites (post-nudge
+      response deadline and the handle() no_progress bound) were byte-identical copies
+      of teardown-guard + last-chance transcript re-scan + retire + slot bookkeeping;
+      they now share _retire_if_exhausted, which returns the verdict that landed during
+      the deadline so the caller records it normally; (2) new test_every_recovery_request_is_a_single_line
+      pins the documented tmux send-keys invariant (no newline / no surrounding whitespace)
+      across the four builders and the verifier two role-specific requests — nothing
+      asserted it, so a wrapped literal would have silently submitted partial input.
+      Also committed the QA session uncommitted qa.md update (R10-R12 scenarios, residuals,
+      ambiguity notes), which matches the shipped behaviour; verify-s10-followup.md
+      stays untracked (scenario-authoring scratch). Full suite after the edits: 3806
+      passed, 1 skipped, 55 failed + 17 errors — identical to the pre-edit run and
+      all reproduce on the unmodified tree here (test_markdown_render x12: markdown
+      module missing; test_merge_publish/test_signoff_integration x41: git env; test_git_ops::test_keeps_unpushed_merge
+      on git 2.34.1; test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can land in
+      a permission hold that begins during an open episode. pr-f2fee05 (verifier re-check
+      hang) remains subsumed by this PR i2.'
+    created_at: '2026-10-28T02:49:15Z'
+    last_edited: '2026-10-28T02:49:15Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
