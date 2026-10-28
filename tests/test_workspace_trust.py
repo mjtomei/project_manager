@@ -472,6 +472,41 @@ class TestPromptWatch:
         assert pane.keys == []
         assert msg and "pm trust add /home/u/proj/p" in msg
 
+    def test_container_dialog_accepted_when_host_has_same_path(
+            self, home, tmp_path):
+        """pm itself in a container or devcontainer has its own /workspace:
+        a container session's dialog naming /workspace is still the mounted
+        workdir, not that unapproved host directory (QA S60 story 3)."""
+        wd = _pm_workdir(home)
+        host_ws = tmp_path / "workspace"
+        host_ws.mkdir()
+        pane = _FakePane(TRUST_SCREEN.format(path=host_ws))
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send), \
+             patch("pm_core.container._CONTAINER_WORKDIR", str(host_ws)), \
+             patch("pm_core.claude_launcher.time.sleep"):
+            host = _FakePane(TRUST_SCREEN.format(path=host_ws))
+            with patch("pm_core.tmux.capture_pane", host.capture), \
+                 patch("pm_core.tmux.send_keys_literal", host.send):
+                assert WorkspacePromptWatch("%2", str(wd), grace=0).check()
+            assert host.keys == []  # a host session still never trusts it
+            w = WorkspacePromptWatch("%1", str(wd), grace=0, container=True)
+            assert w.check() is None
+        assert pane.keys == ["Down", "Enter"]
+
+    def test_container_dialog_outside_mount_not_accepted(self, home):
+        """A container session's dialog naming any other path (even one
+        that is an approved host workdir) is not the mounted workdir."""
+        wd = _pm_workdir(home)
+        pane = _FakePane(TRUST_SCREEN.format(path=wd))
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", pane.send), \
+             patch("pm_core.claude_launcher.time.sleep"):
+            w = WorkspacePromptWatch("%1", str(wd), grace=0, container=True)
+            msg = w.check()
+        assert pane.keys == []
+        assert msg and "workspace-trust prompt" in msg
+
     def test_watch_ends_once_transcript_exists(self, home, tmp_path):
         """Claude writes the transcript only after the dialog; once it
         exists, dialog-like text later in the turn is ignored (no keys, no
@@ -672,6 +707,43 @@ def test_trust_blocked_worker_marked_input_required(tmp_path):
     assert state.scenario_verdicts[1] == "INPUT_REQUIRED"
     assert state.scenario_verdict_reasons[1] == (
         "blocked at workspace-trust prompt: Claude is waiting at the prompt")
+
+
+@pytest.mark.parametrize("container_name,expected", [
+    ("pm-s-qa-pr-w-loop-s1", True), (None, False)])
+def test_worker_watch_knows_container_session(tmp_path, container_name,
+                                              expected):
+    """A container worker's dialog shows container paths, so its watch must
+    be told (QA S60 story 3: /workspace also existed on the host)."""
+    import itertools
+    from pm_core.qa_loop import QALoopState, QAScenario, _poll_tmux_verdicts
+    scenario = QAScenario(index=1, title="T", focus="f")
+    scenario.window_name = "qa-s1"
+    scenario.session_id = "sid-trust-ctr"
+    scenario.worktree_path = str(tmp_path)
+    scenario.container_name = container_name
+    state = QALoopState(pr_id="pr-w")
+    state.scenarios = [scenario]
+    built = []
+    real_init = WorkspacePromptWatch.__init__
+
+    def _init(self, *a, **kw):
+        real_init(self, *a, **kw)
+        built.append(self.container)
+
+    clock = itertools.count(0, 100)
+    with patch("pm_core.qa_loop._get_scenario_pane", return_value="%42"), \
+         patch("pm_core.qa_loop.time.sleep"), \
+         patch("pm_core.qa_loop.time.monotonic", lambda: next(clock)), \
+         patch("pm_core.hook_events.read_event", return_value=None), \
+         patch("pm_core.tmux.pane_exists", return_value=True), \
+         patch.object(WorkspacePromptWatch, "__init__", _init), \
+         patch.object(WorkspacePromptWatch, "check",
+                      return_value="Claude is waiting at the prompt"), \
+         patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+        _poll_tmux_verdicts(state, {}, {}, "sess", str(tmp_path),
+                            tmp_path / "status.json", lambda *a: None)
+    assert built == [expected]
 
 
 def test_trust_blocked_worker_watched_during_verdict_grace(tmp_path):

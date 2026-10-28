@@ -3330,7 +3330,8 @@ def _poll_tmux_verdicts(
                     if watch is None or watch.pane_id != pane_id:
                         watch = WorkspacePromptWatch(
                             pane_id, scenario.worktree_path,
-                            transcript_path=scenario.transcript_path)
+                            transcript_path=scenario.transcript_path,
+                            container=bool(scenario.container_name))
                         _trust_watches[scenario.index] = watch
                     blocked = watch.check()
                     if blocked:

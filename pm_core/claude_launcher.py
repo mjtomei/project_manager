@@ -454,10 +454,14 @@ class WorkspacePromptWatch:
 
     def __init__(self, pane_id: str, workdir: str | None = None,
                  grace: float | None = None, interval: float = 5.0,
-                 transcript_path: str | Path | None = None):
+                 transcript_path: str | Path | None = None,
+                 container: bool = False):
         from pm_core import workspace_trust
         self.pane_id = pane_id
         self.workdir = workdir
+        # The caller launched this pane's session through a container exec
+        # with *workdir* mounted at /workspace.
+        self.container = container
         self.transcript_path = transcript_path
         self.started = False
         self.grace = workspace_trust.prompt_grace_seconds() if grace is None else grace
@@ -487,7 +491,14 @@ class WorkspacePromptWatch:
         """
         from pm_core import workspace_trust
         from pm_core.container import _CONTAINER_WORKDIR
-        if shown and os.path.isdir(shown):
+        if self.container:
+            # Every path on a container session's dialog names the
+            # container's filesystem, even one that also exists on the host
+            # (pm itself running in a container or devcontainer at
+            # /workspace): only the mounted workdir maps back to *workdir*.
+            target = (self.workdir if not shown or workspace_trust.is_within(
+                shown, _CONTAINER_WORKDIR) else None)
+        elif shown and os.path.isdir(shown):
             target = shown
         elif not shown or workspace_trust.is_within(shown, _CONTAINER_WORKDIR):
             target = self.workdir
