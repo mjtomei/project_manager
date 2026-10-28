@@ -311,16 +311,23 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    discarded. All of those fail against the previous recipes except the
    healthy-path Layer 2 case (verified with the pre-fix recipes in place:
    `rc=0` with `/http.log: Permission denied`).
+   R18's driver handle is covered by executing the driver block against a
+   driver that resolves Playwright and then throws: the block must exit
+   non-zero with "the driver failed", and the earlier attempt's
+   webm/trace/`dom.html`/screenshot must be gone (the pre-fix block ran the
+   driver with no check and left all four in place), plus step 1's cleanup
+   must glob `*.webm` under the `${CAPDIR:?}` guard.
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
    - The render steps delete this run's outputs before rendering:
      `rm -f "${cast%.cast}.mp4" "$cast.gif"` in both recording recipes, and
-     `rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" "$CAPDIR/trace.zip"
-     "$CAPDIR/dom.html" "$CAPDIR/http.log" "$CAPDIR/sse.log"
+     `rm -f "$CAPDIR/recording.mp4" "$CAPDIR/trace.zip" "$CAPDIR/dom.html"
+     "$CAPDIR/http.log" "$CAPDIR/sse.log" "${CAPDIR:?}"/*.webm
      "${CAPDIR:?}"/*.png` before the
-     web-UI driver (plus the mp4 again before the transcode). The `${CAPDIR:?}`
-     on the glob is the guard that keeps an unset variable from expanding the
+     web-UI driver (plus the mp4 again before the transcode; R18 explains why
+     the webm glob is `*.webm`). The `${CAPDIR:?}`
+     on the globs is the guard that keeps an unset variable from expanding the
      pattern against the filesystem root. `ffmpeg` does
      not touch an existing output when it fails (verified: a missing input
      leaves the old mp4 byte-for-byte), so without this a render that failed
@@ -684,6 +691,38 @@ R17. **A refusal must name a remedy that still exists, and the produced-files
      disagree. Both lists now name them as failure evidence and say to
      mention whichever exist in the manifest.
 
+R18. **The web-UI driver is a job too: its exit status is the handle, and its
+   auto-named video is stale evidence.** Two leftovers of the PR's own class
+   found by review loop e7e1 i5, both reproduced live in this container with
+   real Playwright (chromium-1223, node 22.22.2):
+   - **The driver's exit status was not checked.** Step 2 ended on
+     `CAPDIR=… APP_URL=… node driver.mjs`, and the finalize step (pasted
+     separately) then transcoded whatever webm was on disk. A driver that
+     fails therefore surfaced one block later as "transcode produced no mp4 —
+     ffmpeg failed on the driver's webm" — a misdiagnosis that sends the
+     worker to the encoder — and a driver that fails after an earlier attempt
+     had left a webm produced a *successful* transcode of that earlier
+     attempt, presented as this run's recording. The block now checks the
+     driver's own exit status and stops with "the driver failed — this run's
+     video, trace and screenshots are incomplete".
+   - **Playwright's auto-named video is a stale artifact nothing cleared.**
+     The driver renames its video onto `recording.webm`, so the flow only
+     cleared that name. Observed in this container: after a driver was killed
+     mid-recording, Playwright's auto-named `page@<hash>.webm` was left in the
+     capture directory and `ffprobe` reports a real duration for it — a
+     *valid, playable* partial recording. (Whether the browser gets to
+     finalize the file is timing-dependent, but the cleanup gap is not: the
+     file is one Playwright can leave there, and nothing else in the flow ever
+     removes it — the pre-fix step-1 `rm` leaves it and the `*.webm` glob
+     removes it, shown in `probe-e` below.) Step 1's cleanup is now `"${CAPDIR:?}"/*.webm` (and the
+     comment says why), and step 2 clears this attempt's `*.webm`,
+     `trace.zip`, `dom.html` and `*.png` before running the driver, because
+     that block is pasted on its own when a driver is adapted and retried: a
+     retry that fails part-way would otherwise leave the earlier attempt's
+     complete webm for the finalize step to transcode into "this run's"
+     recording. (A driver that exits through its own `.catch` leaves no webm
+     at all — verified — which is why the stale-video case needs the kill.)
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -696,7 +735,7 @@ R17. **A refusal must name a remedy that still exists, and the produced-files
 |---|---|
 | `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), a failed `new-session` is reported as a start failure (R15), the `agg` install is guarded on `command -v agg` so it cannot replace a working binary (R16), and the produced-files list names the flow's diagnostics (R17) |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15); the `agg` install is guarded on `command -v agg` (R16); the produced-files list names the flow's diagnostics (R17) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16); the busy-port refusal names the manual pid hunt instead of a teardown whose `server.pid` this step just cleared, and the Playwright resolution failure only offers the link when the package is there (R17) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status (the webm glob is `*.webm`, so Playwright's auto-named video from a killed driver goes too — R18); finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver block clears this attempt's own outputs and checks `node driver.mjs`'s exit status, so a failed driver is named where it fails instead of being misdiagnosed as an ffmpeg error and a retry cannot be finalized from an earlier attempt's webm (R18); the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16); the busy-port refusal names the manual pid hunt instead of a teardown whose `server.pid` this step just cleared, and the Playwright resolution failure only offers the link when the package is there (R17) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -730,7 +769,12 @@ R17. **A refusal must name a remedy that still exists, and the produced-files
    the manual pid hunt and the cleared `server.pid`, the Playwright resolution
    failure offers the link only when the package exists, and both recording
    recipes' produced-files lists name `recorder.status`,
-   `recorder-stderr.log` and `recorder-pane.log`).
+   `recorder-stderr.log` and `recorder-pane.log`; R18's driver handle: step 1's
+   cleanup is the `*.webm` glob (asserted together with the `${CAPDIR:?}`
+   guard) and the driver block is *executed* against a failing driver that
+   exits after resolving Playwright, which must fail with "the driver failed"
+   and leave none of the earlier attempt's webm/trace/`dom.html`/screenshot
+   behind).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -935,3 +979,28 @@ R17. **A refusal must name a remedy that still exists, and the produced-files
   in place). File 107 pass; related suites (`test_qa_artifact_web_ui_recording.py`,
   `test_qa_instructions.py`) pass. No `pm_core/` change; the dropped
   helper/prompt/verifier work stays dropped.
+- Review loop e7e1 i5 verified R18 live in this container with real Playwright
+  (chromium-1223 from `/opt/ms-playwright`, node 22.22.2, the recipe's own
+  `driver.mjs` skeleton against a local `python3 -m http.server`). The
+  skeleton run verbatim produces `recording.webm`, `trace.zip`, three
+  screenshots and `dom.html` (rc 0), so the flow itself is sound. A driver
+  that fails through its own `.catch` (`locator.click` timeout →
+  `process.exit(1)`) leaves **no webm at all**, which is why the pre-fix flow
+  surfaced it one block later as "ffmpeg failed on the driver's webm" rather
+  than as a driver failure. One run in which the driver was killed
+  mid-recording left Playwright's auto-named `page@8d51f406….webm` (3,341
+  bytes) in the capture directory, and `ffprobe` reports `duration=0.040000` —
+  a valid, playable partial recording (whether the browser finalizes the file
+  is timing-dependent; I could not reproduce it on demand with a static page
+  or a long idle wait). The *cleanup* gap is deterministic and is what the fix
+  closes: seeding that file into a capture directory, the pre-fix step-1 `rm`
+  (HEAD's `web-ui-recording.md`) leaves it, and the `*.webm` glob removes it
+  (`probe-e-cleanup-gap.log`). Post-fix the driver block
+  stops with "the driver failed — this run's video, trace and screenshots are
+  incomplete" and removes the earlier attempt's webm/trace/`dom.html`/`*.png`
+  before running the driver. Tests: 1 new execution case plus a tightened
+  cleanup assertion (the `*.webm` glob and its `${CAPDIR:?}` guard); both fail
+  against the pre-fix recipe (checked by restoring `HEAD`'s web-ui recipe in
+  place) and pass with it. File 108 pass; related suites
+  (`test_qa_artifact_web_ui_recording.py`, `test_qa_instructions.py`,
+  `test_qa_loop.py`, `test_markdown_render.py`) pass.

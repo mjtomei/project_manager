@@ -56,6 +56,13 @@ hits, regardless of how it waits for a background job:
   the run block links a ``node_modules`` beside the driver (only when there is
   no local install) and stops at its own resolution check when the import
   still does not resolve;
+- the web-UI driver's own exit status is the capture's completion handle: the
+  driver block stops on a failed driver instead of letting the finalize step
+  transcode whatever is on disk, and it clears this attempt's outputs first
+  because that block is pasted on its own when a driver is retried. Every
+  ``*.webm`` is cleared, not only ``recording.webm``: a driver killed before
+  the rename leaves Playwright's auto-named ``page@<hash>.webm``, which is a
+  valid, playable partial recording;
 - a step that cannot do its job says so where it fails instead of being
   misdiagnosed downstream: an unusable capture directory and a failed
   ``new-session`` stop the run with their own message (otherwise the failure
@@ -1631,6 +1638,45 @@ def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
         "web-ui recipe left a dangling node_modules beside the driver")
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
+    """A failed driver must name itself and leave no earlier attempt's video.
+
+    Step 2 is pasted on its own whenever a driver is adapted and retried, so
+    the *previous* attempt's ``recording.webm``, trace, screenshots and DOM
+    dump are still in the capture directory. The block used to end on
+    ``node driver.mjs`` with no check: a retry that failed part-way left the
+    earlier attempt's complete webm in place, and the finalize step transcoded
+    it into "this run's" recording — a successful transcode of an incomplete
+    run. Without a stale webm the failure surfaced one block later as "ffmpeg
+    failed on the driver's webm", which sends the worker to the encoder
+    instead of the driver.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    stale = {"recording.webm": "an earlier attempt\n",
+             "trace.zip": "an earlier trace\n",
+             "dom.html": "<html>an earlier dump</html>\n",
+             "01-loaded.png": "an earlier screenshot\n"}
+    for name, content in stale.items():
+        (capdir / name).write_text(content)
+    # The driver resolves Playwright, then fails the way a bad locator does.
+    (capdir / "driver.mjs").write_text(
+        'import { chromium } from "playwright";\n'
+        'console.log("driver saw", typeof chromium);\n'
+        'throw new Error("locator timeout");\n')
+    r = _run_driver_block(capdir, _fake_playwright(tmp_path / "global"))
+
+    assert r.returncode != 0, "a failed driver was reported as a success"
+    assert "the driver failed" in r.stderr, (
+        "the driver's failure has no message of its own, so it surfaces later "
+        "as an ffmpeg error: " + r.stderr)
+    for name in stale:
+        assert not (capdir / name).exists(), (
+            f"the driver block left an earlier attempt's {name} in place, so "
+            "a retry that fails can be finalized as this run's recording")
+
+
 _STUB_CURL = r"""
 n=$(cat "$STUB_CURL_COUNT" 2>/dev/null || echo 0)
 n=$((n + 1)); echo "$n" > "$STUB_CURL_COUNT"
@@ -1761,6 +1807,11 @@ def test_web_ui_clears_a_previous_video():
     cleared before the driver starts, and the mp4 again before the transcode
     (``ffmpeg`` leaves an existing output untouched when it fails).
 
+    The glob is ``*.webm``, not ``recording.webm``: a driver killed before the
+    rename (Playwright gone, so nothing finalizes or renames) leaves its
+    auto-named ``page@<hash>.webm`` instead, and that file is a valid, playable
+    partial recording (verified with ffprobe) that no other step clears.
+
     The driver's other outputs are cleared with them: a driver that dies at
     the first locator writes no trace, screenshots or DOM dump, so without
     this the earlier run's files stay in the capture directory and the
@@ -1773,11 +1824,11 @@ def test_web_ui_clears_a_previous_video():
     # Join backslash-continued lines so the cleanup is one logical command.
     joined = re.sub(r"\\\n\s*", " ", capture)
     clear = next((ln for ln in joined.splitlines()
-                  if ln.startswith("rm -f") and "recording.webm" in ln), None)
+                  if ln.startswith("rm -f") and "*.webm" in ln), None)
     assert clear, (
         "web-ui recipe keeps an earlier run's webm/mp4, so a failed driver "
         "transcodes the previous run into this run's recording")
-    for artifact in ("recording.webm", "recording.mp4", "trace.zip",
+    for artifact in ("*.webm", "recording.mp4", "trace.zip",
                      "dom.html", "http.log", "sse.log", "server.pid",
                      "*.png"):
         assert artifact in clear, (
@@ -1790,6 +1841,10 @@ def test_web_ui_clears_a_previous_video():
         "web-ui recipe globs \"$CAPDIR\"/*.png without the `${CAPDIR:?}` "
         "guard: with CAPDIR unset the glob expands against the filesystem "
         "root, so the cleanup would target every PNG there")
+    assert '"${CAPDIR:?}"/*.webm' in clear, (
+        "web-ui recipe globs \"$CAPDIR\"/*.webm without the `${CAPDIR:?}` "
+        "guard: with CAPDIR unset the glob expands against the filesystem "
+        "root")
     finalize_block = _web_ui_finalize_block()
     rm = finalize_block.index('rm -f "$CAPDIR/recording.mp4"')
     assert rm < finalize_block.index("\nffmpeg "), (
@@ -1895,6 +1950,7 @@ def test_web_ui_layer2_block_writes_both_logs(tmp_path):
         "the protocol block wrote no route snapshots")
     assert (capdir / "sse.log").exists(), (
         "the protocol block wrote no SSE transcript")
+
 
 
 # ---------------------------------------------------------------------------

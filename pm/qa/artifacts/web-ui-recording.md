@@ -72,21 +72,26 @@ mkdir -p "$CAPDIR" || {
 # fresh-looking mp4 of that run, and the driver's trace, screenshots and DOM
 # dump would sit in the capture directory as this run's evidence while this
 # run never produced them (a driver that dies at the first locator writes
-# none of them). The webm is dropped too because the driver renames its
-# auto-named video onto it. The Layer 2 logs go with them: a run that never
-# re-captures the protocol would otherwise present the earlier run's http.log
-# and sse.log as this run's evidence.
-# The `${CAPDIR:?}` on the glob (not `$CAPDIR`) makes the whole `rm` command
+# none of them). Every *.webm goes, not just recording.webm: the driver
+# renames Playwright's auto-named video onto that name, so a driver that dies
+# before the rename (a supervisor, OOM or crash — the rename never runs)
+# leaves `page@<hash>.webm` behind, and that file is a *valid, playable*
+# partial recording (observed in this container: ffprobe reports a real
+# duration) that no other step clears. The Layer 2 logs go with them: a run
+# that never re-captures the protocol would otherwise present the earlier
+# run's http.log and sse.log as this run's evidence.
+# The `${CAPDIR:?}` on the globs (not `$CAPDIR`) makes the whole `rm` command
 # abort if the variable is unset: the expansion fails before `rm` runs, so the
 # command never executes — even in an interactive shell, unlike the
-# `: "${CAPDIR:?}"` form below. Without it `"$CAPDIR"/*.png` would expand
-# against the filesystem root and the cleanup would target every PNG there.
+# `: "${CAPDIR:?}"` form below. Without it `"$CAPDIR"/*.png` and `*.webm`
+# would expand against the filesystem root and the cleanup would target every
+# PNG and webm there.
 # `server.pid` (written below) goes too: a stale one would make the teardown
 # signal whatever process has since reused that pid.
-rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
+rm -f "$CAPDIR/recording.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
       "$CAPDIR/http.log" "$CAPDIR/sse.log" "$CAPDIR/server.pid" \
-      "${CAPDIR:?}"/*.png
+      "${CAPDIR:?}"/*.webm "${CAPDIR:?}"/*.png
 
 # Fail fast if something is *already* answering on the port. A previous run's
 # server — or another scenario using the same default port — would satisfy the
@@ -195,7 +200,28 @@ node -e "import('playwright').then(() => console.log('playwright ok'))" || {
         "playwright' here" >&2
     exit 1
 }
-CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs
+# Clear this attempt's outputs before the driver runs. This block is pasted on
+# its own whenever a driver is adapted and retried, so the *previous* attempt's
+# webm, trace, screenshots and DOM dump are still here; a retry that fails
+# part-way would otherwise leave the earlier attempt's complete webm for the
+# finalize step to transcode into this run's recording. Step 1 clears them for
+# a fresh run; this covers step 2 alone. Every *.webm goes: a killed driver
+# leaves Playwright's auto-named `page@<hash>.webm` rather than the renamed
+# recording.webm, and that partial video is valid enough to pass any file
+# check. The paths are relative because the `cd` above succeeded.
+rm -f ./*.webm ./trace.zip ./dom.html ./*.png
+CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs || {
+    # The driver's own exit status is the handle that says this attempt
+    # finished: it writes the video, trace, screenshots and DOM dump as it
+    # goes, so a run that fails leaves a partial set (or, killed before
+    # closing the context, none at all). Without this check the failure
+    # surfaces one block later as "ffmpeg failed on the driver's webm" — a
+    # misdiagnosis that sends the worker to the encoder — or, when a partial
+    # webm is there, as a successful transcode of an incomplete recording.
+    echo "the driver failed — this run's video, trace and screenshots are" \
+        "incomplete; do not finalize this attempt" >&2
+    exit 1
+}
 ```
 
 It records video and trace, walks the UI, and (for SSE/websocket UIs)

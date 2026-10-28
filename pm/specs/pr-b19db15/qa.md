@@ -296,7 +296,20 @@ run.
   that already holds them → the driver step clears the previous run's webm,
   mp4, `trace.zip`, `dom.html`, `http.log`, `sse.log` and screenshots first,
   so a failed run cannot present the earlier run's trace, screenshots or
-  protocol logs as this run's evidence.
+  protocol logs as this run's evidence. The driver's own exit status is the
+  completion handle: the driver block stops with "the driver failed — this
+  run's video, trace and screenshots are incomplete" instead of letting the
+  finalize step transcode whatever is on disk (which misreports a driver
+  failure as an ffmpeg one), and it clears this attempt's outputs before the
+  driver because that block is pasted on its own when a driver is retried —
+  otherwise a retry that fails part-way leaves the earlier attempt's complete
+  webm for the finalize step to present as this run's recording.
+- A driver is killed rather than exiting through its own error path → the
+  video it never renamed is Playwright's auto-named `page@<hash>.webm`, a
+  *valid, playable* partial recording (`ffprobe` reports a real duration), so
+  the capture step clears every `*.webm` in the capture directory, not only
+  `recording.webm`. A stale auto-named video from an earlier run must not
+  survive into this run's evidence.
 - The CLI scaffold's `bash -c` command form → it must be pasted escaped
   (`-c 'bash -c \"…\"'`); the unescaped form ends the outer double-quoted
   argument, the recorder exits, and step 4 reports "asciinema wrote no cast".
