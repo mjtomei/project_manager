@@ -37548,6 +37548,37 @@ prs:
       detaching clears the screen — the casts were not edited. Captures: /pm-captures/scenarios/37/.'
     created_at: '2026-10-28T09:36:50Z'
     last_edited: '2026-10-28T09:36:50Z'
+  - id: note-1b22e1e
+    text: 'Scenario 34 (hostile hand-edited project.yaml) handoff from concretization:
+      (1) `pm pr start` still crashes on a non-string `workdir` (separate bug pr-727073f)
+      — do not put `workdir: 5` on the impl-launch PR; put it on the sign-off PR,
+      whose launch reads it as absent and re-provisions. (2) Integration checks must
+      use real git: export PATH with /usr/bin before ~/.local/bin (re-export after
+      venv activate), or `pm pr signoff integrate` records status:error/base_sha:null
+      instead of the conflict. (3) Create the throwaway TEST_DIR under the scenario
+      workdir (not /tmp) so the sandbox git proxy can see local fetch paths. (4) `pm
+      pr show` prints a non-string workdir literally ("Workdir: 5"); it is the launch
+      that reads it as absent.'
+    created_at: '2026-10-28T08:50:53Z'
+    last_edited: '2026-10-28T08:50:53Z'
+  - id: note-928a226
+    text: 'QA scenario 34 (hostile hand-edited project.yaml) PASS — all six stories
+      held live; no code change. Harness facts for the next run: (1) `pm pr signoff
+      integrate` compares against the **committed** base branch, so a base-side change
+      must be a real commit — build it from `git show HEAD:pm/project.yaml`, commit,
+      then restore the hostile working copy; the working `pm/project.yaml` is read-only
+      (chmod u+w first). (2) Keep all workdir PRs started BEFORE any base commit so
+      their clones share the fixture merge-base. (3) The duplicate-id check is per-list
+      (`_duplicate_id_problems` resets `seen` per list), so the same note id on two
+      different PR records is fine; the hidden-duplicate variant (bare string member
+      in the same notes list) still names `note-1`. (4) Story 4 re-recording needs
+      the base rewound (`git update-ref refs/heads/master <sha>` — never `reset --hard`,
+      it wipes the hostile working copy) because the later base commits carry pr-250
+      and would make FIELD fail on the duplicate id instead of the title. (5) The
+      auto-sequence transcript lives at `pm/transcripts/auto-sequence/<pr>/signoff-<pr>.jsonl`
+      (not `$TEST_DIR/transcripts`). (6) Captures at /pm-captures/scenarios/34/{01-readers,02-tui-tree-home,03-merge-gate,04-field-conflict,05-duplicate-ids,06-auto-sequence}.'
+    created_at: '2026-10-28T09:14:39Z'
+    last_edited: '2026-10-28T09:14:39Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
