@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T06:14:16.882560+00:00'
+  updated_at: '2026-10-28T06:21:50.899258+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15192,6 +15192,33 @@ prs:
       found; nothing to fix.'
     created_at: '2026-10-28T06:14:16Z'
     last_edited: '2026-10-28T06:14:16Z'
+  - id: note-3414919
+    text: 'QA scenario 5 (single TUI: refusal + startup race), 2026-10-28: stories
+      1-2 PASS on this build — a second `pm _tui` is refused from its own pane with
+      "another TUI (pid <owner>) already owns session ... refusing to start a second
+      TUI", EXIT=2, owner pid == pidfile pid, the pidfile md5 and the cmd-queue inode/size/bytes
+      are unchanged, the first TUI keeps rendering, and `pm autostart list` still
+      exits 0 against it. The simultaneous-start story also held (one survivor, one
+      refusal-EXIT=2, pidfile names the winner, exactly one TUI process). FOUND AND
+      FIXED (qa: commit 09560ace): `pm_core/tui/pane_ops.py::heal_registry` resolved
+      "the window" with `get_window_id(session)` (the session ACTIVE window), so a
+      TUI whose pane is in any other window — e.g. the race winner in a non-active
+      window, or a hand-started `pm _tui` — never re-registered its pane; heal_registry
+      then deleted the dead original window and saved {"windows": {}}, after which
+      `_find_tui_pane` (pm tui view, pm autostart, ...) reported "No TUI pane found"
+      / `owner_unavailable` against a live TUI that owned the pidfile. It now resolves
+      the window from $TMUX_PANE (`pane_window_id`) with the session window only as
+      a fallback; 2 new tests (one verified to fail pre-fix). Full suite 3922 passed,
+      1 skipped. Evidence: /pm-captures/scenarios/5/{story12,story3/pre-fix,story3/post-fix}.
+      Notes for next QA: (1) `ps -eo pid,args | grep ...` matches the QA agent itself
+      (the prompt contains `pm _tui` / `pm_core.wrapper _tui`) — use `ps -eo pid,args
+      | awk ''$2 ~ /python/ && /_tui/''`; (2) when `pm session` starts the TUI the
+      process shows as `<venv>/bin/python3 <venv>/bin/pm _tui`, while `pm _tui` typed
+      in a pane re-execs to `python3 -m pm_core.wrapper _tui`; (3) killing the TUI
+      PROCESS does not respawn it (the global after-kill-pane hook runs `pm _pane-closed`
+      outside tmux, so in_tmux() is False).'
+    created_at: '2026-10-28T06:21:50Z'
+    last_edited: '2026-10-28T06:21:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
