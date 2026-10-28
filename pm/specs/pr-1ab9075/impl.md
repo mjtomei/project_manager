@@ -142,7 +142,11 @@ relaunch attempt(s): <cause>` (kind labels: "worker could not be created",
 stays INPUT_REQUIRED (not PASS).
 
 R7. **Cancellation.**  A stop request is observed on the next tick (≤
-`_POLL_INTERVAL`), never after a backoff.  Background launch threads check
+`_POLL_INTERVAL`), never after a backoff.  The loop itself does not start a
+relaunch once `state.stop_requested` is set — a retry that comes due in the
+same tick a stop lands is skipped and the record stays `waiting` (still due),
+so a resume retries it immediately instead of the attempt being spent on a
+launch that would only abort.  Background launch threads also check
 `state.stop_requested` before creating a window/pane (launchers already
 check at prep start; add the check before the worker split and in
 `_relaunch_scenario_window`), so a stopped run does not spawn orphan
@@ -270,6 +274,9 @@ loop owns the run.
 - E1. Stop while a scenario is in backoff → loop exits on the next tick, no
   relaunch (existing `test_stop_during_backoff_does_not_relaunch` intent,
   now `test_stop_during_backoff_returns_on_next_tick`).
+- E1a. Stop that lands in the same tick a retry comes due → the waiting
+  branch skips it (no thread, no spent attempt), the record stays `waiting`
+  with its due `retry_at` (`test_stop_in_the_tick_a_retry_comes_due_does_not_relaunch`).
 - E2. Stop while a background launch thread is mid-concretize → the thread
   bails before splitting the worker pane.
 - E3. Resume with a pane id from the old controller that is dead and a

@@ -213,6 +213,38 @@ def test_stop_during_backoff_returns_on_next_tick(tmp_path):
     assert 1 not in state.scenario_verdicts
 
 
+def test_stop_in_the_tick_a_retry_comes_due_does_not_relaunch(tmp_path):
+    """A stop that lands in the same tick a retry comes due must not start a
+    relaunch: the loop would spawn a thread that aborts at its entry check,
+    spending an attempt and recording a failure cause for a launch that never
+    happened.  The record stays waiting (and due) so a resume retries it."""
+    sc = QAScenario(index=1, title="dead", focus="f", window_name="qa-x-s1",
+                    pane_id="%1", session_id="sid-1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.launch_retries = {1: {"attempts": 1, "kind": "exec", "cause": "x",
+                                "state": "waiting", "sessions": [],
+                                "retry_at": 0}}
+
+    def on_tick(clock):
+        # The stop arrives after the loop condition was checked but before
+        # this tick's body runs, with the retry already past due.
+        if len(clock.sleeps) == 1:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False)]
+    _run(state, tmp_path, patches)
+
+    rec = state.launch_retries[1]
+    # Neither the attempt count nor the state advanced (both are set
+    # synchronously by the waiting branch, so this is not a thread race).
+    assert rec["attempts"] == 1
+    assert rec["state"] == "waiting"
+    assert rec["retry_at"] == 0
+
+
 def test_relaunch_after_stop_creates_no_window():
     sc = QAScenario(index=1, title="t", focus="f", container_name="c")
     state = QALoopState(pr_id="pr-x")

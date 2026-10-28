@@ -3280,8 +3280,15 @@ def _poll_tmux_verdicts(
                     verdicts_changed = True
                     _settle(scenario, state.scenario_verdicts[idx])
                     continue
-                if now < float(rec.get("retry_at") or 0):
-                    continue  # backoff still running; others keep moving
+                if (now < float(rec.get("retry_at") or 0)
+                        or state.stop_requested):
+                    # Backoff still running (others keep moving), or the run
+                    # is stopping: a stop that lands in the same tick a retry
+                    # comes due must not start a launch the background thread
+                    # would only abort — that spends an attempt and records a
+                    # bogus failure cause.  The record stays waiting, so a
+                    # resume retries it immediately.
+                    continue
                 rec["attempts"] = int(rec.get("attempts", 0)) + 1
                 rec["state"] = "launching"
                 rec["retry_at"] = None
