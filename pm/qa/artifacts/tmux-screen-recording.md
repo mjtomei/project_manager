@@ -209,6 +209,27 @@ fi
 # 4. Drive the TUI from outside via pm tui send. Keys reach the TUI
 #    via the same tmux server; the recorder's attach client renders
 #    the redraws; asciinema captures them.
+#    Driving steps are usually pasted into a fresh shell (a scenario's
+#    commands are their own paste), where `$TARGET` from step 1 is gone. An
+#    empty one is not harmless here: `pm tui send -s ""` falls back to
+#    auto-detection — the cwd's session, then *any* pm session with a TUI —
+#    so the keys can drive a different TUI than the one being recorded, with
+#    no error at all and a cast that never showed the behaviour. Re-derive
+#    the handle as step 5 does, and refuse an empty one.
+TARGET=${TARGET:-$(pm session name)}
+if [ -z "$TARGET" ]; then
+    echo "TARGET is unset and 'pm session name' printed nothing — run this" \
+        "step with pm on PATH, in the project directory" >&2
+    exit 1
+fi
+#    Check each send. A `pm tui send` that fails means the TUI is gone, so
+#    that step of the scenario never ran — and step 5 would then see the
+#    recorder and the session both gone, call it a legitimate finish (it
+#    cannot tell that apart from the scenario quitting pm itself), and pass
+#    on a cast that stops before the behaviour under test. Re-run rather
+#    than accept that capture. (The send that ends the session on purpose is
+#    the one case where a failure is the quit racing the send; re-run rather
+#    than guess.)
 pm tui send q -s "$TARGET"            # e.g. navigate to the QA pane
 pm tui send a -s "$TARGET"            # open the picker
 # ... and so on for the scenario steps ...

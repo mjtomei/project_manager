@@ -123,7 +123,10 @@ foreground render block,
   non-empty partial mp4) exits non-zero with the "render produced no mp4 — …"
   message and leaves no mp4, and a render with no cast at all says "there is
   no cast to render" instead of blaming a missing `agg`;
-- `manifest.md` exists and its `## Files` section lists the produced files.
+- `manifest.md` exists and its `## Files` section lists the produced files;
+  on a host without asciinema the documented `| tee …` fallback writes
+  `transcript.log` into the capture directory (not the worker's cwd), and the
+  manifest names it.
 
 ### R2 — The tmux screen-recording recipe records a TUI and renders it (nominal)
 
@@ -144,6 +147,12 @@ session, stop the recorder, and render the cast,
   the "cast is incomplete" message instead of rendering a truncated cast as
   this run's capture, and a detach that itself fails because the recorder
   vanished in that gap fails the same way;
+- a `pm tui send` that fails during the scenario is not accepted as a
+  finish: the TUI is gone, so the scenario did not run, and step 5's
+  both-gone branch cannot tell that apart from the scenario quitting pm —
+  the driving step says so and the capture is re-run; and driving from a
+  fresh shell re-derives `$TARGET` (an empty one is refused), so the keys
+  cannot auto-detect and drive a different TUI than the one recorded;
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files.
 
 ### R3 — Recipe readiness and stop waits are bounded, and stale files are cleared
@@ -187,6 +196,9 @@ run.
   the finalize step then fails with "there is no webm to transcode — the
   driver wrote no video" instead of blaming ffmpeg, and leaves no mp4 (a
   stale one from an earlier run is removed);
+- a transcode whose `ffmpeg` reports success but writes an empty mp4 fails
+  with "ffmpeg wrote nothing", leaves no mp4 behind, and keeps the webm so
+  the step can be retried;
 - with an app that does answer, the recipe proceeds and produces its captures.
 
 ## Edge cases
@@ -221,6 +233,14 @@ run.
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
   `RECORDER_STOP_TIMEOUT` for a long command.
+- The TUI dies mid-scenario (a crash, not the scenario quitting pm) → the
+  driving step's own `pm tui send` fails and step 5's both-gone branch cannot
+  tell that from a legitimate finish, so the capture is re-run rather than
+  accepted; and driving from a fresh shell re-derives `$TARGET` first, because
+  `pm tui send -s ""` auto-detects and can drive another project's TUI.
+- A renderer reports success and writes nothing → the render/finalize step
+  fails on the empty artifact and removes it, so no output is left behind on a
+  failed step for the manifest to list.
 - The web-UI server accepts the connection but never answers → the per-attempt
   curl bound keeps the deadline meaningful.
 - Something already answers on the web-UI port (a previous run's server, or

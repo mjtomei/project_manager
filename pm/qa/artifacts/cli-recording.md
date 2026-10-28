@@ -24,6 +24,9 @@ substitutes the actual captures directory for `<capture-dir>`):
   player library, works offline. H.264/mp4 plays everywhere including
   iOS Safari (VP8/VP9 webm does not decode on iOS). The `.cast` stays
   as the small, exact-replay/grep source.
+- `transcript.log` — plain-text output of the recorded command, written
+  **only** by the `tee` fallback for a host without asciinema (that
+  capture has no cast and no video).
 - `recorder.status`, `recorder-stderr.log` (and `recorder-pane.log` when a
   wait gives up) — the no-TTY scaffold's diagnostics: asciinema's own exit
   status, its error output, and the pane's last screen. They are failure
@@ -263,12 +266,15 @@ tmux -L scaffold kill-server 2>/dev/null || true   # cleanup
 ```
 
 If `asciinema` isn't installed and can't be installed, fall back to
-appending `| tee transcript.log` to the command line — you lose
-animation but keep the output. Note the fallback in the manifest. That
-fallback writes no cast, so the render step below has nothing to render
-and fails with "there is no cast to render"; a capture taken this way has
-no video, so say so in the manifest rather than presenting it as a
-complete recording.
+appending `| tee <capture-dir>/<short-name>/transcript.log` to the command
+line — you lose animation but keep the output, and it lands in the capture
+directory with the rest of the evidence. A bare `| tee transcript.log`
+writes into whatever directory the worker happens to be in, so the capture
+would have no transcript at all while the manifest lists one. Note the
+fallback in the manifest. That fallback writes no cast, so the render step
+below has nothing to render and fails with "there is no cast to render"; a
+capture taken this way has no video, so say so in the manifest rather than
+presenting it as a complete recording.
 
 ## Render to video
 

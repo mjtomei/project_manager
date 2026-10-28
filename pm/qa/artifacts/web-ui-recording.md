@@ -345,7 +345,13 @@ ffmpeg -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
 # The mp4 is the required artifact: fail here, visibly, rather than leaving
 # the caller to notice the video is missing later. The webm is kept until the
 # mp4 exists so a failed transcode can be retried without re-driving the UI.
+# A renderer that reports success and writes nothing leaves an *empty* mp4
+# behind, and an output that is left on a failed step is what the recording
+# recipes' render step removes for the same reason (verified: this branch
+# exits 1 but used to leave a 0-byte recording.mp4 the manifest could list as
+# this run's video).
 test -s "$CAPDIR/recording.mp4" || {
+    rm -f "$CAPDIR/recording.mp4"
     echo "transcode produced no mp4 — ffmpeg wrote nothing; check the" \
         "driver's webm" >&2
     exit 1

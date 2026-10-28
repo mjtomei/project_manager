@@ -477,6 +477,25 @@ class TestRecipes:
         assert "incomplete" in seg and "exit 1" in seg, (
             "a recorder that died mid-scenario is not reported as a failure")
 
+    def test_tmux_driving_step_warns_about_a_failed_send(self):
+        """A failed ``pm tui send`` leaves a cast that never showed the behaviour.
+
+        Step 5 treats "recorder gone *and* target gone" as a legitimate finish
+        (the attach client follows the session out), so a TUI that dies
+        mid-scenario — a crash, not the scenario quitting pm — ends in exactly
+        that state and the run passes on a cast that stops before the behaviour
+        under test. Only the driving step can tell the two apart, because its
+        own ``pm tui send`` is the thing that failed, and the example lines the
+        recipe hands the worker are unchecked. The recipe has to say so.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        seg = block[block.index("# 4."):block.index("# 5.")]
+        assert "pm tui send" in seg
+        assert "`pm tui send` that fails" in seg, (
+            "the driving step does not warn that a failed pm tui send means "
+            "the scenario never ran, so the both-gone finish in step 5 passes "
+            "a capture that never showed the behaviour: " + seg)
+
     def test_tmux_recorder_readiness_is_bounded(self):
         """The recorder readiness wait needs its own deadline.
 
@@ -1110,6 +1129,30 @@ printf '#!/bin/sh\\necho downloaded\\n' > "$last"
             f"{name}: the downloaded agg is never made executable")
 
 
+def test_cli_tee_fallback_writes_the_transcript_into_the_capture_dir():
+    """The no-asciinema fallback must put its transcript where the capture is.
+
+    The fallback is ``| tee transcript.log`` — a relative path, so the file
+    lands in whatever directory the worker happens to be in (the PR workdir,
+    say) while the manifest lists a transcript the capture directory does not
+    hold. That is the same "a promised artifact is written somewhere the
+    capture does not look" bug as the no-TTY scaffold's cast path (R5), one
+    file over: the worker follows the recipe and the capture still has no
+    transcript. The produced-files list has to name the file too, because it
+    is the only artifact that fallback produces.
+    """
+    text = _recipe_text("cli-recording.md")
+    fallback = text[text.index("If `asciinema` isn't installed"):]
+    assert "tee <capture-dir>/<short-name>/transcript.log" in fallback, (
+        "the tee fallback writes a relative transcript.log into the worker's "
+        "cwd, so the capture directory has no transcript")
+    produced = text.split("## What this recipe produces", 1)[1].split(
+        "## Capture", 1)[0]
+    assert "transcript.log" in produced, (
+        "the produced-files list never names the fallback's transcript.log, "
+        "so the manifest and the capture directory disagree")
+
+
 def test_cli_stop_failure_names_the_interactive_remedy():
     """The stop failure must not send an interactive recording to the wrong fix.
 
@@ -1253,6 +1296,42 @@ def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
     assert "transcode produced no mp4" in r.stderr, r.stderr
     assert not (capdir / "recording.mp4").exists(), (
         "a failed transcode left its partial mp4 as this run's recording")
+
+
+def test_web_ui_transcode_that_writes_nothing_leaves_no_mp4(tmp_path):
+    """A renderer that reports success and writes nothing leaves no output.
+
+    The exit status proves the encode ran; ``test -s`` catches the renderer
+    that claims success and writes nothing (R12). Verified: that branch
+    exited 1 but left a **0-byte** ``recording.mp4`` in the capture directory,
+    which the manifest's ``## Files`` section could then list as this run's
+    video — the recording recipes' ``render_fail`` removes the output for
+    exactly this reason, so the two finalize paths disagreed. The webm stays,
+    because a failed transcode is retried from it.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "ffmpeg",
+               'for a in "$@"; do last=$a; done\n: > "$last"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "a transcode that wrote an empty mp4 was reported as success")
+    assert "ffmpeg wrote nothing" in r.stderr, r.stderr
+    assert not (capdir / "recording.mp4").exists(), (
+        "the transcode failure left an empty mp4, which the manifest could "
+        "present as this run's video")
+    assert (capdir / "recording.webm").exists(), (
+        "the finalize step dropped the webm, so a failed transcode cannot be "
+        "retried without re-driving the UI")
 
 
 def _web_ui_capdir(tmp_path):
@@ -2088,6 +2167,7 @@ case "$1 $2" in
   "session name") echo "${STUB_PM_NAME-pm-test}" ;;
   "session ")     exit 0 ;;
   "tui send")
+      [ -n "$STUB_PM_SEND_LOG" ] && printf '%s\n' "$*" >> "$STUB_PM_SEND_LOG"
       case "$STUB_MODE" in
         midadied) rm -f "$STATE/pm-recorder" ;;
         midboth|midbothbad)
@@ -2173,6 +2253,16 @@ _STOP_MARKERS = {
 def _stop_block(name):
     raw = _scaffold_block(_recipe_text(name))
     return raw[raw.index(_STOP_MARKERS[name]):]
+
+
+def _driving_block():
+    """The tmux recipe's scenario-driving step (``# 4.`` … ``# 5.``).
+
+    A scenario supplies its own driving commands, so this is the shape a
+    worker pastes on its own — with no ``$TARGET`` from step 1.
+    """
+    raw = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+    return raw[raw.index("# 4."):raw.index("# 5.")]
 
 
 class TestCaptureFlowExecution:
@@ -2403,6 +2493,35 @@ class TestCaptureFlowExecution:
         assert "incomplete" in r.stderr, r.stderr
         assert "137" in r.stderr, (
             "the failure does not say how the recorder ended: " + r.stderr)
+
+    def test_tmux_driving_step_refuses_an_unresolvable_target(self, tmp_path):
+        """``pm tui send -s ""`` auto-detects, so an unset target drives a guess.
+
+        The driving steps are their own paste for a scenario, so ``$TARGET``
+        from step 1 is gone. An empty one is not a harmless no-op: ``pm tui
+        send -s ""`` falls back to the cwd's session and then to *any* pm
+        session with a TUI, so the keys can drive a different TUI than the one
+        being recorded — with no error at all, and a cast that never showed the
+        behaviour. The step re-derives the handle as step 5 does, and refuses
+        an empty one.
+        """
+        r, _cast = _run_block(_driving_block(), "ok", tmp_path,
+                              env_extra={"STUB_PM_NAME": ""})
+        assert r.returncode != 0, (
+            "the driving step ran with no target session, so its sends would "
+            "go to whatever session `pm tui send` auto-detects")
+        assert "TARGET is unset" in r.stderr, r.stderr
+
+    def test_tmux_driving_step_sends_to_the_derived_session(self, tmp_path):
+        """The re-derivation has to produce the handle the sends carry."""
+        log = tmp_path / "sends"
+        r, _cast = _run_block(_driving_block(), "ok", tmp_path,
+                              env_extra={"STUB_PM_SEND_LOG": str(log)})
+        assert r.returncode == 0, r.stderr
+        sends = log.read_text().splitlines()
+        assert sends and all("-s pm-test" in line for line in sends), (
+            "the driving step's sends do not carry the re-derived session: "
+            + repr(sends))
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_stop_block_pasted_alone_saves_the_pane(self, name, tmp_path):
