@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T15:12:12.698272+00:00'
+  updated_at: '2026-10-28T15:54:53.571504+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32732,6 +32732,42 @@ prs:
       (2026-10-28)'
     created_at: '2026-10-28T15:12:12Z'
     last_edited: '2026-10-28T15:12:12Z'
+  - id: note-85e1c10
+    text: 'Review loop e7e1 i2: four verified leftovers in the kept recipe scope (a
+      start step that cannot do its job is misdiagnosed downstream), plus one doc
+      correction. (1) Both scaffolds ignored `tmux new-session` status: with the server
+      refusing to start (TMUX_TMPDIR gone → "server exited unexpectedly") or a duplicate
+      name, the pane command never runs and the run ended with "recorder exited before
+      it drew" / "asciinema wrote no cast", pointing at a cast and recorder-stderr.log
+      that were never written (reproduced with the recipes own blocks). Both now stop
+      with "could not start the recorder session — see tmux error above". (2) All
+      three recipes ignored `mkdir -p` for the capture directory: with the path unusable
+      the tmux recipe ended with "recorder exited before it drew", the CLI scaffold
+      hit its readiness timeout, and the web-UI start block **exited 0** with the
+      app launched and no pid file (verified). Each now stops with "could not create
+      …". (3) The web-UI driver block guarded an *unset* CAPDIR but not a *missing*
+      one: cd fails, the shell stays in the worker cwd, node_modules is linked there,
+      the resolution check prints "playwright ok", and the driver dies with a bare
+      module error (reproduced). It now stops with "capture directory … does not exist".
+      (4) A failed web-UI start (app never answers) killed the app but left its dead
+      pid in server.pid, which the teardown falls back to (recycled-pid hazard — the
+      reason step 1 clears a stale one); it now removes it. Same class one block over:
+      the Layer 2 protocol block with CAPDIR set but missing fails both redirects,
+      runs no curl, and still exits 0 (verified) — now stopped by a directory guard.
+      (5) Doc correction: the render sections claimed categorically that the QA image
+      has no agg; the bundled Dockerfile installs it (e51274fe, 2026-05-30) and the
+      image used here was built before that, so the prose now says agg may be missing
+      and keeps the `command -v agg` rule. Tests: +8 (new-session start failure both
+      recipes, unusable capture dir both recipes + web-UI start, missing-CAPDIR driver
+      block, failed-start pid removal, Layer 2 missing dir) — all fail against the
+      pre-fix recipes (checked by restoring them in place). File 99 pass (3 runs);
+      related suites 273; full suite 3954 passed, 1 skipped, 92 deselected (test_merge_publish/test_signoff_integration
+      — push proxy), run with env -u PM_HOST_HOME PATH=/usr/bin:/bin and markdown
+      on the path. impl.md R15 + qa.md updated. Evidence /pm-captures/review-e7e1-i2/
+      (probe.py, probe.log, pre/post recipe copies, manifest.md). No pm_core/ change;
+      the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T15:54:53Z'
+    last_edited: '2026-10-28T15:54:53Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
