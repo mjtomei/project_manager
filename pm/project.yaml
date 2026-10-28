@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-ed2ebe9
+  active_pr: pr-0ef7f21
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T08:41:23.371648+00:00'
+  updated_at: '2026-10-28T09:10:14.400374+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38819,6 +38819,45 @@ prs:
       Incidental: pm session home from /tmp makes a broken pm-home (note on pr-3f52b15).'
     created_at: '2026-10-28T08:41:23Z'
     last_edited: '2026-10-28T08:41:23Z'
+  - id: note-f441fef
+    text: 'S120 refine (HEAD 9a9633b4): the auto-sequence qa branch checks overall==PASS
+      before the awaiting-qa guard, and only drops a status whose mtime predates the
+      return ts. So a `pm qa run` started before a REQA return writes a PASS that
+      is newer than the return, and the next tick can print `advanced: sign_off` on
+      it. The awaiting-qa/None branch only counts runs started since the return. A
+      CLI run started before it is not counted, so the tick claims and launches qa-run-bg,
+      and qa-run-bg has no run_driven_elsewhere check. The tick sign_off hop==qa launches
+      qa-run-bg at once. origin/master has the same PASS-first branch and the same
+      unguarded hop launch, so tick-side findings may belong in a bug PR. Start the
+      story-1 ticks after the TUI logs "Sign-off REQA for <pr> — QA starts once…",
+      or a tick may apply the hop itself.'
+    created_at: '2026-10-28T08:06:19Z'
+    last_edited: '2026-10-28T08:06:19Z'
+  - id: note-d13d165
+    text: 'QA S120 (2026-10-28, RQ56, host, all fake-claude, HEAD 9a9633b4 vs control
+      91b259bd, story 2 also origin/master 89e3c501; captures /pm-captures/scenarios/120,
+      REPORT.md, 60 mp4): CODE CHANGE d7e65156 needs normal re-review. Two tick defects
+      reproduced live on HEAD. (1) Launch over a live pm qa run: story 1 (TUI hop
+      deferred correctly per c9ce4f6a, but the first 2 s tick took the awaiting-qa
+      branch: the CLI run started before the return, so it did not count; it printed
+      `running: qa (launched)` and qa-run-bg killed qa-A/qa-A-s1); story 2 (no TUI:
+      the tick sign_off hop==qa launched qa-run-bg over the CLI at once). (2) The
+      CLI one-instruction PASS (newest qa_status.json, after the return ts) read as
+      the re-run verdict: `advanced: sign_off` while the full re-run had no verdict
+      (story 1 and 2 on HEAD, control and master; control story 3). Fix: awaiting-qa
+      tick and qa hop wait while _qa_run_driven_since(pr) (no since bound); latest_qa_status_path
+      skips <pr>-cli-<pr> workdirs (qa_loop.instruction_run_loop_id/is_instruction_run);
+      TUI deferred REQA start says "Sign-off REQA for" not "Review PASS for". Post-fix
+      every Then held in all 3 stories (one driver, CLI windows intact, no sign_off
+      on the CLI PASS, one sign-off ending BLOCKED, story 3 awaiting qa->null once,
+      no claim left, no Error line). Suite 4473 passed 1 skipped. master has the same
+      defect: filed bug pr-d7d4601 (close when this merges). Incidental: tmux kill-pane
+      on the TUI respawns it (after-kill-pane hook), so story 2 ended the TUI process
+      instead; pm tui view then reports a dead pane with rc 0, filed as pr-0ef7f21.
+      master 2 s ticks outside tmux never pass review ("Review window requires tmux.";
+      RQ47 a, fixed here), so master story 2 ran with TMUX set.'
+    created_at: '2026-10-28T09:10:14Z'
+    last_edited: '2026-10-28T09:10:14Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -41653,3 +41692,61 @@ prs:
       rerun held (/pm-captures/scenarios/117/post-fix/s4). Closing as fixed there.'
     created_at: '2026-10-28T07:47:04Z'
     last_edited: '2026-10-28T07:47:04Z'
+- id: pr-d7d4601
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence launches qa-run-bg over a live `pm qa run` at a
+    sign-off REQA, then advances to sign-off on that one instruction''s PASS'
+  branch: pm/pr-d7d4601-bug-pm-pr-auto-sequence-launches-qa-run-bg-over-a-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_auto_sequence: the sign_off branch
+    hop=="qa" calls _launch_qa_detached unconditionally, and the qa branch reads the
+    newest ~/.pm/workdirs/qa/<pr>-*/qa_status.json (paths.latest_qa_status_path) before
+    any awaiting/driver check. Repro (QA S120 story 2, origin/master 89e3c501, host,
+    fake-claude, no TUI, ticks `pm pr auto-sequence B` every 2 s inside the pm session;
+    signoff fake verdicts [{SIGNOFF_REQA, delay 60}, SIGNOFF_BLOCKED]): when the tick
+    prints `advanced: sign_off`, run `pm qa run <instruction> --pr B` in another window.
+    At the REQA the hop tick prints `sign_off: re-qa` and spawns `pm pr qa-run-bg
+    B`, which logs `Killing stale QA window qa-B` / `qa-B-s1` (the live CLI run windows;
+    the CLI relaunches its worker, so two QA loops run at once). When the CLI run
+    writes its PASS (~30 s before its finalizer ends), the next tick prints `advanced:
+    sign_off` while the full re-run still has no verdict, and sign-off judges a one-instruction
+    run. Captures: /pm-captures/scenarios/120/master/s2 (ticks.log 08:37:26 re-qa,
+    08:40:08 advanced: sign_off; samples.log shows the re-run st:? then). Fixed on
+    pr-592e4bd by "qa: S120 auto-sequence leaves a live pm qa run alone at a sign-off
+    REQA ..." (hop and awaiting-qa ticks wait while _qa_run_driven_since; latest_qa_status_path
+    skips <pr>-cli-<pr> workdirs); close when that merges.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T08:44:12.086615+00:00'
+  updated_at: '2026-10-28T08:44:12.086615+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-0ef7f21
+  plan: bugs
+  title: 'Bug: pm tui view reports a dead TUI pane (blank frame, rc 0) after the TUI
+    process exits, instead of "No TUI pane found"'
+  branch: pm/pr-0ef7f21-bug-pm-tui-view-reports-a-dead-tui-pane-blank-fram
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/helpers.py _find_tui_pane returns the pane-registry
+    entry with role tui without checking the pane still exists; pm tui view then captures
+    nothing and prints "[Session: pm-<tag>, Pane: %0]" with rc 0. Repro (QA S120 story
+    2, host): in a pm session, end the TUI process (kill <pid from ~/.pm/tui-pm-<tag>.pid>;
+    window 0 closes, no pm _tui left), then run pm tui view -s pm-<tag>: prints the
+    dead pane id and a blank frame, rc 0. Evidence: /pm-captures/scenarios/120/{head,control,master,post-fix}/events.log
+    "no TUI: tview=[[Session: ..., Pane: %0]||]". Note: tmux kill-pane on the TUI
+    pane does not remove it (the after-kill-pane hook pm _pane-closed respawns it),
+    so ending the process is the only way to run with no TUI.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T09:08:37.363689+00:00'
+  updated_at: '2026-10-28T09:08:37.363689+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
