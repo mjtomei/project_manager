@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T18:35:56.203370+00:00'
+  updated_at: '2026-10-28T19:01:36.460425+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37001,6 +37001,22 @@ prs:
       end to end.'
     created_at: '2026-10-28T18:35:56Z'
     last_edited: '2026-10-28T18:35:56Z'
+  - id: note-ed22e93
+    text: 'QA planning 2026-10-28 (fresh scenarios 17-20): the S16 story-4 marker
+      Then ("the running-wait marker ⟳1 renders during the adopt check and ⏸1 never
+      renders before the adopt log line") is not achievable and should not be re-emitted:
+      consume_breadcrumb mounts (heal_registry, hook install, watcher setup, tmux
+      calls) while the adopt check runs in the loop thread, blocking the UI event
+      loop, so the pane keeps the pre-restart frame until after the adopt line; no
+      post-mount paint can precede it. The correct surface for that window is the
+      published status state, which is now `running / review resuming (iteration N)`
+      with review.resuming=true, input_required=false, follow_up=false (7280536b +
+      4de9868d). Fresh scenario 19 asserts that (and the after-adoption waiting state
+      on the same pane), not paint ordering. Also note S15/S16 were re-run on pre-baa8
+      code; scenarios 17-20 target the baa8 i1-i3 additions (resuming flag, wakeup-turn-after-answer
+      guard, local slash-command echo transparency).'
+    created_at: '2026-10-28T19:01:36Z'
+    last_edited: '2026-10-28T19:01:36Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high

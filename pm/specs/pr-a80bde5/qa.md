@@ -5,7 +5,11 @@ Source of truth for the behaviour under test: `ReviewLoopState.input_required`
 
 - `pm autostart status` (text) and `pm autostart status --json`
   (`pm.autostart.status/1`: `state`, `reason`, `review.input_required`,
-  `review.follow_up`, `review.iteration`, `review.verdict`).
+  `review.follow_up`, `review.resuming`, `review.iteration`,
+  `review.verdict`).  `review.resuming=true` (reason `review resuming
+  (iteration N)`) is the third, neutral state: a resumed loop is still
+  deciding whether its recorded INPUT_REQUIRED wait has a live pane to adopt,
+  so the wait is neither live (`input_required`) nor answered (`follow_up`).
 - The TUI runs popup (`a`) — same `build_status` payload.
 - The tech-tree marker: red `⏸N` while waiting for a human, cyan `⟳N` while
   the loop is working, red `⏹N` when a stop is requested.
@@ -35,6 +39,15 @@ verdict during a TUI restart gap, or a follow-up `idle_prompt` event that was
 lost or overwritten — resolves the wait without another hook event. Without
 it a resumed loop can sit on "follow-up running" forever. The wait-start read
 must never treat the INPUT_REQUIRED question itself as the follow-up.
+
+Review baa8 added two more, both closing false waits the loop itself could
+produce: a resumed loop publishes the neutral `resuming` state while its
+adopt check runs (never a phantom wait or a phantom "answered; follow-up
+running"); and a harness wakeup turn that starts and idles *after* the human
+answered (a `/loop` tick, scheduled prompt, task notification) is not a
+question — it must not re-arm the wait — while a local slash-command echo
+(`/model`) after the follow-up verdict is transparent to the verdict scan
+(→ R5c, R13, E8, E9).
 
 ## Setup (shared by all scenarios)
 
@@ -128,6 +141,19 @@ follow-up stops the loop with verdict PASS (it does not relaunch with
 NEEDS_WORK), and a NEEDS_WORK follow-up advances to the next iteration. The
 question being answered never comes back as its own follow-up.
 
+R5c. **A wakeup turn after the answer does not re-arm the wait.**
+GIVEN the human has answered an INPUT_REQUIRED wait and Claude has not yet
+emitted a follow-up verdict.
+WHEN a harness wakeup turn starts and goes idle with no verdict (a `/loop`
+tick, a scheduled prompt firing, a `<task-notification>`), so the transcript
+gains an assistant turn the human did not ask for.
+THEN the wait stays cleared: status remains `running` with the
+`(INPUT_REQUIRED answered; follow-up running)` reason, `input_required=false`,
+`follow_up=true`, the marker stays the working `⟳N`, and no new INPUT_REQUIRED
+notice appears. The wakeup reply is never recorded as a verdict; the real
+follow-up verdict still resolves the wait (a second genuine INPUT_REQUIRED
+after the answer is still a question → R4).
+
 R6. **Prose question after an answer waits again.**
 GIVEN an answered follow-up.
 WHEN Claude goes idle after that answer without emitting a verdict (it asked
@@ -198,6 +224,18 @@ return the INPUT_REQUIRED question itself as the follow-up (a genuine
 unanswered wait stays `waiting`), and a non-task wakeup turn after the verdict
 must not change which verdict is returned (→ R5b).
 
+R13. **The adopt check is published as `resuming`, not as a wait or an answer.**
+GIVEN a restored INPUT_REQUIRED wait and a TUI restart that resumes its loop.
+WHEN a status reader (CLI text, CLI `--json`, runs popup) samples while the
+resumed loop is still checking whether the recorded wait has a live pane.
+THEN that sample reports `state=running`, reason `review resuming
+(iteration N)`, `review.input_required=false`, `review.follow_up=false`,
+`review.resuming=true` — never `waiting`/INPUT_REQUIRED (nobody is being
+shown the question yet) and never "INPUT_REQUIRED answered; follow-up
+running" (nobody has answered). Once the check finishes, an adoptable wait
+is published as the live `waiting` state on the same pane and iteration, and
+a non-adoptable one is never published as a wait at all.
+
 ## Edge cases
 
 E1. **Two surfaces queried at once agree.** While a transition is happening,
@@ -254,13 +292,18 @@ being mistaken for an answered/completed one.
 ## Pass/Fail criteria
 
 - PASS when every Then clause above is observed on the stated surfaces, with
-  the JSON `review.input_required`/`review.follow_up`/`state`/`reason` matching
-  the text rendering and the TUI, and the original bug (R3) does not reproduce.
+  the JSON `review.input_required`/`review.follow_up`/`review.resuming`/
+  `state`/`reason` matching the text rendering and the TUI, and the original
+  bug (R3) does not reproduce.
 - FAIL on any stale `waiting`/INPUT_REQUIRED while the reviewer is working, any
   cleared wait that nobody answered, any relaunch/`--fresh` that kills a
   pending question, any auto-conversion of a repeated INPUT_REQUIRED, any
   surface disagreement, any unrelated hold cleared, or a resumed wait that
   stays on `follow-up running` after its verdict is already in the transcript.
+- Also FAIL if the resumed adopt check publishes `waiting`/INPUT_REQUIRED or
+  "INPUT_REQUIRED answered; follow-up running" instead of `review resuming
+  (iteration N)` (R13), or if a wakeup turn after the answer re-arms the wait
+  (R5c).
 - Also FAIL if a PASS follow-up followed by a non-task wakeup turn (e.g. a
   `/loop` tick) is recorded as NEEDS_WORK or relaunches an iteration (R5b).
 - The reproduction tests from the diff
@@ -268,11 +311,15 @@ being mistaken for an answered/completed one.
   `TestRestartAdoption` — including
   `test_follow_up_verdict_resolves_without_a_hook_event`,
   `test_follow_up_pass_survives_a_loop_tick_turn`,
+  `test_wakeup_turn_after_the_answer_does_not_rearm_the_wait`,
+  `test_follow_up_verdict_survives_a_local_slash_command`,
+  `test_restart_adopt_check_never_reads_as_follow_up_running`,
   `test_record_with_no_text_is_not_an_answer`; `tests/test_review_loop.py::
   TestInputRequired`) may be run as supporting evidence, but the primary
-  evidence is the user-facing behaviour above. The PR was reworked on top of
-  master at review i3 / 3bf4 i1 and the waiter changed again at review 484e
-  i1, so run these against the current HEAD.
+  evidence is the user-facing behaviour above. The waiter changed again at
+  review baa8 i2/i3 (wakeup-turn guard, local-command transparency) and the
+  status payload gained `review.resuming` at baa8 i1, so run these against
+  the current HEAD.
 
 ## Ambiguities
 
@@ -298,5 +345,14 @@ Resolved:
 - *The waiter reads the transcript when the wait starts* (review 484e i1),
   not only on an `idle_prompt` event, so a restart that loses the event does
   not strand the loop → R12/E10.
+- *The adopt check is a third state* (review baa8 i1): a resumed loop deciding
+  whether its wait is adoptable publishes `review.resuming`, so it is never
+  mistaken for a live wait or for an answered follow-up → R13.
+- *A wakeup turn after the answer is not a question* (review baa8 i2): an idle
+  from a `/loop` tick / scheduled prompt / task notification must not re-arm
+  the wait → R5c.
+- *A local slash-command echo is transparent* (review baa8 i3): `<command-name>`
+  / `<local-command-stdout>` records are neither answers nor task boundaries,
+  so a verdict emitted before one is still recorded → E8.
 
 No **[UNRESOLVED]** ambiguities.
