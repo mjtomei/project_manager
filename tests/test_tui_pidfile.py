@@ -155,9 +155,26 @@ class TestParsePidfile:
                                       # bool/float/null must not coerce to a
                                       # live PID via int().
                                       '{"pid": true}', '{"pid": 1.5}',
-                                      '{"pid": null}', '{"pid": "1.5"}'])
+                                      '{"pid": null}', '{"pid": "1.5"}',
+                                      # Corrupt values that must be reported
+                                      # as unreadable rather than raising
+                                      # (E3): a superscript digit is
+                                      # str.isdigit() but not int()-parseable,
+                                      # and a PID outside pid_t range would
+                                      # raise OverflowError at os.kill time.
+                                      '{"pid": "²"}', '{"pid": "²³"}',
+                                      '{"pid": 2147483648}',
+                                      '{"pid": "100000000000000000000"}',
+                                      "2147483648",
+                                      "100000000000000000000"])
     def test_corrupt_is_none(self, text):
         assert tpf.parse_pidfile(text) is None
+
+    def test_non_decimal_starttime_is_ignored(self):
+        """A corrupt starttime drops to None; it must not raise."""
+        desc = tpf.parse_pidfile('{"pid": 42, "starttime": "²"}')
+        assert desc is not None and desc.pid == 42
+        assert desc.starttime is None
 
     def test_string_pid_is_accepted(self):
         assert tpf.parse_pidfile('{"pid": "42"}').pid == 42
@@ -263,6 +280,22 @@ class TestClaim:
         path.write_text("garbage")
         claim = tpf.claim_tui_pidfile(path, SESSION)
         try:
+            assert tpf.read_pidfile(path).pid == os.getpid()
+        finally:
+            claim.release()
+
+    def test_takes_over_out_of_range_pid(self, tmp_path):
+        """A huge PID is stale, not an OverflowError out of the claim.
+
+        ``os.kill`` refuses a pid outside C ``int`` range, so a corrupt
+        pidfile holding one used to crash ``pm _tui`` at startup instead
+        of being taken over (E3).
+        """
+        path = tmp_path / "tui-pm-test.pid"
+        path.write_text(str(10 ** 20))
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        try:
+            assert claim.pid == os.getpid()
             assert tpf.read_pidfile(path).pid == os.getpid()
         finally:
             claim.release()
@@ -453,6 +486,23 @@ class TestSubmitCommand:
         assert not pidfile.exists()
         assert not queue.exists()
 
+    def test_out_of_range_pid_is_stale_not_a_crash(self, ipc_paths):
+        """A corrupt huge PID must not raise out of the picker path.
+
+        The number parses as an int but ``os.kill`` refuses it with
+        ``OverflowError``; the caller must see a clean "unreadable
+        pidfile" instead of a traceback (E3).
+        """
+        pidfile, queue = ipc_paths
+        pidfile.write_text(str(10 ** 20))
+        assert helpers.tui_owner_problem(SESSION) == "unreadable pidfile"
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+        assert res.ok is False
+        assert res.reason == "stale_pidfile"
+        assert "unreadable" in res.message
+        assert not pidfile.exists()
+        assert not queue.exists()
+
     def test_recycled_pid_starttime_mismatch(self, ipc_paths, procs):
         pidfile, queue = ipc_paths
         other = subprocess.Popen(["sleep", "300"])
@@ -624,6 +674,9 @@ class TestSubmitCommand:
         assert res.ok is False
         assert res.reason == "starting"
         assert "starting up" in res.message
+        # A TUI killed between O_EXCL create and its first write leaves an
+        # empty file forever; the message must name the way out.
+        assert "restart the TUI (Ctrl+R)" in res.message
         assert pidfile.exists()
         assert pidfile.read_text() == ""
         assert not queue.exists()
@@ -815,6 +868,12 @@ class TestIdentity:
             assert tpf.identity_problem(desc) == "process is a zombie"
         finally:
             proc.wait(timeout=5)
+
+    def test_pid_alive_is_total_for_out_of_range_pids(self):
+        """os.kill raises OverflowError, not OSError, past C int range."""
+        assert tpf.pid_alive(2 ** 40) is False
+        assert tpf.identity_problem(tpf.TuiPidfile(pid=2 ** 40)) == (
+            "process is not running")
 
 
 # ---------------------------------------------------------------------------

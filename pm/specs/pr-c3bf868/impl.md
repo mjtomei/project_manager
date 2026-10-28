@@ -197,7 +197,11 @@ A5. *Should a JSON descriptor with `caps: []` (TUI starting) be retried
     still starting up (retry in a moment) or the handler install failed and
     the capabilities were never published (restart the TUI with Ctrl+R).
     The picker pops a dismissable message; the user re-runs the action. No
-    blocking retry loop in the picker.
+    blocking retry loop in the picker. The same both-possibilities wording
+    is used for the other `starting` case — a zero-length pidfile (E3):
+    a TUI killed between its `O_EXCL` create and its first write leaves
+    the file empty for good, so "try again in a moment" alone would be a
+    dead end and the message also names "restart the TUI (Ctrl+R)".
 
 No **[UNRESOLVED]** items.
 
@@ -231,6 +235,16 @@ E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
     writes a whole JSON descriptor in one go, so whitespace-only content
     is corruption (unreadable → removed), never the mid-claim window, and
     a whitespace-only file must not be reported as "starting up" forever.
+    The same "never crash on corruption" rule bounds the parsed values:
+    `pid` must be a decimal integer in `1..2**31-1` (a C `int`, which is
+    what `os.kill` takes — a larger value raises `OverflowError`, not
+    `OSError`, out of the startup claim, the picker, and autostart) and
+    string fields are gated on `str.isdecimal`, not `str.isdigit`
+    (`"²".isdigit()` is true but `int()` refuses it, so a superscript
+    digit in `pid` or `starttime` used to raise `ValueError` out of
+    `parse_pidfile` itself). Both are rejected as unreadable, so the
+    file is reported `stale_pidfile` and removed; `pid_alive` is also
+    total for out-of-range input as defence in depth.
 E4. **Permission denied** (`EPERM`) on signal → return False with a message;
     do **not** delete the pidfile (the process is alive, just not ours).
 E5. **Legacy live TUI + `trigger_tui_reload`** → signals SIGUSR1 (A1).
@@ -375,6 +389,16 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     as four commands while the rollback saw one); and a non-ASCII
     command is rolled back byte-for-byte, proving the writer and
     `_unqueue_line` agree on UTF-8 regardless of the caller's locale.
+28. corrupt pidfile *values* never raise (E3): `parse_pidfile` rejects a
+    `pid` outside `1..2**31-1` (legacy and JSON) and a string that
+    `str.isdigit()` accepts but `int()` refuses (such as `"²"`) in `pid`
+    or `starttime`; a huge-PID pidfile is then taken over by
+    `claim_tui_pidfile` and reported `stale_pidfile` + removed by
+    `submit_tui_command` instead of raising `OverflowError`/`ValueError`,
+    and `pid_alive` / `identity_problem` stay total for out-of-range
+    input. (Pre-fix these raised out of the startup claim, the picker,
+    and autostart — the same class of crash E3 already closed for
+    undecodable bytes.)
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

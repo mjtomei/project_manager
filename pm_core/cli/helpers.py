@@ -559,11 +559,14 @@ def _validate_tui_owner(
             f"No TUI is running for session {session}.")
     if problem == "empty pidfile":
         # A TUI is mid-claim (see ``_read_tui_owner``).  Leave the file
-        # alone so the starting TUI keeps its claim.
+        # alone so the starting TUI keeps its claim.  It can also be
+        # *permanently* empty if a TUI was killed between its ``O_EXCL``
+        # create and its first write, so name the restart fix as well —
+        # "try again in a moment" alone would be a dead end.
         return pidfile, raw, None, TuiIpcResult(
             False, "starting",
             f"The TUI for session {session} has not finished starting up; "
-            f"try again in a moment.")
+            f"try again in a moment, otherwise restart the TUI (Ctrl+R).")
     if problem is not None:
         # Unreadable, dead, recycled, or not a TUI: stale.
         tui_pidfile.unlink_if_unchanged(pidfile, raw)

@@ -34,6 +34,13 @@ CAP_COMMAND = "sigusr2"
 
 PIDFILE_VERSION = 1
 
+# ``os.kill`` takes a C ``int``, so a corrupt pidfile holding a larger
+# number raises ``OverflowError`` at signal time — out of the startup
+# claim, the picker, and autostart — instead of being read as stale.
+# No real PID comes close to this bound (``pid_t`` is a signed 32-bit int
+# on every platform pm runs on).
+_MAX_PID = 2 ** 31 - 1
+
 # An empty pidfile is ambiguous — a peer may have created it with
 # ``O_EXCL`` and not yet written its descriptor — so the claim waits this
 # many short intervals for a peer to publish before treating it as stale.
@@ -92,6 +99,38 @@ class TuiPidfileConflict(RuntimeError):
 # Parsing
 
 
+def _parse_uint(value) -> int | None:
+    """A non-negative integer from a pidfile field, or ``None``.
+
+    Accepts an ``int`` or a decimal string; everything else (``bool``,
+    ``float``, ``None``, a non-numeric string) is rejected rather than
+    coerced.  ``str.isdecimal`` — not ``str.isdigit`` — is the gate: it
+    is true for ``"²"``, which ``int()`` then refuses, and a corrupt
+    pidfile must never raise out of the parser.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text.isdecimal():
+            return None
+        try:
+            value = int(text)
+        except ValueError:  # non-decimal digits int() still refuses
+            return None
+    if not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _parse_pid(value) -> int | None:
+    """A usable PID from *value*, or ``None`` when it is not one."""
+    pid = _parse_uint(value)
+    if pid is None or not 1 <= pid <= _MAX_PID:
+        return None
+    return pid
+
+
 def parse_pidfile(text: str | None) -> TuiPidfile | None:
     """Parse pidfile contents; ``None`` when missing/corrupt.
 
@@ -111,25 +150,13 @@ def parse_pidfile(text: str | None) -> TuiPidfile | None:
             return None
         if not isinstance(data, dict):
             return None
-        raw_pid = data.get("pid")
-        if isinstance(raw_pid, bool):
-            return None
-        if isinstance(raw_pid, int):
-            pid = raw_pid
-        elif isinstance(raw_pid, str) and raw_pid.strip().isdigit():
-            pid = int(raw_pid.strip())
-        else:
-            return None
-        if pid <= 0:
+        pid = _parse_pid(data.get("pid"))
+        if pid is None:
             return None
         caps_raw = data.get("caps")
         caps = (frozenset(str(c) for c in caps_raw)
                 if isinstance(caps_raw, list) else frozenset())
-        starttime = data.get("starttime")
-        if isinstance(starttime, str) and starttime.isdigit():
-            starttime = int(starttime)
-        elif not isinstance(starttime, int) or isinstance(starttime, bool):
-            starttime = None
+        starttime = _parse_uint(data.get("starttime"))
         started_at = data.get("started_at")
         if not isinstance(started_at, str):
             started_at = None
@@ -138,11 +165,8 @@ def parse_pidfile(text: str | None) -> TuiPidfile | None:
             session = None
         return TuiPidfile(pid=pid, caps=caps, started_at=started_at,
                           starttime=starttime, session=session)
-    try:
-        pid = int(stripped)
-    except ValueError:
-        return None
-    if pid <= 0:
+    pid = _parse_pid(stripped)
+    if pid is None:
         return None
     return TuiPidfile(pid=pid, caps=frozenset({CAP_RELOAD}), legacy=True)
 
@@ -229,14 +253,20 @@ def cmdline_is_tui(parts: list[str]) -> bool:
 
 
 def pid_alive(pid: int) -> bool:
-    """True when *pid* exists (a zombie counts as existing here)."""
+    """True when *pid* exists (a zombie counts as existing here).
+
+    Total for any input: an out-of-range value (``os.kill`` raises
+    ``OverflowError``, not ``OSError``) is reported as not alive rather
+    than escaping into a caller.  ``parse_pidfile`` already bounds the
+    pid, so this is defence in depth for direct callers.
+    """
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True  # alive, owned by someone else
-    except OSError:
+    except (OSError, OverflowError, ValueError):
         return False
     return True
 
