@@ -29,6 +29,13 @@ parsed as one; and a `type:"user"` record with no real human text (empty,
 whitespace-only, harness-injected) never counts as the answer that clears a
 wait.
 
+Review 484e i1 added a fifth: the waiter reads the transcript once when the
+wait starts, so a follow-up verdict that already landed — an answer and its
+verdict during a TUI restart gap, or a follow-up `idle_prompt` event that was
+lost or overwritten — resolves the wait without another hook event. Without
+it a resumed loop can sit on "follow-up running" forever. The wait-start read
+must never treat the INPUT_REQUIRED question itself as the follow-up.
+
 ## Setup (shared by all scenarios)
 
 The tester works in a throwaway project inside the workdir (see
@@ -177,6 +184,20 @@ post-merge main-repo update on a remote backend), so `merge INPUT_REQUIRED —
 answer in merge window` cannot be driven here. Covered by code inspection and
 unit tests, not a QA scenario.
 
+R12. **A verdict already in the transcript resolves the resumed wait.**
+GIVEN a review loop waiting on INPUT_REQUIRED whose answer and follow-up
+verdict (PASS or NEEDS_WORK) landed while the TUI was restarting, or whose
+follow-up `idle_prompt` hook event was lost or overwritten by another event.
+WHEN the resumed loop enters (or re-enters) the follow-up wait.
+THEN it reads the transcript at wait start and returns the verdict turn's
+verdict without waiting for another idle event: a NEEDS_WORK follow-up
+launches iteration N+1, a PASS follow-up completes the loop, and status never
+sits on `running / review iteration N (INPUT_REQUIRED answered; follow-up
+running)` after the verdict has already landed. The wait-start read must not
+return the INPUT_REQUIRED question itself as the follow-up (a genuine
+unanswered wait stays `waiting`), and a non-task wakeup turn after the verdict
+must not change which verdict is returned (→ R5b).
+
 ## Edge cases
 
 E1. **Two surfaces queried at once agree.** While a transition is happening,
@@ -220,6 +241,13 @@ E9. **Verdict turn vs transcript tail.** A `/loop` (or other non-task) wakeup
 turn after the follow-up verdict must not change which verdict is recorded;
 the wait state must also not re-arm for it.
 
+E10. **Verdict at wait start with a lost hook event.** The `idle_prompt` event
+is a single file per session, overwritten by each hook event. A restart can
+leave it holding no follow-up idle (or another event type) while the answer
+and verdict are already in the transcript. The resumed wait must resolve from
+the transcript alone, and a still-unanswered wait must still wait rather than
+being mistaken for an answered/completed one.
+
 ## Pass/Fail criteria
 
 - PASS when every Then clause above is observed on the stated surfaces, with
@@ -228,16 +256,20 @@ the wait state must also not re-arm for it.
 - FAIL on any stale `waiting`/INPUT_REQUIRED while the reviewer is working, any
   cleared wait that nobody answered, any relaunch/`--fresh` that kills a
   pending question, any auto-conversion of a repeated INPUT_REQUIRED, any
-  surface disagreement, or any unrelated hold cleared.
+  surface disagreement, any unrelated hold cleared, or a resumed wait that
+  stays on `follow-up running` after its verdict is already in the transcript.
 - Also FAIL if a PASS follow-up followed by a non-task wakeup turn (e.g. a
   `/loop` tick) is recorded as NEEDS_WORK or relaunches an iteration (R5b).
 - The reproduction tests from the diff
   (`tests/test_review_input_required_state.py`: `TestLiveFlow`,
-  `TestRestartAdoption`, `test_follow_up_pass_survives_a_loop_tick_turn`,
+  `TestRestartAdoption` — including
+  `test_follow_up_verdict_resolves_without_a_hook_event`,
+  `test_follow_up_pass_survives_a_loop_tick_turn`,
   `test_record_with_no_text_is_not_an_answer`; `tests/test_review_loop.py::
   TestInputRequired`) may be run as supporting evidence, but the primary
   evidence is the user-facing behaviour above. The PR was reworked on top of
-  master at review i3 / 3bf4 i1, so run these against the integrated HEAD.
+  master at review i3 / 3bf4 i1 and the waiter changed again at review 484e
+  i1, so run these against the current HEAD.
 
 ## Ambiguities
 
@@ -260,5 +292,8 @@ Resolved:
 - *A follow-up verdict is read task-scoped* (integration rework): a later
   `/loop`/non-task turn must not be parsed as the follow-up → R5b/E9.
 - *An empty user record is not an answer* (3bf4 i1) → E8.
+- *The waiter reads the transcript when the wait starts* (review 484e i1),
+  not only on an `idle_prompt` event, so a restart that loses the event does
+  not strand the loop → R12/E10.
 
 No **[UNRESOLVED]** ambiguities.
