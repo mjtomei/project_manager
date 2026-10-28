@@ -36190,6 +36190,7 @@ prs:
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
   updated_at: '2026-10-28T06:17:34.247435+00:00'
+  updated_at: '2026-10-28T06:16:50.107237+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36928,6 +36929,32 @@ prs:
       the TUI, panes, CLI and fake-claude all share the same ~/.pm.'
     created_at: '2026-10-28T05:39:07Z'
     last_edited: '2026-10-28T05:39:07Z'
+  - id: note-c0c8816
+    text: 'QA scenario 22 (concurrent actors during the backoff) PASS 2026-10-28 on
+      f14de47b. All three stories verified live with a podman shim: (1) two supersedes
+      during the 5 s and 10 s windows -> 2x "superseding running loop" + 2x "Fresh
+      review loop started" (loop=5c51, loop=05cd), both superseded loops KILLED with
+      no further attempt, review-* window samples 18x0 / 101x1 (never 2), no "owned
+      by another loop", no LAUNCH_FAILED, surviving loop -> single "Review loop done
+      ... PASS"; (2) 8 backoff `pm pr auto-sequence` calls all "running: review (owned
+      by loop:a17a)" with no advanced:/started:/sign_off:, post-repair call same owner
+      and "window unchanged: yes", one PASS; (3) `pm pr edit --status closed` in the
+      10 s window -> "merged/closed during review launch", verdict=CLOSED, exactly
+      2 launch attempts, no attempt 3, target pruned ("Auto-start: target pr-closed
+      — removed"), no re-arm across two forced scheduler passes (second past the 65
+      s cooldown), autostart status "off". Targeted tests: tests/test_review_launch_retry.py
+      101 passed; test_lease_keepalive_releases_a_lease_claimed_after_a_stop + tests/test_breadcrumb_review_loop.py
+      25 passed. Mechanics for the next run: `pm log grep` has NO -q flag (only --source/-i)
+      so the scenario`s `until pm log grep -q ...` waits hang — use `pm log grep "X"
+      | wc -l`; use a SEPARATE tmux socket per story (PM_TMUX_SOCKET=$QA_ROOT/sN.sock)
+      because `pm session` reattaches by the path-derived session name, so re-running
+      setup in the same dir can leave the previous TUI (cwd = deleted dir) as the
+      owner, which then auto-launches the setup guide and makes `pm autostart add`
+      fail with unknown_pr; `pm push` prints the sync branch twice, so use `grep -o
+      "pm/sync-[0-9]*-[0-9]*" | head -1` before `git merge` (otherwise the merge silently
+      fails and `pm pr start` says "not committed on master yet"). Captures: /pm-captures/scenarios/22/{story1-supersede,story2-autosequence,story3-closed}.'
+    created_at: '2026-10-28T06:16:50Z'
+    last_edited: '2026-10-28T06:16:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
