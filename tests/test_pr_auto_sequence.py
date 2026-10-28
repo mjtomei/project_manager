@@ -375,6 +375,8 @@ class TestQA:
              patch("pm_core.cli.pr._qa_status_for",
                    return_value=("PASS", status_path)), \
              patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=False), \
              patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
             mock_signoff.callback = MagicMock()
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
@@ -410,6 +412,61 @@ class TestQA:
         mock_claim.assert_called_once_with(tmp_path, "pr-001", "qa",
                                            require_status="qa")
         mock_qa.assert_called_once()
+
+    @pytest.mark.parametrize("verdict", ["PASS", "NEEDS_WORK"])
+    def test_a_status_from_before_the_owed_run_does_not_act(
+            self, runner, tmp_path, verdict):
+        """The owed re-run clears ``awaiting`` as it starts but only writes
+        its own ``qa_status.json`` once planning ends — minutes later — so
+        the *previous* run's verdict stays newest while the owed run plans.
+        Acting on it would advance (PASS) or bounce (NEEDS_WORK) the PR out
+        from under the run that owns it, silently dropping the owed re-run."""
+        status_path = tmp_path / "qa_status.json"
+        status_path.write_text('{"overall": "%s"}' % verdict)
+        pr = _pr("qa", signoff_return={
+            "verdict": "SIGNOFF_REQA", "hop": "qa", "awaiting": None,
+            "ts": "2020-01-01T00:00:00+00:00"})
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(verdict, status_path)), \
+             patch("pm_core.cli.pr.store.locked_update") as mock_update, \
+             patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=True), \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff, \
+             patch("pm_core.cli.pr._launch_review_iteration") as mock_review:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "running: qa (driven elsewhere)"
+        mock_update.assert_not_called()
+        mock_signoff.assert_not_called()
+        mock_review.assert_not_called()
+
+    def test_a_status_without_a_reqa_episode_still_advances(
+            self, runner, tmp_path):
+        """The in-flight guard is scoped to an open sign-off return: a plain
+        qa PR whose run just wrote PASS advances as before (one tick later at
+        worst, when the run record ends)."""
+        status_path = tmp_path / "qa_status.json"
+        status_path.write_text('{"overall": "PASS"}')
+        pr = _pr("qa")
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=("PASS", status_path)), \
+             patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=True) as driven, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: sign_off" in result.output
+        mock_signoff.assert_called_once()
+        driven.assert_not_called()      # no episode: no probe, no extra scan
 
 
 class TestSignOff:

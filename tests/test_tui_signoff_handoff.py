@@ -555,6 +555,27 @@ def test_reqa_route_claims_the_launch_before_starting(world_factory):
     assert app.pr()["signoff_return"]["launch_claim"]["hop"] == "qa"
 
 
+def test_reqa_route_keeps_a_running_loop_entry(world_factory):
+    """A QA loop can still be running when sign-off routes the PR back (the
+    user pressed ``i`` while a ``zz t`` loop ran).  Popping its entry would
+    let the owed-REQA start — and every reconciler tick — start a second full
+    run over it; the loop owns the PR until it ends."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    running = QALoopState(pr_id=PR)
+    running.running = True
+    app._qa_loops[PR] = running
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False,
+               create=True):
+        _poll(app)
+    sq.assert_not_called()
+    assert app._qa_loops.get(PR) is running
+    # The obligation stays on disk for the reconciler once the loop ends.
+    assert app.pr()["signoff_return"]["awaiting"] == "qa"
+
+
 def test_review_route_restarts_review_loop(world_factory):
     app, w = world_factory(wait=True)
     _qa_pass(app)

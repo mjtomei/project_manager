@@ -760,3 +760,25 @@ def test_a_pre_return_qa_pass_does_not_supersede_the_owed_reqa(tmp_path):
     assert app.pr()["status"] == "qa"
     assert any("sign-off" in m and "owed" in m.lower() for m in app.logs), \
         app.logs
+
+
+def test_a_pre_return_self_driving_pass_does_not_supersede_the_owed_reqa(
+        tmp_path):
+    """The ``zz t`` branch of the same PASS handler hands off too.  A loop
+    whose last run began before the bounce (a restart would have consumed
+    the obligation) must not hand the PR to sign-off on its PASS: that moves
+    the PR off ``qa`` and the reconciler stops seeing the obligation."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root, autostart=True, targets=(PR,))
+    app._self_driving_qa[PR] = {"pass_count": 0, "required_passes": 1}
+    state = qa_loop.QALoopState(pr_id=PR)
+    state.latest_verdict = qa_loop.VERDICT_PASS
+    with patch("pm_core.tui.qa_loop_ui._record_qa_note"), \
+         patch("pm_core.tui.signoff_ui.start_signoff") as start_signoff:
+        qa_loop_ui._on_qa_complete(app, state)
+    start_signoff.assert_not_called()
+    assert app.pr()["status"] == "qa"
+    assert app._self_driving_qa == {}       # the loop ends, no restart
+    assert any("owed sign-off re-run" in m for m in app.logs), app.logs
+    # The obligation is still owed, so the reconciler runs it next tick.
+    assert qa_loop_ui.owed_reqa_prs(app) != []

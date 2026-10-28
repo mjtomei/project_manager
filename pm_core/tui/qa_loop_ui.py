@@ -784,7 +784,17 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 # state and defer to auto-start (if active) or the user.
                 app._self_driving_qa.pop(pr_id, None)
                 from pm_core.tui import auto_start as _auto_start
-                if _auto_start.in_scope(app, pr_id):
+                if _owed_reqa_on_disk(app, pr_id):
+                    # This loop's run began before sign-off bounced the PR
+                    # (a later ``start_qa`` restart would have consumed the
+                    # obligation), so its PASS verified the code sign-off
+                    # judged.  Handing off would drop the owed full re-run;
+                    # ending the loop leaves it to the owed-REQA reconciler.
+                    app.log_message(
+                        f"[green]QA PASS[/] for {pr_id} "
+                        f"({sd['pass_count']}/{required} consecutive) — the "
+                        "owed sign-off re-run has not run yet")
+                elif _auto_start.in_scope(app, pr_id):
                     app.log_message(
                         f"[green bold]QA PASS[/] for {pr_id} "
                         f"({sd['pass_count']}/{required} consecutive) — "

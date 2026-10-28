@@ -318,7 +318,13 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             "decision (see the sign-off report)", sticky=30)
     elif hop == "qa":
         app.log_message(f"Sign-off routed {pr_id} back to QA (SIGNOFF_REQA)")
-        app._qa_loops.pop(pr_id, None)
+        # Drop a *finished* run's entry so the scheduler no longer reads it as
+        # a loop that owns the PR.  A running one keeps its entry: popping it
+        # would let the owed-REQA start below (and the reconciler) start a
+        # second full run over a loop that is still going.
+        loop = app._qa_loops.get(pr_id)
+        if loop is None or not loop.running:
+            app._qa_loops.pop(pr_id, None)
         # Drop the finished run's PASS record: it would otherwise read as
         # "QA passed" to the catch-up hand-off before the new run starts.
         try:

@@ -3804,6 +3804,18 @@ def pr_auto_sequence(pr_id: str):
         pre_return_pass = overall == "PASS" and owed_reqa
         if stale_status or pre_return_pass:
             overall = None
+        # The REQA episode is still open and a QA run of this PR is in
+        # flight: whatever ``qa_status.json`` says now was written by a run
+        # that started before it (the owed re-run clears ``awaiting`` as it
+        # starts but only writes its own status once planning ends — minutes
+        # later — so the previous run's PASS/NEEDS_WORK stays newest).  Acting
+        # on it would advance or bounce the PR out from under the run that
+        # owns it and drop the owed re-run; wait for that run to end.
+        from pm_core.qa_loop import run_driven_elsewhere
+        if overall is not None and open_return(pr_entry) is not None \
+                and run_driven_elsewhere(pr_id):
+            click.echo("running: qa (driven elsewhere)")
+            return
         if overall == "PASS":
             # QA passed and finalized -> advance to the sign_off step, which
             # runs the comprehensive PR-level review + verdict router.  The
@@ -3866,7 +3878,6 @@ def pr_auto_sequence(pr_id: str):
             # Same race, before the window exists: a run another live
             # process drives (a user's ``pm qa run``, another TUI) is not
             # ours to duplicate (S117).
-            from pm_core.qa_loop import run_driven_elsewhere
             if run_driven_elsewhere(pr_id):
                 click.echo("running: qa (driven elsewhere)")
                 return

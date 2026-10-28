@@ -409,3 +409,41 @@ one full QA starts (one `qa-<pr>` window set, one verifier, one finalizer, one
   `require_status`, or a fresh claim is held); a stale snapshot only falls
   through to the atomic path, so the claim itself is unchanged.  Test: a
   fresh foreign claim is declined with `store.save` never called.
+
+## Review-loop amendments (a6a3 i6)
+
+- **A pre-return status no longer acts while the owed run is in flight.**
+  i5 stopped the CLI tick advancing on a PASS seen with `awaiting: qa` still
+  set, but the owed run clears `awaiting` as it *starts* and only writes its
+  own `qa_status.json` once planning ends — minutes later.  For that whole
+  window the previous run's verdict is still the newest status file, and the
+  tick acted on it: `PASS` advanced the PR to `sign_off` (so the reconciler
+  stopped seeing the obligation and the owed run's own verdict landed on a
+  PR already in sign-off) and `NEEDS_WORK` bounced it to `in_review`.
+  `pm pr auto-sequence`'s `qa` branch now refuses to act on any status while
+  an open sign-off return is still present *and* a QA run is in flight
+  (`run_driven_elsewhere`), reporting `running: qa (driven elsewhere)`
+  instead; the episode's guard is scoped to `open_return(...) is not None`,
+  so a plain `qa` PR whose run just wrote PASS advances as before.  Tests:
+  `test_a_status_from_before_the_owed_run_does_not_act[PASS|NEEDS_WORK]`
+  (both fail with the guard neutralised) and
+  `test_a_status_without_a_reqa_episode_still_advances` (the guard does not
+  fire, and no run-record scan is paid, without an episode).
+- **The `zz t` PASS branch is guarded like the legacy one (R6).**  A
+  self-driving loop can still be running when sign-off routes the PR back
+  (the user presses `i` during a loop).  Its run began before the bounce —
+  a later `start_qa` restart would have consumed the obligation — so its
+  PASS verified the code sign-off judged.  The `pass_count >= required`
+  branch handed the PR to sign-off anyway, moving it off `qa` and dropping
+  the owed re-run.  It now logs "the owed sign-off re-run has not run yet",
+  ends the loop and leaves the obligation to the reconciler, exactly like
+  the legacy branch.  Test:
+  `test_a_pre_return_self_driving_pass_does_not_supersede_the_owed_reqa`.
+- **The REQA hop keeps a *running* QA loop's entry.**  The hop popped
+  `app._qa_loops[pr_id]` unconditionally to drop a finished run's entry, so
+  when a loop was still going, the owed start (and every reconciler tick
+  after it) saw no owner and started a second full run over it in the same
+  process — the duplicate `start_owed_reqa`'s `running` check exists to
+  prevent.  The pop is now conditional on the entry not running.  Test:
+  `test_reqa_route_keeps_a_running_loop_entry` (fails with the pop
+  unconditional: `start_qa` is called once).
