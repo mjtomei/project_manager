@@ -122,9 +122,14 @@ def find_workdir(data: dict) -> Optional[str]:
     """
     prs = data.get("prs") or []
 
-    # First check PR workdirs
+    # First check PR workdirs.  ``project.yaml`` is hand-editable state: a
+    # ``workdir`` that is not a path string is not a checkout (``Path(5)``
+    # raised ``TypeError`` out of every merge check that used this helper, so a
+    # malformed value skipped the integrity verification entirely), so it reads
+    # as absent.
     for p in prs:
         wd = p.get("workdir")
+        wd = wd if isinstance(wd, str) and wd else None
         if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
             return wd
 
@@ -233,8 +238,12 @@ def sync_prs(
             if not branch:
                 continue
 
-            # Prefer PR's own workdir if it exists
+            # Prefer PR's own workdir if it exists.  ``project.yaml`` is
+            # hand-editable state: a ``workdir`` that is not a path string is
+            # not a checkout (``Path(5)`` raised ``TypeError`` out of the sync,
+            # before the per-PR ``try``), so it reads as absent.
             wd = pr_entry.get("workdir")
+            wd = wd if isinstance(wd, str) and wd else None
             check_dir = wd if (wd and Path(wd).exists()) else target_workdir
 
             try:
@@ -392,7 +401,15 @@ def sync_from_github(
                     # Verify what GitHub published against the bound
                     # SIGNOFF_MERGE (pr-2e06289) — the same check
                     # `pm pr merge` runs, applied to a discovered merge.
+                    # ``project.yaml`` is hand-editable state: a ``workdir``
+                    # that is not a path string is not a checkout.  ``Path(5)``
+                    # raised ``TypeError`` here, and because this block sits
+                    # inside the per-PR ``except Exception`` the merge was then
+                    # finalized WITHOUT the verification this PR exists to
+                    # enforce — a malformed value must read as absent, not
+                    # silently skip the check.
                     wd = pr_entry.get("workdir")
+                    wd = wd if isinstance(wd, str) and wd else None
                     check_dir = (wd if (wd and Path(wd).exists())
                                  else find_workdir(data))
                     if not check_dir:

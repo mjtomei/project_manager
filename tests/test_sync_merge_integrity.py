@@ -122,6 +122,13 @@ def integrity_notes(w) -> list[str]:
             if str(n.get("text", "")).startswith("Merge integrity:")]
 
 
+def set_workdir(w, value) -> None:
+    """Hand-edit the PR's ``workdir`` (project.yaml is hand-editable state)."""
+    def _apply(d):
+        store.get_pr(d, PR)["workdir"] = value
+    store.locked_update(w.pm_dir, _apply)
+
+
 class _FakeApp:
     _qa_visible = False
     _plans_visible = False
@@ -287,6 +294,25 @@ def test_sync_prs_workdir_gone_verifies_from_the_sync_workdir(sync_github):
     assert "merge_integrity" in pr_entry(sync_github)
 
 
+def test_sync_prs_malformed_workdir_still_verifies(sync_github):
+    """The TUI background sync reads a non-string ``workdir`` as absent.
+
+    ``Path(5)`` raised ``TypeError`` out of ``sync_prs`` (before its per-PR
+    ``try``), taking the whole background sync down; the PR's own workdir is
+    simply unavailable, so the merge is detected and verified from the project
+    repo like the workdir-gone case.
+    """
+    merge_on_remote(sync_github, extra=True)
+    set_workdir(sync_github, 5)
+
+    result = pr_sync.sync_prs(sync_github.pm_dir, force=True)
+
+    assert PR in result.merged_prs
+    v = result.merge_integrity.get(PR)
+    assert v is not None and v.problem
+    assert "merge_integrity" in pr_entry(sync_github)
+
+
 def test_sync_prs_falls_back_to_project_repo_with_no_workdir(sync_github):
     """Every workdir gone: the merge is still detected and verified.
 
@@ -339,6 +365,26 @@ def test_sync_from_github_workdir_gone_falls_back_to_project_repo(sync_github):
     assert v is not None and v.problem
     assert "did not publish the signed-off candidate" in v.problem
     assert sync_github.head[:12] in v.problem
+    assert "merge_integrity" in pr_entry(sync_github)
+
+
+def test_sync_from_github_malformed_workdir_still_verifies(sync_github):
+    """A hand-edited non-string ``workdir`` must not skip the integrity check.
+
+    ``Path(5)`` raised ``TypeError`` while choosing the directory to verify
+    from, and because that block sits inside the per-PR ``except Exception``
+    the merge was finalized *without* the check — the silent finalize this
+    module exists to prevent.  The malformed value now reads as absent and the
+    check falls back to the project repo.
+    """
+    merge_on_remote(sync_github, extra=True)
+    set_workdir(sync_github, 5)
+
+    result = pr_sync.sync_from_github(sync_github.pm_dir)
+
+    assert PR in result.merged_prs
+    v = result.merge_integrity.get(PR)
+    assert v is not None and v.problem
     assert "merge_integrity" in pr_entry(sync_github)
 
 
@@ -457,6 +503,29 @@ def test_cli_pr_sync_workdir_gone_falls_back_to_project_repo(sync_github):
     assert pr["status"] == "merged"
     assert "merge_integrity" in pr
     assert len(integrity_notes(sync_github)) == 1
+    assert "WARNING:" in result.output
+
+
+def test_cli_pr_sync_malformed_workdir_does_not_crash(sync_github):
+    """`pm pr sync` reads a non-string ``workdir`` as absent, not a crash.
+
+    ``Path(5)`` raised ``TypeError`` out of the check-dir selection and took
+    the whole command down (a traceback, no merge detected).  It now reads as
+    absent, so the check runs from the project repo and the mismatch is
+    recorded like the workdir-gone case.
+    """
+    merge_on_remote(sync_github, extra=True)
+    set_workdir(sync_github, 5)
+
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=sync_github.pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = CliRunner().invoke(pr_mod.pr, ["sync"])
+
+    assert result.exit_code == 0, result.output
+    pr = pr_entry(sync_github)
+    assert pr["status"] == "merged"
+    assert "merge_integrity" in pr
     assert "WARNING:" in result.output
 
 

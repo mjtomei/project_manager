@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-4ee6b33
+  active_pr: pr-2478bf4
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -40873,6 +40873,59 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T15:09:21.583773+00:00'
   updated_at: '2026-10-28T15:09:21.583773+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2478bf4
+  plan: bugs
+  title: 'Bug: a hand-edited non-string workdir still crashes several CLI commands
+    (pm pr cd/list --workdirs/start/review, the review window, cwd inference)'
+  branch: pm/pr-2478bf4-bug-a-hand-edited-non-string-workdir-still-crashes
+  status: pending
+  depends_on: []
+  description: 'project.yaml is hand-edited state: a `workdir` that is not a path
+    string (e.g. `workdir: 5`) is not a checkout, but several readers pass it straight
+    to `Path(...)`, which raises `TypeError` and takes the command down.
+
+
+    Repro (verified on pr-5cee3d5): set a PR`s `workdir` to an int and run any of:
+
+
+    - `pm_core/cli/pr.py` `pr_cd` (~657): `not Path(workdir).is_dir()` -- `pm pr cd`
+    traceback.
+
+    - `pm_core/cli/pr.py` `pr_list --workdirs` (~710): `Path(wd).exists()` -- `pm
+    pr list --workdirs` traceback.
+
+    - `pm_core/cli/pr.py` `pr_start` (~1431): `Path(existing_workdir).exists()` --
+    `pm pr start` traceback.
+
+    - `pm_core/cli/pr.py` `_launch_review_window` (~1737): `Path(workdir).exists()`
+    -- the review window cannot launch.
+
+    - `pm_core/cli/pr.py` `pr_review` (~2082): `Path(workdir).exists()` -- `pm pr
+    review` traceback.
+
+    - `pm_core/cli/helpers.py` `_infer_pr_id` (~882): `Path(wd).resolve()` -- cwd
+    inference traceback.
+
+
+    Fix shape: read a non-string `workdir` as absent (the same `isinstance(workdir,
+    str)` guard `pm_core.signoff.head_sha`, `_ensure_workdir`, `integration.target_for`/`run_check`
+    and `spec_gen.get_spec` already use), so the command provisions/reports a missing
+    workdir instead of raising.
+
+
+    Found while reviewing pr-5cee3d5; not fixed there because it spans master-owned
+    CLI surfaces. pr-5cee3d5 fixed the merge-detection path (`pr_sync.find_workdir`
+    / `sync_prs` / `sync_from_github` / `pm pr sync`), where a malformed workdir silently
+    skipped the merge-integrity check.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T17:45:15.498421+00:00'
+  updated_at: '2026-10-28T17:45:15.498421+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

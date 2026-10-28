@@ -3403,8 +3403,13 @@ def pr_sync():
         if pr_entry.get("status") not in ("in_review", "in_progress", "qa", "sign_off"):
             continue
         branch = pr_entry.get("branch", "")
-        # Prefer PR's own workdir if it exists
+        # Prefer PR's own workdir if it exists.  ``project.yaml`` is
+        # hand-editable state: a ``workdir`` that is not a path string is not a
+        # checkout (``Path(5)`` raised ``TypeError`` out of ``pm pr sync``), so
+        # it reads as absent and the shared workdir is used — the same contract
+        # the sign-off surfaces follow.
         wd = pr_entry.get("workdir")
+        wd = wd if isinstance(wd, str) and wd else None
         check_dir = wd if (wd and Path(wd).exists()) else target_workdir
 
         if backend.is_merged(str(check_dir), branch, base_branch):
