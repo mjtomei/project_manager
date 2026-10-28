@@ -29648,7 +29648,7 @@ prs:
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
   branch: pm/pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-workdir-from-
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Before QA planning starts, reconcile the canonical PR workdir with
     the PR''s actual upstream so the planner and workers use the same current revision.
@@ -29683,13 +29683,13 @@ prs:
     QA runs badbdc1291e2c454/2531ab466c475517.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/246
+  gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-22T18:57:13.955949+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-10-28T07:28:36.879132+00:00'
+  started_at: '2026-10-22T17:20:55.835790+00:00'
+  reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
   notes:
   - id: note-5d019af
@@ -29715,6 +29715,47 @@ prs:
       pre-existing.'
     created_at: '2026-10-22T18:57:13Z'
     last_edited: '2026-10-22T18:57:13Z'
+  - id: note-resume-246-20261028
+    created_at: '2026-10-28T05:45:34.601114+00:00'
+    last_edited: '2026-10-28T05:45:34.601114+00:00'
+    text: 'User authorized resumption in #249 controller. Preserve prior source/specs/review
+      history. Finalizer normally syncs PR workdir; this PR guards stale interrupted/blocked
+      handoffs before planning and requires review for newly imported code. DeepSeek1017/high
+      primary; workOpus5.5/high signoff, manualwait_for_merge/spec-reviewOFF. No duplicate
+      implementation or force push.'
+  - id: note-1b06be7
+    text: 'review 53f0 i1 (0070fd14): hoisted the workdir checkout/merge holds so
+      they also apply to local-only repos (a non-git workdir is left to the handoff
+      guard); the upstream-moved-during-fetch case now reports "moved on … while QA
+      was synchronizing" instead of quoting an empty git error; the refused-ff hold
+      also says to move/remove untracked files (git cannot stash them). New tests:
+      local-only wrong-checkout hold, upstream-moved hold, fast-forward clears a stale
+      qa_branch_sync record, planning_base resume round-trip. Full suite 3385 passed
+      (/pm-captures/review-53f0-i1/). Captures under $CAP/impl/ predate the review-loop
+      hardening (core ff/route behaviours unchanged; the added holds are real-git
+      unit tests).'
+    created_at: '2026-10-28T07:13:28Z'
+    last_edited: '2026-10-28T07:13:28Z'
+  - id: note-7202eed
+    text: 'review 53f0 i2: no functional defects found in the sync/handoff/route logic.
+      Spec refreshed to match i1 hardening (local-only repos still get the checkout/unfinished-merge
+      holds, upstream-moved-during-fetch hold, refused-ff untracked-file remedy, trust-block
+      exit left inline rather than routed through _end_qa_without_scenarios). _planner_code_changes
+      no longer logs "planner handoff:" when the pre-planning sync calls it. Noted
+      (not changed): if the branch advances between ls-remote and fetch such that
+      the old head is still an ancestor, the planner can run one step behind and the
+      handoff guard holds once — the documented R7 fallback. Full suite: 3372 passed;
+      13 failures are environment-only (missing markdown module, hook installer HOME)
+      and unrelated to qa_loop.'
+    created_at: '2026-10-28T07:28:36Z'
+    last_edited: '2026-10-28T07:28:36Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-7b085a9
   plan: bugs
   title: 'Bug: permission-wait state remains stale after Claude resumes work'

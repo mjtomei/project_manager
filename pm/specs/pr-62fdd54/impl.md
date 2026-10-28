@@ -35,8 +35,11 @@ R1. **Refresh before planning.** In `run_qa_sync`'s planning phase, after
     queries the real upstream (`push_proxy.resolve_real_origin`), fetches
     the PR branch's objects (FETCH_HEAD only; no local ref moves except
     the fast-forward below) and classifies local `refs/heads/<branch>` (L)
-    vs upstream (U).  Local-only repos (no real upstream) and an absent
-    upstream branch are no-ops.  The planner prompt and command are built
+    vs upstream (U).  An absent upstream branch is a no-op, and a local-only
+    repo (no real upstream) skips the network work — but the local
+    checkout/unfinished-merge holds below are checked first, so a local-only
+    repo left on the wrong tree still holds (a non-git workdir is left to
+    the planner handoff guard).  The planner prompt and command are built
     after the sync (they used to be built before stale-window cleanup), so
     nothing the planner is given predates it.
 
@@ -45,7 +48,8 @@ R2. **Behind-only fast-forwards automatically.** L ancestor of U →
     Git's own checks preserve dirty files (it refuses when a local change
     or untracked file would be overwritten).  A refusal becomes a specific
     INPUT_REQUIRED hold quoting git's message and the paths, nothing
-    changed.  Up-to-date and local-ahead (U ancestor of L, e.g. earlier
+    changed; its remedy says to commit, stash, move or remove the
+    conflicting files (git cannot stash untracked ones).  Up-to-date and local-ahead (U ancestor of L, e.g. earlier
     unpushed planner-only commits) proceed unchanged — the existing
     publish step pushes local-ahead commits fast-forward.
 
@@ -69,15 +73,21 @@ R4. **Imported application code invalidates old review/sign-off.**  When
     proceed to planning on the refreshed tree.
 
 R5. **Specific actionable holds** (INPUT_REQUIRED, no planning) for:
-    fetch/ls-remote failure; workdir not on the PR branch (HEAD detached or
-    another branch); an unfinished merge/rebase/cherry-pick in the workdir;
-    ff refused (R2); dirty tracked files while diverged; and a divergence
+    fetch/ls-remote failure; the upstream moving between `ls-remote` and
+    the fetch so the classified head is already gone ("moved on … while QA
+    was synchronizing", not an empty git error); workdir not on the PR
+    branch (HEAD detached or another branch); an unfinished
+    merge/rebase/cherry-pick in the workdir; ff refused (R2); dirty tracked
+    files while diverged; and a divergence
     (same L and U) that was already routed to review once and not
     reconciled (prevents an endless QA→review→QA loop when the reviewer
     does not merge).  The last one is detected via a small record on the
     PR (`pr["qa_branch_sync"] = {local, upstream, routed_at}`) written when R3
     routes.  Only an unchanged / fast-forwarded sync clears it; a hold
     keeps it so the same heads still hold (no re-route) once fixed.
+    The workdir checkout and unfinished-merge holds are local checks: they
+    apply on every sync, including local-only repos and an up-to-date
+    branch (a stale checkout or half-done merge is as unplannable there).
 
 R6. **Early exits are visible to every driver.** Each sync exit writes
     `qa_status.json` with `overall` and `error` (auto-sequence reads only
@@ -85,7 +95,10 @@ R6. **Early exits are visible to every driver.** Each sync exit writes
     and notifies.  The existing Phase 1.25 handoff-failure exit did not
     write `overall`, leaving auto-sequence reporting "running: qa" forever
     — fix it the same way, and the QA-spec gate exit after planning (same
-    "running: qa" symptom).  All go through `_end_qa_without_scenarios`.
+    "running: qa" symptom).  The sync exits, the handoff failure and the
+    spec gate go through `_end_qa_without_scenarios`; the earlier
+    workspace-trust-blocked exit already wrote `overall` inline and is
+    unchanged.
 
 R7. **Planner/worker revision consistency.** `pre_plan_head` is taken after
     the sync, so it is the revision the planner reads (recorded as
@@ -139,5 +152,8 @@ R8. **Gates preserved.** No pm-initiated merge to the base branch, no
   is pr-3201ea8 (ownership); the sync only sees what reached the upstream
   and must not hide it (it reports L/U shas in logs).
 - Upstream branch deleted/absent → proceed; publish pushes it.
-- Local backend (`resolve_real_origin` → None) → sync is a no-op.
+- Local backend (`resolve_real_origin` → None) → no network work; the
+  checkout/unfinished-merge holds still apply.
+- Upstream branch moved between `ls-remote` and the fetch → hold (the
+  classified head is gone); restarting QA synchronizes with the new head.
 - `pm/`-only upstream commits (e.g. old workers' `qa:` notes) → ff and plan.

@@ -513,7 +513,7 @@ def _planner_code_changes(workdir_path: str, before: str | None,
         return []
     r = _git_capture(workdir_path, "diff", "--name-only", before, after)
     if r.returncode != 0:
-        _log.warning("planner handoff: could not diff %s..%s: %s",
+        _log.warning("could not diff %s..%s to check for application code: %s",
                      before[:12], after[:12], r.stderr.strip())
         return []
     return sorted(p for p in r.stdout.splitlines()
