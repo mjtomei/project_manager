@@ -65,7 +65,10 @@ R2. **Remove a stale cast before recording, and a stale recorder.** Both
    by `new-session` races the server's exit ("server exited unexpectedly",
    reproduced ~7 times in 40 tight iterations). Both recipes also remove a
    stale `recorder.status` (R4): a leftover one would let a recorder that was
-   torn down before it finished pass the exit-status check.
+   torn down before it finished pass the exit-status check. The two failure
+   logs of R11 (`recorder-stderr.log`, `recorder-pane.log`) are cleared with
+   them, so a run that never wrote one cannot present the previous run's
+   failure as its own.
 
 R3. **Wait for the recorder to be up before sending keys, on the right
    handle.** Keystrokes sent before asciinema has attached are silently lost,
@@ -258,13 +261,25 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    remedy, and the web-UI finalize block is executed both ways — with no
    `CAPDIR` it exits before ffmpeg runs, and with `CAPDIR` set a stub ffmpeg
    still produces the mp4 and drops the webm.
+   R11's evidence handling is covered as well: both recipes clear a stale
+   `recorder-stderr.log`/`recorder-pane.log` in step 0; each pane command's
+   redirect is driven through the stub `tmux` + a stub `asciinema` that
+   writes to stderr, so the text has to reach the file step 4/step 5 reads;
+   the CLI's documented `'\''` form is driven through the recipe's own
+   statement and asciinema has to receive the command intact; and the two
+   stop-timeout paths are *executed* (stub mode `stuck`: the recorder never
+   goes away), asserting that the message names `recorder-pane.log` and that
+   the file holds what the recorder drew. The tmux readiness timeout is
+   executed too (mode `norec`). All ten new/tightened assertions fail
+   against the previous recipes.
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
    - The render steps delete this run's outputs before rendering:
      `rm -f "${cast%.cast}.mp4" "$cast.gif"` in both recording recipes, and
      `rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" "$CAPDIR/trace.zip"
-     "$CAPDIR/dom.html" "${CAPDIR:?}"/*.png` before the
+     "$CAPDIR/dom.html" "$CAPDIR/http.log" "$CAPDIR/sse.log"
+     "${CAPDIR:?}"/*.png` before the
      web-UI driver (plus the mp4 again before the transcode). The `${CAPDIR:?}`
      on the glob is the guard that keeps an unset variable from expanding the
      pattern against the filesystem root. `ffmpeg` does
@@ -276,8 +291,10 @@ R8. **A failed render must not leave the previous run's video, and the
      run. The web-UI driver's trace, screenshots and DOM dump are cleared
      with the webm for the same reason: a driver that dies at the first
      locator writes none of them, so the earlier run's files would be listed
-     as this run's evidence. This is the same bug class as rendering a stale
-     cast (R2), one level up.
+     as this run's evidence. The Layer 2 protocol logs (`http.log`,
+     `sse.log`) go too: a run that never re-captures the protocol would
+     otherwise present the earlier run's logs as this run's. This is the
+     same bug class as rendering a stale cast (R2), one level up.
    - Each render step then `test -s` the mp4 and exits 1 with an actionable
      message ("render produced no mp4 — check 'agg' is installed and the cast
      is readable" / "transcode produced no mp4 — check the driver's webm")
@@ -292,6 +309,16 @@ R8. **A failed render must not leave the previous run's video, and the
      words, the recorder exits immediately and the scaffold fails with
      "asciinema wrote no cast". The escaped form was verified end to end with
      real asciinema + tmux (rc 0, the cast holds the recorded output).
+   - A `'` inside the command needs `'\''`, for the same reason and in the
+     same place: the single quotes around `<command-to-record>` are ordinary
+     characters by the time the pane's shell parses the command, so an
+     unescaped one ends it early. Verified live: the natural
+     `-c 'pm pr note add pr-x 'a note''` leaves asciinema exiting 2
+     ("expected one argument") with no cast, while
+     `-c 'pm pr note add pr-x '\''a note'\'''` records the command intact
+     (the recorded `pm` received `pr-x` and `a note` as separate arguments).
+     Recording a command with a quoted argument is routine in QA, so the
+     recipe documents the escape.
 
 R9. **The web-UI driver has to resolve Playwright before it can run.** The
    QA image installs Playwright globally under `/usr/lib/node_modules` and
@@ -356,6 +383,33 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
      …/driver.mjs" instead of naming the missing variable. It now stops with
      `: "${CAPDIR:?…}"` first, as the finalize step does.
 
+R11. **A failure message has to point at evidence that still exists, and the
+   recorder's own diagnostics have to survive the pane.** Every failure path
+   in both recording recipes tears the recorder pane down, yet the timeout
+   messages told the worker to inspect it — verified live in both recipes:
+   the CLI scaffold printed "check the pane with `tmux -L scaffold
+   capture-pane -p -t rec`" and its next line killed the server (the follow-up
+   answers "no server running"); the tmux recipe printed "check `tmux
+   capture-pane -p -t pm-recorder`" and killed that session the same way. Two
+   small additions make the failures actionable and keep their evidence:
+   - The pane command sends asciinema's *own* stderr to
+     `<capture-dir>[/<short-name>]/recorder-stderr.log` (`… 2>
+     …/recorder-stderr.log; echo \$? > …/recorder.status`). asciinema's
+     startup errors (a broken `-c` command, an unwritable cast path) are
+     exactly what a failed run needs, and they would otherwise die with the
+     pane. Verified that this does not disturb a recording: the recorded
+     command's stderr still goes through the pty and is recorded, and the
+     tmux recipe's failed-attach error (`can't find session: …`, from the
+     recorded `tmux attach`) still reaches the pane and the cast, so the
+     pane-content readiness signal is unaffected.
+   - Each recipe defines `dump_pane()`, which saves the pane's last screen to
+     `…/recorder-pane.log`, and the two timeout paths call it before the
+     teardown; their messages name the file. The died-recorder messages name
+     `recorder-stderr.log` instead, because in those paths the pane is already
+     gone and the status/stderr files are what is left. Both files are
+     cleared in step 0 with the stale cast (R2), so an earlier run's reason
+     cannot be read as this run's.
+
 ## Non-goals
 
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
@@ -367,9 +421,9 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver block refuses an unset `CAPDIR` too (it would otherwise link `node_modules` in the worker's cwd); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; asciinema's own stderr + the pane's last screen saved on failure (R11) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver block refuses an unset `CAPDIR` too (it would otherwise link `node_modules` in the worker's cwd); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -381,7 +435,9 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
    leaves no mp4/gif and exits non-zero, the scaffold's documented
    escaped command form reaches asciinema's `-c` intact, both scaffolds'
    status echo survives its own quoting and lands asciinema's status on
-   disk, a killed/missing recorder fails although the cast is non-empty, and
+   disk, a killed/missing recorder fails although the cast is non-empty, the
+   `'\''` form arrives intact, a failing wait saves the pane where its
+   message says it is, asciinema's own stderr lands on disk, and
    the capture flow runs end to end against a stub `tmux`/`pm` for its
    success and failure paths).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
@@ -424,3 +480,26 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
   reject a real recording. The execution harness reproduces the hole the fix
   closes: with a killed recorder *and* the target session gone, the previous
   recipe exits 0 on the non-empty cast.
+- Review loop 419c i12 verified R11 live in this container (real tmux 3.2a +
+  asciinema 2.1.0, the recipes' own fenced blocks, private sockets). The
+  contradiction reproduced in both recipes: the CLI scaffold printed
+  "recorder did not start within 30s — check the pane with `tmux -L scaffold
+  capture-pane -p -t rec`" and killed the server on the next line, after
+  which that command answers "no server running"; the tmux recipe's
+  readiness timeout did the same to `pm-recorder`. Post-fix: the CLI stop
+  timeout exits 1 with the pane saved in `recorder-pane.log` (holding what
+  the recorder drew) and asciinema's own error in `recorder-stderr.log`
+  ("asciinema: error: cast path is not writable"); a nominal one-shot run
+  leaves an empty `recorder-stderr.log` and rc 0. The single-quote trap was
+  reproduced live: `-c 'pm pr note add pr-x 'a note''` → asciinema exits 2
+  ("expected one argument"), no cast, while `'\''` records and `pm` receives
+  `pr-x` and `a note` as separate arguments. Verified that the stderr
+  redirect does not disturb recording: a recorded command's own stderr is
+  still recorded, and a failed `tmux attach` still draws "can't find
+  session: …" in the pane and records it in the cast (its stderr file stays
+  empty), so the pane-content readiness signal is unaffected. Evidence:
+  `/pm-captures/review-419c-i12/`. Full suite 3920 passed, 1 skipped, with
+  `test_merge_publish`/`test_signoff_integration` excluded (push proxy
+  rejects pushes to master) and the two known baselines
+  (`test_git_ops::test_keeps_unpushed_merge`,
+  `test_hook_events::test_installer_writes_standalone_receiver`) deselected.

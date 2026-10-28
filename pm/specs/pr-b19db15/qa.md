@@ -215,11 +215,21 @@ run.
   only `RECORDER_STOP_TIMEOUT`.
 - A web-UI driver fails before it produces its outputs in a capture directory
   that already holds them → the driver step clears the previous run's webm,
-  mp4, `trace.zip`, `dom.html` and screenshots first, so a failed run cannot
-  present the earlier run's trace and screenshots as this run's evidence.
+  mp4, `trace.zip`, `dom.html`, `http.log`, `sse.log` and screenshots first,
+  so a failed run cannot present the earlier run's trace, screenshots or
+  protocol logs as this run's evidence.
 - The CLI scaffold's `bash -c` command form → it must be pasted escaped
   (`-c 'bash -c \"…\"'`); the unescaped form ends the outer double-quoted
   argument, the recorder exits, and step 4 reports "asciinema wrote no cast".
+- A recorded command containing a single quote (`pm pr note add pr-x '…'`) →
+  it must be pasted as `'\''`; unescaped, the quote ends the pane command and
+  asciinema exits 2 with no cast.
+- A wait gives up (recorder never starts / never exits) → the failure message
+  names a file that still exists after the teardown: asciinema's own error in
+  `recorder-stderr.log`, and the pane's last screen in `recorder-pane.log`.
+  Following the old "check the pane" instruction after the run gives "no
+  server running" — the recipe must not point at evidence it destroys, and a
+  stale log from an earlier run must be cleared with the stale cast.
 
 ## Pass / Fail criteria
 

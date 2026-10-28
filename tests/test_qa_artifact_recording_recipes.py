@@ -132,13 +132,14 @@ def _stub_tool(bindir, name, body="exit 1\n"):
     return path
 
 
-def _drive_recorder_statement(stmt, tmp_path, env_extra=None):
+def _drive_recorder_statement(stmt, tmp_path, env_extra=None, asci_body=None):
     """Run a scaffold's recorder statement, then its pane command.
 
     ``stmt`` is the recipe's own ``tmux ... new-session`` statement. A stub
     ``tmux`` captures the argv, so the last argument is the command tmux runs
     with ``sh -c``; that command is then run against a stub ``asciinema`` that
-    records its argv and exits 7. Returns ``(pane command, asciinema argv
+    records its argv and exits 7 (``asci_body`` overrides that stub, e.g. to
+    make asciinema write to stderr). Returns ``(pane command, asciinema argv
     path)`` so a caller can assert on either layer.
     """
     bindir = tmp_path / "bin"
@@ -152,8 +153,8 @@ def _drive_recorder_statement(stmt, tmp_path, env_extra=None):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     recorder_cmd = tmux_argv.read_text().splitlines()[-1]
-    _stub_tool(bindir, "asciinema",
-               f'printf "%s\\n" "$@" > "{asci_argv}"\nexit 7\n')
+    _stub_tool(bindir, "asciinema", asci_body or (
+        f'printf "%s\\n" "$@" > "{asci_argv}"\nexit 7\n'))
     subprocess.run(["sh", "-c", recorder_cmd], env=env,
                    capture_output=True, text=True)
     return recorder_cmd, asci_argv
@@ -232,6 +233,23 @@ class TestRecipes:
         assert rm, "tmux recipe never removes an earlier transcript.log"
         assert rm.start() < block.index("pipe-pane"), (
             "the stale transcript is removed only after the pipe is attached")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_block_clears_a_stale_failure_log(self, name):
+        """An earlier run's failure evidence must not be read as this run's.
+
+        ``recorder-stderr.log`` is written by the pane command and
+        ``recorder-pane.log`` by a failing wait, so a run that failed before
+        either could be written would leave the previous run's reason on disk
+        — the same stale-artifact bug as the cast, one file over.
+        """
+        block = _scaffold_block(_recipe_text(name))
+        rm = _statement(block, "rm -f ")
+        for artifact in ("recorder-stderr.log", "recorder-pane.log"):
+            assert artifact in rm, (
+                f"{name}: an earlier run's {artifact} survives, so a run that "
+                "never wrote one can present the previous run's failure as "
+                "its own")
 
     def test_tmux_readiness_wait_targets_the_computed_session(self):
         """The pm-session poll must not match the recipe's own recorder.
@@ -548,6 +566,60 @@ class TestRecipes:
             "cli-recording: the recorded command does not survive the "
             f"scaffold's quoting (asciinema got {argv!r})")
 
+    def test_cli_single_quoted_command_survives_the_scaffold(self, tmp_path):
+        """A `'` in the command needs ``'\\''``, like the `"` layer above.
+
+        The single quotes around ``<command-to-record>`` are ordinary
+        characters by the time the pane's shell parses the command, so an
+        unescaped ``'`` ends it early — verified live: the natural
+        ``-c 'pm pr note add pr-x 'a note''`` leaves asciinema exiting 2
+        ("expected one argument") with no cast. Recording a command with a
+        quoted argument is routine in QA (notes, paths), so the recipe has to
+        document the escape; this drives the documented form through the
+        recipe's own statement and asserts asciinema receives the command
+        intact.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        assert r"'\''" in block, (
+            "cli-recording: the scaffold does not document the `'\\''` "
+            "escape, so a command with a quoted argument silently breaks the "
+            "pane command")
+        (tmp_path / "run").mkdir()
+        cmd = r"pm pr note add pr-x '\''a note'\''"
+        stmt = (_statement(block, "tmux -L scaffold new-session")
+                .replace("<capture-dir>", str(tmp_path))
+                .replace("<short-name>", "run")
+                .replace("<command-to-record>", cmd))
+        _, asci_argv = _drive_recorder_statement(stmt, tmp_path)
+        argv = asci_argv.read_text().splitlines()
+        assert argv[argv.index("-c") + 1] == "pm pr note add pr-x 'a note'", (
+            "cli-recording: a single-quoted argument does not survive the "
+            f"scaffold's quoting (asciinema got {argv!r})")
+
+    def test_cli_scaffold_saves_asciinemas_own_stderr(self, tmp_path):
+        """asciinema's own error must land on disk, not only in the pane.
+
+        Its startup errors — a broken ``-c`` command, an unwritable cast path
+        — go to stderr, and every failure path tears the pane down, so
+        without the redirect the worker is told the recording failed and has
+        nothing left to read.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        (tmp_path / "run").mkdir()
+        stmt = (_statement(block, "tmux -L scaffold new-session")
+                .replace("<capture-dir>", str(tmp_path))
+                .replace("<short-name>", "run")
+                .replace("<command-to-record>", "true"))
+        _drive_recorder_statement(
+            stmt, tmp_path,
+            asci_body='echo "asciinema rec: error: expected one argument" >&2\n'
+                      'exit 2\n')
+        log = tmp_path / "run" / "recorder-stderr.log"
+        assert log.exists(), (
+            "cli-recording: asciinema's stderr is not saved, so a failed "
+            "recorder leaves no reason on disk")
+        assert "expected one argument" in log.read_text(), log.read_text()
+
     def test_cli_scaffold_writes_the_cast_beside_the_render(self):
         """The scaffold must write the cast where the render step reads it.
 
@@ -686,6 +758,30 @@ class TestRecipes:
         assert (cap / "recorder.status").read_text().strip() == "7", (
             "tmux-screen-recording: asciinema's exit status does not reach the "
             "file step 5 reads")
+
+    def test_tmux_scaffold_saves_asciinemas_own_stderr(self, tmp_path):
+        """The recorder's own error has to survive the pane it was printed in.
+
+        The attach's errors travel through the pty and stay in the pane and
+        the cast, but asciinema's *own* startup errors go to stderr — and
+        every failure path tears the recorder session down. The redirect puts
+        them on disk; verified that it does not disturb the recording (the
+        attach error is still drawn in the pane and recorded in the cast).
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        cap = tmp_path / "cap"
+        cap.mkdir()
+        stmt = (_statement(block, "tmux new-session -d -s pm-recorder")
+                .replace("<capture-dir>", str(cap)))
+        _drive_recorder_statement(
+            stmt, tmp_path, {"TARGET": "pm-test"},
+            asci_body='echo "asciinema rec: error: recording already exists" >&2\n'
+                      'exit 2\n')
+        log = cap / "recorder-stderr.log"
+        assert log.exists(), (
+            "tmux-screen-recording: asciinema's stderr is not saved, so a "
+            "failed recorder leaves no reason on disk")
+        assert "recording already exists" in log.read_text(), log.read_text()
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -1095,7 +1191,7 @@ def test_web_ui_clears_a_previous_video():
         "web-ui recipe keeps an earlier run's webm/mp4, so a failed driver "
         "transcodes the previous run into this run's recording")
     for artifact in ("recording.webm", "recording.mp4", "trace.zip",
-                     "dom.html", "*.png"):
+                     "dom.html", "http.log", "sse.log", "*.png"):
         assert artifact in clear, (
             f"web-ui recipe leaves a previous run's {artifact} in place, so a "
             "failed driver presents the earlier run's evidence as this run's")
@@ -1145,6 +1241,8 @@ case "$sub" in
   capture-pane) cat "$STATE/pane" 2>/dev/null; exit 0 ;;
   send-keys)
       s=$(val -t "$@")
+      # `stuck`: the recorder never goes away, so a stop wait runs out.
+      [ "$STUB_MODE" = stuck ] && exit 0
       rm -f "$STATE/$s"
       [ "$STUB_MODE" = detachfail ] && exit 1
       exit 0 ;;
@@ -1193,7 +1291,7 @@ exit 0
 """
 
 
-def _run_capture_block(name, mode, tmp_path, target=False):
+def _run_capture_block(name, mode, tmp_path, target=False, env_extra=None):
     """Run a recipe's capture block against stub tmux/pm; return (proc, cast)."""
     capture = tmp_path / "cap"
     state = tmp_path / "state"
@@ -1218,7 +1316,8 @@ def _run_capture_block(name, mode, tmp_path, target=False):
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", block)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_STATE=str(state), STUB_MODE=mode,
-               STUB_CAST=str(capture / sub / "recording.cast"))
+               STUB_CAST=str(capture / sub / "recording.cast"),
+               **(env_extra or {}))
     if "recorder.status" in raw:
         # The CLI scaffold's pane command records asciinema's own exit status;
         # the stub cannot run the pane command, so it writes the status the
@@ -1242,7 +1341,33 @@ class TestCaptureFlowExecution:
         r, cast = _run_capture_block("cli-recording.md", "norec", tmp_path)
         assert r.returncode != 0, "an empty recording was reported as success"
         assert "did not start within" in r.stderr, r.stderr
+        assert "recorder-pane.log" in r.stderr, (
+            "the readiness failure does not say where the pane was saved: "
+            + r.stderr)
         assert not cast.exists()
+
+    def test_cli_stop_timeout_saves_the_pane(self, tmp_path):
+        """A failing wait must leave the pane where its message says it is.
+
+        Every failure path tears the scaffold server down, so a message that
+        says "check the pane" points at evidence that no longer exists —
+        verified live: the readiness timeout printed exactly that and the
+        next line killed the server, after which ``capture-pane`` answered
+        "no server running". The pane is saved before the teardown and the
+        message names the file.
+        """
+        r, cast = _run_capture_block(
+            "cli-recording.md", "stuck", tmp_path,
+            env_extra={"RECORDER_STOP_TIMEOUT": "2"})
+        assert r.returncode != 0, r.stderr
+        assert "did not exit within" in r.stderr, r.stderr
+        assert "recorder-pane.log" in r.stderr, (
+            "the stop failure does not say where the pane was saved: "
+            + r.stderr)
+        log = cast.parent / "recorder-pane.log"
+        assert log.exists(), "the failing wait left no pane evidence"
+        assert "TUI drawn" in log.read_text(), (
+            "the saved pane does not hold what the recorder drew")
 
     def test_cli_recorder_that_dies_without_a_cast_fails(self, tmp_path):
         """asciinema failing to start must not pass as a finished recording."""
@@ -1299,6 +1424,35 @@ class TestCaptureFlowExecution:
             "tmux-screen-recording.md", "dies", tmp_path, target=True)
         assert r.returncode != 0, "a recorder that never drew was reported as success"
         assert "recorder exited before it drew" in r.stderr, r.stderr
+
+    def test_tmux_readiness_timeout_saves_the_pane(self, tmp_path):
+        """The readiness message must not point at the session it kills.
+
+        The timeout branch kills ``pm-recorder`` and then told the worker to
+        inspect it with ``capture-pane`` — verified live that the follow-up
+        answers "no server running". The pane is saved first, and the message
+        names the file.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "norec", tmp_path, target=True)
+        assert r.returncode != 0, r.stderr
+        assert "did not come up within" in r.stderr, r.stderr
+        assert "recorder-pane.log" in r.stderr, (
+            "the readiness failure does not say where the pane was saved: "
+            + r.stderr)
+        assert (cast.parent / "recorder-pane.log").exists(), (
+            "the failing wait left no pane evidence")
+
+    def test_tmux_stop_timeout_saves_the_pane(self, tmp_path):
+        """A stop timeout has to keep what the recorder last drew."""
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "stuck", tmp_path, target=True)
+        assert r.returncode != 0, r.stderr
+        assert "did not exit within" in r.stderr, r.stderr
+        assert "recorder-pane.log" in r.stderr, r.stderr
+        log = cast.parent / "recorder-pane.log"
+        assert log.exists() and "TUI drawn" in log.read_text(), (
+            "the stop failure did not save what the recorder drew")
 
     def test_tmux_failed_attach_that_drew_its_error_fails(self, tmp_path):
         """The attach error text is content, so it must not count as readiness.

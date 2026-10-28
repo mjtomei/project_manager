@@ -37,6 +37,9 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   Playwright records VP8 webm natively; the finalize step transcodes it
   to H.264 mp4 so it plays everywhere including iOS Safari (VP8/VP9
   webm does not decode on iOS).
+- `driver.mjs` — the driver that produced this capture: the adapted
+  skeleton (locators, interactions, side-channel trigger). Keep it in the
+  capture directory so a reviewer can see what was actually driven.
 - `trace.zip` — Playwright trace (DOM snapshots + network + console);
   step through with `npx playwright show-trace trace.zip`.
 - `*.png` — key-state screenshots (one per demonstrated state).
@@ -64,12 +67,15 @@ mkdir -p "$CAPDIR"
 # dump would sit in the capture directory as this run's evidence while this
 # run never produced them (a driver that dies at the first locator writes
 # none of them). The webm is dropped too because the driver renames its
-# auto-named video onto it.
+# auto-named video onto it. The Layer 2 logs go with them: a run that never
+# re-captures the protocol would otherwise present the earlier run's http.log
+# and sse.log as this run's evidence.
 # The `${CAPDIR:?}` on the glob (not `$CAPDIR`) makes the shell stop if the
 # variable is unset: otherwise `"$CAPDIR"/*.png` would expand against the
 # filesystem root and the cleanup would target every PNG there.
 rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
-      "$CAPDIR/trace.zip" "$CAPDIR/dom.html" "${CAPDIR:?}"/*.png
+      "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
+      "$CAPDIR/http.log" "$CAPDIR/sse.log" "${CAPDIR:?}"/*.png
 
 # Fail fast if something is *already* answering on the port. A previous run's
 # server — or another scenario using the same default port — would satisfy the

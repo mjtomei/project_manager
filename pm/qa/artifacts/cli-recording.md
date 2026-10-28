@@ -32,12 +32,14 @@ substitutes the actual captures directory for `<capture-dir>`):
 ## Capture
 
 Before any of the forms below, create the capture directory and clear an
-earlier run's cast and recorder status:
+earlier run's cast, recorder status and failure logs:
 
 ```
 mkdir -p <capture-dir>/<short-name>
 rm -f <capture-dir>/<short-name>/recording.cast \
-      <capture-dir>/<short-name>/recorder.status
+      <capture-dir>/<short-name>/recorder.status \
+      <capture-dir>/<short-name>/recorder-stderr.log \
+      <capture-dir>/<short-name>/recorder-pane.log
 ```
 
 `asciinema rec` reports "asciicast saved" and exits 0 even when the
@@ -51,7 +53,11 @@ left behind: a leftover one makes `new-session` fail with "duplicate
 session: rec" and the readiness wait would then pass on the previous run's
 recorder. `recorder.status` holds this run's recorder exit status (step 4 of
 the no-TTY scaffold); a leftover one would let a recorder that was torn down
-before it finished pass that check.
+before it finished pass that check. `recorder-stderr.log` and
+`recorder-pane.log` are this run's failure evidence — asciinema's own
+diagnostics, and the pane's last screen when a wait gives up — so an earlier
+run's copies go with the rest; a stale one would be read as this run's
+failure.
 
 ### One command, end-to-end
 
@@ -109,18 +115,38 @@ where the CLI runs.
 #    Pasting the double-quoted form unescaped ends the outer string, so
 #    asciinema gets a broken command, exits, and step 4 reports "asciinema
 #    wrote no cast".
-#    The pane command is `asciinema …; echo \$? > …/recorder.status`: the
-#    shell that owns the pane records asciinema's *own* exit status once it
-#    returns, which step 4 needs to tell a finished recording from a
-#    recorder that was killed. `\$?` is escaped so the pane's shell expands
-#    it, not this one.
+#    A `'` inside the command needs `'\''` for the same reason: the single
+#    quotes around it are ordinary characters by the time the pane's shell
+#    parses the command, so an unescaped one ends it early. Verified: the
+#    natural `-c 'pm pr note add pr-x 'a note''` leaves asciinema exiting 2
+#    with no cast, while `-c 'pm pr note add pr-x '\''a note'\'''` records
+#    the command as intended.
+#    The pane command is `asciinema … 2> …/recorder-stderr.log; echo \$? >
+#    …/recorder.status`: the shell that owns the pane records asciinema's
+#    *own* exit status once it returns, which step 4 needs to tell a
+#    finished recording from a recorder that was killed. `\$?` is escaped so
+#    the pane's shell expands it, not this one. asciinema's stderr goes to
+#    a file rather than the pane for the same reason: its own errors (a
+#    broken `-c` command, an unwritable cast path) are what a failed run
+#    needs, and every failure path below tears the pane down. The recorded
+#    command's own stderr still goes to the pty and is recorded.
 tmux -L scaffold kill-session -t rec 2>/dev/null || true
 mkdir -p <capture-dir>/<short-name>
 rm -f <capture-dir>/<short-name>/recording.cast \
-      <capture-dir>/<short-name>/recorder.status
+      <capture-dir>/<short-name>/recorder.status \
+      <capture-dir>/<short-name>/recorder-stderr.log \
+      <capture-dir>/<short-name>/recorder-pane.log
+# Failure paths below tear the scaffold server down, so save the pane's last
+# screen into the capture dir first — otherwise the messages that point at
+# the pane point at evidence that no longer exists.
+dump_pane() {
+    tmux -L scaffold capture-pane -p -t rec \
+        > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
+}
 tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
-        -c '<command-to-record>'; echo \$? > <capture-dir>/<short-name>/recorder.status"
+        -c '<command-to-record>' 2> <capture-dir>/<short-name>/recorder-stderr.log; \
+        echo \$? > <capture-dir>/<short-name>/recorder.status"
 
 # 2. Wait (bounded) for the recorder to start before any keys go in:
 #    keystrokes sent before asciinema has attached to the pane are silently
@@ -135,8 +161,10 @@ deadline=$(( $(date +%s) + 30 ))
 until [ -s <capture-dir>/<short-name>/recording.cast ] ||
       ! tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "recorder did not start within 30s — check the pane with" \
-            "'tmux -L scaffold capture-pane -p -t rec'" >&2
+        dump_pane
+        echo "recorder did not start within 30s — the pane is saved in" \
+            "<capture-dir>/<short-name>/recorder-pane.log, asciinema's own" \
+            "error (if any) in recorder-stderr.log" >&2
         tmux -L scaffold kill-server 2>/dev/null
         exit 1
     fi
@@ -167,17 +195,19 @@ stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 deadline=$(( $(date +%s) + stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
+        dump_pane
         echo "recorder did not exit within ${stop_timeout}s — for a longer" \
             "command set RECORDER_STOP_TIMEOUT; an interactive recording" \
-            "needs 'exit' in the recorded shell (step 3); check the pane with" \
-            "'tmux -L scaffold capture-pane -p -t rec'" >&2
+            "needs 'exit' in the recorded shell (step 3); the pane is saved" \
+            "in <capture-dir>/<short-name>/recorder-pane.log" >&2
         tmux -L scaffold kill-server 2>/dev/null
         exit 1
     fi
     sleep 0.2
 done
 test -s <capture-dir>/<short-name>/recording.cast || {
-    echo "asciinema wrote no cast — check the pane output" >&2
+    echo "asciinema wrote no cast — see" \
+        "<capture-dir>/<short-name>/recorder-stderr.log" >&2
     tmux -L scaffold kill-server 2>/dev/null   # do not leave `rec` behind
     exit 1
 }
@@ -198,7 +228,7 @@ status=$(cat <capture-dir>/<short-name>/recorder.status 2>/dev/null) || {
 }
 [ "$status" = 0 ] || {
     echo "asciinema exited $status — the cast is incomplete, not a finished" \
-        "recording; check the pane output" >&2
+        "recording; see <capture-dir>/<short-name>/recorder-stderr.log" >&2
     tmux -L scaffold kill-server 2>/dev/null
     exit 1
 }

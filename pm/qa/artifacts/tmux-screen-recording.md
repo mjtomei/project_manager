@@ -60,7 +60,9 @@ up if the worker overrides that failure. The transcript is appended to, so
 a stale `transcript.log` would silently mix an earlier run into this run's
 evidence. `recorder.status` holds this run's recorder exit status (step 5);
 a leftover one would let a recorder that was torn down before it finished
-pass that check.
+pass that check. `recorder-stderr.log` and `recorder-pane.log` are this
+run's failure evidence — asciinema's own diagnostics, and the pane's last
+screen when a wait gives up — so an earlier run's copies go too.
 
 ```
 # 0. Clear what an earlier run left behind before anything writes into it:
@@ -68,7 +70,15 @@ pass that check.
 tmux kill-session -t pm-recorder 2>/dev/null || true
 mkdir -p <capture-dir>
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
-      <capture-dir>/recorder.status
+      <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
+      <capture-dir>/recorder-pane.log
+# Failure paths below tear the recorder session down, so save the pane's last
+# screen into the capture dir first — otherwise the messages that point at
+# the pane point at evidence that no longer exists.
+dump_pane() {
+    tmux capture-pane -p -t pm-recorder \
+        > <capture-dir>/recorder-pane.log 2>/dev/null || true
+}
 
 # 1. Start the canonical pm session. `pm session` (no subcommand)
 #    creates the project's pm session and then attaches; the attach
@@ -114,10 +124,15 @@ tmux pipe-pane -t "$TARGET:0.0" "cat >> <capture-dir>/transcript.log"
 #    The pane command also records asciinema's *own* exit status once it
 #    returns: step 5 needs it to tell a finished recording from a recorder
 #    that was killed, and `test -s` on the cast cannot. `\$?` is escaped so
-#    the pane's shell expands it, not this one.
+#    the pane's shell expands it, not this one. asciinema's stderr goes to a
+#    file for the same reason: its own errors (an unwritable cast path, a
+#    bad option) are what a failed run needs, and every failure path below
+#    tears the pane down. The attach's own errors still go through the pty
+#    and stay visible in the pane and the cast.
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
-        -c 'tmux attach -t $TARGET'; echo \$? > <capture-dir>/recorder.status"
+        -c 'tmux attach -t $TARGET' 2> <capture-dir>/recorder-stderr.log; \
+        echo \$? > <capture-dir>/recorder.status"
 # Wait (bounded) for the recorder to draw: the detach key in step 5 (and
 # every key sent below) is lost if the attach client has not started yet.
 # A recorder that *exits* here cannot have recorded the TUI — the
@@ -127,15 +142,18 @@ tmux new-session -d -s pm-recorder -x 200 -y 50 \
 deadline=$(( $(date +%s) + 30 ))
 while :; do
     if ! tmux has-session -t pm-recorder 2>/dev/null; then
-        echo "recorder exited before it drew — check 'asciinema rec' output" >&2
+        echo "recorder exited before it drew — see the cast and" \
+            "<capture-dir>/recorder-stderr.log" >&2
         tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
     fi
     tmux capture-pane -p -t pm-recorder 2>/dev/null \
         | grep -q '[^[:space:]]' && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "recorder did not come up within 30s — check" \
-            "'tmux capture-pane -p -t pm-recorder'" >&2
+        dump_pane
+        echo "recorder did not come up within 30s — the pane is saved in" \
+            "<capture-dir>/recorder-pane.log, asciinema's own error (if any)" \
+            "in recorder-stderr.log" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
         tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
@@ -151,7 +169,8 @@ done
 # alive a moment later before treating the content as a drawn TUI.
 sleep 0.3
 if ! tmux has-session -t pm-recorder 2>/dev/null; then
-    echo "recorder exited before it drew — check 'asciinema rec' output" >&2
+    echo "recorder exited before it drew — see the cast and" \
+        "<capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 fi
@@ -210,8 +229,9 @@ fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t pm-recorder 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "recorder did not exit within 30s — check" \
-            "'tmux capture-pane -p -t pm-recorder'" >&2
+        dump_pane
+        echo "recorder did not exit within 30s — the pane is saved in" \
+            "<capture-dir>/recorder-pane.log" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
         tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
@@ -219,7 +239,8 @@ while tmux has-session -t pm-recorder 2>/dev/null; do
     sleep 0.2
 done
 test -s <capture-dir>/recording.cast || {
-    echo "asciinema wrote no cast — check the recorder pane" >&2
+    echo "asciinema wrote no cast — see" \
+        "<capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 }
@@ -243,7 +264,7 @@ status=$(cat <capture-dir>/recorder.status 2>/dev/null) || {
 }
 [ "$status" = 0 ] || {
     echo "asciinema exited $status — the cast is incomplete, not a finished" \
-        "recording; check the recorder pane" >&2
+        "recording; see <capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 }
