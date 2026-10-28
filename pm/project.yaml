@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T21:50:02.328736+00:00'
+  updated_at: '2026-10-28T21:53:02.153408+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33159,6 +33159,44 @@ prs:
       + test_qa_instructions.py 171 pass. No repo change made.'
     created_at: '2026-10-28T21:50:02Z'
     last_edited: '2026-10-28T21:50:02Z'
+  - id: note-4fc51cc
+    text: 'QA scenario 23 (tmux-screen-recording) environment prerequisites, verified
+      by running the PR-head recipe end to end on the host: (1) step 5 sends C-b d,
+      but this host ~/.tmux.conf sets prefix C-\; run the capture on an isolated default-config
+      server (export TMUX_TMPDIR=$(mktemp -d /tmp/pm-qa23-XXXXXX); unset TMUX TMUX_PANE;
+      tmux -f /dev/null new-session -d -s keepalive "sleep 3600") or the detach lands
+      in the TUI and the stop times out. (2) The QA worker shell is inside the pm-
+      QA session, so `pm session` attaches to that session instead of creating the
+      test project session; run capture/drive/stop with TMUX/TMUX_PANE unset (verified:
+      _get_current_pm_session wins over the cwd-computed name). (3) ffmpeg/ffprobe
+      are not installed on this host; the render block exits "ffmpeg is not installed"
+      — put a static build on PATH (e.g. /tmp/ffmpeg-7.0.2-arm64-static, or download
+      the johnvansickle arm64 build). agg is fetched by the recipe install block (aarch64
+      URL verified). (4) The runner-installed recipe copy is the pre-PR master version
+      (no step 0 cleanup, unbounded `tmux ls | grep ^pm-` wait, pipe-pane -o, no recorder.status);
+      use the workdir pm/qa/artifacts/tmux-screen-recording.md.'
+    created_at: '2026-10-28T21:29:36Z'
+    last_edited: '2026-10-28T21:29:36Z'
+  - id: note-37ea18a
+    text: 'QA scenario 23 (tmux-screen-recording) PASS on 865a88f9: all five stories
+      (dirty-state capture, step-4 driving block alone, step-1 readiness block, completion
+      beside an unrelated ffmpeg-named process, step-5 stop failure modes) held, captures
+      under captures/pr-b19db15/scenarios/23/{tmux-recording,driving-block,stop-failure}.
+      Two notes for the next run. (1) Every prerequisite in note-4fc51cc held: isolated
+      `tmux -f /dev/null` server (host ~/.tmux.conf prefix is C-\), TMUX/TMUX_PANE
+      unset so `pm session` does not attach to the QA session, static ffmpeg 7.0.2
+      (/tmp/ffmpeg-7.0.2-arm64-static) on PATH, and agg 1.9.0 already at ~/.local/bin
+      so the guarded install block is a no-op. (2) Do not mistake the recorded pane
+      bottom row for a foreign session: the attach client draws tmux default status
+      line and status-left-length defaults to 10, so `[#{session_name}] ` renders
+      the test session as `[pm-pm-qa2` followed by the window list `0:main*`, i.e.
+      `[pm-pm-qa20:main*` on screen — that is this run own session name truncated,
+      not a pm-pm-qa20 session (verified: show-options -g status-left-length = 10).
+      Also: story 5 literal stub `tmux new-session -d -s pm-recorder "sleep 600"`
+      draws nothing, so its recorder-pane.log holds only the stray `C-b d` echoed
+      by the stub shell; use a printing stub if you want the saved pane to show content.'
+    created_at: '2026-10-28T21:53:02Z'
+    last_edited: '2026-10-28T21:53:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
