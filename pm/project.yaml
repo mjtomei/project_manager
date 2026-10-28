@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T09:42:14.177703+00:00'
+  updated_at: '2026-10-28T11:28:55.638801+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15509,6 +15509,33 @@ prs:
       a version gate if the descriptor format ever changes.'
     created_at: '2026-10-28T09:42:14Z'
     last_edited: '2026-10-28T09:42:14Z'
+  - id: note-88b676b
+    text: 'QA scenario 11 (startup takeover / non-active-window discovery / racing
+      peer): all four stories PASS 2026-10-28 — (1) 3x kill -9 + `pm session` each
+      gave a new live TUI (1424→1690→2212→2726) with caps [sigusr1,sigusr2], no refusal/crash
+      in the log delta, each respawn printed "TUI pane missing — respawning..."; (2)
+      a pidfile naming a just-exited `sleep 0.3` was taken over by a new TUI (pid
+      3046) and `pm autostart list -s S` answered exit 0 "Auto-start: off / No auto-start
+      targets."; (3) a hand-started TUI in a NON-active window (@8, pane %10) was
+      found by `pm tui view -s S` (header Pane: %10) and answered the routed command
+      — log shows heal_registry "re-registered TUI pane %10 in window @8"; (4) simultaneous
+      start gave one survivor (3829), loser EXIT=2 with the exact "another TUI (pid
+      …) already owns session …" text, pidfile not clobbered. Related tests: tests/test_tui_pidfile.py
+      + autostart/home-kick = 277 passed. Captures: /pm-captures/scenarios/11/{story1..story4}.
+      Next-run gotchas: (a) the scenario''s process check `ps -eo pid=,comm=,args=
+      | awk ''$2 ~ /^python/ && /_tui/''` matches NOTHING here because the venv entry
+      point sets comm=pm (args are still "/tmp/pm-venv/bin/python3 /tmp/pm-venv/bin/pm
+      _tui") — use `ps -eo pid=,args= | awk ''$2 ~ /python/ && /_tui/''`; (b) after
+      a TUI pane dies, `pm session` respawns into the session''s ACTIVE window, so
+      if the shell window is active it SPLITS the shell window (pane %N inside @2)
+      instead of creating a new window — expect that when scripting stories 3/4; (c)
+      there is no literal "SIGUSR2 sent to pid N" log line; routing evidence is `[cli.autostart]
+      … pid=<owner>` plus `[tui] queue dispatch … result=ok` in the TUI''s own log;
+      (d) agg is not preinstalled in the container — the raw aarch64 v1.9.0 release
+      binary works; (e) `kill -0` returns success for a zombie, so wait on /proc/<pid>/stat
+      state != Z.'
+    created_at: '2026-10-28T11:28:55Z'
+    last_edited: '2026-10-28T11:28:55Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
