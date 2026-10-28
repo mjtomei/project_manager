@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T08:59:20.805450+00:00'
+  updated_at: '2026-10-28T09:13:10.970282+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36058,6 +36058,33 @@ prs:
       target, so z a preserved that policy. (2026-10-28)'
     created_at: '2026-10-28T08:59:20Z'
     last_edited: '2026-10-28T08:59:20Z'
+  - id: note-00313a4
+    text: 'QA S9 (handoff turn detection vs real transcript shapes) PASS — all six
+      stories verified on the live TUI + CLI, no defects, no code change. Verified
+      tails: (1) unanswered user prompt → CLI prints the three lines in order and
+      the row reads "waiting/implementation — fresh autostart: waiting for the current
+      implementation turn after feedback" (also in the `a` runs popup); (2) streamed
+      thinking block (apiBlockIndex 0, stop_reason null, no text) → 15/15 status samples
+      over 31 s still waiting, never "turn complete", 0 review windows; (3) `!` shell
+      records (<bash-input>/<bash-stdout>/<bash-stderr>) → 8/8 waiting, and a following
+      plain user prompt also stays waiting, so the handoff only fires on the answer
+      record; (4) interrupt marker backdated 10 s before the request → CLI says "implementation
+      turn complete, fresh review started" and exactly one review #1 opens; (5) interrupt
+      marker timestamped AFTER fresh_autostart.requested_at (09:04:55.641Z vs 09:04:37Z)
+      → 8/8 waiting, no review, then the subsequent turn completes and starts review
+      #1; (6) literal U+2028/U+2029 in the two newest records (json.dumps ensure_ascii=False)
+      → 10/10 waiting (no fallback to the older completed answer), and a U+2028 answer
+      record starts exactly one review #1. In every case: exactly one review window,
+      iteration 1, no second window/iteration over the following 30 s; `pm log show`
+      shows exactly one relauncher line per story. Captures: /pm-captures/scenarios/9/{tui,cli,cli-status}/.
+      Fixture mechanic for future runs: re-establish the Given per story with `pm
+      tui send zd` (stops the running loop, leaves in_review + a stopped loop object
+      + a review window), `pm autostart remove <pr>`, then restore the 2-record baseline
+      transcript; the fresh flow parks/kills the stale review window itself. Camera-lock
+      the tmux recorder to window 0 or the review-window select yanks the cast off
+      the tech tree. (2026-10-28T09:15:00Z)'
+    created_at: '2026-10-28T09:13:10Z'
+    last_edited: '2026-10-28T09:13:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
