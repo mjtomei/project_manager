@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T12:57:42.002614+00:00'
+  updated_at: '2026-10-28T13:40:19.172330+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16729,6 +16729,30 @@ prs:
       with (QA/planner panes inherit the TUI process PATH).'
     created_at: '2026-10-28T12:57:41Z'
     last_edited: '2026-10-28T12:57:41Z'
+  - id: note-5334773
+    text: 'QA S15 (legacy-TUI A/B, build 3b00af91) PASS 2026-10-28, all 4 triples.
+      Legacy TUI = worktree 372f85f4^ (0e2cc2db); pre-fix CLI = worktree 89e3c501
+      (`pm which` -> /tmp/pm-qa15-prefix/pm_core). (1) fixed CLI `pm autostart add
+      pr-95325c4 -s $S` -> exit 2 "owner_unavailable ... predates the command-queue
+      feature"; legacy pid 1664 alive (Ssl+), pidfile byte-unchanged (bare "1664",
+      md5 4f398cb9), queue 0 bytes; legacy logged only "Installed SIGUSR1 reload handler"
+      at mount and the dispatch logged missing_capability. (2) fixed `pm pr add "Add
+      password reset"` -> exit 0 "Created pr-c715bb9 ... (now active)"; board auto-reloaded
+      1->2 PRs with no keypress (frame tree_prs:2 at 13:33:49.807606Z vs project.yaml
+      mtime 13:33:49.775627Z = 32 ms); same pid/pidfile; log "action: reload (state
+      only)". (3) pre-fix CLI `--timeout 3` -> legacy TUI killed (pid gone, window
+      0 gone, session alive), exit 2 exact owner_timeout text, queue holds exactly
+      one line "autostart add pr-95325c4 --reply 1793194469-3333e331", pidfile left
+      stale naming 1664. (4) pytest -q tests/test_tui_pidfile.py -> 130 passed; -k
+      subset -> 6 passed. Captures: /pm-captures/scenarios/15/{01..05}. New mechanics
+      for next run: capture-pane on a `new-window -d` pane stays blank until that
+      window is the session current window (select-window it); a cast final pyte screen
+      is the alt-screen teardown, so snapshot the last frame containing "Project:";
+      tmux status-left-length=10 clips the session name in casts to "[pm-pm-qa1" +
+      "0:main*" (reads like pm-pm-qa10); when window 0 dies the recorder client switches
+      to the driver window, so one cast shows the board and the owner_timeout output.'
+    created_at: '2026-10-28T13:40:19Z'
+    last_edited: '2026-10-28T13:40:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
