@@ -42,6 +42,8 @@ User-visible behavior added after `76081338` that fresh scenarios must cover:
 
 Refresh on 2026-10-28 at HEAD `1bc65b72` (QA fixes from scenarios 58–63 plus review-loop ad53 i1). Scenarios 58–63 are locked historical evidence; fresh scenarios begin at 64. Results of the 58–63 run (aggregate NEEDS_WORK): S58 (whole PR life from implementation to merge) and S63 (periodic pass waits for a busy reaper lock) PASS. S59, S60, S61 and S62 held their stories only after in-run fixes (70cd9492, fd9bbdb4/eac0ccdd, 60ccb95e, d3d1b4fc), and review ad53 i1 then corrected 70cd9492 (1bc65b72), so those paths need clean reruns on the current head. The run that started after ad53 i1 (loop 088f8dc8) ended QA ERROR with no recorded message before any scenario ran; this planning pass replaces it.
 
+Refresh on 2026-10-28, HEAD `fb37dc36`, code unchanged since `1bc65b72`: QA loop `42a07a34` locked scenarios 64–68 and cloned their workdirs. About three minutes later the next run (`c8dbe953`) superseded it. No scenario launched a worker or produced a verdict, and no container from that loop remained in the runtime inventory. Scenarios 64–68 are therefore locked but unexecuted. Fresh scenarios 69–73 carry their stories forward unchanged in intent: 69 = 64, 70 = 65, 71 = 66, 72 = 67, 73 = 68. They also correct the expected deferred-retry log wording to "deferred container release retried". Requirements and resolutions are unchanged.
+
 User-visible behavior added after `afc151b5` that fresh scenarios must cover:
 - Inventory outage at a full runtime: the run makes one floor launch, then waits for a readable inventory (log "wait for a readable container inventory"). Its settled workers whose release is unconfirmed, and workers a release deliberately kept (INPUT_REQUIRED or viewed), count as held. So INPUT_REQUIRED settlements during the outage do not each admit another launch. Peak at most L+1; after recovery the deferred releases run, the peak returns to at most L and the batch grows back (70cd9492, 1bc65b72).
 - A partial run-end release, or its deferred retry, logs which viewed/INPUT_REQUIRED workers it kept even when it released others (60ccb95e).
@@ -112,6 +114,8 @@ Fresh scenarios 64–68 re-cover them on HEAD `1bc65b72`:
 - process trees/PID: none changed since S61; not re-run
 - workdirs/evidence: all
 - popups/locale: none changed; not re-run
+
+Fresh scenarios 69–73 carry 64–68 forward, unexecuted, with the same coverage map (69 for 64, 70 for 65, 71 for 66, 72 for 67, 73 for 68).
 
 ## Setup
 
