@@ -147,7 +147,10 @@ Rules, in order:
     cannot cause an automatic merge (every merge path checks `is_enabled`).
     Malformed review-loop records/history entries are skipped with a
     warning (never raised out of startup); well-formed loop state and
-    entries are still restored.
+    entries are still restored.  A record or entry whose scalar fields have
+    the wrong type (e.g. a string `iteration`, a non-bool
+    `input_required`) counts as malformed: adopting it would only fail
+    later inside a review-loop worker, not at startup.
 - Validate restored targets against the loaded project data:
   - unknown PR ids → reject the whole restore (remain OFF, diagnostic).
   - terminal (merged/closed) targets are kept; the existing
@@ -335,7 +338,8 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
    `target` without `auto_start` (migrates).
 10. Save→consume while autostart is off writes no autostart fields;
     enabled-with-empty-targets writes no breadcrumb at all.
-11. A malformed review-loop history entry does not abort the restore, the
+11. A malformed review-loop history entry does not abort the restore, a
+    wrong-typed record/entry field is skipped rather than adopted, the
     loop-resume summary never paints over the rejection diagnostic, and an
     all-malformed `review_loops` file claims no resume.
 12. Two back-to-back rejections in the same UTC second preserve both

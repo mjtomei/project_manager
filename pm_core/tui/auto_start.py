@@ -307,6 +307,55 @@ def _parse_stop_marks(raw) -> tuple[set[str] | None, str | None]:
     return set(raw), None
 
 
+def _loop_record_fields(loop_data: dict) -> dict | None:
+    """Validate a saved review-loop record's scalar fields.
+
+    Returns the kwargs for ``ReviewLoopState``, or ``None`` when a field has
+    the wrong type.  Restoring is fail-soft but not blind: a record with,
+    say, a string ``iteration`` would be adopted at startup and only raise
+    later inside a review-loop worker, so a wrong-typed record counts as
+    malformed saved state and is skipped like a non-object one.
+    """
+    iteration = loop_data.get("iteration", 0)
+    if not isinstance(iteration, int) or isinstance(iteration, bool):
+        return None
+    latest_verdict = loop_data.get("latest_verdict", "")
+    if not isinstance(latest_verdict, str):
+        return None
+    loop_id = loop_data.get("loop_id")
+    if loop_id is not None and not isinstance(loop_id, str):
+        return None
+    input_required = loop_data.get("input_required", False)
+    if not isinstance(input_required, bool):
+        return None
+    transcript_dir = loop_data.get("_transcript_dir")
+    if transcript_dir is not None and not isinstance(transcript_dir, str):
+        return None
+    return {"iteration": iteration,
+            "latest_verdict": latest_verdict,
+            "loop_id": loop_id or secrets.token_hex(2),
+            "input_required": input_required,
+            "_transcript_dir": transcript_dir}
+
+
+def _valid_history_entry(entry) -> bool:
+    """Whether a saved review-loop history entry has well-typed fields.
+
+    ``iteration``/``verdict`` are required; ``timestamp`` is optional but
+    must be a string when present.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if "iteration" not in entry or "verdict" not in entry:
+        return False
+    iteration = entry["iteration"]
+    if not isinstance(iteration, int) or isinstance(iteration, bool):
+        return False
+    if not isinstance(entry["verdict"], str):
+        return False
+    return isinstance(entry.get("timestamp", ""), str)
+
+
 def _validate_restored_targets(app, targets: dict[str, dict],
                                migrated: bool) -> str | None:
     """Reject saved targets that do not resolve in the loaded project.
@@ -431,18 +480,13 @@ async def consume_breadcrumb(app) -> None:
     if review_loops_data:
         from pm_core.review_loop import ReviewLoopState, ReviewIteration
         for pr_id, loop_data in review_loops_data.items():
-            if not isinstance(loop_data, dict):
+            fields = (_loop_record_fields(loop_data)
+                      if isinstance(loop_data, dict) else None)
+            if fields is None:
                 _log.warning("consume_breadcrumb: ignoring malformed review "
                              "loop record for %s", pr_id)
                 continue
-            rstate = ReviewLoopState(
-                pr_id=pr_id,
-                iteration=loop_data.get("iteration", 0),
-                latest_verdict=loop_data.get("latest_verdict", ""),
-                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
-                input_required=loop_data.get("input_required", False),
-                _transcript_dir=loop_data.get("_transcript_dir"),
-            )
+            rstate = ReviewLoopState(pr_id=pr_id, **fields)
             history = loop_data.get("history") or []
             if not isinstance(history, list):
                 _log.warning("consume_breadcrumb: ignoring malformed review "
@@ -451,8 +495,7 @@ async def consume_breadcrumb(app) -> None:
             for h in history:
                 # Saved-state parsing is fail-soft here: a malformed history
                 # entry must not abort the whole startup restore.
-                if not isinstance(h, dict) or "iteration" not in h \
-                        or "verdict" not in h:
+                if not _valid_history_entry(h):
                     _log.warning("consume_breadcrumb: ignoring malformed "
                                  "review-loop history entry for %s", pr_id)
                     continue

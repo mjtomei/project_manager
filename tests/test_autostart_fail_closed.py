@@ -629,6 +629,54 @@ class TestConsumeFailClosed:
         start_loop.assert_not_called()
         assert not any("Resumed review loop state" in m for m in app.logs)
 
+    @pytest.mark.parametrize("bad_field", [
+        {"iteration": "2"},          # str, would break iteration arithmetic
+        {"iteration": 2.5},          # float, not an int
+        {"iteration": True},         # bool is an int subclass; reject anyway
+        {"latest_verdict": 5},
+        {"loop_id": 7},
+        {"input_required": "yes"},
+        {"_transcript_dir": {"not": "a path"}},
+    ])
+    def test_wrong_typed_loop_record_is_skipped(self, tmp_path, bad_field):
+        """A record whose scalar fields have the wrong type is malformed
+        saved state: adopting it would only raise later inside a review-loop
+        worker, not at startup."""
+        app = FakeApp([_pr("pr-a", status="in_review", workdir="/tmp/wd")],
+                      tmp_path)
+        record = {"iteration": 2, "latest_verdict": "", "history": [],
+                  **bad_field}
+        _write_breadcrumb(tmp_path, {"review_loops": {"pr-a": record}})
+        with patch("pm_core.tui.review_loop_ui._start_loop") as start_loop:
+            _consume(app, tmp_path)
+        assert app._review_loops == {}
+        start_loop.assert_not_called()
+        assert not any("Resumed review loop state" in m for m in app.logs)
+
+    def test_wrong_typed_history_entry_skipped_but_loop_restored(self, tmp_path):
+        """A wrong-typed history entry is dropped while the (well-formed)
+        record is still adopted."""
+        app = FakeApp([_pr("pr-a", status="in_review", workdir="/tmp/wd")],
+                      tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "review_loops": {"pr-a": {
+                "iteration": 2,
+                "history": [
+                    {"iteration": "1", "verdict": "PASS"},
+                    {"iteration": 1, "verdict": 5},
+                    {"iteration": 1, "verdict": "PASS", "timestamp": 3},
+                    {"iteration": 1, "verdict": "PASS",
+                     "timestamp": "2026-10-27T00:00:00Z"},
+                ],
+            }},
+        })
+        with patch("pm_core.tui.review_loop_ui._start_loop"):
+            _consume(app, tmp_path)
+        rstate = app._review_loops["pr-a"]
+        assert rstate.iteration == 2
+        assert [(h.iteration, h.verdict) for h in rstate.history] == [
+            (1, "PASS")]
+
 
 class TestSaveNeverPersistsWildcard:
     def test_save_writes_targets_only(self, tmp_path):
