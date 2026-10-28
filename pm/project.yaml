@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T16:57:40.572013+00:00'
+  updated_at: '2026-10-28T17:20:37.012482+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39432,6 +39432,51 @@ prs:
       (12-char hashes); `pm pr signoff record` binds A and B1. (6) Captures at /pm-captures/scenarios/46/{story1-sync-workdir-gone,story2-second-sync,story3-good-merge-silent,story4-sync-github,story5-propagation-only-recovery}.'
     created_at: '2026-10-28T16:57:40Z'
     last_edited: '2026-10-28T16:57:40Z'
+  - id: note-7c2249c
+    text: 'QA scenario 47 (concurrent operators on the project-repo fallback, the
+      shared registry and one PR workdir) — NEEDS_WORK, fixed in 9206eb13. FOUND+FIXED:
+      `_step_signoff_locked` tested the raw `record.get("verdict")` truthiness after
+      `fresh_recorded_verdict` had already read it as absent, so a hand-edited mapping
+      verdict took the STALE branch: it retired the run, deleted pr["signoff"] and
+      logged "Sign-off for <pr> is stale (HEAD moved) — re-running" for an untouched
+      HEAD (false provenance, contradicts the `verdict_of` contract). Guard now uses
+      `verdict_of(...)`; regression test fails on the pre-fix code. Stories: (1) PASS
+      — two back-to-back `pm pr sync` runs (repo root + pm/, ~5 ms apart) both printed
+      ✅ #1/#2 + the two unreviewed-merge WARNINGs, exit 0, exactly one Merge integrity
+      note and one merge_integrity block per PR, titles/descriptions unchanged. (3)
+      PASS — two concurrent `pm pr signoff record` + note add both exit 0, one coherent
+      ## Sign-off block, distinct note ids, ▲ in pm pr list / pm tui view, no traceback.
+      (3b) the bug above; post-fix the driver logs `launching router for <pr> (stale=False)`,
+      the popup row keeps a no-verdict reason, and a fresh run records a real verdict.
+      (4) PASS on its substance (sync prints ✅ #1: merged with no WARNING and no Merge
+      integrity note while the popup renders every tick, no status failed:/stale/traceback)
+      but the Then ''row reads COMPLETED done — merged'' is unreachable: `_prune_completed_targets`
+      (master 8043b8cc, untouched by this PR) removes a merged --wait-for-merge target
+      in the same pass. SCENARIO DEFECT: story 2''s Given (a bound SIGNOFF_MERGE for
+      a resolved candidate that is NOT applied) cannot be established — `pm pr signoff
+      record` refuses "the resolved candidate was not applied to the PR branch", which
+      is the documented contract (impl.md R4: the resolved merge is applied before
+      sign-off runs) and the driver coerces the same way. The Given is reachable one
+      step later (apply → record → reset the branch to the pre-apply head); the resulting
+      apply/merge race produced the scenario''s expected refusal verbatim ("recorded
+      sign-off verdict SIGNOFF_MERGE is stale (HEAD moved since)"), base unchanged,
+      applied tree == candidate. HARNESS FACTS for the next run: (a) put real /usr/bin/git
+      FIRST on PATH — ~/.local/bin/git is the push proxy and makes local-path fetch/ls-remote
+      fail ("does not appear to be a git repository"), which silently creates the
+      PR branch from master instead of origin/<branch> (then integrate says "already
+      contained in master"); (b) `pm pr signoff record` needs an evidence/checks tag
+      or it refuses; (c) a branch with no own commit is `in_base` and cannot be recorded
+      — commit in the workdir first so `integrate --record` says "up to date"; (d)
+      `{"_all": {}}` gives verdict-producing session types their default verdict,
+      so a no-verdict fake sign-off window needs `pm fake-claude config set ''{"_all":
+      {}, "signoff": {"verdicts": []}}''`; (e) the TUI background sync preempts a
+      CLI `pm pr sync` (stop the TUI via kill -TERM on the window-0 pane pid) or the
+      CLI prints "No new merges detected"; (f) the pm fake-github stand-in is a non-bare
+      repo — publish state with `git -C <remote> fetch <project> master && merge --ff-only
+      FETCH_HEAD`; (g) captures at /pm-captures/scenarios/47/ (01-two-syncs, 01b-aftermath,
+      02-apply-vs-merge, 03-record-notes-tui, 04-sync-with-popup, pre-fix+post-fix/03b-malformed-verdict).'
+    created_at: '2026-10-28T17:20:36Z'
+    last_edited: '2026-10-28T17:20:36Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
