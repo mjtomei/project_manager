@@ -1256,7 +1256,7 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
         rec = (pr or {}).get("signoff_return")
         if not isinstance(rec, dict) or rec.get("awaiting") != hop:
             return
-        claim = rec.get("launch_claim") or {}
+        claim = _mapping(rec.get("launch_claim"))
         try:
             age = (now - parse_ts(claim.get("at"))).total_seconds()
         except (TypeError, ValueError):

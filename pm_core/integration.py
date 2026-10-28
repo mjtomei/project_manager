@@ -1995,7 +1995,8 @@ def _check_is_stale(record: dict, pr_entry: dict) -> bool:
     return old.get("head") == now
 
 
-def _record_check(root: Path, pr_id: str, record: dict) -> dict:
+def _record_check(root: Path, pr_id: str, record: dict, *,
+                  keep_recorded_head: str | None = None) -> dict:
     """Record *record* on the PR, carrying resolution provenance forward.
 
     The carry-forward runs again inside the locked update.  Two operators can
@@ -2005,6 +2006,15 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
     later ``--record`` cannot restore them once the branch carries the base).
     A check computed before the HEAD moved is dropped the same way: it must
     not replace the record that describes the branch's current revision.
+
+    *keep_recorded_head* makes a *failed* check of that revision yield to a
+    mergeable record of the same revision, re-evaluated inside the lock.  The
+    lost-apply-race path (:func:`prepare`) decides outside the lock that the
+    branch's current revision has no record yet and must be re-recorded; the
+    winner of that race can record in between, and ``_check_is_stale`` cannot
+    drop this record (it describes the same revision).  Without the in-lock
+    re-check a transient failure of the loser would replace the winner's
+    applied record (and drop the approval until another check re-runs it).
     """
     try:
         old_pr = store.get_pr(store.load(root), pr_id) or {}
@@ -2043,6 +2053,20 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
         if _check_is_stale(record, p):
             # Keep the record that describes the branch's current revision
             # (and its applied resolution).
+            final["record"] = p.get("integration") or record
+            final["stale"] = True
+            return
+        stored_rec = _mapping(p.get("integration"))
+        if (keep_recorded_head and record.get("status") not in MERGEABLE
+                and stored_rec.get("head") == keep_recorded_head
+                and stored_rec.get("status") in MERGEABLE):
+            # A concurrent actor already recorded a mergeable result for this
+            # revision (the winner of the HEAD race).  A failed check of the
+            # *same* revision is the loser's transient failure — not new
+            # information — so it must not replace the applied record.  This
+            # is re-evaluated here, under the lock: the caller's decision (a
+            # revision with no stored record must be re-recorded) can be
+            # overtaken by the winner's write between its read and this one.
             final["record"] = p.get("integration") or record
             final["stale"] = True
             return
@@ -2138,7 +2162,15 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
                     _log.info("sign-off %s: HEAD moved during apply; recorded "
                               "%s at %s", pr_id, current.get("status"),
                               now_head[:8])
-                    return _record_check(root, pr_id, current)
+                    # A non-mergeable re-check must still yield to a record
+                    # the winner stores between this read and the write: the
+                    # decision above is taken outside the store lock, so
+                    # ``_record_check`` re-evaluates it under the lock.
+                    return _record_check(
+                        root, pr_id, current,
+                        keep_recorded_head=(now_head
+                                            if current.get("status")
+                                            not in MERGEABLE else None))
         return _record_check(root, pr_id, record)
     previous = record
     # Re-check against the exact revision just applied, not a fresh fetch: a

@@ -37648,3 +37648,35 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a187153
+  plan: bugs
+  title: 'Bug: store.load does not validate the shape of project/prs/plans, so a hand-edited
+    scalar crashes every reader with an uncaught TypeError/AttributeError'
+  branch: pm/pr-a187153-bug-store-load-does-not-validate-the-shape-of-proj
+  status: pending
+  depends_on: []
+  description: 'pm_core/store.py:101 `load()` validates only that the top level is
+    a mapping. A hand-edited `prs: 5` or `plans: 7` raises an uncaught `TypeError:
+    int object is not iterable` out of `_validate_pr_statuses`/`_validate_plans` (not
+    even ProjectYamlParseError). A present non-mapping `project` (e.g. `project: oops`
+    or `project: [1,2]`) loads fine as a str/list, then every reader that does `data.get("project",
+    {}).get(...)` raises `AttributeError: str object has no attribute get` — e.g.
+    `integration.target_for` (and its own except-fallback in `run_check`), `prompt_gen`,
+    `model_config`, `container`, `pr_sync`. Repro: write `project: oops\nprs: []\nplans:
+    []\n` to project.yaml and run `pm pr signoff integrate <pr>`; `store.load` returns
+    project as the string "oops" and the integration check reports "Integration check
+    failed: str object has no attribute get" forever, so the PR can never be signed
+    off. Expected: `load()` normalizes/refuses these shapes the way it already defaults
+    an invalid PR status (a non-mapping project reads as absent `{}`, a non-list prs/plans
+    as empty), so a hand-edited scalar is a readable state error rather than an uncaught
+    crash. Found during the pr-5cee3d5 review (its resolver already refuses a non-mapping
+    project in the merged document; the live-state path is unguarded).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:54:10.204577+00:00'
+  updated_at: '2026-10-28T03:54:10.204577+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

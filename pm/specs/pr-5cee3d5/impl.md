@@ -267,7 +267,16 @@ published. So the sign-off launch
    check describes a revision that no longer exists. The exception is a
    revision that already has a stored record (a concurrent apply's): a
    transient failure of the loser must not overwrite it — the fall-through
-   then drops the stale record in `_record_check`. `_record_check`
+   then drops the stale record in `_record_check`. That rule is decided
+   *outside* the store lock (the loser must know whether the branch's current
+   revision has a record before it re-records it), so the winner can write in
+   between; `_record_check` therefore takes the revision
+   (`keep_recorded_head`) and re-evaluates it *inside* the locked update: a
+   non-mergeable check of a revision that already has a **mergeable** stored
+   record is dropped (that stored record is kept), because a failed check of
+   the same revision is the loser's transient failure, not new information. A
+   stored record of *another* revision is not the winner of this race, so a
+   genuine new conflict is still recorded. `_record_check`
    additionally refuses, inside the locked read-modify-write, to write a
    check computed before HEAD moved when the stored record already describes
    the branch's current revision
@@ -838,8 +847,13 @@ tests):
 15. Race and provenance honesty: a lost apply race whose re-check at the
     branch's current revision is *not* mergeable (a new conflict outside
     `project.yaml`, a failed check) records that revision instead of the
-    loser's stale `resolved` check, while a record that already describes the
-    current revision (a concurrent apply's) is left alone; a clean bounce that
+    loser's stale `resolved` check, while a mergeable record that already
+    describes the current revision (a concurrent apply's) is left alone —
+    re-evaluated *inside* the store lock (`_record_check`'s
+    `keep_recorded_head`), so a winner that records between the loser's
+    decision and its write is not overwritten by a transient failure of the
+    same revision (a stored record of *another* revision is not the winner,
+    so a genuine new conflict is still recorded); a clean bounce that
     carries an earlier applied resolution keeps that resolution's
     `applied_merge_sha` (it did not apply it) and its digest; a `null`
     bookkeeping timestamp, a mapping-valued one, and a report whose

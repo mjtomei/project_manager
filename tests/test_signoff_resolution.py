@@ -1062,6 +1062,104 @@ def test_record_check_carries_the_applied_resolution_under_the_lock(
     assert stored["resolution"]["applied_merge_sha"] == applied
 
 
+def test_a_transient_recheck_yields_to_the_winners_record_under_the_lock(w):
+    """A failed re-check of the branch's current revision is not news.
+
+    ``prepare``'s lost-apply-race path decides *outside* the store lock that
+    the branch's current revision has no record yet and re-records it.  The
+    winner can store a mergeable record of that same revision in between, and
+    ``_check_is_stale`` cannot drop this one (it describes the same revision).
+    ``keep_recorded_head`` re-evaluates the rule under the lock, so the
+    loser's transient failure does not replace the applied record — and with
+    it the approval — until another check re-runs it.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    head = git(w.wd, "rev-parse", "HEAD")
+    failed = {"status": integration.ERROR, "error": "base fetch failed",
+              "head": head, "base_sha": rec["base_sha"],
+              "base_branch": "master", "target_repo": str(w.repo)}
+
+    out = integration._record_check(w.pm_dir, PR, dict(failed),
+                                    keep_recorded_head=head)
+    assert out["status"] == integration.UP_TO_DATE
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.UP_TO_DATE
+    assert stored["head"] == head
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+    # Without the guard the very same failed check of the same revision
+    # replaces the mergeable record: that is what the re-check under the lock
+    # prevents.  (The provenance is carried, so nothing is lost outright, but
+    # the record stops being mergeable until another check runs.)
+    integration._record_check(w.pm_dir, PR, dict(failed))
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.ERROR
+    assert stored["resolution"]["applied_merge_sha"] == applied
+
+
+def test_a_genuine_conflict_is_still_recorded_when_the_winner_guard_is_passed(
+        w):
+    """The guard only yields to a record of the *same* revision.
+
+    A record of another revision is not the winner of this race: the fresh,
+    non-mergeable check describes the revision the branch actually has and
+    must replace it.
+    """
+    rec = _metadata_conflict(w)
+    head = git(w.wd, "rev-parse", "HEAD")
+    conflict = {"status": integration.CONFLICT, "head": head,
+                "base_sha": rec["base_sha"], "base_branch": "master",
+                "target_repo": str(w.repo), "conflicts": ["pm/shared.txt"]}
+
+    def _older_record(d):
+        integ = store.get_pr(d, PR)["integration"]
+        integ["head"] = "0" * 40
+        integ["status"] = integration.UP_TO_DATE
+    store.locked_update(w.pm_dir, _older_record)
+    integration._record_check(w.pm_dir, PR, conflict, keep_recorded_head=head)
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.CONFLICT
+    assert stored["head"] == head
+
+
+def test_prepare_passes_the_winner_guard_for_a_non_mergeable_recheck(
+        w, monkeypatch):
+    """The lost-apply-race path hands the guard to ``_record_check``.
+
+    The "a revision that already has a stored record is the winner's" rule is
+    decided outside the lock, so the write must re-evaluate it under the lock
+    (see ``test_a_transient_recheck_yields_to_the_winners_record_under_the_
+    lock``).
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    (w.base_pm / "shared.txt").write_text("base\n")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+
+    def _concurrent_apply(root, pr_id, record=None, *, data=None):
+        # A concurrent commit lands on the branch between the check and the
+        # apply, and it conflicts with the base outside project.yaml.
+        commit(w.wd, "pm/shared.txt", "branch\n", "concurrent work")
+        return None, integration.HEAD_MOVED
+
+    monkeypatch.setattr(integration, "apply_integration", _concurrent_apply)
+    seen = {}
+    real = integration._record_check
+
+    def spy(root, pr_id, record, *, keep_recorded_head=None):
+        seen["keep"] = keep_recorded_head
+        return real(root, pr_id, record, keep_recorded_head=keep_recorded_head)
+
+    monkeypatch.setattr(integration, "_record_check", spy)
+    rec = integration.prepare(w.pm_dir, PR)
+    assert rec["status"] == integration.CONFLICT, rec
+    assert seen["keep"] == rec["head"]
+
+
 def test_a_stale_check_does_not_replace_the_record_for_the_current_head(w):
     """A check that started before a concurrent apply reads the old HEAD but
     can finish after it; recording it would describe a revision the branch no

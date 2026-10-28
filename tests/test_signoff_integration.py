@@ -796,6 +796,23 @@ def test_claim_return_launch_expires(tmp_path):
     assert signoff.claim_return_launch(tmp_path, PR, "review") is True
 
 
+def test_claim_return_launch_reads_a_malformed_claim_as_no_claim(tmp_path):
+    """project.yaml is hand-editable state: a non-mapping ``launch_claim``
+    must read as absent, not raise out of the locked update.
+
+    The exception would be swallowed by ``claim_return_launch``'s guard, which
+    returns False — read by the driver as "another launcher holds it" — so a
+    scalar value would silently strand the returned PR's relaunch forever.
+    """
+    p = _returned("in_review", "review", launch_claim="garbage")
+    store.save({"project": {"name": "t", "repo": str(tmp_path),
+                            "base_branch": "master", "backend": "local"},
+                "prs": [p]}, tmp_path)
+    assert signoff.claim_return_launch(tmp_path, PR, "review") is True
+    ret = store.get_pr(store.load(tmp_path), PR)["signoff_return"]
+    assert ret["launch_claim"]["hop"] == "review"
+
+
 def test_cli_leaves_a_claimed_review_return_launch_alone(tmp_path):
     """A second driver (concurrent tick, or the TUI that routed the
     verdict) is launching the return's review: relaunching --fresh would
