@@ -2246,6 +2246,62 @@ S13, S14, S22, S101.
       through the router stub. One verifier-path round and one relaunch
       round on a routed PR, beside an unrouted PR whose QA runs to PASS at
       the same time.
+    Results (run 21f1de510c58c784): S107, S108 and S109 PASS on 239e2f04,
+    no code change.
+  - Fortieth pass (S110+), planner 2026-10-28, HEAD 49bbc7e4, after sign-off
+    returned SIGNOFF_REQA (note-20a8aed). There is no product change since
+    review 0f81 i4 (abd23015). The pass closes the acceptance items that
+    earlier passes left open, on the integrated code, and every scenario
+    must publish a `recording.mp4` (install `agg` if it is missing; S104
+    rendered with agg 1.9.0). A cast-only result is not complete.
+    Not to redo: S103–S109 (RQ52–RQ55), S98–S100 post-fix, S65–S96. S73
+    (pr-bddda0f) stays a separate item.
+    - S110 (RQ47 a, replaces S102's unfinished runs 4 and 6): host,
+      fake-claude. `pm pr auto-sequence` ticks from outside the pm tmux
+      session: a plain terminal in the clone root, a non-pm tmux session,
+      and `-C <clone>` from a PR workdir. The driver runs in the project's
+      pm session, its records land in `~/.pm/runtime/pm-<tag>/`, and the
+      TUI and picker follow the run to its verdict. Background review and
+      sign-off hops work without tmux. Control: 1f90deb6 (cd617253^).
+    - S111 (RQ47 b): host, fake-claude. `pm tui restart` and other TUI
+      auto-start passes while a `qa-run-bg` driver is alive. Also the window
+      between the driver's spawn and its `qa_run.json` (`write_run_record`,
+      reached only after `locked_update` and `clear_return_awaiting`), held
+      open by a busy project.yaml. And a `pm qa run` CLI run (fixed loop id
+      `cli-<pr>`, so its `qa_run.json` is written once and kept across
+      later CLI runs) beside TUI auto-start of full QA. Expected: exactly
+      one driver per QA run. A stale CLI record never blocks auto-start,
+      and the run is never lost from the picker. A second loop, or full QA
+      that never starts, is a finding. Control: 1f90deb6.
+    - S112 (R9/RQ44 since the 10-27 rework, host): from a shell or TUI that
+      carries a routed session env, launch PR N (no model), P (plain
+      `claude-opus-5-5`) and R (a generic router whose model has no `work/`
+      name). Cover impl, review, sign-off, s0, planner, refiner, worker,
+      `--resume` and the `claude -p` helpers. Check the live process env of
+      each pane and the stub logs. The last live run was S62 on 09a23249.
+    - S113: S112 in container mode (podman 3, slirp4netns). Check what the
+      container receives by name, the command's `env -u` list, and that
+      only R has the bridge mount. The last live run was S63.
+    - S114 (re-record of S105 to mp4): RQ52 for a PR routed on every role
+      through start, review loop, sign-off and auto-start, with the router
+      down at launch and then back, beside a default-provider PR, in host
+      and container mode. Also RQ54: impl, review and sign-off refuse an
+      unusable bridge.
+    - S115 (re-record of S101 to mp4, under RQ52): upgrade from 34fa3d24
+      with a pre-rework providers.yaml in container mode. Cover the retired
+      key warnings and `--clear`, the absent classifier env until
+      `--classifier-model`, and a routed QA run with the router down, which
+      shows ordinary API errors and no route wait line.
+    Harness gotcha (sign-off item 4): nested scratch QA runs in earlier
+    scenarios wrote `verdict.md`, `prompt.md` and `scenario.json` for their
+    own scenarios 1–22 and 40–42 into this PR's `/pm-captures/scenarios/`.
+    The worker scripts had scrubbed `PM_CAPTURES_PR` from the env, and
+    `captures_dir` lets any PR use the mount when that variable is unset
+    (master 237179d7, by design). Keep `PM_CAPTURES_PR` exported in every
+    scrubbed env, or give nested runs a mount-free HOME and cwd. Check that
+    no other scenario's capture dir changes. The QA40 planner restored those
+    files from the original runs' `qa_status.json` (the overwritten copies
+    are in `nested-run-overwrite/` in each dir).
 
 ## 3. Edge cases
 
