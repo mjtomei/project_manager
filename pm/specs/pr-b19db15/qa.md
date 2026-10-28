@@ -199,6 +199,10 @@ run.
 - a transcode whose `ffmpeg` reports success but writes an empty mp4 fails
   with "ffmpeg wrote nothing", leaves no mp4 behind, and keeps the webm so
   the step can be retried;
+- the finalize step run with a `CAPDIR` that does not exist fails with
+  "capture directory … does not exist", not "there is no webm to transcode";
+- a driver block whose Playwright resolution check fails leaves none of the
+  earlier attempt's `*.webm`/`trace.zip`/`dom.html`/`*.png` behind;
 - with an app that does answer, the recipe proceeds and produces its captures.
 
 ## Edge cases
@@ -232,7 +236,11 @@ run.
   pm session itself ended exits 0 and passes.
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
-  `RECORDER_STOP_TIMEOUT` for a long command.
+  `RECORDER_STOP_TIMEOUT` for a long command. A *mistyped* value (`2m`,
+  `1.5h`) must fail the step with "RECORDER_STOP_TIMEOUT must be whole
+  seconds" instead of removing the bound: in an interactive shell the failed
+  arithmetic leaves the deadline empty and the shell carries on, so the stop
+  wait never ends.
 - The TUI dies mid-scenario (a crash, not the scenario quitting pm) → the
   driving step's own `pm tui send` fails and step 5's both-gone branch cannot
   tell that from a legitimate finish, so the capture is re-run rather than
@@ -266,7 +274,10 @@ run.
   different renderer is not a pass. The install block is guarded on
   `command -v agg`, so on an image that already has `agg` it must do nothing
   — re-downloading over the working binary would truncate it earlier on
-  `PATH` if the transfer failed partway.
+  `PATH` if the transfer failed partway. The download itself carries
+  `--connect-timeout`/`--max-time` (a stalled transfer would otherwise hang
+  the worker), and a failed transfer removes its partial file and stops with
+  "could not download agg".
 - An encoder fails *partway* → the render steps check `agg`'s and `ffmpeg`'s
   own exit statuses, not only the output file: a killed `ffmpeg` leaves a
   non-empty partial mp4 (verified: 267,945 bytes) that `test -s` accepts, so
@@ -300,7 +311,9 @@ run.
 - The web-UI finalize step is run in a fresh shell (no `CAPDIR`) → it stops
   with the "CAPDIR is unset" message instead of aiming its `rm -f` and ffmpeg
   at `/recording.mp4` / `/recording.webm`; with `CAPDIR` set it still produces
-  the mp4 and drops the webm.
+  the mp4 and drops the webm. With `CAPDIR` *set but missing* it stops with
+  "capture directory … does not exist" rather than reporting "there is no
+  webm to transcode — the driver wrote no video".
 - The CLI no-TTY scaffold is pasted whole for the interactive `bash` form →
   the stop step times out with the shell still at its prompt, and its failure
   message names the remedy (`exit` in the recorded shell, step 3) rather than

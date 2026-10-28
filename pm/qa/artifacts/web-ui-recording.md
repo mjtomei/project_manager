@@ -172,6 +172,17 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
     echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
     exit 1
 }
+# Clear this attempt's outputs *before* anything below can fail. This block is
+# pasted on its own whenever a driver is adapted and retried, so the *previous*
+# attempt's webm, trace, screenshots and DOM dump are still here; any failure
+# from this point on — a resolution check that cannot find Playwright, a driver
+# that dies part-way — would otherwise leave the earlier attempt's complete
+# webm for the finalize step to transcode into this run's recording. Step 1
+# clears them for a fresh run; this covers step 2 alone. Every *.webm goes: a
+# killed driver leaves Playwright's auto-named `page@<hash>.webm` rather than
+# the renamed recording.webm, and that partial video is valid enough to pass
+# any file check. The paths are relative because the `cd` above succeeded.
+rm -f ./*.webm ./trace.zip ./dom.html ./*.png
 # The driver is an ES module, and Node's ES-module resolver ignores
 # NODE_PATH, so with only the image's global Playwright a bare
 # `node driver.mjs` fails at once with "ERR_MODULE_NOT_FOUND: Cannot find
@@ -200,16 +211,6 @@ node -e "import('playwright').then(() => console.log('playwright ok'))" || {
         "playwright' here" >&2
     exit 1
 }
-# Clear this attempt's outputs before the driver runs. This block is pasted on
-# its own whenever a driver is adapted and retried, so the *previous* attempt's
-# webm, trace, screenshots and DOM dump are still here; a retry that fails
-# part-way would otherwise leave the earlier attempt's complete webm for the
-# finalize step to transcode into this run's recording. Step 1 clears them for
-# a fresh run; this covers step 2 alone. Every *.webm goes: a killed driver
-# leaves Playwright's auto-named `page@<hash>.webm` rather than the renamed
-# recording.webm, and that partial video is valid enough to pass any file
-# check. The paths are relative because the `cd` above succeeded.
-rm -f ./*.webm ./trace.zip ./dom.html ./*.png
 CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs || {
     # The driver's own exit status is the handle that says this attempt
     # finished: it writes the video, trace, screenshots and DOM dump as it
@@ -314,6 +315,14 @@ decode. Transcode to H.264 and keep only the mp4:
 if [ -z "${CAPDIR:-}" ]; then
     echo "CAPDIR is unset — set the placeholders from step 1 first; the" \
         "cleanup and ffmpeg below would otherwise aim at the filesystem root" >&2
+    exit 1
+fi
+# A set-but-missing directory is the same hole one line later, and it is
+# misdiagnosed: both the `rm` and the webm check below fail for their own
+# reasons, and the block reports "the driver wrote no video" for a path that
+# simply is not there (the driver and Layer 2 blocks guard this the same way).
+if [ ! -d "$CAPDIR" ]; then
+    echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
     exit 1
 fi
 # Drop the old mp4 first: ffmpeg leaves an existing output untouched when it

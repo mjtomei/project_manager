@@ -630,8 +630,9 @@ class TestRecipes:
             "cli-recording: the stop bound cannot be raised for a long command")
         stop = block[block.index("stop_timeout="):]
         body = stop[:stop.index("\ndone")]
-        assert "deadline=$(( $(date +%s) + stop_timeout ))" in body, (
-            "cli-recording: the stop deadline ignores RECORDER_STOP_TIMEOUT")
+        assert "deadline=$(( $(date +%s) + 10#$stop_timeout ))" in body, (
+            "cli-recording: the stop deadline ignores RECORDER_STOP_TIMEOUT "
+            "(or reads a leading zero as octal)")
         assert "RECORDER_STOP_TIMEOUT" in body, (
             "cli-recording: the stop failure does not say how to raise the bound")
 
@@ -1067,6 +1068,45 @@ def _install_block(name):
     raise AssertionError(f"{name}: no agg install block found")
 
 
+def _run_install_block(name, tmp_path, curl_body=None, agg_present=False):
+    """Run the recipe's own ``agg`` install block against stub tools.
+
+    ``agg_present`` seeds a working ``agg`` in ``~/.local/bin`` (ahead of the
+    stub PATH, as on the image). ``curl_body`` replaces the stub ``curl``.
+    Returns ``(proc, agg path, curl-called marker)``.
+    """
+    block = _install_block(name)
+    home = tmp_path / "home"
+    local = home / ".local" / "bin"
+    local.mkdir(parents=True)
+    agg = local / "agg"
+    if agg_present:
+        agg.write_text("#!/bin/sh\necho working\n")
+        agg.chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "curl-called"
+    # The block's own tools, stubbed to the real ones by absolute path, so the
+    # test's PATH cannot pick up a host `agg` and mask the guard.
+    for tool in ("mkdir", "chmod", "uname", "rm"):
+        real = shutil.which(tool)
+        assert real, f"{tool} is required"
+        _stub_tool(bindir, tool, f'exec "{real}" "$@"\n')
+    # The stub's PATH is the stub dir itself, so it may only use builtins.
+    _stub_tool(bindir, "curl", curl_body or f''': > "{called}"
+for a in "$@"; do last=$a; done
+printf '#!/bin/sh\\necho downloaded\\n' > "$last"
+''')
+    # `~/.local/bin` is on the image's PATH ahead of the system dirs, and the
+    # stubs stand in for everything else, so no host `agg` can mask the guard.
+    # `bash` itself is resolved before PATH is replaced.
+    bash = shutil.which("bash")
+    env = dict(os.environ, HOME=str(home), PATH=f"{local}:{bindir}")
+    r = subprocess.run([bash], input=block, env=env,
+                       capture_output=True, text=True, timeout=60)
+    return r, agg, called
+
+
 @pytest.mark.parametrize("name", RECIPES)
 @pytest.mark.parametrize("agg_present", [True, False])
 def test_renderer_install_block_only_runs_when_agg_is_missing(name,
@@ -1083,36 +1123,7 @@ def test_renderer_install_block_only_runs_when_agg_is_missing(name,
     matching the prose that says to install it only when that prints nothing.
     This runs the recipe's own block both ways against a stub ``curl``.
     """
-    block = _install_block(name)
-    home = tmp_path / "home"
-    local = home / ".local" / "bin"
-    local.mkdir(parents=True)
-    agg = local / "agg"
-    if agg_present:
-        agg.write_text("#!/bin/sh\necho working\n")
-        agg.chmod(0o755)
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    called = tmp_path / "curl-called"
-    # The block's own tools, stubbed to the real ones by absolute path, so the
-    # test's PATH cannot pick up a host `agg` and mask the guard.
-    for tool in ("mkdir", "chmod", "uname"):
-        real = shutil.which(tool)
-        assert real, f"{tool} is required"
-        _stub_tool(bindir, tool, f'exec "{real}" "$@"\n')
-    # The stub's PATH is the stub dir itself, so it may only use builtins.
-    _stub_tool(bindir, "curl", f''': > "{called}"
-for a in "$@"; do last=$a; done
-printf '#!/bin/sh\\necho downloaded\\n' > "$last"
-''')
-    # `~/.local/bin` is on the image's PATH ahead of the system dirs, and the
-    # stubs stand in for everything else, so no host `agg` can mask the guard.
-    # `bash` itself is resolved before PATH is replaced.
-    bash = shutil.which("bash")
-    env = dict(os.environ, HOME=str(home), PATH=f"{local}:{bindir}")
-
-    r = subprocess.run([bash], input=block, env=env,
-                       capture_output=True, text=True)
+    r, agg, called = _run_install_block(name, tmp_path, agg_present=agg_present)
 
     assert r.returncode == 0, r.stderr
     if agg_present:
@@ -1127,6 +1138,37 @@ printf '#!/bin/sh\\necho downloaded\\n' > "$last"
         assert agg.read_text() == "#!/bin/sh\necho downloaded\n", agg.read_text()
         assert os.access(agg, os.X_OK), (
             f"{name}: the downloaded agg is never made executable")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_renderer_install_is_bounded_and_drops_a_partial_download(name,
+                                                                  tmp_path):
+    """The install download is the last unbounded request in the recipes.
+
+    Every other request is bounded — the readiness polls per attempt, the
+    Layer 2 route snapshots with ``--connect-timeout``/``--max-time`` —
+    because one that accepts the connection and never answers hangs the
+    worker. ``curl -o`` with no deadline is that wait one step earlier, and
+    ``-o`` writes in place, so a transfer that dies mid-body leaves a partial
+    file that would shadow the image's working ``agg`` on PATH. It has to be
+    removed and the failure named.
+    """
+    block = _install_block(name)
+    assert "--connect-timeout" in block and "--max-time" in block, (
+        f"{name}: the agg install download has no deadline: " + block)
+
+    # A transfer that dies mid-body: curl exits 18 and leaves a partial file.
+    r, agg, _called = _run_install_block(
+        name, tmp_path,
+        curl_body='for a in "$@"; do last=$a; done\n'
+                  'printf "partial" > "$last"\nexit 18\n')
+
+    assert r.returncode != 0, (
+        f"{name}: a failed agg download was reported as a successful install")
+    assert not agg.exists(), (
+        f"{name}: a failed download left a partial agg earlier on PATH than "
+        "the image's working binary")
+    assert "could not download agg" in r.stderr, r.stderr
 
 
 def test_cli_tee_fallback_writes_the_transcript_into_the_capture_dir():
@@ -1206,6 +1248,39 @@ def test_web_ui_finalize_refuses_an_unset_capdir(tmp_path):
     assert not called.exists(), (
         "the finalize step ran ffmpeg with an unset CAPDIR, so it read and "
         "wrote paths at the filesystem root")
+
+
+def test_web_ui_finalize_refuses_a_missing_capture_dir(tmp_path):
+    """A set-but-missing CAPDIR is not "the driver wrote no video".
+
+    The driver and Layer 2 blocks both stop on a directory they cannot enter
+    (R15), but the finalize block guarded only an *unset* CAPDIR: pasted with
+    a wrong or un-created path it reported "there is no webm to transcode —
+    the driver wrote no video; re-run step 2", sending the worker to re-drive
+    a UI for a directory that is simply not there (verified: the pre-fix
+    block exits 1 with that message). The same guard one block over is what
+    makes every step's failure name its own cause.
+    """
+    missing = tmp_path / "does-not-exist"
+    block = _web_ui_finalize_block()
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(missing),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "the finalize step ran against a capture directory that is not there")
+    assert "does not exist" in r.stderr, (
+        "a missing capture directory is not named: " + r.stderr)
+    assert "there is no webm to transcode" not in r.stderr, (
+        "a missing capture directory is reported as a driver that recorded "
+        "nothing: " + r.stderr)
+    assert not called.exists(), "the finalize step ran ffmpeg anyway"
 
 
 def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
@@ -1443,12 +1518,21 @@ def test_web_ui_teardown_refuses_an_unset_server_pid(tmp_path):
 
 
 def _run_in_interactive_shell(block, env, cwd=None):
-    """Feed ``block`` to an interactive bash on a pty (``script``)."""
+    """Feed ``block`` to an interactive bash on a pty (``script``).
+
+    The pty transcript is decoded leniently: readline redraws the line as the
+    block arrives, and a redraw can interleave a control sequence inside a
+    multi-byte character (the recipe text is full of em dashes), which strict
+    UTF-8 decoding rejects. That is an artifact of the pty echo, not of the
+    block — the assertions below only look for ASCII words and file effects —
+    so a decode error must not fail the run.
+    """
     if shutil.which("script") is None:
         pytest.skip("script(1) is required")
     return subprocess.run(["script", "-qec", "bash", "/dev/null"],
                           input=block, env=env, cwd=cwd,
-                          capture_output=True, text=True, timeout=60)
+                          capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=60)
 
 
 def test_web_ui_finalize_guard_stops_an_interactive_paste(tmp_path):
@@ -1737,11 +1821,17 @@ def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
     Without the gate the worker sees the same ``ERR_MODULE_NOT_FOUND`` twice
     (once from the check, once from the driver) and no statement of what to
     do; and with no global install an unconditional link would leave a
-    dangling ``node_modules`` in the capture directory.
+    dangling ``node_modules`` in the capture directory. The step is pasted on
+    its own when a driver is retried, so the earlier attempt's outputs have to
+    go even on *this* failure path — otherwise the finalize step can transcode
+    the previous attempt's complete webm into "this run's" recording.
     """
     capdir = tmp_path / "cap"
     capdir.mkdir()
     _write_driver(capdir)
+    stale = {"recording.webm": "an earlier attempt\n", "trace.zip": "trace\n"}
+    for name, content in stale.items():
+        (capdir / name).write_text(content)
     r = _run_driver_block(capdir, tmp_path / "missing-global-install")
     assert r.returncode != 0, (
         "the recipe ran driver.mjs although its own resolution check failed")
@@ -1751,6 +1841,10 @@ def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
         "the recipe ran the driver after its resolution check failed")
     assert not os.path.lexists(capdir / "node_modules"), (
         "web-ui recipe left a dangling node_modules beside the driver")
+    for name in stale:
+        assert not (capdir / name).exists(), (
+            f"the resolution failure left an earlier attempt's {name} for the "
+            "finalize step to present as this run's evidence")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
@@ -2180,7 +2274,8 @@ exit 0
 
 
 def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
-               sessions=(), files=None, state_files=None, capture=None):
+               sessions=(), files=None, state_files=None, capture=None,
+               timeout=120):
     """Run one recipe block against stub tmux/pm; return (proc, cast path).
 
     ``raw`` is the block text as a worker pastes it, ``sessions`` the tmux
@@ -2230,7 +2325,7 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
         # recipe's step 4 reads.
         env["STUB_STATUS_FILE"] = str(capture / sub / "recorder.status")
     r = subprocess.run(["bash"], input=block, env=env,
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, timeout=timeout)
     return r, capture / sub / "recording.cast"
 
 
@@ -2305,6 +2400,31 @@ class TestCaptureFlowExecution:
         assert log.exists(), "the failing wait left no pane evidence"
         assert "TUI drawn" in log.read_text(), (
             "the saved pane does not hold what the recorder drew")
+
+    def test_cli_stop_refuses_a_non_numeric_timeout(self, tmp_path):
+        """A mistyped RECORDER_STOP_TIMEOUT must fail, not remove the bound.
+
+        Verified in a real interactive bash: `$(( … + 2m ))` fails, leaves
+        `deadline` empty, and the shell *carries on* (only a scripted run
+        exits on that error), so the deadline check below is always false and
+        the stop wait never ends — the unbounded wait this step exists to
+        remove, reintroduced by the knob the recipe tells workers to raise.
+        The block has to validate the value and say what is wrong.
+        """
+        try:
+            r, _cast = _run_block(
+                _stop_block("cli-recording.md"), "stuck", tmp_path,
+                sessions=("rec",),
+                files={"recording.cast": '{"version": 2}\n'},
+                state_files={"pane": "TUI drawn\n"},
+                env_extra={"RECORDER_STOP_TIMEOUT": "2m"}, timeout=20)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the stop block hung on a non-numeric "
+                        "RECORDER_STOP_TIMEOUT instead of failing")
+        assert r.returncode != 0, (
+            "the stop block accepted a non-numeric RECORDER_STOP_TIMEOUT")
+        assert "RECORDER_STOP_TIMEOUT must be whole seconds" in r.stderr, (
+            "the bad bound is not named: " + r.stderr)
 
     def test_cli_recorder_that_dies_without_a_cast_fails(self, tmp_path):
         """asciinema failing to start must not pass as a finished recording."""

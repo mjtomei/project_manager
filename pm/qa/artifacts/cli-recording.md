@@ -221,7 +221,20 @@ done
 #    bound is a hang detector, not a time limit on the recorded work, and
 #    killing a healthy recording loses the evidence.
 stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
-deadline=$(( $(date +%s) + stop_timeout ))
+# Validate the bound before the arithmetic that uses it. A non-numeric value
+# (`2m`, `1.5h`) makes `$(( … ))` fail and leaves `deadline` empty — and in an
+# *interactive* shell the block carries on past that error (only a scripted
+# run exits), so the deadline check below is always false and the wait never
+# ends: the unbounded wait this step exists to remove, reintroduced by a
+# mistyped knob. `10#` keeps a leading zero from being read as octal.
+case $stop_timeout in
+    *[!0-9]*)
+        echo "RECORDER_STOP_TIMEOUT must be whole seconds (got" \
+            "'$stop_timeout'); e.g. RECORDER_STOP_TIMEOUT=120" >&2
+        tmux -L scaffold kill-server 2>/dev/null
+        exit 1 ;;
+esac
+deadline=$(( $(date +%s) + 10#$stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         tmux -L scaffold capture-pane -p -t rec \
@@ -302,9 +315,21 @@ pasting it on an image that already has `agg` does nothing:
 # working agg with a 500-byte file).
 if ! command -v agg >/dev/null; then
     mkdir -p ~/.local/bin
-    curl -fsSL \
+    # Bound the download like every other request in this recipe: a transfer
+    # that stalls would otherwise hang the worker with no deadline, the same
+    # unbounded wait the capture flow bounds everywhere else. `-o` writes in
+    # place, so a failed or timed-out download leaves a partial file behind —
+    # remove it rather than leave a broken `agg` earlier on PATH than the
+    # image's working one.
+    curl -fsSL --connect-timeout 5 --max-time 180 \
         https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
-        -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+        -o ~/.local/bin/agg || {
+        rm -f ~/.local/bin/agg
+        echo "could not download agg — put a release binary on PATH and" \
+            "re-run the render" >&2
+        exit 1
+    }
+    chmod +x ~/.local/bin/agg
 fi
 ```
 

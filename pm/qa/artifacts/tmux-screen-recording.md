@@ -373,9 +373,21 @@ pasting it on an image that already has `agg` does nothing:
 # working agg with a 500-byte file).
 if ! command -v agg >/dev/null; then
     mkdir -p ~/.local/bin
-    curl -fsSL \
+    # Bound the download like every other request in this recipe: a transfer
+    # that stalls would otherwise hang the worker with no deadline, the same
+    # unbounded wait the capture flow bounds everywhere else. `-o` writes in
+    # place, so a failed or timed-out download leaves a partial file behind —
+    # remove it rather than leave a broken `agg` earlier on PATH than the
+    # image's working one.
+    curl -fsSL --connect-timeout 5 --max-time 180 \
         https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
-        -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+        -o ~/.local/bin/agg || {
+        rm -f ~/.local/bin/agg
+        echo "could not download agg — put a release binary on PATH and" \
+            "re-run the render" >&2
+        exit 1
+    }
+    chmod +x ~/.local/bin/agg
 fi
 ```
 
