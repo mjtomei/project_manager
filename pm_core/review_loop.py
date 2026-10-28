@@ -91,6 +91,13 @@ class ReviewLoopState:
     # when the verdict lands, cleared once the user answers in the pane (the
     # follow-up is then Claude's work) or a new iteration takes over.
     input_required: bool = False
+    # A resumed loop is still checking whether its recorded INPUT_REQUIRED
+    # wait has a live pane to adopt.  During that check the loop is running
+    # but the wait is neither live nor answered, so status readers must not
+    # report "follow-up running" — that claims the user answered a question
+    # nobody has been shown yet.  Cleared as soon as the adopt decision is
+    # made (adoptable: input_required is re-set; not: the iteration reruns).
+    _adopting_wait: bool = False
 
 
 def _match_verdict(line: str) -> str | None:
@@ -522,6 +529,11 @@ def run_review_loop_sync(
     # the resume takes — the same false-wait class this loop exists to
     # prevent.  The adopted case re-sets it below.
     state.input_required = False
+    # ... and until that check finishes the wait is not "answered" either:
+    # running + not input_required + a recorded INPUT_REQUIRED history would
+    # otherwise read as "INPUT_REQUIRED answered; follow-up running" for the
+    # length of the check.
+    state._adopting_wait = adopt_wait
 
     try:
         while state.iteration < max_iterations or adopt or adopt_wait:
@@ -534,6 +546,9 @@ def run_review_loop_sync(
                 adopt_wait = False
                 wait_transcript = _adoptable_wait_transcript(
                     state, pr_data, saved_transcript_dir)
+                # The check is over: from here on the wait is either live
+                # (input_required set below) or gone (iteration reruns).
+                state._adopting_wait = False
                 if wait_transcript is None:
                     _log.info("review_loop: INPUT_REQUIRED wait for %s "
                               "iteration %d has no live pane; continuing",
@@ -632,6 +647,7 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        state._adopting_wait = False
         # Status reads input_required before running: a loop that died
         # mid-wait must not report a human request nobody can answer.
         state.input_required = False

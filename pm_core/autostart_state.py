@@ -477,6 +477,10 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             if review.get("input_required"):
                 return phase, "waiting", f"review INPUT_REQUIRED (iteration {it})"
             if review.get("running"):
+                if review.get("resuming"):
+                    # A resumed loop is re-checking its recorded wait: no
+                    # question is live yet and nobody has answered one.
+                    return phase, "running", f"review resuming (iteration {it})"
                 reason = f"review iteration {it}"
                 if review.get("follow_up"):
                     reason += " (INPUT_REQUIRED answered; follow-up running)"
@@ -837,10 +841,16 @@ def review_progress_input(state) -> dict:
     """Summarise a ReviewLoopState-like object into a ``review_loops`` entry.
 
     ``follow_up``: the current iteration ended INPUT_REQUIRED and the user
-    has answered — Claude is working on the follow-up in the same pane."""
+    has answered — Claude is working on the follow-up in the same pane.
+    ``resuming``: a resumed loop is still checking whether its recorded
+    INPUT_REQUIRED wait has a live pane to adopt.  The wait is neither live
+    nor answered then, so neither ``input_required`` nor ``follow_up`` may
+    be reported (a status reader would otherwise show a phantom wait or a
+    phantom "answered; follow-up running" for the length of the check)."""
     running = bool(getattr(state, "running", False))
     iteration = getattr(state, "iteration", 0) or 0
     input_required = bool(getattr(state, "input_required", False))
+    adopting_wait = bool(getattr(state, "_adopting_wait", False))
     history = getattr(state, "history", None) or []
     last = history[-1] if history else None
     return {
@@ -848,7 +858,9 @@ def review_progress_input(state) -> dict:
         "iteration": iteration,
         "verdict": getattr(state, "latest_verdict", "") or "",
         "input_required": input_required,
-        "follow_up": bool(running and not input_required and last is not None
+        "resuming": bool(running and adopting_wait),
+        "follow_up": bool(running and not input_required and not adopting_wait
+                          and last is not None
                           and getattr(last, "iteration", None) == iteration
                           and getattr(last, "verdict", "") == "INPUT_REQUIRED"),
     }

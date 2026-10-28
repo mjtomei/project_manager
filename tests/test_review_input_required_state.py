@@ -666,6 +666,65 @@ class TestRestartAdoption:
             release3.set()
             p.stop()
 
+    def test_adopting_wait_is_not_reported_as_an_answered_follow_up(self):
+        """A restored wait whose adopt check has not run is neither live nor
+        answered: status must not claim "INPUT_REQUIRED answered"."""
+        st = ReviewLoopState(pr_id=PR_ID, iteration=2,
+                             latest_verdict="INPUT_REQUIRED",
+                             running=True, input_required=False)
+        st.history.append(ReviewIteration(iteration=2, verdict="INPUT_REQUIRED",
+                                          output=""))
+        st._adopting_wait = True
+        review = autostart_state.review_progress_input(st)
+        assert review["resuming"] is True
+        assert review["follow_up"] is False
+        assert _status(st)[:2] == ("running", "review resuming (iteration 2)")
+        # Once the check is over and the pane adopted, the wait is live.
+        st._adopting_wait = False
+        review = autostart_state.review_progress_input(st)
+        assert review["resuming"] is False
+        assert review["follow_up"] is True
+
+    def test_restart_adopt_check_never_reads_as_follow_up_running(self, env):
+        """The sub-second adopt check after a restart must not publish
+        "INPUT_REQUIRED answered; follow-up running" — nobody has answered
+        the restored question yet."""
+        tdir, _ = env
+        pane2 = Pane(tdir, 2)
+        pane2.verdict("INPUT_REQUIRED", "Which option?")
+        state = _restored(tdir, 2, ["NEEDS_WORK", "INPUT_REQUIRED"])
+        entered = threading.Event()
+        release = threading.Event()
+        real = rl._adoptable_wait_transcript
+
+        def slow_adopt(*a, **kw):
+            entered.set()
+            release.wait(10)
+            return real(*a, **kw)
+
+        with patch.object(rl, "_adoptable_wait_transcript", side_effect=slow_adopt):
+            t, mock, p = _start(state, tdir, {})
+        try:
+            assert entered.wait(5), "adopt check never started"
+            # The check is parked: sample it like an external status reader.
+            for _ in range(20):
+                s, reason, review = _status(state)
+                assert s == "running"
+                assert "follow-up running" not in reason
+                assert review["follow_up"] is False
+                assert review["input_required"] is False
+                time.sleep(0.01)
+            assert _status(state)[:2] == (
+                "running", "review resuming (iteration 2)")
+            release.set()
+            _until(lambda: state.input_required, what="adopted wait")
+            assert _status(state)[:2] == (
+                "waiting", "review INPUT_REQUIRED (iteration 2)")
+        finally:
+            release.set()
+            state.stop_requested = True
+            p.stop()
+
     def test_restart_after_answer_shows_follow_up_running(self, env):
         tdir, _ = env
         pane2 = Pane(tdir, 2)
