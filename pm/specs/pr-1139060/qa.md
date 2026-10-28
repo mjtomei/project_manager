@@ -44,6 +44,8 @@ Refresh on 2026-10-28 at HEAD `1bc65b72` (QA fixes from scenarios 58–63 plus r
 
 Refresh on 2026-10-28, HEAD `fb37dc36`, code unchanged since `1bc65b72`: QA loop `42a07a34` locked scenarios 64–68 and cloned their workdirs. About three minutes later the next run (`c8dbe953`) superseded it. No scenario launched a worker or produced a verdict, and no container from that loop remained in the runtime inventory. Scenarios 64–68 are therefore locked but unexecuted. Fresh scenarios 69–73 carry their stories forward unchanged in intent: 69 = 64, 70 = 65, 71 = 66, 72 = 67, 73 = 68. They also correct the expected deferred-retry log wording to "deferred container release retried". Requirements and resolutions are unchanged.
 
+Refresh on 2026-10-28, HEAD `06d8aaa6`, code unchanged since `1bc65b72`: QA loop `c8dbe953` locked scenarios 69–73, created their concretizer containers and windows at 23:04 CDT and began concretization. At 23:05:57 a breadcrumb restart of the host TUI (running another PR's PM code) did not resume it, because a run writes `qa_resume.json` only after launch (pre-existing gap, tracked by pr-3201ea8). Auto-start began run `6086ab24`, which killed the stale s69–s73 windows and removed their five containers. Run `b49b38db` superseded that run at 23:09 before it planned. No scenario worker launched, no verdict was produced and no container from these loops is still running. Scenarios 69–73 are therefore locked but unexecuted. Fresh scenarios 74–78 carry them forward unchanged: 74 = 69, 75 = 70, 76 = 71, 77 = 72, 78 = 73. Requirements and resolutions are unchanged.
+
 User-visible behavior added after `afc151b5` that fresh scenarios must cover:
 - Inventory outage at a full runtime: the run makes one floor launch, then waits for a readable inventory (log "wait for a readable container inventory"). Its settled workers whose release is unconfirmed, and workers a release deliberately kept (INPUT_REQUIRED or viewed), count as held. So INPUT_REQUIRED settlements during the outage do not each admit another launch. Peak at most L+1; after recovery the deferred releases run, the peak returns to at most L and the batch grows back (70cd9492, 1bc65b72).
 - A partial run-end release, or its deferred retry, logs which viewed/INPUT_REQUIRED workers it kept even when it released others (60ccb95e).
@@ -116,6 +118,8 @@ Fresh scenarios 64–68 re-cover them on HEAD `1bc65b72`:
 - popups/locale: none changed; not re-run
 
 Fresh scenarios 69–73 carry 64–68 forward, unexecuted, with the same coverage map (69 for 64, 70 for 65, 71 for 66, 72 for 67, 73 for 68).
+
+Fresh scenarios 74–78 carry 69–73 forward, unexecuted, with the same coverage map (74 for 69, 75 for 70, 76 for 71, 77 for 72, 78 for 73).
 
 ## Setup
 
