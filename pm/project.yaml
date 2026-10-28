@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T05:53:48.426013+00:00'
+  updated_at: '2026-10-28T06:35:04.715046+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37390,6 +37390,20 @@ prs:
       PM_HOST_HOME set).'
     created_at: '2026-10-28T05:53:48Z'
     last_edited: '2026-10-28T05:53:48Z'
+  - id: note-9785884
+    text: 'review-loop 4440 i6: fixed the last lossy edit-template round-trip — the
+      description body. `_parse_pr_edit_raw` skipped every `#`-prefixed line *before*
+      it checked the description section, so a PR description carrying markdown headings
+      (`## Goal`; 100 PRs in this project.yaml do) lost every heading on a no-op `pm
+      pr edit` save, and the description was rewritten ("Updated pr-001: description
+      updated"). Everything after the template''s "everything below this line" header
+      is now the description, `#` lines included; the template''s own comment lines
+      all precede that header, and its instruction line is phrased without "below"
+      so it cannot be mistaken for the header. Two tests (the real template through
+      the real parser/CLI, and a parser unit test) fail on the pre-fix code. Full
+      suite: 4045 passed, 1 skipped. Spec R9 item 14 updated.'
+    created_at: '2026-10-28T06:35:04Z'
+    last_edited: '2026-10-28T06:35:04Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
