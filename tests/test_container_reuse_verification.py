@@ -250,6 +250,7 @@ def test_in_place_setup_error_names_the_container_not_its_id(monkeypatch, tmp_pa
     assert name in message
     assert cid not in message
     assert "copying ~/.claude.json failed" in message
+    assert f"Container '{name}' could not receive ~/.claude.json" in message
     remove.assert_not_called()
 
 

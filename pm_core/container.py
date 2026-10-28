@@ -1903,9 +1903,11 @@ def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
             try:
                 _post_setup(container_id, workdir, "podman" in _get_runtime())
             except ContainerLaunchError as exc:
-                # Post-setup addresses the captured id; name the container.
-                raise launch_error(name, exc.kind, exc.stderr,
-                                   stage="finish setup of the existing container") from exc
+                # Post-setup addresses the captured id; name the container, and
+                # keep the helper's stage (e.g. "receive ~/.claude.json").
+                raise launch_error(
+                    name, exc.kind, exc.stderr,
+                    stage=exc.stage or "finish setup of the existing container") from exc
             try:
                 finished = _setup_complete(container_id)
             except ContainerLaunchError as exc:
