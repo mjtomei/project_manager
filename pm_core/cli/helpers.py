@@ -525,12 +525,15 @@ def _read_tui_owner(
     if raw is None:
         return path, None, None, (
             "unreadable pidfile" if path.exists() else "no pidfile")
-    if not raw.strip():
+    if raw == "":
         # A TUI creates the file with O_EXCL and writes its descriptor a
         # moment later (``claim_tui_pidfile`` waits out that window on
-        # the writing side).  An empty file is therefore ambiguous, not
-        # stale: callers must not delete it, or a second TUI could claim
-        # the session while the first is still starting.
+        # the writing side).  A *zero-length* file is therefore ambiguous,
+        # not stale: callers must not delete it, or a second TUI could
+        # claim the session while the first is still starting.  Whitespace-
+        # only content is not that window (the claim writes a whole JSON
+        # descriptor in one go), so it falls through as unreadable — which
+        # matches the claim, where only ``""`` is retried.
         return path, raw, None, "empty pidfile"
     desc = tui_pidfile.parse_pidfile(raw)
     if desc is None:
@@ -567,8 +570,11 @@ def _validate_tui_owner(
         if desc is None:
             message = (f"The TUI pidfile for session {session} is "
                        f"unreadable; restart the TUI.")
+        elif problem == "process is not running":
+            message = (f"The TUI for session {session} is not running; "
+                       f"restart the TUI.")
         else:
-            message = (f"The TUI for session {session} is not running "
+            message = (f"The TUI for session {session} is not available "
                        f"({problem}); restart the TUI.")
         return pidfile, raw, desc, TuiIpcResult(
             False, "stale_pidfile", message)
@@ -735,9 +741,11 @@ def _unqueue_line(queue: Path, line: str) -> None:
     appenders — under the same ``flock`` the appender uses, we only
     truncate when the file still ends with our exact line at a line
     boundary, so a *different* line another caller appended after ours is
-    never the one removed.  Two callers submitting the identical command
-    are indistinguishable by content: at most one copy is rolled back and
-    the other stays queued for its own caller.
+    never the one removed — in that case our line stays queued (the
+    rollback is best effort, and leaving a command behind is safer than
+    corrupting someone else's).  Two callers submitting the identical
+    command are indistinguishable by content: at most one copy is rolled
+    back and the other stays queued for its own caller.
     """
     import fcntl
 

@@ -128,6 +128,15 @@ I7. The TUI session name must be resolvable before `app.run()` for the
     pre-run claim. Factor the existing `on_mount` logic into
     `current_session_name()` in `app.py` and reuse it in `pm_core/cli/tui.py`.
 
+I8. When the launcher claimed a pidfile, `on_mount` must use that claim's
+    session name (`_session_for_claim`) rather than asking tmux again: a
+    second `display-message` that fails (or returns a renamed session)
+    would make `_reload_pidfile()` point somewhere else, so the claimed
+    descriptor would never be published — it would sit at `caps: []` for
+    the life of the TUI and every caller would report "has not finished
+    starting up". It also guarantees `claim.path == pidfile` in
+    `_install_reload_signal`, so the launcher's claim is never re-claimed.
+
 ## Ambiguities (resolved)
 
 A1. *Legacy numeric pidfiles: empty caps or `{"sigusr1"}`?* The task text
@@ -194,12 +203,16 @@ E3. **Unreadable/empty pidfile.** Treated as "no TUI"; unlink only if the
     than propagating: a half-written pidfile must never crash the startup
     claim or the picker. A file that is present but unreadable is reported
     as `stale_pidfile` and removed; a missing one is `no_pidfile`. In the
-    startup claim an *empty* file is retried briefly first (a peer may be
-    mid-claim) and only then treated as stale (A2). The *caller* side
-    applies the same reasoning: an empty file is reported as `starting`
-    and is **never** unlinked, because deleting a peer's just-created
-    file would let a second TUI claim the session while the first is
-    still starting — the exact race A2 closes from the writing side.
+    startup claim a *zero-length* file is retried briefly first (a peer may
+    be mid-claim) and only then treated as stale (A2). The *caller* side
+    applies the same reasoning: a zero-length file is reported as
+    `starting` and is **never** unlinked, because deleting a peer's
+    just-created file would let a second TUI claim the session while the
+    first is still starting — the exact race A2 closes from the writing
+    side. Both sides key on `raw == ""`, not `not raw.strip()`: the claim
+    writes a whole JSON descriptor in one go, so whitespace-only content
+    is corruption (unreadable → removed), never the mid-claim window, and
+    a whitespace-only file must not be reported as "starting up" forever.
 E4. **Permission denied** (`EPERM`) on signal → return False with a message;
     do **not** delete the pidfile (the process is alive, just not ours).
 E5. **Legacy live TUI + `trigger_tui_reload`** → signals SIGUSR1 (A1).
@@ -320,6 +333,13 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     handed to `ProjectManagerApp(pidfile_claim=...)`; an `OSError` claim
     failure still starts the app without IPC; a conflict raised inside
     `on_mount` (`_startup_error`) is re-printed on stdout and exits 2.
+25. a whitespace-only pidfile is `unreadable pidfile` (not `starting`),
+    so `submit_tui_command` returns `stale_pidfile`, removes it, and
+    `tui_owner_problem` agrees (E3: only a zero-length file is the
+    mid-claim window).
+26. `on_mount` takes its session name from the launcher's claim
+    (`_session_for_claim`) so the published descriptor is the claimed one;
+    without a claim it falls back to `current_session_name()` (I8).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

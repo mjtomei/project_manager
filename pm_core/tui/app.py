@@ -81,6 +81,20 @@ def current_session_name() -> str | None:
     return name.split("~")[0] or None
 
 
+def _session_for_claim(claim: tui_pidfile.TuiPidfileClaim | None) -> str | None:
+    """Session name this app should use for its pidfile/queue/frames.
+
+    The launcher's claim wins when there is one: it was taken before the
+    app started, and asking tmux a second time here could fail (or return
+    a renamed session), leaving the claim published against a session name
+    the app then does not use — the pidfile would sit at ``caps: []``
+    forever and every caller would report "has not finished starting up".
+    """
+    if claim is not None:
+        return claim.session
+    return current_session_name()
+
+
 class ProjectManagerApp(App):
     """Interactive TUI for managing PR dependency graphs."""
 
@@ -518,8 +532,10 @@ class ProjectManagerApp(App):
             trigger = "initial"
         _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
                   os.getpid(), Path.cwd(), trigger)
-        # Get session name for frame capture file naming
-        self._session_name = current_session_name()
+        # Get session name for frame capture file naming.  Reuse the
+        # launcher's claim when there is one so the pidfile we publish to
+        # is always the one that was claimed (see _session_for_claim).
+        self._session_name = _session_for_claim(self._pidfile_claim)
         # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).
         from pm_core.tui import perf
         perf.setup_event_loop(self._session_name)

@@ -384,6 +384,9 @@ class TestSubmitCommand:
         res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
         assert res.ok is False
         assert res.reason == "stale_pidfile"
+        assert "is not running" in res.message
+        # The popup must not read "is not running (process is not running)".
+        assert "(process is not running)" not in res.message
         assert not pidfile.exists()
         assert not queue.exists()
 
@@ -571,6 +574,23 @@ class TestSubmitCommand:
         assert pidfile.read_text() == ""
         assert not queue.exists()
         assert helpers.tui_owner_problem(SESSION) == "empty pidfile"
+
+    def test_whitespace_only_pidfile_is_unreadable_not_starting(self, ipc_paths):
+        """Only a *zero-length* file is the mid-claim window (A2/E3).
+
+        ``claim_tui_pidfile`` writes the whole JSON descriptor in one go,
+        so whitespace-only content is corruption, not a peer mid-claim;
+        the claim side unlinks it immediately and the caller side must
+        agree instead of reporting "starting up" for the life of the file.
+        """
+        pidfile, queue = ipc_paths
+        pidfile.write_text(" \n\t")
+        assert helpers.tui_owner_problem(SESSION) == "unreadable pidfile"
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+        assert res.ok is False
+        assert res.reason == "stale_pidfile"
+        assert not pidfile.exists()
+        assert not queue.exists()
 
 
 class TestUnqueue:
@@ -1114,4 +1134,22 @@ class TestTuiLauncher:
 
         assert exc.value.code == 2
         assert "already owns" in capsys.readouterr().out
+
+
+class TestSessionName:
+    """on_mount must publish to the session the launcher actually claimed."""
+
+    def test_prefers_the_claims_session(self, monkeypatch):
+        from pm_core.tui import app as app_mod
+
+        claim = tpf.TuiPidfileClaim(
+            path=Path("/tmp/tui-pm-test.pid"), session=SESSION,
+            pid=os.getpid(), started_at="2026-10-27T00:00:00+00:00",
+            starttime=None)
+
+        monkeypatch.setattr(app_mod, "current_session_name",
+                            lambda: "pm-renamed")
+        assert app_mod._session_for_claim(claim) == SESSION
+        # Without a claim (app constructed directly) tmux is the source.
+        assert app_mod._session_for_claim(None) == "pm-renamed"
 
