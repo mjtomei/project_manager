@@ -104,6 +104,7 @@ def test_resume_roundtrip(tmp_path):
     assert rebuilt.planning_phase is False
     assert rebuilt.finalize_verdict == "FINALIZE_DONE"
     assert rebuilt.verified_scenarios == {1}
+    assert rebuilt.verify_pass_enabled is None  # the poll had not read it yet
     assert rebuilt.scenario_verdicts == {1: VERDICT_PASS}
     assert rebuilt.scenario_verdict_reasons == {1: "looks good"}
 
@@ -581,3 +582,35 @@ def test_resumed_pass_skips_reverification(tmp_path):
     assert "verifying" not in state.latest_output
     assert state.scenario_verdicts[1] == VERDICT_PASS
     assert 1 in state.verified_scenarios
+
+
+def test_resume_keeps_the_runs_verify_pass_snapshot(tmp_path):
+    """A run that started with qa-verify-pass off settled its PASSes as final
+    and released their workers. Turning the setting on and restarting the TUI
+    must not make the resumed poll treat those PASSes as awaiting
+    verification and relaunch their (already released) workers."""
+    from pm_core.qa_loop import _poll_tmux_verdicts
+
+    state = _make_state(tmp_path)
+    state.verified_scenarios = set()
+    state.verify_pass_enabled = False
+    _write_resume_file(state, use_containers=True, concurrency_cap=2)
+    rebuilt = build_resume_state(_load_resume_file(tmp_path))
+    assert rebuilt.verify_pass_enabled is False
+    # Older snapshots carry no snapshot: the resumed poll reads the setting.
+    assert build_resume_state({"pr_id": "p"}).verify_pass_enabled is None
+
+    rebuilt.qa_workdir = None  # skip snapshot writes inside the loop
+    rebuilt.scenarios = [s for s in rebuilt.scenarios if s.index == 1]
+    with patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+         patch("pm_core.qa_loop._live_worker_pane", return_value=None), \
+         patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
+         patch("pm_core.qa_loop._verify_single_scenario") as verify, \
+         patch("pm_core.qa_loop.time.sleep"):
+        _poll_tmux_verdicts(rebuilt, {}, {}, "sess", "/tmp/work",
+                            tmp_path / "status.json", lambda *a: None)
+
+    relaunch.assert_not_called()
+    verify.assert_not_called()
+    assert rebuilt.scenario_verdicts[1] == VERDICT_PASS
+    assert qa_loop._unverified_passes(rebuilt) == []

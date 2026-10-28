@@ -225,10 +225,12 @@ class QALoopState:
     # Scenarios whose PASS verdict has been confirmed by the verifier.
     # Finalize waits until every PASS in scenario_verdicts is in this set.
     verified_scenarios: set[int] = field(default_factory=set)
-    # ``qa-verify-pass`` as the verdict poll read it (None before polling).
+    # ``qa-verify-pass`` as the run first read it (None before polling).
     # The finalize gate and the stop downgrade use this snapshot so a
     # mid-run toggle cannot make them wait on verification the poll never
-    # started.
+    # started. It travels in the resume snapshot, so a TUI restart after a
+    # toggle does not turn PASSes that already settled back into pending
+    # work (relaunching workers whose containers were already released).
     verify_pass_enabled: bool | None = None
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
@@ -992,6 +994,7 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
             str(k): v for k, v in state.scenario_verdict_reasons.items()
         },
         "verified_scenarios": sorted(state.verified_scenarios),
+        "verify_pass_enabled": state.verify_pass_enabled,
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
         "queued_indices": sorted(queued_indices or set()),
@@ -1118,6 +1121,8 @@ def build_resume_state(resume_data: dict) -> QALoopState:
         for k, v in (resume_data.get("scenario_verdict_reasons") or {}).items()
     }
     state.verified_scenarios = set(resume_data.get("verified_scenarios") or [])
+    # Absent in older snapshots: the resumed poll then reads the setting.
+    state.verify_pass_enabled = resume_data.get("verify_pass_enabled")
     state.finalize_verdict = resume_data.get("finalize_verdict")
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
@@ -2915,7 +2920,9 @@ def _poll_tmux_verdicts(
     """
     from pm_core import tmux as tmux_mod
 
-    verify_enabled = state.verify_pass_enabled = _is_verification_enabled()
+    if state.verify_pass_enabled is None:
+        state.verify_pass_enabled = _is_verification_enabled()
+    verify_enabled = state.verify_pass_enabled
     verify_max_retries = _get_verification_max_retries()
     if verify_enabled:
         _log.info("PASS verdict verification is enabled (max retries: %d)",
@@ -4762,6 +4769,8 @@ def _finalize_scenarios(
     is gone.  Transcripts, captures and scenario clones stay on the host.
     """
     queued_indices = {s.index for s in queued_scenarios}
+    if state.verify_pass_enabled is None:
+        state.verify_pass_enabled = _is_verification_enabled()
 
     # Snapshot resumable state before the blocking poll so an early
     # restart can pick the run back up.
