@@ -38678,6 +38678,22 @@ prs:
       without a live-run check.'
     created_at: '2026-10-28T05:12:19Z'
     last_edited: '2026-10-28T05:12:19Z'
+  - id: note-3368718
+    text: 'QA S112 (2026-10-28, R9/RQ44 host rerun, real claude 2.1.312 vs main +
+      acme router stubs + :ROUTE listener + refusing proxy, fake planner/verifier/finalizer;
+      captures /pm-captures/scenarios/112, REPORT.md): PASS on 9a2dacaa, no code change.
+      From a work/-routed TUI/CLI env, N (no model) / P (claude-opus-5-5 high) / R
+      (provider:acme) impl, review, s0, refiner, worker, signoff and fake roles each
+      carried only their own routing (32 TUI/signoff + 6 resume + 4 helper processes,
+      0 violations); main stub only N/P unprefixed, acme only R acme-opus (classifier
+      too, via the sonnet alias), :ROUTE 0 rows; plain-terminal --resume kept sid
+      + env; claude -p helpers (R too) ran N env on main; variant B dropped inherited
+      route BASE_URL, kept proxy vars, 0 stub rows, ERR_PROXY_TUNNEL only. Harness:
+      fake planner writes no QA spec, so QA first stops INPUT_REQUIRED (spec missing)
+      - write qa.md via pm pr spec-path and z t; pm session kill kills an in-pane
+      asciinema before flush (keep a pipe-pane transcript).'
+    created_at: '2026-10-28T03:38:20Z'
+    last_edited: '2026-10-28T03:38:20Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
