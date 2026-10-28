@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T21:17:52.929733+00:00'
+  updated_at: '2026-10-28T21:48:43.986305+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37238,6 +37238,43 @@ prs:
       fixed in 07340d38 and needs a re-QA run, not code.'
     created_at: '2026-10-28T21:17:52Z'
     last_edited: '2026-10-28T21:17:52Z'
+  - id: note-a928941
+    text: 'review e386 i3 (fix + handoff, 96b640e1). Reviewed the integrated HEAD
+      958c58fd (master@89e3c501 already merged; merge-base == origin/master). One
+      false-wait residual found in the adopt gate and fixed, covered by a test that
+      fails pre-fix. (1) The adopt branch of run_review_loop_sync assumed the resumed
+      wait was live (`input_required = True`) and only read the transcript afterwards
+      in _wait_for_follow_up_verdict. If the human answered BEFORE the restart, the
+      adopt decision published a phantom `waiting / review INPUT_REQUIRED (iteration
+      N)` — the same false-wait class this PR fixes — for the length of the decision
+      (a _log.info file write plus the full transcript read/parse in HumanResponseWatch),
+      where R2 requires the initial waiting/answered state to come from the transcript.
+      Verified by sampling the published state at the adopt decision log line: pre-fix
+      `input_required=True`, post-fix `input_required=False` / follow_up=true. Fix:
+      the adopt branch builds the HumanResponseWatch while _adopting_wait is still
+      set, publishes what it says, then clears the flag; the watch is passed into
+      _wait_for_follow_up_verdict/_await_input_resolution so the transcript is not
+      read twice (each repeated question still gets a fresh watch). review_progress_input
+      reader order (_adopting_wait, iteration, input_required) makes no transient
+      observable either way. Regression test_adopt_decision_of_an_answered_wait_never_reads_as_waiting
+      (waits on the decision, not a timer); fails pre-fix with "an answered wait was
+      published as a live human request", passes post-fix; 5/5 repeat runs stable.
+      Spec impl.md adopt-gate edge case and qa.md R13 + FAIL criteria updated for
+      the answered-at-adopt case. Tests: review/verdict/breadcrumb/autostart files
+      187 passed; FULL SUITE 4136 passed, 1 skipped, 0 failed (this container run
+      did not hit the documented git-env families). project.yaml 509 PRs, no id lost
+      or duplicated vs origin/master, store.load(validate=True) OK. No other wait-state
+      defects found: _wait_for_follow_up_verdict, HumanResponseWatch, _await_input_resolution
+      and the adopt gate re-read end to end; the e386 i1/i2 fixes hold (shared verdict-line
+      predicate, adopt-order, _opens_assistant_turn). QA gate unchanged: the outstanding
+      S17 NEEDS_WORK is the false-wait fixed in 07340d38 and needs a re-QA run, not
+      code. Observations, not changed: _await_input_resolution re-parses parse_review_verdict(hit.text)
+      instead of using find_verdict_turn hit.verdict (they can only disagree on a
+      turn carrying two contradictory verdict lines — not realistic output); _finalize_all_transcripts
+      still freezes a running watcher transcript (pr-e0f54ca); _adoptable_wait_transcript
+      still does not verify the pane runs the transcript session (pr-7e00786).'
+    created_at: '2026-10-28T21:48:43Z'
+    last_edited: '2026-10-28T21:48:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
