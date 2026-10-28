@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T17:19:29.640750+00:00'
+  updated_at: '2026-10-28T17:46:28.541902+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35894,6 +35894,25 @@ prs:
       (4030 passed = master 4003 + 27 new). Commit 8b4ef4b8.'
     created_at: '2026-10-28T17:19:29Z'
     last_edited: '2026-10-28T17:19:29Z'
+  - id: note-d5fae70
+    text: 'Review-loop 8602 i5: (a) pinned the `resolve_iteration_transcript` precedence
+      with two tests — the loop-scoped path wins when both names exist (a resumed
+      post-upgrade loop must never poll an older loop''s legacy transcript), and a
+      *dangling* loop-scoped link (the launch creates the link before Claude writes
+      the native JSONL) is the current attempt''s transcript, not a reason to fall
+      back to legacy. (b) `consume_breadcrumb` now ignores a non-object `iteration_sessions`
+      value instead of raising AttributeError out of the async restore, which would
+      have abandoned the remaining loops and the auto-start state; a new test pins
+      it (fails without the guard). Spec updated (28 archive tests, i5 hardening note).
+      Verified: 188 focused tests pass (archive/review_loop/breadcrumb/watcher_loop/auto_start_qa);
+      full suite 55F/36E with failure names identical to master (markdown, signoff-integration,
+      merge-publish, sync-integrity, git — all env-only; the markdown 12 appear/disappear
+      with the dep, which explains the 43F in the i4 note). Captures re-verified:
+      pre-fix repro reproduces all three symptoms (A lost session, B frozen live link,
+      C shared i1 path) on a worktree at 3699f71a; post-fix repro reports all three
+      fixed. Commit 95867725.'
+    created_at: '2026-10-28T17:46:28Z'
+    last_edited: '2026-10-28T17:46:28Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
