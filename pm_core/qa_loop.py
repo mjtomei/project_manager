@@ -3316,8 +3316,9 @@ def _poll_tmux_verdicts(
         """Write qa_status.json from the loop's current state.
 
         Besides the end-of-tick write, it runs where a provider setup
-        error can stop the run mid-tick (before a queued launch, and when
-        a relaunch raises), so the stopped run's status keeps the verdicts
+        error can stop the run mid-tick (before a queued launch, when a
+        relaunch raises, and when a verifier thread hit one), so the
+        stopped run's status keeps the verdicts
         and verifications settled so far instead of a stale
         "PASS (verifying)" (S106).
         """
@@ -3400,10 +3401,20 @@ def _poll_tmux_verdicts(
 
         # Check for completed verifications
         with verification_lock:
-            if setup_errors:
-                raise setup_errors[0]
+            setup_error = setup_errors[0] if setup_errors else None
             completed_verifications = dict(verification_results)
             verification_results.clear()
+        if setup_error is not None:
+            # The run stops here.  A verifier that passed in the same
+            # interval still counts in the stopped run's status (S106,
+            # see _write_dashboard); a flag gets no follow-up, so that
+            # scenario stays unverified.
+            for scenario_idx, (passed, _reason) in completed_verifications.items():
+                if passed:
+                    verifying.discard(scenario_idx)
+                    state.verified_scenarios.add(scenario_idx)
+            _write_dashboard()
+            raise setup_error
 
         for scenario_idx, (passed, reason) in completed_verifications.items():
             verifying.discard(scenario_idx)
