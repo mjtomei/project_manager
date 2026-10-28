@@ -179,12 +179,15 @@ class HelpScreen(ModalScreen):
         Binding("up", "scroll_up", "Scroll up", show=False),
     ]
 
+    # Wide enough for the longest row ("z a  Fresh autostart after feedback
+    # (keep merge policy)", 57 cols) plus padding, border and scrollbar;
+    # narrower clipped the policy suffix.  Still fits an 80-col terminal.
     CSS = """
     HelpScreen {
         align: center middle;
     }
     #help-container {
-        width: 50;
+        width: 66;
         height: auto;
         max-height: 80%;
         background: $surface;
