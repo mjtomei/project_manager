@@ -124,6 +124,18 @@ class TestSyncPrBranch:
             sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
         assert sync.outcome == "unchanged" and _head(s) == s["L"]
 
+    def test_local_only_repo_wrong_checkout_still_holds(self, repos):
+        """The checkout/merge holds are local checks: a local-only repo
+        with the wrong tree checked out is as unplannable as a remote one.
+        """
+        s = repos
+        _git(s["wd"], "checkout", "--quiet", "master")
+        with patch("pm_core.push_proxy.resolve_real_origin",
+                   return_value=None):
+            sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "refs/heads/master" in sync.detail
+
     def test_planner_commits_plus_upstream_fix_diverged_untouched(
             self, repos):
         s = repos
@@ -258,6 +270,19 @@ class TestSyncPrBranch:
             sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
         assert sync.outcome == "hold"
         assert "Could not refresh the upstream" in sync.detail
+
+    def test_upstream_moved_during_fetch_holds(self, repos):
+        """ls-remote classified a head the fetch no longer brings: hold
+        with an accurate reason instead of quoting an empty git error."""
+        s = repos
+        _worker_push(s)
+        with patch.object(qa_loop, "_remote_branch_sha",
+                          return_value="0" * 40):
+            sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "moved on" in sync.detail and "Restart QA" in sync.detail
+        assert "Could not fetch" not in sync.detail
+        assert _head(s) == s["L"]
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +472,16 @@ class TestRunQaSyncBranchSync:
         state, seen, pr = _run_qa(
             s, sync_record={"local": "a" * 40, "upstream": "b" * 40})
         assert seen["planner_reads"] == s["L"]
+        assert "qa_branch_sync" not in pr
+
+    def test_fast_forwarded_branch_clears_sync_record(self, repos):
+        """A fast-forward is reconciliation too: the stale divergence
+        record must not make the next sync hold."""
+        s = repos
+        u = _worker_push(s, "pm/qa/notes.md", "note\n")
+        state, seen, pr = _run_qa(
+            s, sync_record={"local": s["L"], "upstream": "b" * 40})
+        assert seen["planner_reads"] == u
         assert "qa_branch_sync" not in pr
 
     def test_hold_keeps_routed_divergence_record(self, repos):

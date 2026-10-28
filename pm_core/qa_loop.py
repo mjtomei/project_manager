@@ -554,6 +554,11 @@ def _workdir_state_hold(workdir_path: str, branch: str,
     the branch needs a fast-forward: an up-to-date branch with a stale
     checkout or a half-done merge is exactly as unplannable.
     """
+    if _git_capture(workdir_path, "rev-parse", "--git-dir").returncode != 0:
+        # Not a git repository: there is no checkout state to judge (and
+        # the branch lookup would have found nothing).  The handoff guard
+        # reports the missing branch.
+        return None
     where = f"PR workdir {workdir_path} has {branch} at {local[:12]}"
     current = _git_capture(workdir_path, "symbolic-ref", "--quiet", "HEAD")
     checked_out = current.stdout.strip()
@@ -597,16 +602,18 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
         _log.warning("QA sync: %s not found in %s", branch, workdir_path)
         return BranchSync("unchanged")
 
+    # Before any network work (and for local-only repos too): a workdir
+    # that is not on the PR branch, or is mid-merge, cannot be planned in
+    # even if the branch is current — the planner would read a different
+    # tree than the branch the scenario clones are pinned to.
+    state_hold = _workdir_state_hold(workdir_path, branch, local)
+    if state_hold:
+        return state_hold
+
     from pm_core.push_proxy import resolve_real_origin
     real_url = resolve_real_origin(workdir_path)
     if not real_url:
         return BranchSync("unchanged", local=local)
-
-    # Before any network work: a workdir that is not on the PR branch, or
-    # is mid-merge, cannot be planned in even if the branch is current.
-    state_hold = _workdir_state_hold(workdir_path, branch, local)
-    if state_hold:
-        return state_hold
 
     try:
         upstream = _remote_branch_sha(workdir_path, real_url, branch)
@@ -624,10 +631,18 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
     # FETCH_HEAD only: no local branch moves except the ff below.
     fetch = _fetch_upstream_commit(workdir_path, real_url, branch, upstream)
     if fetch is not None and not _has_commit(workdir_path, upstream):
+        if fetch.returncode == 0:
+            # The fetch worked, so the branch moved between the ls-remote
+            # and the fetch: the head we classified is already gone.
+            return hold(
+                f"{branch} moved on {real_url} while QA was synchronizing "
+                f"with it (the fetched head is not {upstream[:12]}). "
+                "Restart QA to synchronize with the new head.",
+                local=local, upstream=upstream)
+        msg = " ".join((fetch.stderr or fetch.stdout).split())
         return hold(
             f"Could not fetch {branch} at {upstream[:12]} from "
-            f"{real_url}: {(fetch.stderr or fetch.stdout).strip()}. "
-            "Restart QA once the remote is reachable.",
+            f"{real_url}: {msg}. Restart QA once the remote is reachable.",
             local=local, upstream=upstream)
 
     if _is_ancestor(workdir_path, upstream, local):
@@ -663,8 +678,9 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
         msg = " ".join((ff.stderr or ff.stdout).split())
         return hold(
             f"{where} (behind only), but the fast-forward was refused, "
-            f"so nothing was changed: {msg or 'unknown error'}. Commit or "
-            "stash the conflicting local changes, then restart QA.",
+            f"so nothing was changed: {msg or 'unknown error'}. Commit, "
+            "stash, move or remove the conflicting local files, then "
+            "restart QA.",
             local=local, upstream=upstream)
     _log.info("QA sync: fast-forwarded %s in %s %s -> %s",
               branch, workdir_path, local[:12], upstream[:12])

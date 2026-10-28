@@ -50,6 +50,7 @@ def _make_state(qa_workdir) -> QALoopState:
     state.qa_workdir = str(qa_workdir)
     state.session_tag = "project_manager-deadbeef"
     state.planning_phase = False
+    state.planning_base = "a" * 40
     state.scenarios = [
         QAScenario(
             index=1, title="Login flow", focus="auth",
@@ -99,6 +100,8 @@ def test_resume_roundtrip(tmp_path):
     assert rebuilt.qa_workdir == str(tmp_path)
     assert rebuilt.session_tag == "project_manager-deadbeef"
     assert rebuilt.planning_phase is False
+    # The revision the planner read (pre-planning branch sync) survives.
+    assert rebuilt.planning_base == "a" * 40
     assert rebuilt.finalize_verdict == "FINALIZE_DONE"
     assert rebuilt.verified_scenarios == {1}
     assert rebuilt.scenario_verdicts == {1: VERDICT_PASS}
