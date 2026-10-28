@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T15:16:57.742516+00:00'
+  updated_at: '2026-10-28T16:00:36.110796+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9324,6 +9324,24 @@ prs:
       adding unrelated churn without a decision.'
     created_at: '2026-10-28T15:16:57Z'
     last_edited: '2026-10-28T15:16:57Z'
+  - id: note-b159ef5
+    text: 'Review i12 (5865): one production fix — fresh_start_qa / start_or_stop_qa_loop
+      only set state.superseded when the discarded run already had a qa_workdir, but
+      run_qa_sync creates that workdir after startup. A run superseded in that window
+      (z t pressed while it was still starting) kept writing resume snapshots once
+      its workdir existed; when the replacing run later ended in qa status (e.g. INPUT_REQUIRED),
+      _resume_incomplete_qa adopted the discarded run snapshot and recorded a spurious
+      QA note for it. Both paths now mark the discarded state superseded unconditionally
+      and clear the snapshot only when there is one. Tests: test_fresh_start_supersedes_a_run_that_has_no_workdir_yet,
+      test_qa_loop_restart_supersedes_a_stale_state. Also corrected spec R2 step 4:
+      the finalize pane runs for a live run that newly enters the hold (was_held decides),
+      not only when held is false — matching iteration 1 notes and the code. Observation,
+      PRE-EXISTING and left alone: the TUI auto-start scheduler (_auto_start_qa_loops)
+      does not consult the resume snapshot the way pm pr auto-sequence now does, so
+      with auto-start on while a detached driver runs it can launch a duplicate QA
+      run; that race exists for any live detached run and is not specific to the hold.'
+    created_at: '2026-10-28T16:00:36Z'
+    last_edited: '2026-10-28T16:00:36Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

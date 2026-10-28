@@ -246,11 +246,16 @@ def fresh_start_qa(app, pr_id: str) -> None:
     app._qa_loops.pop(pr_id, None)
     # The superseded run must not be re-adopted by a later restart scan:
     # clear its snapshot and stop its (still winding-down) thread from
-    # rewriting it, which would resurrect the run.
-    if existing and existing.qa_workdir:
+    # rewriting it, which would resurrect the run.  Mark it even when it has
+    # no qa workdir yet (superseded during startup, before run_qa_sync
+    # creates one): it creates one later, and its snapshot must be suppressed
+    # too — otherwise a later restart scan adopts the discarded run and
+    # records a spurious QA note for it.
+    if existing:
         from pm_core import qa_loop
         existing.superseded = True
-        qa_loop.clear_resume_file(existing.qa_workdir)
+        if existing.qa_workdir:
+            qa_loop.clear_resume_file(existing.qa_workdir)
     # Clear self-driving state so the fresh start is a one-shot QA
     app._self_driving_qa.pop(pr_id, None)
 
@@ -295,11 +300,13 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
 
     # Remove stale loop state — run_qa_sync will clean up old windows
     # after capturing which sessions were watching them.  The superseded
-    # run must not rewrite the snapshot we are clearing.
-    if existing and existing.qa_workdir:
+    # run must not rewrite the snapshot we are clearing (even when it has no
+    # qa workdir yet: it creates one later and must not snapshot the run).
+    if existing:
         from pm_core import qa_loop
         existing.superseded = True
-        qa_loop.clear_resume_file(existing.qa_workdir)
+        if existing.qa_workdir:
+            qa_loop.clear_resume_file(existing.qa_workdir)
     app._qa_loops.pop(pr_id, None)
 
     # Like start_qa: the first run of a loop on an in_review PR moves it

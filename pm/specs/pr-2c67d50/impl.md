@@ -60,9 +60,13 @@ progress, not a wait).
 2. Aggregate as today, plus `input_wait_code_changes` (R6) forcing
    `NEEDS_WORK`.
 3. Write status + persist verdict evidence.
-4. If `state.held` is **false**, run the normal finalize pane and set
+4. If the run was **not restored as already held** (`was_held`, the flag the
+   snapshot was adopted with, is false), run the normal finalize pane and set
    `state.completion_processed = False` / `state._ui_complete_notified =
-   False`.
+   False`. A live run that newly enters the hold does run the pane (the hold
+   snapshot is written first, so a restart during the pane recovers the wait
+   instead of treating the run as finished); a restored held run already
+   finalized this result before the restart and skips it.
 5. `state.held = bool(waiting_for_input) and latest_verdict ==
    INPUT_REQUIRED and not stop_requested`.
 6. `state.running = False`; persist the resume snapshot; `notify()`.
@@ -580,3 +584,18 @@ covered by tests in `tests/test_qa_input_required.py` /
   `test_waiting_entry_without_a_source_is_dropped_but_keeps_the_verdict`
   pins the second.
 - No production-code changes were needed in this iteration.
+
+## 17. Implementation notes (review iteration 12)
+
+- **A run superseded before it had a qa workdir could still be resurrected.**
+  `fresh_start_qa` / `start_or_stop_qa_loop` only set `state.superseded` (and
+  cleared the snapshot) when `existing.qa_workdir` was already set, but
+  `run_qa_sync` creates the workdir *after* startup.  A run superseded in that
+  window (`z t` pressed while it was still starting) kept writing resume
+  snapshots once its workdir existed; when the replacing run later ended in
+  `qa` (e.g. INPUT_REQUIRED), `_resume_incomplete_qa` adopted the discarded
+  run's snapshot and recorded a spurious QA note for it.  Both paths now mark
+  the discarded state superseded unconditionally and clear the snapshot only
+  when there is one.  Covered by
+  `test_fresh_start_supersedes_a_run_that_has_no_workdir_yet` and
+  `test_qa_loop_restart_supersedes_a_stale_state`.

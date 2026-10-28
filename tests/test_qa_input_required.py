@@ -1252,6 +1252,56 @@ def test_stop_qa_requests_stop_on_a_held_run(tmp_path):
     app.log_message.assert_called()
 
 
+def test_fresh_start_supersedes_a_run_that_has_no_workdir_yet(tmp_path):
+    """The superseded flag must not depend on the run having a qa workdir.
+
+    ``run_qa_sync`` creates its workdir after startup, so a run superseded in
+    that window would otherwise write a resume snapshot later — and a restart
+    scan would re-adopt the discarded run and record a spurious QA note.
+    """
+    from pm_core.tui import qa_loop_ui
+
+    app = _poll_app(tmp_path)
+    state = QALoopState(pr_id="pr-001")
+    state.running = True
+    state.qa_workdir = None
+    app._qa_loops = {"pr-001": state}
+
+    with patch.object(qa_loop_ui, "start_qa"):
+        qa_loop_ui.fresh_start_qa(app, "pr-001")
+
+    assert state.stop_requested is True
+    assert state.superseded is True
+
+    # Its later snapshot write is suppressed even though it now has a workdir.
+    late = tmp_path / "late-workdir"
+    late.mkdir()
+    state.qa_workdir = str(late)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    assert not (late / "qa_resume.json").exists()
+
+
+def test_qa_loop_restart_supersedes_a_stale_state(tmp_path):
+    """The ``zz t`` restart path marks the discarded state superseded and
+    drops its snapshot, so the run it replaces cannot be re-adopted."""
+    from pm_core.tui import qa_loop_ui
+
+    app = _poll_app(tmp_path)
+    state = QALoopState(pr_id="pr-001")
+    state.running = False
+    state.qa_workdir = str(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    assert (tmp_path / "qa_resume.json").exists()
+    app._qa_loops = {"pr-001": state}
+
+    with patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
+
+    assert state.superseded is True
+    assert not (tmp_path / "qa_resume.json").exists()
+
+
 def test_waiting_suffix_fits_the_status_line():
     """The "(waiting)" marker must not push a row past the terminal width —
     a wrapped row shifts the whole qa_status screen."""
