@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T02:20:02.467978+00:00'
+  updated_at: '2026-10-28T03:07:44.623966+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14982,6 +14982,36 @@ prs:
       Pushed 5f302fdf.'
     created_at: '2026-10-28T02:20:02Z'
     last_edited: '2026-10-28T02:20:02Z'
+  - id: note-7e86cab
+    text: 'Review loop 9679 i1 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found one real defect of the class E3 already covers ("a corrupt
+      pidfile must never crash the claim or the picker"), this time on the target-process
+      side: `tui_pidfile._proc_stat_fields` read `/proc/<pid>/stat` with a strict
+      `read_text()`, but `comm` is 16 process-controlled bytes, so a recycled PID
+      belonging to a process with a non-UTF-8 name raised `UnicodeDecodeError` (a
+      ValueError, so not caught by the surrounding `except OSError`). It escaped `proc_starttime`/`is_zombie`
+      and therefore: `claim_tui_pidfile` (pm _tui crashed with a traceback at startup
+      instead of taking the stale pidfile over, and every retry did the same, so the
+      TUI could not start until the file was deleted by hand), `submit_tui_command`
+      (the picker and `pm autostart` tracebacked instead of reporting `stale_pidfile`)
+      and `autostart._resolve_owner`. Fixed by decoding with errors="replace" — only
+      the state char and the numeric fields after the final `)` are used, and those
+      are always ASCII. Reproduced with a live process whose comm was set to `\xff\xfe\x80abc`
+      via prctl: pre-fix both `submit_tui_command` and the claim raised UnicodeDecodeError;
+      post-fix they return `stale_pidfile` / take the file over. Incidental fix (same
+      bug, different subsystem): `pm_core/qa_loop.py::_proc_stat_fields` (the QA resume
+      snapshot recorded owner PID) had the identical strict decode, which would raise
+      out of `resume_owned_elsewhere` in the TUI startup resume path; fixed the same
+      way. 5 new tests (4 in tests/test_tui_pidfile.py::TestNonUtf8ProcStat, 1 in
+      tests/test_qa_resume.py), each verified to fail against the pre-fix strict decode
+      by reverting only that line. Spec impl.md E16 + test item 29 added; evidence
+      in /pm-captures/impl/post-fix/non-utf8-comm/README.md. Full suite: 3910 passed,
+      1 skipped (pytest 8.4.2; env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace,
+      markdown on the path). No user-visible message changed this iteration. (2026-10-28T03:07:14Z)'
+    created_at: '2026-10-28T03:07:00Z'
+    last_edited: '2026-10-28T03:07:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
