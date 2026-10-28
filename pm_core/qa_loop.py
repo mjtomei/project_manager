@@ -3156,6 +3156,7 @@ def _poll_tmux_verdicts(
     # the inventory stays unreadable its settled, kept and deferred containers
     # count as held, and it launches only while it holds nothing.
     _blind_launches = [1 if state._resumed else 0]
+    run_key = (state.pr_id, state.loop_id)
 
     def _launch_next_queued() -> bool:
         """Release settled allocations, then launch one queued scenario.
@@ -3198,6 +3199,7 @@ def _poll_tmux_verdicts(
         # Size and reserve the launch atomically with the other runs in this
         # process (see _launch_admission_lock).
         launch_reservation = None
+        floor_taken = False
         with _launch_admission_lock:
             if use_containers:
                 # Re-clamp the *total* batch from the run's desired size with a
@@ -3220,7 +3222,12 @@ def _poll_tmux_verdicts(
                     concurrency_cap, desired_cap, active=active, own=own)
                 if known:
                     _blind_launches[0] = 0
-                elif _blind_launches[0]:
+                    _outage_floor.clear()
+                else:
+                    # Another run in this process already made this outage's
+                    # floor launch: this run waits as if it had made it.
+                    floor_taken = _outage_floor.get("run", run_key) != run_key
+                if not known and (_blind_launches[0] or floor_taken):
                     # Releases need the same inventory, so while it is unreadable
                     # every settled worker's release is deferred and its container
                     # keeps running. The outage admits one floor launch (qa.md
@@ -3235,24 +3242,31 @@ def _poll_tmux_verdicts(
                                     or s.index in kept_indices))
             else:
                 held, known = 0, True
-            if concurrency_cap > 0 and active + held >= concurrency_cap:
+            if concurrency_cap > 0 and (active + held >= concurrency_cap
+                                        or floor_taken):
                 if not known:
                     if held and held != _held_logged[0]:
                         _log.info("QA %s: %d queued scenario(s) wait for a readable "
                                   "container inventory; %d of this run's container "
                                   "release(s) are deferred (container-max-running)",
                                   state.pr_id, len(_launch_queue), held)
+                    elif not held and _held_logged[0] != -1:
+                        _log.info("QA %s: %d queued scenario(s) wait for a readable "
+                                  "container inventory; another QA run made this "
+                                  "outage's floor launch (container-max-running)",
+                                  state.pr_id, len(_launch_queue))
                 elif held and held != _held_logged[0]:
                     _log.info("QA %s: %d queued scenario(s) wait for container "
                               "headroom; %d of this run's container(s) are retained "
                               "(container-max-running)", state.pr_id,
                               len(_launch_queue), held)
-                _held_logged[0] = held
+                _held_logged[0] = held if held or not floor_taken else -1
                 return False
             scenario = _launch_queue.pop(0)
             _queued_indices.discard(scenario.index)
             if not known:
                 _blind_launches[0] += 1
+                _outage_floor.setdefault("run", run_key)
             if use_containers:
                 from pm_core import container as container_mod
                 launch_reservation = _reserve_launches([container_mod.qa_container_name(
@@ -4857,6 +4871,14 @@ def run_qa_sync(
 # coordinated (qa.md resolution 24).
 _launch_admission_lock = threading.RLock()
 _inflight_launches: dict[object, frozenset[str]] = {}
+# The outage floor is shared the same way. While the inventory is unreadable a
+# run may make one floor launch into a full runtime (qa.md resolution 19), but
+# releases are deferred too, so every run's settled workers keep running. Two
+# runs in one TUI each making their own floor launch reached L+2 (S93); one
+# floor per process keeps the combined peak at L+1 (resolution 35). Holds the
+# run key of the run that made this outage's floor launch; cleared by the
+# first readable inventory any run sees.
+_outage_floor: dict[str, tuple[str, str]] = {}
 
 
 def _reserve_launches(names) -> object:

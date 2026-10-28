@@ -953,6 +953,92 @@ def test_resumed_poll_does_not_repeat_the_outage_floor_launch(
         assert launched == [1], "a run holding nothing keeps its floor launch"
 
 
+@pytest.mark.parametrize("other_run_floor", [True, False])
+def test_two_runs_share_one_outage_floor_launch(tmp_path, monkeypatch,
+                                                other_run_floor):
+    """S93: two QA runs in one TUI during an inventory outage at a full runtime.
+    Both drained to no active worker while their settled workers' releases
+    were deferred, and each made its own floor launch: 10 = L+2. The floor is
+    one per process (qa.md resolution 35): once another run made this
+    outage's floor launch, this run waits for a readable inventory, and the
+    first readable inventory frees the floor again."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 4)
+    ]
+    logged = []
+    monkeypatch.setattr(qa_loop._log, "info",
+                        lambda msg, *a, **k: logged.append(msg % a))
+    if other_run_floor:
+        monkeypatch.setitem(qa_loop._outage_floor, "run", ("pr-bbbb", "L"))
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    outage = {"polls_left": 6}
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        outage["polls_left"] -= 1
+        if ticks == 5:
+            seen["outage"] = (list(launched), dict(qa_loop._outage_floor))
+        if ticks >= 10:
+            state.stop_requested = True
+
+    seen = {}
+
+    def inventory():
+        return None if outage["polls_left"] > 0 else _running(B_IMPL)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 8)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: None if (inv := inventory()) is None else len(inv))
+    monkeypatch.setattr(container_reaper, "list_containers", inventory)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, **k: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    # Launched workers stay busy; only the floor and the recovery matter here.
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios,
+        concurrency_cap=1, desired_cap=3, use_containers=True)
+
+    during, floor = seen["outage"]
+    if other_run_floor:
+        assert during == [], "the other run's floor launch is this outage's only one"
+        assert floor == {"run": ("pr-bbbb", "L")}
+        waits = [m for m in logged
+                 if "another QA run made this outage's floor launch" in m]
+        assert len(waits) == 1, waits
+    else:
+        assert during == [1], "a run holding nothing still makes the floor launch"
+        assert floor == {"run": ("pr-aaaa", state.loop_id)}
+    assert qa_loop._outage_floor == {}, "a readable inventory frees the floor"
+    assert launched == [1, 2, 3], "the batch grows back after recovery"
+
+
 def test_reservation_turning_running_between_listings_is_not_missed(monkeypatch):
     """The no-own headroom paths take two listings (running count, then the
     reservations' inventory).  A reserved container that turns running
