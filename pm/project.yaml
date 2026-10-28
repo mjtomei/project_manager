@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T12:59:32.883215+00:00'
+  updated_at: '2026-10-28T13:26:39.186489+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39073,6 +39073,44 @@ prs:
       an event (pm autostart add).'
     created_at: '2026-10-28T12:59:32Z'
     last_edited: '2026-10-28T12:59:32Z'
+  - id: note-6cc80c3
+    text: 'S127 refine (2026-10-28, HEAD 3110c6f3): /pm-captures/scenarios/125/scripts
+      does not exist (S125 kept captures only). Rebuild from 113 (stub.py, container/bridge,
+      routed.sh), 120/123 (tick.sh, sampler, killrun walker) and 124 (myview + outer
+      recorder lib.sh). The 113 stub signoff verdict is one global "signoff" key:
+      make it per-PR (R: SIGNOFF_REQA once, then SIGNOFF_MERGE; U: SIGNOFF_MERGE).
+      pm pr show prints no route: the route surfaces are pm model show (Routes: R
+      only, via=container-bridge), pm pr model show (command "claude (container route
+      bridge)"), the pm qa run/QA status line "refiners: route=…; workers: route=…"
+      (U: route=none … via=claude) and the debug log "Refiner/Worker for scenario
+      N: route=…". The picker [working] and the tick/TUI driven checks only count
+      a cli-<pr> record whose session_tag is this pm session.'
+    created_at: '2026-10-28T11:50:06Z'
+    last_edited: '2026-10-28T11:50:06Z'
+  - id: note-dcc04c0
+    text: 'QA S127 (2026-10-28, container podman 3 slirp4netns, HEAD dc8d0f91=3110c6f3,
+      real claude 2.1.312 vs main + acme router stubs, fake planner/verifier/finalizer;
+      captures /pm-captures/scenarios/127/README.md, 16 mp4): INPUT_REQUIRED, no code
+      change. Story 1 PASS: R ticks re-qa once while the CLI refiner was held at the
+      router, 27 running: qa through refining and the worker, then one running: qa
+      (launched) 6 s after Result: PASS with one qa-run-bg and one new loop id. No
+      qa-run-bg R and no claim from REQA to Result. myview C-b P showed [working]
+      3x. Router saw only R refiner/worker sessions (6 sids), acme-opus-1, main_key
+      false. /run/pm-route only on R qa scenario containers (s1, cli-s1, s2). 0 secret
+      hits, no route wait/defer/stall lines. U ends sign_off_blocked with no re-qa.
+      Story 2 (3 fresh setups): pm tui restart from myview printed Sent restart, with
+      no Resuming/Recovered/QA start for cli-<R> and no extra verifier/finalizer pane.
+      Picker stayed [working]. Exactly one re-run every time, never both. OPEN: the
+      Then requiring the TUI debug log to show "QA run is driven by another process"
+      or the REQA defer cannot hold with a plain pm tui restart, because it drops
+      auto-start (status Auto-start: off) and the TUI runs no auto-start pass when
+      a tick moves R to qa. It held only when the user re-added R after the REQA (s2c:
+      the driven line every 30 s, then the TUI itself ran the one re-run, Auto-start:
+      QA for R, and ticks never launched). Decide: --breadcrumb, re-enable after restart,
+      or should a plain restart keep targets. Filed pr-7682b32 (ticks never advance
+      an impl started by pm pr start; the user must close the impl windows).'
+    created_at: '2026-10-28T13:26:39Z'
+    last_edited: '2026-10-28T13:26:39Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -42127,6 +42165,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T12:58:51.713401+00:00'
   updated_at: '2026-10-28T12:58:51.713401+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7682b32
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence never advances an implementation started with pm
+    pr start: ticks print "running: implementation" forever while the impl session
+    sits idle'
+  branch: pm/pr-7682b32-bug-pm-pr-auto-sequence-never-advances-an-implemen
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py auto_sequence, in_progress branch: _check_impl_idle(pm_session,
+    pr_entry, tdir) only finds an idle impl through the auto-sequence transcript symlink
+    that the tick itself creates when it launches pr_start(transcript=<tdir>/impl-<pr>.jsonl).
+    Repro (QA S127, pr-592e4bd HEAD 3110c6f3, container mode, real claude on a stub):
+    pm pr start <pr> from a plain terminal; the impl Claude answers and goes idle;
+    pm pr auto-sequence <pr> every 10 s prints "running: implementation" for 64 ticks
+    (~11 min) and never advances to review. Closing the impl window makes the next
+    tick relaunch impl with its transcript ("restarted: impl window relaunched"),
+    and ~1 min later it advances. Captures: /pm-captures/scenarios/127/s1/ticks (001-064).
+    Expected: an idle impl session launched by pm pr start (or the TUI s key) counts
+    as finished work for the tick, or the tick says why it cannot tell.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T13:25:43.455598+00:00'
+  updated_at: '2026-10-28T13:25:43.455598+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
