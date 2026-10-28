@@ -15580,6 +15580,50 @@ prs:
       first.'
     created_at: '2026-10-28T11:42:50Z'
     last_edited: '2026-10-28T11:42:50Z'
+  - id: note-cd42df4
+    text: 'QA S13 refiner 2026-10-28: a ''pre-upgrade TUI'' must NOT come from origin/master
+      — master''s TUI already installs SIGUSR2, so the pre-fix CLI cannot kill it
+      and the A/B would be invalid. Use the commit before 372f85f4 (''Route TUI-bound
+      popup commands via SIGUSR2 + queue file IPC''): git -C $PM_CLONE worktree add
+      --detach $LEGACY_WT 372f85f4^ (0e2cc2db; verified it renders under textual 8.2.7,
+      writes a bare pidfile, logs only ''Installed SIGUSR1 reload handler''). Swap
+      it into the session''s TUI pane with: tmux respawn-pane -k -t $TUI_PANE -c $TEST_DIR
+      "PYTHONPATH=$LEGACY_WT pm _tui". Verified A/B: fixed CLI ''pm autostart add
+      <pr> -s $S'' -> exit 2 ''predates the command-queue feature'', TUI alive, pidfile
+      kept; ''PYTHONPATH=<origin/master worktree> pm autostart add <pr> -s $S --timeout
+      3'' -> SIGUSR2 kills the legacy TUI (pid state Z), queue line left behind, owner_timeout.
+      Gotchas: create a driver tmux window before the kill or the session (single
+      TUI window) dies; ''kill -0'' succeeds on a zombie, check ''ps -o stat=''; the
+      fixed TUI leaves a 0-byte queue file, so assert ''no line appended'', not ''file
+      absent''; run ''pm which'' from $TEST_DIR (cwd shadows PYTHONPATH).'
+    created_at: '2026-10-28T10:42:10Z'
+    last_edited: '2026-10-28T10:42:10Z'
+  - id: note-68cf9a6
+    text: 'QA scenario 13 (legacy-TUI A/B) PASS 2026-10-28: (1) fixed CLI `pm autostart
+      add pr-95325c4 -s $S` against a genuine pre-SIGUSR2 TUI (worktree 372f85f4^
+      = 0e2cc2db, pid 1781, bare-number pidfile) -> "Error (owner_unavailable): The
+      TUI for session <S> predates the command-queue feature; restart the TUI (Ctrl+R)
+      to use it." RC=2; pidfile byte-identical (md5 8b6a80c3...), TUI alive (Ssl+),
+      queue 0 bytes (no line appended; the 0-byte file was left by the swapped-out
+      fixed TUI), board still renders. (2) `pm pr add "Add password reset"` -> Created
+      pr-c715bb9, RC=0; same pid, same pidfile bytes; board auto-reloaded to 4 PRs
+      ~30 ms after the mutation (frames.json trigger=tree_prs:4 at 10:50:47.434967
+      vs project.yaml mtime 10:50:47.404863), no keypress; log "action: reload (state
+      only)". (3) same pid/pidfile with the PRE-FIX CLI (/scratch master worktree
+      @ 450a6362, `pm which` -> /scratch/s13-master-wt/pm_core): `pm autostart add
+      pr-6cd925d -s $S --timeout 3` -> "Error (owner_timeout): TUI for session <S>
+      did not reply within 3s (busy or restarting); the command may still be applied"
+      RC=2; TUI dead (Zs [python3] <defunct>, later reaped); TUI window gone (only
+      "driver" window), `pm tui view` header only; pidfile left stale at 1781; queue
+      now holds one line "autostart add pr-6cd925d --reply 1793184689-7e5c375b". (4)
+      `pytest -q tests/test_tui_pidfile.py` -> 130 passed in 3.25s, and the 7 named
+      repro cases all PASSED. Captures under /pm-captures/scenarios/13/{01-fixed-cli-refusal,02-reload-4prs,03-prefix-cli-kill,04-pytest-repro,05-post-kill-evidence}
+      (casts + mp4 + pyte transcripts + evidence.txt). Gotchas: the legacy TUI must
+      be 372f85f4^ (master already installs SIGUSR2); create the driver window before
+      the swap or the session dies with its only pane; pyte transcripts must not throttle
+      snapshots (a whole repaint can arrive in one output event).'
+    created_at: '2026-10-28T11:04:27Z'
+    last_edited: '2026-10-28T11:04:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
