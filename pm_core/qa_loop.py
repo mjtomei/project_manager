@@ -266,6 +266,9 @@ class QALoopState:
     _deferred_release_session: str = ""
     # Set by resume_qa_sync: this run's poll re-entered after a TUI restart.
     _resumed: bool = False
+    # Set at run start when the inventory was unreadable: the initial batch
+    # was this outage's floor launch, or another run had already made it.
+    _blind_start: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -3155,7 +3158,9 @@ def _poll_tmux_verdicts(
     # settled admitted a second one, L+2), so it starts as if it had: while
     # the inventory stays unreadable its settled, kept and deferred containers
     # count as held, and it launches only while it holds nothing.
-    _blind_launches = [1 if state._resumed else 0]
+    # A run whose start clamp found the inventory unreadable made (or yielded
+    # to another run) the outage's floor launch before this poll began.
+    _blind_launches = [1 if state._resumed or state._blind_start else 0]
     run_key = (state.pr_id, state.loop_id)
 
     def _launch_next_queued() -> bool:
@@ -4767,11 +4772,12 @@ def run_qa_sync(
     concurrency_cap = desired_cap
     launch_reservation = None
     with _launch_admission_lock:
+        initial = concurrency_cap
         if use_containers:
-            concurrency_cap = _clamp_to_container_headroom(desired_cap)
+            concurrency_cap, initial = _initial_container_batch(state, desired_cap)
         if concurrency_cap > 0:
-            launch_scenarios = state.scenarios[:concurrency_cap]
-            queued_scenarios = state.scenarios[concurrency_cap:]
+            launch_scenarios = state.scenarios[:initial]
+            queued_scenarios = state.scenarios[initial:]
         else:
             launch_scenarios = state.scenarios
             queued_scenarios = []
@@ -4923,10 +4929,15 @@ def _clamp_to_container_headroom(cap: int) -> int:
     0 means unlimited for both.  At least one scenario always launches; the
     rest wait in the existing queue and start as running scenarios finish.
     """
+    return _clamp_to_container_headroom_known(cap)[0]
+
+
+def _clamp_to_container_headroom_known(cap: int) -> tuple[int, bool]:
+    """:func:`_clamp_to_container_headroom` plus whether the inventory was readable."""
     from pm_core import container as container_mod
     limit = container_mod.max_running_containers()
     if limit <= 0:
-        return cap
+        return cap, True
     # Another run's dequeued launch is capacity in use before its container
     # exists (see _launch_admission_lock).  Read the reservations' inventory
     # BEFORE the running count: a reserved container that turns running
@@ -4942,13 +4953,37 @@ def _clamp_to_container_headroom(cap: int) -> int:
         # re-clamp on the next poll with a fresh count.
         _log.warning("container-max-running=%d: running-container count "
                      "unavailable; launching one scenario at a time", limit)
-        return 1
+        return 1, False
     headroom = max(1, limit - running)
     if cap <= 0 or headroom < cap:
         _log.info("QA launch batch clamped to %d (container-max-running=%d, "
                   "%d running)", headroom, limit, running)
-        return headroom
-    return cap
+        return headroom, True
+    return cap, True
+
+
+def _initial_container_batch(state: QALoopState, desired_cap: int) -> tuple[int, int]:
+    """Return ``(concurrency_cap, initial_launches)`` for a container run's start.
+
+    The caller holds :data:`_launch_admission_lock`.  A start whose inventory
+    is unreadable clamps to one launch: that launch *is* this outage's floor
+    launch, so it is shared with the other runs in this process exactly like
+    a floor launch from the queue (:data:`_outage_floor`).  When another run
+    already made it, this run starts with everything queued and waits for a
+    readable inventory.  Either way the run's poll must count its settled,
+    release-deferred workers as held (``state._blind_start``), or the first
+    one to settle would admit a second blind launch (L+2).
+    """
+    cap, known = _clamp_to_container_headroom_known(desired_cap)
+    if known:
+        _outage_floor.clear()
+        return cap, cap
+    state._blind_start = True
+    run_key = (state.pr_id, state.loop_id)
+    if _outage_floor.setdefault("run", run_key) != run_key:
+        # The poll's first fill pass logs the wait.
+        return cap, 0
+    return cap, cap
 
 
 def _container_headroom_cap(cap: int, desired: int | None = None,

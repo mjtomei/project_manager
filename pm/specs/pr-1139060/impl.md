@@ -603,7 +603,14 @@ crashing `pm container status`.
   the retained container and its evidence are preserved. The at-least-one
   floor (one launch into a full runtime) applies only to a run that holds no
   container of its own, and an unreadable inventory still clamps to one
-  (qa.md resolution 19). Resume must not recreate already
+  (qa.md resolution 19). During an inventory outage that floor is one per PM
+  process (qa.md resolution 35): whichever run makes it — from its queue or
+  as its run-start batch — claims it, and every other run in the process
+  waits for a readable inventory (a run starting in the same outage queues
+  all of its scenarios). A run whose start or resume was blind counts its
+  settled, release-deferred workers as held from its first poll, so a
+  start-time floor worker that settles does not admit a second blind launch.
+  Resume must not recreate already
   settled workers. Final resume snapshots contain only unattempted queued
   scenarios; older stale queue entries cannot relaunch settled or failed work.
   Failed queued launches leave no worker/verdict and must not strand the remaining queue.

@@ -111,3 +111,14 @@ def test_key_hint_and_progress_never_wider_than_the_pane():
         progress = [l for l in lines if "Progress:" in l]
         assert hint and progress
         assert all(len(l.rstrip()) <= cols for l in hint + progress)
+
+
+def test_pane_one_row_short_drops_only_the_key_hint():
+    """Dropping the key hint is enough when the render is one row too tall:
+    the blank spacer lines stay and the error is not shortened."""
+    status = _launch_failure_status()
+    full = _text(status, cols=99, rows=0).split("\n")
+    lines = _text(status, cols=99, rows=len(full) - 1).split("\n")
+    assert lines == full[:-1]
+    assert "" in [l.strip() for l in lines]
+    assert "j/k: navigate" not in "\n".join(lines)

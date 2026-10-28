@@ -226,7 +226,9 @@ def _finish(lines: list[str], rows: int, cols: int, err_start: int,
     if rows > 0 and len(lines) > rows:
         err_end = err_start + len(err_chunks)
         tagged = [("err" if err_start <= i < err_end else "", l)
-                  for i, l in enumerate(lines[:-1]) if l != ""]
+                  for i, l in enumerate(lines[:-1])]
+        if len(tagged) > rows:
+            tagged = [(k, l) for k, l in tagged if l != ""]
         over = len(tagged) - rows
         if over > 0 and err_chunks:
             keep = max(1, len(err_chunks) - over)

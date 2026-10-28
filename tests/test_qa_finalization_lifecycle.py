@@ -241,7 +241,8 @@ def test_initial_launch_errors_restore_scenarios_and_release(
     monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-t")
     monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
     monkeypatch.setattr(container, "_runtime_available", lambda: True)
-    monkeypatch.setattr(qa_loop, "_clamp_to_container_headroom", lambda cap: cap)
+    monkeypatch.setattr(qa_loop, "_clamp_to_container_headroom_known",
+                        lambda cap: (cap, True))
     monkeypatch.setattr(tmux, "find_window_by_name", lambda *a: {"index": 0})
     monkeypatch.setattr(tmux, "get_pane_indices", lambda *a: [])
     status = MagicMock(side_effect=[None, OSError("disk unavailable")])
