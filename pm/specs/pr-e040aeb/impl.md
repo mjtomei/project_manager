@@ -1246,3 +1246,35 @@ test's tmp HOME).
    fix here only counts `--review-loop` launches. Verified: one ambient
    probe, two launch attempts (attempt 1 fails, attempt 2 succeeds), same
    iteration.
+
+### Review iteration 2 (c945) — HOLD status parity
+
+1. **A HOLD reports no retry attempt count.** `autostart_state.review_progress_input`
+   kept `attempts` (`launch_attempts`) for a `HOLD`, while the `runtime_state`
+   mirror (`_on_complete_from_thread`) drops it — the same live-path vs mirror
+   divergence iteration 9 (0688) closed for a `KILLED` loop. The attempt count
+   is retry-episode evidence belonging to the failed launch, not to the hold
+   the pane sits at, so the live path now drops it too (the hold still reports
+   its own prompt message as `error`; `retryable`/`artifact` were already
+   dropped). Covered by the strengthened
+   `test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error`
+   (the state carries `launch_attempts=2`; the test asserts `attempts == 0` and
+   `retryable is False`, and fails pre-fix).
+
+Not changed (documented residuals, unchanged): `review_loop.py` is ~1553
+lines; two lease mechanisms coexist (`signoff.claim_return_launch` in
+project.yaml vs `runtime_state.claim_action_lease`); discovery still adopts a
+transcript verdict without requiring an idle hook event (rationale in
+iteration 9 of 385e); `other_owner` stand-down surfaces as a non-retryable
+`LAUNCH_FAILED` after the bounded claim wait; the `runtime_state` mirror of a
+re-armed loop keeps the previous episode's `verdict`/`attempts` until the next
+iteration mirrors a new verdict (only visible to a raw reader of
+`~/.pm/runtime/<pr>.json`); a merge restart during the post-exhaustion re-arm
+*cooldown* does not persist the loop (`save_breadcrumb` only saves running
+loops), so auto-start starts a fresh loop for the PR instead of continuing the
+episode — the review still runs and no verdict is fabricated;
+`_interruptible_sleep` re-reads and re-validates the ~2 MB `project.yaml` every
+2 s during a backoff; the retry re-arm's `_progress` label names the attempt
+that just failed (not the pending upcoming one) during the 5–10 s backoff,
+while the TUI notice announces the upcoming attempt (cosmetic; both are
+transient).

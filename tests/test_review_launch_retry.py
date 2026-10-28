@@ -1472,6 +1472,7 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
         latest_verdict=VERDICT_HOLD,
         latest_output="workspace trust prompt in review pane",
         last_launch_error="container setup failed",
+        launch_attempts=2,
         last_launch_artifact="/tmp/stale-attempt.log")
     status = st.build_status({
         "prs": [{"id": PR, "title": "T", "status": "in_review",
@@ -1490,6 +1491,10 @@ def test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error():
     # The artifact belongs to the failed attempt, not to the hold; the live
     # status input must not attach it (matching the runtime_state mirror).
     assert run["review"]["artifact"] == ""
+    # The attempt count is retry-episode evidence too, and the mirror drops
+    # it for a HOLD; the live status path must not report it either.
+    assert run["review"]["attempts"] == 0
+    assert run["review"]["retryable"] is False
 
 
 def test_autostart_status_does_not_repeat_the_artifact_path():

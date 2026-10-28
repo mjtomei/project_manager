@@ -880,6 +880,11 @@ def review_progress_input(state) -> dict:
         error = getattr(state, "latest_output", "") or error
         artifact = ""
         retryable = False
+        # The attempt count is retry-episode evidence that belongs to the
+        # failed launch, not to the hold; the runtime_state mirror drops it
+        # for a HOLD too (`_on_complete_from_thread`), so the live status
+        # path must not report it either.
+        attempts = 0
     elif not running and verdict != "LAUNCH_FAILED":
         # Only an exhausted launch retry (LAUNCH_FAILED) is retryable and
         # re-armed by auto-start.  Once the loop has stopped with any other
@@ -898,7 +903,9 @@ def review_progress_input(state) -> dict:
         "iteration": getattr(state, "iteration", 0) or 0,
         "verdict": verdict,
         "input_required": bool(getattr(state, "input_required", False)),
-        # Failed-launch retry evidence (LAUNCH_FAILED / HOLD outcomes).
+        # Failed-launch retry evidence.  A HOLD keeps only its own prompt
+        # message as ``error``; the retryable flag, attempt count and
+        # artifact belong to a failed launch, not to a hold.
         "retryable": retryable,
         "attempts": attempts,
         "error": error,
