@@ -15638,6 +15638,20 @@ prs:
       PASS before step 4, so B was re-run with z t.'
     created_at: '2026-10-28T15:14:07Z'
     last_edited: '2026-10-28T15:14:07Z'
+  - id: note-1a0b1e0
+    text: 'Refine S87 (2026-10-28): verified live vs a standalone proxy + real wrapper:
+      broad abbreviations refuse as "push-proxy: rejected — ''--mir (read by git as
+      --mirror)'' is not allowed, only single-branch push to ''<b>''" (--mirror=1
+      shows the full arg), dangerous ones as "git-proxy: rejected — ''--upl (abbreviation
+      of --upload-pack)'' is not allowed in push (security restriction)". Look-alike
+      --follow-tags DOES publish any reachable annotated tag (spec calls it allowed),
+      so keep worker repos tag-free when asserting ''no tags appear''. Plain ''pm
+      pr start <PR>'' with a live window takes the switch fast path and runs no git
+      — use --fresh (reuses the impl container, per S40). QA scenario workers have
+      their own clone/proxy, so hooks in the PR workdir must be planted from the impl
+      container.'
+    created_at: '2026-10-28T13:12:46Z'
+    last_edited: '2026-10-28T13:12:46Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
