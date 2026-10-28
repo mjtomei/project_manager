@@ -17,7 +17,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-import pytest
 from click.testing import CliRunner
 
 from pm_core import graph, store
