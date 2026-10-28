@@ -44,6 +44,9 @@ VERDICT_PASS = "PASS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
+# The pre-review base integration gate found a conflict: the PR was returned
+# to implementation and no reviewer ran.  Deliberate routing, not a failure.
+VERDICT_BASE_CONFLICT = "BASE_CONFLICT"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 
@@ -83,6 +86,11 @@ class ReviewLoopState:
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
+    # A restored (breadcrumb) loop may have an iteration in flight: adopt its
+    # live pane instead of relaunching.  A *fresh* loop that starts after the
+    # PR's existing iteration transcripts must not adopt (there is nothing in
+    # flight); _start_loop clears this for those.
+    adopt_in_flight: bool = True
 
 
 def _match_verdict(line: str) -> str | None:
@@ -105,6 +113,32 @@ def parse_review_verdict(output: str) -> str:
             return verdict
     # If no clear verdict, assume needs work if there's output
     return VERDICT_NEEDS_WORK if output.strip() else VERDICT_PASS
+
+
+def next_review_iteration(transcript_dir: str, pr_id: str) -> int:
+    """Highest existing iteration number for *pr_id* under *transcript_dir*.
+
+    A fresh loop starts after the PR's completed iterations instead of
+    overwriting ``review-<pr>-i1.jsonl``: a base-conflict return, a sign-off
+    REVIEW bounce or a TUI restart must preserve the earlier review
+    transcripts and evidence.  Returns 0 when none exist.
+    """
+    import re
+    from pathlib import Path
+
+    d = Path(transcript_dir)
+    if not d.is_dir():
+        return 0
+    pattern = re.compile(rf"review-{re.escape(pr_id)}-i(\d+)\.jsonl$")
+    best = 0
+    try:
+        for p in d.iterdir():
+            m = pattern.match(p.name)
+            if m and (p.is_file() or p.is_symlink()):
+                best = max(best, int(m.group(1)))
+    except OSError:
+        return 0
+    return best
 
 
 def _compute_review_window_name(pr_data: dict) -> str:
@@ -131,6 +165,14 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     t0 = time.monotonic()
     result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=120)
     elapsed = time.monotonic() - t0
+    if result.returncode == 3:
+        # The pre-review base integration gate refused the launch: the PR
+        # was returned to implementation (or its rework is still pending).
+        # No reviewer ran, so this is routing, not an error.
+        detail = ((result.stderr or "").strip() or (result.stdout or "").strip())
+        _log.info("review_loop: base integration gate returned pr=%s: %s",
+                  pr_id, detail[:500])
+        raise BaseConflictError(detail or "base integration conflict")
     if result.returncode != 0:
         stderr = result.stderr.strip() if result.stderr else ""
         stdout = result.stdout.strip() if result.stdout else ""
@@ -165,6 +207,15 @@ def _get_pm_session() -> str | None:
 
 class PaneKilledError(Exception):
     """Raised when the review pane disappears before producing a verdict."""
+
+
+class BaseConflictError(Exception):
+    """The pre-review base integration gate returned the PR to implementation.
+
+    Raised by :func:`_launch_review_window` when ``pm pr review`` exits 3 —
+    no reviewer ran, so the loop ends with
+    :data:`VERDICT_BASE_CONFLICT` instead of an error.
+    """
 
 
 def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
@@ -319,7 +370,7 @@ def run_review_loop_sync(
     state.stop_requested = False
 
     last_done = state.history[-1].iteration if state.history else 0
-    adopt = state.iteration > last_done
+    adopt = state.adopt_in_flight and state.iteration > last_done
 
     try:
         while state.iteration < max_iterations or adopt:
@@ -345,6 +396,17 @@ def run_review_loop_sync(
                         iteration=state.iteration, loop_id=state.loop_id,
                         transcript=iter_transcript,
                     )
+            except BaseConflictError as e:
+                # The base gate returned the PR to implementation before the
+                # reviewer started.  No iteration ran: keep the counter where
+                # it was so the next loop continues from the same number (the
+                # transcript-based numbering also skips this attempt).
+                _log.info("review_loop: base conflict on iteration %d: %s",
+                          state.iteration, e)
+                state.iteration = max(0, state.iteration - 1)
+                state.latest_verdict = VERDICT_BASE_CONFLICT
+                state.latest_output = str(e)
+                break
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED

@@ -145,6 +145,16 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
             app.log_message(f"QA already running for {pr_id}", force=True)
             return
 
+    # A base-conflict return owns the PR: no QA planner until the
+    # implementation has reconciled the base.
+    from pm_core import base_check
+    if base_check.has_open_return(pr):
+        app.log_message(
+            f"{pr_id}: base integration rework pending — QA not started",
+            force=True)
+        _log.info("start_qa: %s has an open base return; not starting", pr_id)
+        return
+
     # A sign-off REQA return is now being re-verified.
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(app._root, pr_id, "qa")
@@ -284,6 +294,15 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
 
+    # A base-conflict return owns the PR: no QA planner yet.
+    from pm_core import base_check
+    if base_check.has_open_return(pr):
+        app.log_message(
+            f"{pr_id}: base integration rework pending — QA not started",
+            force=True)
+        _log.info("qa_loop_ui: %s has an open base return; not starting", pr_id)
+        return
+
     # Like start_qa: the first run of a loop on an in_review PR moves it
     # to qa (restarts go through start_qa, which already does this).
     if not _enter_qa_status(app, pr, "qa_loop_ui"):
@@ -350,6 +369,26 @@ def poll_qa_state(app) -> None:
                 except ValueError:
                     continue
             tracker.poll(key)
+
+        if not state.running and state.base_returned:
+            # The pre-QA base gate returned the PR to implementation before
+            # the planner ran.  This is routing, not a QA verdict: log it
+            # once and drop the loop (the PR is in_progress now).
+            if not state._ui_base_return_notified:
+                state._ui_base_return_notified = True
+                app.log_message(
+                    f"[yellow bold]QA not started[/] for {pr_id}: "
+                    f"{state.base_return_reason}",
+                    sticky=30)
+            for sc in state.scenarios:
+                tracker.unregister(f"qa:{pr_id}:s{sc.index}")
+            try:
+                from pm_core import runtime_state as _rs
+                _rs.clear_action(pr_id, "qa")
+            except Exception:
+                _log.debug("runtime_state qa clear failed", exc_info=True)
+            del app._qa_loops[pr_id]
+            continue
 
         if not state.running and state.latest_verdict:
             first_completion = not state._ui_complete_notified

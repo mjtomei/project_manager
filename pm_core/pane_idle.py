@@ -198,6 +198,19 @@ class PaneIdleTracker:
             state = self._states.get(key)
             return state.idle if state else False
 
+    def idle_since(self, key: str) -> float | None:
+        """Wall-clock time of the idle event when the pane is idle, else None.
+
+        Callers that must not treat an immediate idle turn as finished work
+        (e.g. a base-rework handoff) use this to require a settle window; a
+        later hook event refreshes it.
+        """
+        with self._lock:
+            state = self._states.get(key)
+            if state and state.idle and state.last_hook_ts:
+                return state.last_hook_ts
+            return None
+
     def is_waiting_for_input(self, key: str) -> bool:
         """Return True when the agent is blocked on Claude's permission dialog.
 

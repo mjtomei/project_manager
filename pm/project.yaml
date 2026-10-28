@@ -38473,3 +38473,68 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-f0f4129
+  plan: bugs
+  title: Check base integration before review iterations and QA; return conflicts
+    to implementation
+  branch: pm/pr-f0f4129-check-base-integration-before-review-iterations-an
+  status: in_progress
+  depends_on: []
+  description: 'Sign-off is correctly detecting integration conflicts, but doing so
+    after repeated review and QA wastes completed work. User requested an automated
+    conflict check before starting review, before moving to another review iteration,
+    and before starting QA, returning to implementation for the base merge when necessary.
+
+
+    Check the latest configured base against the current PR HEAD in an isolated candidate,
+    without mutating the product workdir, index, or refs. Cover the supported TUI,
+    CLI/background and resumed native transition paths. If integration conflicts,
+    do not launch the downstream reviewer/planner: record the exact PR HEAD/base pair,
+    conflict paths/reason and intended return stage, then hand off once to implementation
+    to merge/reconcile the base. Implementation completion must be genuine before
+    fresh review starts; an idle notification while background tests or edits are
+    unfinished must not launch a concurrent writer. Preserve completed review outcomes,
+    transcript/evidence history, dirty files, stashes, fixtures, drafts, model routing,
+    spec-review setting and manual merge gates.
+
+
+    Clean integration continues the intended phase; do not turn every clean base advance
+    into an unconditional full review/QA reset. Fetch/probe failures are explicit
+    retryable failures, not proof of a conflict or approval. Sign-off remains the
+    final integrated-candidate authority. Reuse existing integration primitives where
+    appropriate and coordinate with #253/pr-5cee3d5 evidence reuse. This differs from
+    #246/pr-62fdd54, which synchronizes the PR workdir to its own upstream branch
+    before planning.
+
+
+    Make the transition idempotent across repeated polls, controller restart, concurrent
+    PRs, stale callbacks and base movement. Never run implementation/review/QA writers
+    concurrently for this handoff, drop existing evidence, merge the PR, force-push,
+    or change the user''s policies. Avoid an endless return loop for an unchanged
+    unresolved HEAD/base pair.
+
+
+    Acceptance: real Git conflict reproductions at each of the three transition points;
+    clean and unchanged base paths; another review iteration; base moving during handoff;
+    dirty workdirs retained; fetch failures; restart/late callback races and exactly
+    one implementation owner. Reproduce background-test idle handoff and ensure it
+    does not qualify as completed implementation. Test meaningful behavior, and live
+    QA must verify the transition and preserved evidence. Deliver the implementation
+    through ordinary review/QA/work-Opus sign-off with wait_for_merge. User authorized
+    standalone start on 2026-10-28.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/274
+  gh_pr_number: 274
+  created_at: '2026-10-28T13:41:51.469975+00:00'
+  updated_at: '2026-10-28T13:44:04.216828+00:00'
+  started_at: '2026-10-28T13:44:04.216828+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f0f4129-check-base-integration-before-review-fb6d03d0

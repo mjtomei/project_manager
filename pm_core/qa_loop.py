@@ -237,6 +237,12 @@ class QALoopState:
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # Pre-QA base integration gate: the PR was returned to implementation
+    # instead of starting the planner.  Not a QA verdict — the run never
+    # started, so no note/verdict/lifecycle transition is produced.
+    base_returned: bool = False
+    base_return_reason: str = ""
+    _ui_base_return_notified: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -3792,6 +3798,23 @@ def run_qa_sync(
         state.latest_verdict = "ERROR"
         state.latest_output = f"Workdir for {state.pr_id} does not exist on this machine and could not be created"
         return state
+
+    # Pre-QA base integration gate: a conflict returns the PR to
+    # implementation instead of launching the planner and wasting a full
+    # QA cycle.  Runs before the QA workdir, Scenario 0 or any window.
+    from pm_core import base_check
+    gate = base_check.gate(pm_root, pr_id, base_check.STAGE_QA, data=data)
+    if gate.decision in (base_check.CONFLICT, base_check.WAIT):
+        _log.info("QA not started for %s: %s", pr_id, gate.reason)
+        # The return owns the PR; never leave a raced transition in qa.
+        base_check.ensure_impl_status(pm_root, pr_id)
+        state.running = False
+        state.base_returned = True
+        state.base_return_reason = gate.reason
+        return state
+    if gate.decision == base_check.RETRY:
+        _log.warning("QA %s: base check failed (retryable): %s; continuing",
+                     pr_id, gate.reason)
 
     # Create QA workdir
     if not state.qa_workdir:

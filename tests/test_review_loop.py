@@ -600,3 +600,44 @@ class TestGenerateReviewPromptInputRequired:
         assert "INPUT_REQUIRED" in prompt
         # Should explain that it's reserved for genuine ambiguities
         assert "needs the user's attention" in prompt
+
+
+# --- pre-review base integration gate --------------------------------------
+
+class TestBaseConflictIteration:
+    """The base gate returning the PR to implementation is routing, not a
+    failed review: no iteration is recorded and the loop stops cleanly."""
+
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_base_conflict_stops_without_history(self, mock_review):
+        from pm_core.review_loop import BaseConflictError, VERDICT_BASE_CONFLICT
+        mock_review.side_effect = BaseConflictError(
+            "base_conflict: CONFLICTS with master: shared.txt")
+        state = ReviewLoopState(pr_id="pr-001")
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                      transcript_dir="/tmp")
+        assert result.latest_verdict == VERDICT_BASE_CONFLICT
+        assert result.history == []
+        assert result.iteration == 0
+        assert result.running is False
+
+    def test_launch_rc3_raises_base_conflict(self, tmp_path):
+        from pm_core.review_loop import BaseConflictError, _launch_review_window
+        failed = MagicMock()
+        failed.returncode = 3
+        failed.stdout = "base_conflict: conflicts\n"
+        failed.stderr = "Review not started — returned to implementation.\n"
+        with patch("pm_core.review_loop.subprocess.run", return_value=failed):
+            with pytest.raises(BaseConflictError):
+                _launch_review_window("pr-001", "/tmp")
+
+
+class TestNextReviewIteration:
+    def test_continues_after_existing_transcripts(self, tmp_path):
+        from pm_core.review_loop import next_review_iteration
+        for n in (1, 3):
+            (tmp_path / f"review-pr-001-i{n}.jsonl").write_text("{}")
+        (tmp_path / "review-pr-001.jsonl").write_text("{}")
+        (tmp_path / "review-pr-002-i9.jsonl").write_text("{}")
+        assert next_review_iteration(str(tmp_path), "pr-001") == 3
+        assert next_review_iteration(str(tmp_path / "missing"), "pr-001") == 0

@@ -731,3 +731,107 @@ class TestQaRunBgRuntimeState:
             assert result.exit_code == 1
             rec = runtime_state.get_action_state("pr-001", "qa")
             assert rec.get("state") == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Base integration gate (pre-review / pre-QA, return to implementation)
+# ---------------------------------------------------------------------------
+
+def _base_return(**over):
+    rec = {
+        "verdict": "BASE_CONFLICT", "stage": "review", "head": "abc",
+        "base_sha": "base", "base_branch": "master", "target_repo": "/repo",
+        "conflicts": ["shared.txt"], "conflicts_total": 1,
+        "reason": "CONFLICTS with master@base: shared.txt",
+        "attempt": 1, "ts": "2026-01-01T00:00:00+00:00",
+        "awaiting": None, "resolved_at": None,
+    }
+    rec.update(over)
+    return rec
+
+
+class TestBaseGate:
+    def test_needs_work_conflict_does_not_launch_review(self, runner):
+        from pm_core import base_check
+        pr = _pr("in_review", workdir="/wd")
+        conflict = base_check.GateResult(
+            base_check.CONFLICT, base_check.STAGE_REVIEW_ITERATION,
+            status="conflict", conflicts=["shared.txt"], returned=True,
+            reason="CONFLICTS with master@base: shared.txt")
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_review_verdict",
+                   return_value=("NEEDS_WORK", 1)), \
+             patch("pm_core.base_check.gate", return_value=conflict), \
+             patch("pm_core.cli.pr.pr_review") as mock_review:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "base_conflict" in result.output
+        mock_review.assert_not_called()
+
+    def test_open_return_blocks_a_review_launch(self, runner):
+        pr = _pr("in_review", workdir="/wd", base_return=_base_return())
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_review_verdict",
+                   return_value=("NEEDS_WORK", 1)), \
+             patch("pm_core.cli.pr.pr_review") as mock_review:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "base_conflict" in result.output
+        mock_review.assert_not_called()
+
+    def test_idle_with_unfinished_rework_does_not_advance(self, runner):
+        from pm_core import base_check
+        pr = _pr("in_progress", workdir="/wd",
+                 base_return=_base_return())
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_impl_idle", return_value=(True, False)), \
+             patch("pm_core.base_check.impl_completion",
+                   return_value=base_check.CompletionResult(
+                       False, "uncommitted edits remain")), \
+             patch("pm_core.cli.pr.pr_review") as mock_review:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "running: implementation (uncommitted edits remain)" in result.output
+        mock_review.assert_not_called()
+
+    def test_idle_with_completed_rework_advances(self, runner):
+        from pm_core import base_check
+        pr = _pr("in_progress", workdir="/wd",
+                 base_return=_base_return())
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_impl_idle", return_value=(True, False)), \
+             patch("pm_core.base_check.impl_completion",
+                   return_value=base_check.CompletionResult(True, "clean")), \
+             patch("pm_core.base_check.gate",
+                   return_value=base_check.GateResult(
+                       base_check.PROCEED, base_check.STAGE_REVIEW)), \
+             patch("pm_core.cli.pr.pr_review") as mock_review:
+            mock_review.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: in_review" in result.output
+        mock_review.assert_called_once()
+
+    def test_awaiting_base_impl_relaunches(self, runner):
+        pr = _pr("in_progress", workdir="/wd",
+                 base_return=_base_return(awaiting="impl",
+                                          launch_claim={"hop": "impl",
+                                                        "at": "2000-01-01T00:00:00+00:00"}))
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.base_check.claim_impl_launch", return_value=True), \
+             patch("pm_core.base_check.launch_impl",
+                   return_value=(True, "")) as launch:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "base_conflict: returning to impl (relaunched)" in result.output
+        launch.assert_called_once()

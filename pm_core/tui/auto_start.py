@@ -828,8 +828,7 @@ async def check_and_start(app) -> None:
                 # One launcher: a concurrent `pm pr auto-sequence` tick (or
                 # our own sign-off hop) may already be relaunching it, and a
                 # second --fresh would kill that session.
-                from pm_core.signoff import claim_return_launch
-                if not claim_return_launch(app._root, pr_id, "impl"):
+                if not _claim_impl_return(app, pr_id):
                     _log.info("auto_start: %s rework launch already "
                               "claimed, skipping", pr_id)
                     _recheck_after_claim(app)
@@ -882,6 +881,13 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
             continue
         # Skip if no workdir (shouldn't happen for in_review, but guard)
         if not pr.get("workdir"):
+            continue
+        # A base-conflict return owns the PR: implementation must reconcile
+        # the base before any reviewer runs.
+        from pm_core import base_check
+        if base_check.has_open_return(pr):
+            _log.debug("auto_start: %s base rework pending, no review loop",
+                       pr_id)
             continue
         # A sign-off REVIEW return still waiting for its launch (TUI
         # restart after the hop): the loop's --fresh launch would kill one
@@ -977,6 +983,12 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # Skip if no workdir
         if not pr.get("workdir"):
             continue
+        # A base-conflict return owns the PR: no QA planner until the
+        # implementation has reconciled the base.
+        from pm_core import base_check
+        if base_check.has_open_return(pr):
+            _log.debug("auto_start: %s base rework pending, no QA loop", pr_id)
+            continue
         _log.info("auto_start: starting QA loop for %s", pr_id)
         app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui
@@ -1006,14 +1018,29 @@ def _recheck_after_claim(app) -> None:
 
 
 def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
-    """Whether the PR's sign-off return to *hop* still waits for its launch."""
+    """Whether a sign-off or base-conflict return to *hop* awaits its launch."""
     from pm_core.signoff import return_awaiting
+    from pm_core import base_check
     try:
         pr = store.get_pr(store.load(app._root), pr_id)
     except Exception:
         _log.debug("auto_start: reload for %s failed", pr_id, exc_info=True)
         return False
-    return return_awaiting(pr) == hop
+    return (return_awaiting(pr) == hop
+            or base_check.return_awaiting(pr) == hop)
+
+
+def _claim_impl_return(app, pr_id: str) -> bool:
+    """Claim the one impl relaunch for whichever return is awaiting it."""
+    from pm_core.signoff import claim_return_launch
+    from pm_core import base_check
+    try:
+        pr = store.get_pr(store.load(app._root), pr_id)
+    except Exception:
+        return False
+    if base_check.return_awaiting(pr) == "impl":
+        return base_check.claim_impl_launch(app._root, pr_id)
+    return claim_return_launch(app._root, pr_id, "impl")
 
 
 async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:

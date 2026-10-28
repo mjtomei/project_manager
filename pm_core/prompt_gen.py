@@ -119,6 +119,12 @@ def _signoff_return_block(pr: dict, for_signoff: bool = False) -> str:
     return format_signoff_return(pr, for_signoff=for_signoff)
 
 
+def _base_return_block(pr: dict) -> str:
+    """Why pm returned this PR to implementation for a base conflict."""
+    from pm_core import base_check
+    return base_check.format_return(pr)
+
+
 def _note_timestamp(n: dict, key: str) -> str:
     """A note timestamp as a comparable string, tolerating a null value.
 
@@ -376,6 +382,7 @@ def generate_prompt(data: dict, pr_id: str, session_name: str | None = None) -> 
     # enumeration is bounded.
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr)
+    base_return_block = _base_return_block(pr)
 
     beginner_block = _beginner_addendum()
     cleanup_block = _auto_cleanup_addendum()
@@ -404,7 +411,7 @@ This session is managed by `pm`. Run `pm help` to see available commands.
 
 ## Task
 {description}
-{pr_notes_block}{signoff_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
+{pr_notes_block}{signoff_return_block}{base_return_block}{impl_spec_block}{impl_spec_preamble}{bug_fix_block}{pr_notes_handoff_block}
 ## Tips
 - This session may be resuming after a restart. Check `git status` and `git log` to see if previous work exists on this branch — if so, continue from there. The directory may contain uncommitted implementation work from a previous session.
 - Before referencing existing code (imports, function calls, class usage), read the source to verify the interface.
@@ -504,6 +511,7 @@ This PR is part of plan "{plan['name']}" ({plan['id']}). Other PRs in this plan:
     # whole (see generate_prompt).
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr)
+    base_return_block = _base_return_block(pr)
 
     # Backend-appropriate diff and sync commands
     backend_name = data.get("project", {}).get("backend", "vanilla")
@@ -565,7 +573,7 @@ Review the code changes in this PR for quality, correctness, and architectural f
 
 ## Description
 {description}
-{pr_notes_block}{signoff_return_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
+{pr_notes_block}{signoff_return_block}{base_return_block}{impl_spec_block}{plan_context}{tui_block}{general_notes_block}
 ## Steps
 {pull_step}{n}. Run `{diff_cmd}` to see all changes
 {n+1}. **Generic checks** — things any codebase should get right:
@@ -2193,6 +2201,7 @@ def generate_qa_planner_prompt(data: dict, pr_id: str,
     # Include PR notes (prior QA results, addendums)
     pr_notes_block = _format_pr_notes(pr, workdir=pr.get("workdir"))
     signoff_return_block = _signoff_return_block(pr)
+    base_return_block = _base_return_block(pr)
     pr_notes_handoff_block = _pr_notes_handoff_block(pr_id)
 
     # Include QA spec if already generated, or preamble to generate one
@@ -2293,7 +2302,7 @@ to see what changed.  Read source files as needed to understand the context.
 Make sure to not get bogged down too much in the details and method names. Try
 to abstract out user stories that exercise the changes.
 
-{pr_notes_block}{signoff_return_block}{qa_spec_block}{qa_spec_preamble}
+{pr_notes_block}{signoff_return_block}{base_return_block}{qa_spec_block}{qa_spec_preamble}
 ## QA Instruction Library
 
 These are available QA instructions.  Reference any that are relevant to

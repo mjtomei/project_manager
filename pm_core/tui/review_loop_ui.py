@@ -11,15 +11,19 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
+import time
+
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import held_by_text
 from pm_core.review_loop import (
     ReviewLoopState,
+    next_review_iteration,
     start_review_loop_background,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_BASE_CONFLICT,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
@@ -29,6 +33,7 @@ VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
+    VERDICT_BASE_CONFLICT: "[yellow bold]⇤ BASE_CONFLICT[/]",
     "KILLED": "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     "ERROR": "[red bold]! ERROR[/]",
@@ -195,6 +200,17 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
         return
 
+    # A base-conflict return owns the PR: implementation must reconcile the
+    # base before any reviewer runs.  (The pre-review gate would refuse the
+    # launch anyway; skipping here avoids a wasted loop start/log line.)
+    from pm_core import base_check
+    if base_check.has_open_return(pr):
+        app.log_message(
+            f"{pr_id}: base integration rework pending — review not started",
+            force=True)
+        _log.info("_start_loop: %s has an open base return; not starting", pr_id)
+        return
+
     # Ensure the transcript directory exists on disk.  Fail fast here
     # (before launching a podman container + review pane) if creation
     # fails — better than surfacing the error after the pane is up.
@@ -221,9 +237,20 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
-        state = ReviewLoopState(pr_id=pr_id)
+        # Continue after the PR's existing iteration transcripts so a
+        # re-review (base return, sign-off bounce, restart) never
+        # overwrites earlier evidence; carry a completed in-memory state's
+        # history across the handoff too.
+        start_iter = next_review_iteration(transcript_dir, pr_id)
+        state = ReviewLoopState(pr_id=pr_id, iteration=start_iter,
+                                adopt_in_flight=False)
+        old = app._review_loops.get(pr_id)
+        if old is not None and not old.running and old.history:
+            state.history = list(old.history)
+            state.iteration = max(state.iteration, old.iteration)
         app._review_loops[pr_id] = state
-        _log.info("review_loop_ui: starting loop for %s", pr_id)
+        _log.info("review_loop_ui: starting loop for %s at iteration %d",
+                  pr_id, state.iteration)
 
     if superseded:
         msg = (f"[bold]Fresh review loop started[/] for {pr_id} "
@@ -925,7 +952,8 @@ def _poll_impl_idle(app) -> None:
 
     tracker = app._pane_idle_tracker
     active_pr_ids: set[str] = set()
-    newly_idle: list[tuple[str, dict]] = []  # (pr_id, pr) pairs
+    # (pr_id, pr, resume_review_loop) triples
+    newly_idle: list[tuple[str, dict, bool]] = []
     untracked_seen: set[str] = set()
 
     for pr in (app._data.get("prs") or []):
@@ -969,21 +997,42 @@ def _poll_impl_idle(app) -> None:
         tracker.poll(pr_id)
 
         # Detect newly-idle in_progress PRs for auto-review
-        if status == "in_progress" and tracker.became_idle(pr_id):
+        if status == "in_progress" and tracker.is_idle(pr_id):
             from pm_core.signoff import return_awaiting
-            if return_awaiting(pr) == "impl":
-                # Sign-off sent it back but the rework session has not
-                # launched yet: an idle (old) session is not finished work.
-                _log.info("impl_idle: %s awaiting sign-off rework launch", pr_id)
+            from pm_core import base_check
+            base_ret = base_check.open_return(pr)
+            if return_awaiting(pr) == "impl" or (
+                    base_ret is not None
+                    and base_check.return_awaiting(pr) == "impl"):
+                # Sent back but the rework session has not launched yet: an
+                # idle (old) session is not finished work.  Catch up the
+                # relaunch when no other driver owns it.
+                _log.info("impl_idle: %s awaiting rework launch", pr_id)
+                if base_ret is not None and not _auto_start.is_enabled(app):
+                    _catch_up_base_impl(app, pr_id)
                 tracker.mark_active(pr_id)
                 continue
-            if pr.get("spec_pending"):
-                # Spec generation paused for user input (ambiguity
-                # resolution).  The session is waiting, not done.
-                _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
-                tracker.mark_active(pr_id)
-            else:
-                newly_idle.append((pr_id, pr))
+            if base_ret is not None:
+                # A base-conflict return: an idle turn is not completion.
+                # The integration re-check runs off the event loop; the idle
+                # event is left unconsumed so a settle/background job can
+                # surface before the handoff.
+                ok, why, resume = _base_completion_tick(app, pr_id, pr, tracker)
+                if not ok:
+                    _log.debug("impl_idle: %s base rework pending: %s",
+                               pr_id, why)
+                    continue
+                tracker.became_idle(pr_id)  # consume the verified idle
+                newly_idle.append((pr_id, pr, resume))
+                continue
+            if tracker.became_idle(pr_id):
+                if pr.get("spec_pending"):
+                    # Spec generation paused for user input (ambiguity
+                    # resolution).  The session is waiting, not done.
+                    _log.info("impl_idle: %s idle but spec_pending, resetting", pr_id)
+                    tracker.mark_active(pr_id)
+                else:
+                    newly_idle.append((pr_id, pr, False))
 
     # --- Second pass: post-publish repo-update (merge) windows ---
     # Discover merge windows for ALL in_review / sign_off PRs, not just
@@ -1149,11 +1198,143 @@ def _poll_impl_idle(app) -> None:
     _prune_untracked_trust(app, untracked_seen)
 
     # Auto-start review for newly-idle implementation PRs
+    started: set[str] = set()
     if newly_idle and _auto_start.is_enabled(app):
-        _auto_review_idle_prs(app, newly_idle)
+        started = _auto_review_idle_prs(app, newly_idle)
+    # A TUI review loop that was interrupted by a base-conflict return
+    # resumes even without auto-start (manual ``zz d`` semantics); a
+    # one-shot ``z d`` stays manual.
+    for entry in newly_idle:
+        pr_id = entry[0]
+        resume = entry[2] if len(entry) > 2 else False
+        if resume and pr_id not in started:
+            _resume_returned_loop(app, pr_id)
 
 
-def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
+# How often the TUI re-runs the (network) base completion check for a
+# returned PR whose pane is idle.  Between checks the cheap quiescence
+# checks run inline.
+BASE_CHECK_POLL_SECONDS = 15.0
+
+
+def _base_completion_tick(app, pr_id: str, pr: dict,
+                          tracker) -> tuple[bool, str, bool]:
+    """Evaluate a base-return handoff without blocking the event loop.
+
+    Cheap quiescence checks run inline; the integration re-check (a fetch)
+    runs in a worker thread and its result is consumed on a later tick.  The
+    idle event is not consumed until the result says the rework genuinely
+    finished — an idle notification while edits/background tests are still
+    unfinished must not launch a review writer.
+    """
+    from pm_core import base_check
+    from pm_core.tui import auto_start as _auto_start
+
+    checks = getattr(app, "_base_completion_checks", None)
+    if checks is None:
+        checks = {}
+        app._base_completion_checks = checks
+    # A cached result only belongs to the return episode that produced it;
+    # a new return (new ``ts``) must be checked afresh.
+    ret = base_check.open_return(pr)
+    episode = (ret or {}).get("ts")
+    st = checks.get(pr_id) or {}
+    if st.get("episode") != episode:
+        st = {}
+    now = time.monotonic()
+    if st.get("in_flight"):
+        return False, "checking base integration", False
+    if st.get("at") and now - float(st["at"]) < BASE_CHECK_POLL_SECONDS:
+        return (bool(st.get("ok")), st.get("reason", ""),
+                bool(st.get("resume_loop")))
+    idle_since = tracker.idle_since(pr_id)
+    if idle_since is None:
+        return False, "not idle", False
+    if time.time() - idle_since < base_check.IDLE_SETTLE_SECONDS:
+        return False, "letting the implementation settle", False
+    workdir = pr.get("workdir")
+    op = base_check.git_op_in_progress(workdir or "")
+    if op:
+        return False, f"{op} still in progress", False
+    if base_check.tracked_dirty(workdir or ""):
+        return False, "uncommitted edits remain", False
+
+    checks[pr_id] = {"in_flight": True, "started": now, "episode": episode}
+
+    def _run():
+        try:
+            res = base_check.impl_completion(
+                app._root, pr_id, pr, idle_since=idle_since,
+                transcript_dir=_auto_start.get_transcript_dir(app))
+            checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
+                             "episode": episode,
+                             "ok": res.complete, "reason": res.reason,
+                             "resume_loop": res.resume_loop}
+        except Exception as e:
+            _log.warning("base completion check for %s failed: %s", pr_id, e)
+            checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
+                             "episode": episode, "ok": False,
+                             "reason": f"completion check failed: {e}",
+                             "resume_loop": False}
+
+    app.run_worker(_run, thread=True, exclusive=False,
+                   group=f"base-check-{pr_id}")
+    return False, "checking base integration", False
+
+
+def _catch_up_base_impl(app, pr_id: str) -> None:
+    """Relaunch a base-return rework session that no other driver claimed."""
+    from pm_core import base_check
+    from pm_core.tui import auto_start as _auto_start
+
+    if not app._root:
+        return
+    if not base_check.claim_impl_launch(app._root, pr_id):
+        return
+    tdir = _auto_start.get_transcript_dir(app)
+
+    async def _run():
+        import asyncio
+        ok, detail = await asyncio.to_thread(
+            base_check.launch_impl, app._root, pr_id, tdir)
+        if not ok:
+            app.log_message(f"{pr_id}: base rework relaunch failed: {detail}")
+        else:
+            _log.info("impl_idle: relaunched base rework for %s", pr_id)
+
+    app.run_worker(_run())
+
+
+def _resume_returned_loop(app, pr_id: str) -> None:
+    """Restart a TUI review loop after its base-conflict rework finished."""
+    from pm_core.tui import pr_view
+    from pm_core.tui import auto_start as _auto_start
+    from pm_core import base_check
+
+    if not app._root:
+        return
+    try:
+        app._data = store.load(app._root)
+    except store.ProjectYamlParseError:
+        return
+    pr = store.get_pr(app._data, pr_id)
+    if not pr or pr.get("status") != "in_progress":
+        return
+    if base_check.has_open_return(pr):
+        return
+    app.log_message(f"Base rework complete for {pr_id} — resuming review loop")
+    pr_view.run_command(app, f"pr review --no-window {pr_id}")
+    try:
+        app._data = store.load(app._root)
+    except store.ProjectYamlParseError:
+        return
+    updated = store.get_pr(app._data, pr_id)
+    if updated and updated.get("status") == "in_review":
+        _start_loop(app, pr_id, updated,
+                    transcript_dir=str(_auto_start.get_transcript_dir(app)))
+
+
+def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict, bool]]) -> set[str]:
     """Transition newly-idle in_progress PRs to in_review and start review loops.
 
     Only called when auto-start is enabled. Scopes to the union of the
@@ -1164,8 +1345,10 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
 
     prs = app._data.get("prs") or []
     tdir = _auto_start.get_transcript_dir(app)
+    started: set[str] = set()
 
-    for pr_id, pr in newly_idle:
+    for entry in newly_idle:
+        pr_id = entry[0]
         # Scope to the union of the targets' dependency closures
         if not _auto_start.in_scope(app, pr_id, prs):
             continue
@@ -1186,7 +1369,7 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             app._data = store.load(app._root)
         except store.ProjectYamlParseError as e:
             _log.warning("_auto_start_single: corrupt YAML after review cmd: %s", e)
-            return
+            return started
         updated_pr = store.get_pr(app._data, pr_id)
         if updated_pr and updated_pr.get("status") == "in_review":
             # Start a review loop (same as _auto_start_review_loops)
@@ -1194,3 +1377,5 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict]]) -> None:
             if not loop:
                 _start_loop(app, pr_id, updated_pr,
                              transcript_dir=str(tdir))
+                started.add(pr_id)
+    return started
