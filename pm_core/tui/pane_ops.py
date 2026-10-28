@@ -13,7 +13,6 @@ from pm_core import tmux as tmux_mod
 from pm_core import pane_layout, pane_registry
 from pm_core import store, guide, notes
 from pm_core.prompt_gen import tui_section
-from pm_core.tui._shell import _run_shell
 from pm_core.tui.screens import ConnectScreen
 
 _log = configure_logger("pm.tui.pane_ops")
@@ -729,13 +728,19 @@ def launch_plan_activated(app, plan_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def show_connect(app) -> None:
-    """Show the tmux connect command for shared sessions."""
+    """Show the tmux connect command for this session's server."""
     socket_path = os.environ.get("PM_TMUX_SOCKET")
+    if not socket_path:
+        session = getattr(app, "_session_name", None)
+        if session:
+            from pm_core.paths import session_socket_path
+            socket_path = str(
+                session_socket_path(session.removeprefix("pm-")))
     if socket_path:
         command = f"tmux -S {socket_path} attach"
         app.push_screen(ConnectScreen(command))
     else:
-        app.log_message("Not a shared session")
+        app.log_message("Not in a pm session")
         app.clear_log_message_later(2)
 
 
@@ -743,8 +748,12 @@ def quit_app(app) -> None:
     """Detach from tmux session instead of killing the TUI."""
     _log.info("quit_app")
     if tmux_mod.in_tmux():
-        # Detach from tmux, leaving session running
-        _run_shell(tmux_mod._tmux_cmd("detach-client"), check=False)
+        # Detach only the client viewing this pane's window, leaving the
+        # session running.  Never use bare `detach-client`: it targets the
+        # server's most recently active client and once detached the user
+        # from a different pm session (pr-073910f).
+        if not tmux_mod.detach_current_client():
+            _log.info("quit_app: no attached client to detach")
     else:
         # Not in tmux, just exit normally
         app.exit()

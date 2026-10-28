@@ -210,6 +210,29 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     return _CLEAR_SCREEN + "\n".join(padded)
 
 
+def _tmux_argv(*args: str) -> list[str]:
+    """Build a tmux argv targeting this pm session's own server.
+
+    This module runs as a standalone script (``python3 .../qa_status.py``),
+    so it must not import ``pm_core``.  It still has to reach the private
+    socket rather than the user's default server: prefer
+    ``PM_TMUX_SOCKET`` (exported into every pane) and fall back to the
+    socket named by ``$TMUX`` when it is a pm socket.
+    """
+    socket_path = os.environ.get("PM_TMUX_SOCKET")
+    if not socket_path:
+        raw = os.environ.get("TMUX")
+        if raw:
+            path = raw.rsplit(",", 2)[0]
+            if os.path.dirname(path) == "/tmp/pm-sessions":
+                socket_path = path
+    cmd = ["tmux"]
+    if socket_path:
+        cmd.extend(["-S", socket_path])
+    cmd.extend(args)
+    return cmd
+
+
 def _find_attached_session(base: str) -> str:
     """Find the correct grouped session for window switching.
 
@@ -223,14 +246,17 @@ def _find_attached_session(base: str) -> str:
     if pane:
         try:
             result = subprocess.run(
-                ["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+                _tmux_argv(
+                    "display-message", "-p", "-t", pane, "#{session_name}"),
                 capture_output=True, text=True,
             )
             current = result.stdout.strip()
             if current and (current == base or current.startswith(base + "~")):
                 # Verify it has attached clients
                 att = subprocess.run(
-                    ["tmux", "display-message", "-t", current, "-p", "#{session_attached}"],
+                    _tmux_argv(
+                        "display-message", "-t", current, "-p",
+                        "#{session_attached}"),
                     capture_output=True, text=True,
                 )
                 if att.returncode == 0 and att.stdout.strip() != "0":
@@ -241,7 +267,8 @@ def _find_attached_session(base: str) -> str:
     # Priority 2: first attached grouped session
     try:
         result = subprocess.run(
-            ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],
+            _tmux_argv(
+                "list-sessions", "-F", "#{session_name} #{session_attached}"),
             capture_output=True, text=True,
         )
         for line in result.stdout.strip().splitlines():
@@ -264,7 +291,7 @@ def _switch_to_window(session: str, window_name: str) -> None:
     try:
         target = _find_attached_session(session)
         result = subprocess.run(
-            ["tmux", "select-window", "-t", f"{target}:{window_name}"],
+            _tmux_argv("select-window", "-t", f"{target}:{window_name}"),
             capture_output=True, text=True,
         )
         if result.returncode != 0:

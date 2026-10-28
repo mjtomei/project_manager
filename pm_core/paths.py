@@ -784,25 +784,57 @@ def bench_cache_dir() -> Path:
 
 SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
 
+# Unix domain sockets are limited to ~108 bytes including the NUL.  Keep a
+# little headroom for callers that append nothing but tmux internals.
+_SOCKET_PATH_MAX = 100
+
+
+def session_socket_path(session_tag: str) -> Path:
+    """Return the deterministic tmux server socket path for a pm session.
+
+    Every pm session gets its own tmux server.  The path is derived from
+    the session tag so the creating process and any later CLI invocation
+    (``pm session kill``, ``pm session list``, ``pm tui …``) compute the
+    same location without consulting ambient tmux state.
+
+    Very long repo names would exceed the Unix socket path limit, so those
+    fall back to a deterministic hash of the tag.  Discovery never depends
+    on the filename: session names are read from the server itself.
+    """
+    path = SHARED_SOCKET_DIR / f"pm-{session_tag}"
+    if len(str(path)) > _SOCKET_PATH_MAX:
+        digest = hashlib.md5(session_tag.encode()).hexdigest()
+        path = SHARED_SOCKET_DIR / f"pm-{digest}"
+    return path
+
 
 def shared_socket_path(session_tag: str) -> Path:
-    """Return the deterministic socket path for a shared session.
+    """Return the deterministic socket path for a session.
 
-    Both the creating user and joining users compute the same path
-    from the session tag, so they find each other's tmux server.
+    Kept as an alias for :func:`session_socket_path`; shared sessions use
+    the same per-session server scheme as private sessions.
     """
-    return SHARED_SOCKET_DIR / f"pm-{session_tag}"
+    return session_socket_path(session_tag)
 
 
-def ensure_shared_socket_dir() -> None:
+def ensure_socket_dir() -> None:
     """Create /tmp/pm-sessions/ with sticky world-writable permissions.
 
     Uses 1777 (sticky + rwx for all) so any user can create sockets
     but only the owner can delete their own.
     """
     SHARED_SOCKET_DIR.mkdir(mode=0o1777, parents=True, exist_ok=True)
-    # Ensure permissions are correct even if directory already existed
-    SHARED_SOCKET_DIR.chmod(0o1777)
+    # Ensure permissions are correct even if directory already existed.
+    # Another user may own the shared dir (1777); chmod then fails and is
+    # harmless because the mode is already correct.
+    try:
+        SHARED_SOCKET_DIR.chmod(0o1777)
+    except OSError:
+        pass
+
+
+# Backwards-compatible alias (shared sessions historically owned this dir).
+ensure_shared_socket_dir = ensure_socket_dir
 
 
 def set_shared_socket_permissions(socket_path: Path, group_name: str | None = None) -> None:

@@ -940,71 +940,118 @@ def _get_pm_session() -> str | None:
     return _get_current_pm_session() or _get_session_name_for_cwd()
 
 
+def _use_tmux_socket(socket_path: str | None) -> None:
+    """Point subsequent ``tmux_mod`` calls at *socket_path*.
+
+    ``None`` means the default server (legacy pre-isolation sessions).
+    """
+    if socket_path:
+        os.environ["PM_TMUX_SOCKET"] = socket_path
+    else:
+        os.environ.pop("PM_TMUX_SOCKET", None)
+
+
+def _select_session_socket(session_name: str) -> str | None:
+    """Point ``PM_TMUX_SOCKET`` at the server hosting *session_name*.
+
+    Prefers the session's dedicated private socket, falls back to the
+    legacy default server (clearing the env var).  Returns the selected
+    socket path, or None when the session is on the default server or was
+    not found.  Leaves the ambient setting untouched when not found.
+    """
+    from pm_core.paths import session_socket_path
+
+    base = pane_registry.base_session_name(session_name)
+    if not base.startswith("pm-"):
+        return None
+    sock = str(session_socket_path(base.removeprefix("pm-")))
+    if tmux_mod.session_exists(base, socket_path=sock):
+        _use_tmux_socket(sock)
+        return sock
+    if tmux_mod.session_exists(base, use_env=False):
+        _use_tmux_socket(None)
+        return None
+    return None
+
+
+def _registry_tui_pane(session: str) -> str | None:
+    """Return the registered TUI pane for *session* if it is still alive."""
+    data = pane_registry.load_registry(session)
+    for _, pane in pane_registry._iter_all_panes(data):
+        if pane.get("role") == "tui":
+            pane_id = pane.get("id")
+            if pane_id and tmux_mod.pane_exists(pane_id):
+                return pane_id
+    return None
+
+
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
     Returns (pane_id, session_name) or (None, None) if not found.
 
+    Every pm session has its own tmux server, so resolution also selects
+    the server hosting the found session: subsequent ``tmux_mod`` calls in
+    the caller target it via ``PM_TMUX_SOCKET``.
+
     If session is provided, uses that. Otherwise:
     - If in a pm- tmux session, uses current session
     - Otherwise, tries to find session matching current directory
-    - Falls back to searching for any pm- session with a TUI pane
+    - Falls back to scanning every pm server for a live TUI pane
     """
-    # If session specified, use it
+    # If session specified, use it (and its server)
     if session:
-        data = pane_registry.load_registry(session)
-        for _, pane in pane_registry._iter_all_panes(data):
-            if pane.get("role") == "tui":
-                return pane.get("id"), session
-        return None, None
+        base = pane_registry.base_session_name(session)
+        _select_session_socket(base)
+        if not tmux_mod.session_exists(base):
+            return None, None
+        pane_id = _registry_tui_pane(base)
+        return (pane_id, base) if pane_id else (None, None)
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():
         current_session = tmux_mod.get_session_name()
         if current_session.startswith("pm-"):
-            data = pane_registry.load_registry(current_session)
-            for _, pane in pane_registry._iter_all_panes(data):
-                if pane.get("role") == "tui":
-                    return pane.get("id"), current_session
+            base = pane_registry.base_session_name(current_session)
+            pane_id = _registry_tui_pane(base)
+            if pane_id:
+                return pane_id, base
 
     # Try to find session matching current directory first
     expected_session = _get_session_name_for_cwd()
+    _select_session_socket(expected_session)
     if tmux_mod.session_exists(expected_session):
-        data = pane_registry.load_registry(expected_session)
-        for _, pane in pane_registry._iter_all_panes(data):
-            if pane.get("role") == "tui":
-                return pane.get("id"), expected_session
+        pane_id = _registry_tui_pane(expected_session)
+        if pane_id:
+            return pane_id, expected_session
 
-    # Fall back to searching for any pm session with a TUI
-    result = subprocess.run(
-        tmux_mod._tmux_cmd("list-sessions", "-F", "#{session_name}"),
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        return None, None
-
-    for sess in result.stdout.strip().splitlines():
-        if sess.startswith("pm-") and "~" not in sess:
-            data = pane_registry.load_registry(sess)
-            for _, pane in pane_registry._iter_all_panes(data):
-                if pane.get("role") == "tui":
-                    return pane.get("id"), sess
+    # Fall back to scanning every pm server (private sockets + legacy
+    # default) for a session with a live registered TUI pane.
+    servers = tmux_mod.list_pm_sessions()
+    for info in servers:
+        _use_tmux_socket(info["socket"])
+        pane_id = _registry_tui_pane(info["name"])
+        if pane_id:
+            return pane_id, info["name"]
 
     # Last resort: search tmux directly for a pane running 'pm _tui'.
     # This handles cases where the TUI pane was removed from the registry
     # (e.g. during heal testing) but is still alive in tmux.
-    result = subprocess.run(
-        tmux_mod._tmux_cmd("list-panes", "-a",
-                           "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
-        capture_output=True, text=True
-    )
-    if result.returncode == 0:
+    for info in servers:
+        _use_tmux_socket(info["socket"])
+        result = subprocess.run(
+            tmux_mod._tmux_cmd(
+                "list-panes", "-a",
+                "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            continue
         for line in result.stdout.strip().splitlines():
             parts = line.split(None, 3)
             if len(parts) >= 3 and parts[1].startswith("pm-"):
-                # Check if command contains 'pm _tui' or 'pm-tui'
                 cmd_text = " ".join(parts[2:])
                 if "_tui" in cmd_text:
-                    return parts[0], parts[1]
+                    return parts[0], pane_registry.base_session_name(parts[1])
 
     return None, None

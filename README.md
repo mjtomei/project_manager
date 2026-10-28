@@ -286,18 +286,45 @@ Press `a` in the TUI for a live runs popup (same data as `pm autostart status`):
 phase, running/waiting/paused/failed state with a reason, review iteration or QA
 progress, and Enter to jump to the run's tmux window.
 
+## Per-session tmux servers
+
+Every `pm session` runs on its **own dedicated tmux server** (socket) at
+`/tmp/pm-sessions/pm-<session-tag>`. Sessions no longer share the user's
+default tmux server, so detaching, restarting or cleaning up one pm session
+cannot affect another one — panes, clients and hooks are scoped to that
+session's server.
+
+`pm session list` shows every pm session, the server it runs on, and how many
+clients are attached:
+
+```bash
+$ pm session list
+SESSION                                  CLIENTS  SOCKET
+pm-myproject-1a2b3c4d                          1  /tmp/pm-sessions/pm-myproject-1a2b3c4d
+```
+
+`pm session` (attach), `pm session kill`, `pm tui …` and the popup pickers all
+locate the session's server automatically; `PM_TMUX_SOCKET` is exported into
+the session's panes, hooks and popups.
+
+Sessions started by an older pm version still live on the default tmux
+server. `pm session` keeps attaching to those (no automatic migration);
+`pm session kill` followed by `pm session` moves the session to its own
+server.
+
 ## Shared sessions
 
-By default, `pm session` creates a private tmux session. To let other users
-on the same machine join your session:
+By default, a pm session is private to you. To let other users on the same
+machine join your session:
 
 ```bash
 pm session --global          # anyone on the machine can attach
 pm session --group staff     # only members of the "staff" Unix group can attach
 ```
 
-These create a shared tmux socket under `/tmp/pm-sessions/`. Another user
-connects by pointing at your project directory:
+Shared sessions use the same per-session socket under `/tmp/pm-sessions/`,
+with permissions and tmux `server-access` grants for the invited users.
+Another user connects by pointing at your project directory:
 
 ```bash
 pm session --dir /home/alice/myrepo/pm

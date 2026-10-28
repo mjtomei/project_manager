@@ -4357,11 +4357,61 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-03-08T22:40:41.080175+00:00'
+  updated_at: '2026-10-28T20:24:33.092296+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-3264dca
+    text: 'User authorized starting this PR on 2026-10-28 after a confirmed cross-session
+      detach. #263 QA S25 sent Ctrl-Q to its own fixture pane %2547 at20:02:32UTC;
+      pm_core/tui/pane_ops.py quit_app ran bare tmux detach-client on the shared host
+      server and detached the user from #249. The key was correctly targeted; the
+      subsequent client operation was not. Private-socket reproduction confirmed an
+      unattached QA session can detach a client attached to another session on the
+      same server. Evidence: /home/matt/.local/state/pm-pr-shepherd/tmux-disconnect-investigation-20261028T200318Z/findings.json
+      and private-socket-reproduction.json. Related existing direct-targeting bug
+      pr-442e51c; hook-scoping bugs pr-f2f9ef8 and pr-ee18218. Implement the dedicated
+      per-PM-session server/socket scope described here, including host QA fixtures,
+      grouped clients, subprocesses, attach/discovery, and explicit socket propagation.
+      Acceptance must demonstrate that quit/restart/cleanup in one test session leaves
+      clients, panes and hooks in another server intact. Use disposable isolated tmux
+      sockets for every destructive fixture command; never reproduce against the live
+      user server. Preserve existing live sessions and data during rollout; do not
+      migrate, detach, restart or kill this live controller/session as part of implementation.
+      DeepSeek1017/high implementation/review/QA/helpers; work Opus5.5/high signoff;
+      manual wait_for_merge, spec-review off.'
+    created_at: '2026-10-28T20:21:14.877609+00:00'
+    last_edited: '2026-10-28T20:21:14.877609+00:00'
+  model: provider:deepseek-flash
+  effort: high
+  review_spec: false
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    watcher: provider:deepseek-flash
+    merge: provider:deepseek-flash
+  session_effort:
+    impl: high
+    review: high
+    qa: high
+    qa_planning: high
+    qa_scenario: high
+    qa_concretize: high
+    qa_verification: high
+    qa_finalize: high
+    qa_interactive: high
+    signoff: high
+    watcher: high
+    merge: high
 - id: pr-cf41efc
   plan: plan-qa
   title: Add interactive Scenario 0 and fix QA scenario window bugs
