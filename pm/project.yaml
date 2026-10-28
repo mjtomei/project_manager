@@ -17201,6 +17201,53 @@ prs:
       must be read as "no file for MY sessions" when other scenarios run in parallel.'
     created_at: '2026-10-28T20:14:04Z'
     last_edited: '2026-10-28T20:14:04Z'
+  - id: note-6619b36
+    text: 'QA scenario 25 (end-to-end acceptance, build 1755a172) PASS 2026-10-28
+      — all five triples matched verbatim. (1) Legacy-TUI A/B, fixed half: genuine
+      pre-command-queue TUI (worktree 372f85f4^ = 0e2cc2db, pid 2403138, bare-number
+      pidfile, only ''Installed SIGUSR1 reload handler'') + fixed CLI ''pm autostart
+      add pr-95325c4 -s $S'' -> exit 2 verbatim owner_unavailable ''predates the command-queue
+      feature''; TUI still Ssl+, board still 4 PRs (Pane %2551), pidfile sha identical
+      and still the bare number, queue 0 bytes. (2) A/B pre-fix half: PYTHONPATH=worktree
+      89e3c501 -> exit 2 verbatim owner_timeout (3s); legacy TUI reaped (ps empty),
+      pane %2551 gone from list-panes -a, ''pm tui view'' exit 1 ''No TUI pane found.
+      Is there a pm tmux session running?'', queue holds exactly one line ''autostart
+      add pr-95325c4 --reply 1793217854-828033c0'' (53 B), stale pidfile names dead
+      2403138. (3) Cross-session isolation: A''s TUI window made non-active (active=driver);
+      ''pm pr add Add password reset'' -> ''Created pr-c715bb9 ... (now active)'',
+      A''s board 4->5 PRs with no keypress, A pidfile still 2450881; B pidfile pid+sha
+      unchanged and B board byte-identical; both ''autostart list --json'' -> owner
+      {session, pid} = that session''s own TUI, mode off, targets [], text ''Auto-start:
+      off'' + ''No auto-start targets.''. (4) ''pm autostart add pr-6cd925d --wait-for-merge''
+      -> ''added: ... (wait-for-merge)'' + ''auto-start targets; targets: pr-6cd925d'';
+      list one row; status ''Auto-start: targets (1 target(s))  run=autostart-...
+      owner=pm-projA-...'' + ''@ pr-6cd925d [wait-for-merge] waiting/pending — blocked
+      on pr-95325c4''; queue 0; board log ''Auto-start: targets += pr-6cd925d (wait-for-merge
+      + deps) (1 total)''. (5) clear -> ''removed: pr-6cd925d'' + ''auto-start off;
+      targets: (none)''; deprecated ''--stop-before-merge'' -> ''added: pr-6cd925d
+      (wait-for-merge)'', list shows exactly one wait-for-merge row, no stop-before-merge
+      policy, queue 0. Tests: tests/test_tui_pidfile.py 132 passed; with test_breadcrumb_review_loop.py
+      + test_cli_helpers.py 224 passed; 8 named repro tests pass. Captures: /pm-captures/scenarios/25/{01-fixed-cli-refuses-legacy-tui,02-prefix-cli-kills-legacy-tui,03-cross-session-isolation,04-autostart-wait-for-merge,05-stop-before-merge-mapping,06-repro-tests}
+      (each cast+mp4+transcript+manifest). RUN MECHANICS for the next run: (a) ''pm
+      session'' must run with ''env -u TMUX -u TMUX_PANE'' — otherwise _get_current_pm_session()
+      resolves the invoking pane''s pm session (the orchestrator''s) and the projA
+      session is never created; (b) the TUI has NO quit key (q=toggle_qa, ctrl+q/ctrl+c
+      do nothing; quit_app only detaches) — to put a legacy TUI in place, SIGTERM
+      the fixed TUI, then start the legacy pane; the stale JSON pidfile is taken over
+      and rewritten as a bare number; (c) a stray ''d'' can land in a driver pane
+      right after starting the asciinema recorder (observed once: ''dpm pr add ...''),
+      so send C-u before typing the recorded command; (d) the pre-fix CLI''s stranded
+      queue line IS applied by the replacement TUI''s startup drain when it is <60
+      s old, so story-3''s auto-start-off Given may need an explicit ''pm autostart
+      clear -s $A'' first (happened here: mode=targets with pr-95325c4, then clear
+      -> off); (e) the board''s two-line log region scrolls ''Auto-start: targets
+      += ...'' off as soon as the scheduler logs ''starting ...'', so poll ''pm tui
+      view'' immediately after the add to capture it; (f) this container has no ffmpeg/agg
+      — johnvansickle arm64-static ffmpeg 7.0.2 and agg v1.9.0 aarch64-unknown-linux-gnu
+      both work; (g) pytest is only in the system python (9.0.2, /home/matt/.local/bin),
+      not in /tmp/pm-venv.'
+    created_at: '2026-10-28T20:13:58Z'
+    last_edited: '2026-10-28T20:13:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
