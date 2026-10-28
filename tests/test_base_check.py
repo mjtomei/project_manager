@@ -467,3 +467,16 @@ def test_qa_gate_waits_on_a_raced_status_with_open_return(w):
     res = gate(w, base_check.STAGE_QA)
     assert res.decision == base_check.WAIT
     assert res.already_returned
+
+
+def test_gate_self_heals_a_return_when_the_base_moves_clean(w):
+    """A stale/manual gate call resolves the episode once the base is clean."""
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+    simulate_launch(w)
+    git(w.repo, "reset", "-q", "--hard", "HEAD~1")
+    commit(w.repo, "other.txt", "x\n", "clean base")
+    res = gate(w)
+    assert res.decision == base_check.PROCEED
+    assert base_check.open_return(pr(w)) is None
+    assert pr(w)["base_return"]["resolved_at"]
