@@ -15716,6 +15716,36 @@ prs:
       / 3 skipped.'
     created_at: '2026-10-28T18:11:30Z'
     last_edited: '2026-10-28T18:11:30Z'
+  - id: note-e75d3ae
+    text: 'Refine S91 (a50dade2/code 1285ff26, code-traced): reap removes by container
+      ID (rm -f <cid>), so the story-2 overlap hold shim must match B''s full ID,
+      scoped to the reap window''s PATH. pm pr start --fresh A kills A''s window;
+      its EXIT release waits for the reaper lock and goes stale if the relaunch reuses
+      A (new generation), so reuse or recreate are both valid. No reap runs in story
+      1; check A''s tokenless dir still exists before the story-2 WHEN. Startup-cleanup
+      deadline: 60 s. Last cleanup per resolution 33.'
+    created_at: '2026-10-28T16:56:40Z'
+    last_edited: '2026-10-28T16:56:40Z'
+  - id: note-6ae4d65
+    text: 'QA S91 PASS (a50dade2 = code 1285ff26, incl. 5d761eb7; real rootless Podman
+      3.4.4, unmodified build-base, fake agents/fake GitHub; evidence /pm-captures/scenarios/91/manifest.md).
+      No code change. Run 2 of stories 1+2 in one fixture pass: a70331c1 container
+      refused with the exact remove-it message (same ID, no window/dir/agent), rm
+      + start recreated it on hashed dir+link+lock with unpushed commit and edit intact,
+      branch push landed, master push rejected; reap printed stopped push proxy <dir>
+      once each for B hashed dir and A tokenless dir, removed 1, kept 2, failed 0,
+      stopped 2; C malformed owner.json/socket/daemon untouched; --fresh A overlapped
+      (reused). Story 3: startup pass removed D impl+QA 4 s after TUI start, integrity
+      line held ~5.9 s, one note on E after r and later sync; E retained and F IR
+      worker kept with proxies working. Fixture lessons: (1) a 20 s rm hold on a master-era
+      container (PID 1 sleep infinity, 10 s stop) hits PM 30 s rm timeout -> FAILED
+      + container left stopping; retry reap recovers; use a hold <= 15 s. (2) put
+      the fake-claude shim on the fixture PATH or QA panes die rc 127. (3) closing
+      an IR QA window while the TUI runs lets the 10-min periodic pass reclaim it;
+      stop the TUI within 10 min of closing. (4) debug log may contain binary bytes:
+      use grep -a.'
+    created_at: '2026-10-28T17:53:58Z'
+    last_edited: '2026-10-28T17:53:58Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
