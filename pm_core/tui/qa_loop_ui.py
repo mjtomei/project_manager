@@ -393,6 +393,16 @@ def poll_qa_state(app) -> None:
                     from pm_core import qa_loop
                     qa_loop.mark_completion_processed(state)
                 continue
+            # The hold can also reopen the run *between* the two checks
+            # above: it publishes running=True before clearing held, so the
+            # first check can read the pre-reopen False while the second
+            # reads the already-cleared held.  Falling through then would
+            # clear the reopened run's snapshot (the follow-up it reopened
+            # for is still being collected) and mark its completion
+            # notified.  Re-check running after the held branch so every
+            # reopen ordering keeps the run.
+            if state.running:
+                continue
             # The completion has now been processed (note recorded,
             # lifecycle transition done).  Drop the resume snapshot
             # immediately rather than waiting for the tick-2 cleanup
@@ -558,10 +568,15 @@ def _resume_incomplete_qa(app) -> None:
 
         if overall:
             # Completed during downtime — process and clear the snapshot.
+            # A snapshot whose result the TUI already noted (a held run that
+            # ended its hold without a follow-up: stop, PR left qa, last
+            # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
             state.latest_verdict = overall
-            _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
-            _on_qa_complete(app, state)
+            _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
+                      pr_id, overall, state.completion_processed)
+            if not state.completion_processed:
+                _on_qa_complete(app, state)
             state._ui_complete_notified = True
             if state.qa_workdir:
                 qa_loop.clear_resume_file(state.qa_workdir)

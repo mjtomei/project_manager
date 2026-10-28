@@ -4898,6 +4898,13 @@ def _execute_and_finalize(
     Scenario windows AND containers are intentionally left alive after the
     verdict so users can inspect results; orphaned containers are cleaned
     up at the start of the next QA run.
+
+    A run that aggregates to ``INPUT_REQUIRED`` while scenarios are still
+    waiting for user input is *held*: the result is finalized and published,
+    then :func:`_hold_for_follow_up` blocks on the waiting workers' own
+    transcripts.  When one produces a follow-up verdict (or an attempt is
+    dropped back to the retry path) the loop reopens and re-finalizes the
+    new result instead of leaving the run dead.
     """
     queued_indices = {s.index for s in queued_scenarios}
 

@@ -429,6 +429,29 @@ def test_poll_qa_state_held_notes_once_and_keeps_state(tmp_path):
     assert len(qa_notes) == 1
 
 
+def test_resume_completed_snapshot_already_processed_is_not_renoted(tmp_path):
+    """A held run that ends its hold without a follow-up (stop, PR left qa,
+    last attempt dropped) leaves a completed snapshot whose result the TUI
+    already noted.  Re-adopting it must not record a second QA note or repeat
+    the lifecycle transition."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=True)
+    # The hold is over: nothing is waiting any more, the result stands.
+    data = json.loads(_resume_file_path(qa_dir).read_text())
+    data["held"] = False
+    data["waiting_for_input"] = []
+    data["waiting_input_sources"] = {}
+    _resume_file_path(qa_dir).write_text(json.dumps(data))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    on_complete.assert_not_called()
+    assert not _resume_file_path(qa_dir).exists()
+    assert "pr-001" not in app._qa_loops
+
+
 def test_owner_pid_reused_by_unrelated_process_is_not_owner():
     """The dead owner's pid now belongs to an unrelated process (different
     start time): the run is orphaned and must stay resumable."""

@@ -417,3 +417,26 @@ covered by tests in `tests/test_qa_input_required.py` /
   resumed run.
 - **Spec correction.** Iteration 4's note claimed the TUI de-duplicates an
   identical QA note; it does not (see the trade-off above).
+
+## 11. Implementation notes (review iteration 6)
+
+- **A hold can reopen the run between the TUI's two checks.** `poll_qa_state`
+  reads `state.running` (False, pre-reopen), then the held thread publishes
+  `running=True` and only afterwards clears `held`; the TUI's `held` read can
+  therefore see the already-cleared False and fall through to the finished
+  path, clearing the reopened run's resume snapshot.  `running` is re-checked
+  after the held branch, so every ordering of the reopen transition keeps the
+  run and its snapshot.
+- **A completed snapshot whose result was already noted is not re-noted.**
+  `_resume_incomplete_qa`'s completed-run branch now honours
+  `completion_processed` from the snapshot.  A held run that ends its hold
+  without a follow-up (stop, PR left qa, last attempt dropped terminal)
+  leaves a snapshot with `held=False` and the already-noted result; adopting
+  it must clear the snapshot, not record a second QA note / lifecycle
+  transition.
+- **Test coverage.** `test_restored_held_run_finalizes_a_collected_follow_up`
+  pins the `_clear_waiting` → `held=False` coupling that makes a restored
+  held run re-finalize a collected follow-up (a follow-up PASS must not skip
+  the finalize pane's push/fast-forward verification);
+  `test_resume_completed_snapshot_already_processed_is_not_renoted` covers
+  the `completion_processed` guard.

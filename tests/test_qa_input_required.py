@@ -745,6 +745,30 @@ class TestFinalizeHoldsForInput:
         finalize.assert_not_called()
         assert state.latest_verdict == VERDICT_INPUT_REQUIRED
 
+    def test_restored_held_run_finalizes_a_collected_follow_up(self, tmp_path):
+        """A restored held run whose follow-up is collected on the first
+        iteration must still run the finalize pane for the new result.
+        ``_clear_waiting`` clears ``held`` when the live loop records the
+        follow-up, so ``was_held`` is False for that iteration; if it stayed
+        True the follow-up PASS would be promoted without the push /
+        fast-forward verification the finalize pane performs."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.held = True
+        state.completion_processed = True
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+
+        def _poll(_state, *_a, **_k):
+            # What the live loop's _clear_waiting + _accept_hit do.
+            _state.waiting_for_input.clear()
+            _state.waiting_input_sources.clear()
+            _state.held = False
+            _state.scenario_verdicts = {1: VERDICT_PASS}
+
+        finalize, _ = self._finalize(
+            state, tmp_path, hold_returns=(False,), poll_side_effect=_poll)
+        assert finalize.call_count == 1
+        assert state.latest_verdict == VERDICT_PASS
+
     def test_follow_up_reopens_and_re_finalizes(self, tmp_path):
         state = _waiting_state(tmp_path / "t.jsonl")
         calls = {"n": 0}
