@@ -38526,7 +38526,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T15:02:22.451596+00:00'
+  updated_at: '2026-10-28T15:43:39.515625+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38562,6 +38562,27 @@ prs:
       container cannot reach the host TUI).'
     created_at: '2026-10-28T15:02:01Z'
     last_edited: '2026-10-28T15:02:22Z'
+  - id: note-139fb81
+    text: 'Review-loop 8bac i1 fixes (on a1b9e152). (1) impl_completion now requires
+      idle evidence from *after* the relaunch: clear_return_awaiting stamps `launched_at`,
+      so the killed session''s idle_prompt (still readable through another driver''s
+      stale impl-<pr>.jsonl symlink) can no longer pass the settle window and start
+      a reviewer beside the rework writer. (2) launch_impl re-points the other drivers''
+      impl-<pr>.jsonl symlinks at the new session (_share_impl_transcript) so the
+      TUI run dir and auto-sequence dir keep tracking it — without that, (1) would
+      stall a manual `d` conflict. (3) base_return stores conflicts/overlap bounded
+      like integration.compact with *_total preserved (project.yaml is git-tracked).
+      (4) pr_auto_sequence''s qa branch refuses to advance a PR whose base return
+      is open, so a stale qa_status.json PASS cannot hand it to sign-off. (5) BASE_CONFLICT
+      renders in the tech tree; unused base_check.summary removed; _check_impl_idle/_impl_idle_since
+      share one pane poll. Spec updated (R6 idle-evidence clause, R12 qa guard). Full
+      suite: 4119 passed, 1 skipped, 13 failed — all pre-existing env (12x test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Overlap for pr-9ee4d64 (transcript overwrite after
+      a return): next_review_iteration + _share_impl_transcript now own parts of that
+      space.'
+    created_at: '2026-10-28T15:43:39Z'
+    last_edited: '2026-10-28T15:43:39Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

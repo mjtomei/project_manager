@@ -87,6 +87,29 @@ def simulate_launch(w):
     base_check.clear_return_awaiting(w.pm_dir, PR)
 
 
+def reconcile(w):
+    """Merge the fixture's conflicting base into the PR branch."""
+    subprocess.run(["/usr/bin/git", "merge", "--no-edit", "FETCH_HEAD"],
+                   cwd=w.wd, capture_output=True, text=True)
+    if git(w.wd, "status", "--porcelain"):
+        (w.wd / "shared.txt").write_text("base\nmaster side\npr side\n")
+        git(w.wd, "add", "shared.txt")
+        git(w.wd, "commit", "-q", "-m", "merge base")
+
+
+def completion(w, **kw):
+    """``impl_completion`` with a genuine, settled idle turn.
+
+    The idle event is stamped *now* (after the return's relaunch, which
+    ``simulate_launch`` records) and the settle window is disabled so the
+    call exercises the completion decision rather than the timing guards.
+    """
+    import time
+    kw.setdefault("idle_since", time.time())
+    with patch.object(base_check, "IDLE_SETTLE_SECONDS", 0.0):
+        return base_check.impl_completion(w.pm_dir, PR, pr(w), **kw)
+
+
 # --- conflicts -------------------------------------------------------------
 
 def test_conflict_before_review_returns_to_implementation(w):
@@ -161,9 +184,7 @@ def test_return_cap_stops_automatic_rework(w):
             base_check.clear_return_awaiting(w.pm_dir, PR)
             commit(w.wd, f"f{i}.txt", "x\n", f"impl {i}")
             commit(w.repo, "shared.txt", f"base {i}\n", f"base {i}")
-            base_check.impl_completion(
-                w.pm_dir, PR, pr(w), idle_since=0,
-                transcript_dir=w.tdir)
+            completion(w, transcript_dir=w.tdir)
     ret = pr(w)["base_return"]
     assert ret.get("needs_human")
     assert "launch_claim" not in ret
@@ -232,11 +253,11 @@ def test_recent_failure_suppresses_a_second_fetch(w):
 def test_completion_waits_for_a_launched_rework(w):
     with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
         gate(w)
-    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=0)
+    res = completion(w)
     assert not res.complete
     assert "has not launched" in res.reason
     simulate_launch(w)
-    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=0)
+    res = completion(w)
     assert not res.complete
     assert "unchanged" in res.reason
 
@@ -246,19 +267,39 @@ def test_completion_after_reconciled_base_resolves_the_return(w):
         gate(w)
     simulate_launch(w)
     # Reconcile: merge the base and commit the resolution.
-    r = subprocess.run(["/usr/bin/git", "merge", "--no-edit", "FETCH_HEAD"],
-                       cwd=w.wd, capture_output=True, text=True)
-    if r.returncode != 0:
-        (w.wd / "shared.txt").write_text("base\nmaster side\npr side\n")
-        git(w.wd, "add", "shared.txt")
-        git(w.wd, "commit", "-q", "-m", "merge base")
-    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=0,
-                                     transcript_dir=w.tdir)
+    reconcile(w)
+    res = completion(w, transcript_dir=w.tdir)
     assert res.complete, res.reason
     p = pr(w)
     assert p["base_return"]["resolved_at"]
     assert p["base_return"]["awaiting"] is None
     assert base_check.open_return(p) is None
+
+
+def test_completion_ignores_idle_evidence_from_before_the_relaunch(w):
+    """The killed session's idle event is not the rework session's turn.
+
+    A stale ``impl-<pr>.jsonl`` symlink keeps reporting the old session's
+    ``idle_prompt``; without the relaunch guard its (already old) timestamp
+    passes the settle window and an idle notification from before the rework
+    would qualify as completion.
+    """
+    import time
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+    simulate_launch(w)          # records launched_at
+    reconcile(w)
+    stale = time.time() - 3600
+    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=stale,
+                                     transcript_dir=w.tdir)
+    assert not res.complete
+    assert "no idle evidence" in res.reason
+    # A genuine idle turn *after* the relaunch still completes.
+    with patch.object(base_check, "IDLE_SETTLE_SECONDS", 0.0):
+        res = base_check.impl_completion(w.pm_dir, PR, pr(w),
+                                         idle_since=time.time(),
+                                         transcript_dir=w.tdir)
+    assert res.complete, res.reason
 
 
 def test_dirty_workdir_blocks_completion_and_is_retained(w):
@@ -267,7 +308,7 @@ def test_dirty_workdir_blocks_completion_and_is_retained(w):
     simulate_launch(w)
     (w.wd / "fixture.txt").write_text("keep me\n")       # untracked
     (w.wd / "feature.txt").write_text("edited\n")         # tracked edit
-    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=0)
+    res = completion(w)
     assert not res.complete
     assert "uncommitted edits" in res.reason
     assert (w.wd / "fixture.txt").read_text() == "keep me\n"
@@ -294,13 +335,57 @@ def test_moved_base_during_handoff_returns_again(w):
     # HEAD moved but the new base still conflicts.
     commit(w.wd, "more.txt", "x\n", "more impl work")
     commit(w.repo, "shared.txt", "new master side\n", "master moves")
-    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=0,
-                                     transcript_dir=w.tdir)
+    res = completion(w, transcript_dir=w.tdir)
     assert not res.complete
     ret = pr(w)["base_return"]
     assert ret["attempt"] == 2
     assert ret["base_sha"] != first["base_sha"]
     assert ret["awaiting"] == "impl"
+
+
+def test_launch_impl_repairs_the_other_drivers_transcript(w):
+    """A relaunch stays trackable from the dir the old session used.
+
+    The TUI run dir and the auto-sequence dir each hold their own
+    ``impl-<pr>.jsonl`` symlink; a relaunch that wrote only its own would
+    leave the other drivers reading the killed session's hook events.
+    """
+    import os
+    stale = w.pm_dir / "transcripts" / "run-a" / f"impl-{PR}.jsonl"
+    stale.parent.mkdir(parents=True)
+    stale.symlink_to("/nonexistent/old-session.jsonl")
+    fresh = w.tdir / f"impl-{PR}.jsonl"
+    new_target = "/tmp/new-session.jsonl"
+
+    def fake_run(cmd, *a, **k):
+        # ``pm pr start --transcript <path>`` creates the symlink.
+        fresh.symlink_to(new_target)
+        return subprocess.CompletedProcess(args=cmd, returncode=0,
+                                           stdout="", stderr="")
+
+    with patch("pm_core.base_check.subprocess.run", side_effect=fake_run):
+        ok, detail = base_check.launch_impl(w.pm_dir, PR, w.tdir)
+    assert ok, detail
+    assert os.readlink(stale) == new_target
+
+
+def test_large_conflict_list_is_bounded_in_the_return(w):
+    """project.yaml keeps the record small; the totals keep it truthful."""
+    paths = [f"dir/file{i}.txt" for i in range(120)]
+    record = {"status": integration.CONFLICT, "head": "h" * 40,
+              "base_sha": "b" * 40, "base_branch": "master",
+              "target_repo": str(w.repo), "conflicts": paths,
+              "overlap": paths[:60]}
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        rec = base_check.return_to_impl(w.pm_dir, PR, record,
+                                        base_check.STAGE_REVIEW)
+    assert rec is not None
+    stored = pr(w)["base_return"]
+    limit = integration._YAML_LIST_LIMIT
+    assert len(stored["conflicts"]) == limit
+    assert stored["conflicts_total"] == 120
+    assert len(stored["overlap"]) == limit
+    assert stored["overlap_total"] == 60
 
 
 def test_launch_failure_keeps_awaiting_and_releases_the_claim(w):
@@ -456,7 +541,7 @@ def test_pm_state_file_does_not_block_completion(w):
         (w.wd / "shared.txt").write_text("base\nmaster side\npr side\n")
         git(w.wd, "add", "shared.txt")
         git(w.wd, "commit", "-q", "-m", "merge base")
-    res = base_check.impl_completion(w.pm_dir, PR, pr(w), idle_since=0)
+    res = completion(w)
     assert res.complete, res.reason
 
 

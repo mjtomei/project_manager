@@ -110,10 +110,15 @@ already drops it because the status is no longer `qa`.
   and a fresh integration check is no longer a conflict. Same
   `(head, base_sha)` as the return ⇒ wait; a moved pair that still conflicts
   ⇒ one more return (bounded); `clean`/`up_to_date` ⇒ resolve and complete.
-  An idle notification alone never qualifies. The TUI runs the network check
-  in a worker thread (throttled to `BASE_CHECK_POLL_SECONDS`, keyed to the
-  return episode); the CLI passes the tracker's idle timestamp so the same
-  settle window applies.
+  The idle evidence must also **postdate the relaunch** (`launched_at`,
+  written by `clear_return_awaiting`): a killed session's last
+  `idle_prompt` — still visible through a stale `impl-<pr>.jsonl` symlink in
+  another driver's transcript dir — is not the rework session's turn, so the
+  relaunch re-points those symlinks (`_share_impl_transcript`) to keep the
+  new session trackable. An idle notification alone never qualifies. The TUI
+  runs the network check in a worker thread (throttled to
+  `BASE_CHECK_POLL_SECONDS`, keyed to the return episode); the CLI passes the
+  tracker's idle timestamp so the same settle window applies.
 - **R7 — Idempotent / single owner.** The return is created at most once per
   open episode and never twice for the same unresolved `(head, base_sha)`
   pair (second gate ⇒ `wait`, no new return, no launch). `launch_claim`
@@ -149,7 +154,11 @@ already drops it because the status is no longer `qa`.
   `running: implementation (<why>)`). It relaunches impl for a base
   `awaiting == "impl"` return via `claim_impl_launch`, mirroring the
   sign-off return catch-up. A hidden `--skip-base-check` flag on
-  `pr_review` avoids a double fetch from this in-process path.
+  `pr_review` avoids a double fetch from this in-process path. Its `qa`
+  branch refuses to advance a PR whose base return is still open (repairing
+  a raced `in_progress`→`qa` transition) instead of trusting a stale
+  `qa_status.json`, so a previous QA PASS cannot hand the PR to sign-off
+  beside the rework.
 - **R13 — TUI coverage.** `_start_loop` and `_auto_start_review_loops` refuse
   to start a review while a base return is open; `start_qa` /
   `_auto_start_qa_loops` / `qa-run-bg` refuse to start QA likewise;

@@ -822,6 +822,24 @@ class TestBaseGate:
         assert "advanced: in_review" in result.output
         mock_review.assert_called_once()
 
+    def test_open_base_return_blocks_a_stale_qa_pass(self, runner):
+        """A raced qa status must not hand the PR to sign-off beside rework."""
+        pr = _pr("qa", workdir="/wd", base_return=_base_return())
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=("PASS", Path("/tmp/qa.json"))), \
+             patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.base_check.ensure_impl_status") as fix, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "base_conflict" in result.output
+        mock_signoff.assert_not_called()
+        fix.assert_called_once()
+
     def test_awaiting_base_impl_relaunches(self, runner):
         pr = _pr("in_progress", workdir="/wd",
                  base_return=_base_return(awaiting="impl",

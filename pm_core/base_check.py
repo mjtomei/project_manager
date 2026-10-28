@@ -34,6 +34,8 @@ implementation writer.
 
 from __future__ import annotations
 
+import glob
+import os
 import secrets
 import subprocess
 import sys
@@ -284,6 +286,12 @@ def _add_note(pr: dict, text: str) -> None:
 
 def _new_return(record: dict, stage: str, iteration: int | None,
                 attempt: int, *, resume_loop: bool) -> dict:
+    # project.yaml is git-tracked, so keep the stored path lists bounded the
+    # way ``integration.compact`` bounds ``pr["integration"]`` and record the
+    # real length beside each one; the full list stays in integration.json.
+    compact = integration.compact(record)
+    conflicts = list(compact.get("conflicts") or [])
+    overlap = list(compact.get("overlap") or [])
     rec = {
         "verdict": VERDICT_BASE_CONFLICT,
         "stage": stage,
@@ -293,12 +301,10 @@ def _new_return(record: dict, stage: str, iteration: int | None,
         "base_branch": record.get("base_branch"),
         "target_repo": record.get("target_repo"),
         "status": record.get("status"),
-        "conflicts": list(record.get("conflicts") or []),
-        "conflicts_total": record.get("conflicts_total",
-                                      len(record.get("conflicts") or [])),
-        "overlap": list(record.get("overlap") or []),
-        "overlap_total": record.get("overlap_total",
-                                    len(record.get("overlap") or [])),
+        "conflicts": conflicts,
+        "conflicts_total": compact.get("conflicts_total", len(conflicts)),
+        "overlap": overlap,
+        "overlap_total": compact.get("overlap_total", len(overlap)),
         "reason": integration.summary(record),
         "attempt": attempt,
         "ts": _now(),
@@ -457,13 +463,20 @@ def claim_impl_launch(root: Path, pr_id: str) -> bool:
 
 
 def clear_return_awaiting(root: Path, pr_id: str) -> None:
-    """The impl session launched: stop forcing a relaunch."""
+    """The impl session launched: stop forcing a relaunch.
+
+    ``launched_at`` marks the moment the rework session started: the
+    completion check only trusts idle evidence from after it, so the killed
+    session's last ``idle_prompt`` (still visible through a stale transcript
+    symlink) can never pass for the new session's turn.
+    """
     def _apply(d):
         pr = store.get_pr(d, pr_id)
         rec = open_return(pr)
         if rec and rec.get("awaiting") == "impl":
             rec["awaiting"] = None
             rec.pop("launch_claim", None)
+            rec["launched_at"] = _now()
 
     try:
         data = store.load(root)
@@ -526,7 +539,50 @@ def launch_impl(root: Path, pr_id: str, transcript_dir: str | Path | None) -> tu
     # pr_start clears awaiting on its successful launch path; make it
     # unconditional so a fast-path return cannot strand the handshake.
     clear_return_awaiting(root, pr_id)
+    _share_impl_transcript(root, pr_id, tdir / f"impl-{pr_id}.jsonl")
     return True, ""
+
+
+def _share_impl_transcript(root: Path, pr_id: str, transcript: Path) -> None:
+    """Point every driver's ``impl-<pr>.jsonl`` at the relaunched session.
+
+    A relaunch writes its transcript symlink into one directory.  Other
+    drivers that were watching the *killed* session (the TUI run dir, the
+    auto-sequence dir) keep their own symlink, so they would read that
+    session's last ``idle_prompt`` as if the rework session were idle — and
+    never see the new session's events at all.  Refreshing them keeps the
+    relaunch trackable by whichever driver resumes the handoff.
+    """
+    try:
+        target = os.readlink(transcript)
+    except OSError:
+        return
+    base = Path(root) / "transcripts"
+    if not base.is_dir():
+        return
+    name = f"impl-{pr_id}.jsonl"
+    # Every pm transcript dir is ``transcripts/<run>/`` (TUI run dir) or
+    # ``transcripts/auto-sequence/<pr>/`` (CLI driver).  Scan those two
+    # depths explicitly: no unbounded recursion (and no symlink-loop risk),
+    # and ``glob`` matches a link whose target is gone where ``rglob``
+    # (which only yields files) would skip it.
+    links: list[Path] = []
+    for pattern in (f"*/{name}", f"*/*/{name}"):
+        try:
+            links.extend(Path(p) for p in glob.glob(str(base / pattern)))
+        except OSError:  # pragma: no cover - best effort
+            continue
+    for p in links:
+        if p == transcript:
+            continue
+        try:
+            if p.is_symlink() and os.readlink(p) == target:
+                continue
+            if p.is_symlink() or p.exists():
+                p.unlink()
+            p.symlink_to(target)
+        except OSError as e:  # pragma: no cover - best effort
+            _log.debug("base_check: refreshing %s failed: %s", p, e)
 
 
 # --- the check -------------------------------------------------------------
@@ -717,8 +773,17 @@ def gate(root: Path, pr_id: str, stage: str, *,
                 root, pr_id, record, stage, iteration=iteration,
                 resume_loop=resume_loop, supersede=open_rec is not None)
             if rec is None:
-                # Another driver won the return (or the PR moved on).
-                return _wait("base integration return already recorded")
+                # Either another driver won the return or the PR left the
+                # phase between the check and the write.  Refuse the writer
+                # either way, but say which so the log is not misleading.
+                try:
+                    now_pr = store.get_pr(store.load(root), pr_id)
+                except Exception:  # pragma: no cover - best effort
+                    now_pr = None
+                if open_return(now_pr) is not None:
+                    return _wait("base integration return already recorded")
+                return _wait("the PR left the review/QA phase before the "
+                             "return was recorded")
             launched = False
             if not rec.get("needs_human"):
                 launched, _detail = launch_impl(
@@ -796,6 +861,16 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
         workdir = pr.get("workdir")
         if not workdir or not Path(workdir).is_dir():
             return CompletionResult(False, "no PR workdir")
+        launched = _parse_ts(rec.get("launched_at") or rec.get("ts"))
+        if idle_since is not None and launched is not None \
+                and float(idle_since) < launched.timestamp():
+            # The idle event predates the relaunch: it belongs to the session
+            # this return killed (a stale transcript symlink still points at
+            # it), so it says nothing about the rework.  Without this an
+            # idle notification from before the rework qualifies as
+            # completion and a reviewer could start beside the new writer.
+            return CompletionResult(
+                False, "no idle evidence from the rework session yet")
         if idle_since is not None and (
                 time.time() - float(idle_since) < IDLE_SETTLE_SECONDS):
             return CompletionResult(
@@ -922,16 +997,3 @@ def format_return(pr: dict) -> str:
         "When this step completes, pm re-checks the base and only then "
         "resumes review/QA.")
     return "\n".join(lines) + "\n"
-
-
-def summary(pr: dict) -> str:
-    """One-line human summary of the PR's base return (empty when none)."""
-    rec = last_return(pr)
-    if not rec:
-        return ""
-    head = (rec.get("head") or "?")[:12]
-    base = (rec.get("base_sha") or "?")[:12]
-    state = "resolved" if rec.get("resolved_at") else "open"
-    return (f"{rec.get('verdict')} ({state}): HEAD {head} vs "
-            f"{rec.get('base_branch') or 'base'}@{base}, "
-            f"{len(rec.get('conflicts') or [])} conflict path(s)")

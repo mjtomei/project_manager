@@ -3677,27 +3677,42 @@ def _retire_signoff_window(session: str, pr_entry: dict, tdir: Path) -> None:
     signoff_mod.retire_signoff_run(session, pr_entry, tdir)
 
 
+def _impl_idle_tracker(pr_entry: dict, tdir: Path, pane_id: str):
+    """Register+poll the impl pane once; ``(tracker, pr_id)`` or None.
+
+    Both idle readers below need the same registration (hook events are keyed
+    by the session id recovered from the transcript symlink); they only differ
+    in what they read back.  None means "nothing to read yet" — no transcript
+    symlink (the session never launched) or no recoverable session id.
+    """
+    from pm_core.pane_idle import PaneIdleTracker
+
+    pr_id = pr_entry["id"]
+    transcript = tdir / f"impl-{pr_id}.jsonl"
+    if not transcript.exists():
+        return None
+    tracker = PaneIdleTracker()
+    try:
+        tracker.register(pr_id, pane_id, str(transcript))
+    except ValueError:
+        return None
+    tracker.poll(pr_id)
+    return tracker, pr_id
+
+
 def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bool]:
     """Return (idle, gone): polls the impl pane via PaneIdleTracker.
 
     *idle* is True when the Claude session has emitted ``idle_prompt``.
     *gone* is True when the tmux pane disappeared.
     """
-    from pm_core.pane_idle import PaneIdleTracker
-
-    pr_id = pr_entry["id"]
     pane_id = _impl_window_pane(session, pr_entry)
     if not pane_id:
         return False, True
-    transcript = tdir / f"impl-{pr_id}.jsonl"
-    if not transcript.exists():
+    polled = _impl_idle_tracker(pr_entry, tdir, pane_id)
+    if polled is None:
         return False, False
-    tracker = PaneIdleTracker()
-    try:
-        tracker.register(pr_id, pane_id, str(transcript))
-    except ValueError:
-        return False, False
-    tracker.poll(pr_id)
+    tracker, pr_id = polled
     return tracker.is_idle(pr_id), tracker.is_gone(pr_id)
 
 
@@ -3709,21 +3724,13 @@ def _impl_idle_since(session: str, pr_entry: dict, tdir: Path) -> float | None:
     running.  Kept separate from :func:`_check_impl_idle` so its patch point
     (and two-value contract) is unchanged.
     """
-    from pm_core.pane_idle import PaneIdleTracker
-
-    pr_id = pr_entry["id"]
     pane_id = _impl_window_pane(session, pr_entry)
     if not pane_id:
         return None
-    transcript = tdir / f"impl-{pr_id}.jsonl"
-    if not transcript.exists():
+    polled = _impl_idle_tracker(pr_entry, tdir, pane_id)
+    if polled is None:
         return None
-    tracker = PaneIdleTracker()
-    try:
-        tracker.register(pr_id, pane_id, str(transcript))
-    except ValueError:
-        return None
-    tracker.poll(pr_id)
+    tracker, pr_id = polled
     return tracker.idle_since(pr_id)
 
 
@@ -3992,6 +3999,16 @@ def pr_auto_sequence(pr_id: str):
         return
 
     if status == "qa":
+        if base_return is not None:
+            # A raced transition into qa must not advance a PR its base
+            # return owns: a stale qa_status.json would otherwise hand the
+            # PR to sign-off (a second writer) beside the rework.  Keep the
+            # status in_progress, as the gates do.
+            base_check.ensure_impl_status(root, pr_id)
+            click.echo(
+                f"base_conflict: "
+                f"{base_return.get('reason') or 'base rework pending'}")
+            return
         overall, _path = _qa_status_for(pr_id)
         if overall and _older_than(_path,
                                    (open_return(pr_entry) or {}).get("ts")):

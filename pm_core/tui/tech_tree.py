@@ -43,6 +43,9 @@ VERDICT_MARKERS = {
     "TIMEOUT": "⏱",
     "ERROR": "!",
     "INPUT_REQUIRED": "⏸",
+    # The review loop routed the PR back to implementation before any
+    # reviewer ran (base integration conflict) — not a failed review.
+    "BASE_CONFLICT": "⇤",
 }
 
 VERDICT_STYLES = {
@@ -52,6 +55,7 @@ VERDICT_STYLES = {
     "TIMEOUT": "bold red",
     "ERROR": "bold red",
     "INPUT_REQUIRED": "bold red",
+    "BASE_CONFLICT": "bold yellow",
 }
 
 # Sign-off verdict markers/styles live in pm_core.signoff (single source of
