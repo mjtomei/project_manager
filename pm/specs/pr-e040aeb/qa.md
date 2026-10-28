@@ -331,3 +331,46 @@ New regression tests (fail on the pre-fix tree):
 Also re-verify on the live surface the earlier `f076 i1` item 2: a TUI restart
 mid-retry must not re-announce a retry notice the user already saw
 (`_ui_notified_retry` round-trips through the breadcrumb).
+
+## Post-QA fixes to verify (scenario 8–9, from the second QA pass)
+
+The second QA pass produced these behaviour/log fixes; scenarios must verify
+them on the live surfaces.
+
+1. **Every retry attempt is announced, including the final one.** The retry
+   notice is keyed on the *upcoming* attempt while the loop waits out its
+   backoff (`next_retry_at` in the future), so an attempt that starts and dies
+   inside one poll tick is still announced; each attempt is announced exactly
+   once across restarts and across re-armed episodes. A retryable per-attempt
+   failure logs `launch failed (rc=…)` at WARNING; ERROR is reserved for an
+   auth failure or for giving up.
+2. **The auto-start re-arm is visible.** `Auto-start: retrying review launch
+   for <pr>` is held long enough not to be replaced in the same tick by
+   `Review loop resumed …` (which `_start_loop` logs right after).
+3. **The review-window replacement is visible in the log.** On the loop path
+   the replacement happens inside the launch child (`pm pr review --fresh`),
+   whose stdout is discarded on success; the child's `Killed existing review
+   window '<name>'` / `Switched to existing review window '<name>'` notices
+   are mirrored into the debug log, so `pm log show` contains the line. It
+   appears just *after* `Review loop started`, not before.
+
+Note for test runs:
+`tests/test_review_launch_retry.py::test_old_window_then_container_failure_retries_the_same_command`
+patches the process-wide `subprocess.run`; run the suites from a shell that is
+not inside a tmux pane, or an ambient `tmux display-message` lookup can consume
+the "first call fails" slot.
+
+## Known residuals (record as evidence, do not fail a scenario)
+
+- A second TUI on the same project stands down as a non-retryable
+  `LAUNCH_FAILED` ("needs attention") rather than adopting the first loop's
+  review; the first loop must be unharmed.
+- A merge restart during the post-exhaustion re-arm *cooldown* does not persist
+  the loop (`save_breadcrumb` saves only running loops): auto-start starts a
+  fresh loop instead. The review still runs and no verdict is fabricated; only
+  loop history/iteration numbering restarts.
+- A stop (`z d` / `zz d`) landing inside the launch child subprocess is not
+  noticed until the child returns; the old loop then bows out at its next
+  checkpoint (its lease is already released).
+- Discovery may adopt a transcript verdict without an idle hook event
+  (documented design choice).
