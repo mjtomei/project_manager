@@ -11550,6 +11550,33 @@ prs:
       breaks pm qa debug ("No pm session found") - export TMUX there. Captures /pm-captures/scenarios/82.'
     created_at: '2026-10-28T03:21:45Z'
     last_edited: '2026-10-28T03:21:45Z'
+  - id: note-35d3273
+    text: 'Refine S87 @17e68cc3: (1) a refused SIGNOFF_IMPL bounce is never retried
+      automatically in the TUI (no periodic check_and_start); a retry needs a nudge
+      (pm autostart add <B1> re-arm -> claim held -> 185 s recheck timer -> one --fresh
+      retry). (2) pm pr start --fresh on a LIVE impl window kills it (EXIT trap podman
+      rm -f, ~10 s stop for sleep-infinity PID1) but, unlike _launch_review_window,
+      never removes the container synchronously: wrap_claude_cmd may "Reuse running
+      container" (old id, no admission) and the trap then kills the new session. (3)
+      Use target 1m for refusals: fake-claude samples can sit under 1G so 1g may admit.'
+    created_at: '2026-10-28T02:53:28Z'
+    last_edited: '2026-10-28T02:53:28Z'
+  - id: note-c9559b6
+    text: 'QA S87 (2026-10-28, 17e68cc3, nested rootless podman, fake-claude): all
+      5 stories PASS live, no code change. z d / zz d at 1m on a stop-on-idle review
+      window: single-container refusal + loop ERROR (only traceback), Blocked bar/status,
+      no container, window @5 + both panes unchanged, cmp 0; 40g zz d: Created ->
+      kill_window -> new_window_get_pane, loop PASS, removed with new ID. SIGNOFF_IMPL
+      bounce at 1m: 2 refused pr start (hop +1 s, recheck exactly 185 s after the
+      claimed re-arm), dead impl window @7/%9 unchanged in 40 samples, cmp 0, awaiting
+      impl kept; 40g: no relaunch in 200 s (no timer after a claimed retry), pm autostart
+      add nudge launched it (Created -> kill -> new_window -> succeeded), awaiting
+      null, no further start in 60 s. pr start --fresh on a live L1 window: kill_window
+      first, synchronous remove_container, new ID, pane live 30 s later. Spec nits:
+      grep -A12 signoff_return does not reach awaiting (integration block); review
+      logs new_window_get_pane. Captures /pm-captures/scenarios/87.'
+    created_at: '2026-10-28T03:16:42Z'
+    last_edited: '2026-10-28T03:16:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
