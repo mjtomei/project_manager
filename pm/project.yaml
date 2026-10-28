@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T08:12:00.370907+00:00'
+  updated_at: '2026-10-28T08:56:38.142524+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32362,6 +32362,28 @@ prs:
       File 31 pass (3 runs); related suites 305 pass. No pm_core/ change. (2026-10-28)'
     created_at: '2026-10-28T08:12:00Z'
     last_edited: '2026-10-28T08:12:00Z'
+  - id: note-213623e
+    text: 'Review loop 419c i4: one stale-evidence hole left in the kept recipe scope.
+      The web-UI recipe cleared only the previous run''s webm/mp4 before the Playwright
+      driver, so a driver that dies at the first locator (writing no trace/screenshots/DOM
+      dump this run) left the earlier run''s trace.zip, *.png screenshots and dom.html
+      in the capture directory, which the manifest and report present as this run''s
+      evidence — the same stale-artifact bug as the webm, one artifact class over.
+      The pre-driver cleanup now removes all of them, and the *.png glob carries the
+      `${CAPDIR:?}` guard (with CAPDIR unset the unguarded glob expands against the
+      filesystem root; verified the guard aborts before rm runs and that a set CAPDIR
+      clears all six outputs). test_web_ui_clears_a_previous_video asserts each artifact,
+      the order (before the app starts) and the guard, and fails against the previous
+      recipe. impl.md R7/R8/Files and the qa.md edge case updated. Re-verified live
+      in this container (tmux 3.2a, asciinema 2.1.0): the CLI no-TTY scaffold nominal/interactive
+      path (rc 0, cast holds the driven output), the quiet one-shot early-exit path
+      (readiness ends on session gone, cast check passes), the long-command stop bound
+      (fails at the raisable deadline with its message), and the tmux recipe nominal
+      detach plus mid-scenario recorder kill (fails with "recorder exited while the
+      TUI was still running"). Full suite 3886 passed, 1 skipped, 92 deselected (test_merge_publish/test_signoff_integration
+      — push proxy rejects pushes to master).'
+    created_at: '2026-10-28T08:56:24Z'
+    last_edited: '2026-10-28T08:56:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
