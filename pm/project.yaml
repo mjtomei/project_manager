@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T14:17:46.724158+00:00'
+  updated_at: '2026-10-28T14:46:27.089662+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35828,6 +35828,21 @@ prs:
       symptoms reproduce pre-fix).'
     created_at: '2026-10-28T14:17:46Z'
     last_edited: '2026-10-28T14:17:46Z'
+  - id: note-eca2da0
+    text: 'Review-loop i1 (94dc): closed a spec-R2 gap — the TUI auto-start watcher
+      shares the run dir with auto-start review loops, so watcher completion (and
+      `_disable`, which finalizes before stopping the watcher) could freeze a loop
+      still polling. Both sweeps now go through `finalize_transcript_dir(dir, skip=...)`
+      with `auto_start._live_transcript_skip(app)`, which also treats running watcher
+      loops as live and reuses `autostart_state._window_names` instead of duplicating
+      window names. Also: `session_id_from_transcript` now reuses `_session_id_of_path`;
+      the archive-failure fallback unlinks with missing_ok. Tests 18 (archive) + 1
+      (review_loop): fixed `test_disable_skips_a_running_review_loop` which wrote
+      into a directory the sweep never visited (vacuously passing), added watcher-completion,
+      running-watcher and step-window coverage, and a loop-scoped-launch/session-recording
+      test.'
+    created_at: '2026-10-28T14:46:27Z'
+    last_edited: '2026-10-28T14:46:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high

@@ -95,9 +95,11 @@ Required behaviour:
   each iteration when available.
 - The bulk sweeps (`_finalize_all_transcripts`, watcher completion) skip
   transcripts whose session is still live: running review loops
-  (`app._review_loops[pr].running`) and live impl/review/signoff/merge
-  tmux windows. A disable must not freeze a collector that is still
-  polling.
+  (`app._review_loops[pr].running`), running watcher loops
+  (`app._watcher_manager.list_watchers()`), and live
+  impl/review/signoff/merge tmux windows. A disable must not freeze a
+  collector that is still polling.  This matters because the TUI
+  auto-start watcher and the review loops share one run directory.
 - `_finalize_all_transcripts` also finalizes symlinks already sitting in
   `archive/` so archived sessions survive Claude transcript pruning.
 
@@ -189,12 +191,17 @@ available in the run dir:
   - `sid = _session_id_from_target(target)`;
   - `if session_id and sid and sid != session_id: return False`;
   - `if not target.exists(): return False`;
-  - write/refresh the immutable archive entry (copy) via a shared helper;
+  - write/refresh the immutable archive entry (copy) via a shared helper
+    (`_freeze_archive_copy`: copy beside the entry, then `os.replace`, so
+    a crash can never leave the archive without a session copy);
   - re-read `os.readlink(path)`; if it != `raw`, return `False`;
   - `unlink` + `shutil.copy2(target, path)` (existing behaviour);
   - return `True`.
-- Add `finalize_transcript_dir(directory) -> int`: finalize every
-  top-level `*.jsonl` symlink and every `archive/*.jsonl` symlink.
+- Add `finalize_transcript_dir(directory, *, skip=None) -> int`: finalize
+  every top-level `*.jsonl` symlink and every `archive/*.jsonl` symlink.
+  `skip` is an optional predicate on a file name; a name it accepts is
+  left live (its session may still be writing).  Archive entries are
+  never skipped.
 
 ### `pm_core/review_loop.py`
 
@@ -222,13 +229,24 @@ available in the run dir:
 
 ### `pm_core/tui/auto_start.py`
 
-- `_finalize_all_transcripts`: use `finalize_transcript_dir` for
-  non-live transcripts; skip a path if its review loop is running or its
-  impl/review/signoff/merge window still exists.
+- `_live_transcript_owners(app)` returns `(exact_names, prefixes)` of
+  transcripts whose session may still be writing: every
+  `review-<pr>-<loop_id>-i*` of a running review loop, every
+  `<watcher-type>-i*` of a running watcher loop, and the canonical path
+  of each live impl/review/sign-off/merge window (window names come from
+  `autostart_state._window_names`).
+- `_live_transcript_skip(app)` wraps that as the `skip` predicate.
+- `_finalize_all_transcripts`: call
+  `finalize_transcript_dir(tdir, skip=_live_transcript_skip(app))`.
 
 ### `pm_core/tui/watcher_ui.py`, `pm_core/cli/watcher.py`
 
 - Use `finalize_transcript_dir` (includes `archive/`).
+- The TUI auto-start watcher shares its run directory with the
+  auto-start review loops, so its completion sweep must pass the same
+  `skip` predicate; otherwise a completing watcher freezes a loop that is
+  still polling (the 2026-10-28 failure mode).  The CLI watcher uses a
+  private `watcher-<token>` directory and needs no skip.
 
 ## Ambiguities (resolved)
 
@@ -284,10 +302,11 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests in `tests/test_transcript_archive.py` covering:
+- New unit tests (18) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
-  retire preserving history, live-appends visibility, and restart
-  fallback.
+  retire preserving history, live-appends visibility, restart fallback,
+  and the live-owner skips (running review loop, running watcher, live
+  step windows) for both bulk sweeps.
 - Regression run of `tests/test_review_loop.py`,
   `tests/test_signoff.py`, `tests/test_signoff_integration.py`,
   `tests/test_workspace_trust.py`, `tests/test_tui_signoff_handoff.py`,

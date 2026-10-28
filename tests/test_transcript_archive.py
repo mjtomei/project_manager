@@ -280,9 +280,14 @@ def test_disable_skips_a_running_review_loop(env):
 
     state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa", running=True)
     app = _fake_app(env, loops={"pr-abc": state})
+    tdir = auto_start.get_transcript_dir(app)
+    tdir.mkdir(parents=True)
     live = _native(env.cwd, _sid(), "STILL RUNNING")
-    p = Path(rl.iteration_transcript(env.run, "pr-abc", "aaaa", 1))
+    p = Path(rl.iteration_transcript(tdir, "pr-abc", "aaaa", 1))
     _link(p, live)
+    # An idle sibling proves the sweep actually ran over this directory.
+    idle = tdir / "impl-pr-abc.jsonl"
+    _link(idle, _native(env.cwd, _sid(), "IDLE"))
 
     auto_start._finalize_all_transcripts(app)
 
@@ -290,6 +295,79 @@ def test_disable_skips_a_running_review_loop(env):
     with live.open("a") as f:
         f.write(_record("NEEDS_WORK") + "\n")
     assert "NEEDS_WORK" in p.read_text()
+    assert idle.is_file() and not idle.is_symlink()
+
+
+def test_disable_skips_a_running_watcher_transcript(env):
+    """`_disable` finalizes before stopping the watcher, so the watcher's
+    in-flight transcript must be treated as live."""
+    from pm_core.tui import auto_start
+
+    class _Manager:
+        def list_watchers(self):
+            return [{"id": "auto-start-abcd", "type": "auto-start",
+                     "running": True}]
+
+    app = _fake_app(env)
+    app._watcher_manager = _Manager()
+    tdir = auto_start.get_transcript_dir(app)
+    tdir.mkdir(parents=True)
+    live = _native(env.cwd, _sid(), "WATCHER ITERATION")
+    p = tdir / "auto-start-i3.jsonl"
+    _link(p, live)
+    idle = tdir / "impl-pr-abc.jsonl"
+    _link(idle, _native(env.cwd, _sid(), "IDLE"))
+
+    auto_start._finalize_all_transcripts(app)
+
+    assert p.is_symlink()
+    with live.open("a") as f:
+        f.write(_record("READY") + "\n")
+    assert "READY" in p.read_text()
+    assert idle.is_file() and not idle.is_symlink()
+
+
+def test_watcher_completion_skips_a_live_review_loop(env):
+    """The auto-start watcher shares its run dir with auto-start review
+    loops; a completing watcher must not freeze a loop still polling."""
+    from pm_core.tui import watcher_ui
+
+    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa", running=True)
+    app = _fake_app(env, loops={"pr-abc": state})
+    tdir = env.run
+    live = _native(env.cwd, _sid(), "LOOP STILL RUNNING")
+    p = Path(rl.iteration_transcript(tdir, "pr-abc", "aaaa", 1))
+    _link(p, live)
+    idle = tdir / "auto-start-i2.jsonl"
+    _link(idle, _native(env.cwd, _sid(), "WATCHER DONE"))
+
+    watcher_ui._on_complete_from_thread(
+        app, types.SimpleNamespace(_transcript_dir=str(tdir),
+                                   latest_verdict="READY", iteration=2))
+
+    assert p.is_symlink()
+    with live.open("a") as f:
+        f.write(_record("NEEDS_WORK") + "\n")
+    assert "NEEDS_WORK" in p.read_text()
+    assert idle.is_file() and not idle.is_symlink()
+
+
+def test_live_owners_follow_step_windows(env, monkeypatch):
+    """A live step window marks that step's canonical transcript live."""
+    from pm_core import tmux as tmux_mod
+    from pm_core.tui import auto_start
+
+    app = _fake_app(env, session="pm-x", prs=[
+        {"id": "pr-abc", "gh_pr_number": 241},
+    ])
+    monkeypatch.setattr(tmux_mod, "list_windows",
+                        lambda session: [{"name": "#241"},
+                                         {"name": "signoff-#241"}])
+    exact, prefixes = auto_start._live_transcript_owners(app)
+    assert "impl-pr-abc.jsonl" in exact
+    assert "signoff-pr-abc.jsonl" in exact
+    assert "review-pr-abc.jsonl" not in exact
+    assert prefixes == set()
 
 
 def test_disable_finalizes_idle_transcripts_and_archives(env):

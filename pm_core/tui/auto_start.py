@@ -36,7 +36,7 @@ from pm_core.paths import configure_logger, pm_home
 from pm_core import store, graph
 from pm_core import autostart_state
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
+    POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY, _window_names,
 )
 from pm_core.tui._shell import _run_shell_async
 
@@ -373,19 +373,27 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
     """Transcript names/prefixes whose session may still be writing.
 
     Returns ``(exact_names, prefixes)``.  A running review loop owns every
-    ``review-<pr>-<loop_id>-i*`` path; a live impl/review/sign-off/merge
-    tmux window owns the canonical path of that step.
+    ``review-<pr>-<loop_id>-i*`` path; a running watcher loop owns its
+    ``<watcher-type>-i*`` paths; a live impl/review/sign-off/merge tmux
+    window owns the canonical path of that step.
     """
     exact: set[str] = set()
     prefixes: set[str] = set()
     for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
         if getattr(state, "running", False):
-            prefixes.add(f"review-{pr_id}-{state.loop_id}-i")
+            prefixes.add(f"review-{pr_id}-{getattr(state, 'loop_id', '')}-i")
+    manager = getattr(app, "_watcher_manager", None)
+    if manager is not None:
+        try:
+            for info in manager.list_watchers():
+                if info.get("running") and info.get("type"):
+                    prefixes.add(f"{info['type']}-i")
+        except Exception:
+            _log.debug("auto_start: list_watchers failed", exc_info=True)
     session = getattr(app, "_session_name", None)
     prs = (getattr(app, "_data", None) or {}).get("prs") or []
     if session:
         from pm_core import tmux as tmux_mod
-        from pm_core.cli.helpers import _pr_display_id
         try:
             windows = {w["name"] for w in tmux_mod.list_windows(session)}
         except Exception:
@@ -395,46 +403,47 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
             pr_id = pr.get("id")
             if not pr_id:
                 continue
-            disp = _pr_display_id(pr)
+            names = _window_names(pr)
             for window, name in (
-                (disp, f"impl-{pr_id}.jsonl"),
-                (f"review-{disp}", f"review-{pr_id}.jsonl"),
-                (f"signoff-{disp}", f"signoff-{pr_id}.jsonl"),
-                (f"merge-{disp}", f"merge-{pr_id}.jsonl"),
+                (names["implementation"], f"impl-{pr_id}.jsonl"),
+                (names["review"], f"review-{pr_id}.jsonl"),
+                (names["sign_off"], f"signoff-{pr_id}.jsonl"),
+                (names["merge"], f"merge-{pr_id}.jsonl"),
             ):
                 if window in windows:
                     exact.add(name)
     return exact, prefixes
 
 
-def _finalize_all_transcripts(app) -> None:
-    """Finalize transcript symlinks in the current run directory.
+def _live_transcript_skip(app):
+    """Predicate: True when a transcript's session may still be writing.
 
-    Skips transcripts whose session is still live — a running review loop
-    or an existing step window.  Freezing a live collector would hide the
-    verdict the session appends later (pr-9ee4d64).  Symlinks already in
-    the run archive are finalized too, so superseded attempts survive
-    Claude transcript pruning.
+    Passed to :func:`pm_core.claude_launcher.finalize_transcript_dir` so a
+    bulk finalize never freezes a collector that is still polling
+    (pr-9ee4d64).
     """
-    tdir = get_transcript_dir(app)
-    if not tdir or not tdir.is_dir():
-        return
-    from pm_core.claude_launcher import (
-        TRANSCRIPT_ARCHIVE_DIR, finalize_transcript,
-    )
     exact, prefixes = _live_transcript_owners(app)
 
     def _live(name: str) -> bool:
         return name in exact or any(name.startswith(p) for p in prefixes)
 
-    for p in tdir.iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl" and not _live(p.name):
-            finalize_transcript(p)
-    adir = tdir / TRANSCRIPT_ARCHIVE_DIR
-    if adir.is_dir():
-        for p in adir.iterdir():
-            if p.is_symlink() and p.suffix == ".jsonl":
-                finalize_transcript(p)
+    return _live
+
+
+def _finalize_all_transcripts(app) -> None:
+    """Finalize transcript symlinks in the current run directory.
+
+    Skips transcripts whose session is still live — a running review loop,
+    a running watcher loop, or an existing step window.  Freezing a live
+    collector would hide the verdict the session appends later
+    (pr-9ee4d64).  Symlinks already in the run archive are finalized too,
+    so superseded attempts survive Claude transcript pruning.
+    """
+    tdir = get_transcript_dir(app)
+    if not tdir or not tdir.is_dir():
+        return
+    from pm_core.claude_launcher import finalize_transcript_dir
+    finalize_transcript_dir(tdir, skip=_live_transcript_skip(app))
 
 
 def _disable(app) -> None:

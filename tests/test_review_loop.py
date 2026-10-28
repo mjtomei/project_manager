@@ -289,6 +289,32 @@ class TestRunReviewLoopSync:
         assert result.latest_verdict == VERDICT_NEEDS_WORK
 
     @patch("pm_core.review_loop._run_claude_review")
+    def test_launches_loop_scoped_transcript_and_records_session(
+            self, mock_review, tmp_path):
+        """Iteration transcripts are loop-scoped and their session is recorded
+        so completion can finalize with an ownership check (pr-9ee4d64)."""
+        from pathlib import Path
+
+        sid = "11111111-1111-4111-8111-111111111111"
+        native = tmp_path / f"{sid}.jsonl"
+        native.write_text("")
+
+        def fake_launch(pr_id, pm_root, pr_data, *, iteration, loop_id,
+                        transcript):
+            Path(transcript).parent.mkdir(parents=True, exist_ok=True)
+            Path(transcript).symlink_to(native)
+            return "**PASS**"
+
+        mock_review.side_effect = fake_launch
+        state = ReviewLoopState(pr_id="pr-001")
+        run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=str(tmp_path))
+
+        launched = mock_review.call_args.kwargs["transcript"]
+        assert launched == str(
+            tmp_path / f"review-pr-001-{state.loop_id}-i1.jsonl")
+        assert state.iteration_sessions == {1: sid}
+
+    @patch("pm_core.review_loop._run_claude_review")
     def test_calls_on_iteration_callback(self, mock_review):
         mock_review.return_value = "**PASS**"
         callback = MagicMock()

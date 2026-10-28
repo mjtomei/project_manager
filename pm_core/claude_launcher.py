@@ -13,6 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
@@ -943,7 +944,10 @@ def build_claude_shell_cmd(
         # blocked by it.
         if transcript_path.is_symlink() or transcript_path.exists():
             if archive_transcript(transcript_path) is None:
-                transcript_path.unlink()
+                # Archiving failed (e.g. the archive dir is unwritable).
+                # Prefer launching over stalling the workflow; the native
+                # JSONL still exists under ~/.claude/projects.
+                transcript_path.unlink(missing_ok=True)
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
@@ -1080,13 +1084,7 @@ def session_id_from_transcript(transcript_path: str | Path) -> str | None:
         # has not yet opened.
     except OSError:
         return None
-    name = target.name
-    if name.endswith(".jsonl"):
-        name = name[:-6]
-    # Basic sanity check — session ids are UUIDs (32 hex + 4 dashes = 36 chars)
-    if len(name) == 36 and name.count("-") == 4:
-        return name
-    return None
+    return _session_id_of_path(target)
 
 
 def transcript_path_for(cwd: str, session_id: str) -> Path:
@@ -1289,13 +1287,22 @@ def _freeze_archive_copy(p: Path, raw: str, target: Path,
                 same = os.readlink(dest) == raw
             except OSError:
                 same = False
-            if same:
-                dest.unlink()
-                shutil.copy2(target, dest)
+            if not same:
+                # Another session's immutable entry; never touch it.
+                return dest
+        elif dest.exists():
             return dest
-        if dest.exists():
-            return dest
-        shutil.copy2(target, dest)
+        # Write beside the entry and replace atomically, so a crash can
+        # never leave the archive without a copy of a session.
+        tmp = adir / f".{dest.name}.tmp-{os.getpid()}"
+        try:
+            shutil.copy2(target, tmp)
+            os.replace(tmp, dest)
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
         return dest
     except OSError as e:
         _log.warning("transcript: archive copy of %s failed: %s", p, e)
@@ -1395,29 +1402,36 @@ def finalize_transcript(transcript_path: Path,
     return True
 
 
-def finalize_transcript_dir(directory: str | Path) -> int:
+def finalize_transcript_dir(directory: str | Path, *,
+                            skip: Callable[[str], bool] | None = None) -> int:
     """Finalize every transcript symlink in *directory* and its archive.
 
     Returns the number of links frozen.  Archives are included so the
     per-attempt sessions kept by :func:`archive_transcript` also survive
     Claude transcript pruning.
+
+    *skip* is a predicate on a file name: a transcript whose session may
+    still be writing (a running loop or an existing step window) must be
+    left live, otherwise its collector polls a frozen copy and never sees
+    the verdict appended later (pr-9ee4d64).  Archive entries are never
+    skipped — they are immutable snapshots of superseded attempts.
     """
     d = Path(directory)
     if not d.is_dir():
         return 0
-    links: list[Path] = []
-    try:
-        links.extend(p for p in d.iterdir()
-                     if p.is_symlink() and p.suffix == ".jsonl")
-    except OSError:
-        pass
+
+    def _links_in(directory: Path) -> list[Path]:
+        try:
+            return [p for p in directory.iterdir()
+                    if p.is_symlink() and p.suffix == ".jsonl"]
+        except OSError:
+            return []
+
+    links = [p for p in _links_in(d)
+             if not (skip is not None and skip(p.name))]
     adir = d / TRANSCRIPT_ARCHIVE_DIR
     if adir.is_dir():
-        try:
-            links.extend(p for p in adir.iterdir()
-                         if p.is_symlink() and p.suffix == ".jsonl")
-        except OSError:
-            pass
+        links.extend(_links_in(adir))
     return sum(1 for p in links if finalize_transcript(p))
 
 
