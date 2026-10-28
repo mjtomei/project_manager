@@ -14827,6 +14827,30 @@ prs:
       (use grep -a); pm pr signoff needs a shell inside the pm tmux session.'
     created_at: '2026-10-28T03:22:48Z'
     last_edited: '2026-10-28T03:22:48Z'
+  - id: note-9b79f24
+    text: 'Refine S63 (025c8d53 rerun): a periodic/startup pass that gives up on a
+      busy reaper.lock is SILENT (Outcome.skipped -> no reconcile[...] debug line,
+      no TUI message, no reaper-*.json record); prove skip vs wait by timing of reconcile[periodic]
+      / Last cleanup (periodic) + podman-shim calls from the TUI pid. Inventory ps
+      timeout is 30 s and inspect 60 s, so a >60 s hold needs chained gates (ps name,
+      ps label, inspect). S57 drivers in /pm-captures/scenarios/57/setup hardcode
+      /scratch/s57.'
+    created_at: '2026-10-28T01:55:39Z'
+    last_edited: '2026-10-28T01:55:39Z'
+  - id: note-57ba583
+    text: 'QA S63 PASS (07b77965 incl. 025c8d53; real rootless Podman 3.4.4, TUI pid-keyed
+      calls.jsonl; evidence /pm-captures/scenarios/63/README.md). S1: gated reap --pr
+      B held reaper.lock 02:10:44-02:11:09 across tick 02:10:59; 0 TUI calls until
+      release, TUI inventory 0.05 s after manual finished, reconcile[periodic] removed
+      orphan 02:11:12. S2: 3 gates held 02:20:49-02:22:20 (tick+81); periodic gave
+      up silently (0 TUI calls to next tick), manual rc=0 failed 0, orphan reclaimed
+      at tick+600 (02:31:01). S3: pm tui restart during held lock -> same-pid mount,
+      nav in 2 s, startup skipped (0 calls), next periodic T0+600 removed orphan.
+      TUI nav/r/pm tui view <0.2 s throughout. Filed pr-fa5bb86 (ERROR log for expected
+      post-rm inspect rc=125). Fixture trap: background-task exit killed a nested
+      build-base; use setsid nohup.'
+    created_at: '2026-10-28T02:46:54Z'
+    last_edited: '2026-10-28T02:46:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -34996,6 +35020,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:21:38.022054+00:00'
   updated_at: '2026-10-28T03:21:38.022054+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-fa5bb86
+  plan: bugs
+  title: 'Bug: successful container removal logs ERROR "container runtime failed (rc=125):
+    podman inspect <id>" for the expected absence probe'
+  branch: pm/pr-fa5bb86-bug-successful-container-removal-logs-error-contai
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py _run_runtime logs every non-zero rc at ERROR,
+    including remove_container post-rm absence confirmation (inspect <id> with check=False,
+    rc=125 "no such object" is the success path). Every successful reap/periodic removal
+    therefore writes an ERROR + stderr block to ~/.pm/debug/<tag>.log (seen 3x in
+    QA S63 pr-1139060 at 02:11:11/02:31:00/02:44:14, each followed by removed=1 failures={}).
+    Repro: orphan a pm container (SIGKILL pane pgroup), wait for periodic reconcile,
+    grep ERROR in debug log. Fix idea: let callers mark expected-absence probes (e.g.
+    log_errors=False) or log at DEBUG when the caller passes check=False and handles
+    the rc.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T02:45:35.737191+00:00'
+  updated_at: '2026-10-28T02:45:35.737191+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
