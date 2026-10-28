@@ -14561,7 +14561,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T02:54:22.708062+00:00'
+  updated_at: '2026-10-28T02:57:42.274799+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15420,6 +15420,31 @@ prs:
       is not prebuilt - run pm container build-base first (~4 min). Captures: /pm-captures/scenarios/8/{registry-surfaces,pr-notes,container-proxies}.'
     created_at: '2026-10-28T02:54:22Z'
     last_edited: '2026-10-28T02:54:22Z'
+  - id: note-67f367f
+    text: 'QA S9 (2026-10-28, container mode, nested podman, real file:// upstream,
+      private PM_TMUX_SOCKET): PASS. Two PRs in one project (pr-7405909 alpha / pr-cb1fbf8
+      beta) each got a distinct workdir-keyed proxy dir /tmp/pm-push-proxy-<tag>-<prid>-<token>;
+      each proxy.json recorded its own workdir+allowed_branch with distinct pids (12984
+      vs 13984); each container mounted its own dir and git ls-remote worked from
+      both. Each push landed only its own branch (upstream tip == that container HEAD,
+      other branch unchanged). Cross-branch push from beta container onto alpha branch
+      exited 1 with the exact message "push-proxy: rejected — pushing to ''pm/pr-7405909-alpha-feature''
+      is not allowed, only ''pm/pr-cb1fbf8-beta-feature''"; neither branch moved;
+      beta proxy kept the same pid/socket and its own push then worked. Restarting
+      alpha impl window recreated its container (new Id/StartedAt) while reusing the
+      same D1 proxy (pid 12984 unchanged, proxy.json unchanged, mount source still
+      D1) and the drive pane printed "PR pr-7405909 is already in_progress, reusing
+      existing workdir."; both containers then pushed only their own branches; beta
+      container Id/StartedAt and proxy untouched. Tests: tests/test_push_proxy.py
+      + tests/test_container.py 238 passed (venv --system-site-packages, pytest<9;
+      reproduction test test_impl_and_qa_get_distinct_proxies passed). Captures: /pm-captures/scenarios/9/{story1-separate-proxies,story2-cross-branch,story3-restart-reuse}.
+      Driver caveats for a re-run: drive container pushes as podman exec $CTR bash
+      -c "cd /workspace && git push ..." (podman exec $CTR git -C /workspace push
+      bypasses the wrapper); keep the project dir name short so the socket dir keeps
+      its readable <tag>-<pr>-<token> form; pipe-pane -o with an already-open pipe
+      is a no-op, so reopen without -o for a second transcript.'
+    created_at: '2026-10-28T02:57:42Z'
+    last_edited: '2026-10-28T02:57:42Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
