@@ -325,6 +325,92 @@ class TestQA:
                                            require_status="qa")
         mock_qa.assert_not_called()
 
+    def test_a_pass_from_a_run_in_flight_at_the_bounce_does_not_advance(
+            self, runner, tmp_path):
+        """A PASS visible while the REQA obligation is still unclaimed came
+        from a run that was already in flight when sign-off bounced the PR
+        (every full-run starter clears ``awaiting`` as it starts), so it
+        verified the code sign-off judged.  Advancing would silently drop the
+        owed re-run; the tick must leave the PR at ``qa`` and start it."""
+        status_path = tmp_path / "qa_status.json"
+        status_path.write_text('{"overall": "PASS"}')   # newer than the return
+        pr = _pr("qa", signoff_return={
+            "verdict": "SIGNOFF_REQA", "hop": "qa", "awaiting": "qa",
+            "ts": "2020-01-01T00:00:00+00:00"})
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=("PASS", status_path)), \
+             patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=False), \
+             patch("pm_core.signoff.claim_return_launch",
+                   return_value=True) as mock_claim, \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa, \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: sign_off" not in result.output
+        # The finished run's window is kept for inspection; it must not be
+        # read as "a run is starting" and strand the owed re-run.
+        mock_signoff.assert_not_called()
+        mock_claim.assert_called_once_with(tmp_path, "pr-001", "qa",
+                                           require_status="qa")
+        mock_qa.assert_called_once()
+
+    def test_a_pass_from_the_owed_run_still_advances(self, runner, tmp_path):
+        """The owed run consumed ``awaiting`` as it started, so its own PASS
+        is the re-verification sign-off asked for — advance as usual."""
+        status_path = tmp_path / "qa_status.json"
+        status_path.write_text('{"overall": "PASS"}')
+        pr = _pr("qa", signoff_return={
+            "verdict": "SIGNOFF_REQA", "hop": "qa", "awaiting": None,
+            "ts": "2020-01-01T00:00:00+00:00"})
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=("PASS", status_path)), \
+             patch("pm_core.cli.pr.store.locked_update"), \
+             patch("pm_core.cli.pr.pr_signoff") as mock_signoff:
+            mock_signoff.callback = MagicMock()
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "advanced: sign_off" in result.output
+        mock_signoff.assert_called_once()
+
+    def test_the_finished_runs_window_does_not_strand_the_owed_rerun(
+            self, runner, tmp_path):
+        """A REQA bounce keeps the previous run's ``qa-<pr>`` window for
+        inspection.  With the obligation still unclaimed the window is not
+        evidence of a run starting, so the catch-up must start the owed
+        re-run rather than report "running: qa" forever (a watcher-only setup
+        has no TUI reconciler to fall back on)."""
+        pr = _pr("qa", signoff_return={
+            "verdict": "SIGNOFF_REQA", "hop": "qa", "awaiting": "qa",
+            "ts": "2020-01-01T00:00:00+00:00"})
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, None)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value={"id": "@7", "index": "3"}), \
+             patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=False), \
+             patch("pm_core.signoff.claim_return_launch",
+                   return_value=True) as mock_claim, \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "running: qa (launched)" in result.output
+        mock_claim.assert_called_once_with(tmp_path, "pr-001", "qa",
+                                           require_status="qa")
+        mock_qa.assert_called_once()
+
 
 class TestSignOff:
     def test_no_verdict_window_present_running(self, runner, tmp_path):

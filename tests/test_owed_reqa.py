@@ -484,6 +484,26 @@ def test_a_fresh_foreign_claim_blocks_until_it_expires(tmp_path):
     sq.assert_called_once_with(app, PR)
 
 
+def test_a_held_claim_is_declined_without_a_project_rewrite(tmp_path):
+    """Waiting out another driver's claim must not cost a full project.yaml
+    rewrite every ~5 s tick: ``locked_update`` saves even when its callback
+    declines, and the claim can be held for RETURN_LAUNCH_CLAIM_SECONDS."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+
+    def apply(d):
+        store.get_pr(d, PR)["signoff_return"]["launch_claim"] = {
+            "hop": "qa", "at": _now(-1)}
+    store.locked_update(root, apply)
+
+    with _driven(False), \
+         patch.object(store, "save") as save, \
+         patch.object(qa_loop_ui, "start_qa") as sq:
+        qa_loop_ui.reconcile_owed_reqa(app)
+    sq.assert_not_called()
+    save.assert_not_called()
+
+
 def test_two_tuis_start_the_owed_qa_only_once(tmp_path):
     """Grouped/concurrent clients: the claim is the cross-process gate."""
     root = _project(tmp_path, ret=_owed_return())

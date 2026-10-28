@@ -322,8 +322,8 @@ def start_owed_reqa(app, pr_id: str) -> bool:
         # Another driver holds the claim — or one already consumed the
         # obligation (its start cleared ``awaiting`` on disk).  The second
         # case must also drop this process's copy: otherwise every ~5 s tick
-        # retries the claim, i.e. a full project.yaml read plus a fsynced
-        # rewrite, until some other path reloads the state.
+        # re-reads project.yaml and re-attempts the claim until some other
+        # path reloads the state.
         if _disk_owed_state(app, pr_id) is False:
             _consume_owed_reqa_in_memory(app, pr_id)
         _log.info("owed REQA: %s launch claimed elsewhere or no longer owed",

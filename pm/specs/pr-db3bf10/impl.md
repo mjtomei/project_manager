@@ -81,7 +81,7 @@ New in `pm_core/tui/qa_loop_ui.py`:
 def owed_reqa_prs(app, prs=None) -> list[dict]
 def start_owed_reqa(app, pr_id) -> bool   # claim, then start_qa (one winner)
 def reconcile_owed_reqa(app, prs=None) -> None
-def arm_owed_reqa(app) -> None            # mount: reconcile + arm the poll timer
+def arm_owed_reqa(app) -> None            # mount: arm the poll timer, defer the reconcile
 ```
 
 `reconcile_owed_reqa` runs on the TUI's ~5 s cadence from `poll_qa_state`
@@ -97,8 +97,9 @@ QA when:
 3. it wins the on-disk launch claim (R4).
 
 Otherwise it leaves the obligation on disk and logs the deferral once per
-return episode: `QA for <pr> starts once the QA run another process drives
-ends` (the S127 wording), so the log is not a per-tick repeat.
+return episode: `Sign-off REQA for <pr> — QA starts once the QA run another
+process drives ends` (the S127 wording, so an assertion on that line still
+holds), so the log is not a per-tick repeat.
 
 ### R4 — One owner across restarts, ticks and clients
 
@@ -124,14 +125,16 @@ ends` (the S127 wording), so the log is not a per-tick repeat.
 ### R5 — Every QA-start path honours the same owner
 
 - `pm_core/tui/signoff_ui.py` `step()` qa hop: if `run_driven_elsewhere` →
-  do not start, log the deferral, arm the poll timer (the record stays on
-  disk); else `start_owed_reqa` instead of a raw `start_qa`.
+  do not start; arm the owed-REQA hook (`arm_owed_reqa`: poll timer plus the
+  deferred reconcile that logs the deferral) and leave the record on disk;
+  else `start_owed_reqa` instead of a raw `start_qa`.
 - `pm_core/tui/auto_start.py` `_auto_start_qa_loops`: skip a PR whose run is
   driven elsewhere; route an owed REQA through `start_owed_reqa`.
 - `pm_core/cli/pr.py` `pr_auto_sequence`: the `sign_off` → `qa` hop claims
   before `_launch_qa_detached` and defers (`sign_off: re-qa deferred: a QA
   run is in flight`) when a run is driven elsewhere; the `qa` branch does not
-  launch a detached run over a live one.
+  launch a detached run over a live one, and does not advance to sign-off on
+  a PASS that predates the owed run (R6's rule, see the i5 amendment).
 - `pm_core/cli/pr.py` `pr_qa_run_bg` is unchanged: the tick that claims is the
   hop's driver, and `qa-run-bg`'s `clear_return_awaiting` releases the claim.
 
@@ -364,3 +367,45 @@ one full QA starts (one `qa-<pr>` window set, one verifier, one finalizer, one
   "QA starts once the QA run another process drives ends" was never logged
   for that PR.  The key is now `ts or ""`.  Test:
   `test_deferral_is_reported_for_a_return_without_a_ts` (once, not per tick).
+
+## Review-loop amendments (a6a3 i5)
+
+- **A pre-return PASS no longer cancels the owed re-run on the CLI tick.**
+  `pm pr auto-sequence`'s `qa` branch advanced a PR to `sign_off` on any
+  `qa_status.json` PASS newer than the return's `ts`.  A run that was in
+  flight when sign-off bounced the PR (the bug's `pm qa run` case) writes its
+  status after the bounce, so its PASS looked like the owed re-run's and
+  silently dropped the obligation (the PR left `qa`, so the reconciler
+  stopped considering it owed) — the exact failure R6 already prevents in
+  the TUI.  The branch now treats a PASS seen while `awaiting == "qa"` as
+  pre-return: every full-run starter clears `awaiting` as it starts
+  (`start_qa`, `qa-run-bg`, `zz t`), so the owed run's own PASS can never be
+  seen with it still set.  The tick leaves the PR at `qa` and falls through
+  to the existing catch-up launch (then `run_driven_elsewhere`, the claim,
+  `_launch_qa_detached`).
+- **The finished run's window no longer strands the owed re-run.**  The
+  catch-up's `qa-<pr>` window check exists to avoid stacking a driver over a
+  run whose first status write has not landed; but QA windows are kept for
+  inspection, so after a bounce the previous run's window made a watcher-only
+  tick report `running: qa` forever (with no TUI reconciler to fall back on,
+  the owed run never started).  While the obligation is unclaimed
+  (`awaiting == "qa"`) a starting run is never one we would duplicate: every
+  starter either clears `awaiting` first or writes its run record before any
+  window exists (the `run_driven_elsewhere` check below catches the latter),
+  so the window check is skipped there and the claim is the one-owner gate.
+  Tests: a pre-return PASS with a live-looking window launches the owed run
+  and does not advance (fails with the guard neutralised on both counts); an
+  unclaimed obligation with no status but the old window still launches; the
+  owed run's own PASS still advances; a plain `qa` PR with a window still
+  waits (`test_no_status_with_window_does_not_relaunch`).
+- **Waiting out a claim no longer rewrites project.yaml every tick.**
+  `store.locked_update` saves even when its callback declines, so the
+  reconciler's ~5 s claim attempt against another driver's fresh claim
+  rewrote the whole file (a fsynced save, ~830 ms on this repo) for up to
+  `RETURN_LAUNCH_CLAIM_SECONDS` — the same churn class i2 fixed for the
+  consumed case.  `claim_return_launch` now takes a snapshot pre-check
+  (`_launch_claimable`) and returns without the locked update when the record
+  is already unwinnable (no open return awaiting the hop, the PR left
+  `require_status`, or a fresh claim is held); a stale snapshot only falls
+  through to the atomic path, so the claim itself is unchanged.  Test: a
+  fresh foreign claim is declined with `store.save` never called.

@@ -3789,11 +3789,20 @@ def pr_auto_sequence(pr_id: str):
 
     if status == "qa":
         overall, _path = _qa_status_for(pr_id)
-        if overall and _older_than(_path,
-                                   (open_return(pr_entry) or {}).get("ts")):
-            # The status predates sign-off's return (REQA, or rework that
-            # must be re-verified): it is the run sign-off already judged,
-            # not the re-run.
+        # The status predates sign-off's return (REQA, or rework that must be
+        # re-verified): it is the run sign-off already judged, not the re-run.
+        stale_status = bool(overall) and _older_than(
+            _path, (open_return(pr_entry) or {}).get("ts"))
+        # A PASS seen while the REQA obligation is still unclaimed is not the
+        # owed re-run's either: every full-run starter clears ``awaiting`` as
+        # it starts (``start_qa``, ``qa-run-bg``, ``zz t``), so it came from a
+        # run that was already in flight when sign-off bounced the PR.  That
+        # run verified the code sign-off judged, so advancing would silently
+        # drop the owed re-run — leave the PR at ``qa`` and start it via the
+        # catch-up below (mirrors ``qa_loop_ui._on_qa_complete``'s guard).
+        owed_reqa = awaiting == "qa"
+        pre_return_pass = overall == "PASS" and owed_reqa
+        if stale_status or pre_return_pass:
             overall = None
         if overall == "PASS":
             # QA passed and finalized -> advance to the sign_off step, which
@@ -3840,11 +3849,17 @@ def pr_auto_sequence(pr_id: str):
             # a freshly-launched run whose first status write hasn't
             # landed yet.  Check for the qa tmux window before
             # re-launching to avoid stacking duplicate QA subprocesses
-            # during the launch→first-write race window.
-            display_id = _pr_display_id(pr_entry)
-            qa_win = tmux_mod.find_window_by_name(
-                pm_session, f"qa-{display_id}",
-            ) if pm_session else None
+            # during the launch→first-write race window.  While the REQA
+            # obligation is still unclaimed that window belongs to a run that
+            # already finished (QA windows are kept for inspection), so it
+            # does not mean a run is starting: the catch-up's claim is the
+            # one-owner gate there, and any run actually starting has either
+            # cleared ``awaiting`` or written its run record by now.
+            qa_win = None
+            if pm_session and not owed_reqa:
+                display_id = _pr_display_id(pr_entry)
+                qa_win = tmux_mod.find_window_by_name(
+                    pm_session, f"qa-{display_id}")
             if qa_win:
                 click.echo("running: qa")
                 return
