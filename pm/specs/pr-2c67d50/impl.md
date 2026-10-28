@@ -359,3 +359,40 @@ covered by tests in `tests/test_qa_input_required.py` /
   and relaunched the scenario. It now refreshes the baseline past the
   repeated INPUT_REQUIRED and then applies the normal newer-verdict check,
   matching the live-pane branch.
+
+## 9. Implementation notes (review iteration 4)
+
+- **A run reopened mid-poll keeps its state.** `poll_qa_state` reads
+  `state.running`, then calls `_on_qa_complete` (which does note I/O), then
+  re-reads `state.held`. The held thread can reopen the run (running=True,
+  held=False) in that window; the TUI would then fall through to the
+  finished-run path, clear the reopened run's resume snapshot and mark the
+  completion notified — so the follow-up verdict it was reopened to collect
+  would never be processed. `poll_qa_state` now re-checks `state.running`
+  after `_on_qa_complete` and skips the state when the run has reopened.
+- **The per-scenario head is only a fallback baseline.** `_enter_waiting`
+  resolved the current PR head on every worker INPUT_REQUIRED even though
+  `_poll_waiting` prefers `state.planner_head` (set for every run that
+  launches scenarios). That lookup queries the upstream with a 15s timeout,
+  so it is now skipped when a planner head exists, keeping the verdict
+  collection loop off the network in the normal path.
+- **Head resolution is best-effort as documented.** `_current_pr_head`
+  wrapped only the upstream query; the local `_rev_parse` fallback could
+  raise (a workdir deleted mid-run) and crash the collection thread. Both
+  paths now return `None` on failure.
+- **Known trade-off (unchanged): follow-ups are accepted from the
+  transcript without an idle_prompt gate.** The hold and the live loop read
+  the scenario's own transcript on a stat-change poll, so a standalone
+  verdict line written mid-turn could be accepted before the turn ends.
+  The baseline rule (newer than the INPUT_REQUIRED turn) keeps stale output
+  out, and the worker prompt requires the verdict on the final line; a
+  hook gate was rejected because a missed `idle_prompt` would strand the
+  scenario in an unbounded wait, which is the failure this PR exists to
+  remove.
+- **Known trade-off (unchanged): a follow-up that lands between the hold's
+  scan and the reopened live loop's scan.** If the worker appends a
+  repeated INPUT_REQUIRED in that one-interval window, the live loop
+  refreshes the baseline instead of accepting the earlier follow-up and the
+  run re-finalizes as INPUT_REQUIRED. The re-finalize re-runs the finalize
+  pane for the same result (idempotent: it re-verifies pushes and
+  fast-forwards) and the TUI's QA note is de-duplicated by identical text.

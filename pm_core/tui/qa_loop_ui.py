@@ -372,6 +372,14 @@ def poll_qa_state(app) -> None:
         if not state.running and state.latest_verdict:
             first_completion = not state._ui_complete_notified
             _on_qa_complete(app, state)
+            # The held watcher can reopen the run (running=True) between the
+            # check above and here — _on_qa_complete does file I/O for the
+            # note, and a follow-up can arrive at any moment.  A reopened run
+            # must keep its state and resume snapshot: falling through would
+            # clear the snapshot and mark the completion notified, so the
+            # reopened run's eventual verdict would never be processed.
+            if state.running:
+                continue
             # A held run finalized INPUT_REQUIRED but is still watching its
             # worker panes for a follow-up.  Keep the state tracked and the
             # resume snapshot on disk so a restart can re-adopt the wait; the

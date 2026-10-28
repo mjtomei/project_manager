@@ -17,6 +17,7 @@ from pm_core.qa_loop import (
     VERDICT_INPUT_REQUIRED,
     VERDICT_NEEDS_WORK,
     VERDICT_PASS,
+    _enter_waiting,
     _newer_verdict,
     _scan_waiting_scenarios,
     _waiting_source_is_current,
@@ -337,6 +338,38 @@ class TestScanWaitingScenarios:
         source["session_id"] = scenario.session_id
         source["transcript_path"] = "/tmp/y.jsonl"
         assert not _waiting_source_is_current(state, scenario, source)
+
+
+class TestEnterWaiting:
+    def _hit(self):
+        from pm_core.verdict_transcript import VerdictHit
+        return VerdictHit(
+            verdict=VERDICT_INPUT_REQUIRED,
+            text="Reason: need a decision\nINPUT_REQUIRED",
+            turn_id="turn-ir", timestamp="2026-05-13T14:01:00.000Z",
+            line_index=2)
+
+    def test_planner_head_skips_the_blocking_upstream_lookup(self):
+        """The per-scenario head is only a fallback baseline.  Resolving it
+        queries the upstream (up to a 15s timeout), so a run that already has
+        a planner head must not pay for it on every INPUT_REQUIRED."""
+        state = _waiting_state("/tmp/x.jsonl")
+        state.planner_head = "planner-head"
+        with patch("pm_core.qa_loop._current_pr_head") as head:
+            _enter_waiting(state, state.scenarios[0], self._hit(), "why",
+                           "/tmp/w", "b")
+        head.assert_not_called()
+        assert state.waiting_input_sources[1]["head"] is None
+
+    def test_head_is_recorded_when_there_is_no_planner_head(self):
+        state = _waiting_state("/tmp/x.jsonl")
+        state.planner_head = None
+        with patch("pm_core.qa_loop._current_pr_head",
+                   return_value="current-head") as head:
+            _enter_waiting(state, state.scenarios[0], self._hit(), "why",
+                           "/tmp/w", "b")
+        head.assert_called_once_with("/tmp/w", "b")
+        assert state.waiting_input_sources[1]["head"] == "current-head"
 
 
 # ---------------------------------------------------------------------------
@@ -862,6 +895,39 @@ def test_poll_qa_state_drops_a_crashed_held_run(tmp_path):
 
     assert "pr-001" not in app._qa_loops
     assert not (tmp_path / "qa_resume.json").exists()
+
+
+def test_poll_qa_state_keeps_a_run_reopened_mid_tick(tmp_path):
+    """The held watcher can reopen the run while ``_on_qa_complete`` is doing
+    its note I/O.  The TUI already decided the state was finished, so without
+    a re-check it would clear the reopened run's snapshot and mark the
+    completion notified — its follow-up verdict would never be processed."""
+    from pm_core.tui import qa_loop_ui
+
+    app = _poll_app(tmp_path)
+    state = _waiting_state(tmp_path / "t.jsonl")
+    state.qa_workdir = str(tmp_path)
+    state.held = True
+    state.running = False
+    state.latest_verdict = VERDICT_INPUT_REQUIRED
+    state._ui_complete_notified = True
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    app._qa_loops = {"pr-001": state}
+
+    def _reopen(_app, s):
+        # The hold thread accepted a follow-up mid-tick.
+        s.running = True
+        s.held = False
+        s.latest_verdict = ""
+        s._ui_complete_notified = False
+
+    with patch.object(qa_loop_ui, "_resume_incomplete_qa"), \
+         patch.object(qa_loop_ui, "_on_qa_complete", side_effect=_reopen):
+        qa_loop_ui.poll_qa_state(app)
+
+    assert app._qa_loops.get("pr-001") is state
+    assert (tmp_path / "qa_resume.json").exists()
+    assert state._ui_complete_notified is False
 
 
 def test_stop_qa_requests_stop_on_a_held_run(tmp_path):

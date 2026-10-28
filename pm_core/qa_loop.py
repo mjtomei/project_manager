@@ -2856,7 +2856,14 @@ def _current_pr_head(workdir_path: str | None, branch: str | None) -> str | None
     except Exception:
         _log.debug("could not resolve upstream head of %s", branch,
                    exc_info=True)
-    return _rev_parse(workdir_path, f"refs/heads/{branch}")
+    try:
+        return _rev_parse(workdir_path, f"refs/heads/{branch}")
+    except Exception:
+        # Best effort only: a workdir that vanished mid-run must not crash
+        # the verdict-collection thread.
+        _log.debug("could not resolve local head of %s", branch,
+                   exc_info=True)
+        return None
 
 
 def _newer_verdict(transcript_path: str | None,
@@ -2906,7 +2913,11 @@ def _enter_waiting(state: QALoopState, scenario: QAScenario, hit: VerdictHit,
         "turn_id": hit.turn_id,
         "timestamp": hit.timestamp,
         "line_index": hit.line_index,
-        "head": _current_pr_head(workdir_path, branch),
+        # Only a fallback for runs with no planner head (the normal
+        # baseline).  Resolving it queries the upstream and can block on the
+        # network, so skip it when the planner head is available.
+        "head": (None if state.planner_head
+                 else _current_pr_head(workdir_path, branch)),
         "reason": reason or "",
     }
     # A PASS verified for this scenario's earlier turn must not be inherited
