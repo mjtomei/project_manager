@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T05:12:19.848886+00:00'
+  updated_at: '2026-10-28T06:32:32.592363+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38694,6 +38694,44 @@ prs:
       asciinema before flush (keep a pipe-pane transcript).'
     created_at: '2026-10-28T03:38:20Z'
     last_edited: '2026-10-28T03:38:20Z'
+  - id: note-33ee5f0
+    text: 'S118 refine (HEAD dd00f754): (1) The tick takes the project.yaml lock itself
+      (2 s) before spawning qa-run-bg, so the driver never locks on the auto-sequence
+      path (PR is already qa). A hold that starts before the tick makes the tick print
+      one "Error: Could not acquire lock" and leaves the PR in_review (no driver/record).
+      Arm the hold on status=qa (111 holder.py). (2) After pm tui restart the mount
+      sweep clears a qa-run-bg run''s [working] entry; the picker shows bare [open]
+      until [done PASS] (S102/S111). (3) A TUI auto-start target in qa with a recorded
+      PASS is handed to a TUI sign-off by the 30 s driver recheck (signoff_ui.advance_all),
+      which strands ticks on running: sign_off (pr-95664e1). Remove the targets (pm
+      autostart remove) before the drivers finish if sign-offs must be tick-launched.'
+    created_at: '2026-10-28T05:51:30Z'
+    last_edited: '2026-10-28T05:51:30Z'
+  - id: note-89d35c0
+    text: 'QA S118 (2026-10-28, container podman 3 + host, real claude 2.1.312 refiner/worker/s0
+      vs acme router + main stubs, fake planner/verifier/finalizer; captures /pm-captures/scenarios/118,
+      REPORT.md, every recording mp4): CODE CHANGE 91b259bd needs normal re-review.
+      Pre-existing master bug exposed by the prescribed recorder view (grouped session
+      v118, not <base>~N): tmux names the most recently active grouped session even
+      for display -t <pane>, so (1) pm tui restart re-exec took v118 for its pidfile/cmd-queue
+      and pm autostart remove failed owner_timeout rc 2 (auto-start kept R/U targets);
+      (2) a popup on that client (PM_POPUP_SESSION=v118) fell back to the cwd session,
+      so the picker opened from a qa-<pr> window (cwd = PR clone) read an empty runtime
+      dir and showed no [working]/[done] badge. Fix: TUI _own_session_name uses #{session_group};
+      _get_current_pm_session resolves a non-pm grouped session via tmux.session_group;
+      real-tmux tests fail on the old code; full suite 4463 passed. Post-fix (91b259bd)
+      every Then held: story 1 R4/U4 ticks 102x rc 0, advanced: qa once each, one
+      qa-run-bg --loop-id per PR (same pid), router-down refiner Retrying in -> next
+      retry reached acme, restart pass "driven by another process" only, autostart
+      remove rc 0, picker [working] -> [open] -> [done PASS], bridge mount only on
+      R container, stubs attribution clean, no secrets/forbidden lines; story 2 holder
+      3 s at status=qa, R2 driver same pid through the hold, live env R2 refiner/worker
+      on 127.0.0.1:21182 acme-opus-1 no key, all others main. Noted only: sign-off
+      starts ~25 s before QA finalize ends (pr-f1d825b); U2 tick inside the 3 s hold
+      printed the 2 s lock Error rc 1 (expected); pm pr start impl windows have no
+      tick transcript (closed them so the tick relaunched).'
+    created_at: '2026-10-28T06:32:32Z'
+    last_edited: '2026-10-28T06:32:32Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
