@@ -357,6 +357,30 @@ implementing and QA-ing it, and ship here (each has a PR note):
   `test_grouped_session_owner_matches_its_base`,
   `test_non_object_breadcrumb_is_dropped`; all four verified to fail
   against the pre-fix implementation).
+- `consume_breadcrumb` must be total for *every* corrupt shape, not just a
+  non-object top level, and a failed restore must never disable external
+  IPC (review-loop c0c9 i3). `_cmd_queue_ready` is only ever set in
+  `ProjectManagerApp._deferred_startup` after `consume_breadcrumb` returns,
+  and while it is False every queued command is deferred — so any
+  exception from a restore step left a healthy TUI that never drained the
+  queue, with the picker spinning on `queued…` forever (its owner check
+  only sees a valid pidfile). Three holes, all reachable from a
+  hand-edited/older-shaped breadcrumb that is still valid JSON:
+  (a) a non-string `run_id` raised `TypeError` out of `Path / run_id`;
+  (b) `review_loops` / a loop entry / `history` of the wrong container
+  type raised `AttributeError`/`TypeError` at `.items()` / `.get()` /
+  iteration; (c) `watchers` / `watcher` of the wrong shape raised the
+  same way. Every section is now read structurally (non-list `watchers`,
+  non-dict `watcher`/loop entry, non-list `history` are logged and
+  dropped; `history` entries use `.get`), a non-string `run_id` is
+  dropped, and a non-string `session` is treated as *unscoped* (the same
+  rule `tui_pidfile._marker_owner` applies) instead of stranding the file
+  as another session's forever. Structurally,
+  `ProjectManagerApp._deferred_startup` now wraps both the blocking
+  startup chores and the restore so `_cmd_queue_ready` and the startup
+  drain always run. Tests: `TestCorruptBreadcrumbShapes` (3) and
+  `TestDeferredStartupArmsQueue` (2); all five verified to fail against
+  the pre-fix implementation.
 
 ## Edge cases
 
@@ -773,6 +797,20 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     consuming a legacy session-less one. Tests in
     `TestMergeRestartMarkerSessionScope` /
     `TestBreadcrumbSessionOwnership`.
+44. a corrupt-but-valid breadcrumb never crashes the mount (review-loop
+    c0c9 i3): a non-string `run_id` (which raised `TypeError` from
+    `Path / run_id`), a non-dict `review_loops`, a non-dict loop entry, a
+    non-list `history`, a non-list `watchers`, a non-dict `watcher`, and
+    a non-string `session` are all dropped/logged rather than raising,
+    and the file is consumed (a wrong-typed `session` must not strand it
+    as another session's forever). Tests in `TestCorruptBreadcrumbShapes`
+    (3, all verified to fail against the pre-fix implementation).
+45. a failed startup step never disables external IPC (review-loop c0c9
+    i3): `_deferred_startup` arms `_cmd_queue_ready` and runs the startup
+    drain even when the blocking startup chores raise or
+    `consume_breadcrumb` raises (and the restore is still attempted after
+    a failed chore). Tests in `TestDeferredStartupArmsQueue` (2, both
+    verified to fail against the pre-fix implementation).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

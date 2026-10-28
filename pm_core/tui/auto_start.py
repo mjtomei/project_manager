@@ -324,9 +324,17 @@ async def consume_breadcrumb(app) -> None:
     # with nothing to restore.  Leave it in place for its owner.  A mount
     # with no session name (``mine is None``) can never own a scoped
     # breadcrumb, so it leaves those alone too.
+    #
+    # Only a non-empty *string* is a session name.  A wrong-typed value is
+    # corruption, not another session's request: treating it as an owner
+    # would strand the file forever (no mount could ever match it) and
+    # re-log it on every start, so it reads as unscoped — the same rule
+    # ``tui_pidfile._marker_owner`` applies.
     owner = data.get("session")
-    if isinstance(owner, str):
-        owner = owner.split("~")[0]
+    if "session" in data and not isinstance(owner, str):
+        _log.warning("consume_breadcrumb: ignoring non-string session (%s)",
+                     type(owner).__name__)
+    owner = owner.split("~")[0] if isinstance(owner, str) else ""
     mine = _app_session(app)
     if owner and owner != mine:
         _log.info("consume_breadcrumb: leaving breadcrumb for session %s "
@@ -345,6 +353,10 @@ async def consume_breadcrumb(app) -> None:
         data, (app._data or {}).get("prs") or [])
     had_auto_start = bool(targets) or all_mode
     run_id = data.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        # The run id names a directory under ``transcripts/``; a wrong-typed
+        # value would raise ``TypeError`` out of the mount (``Path / 5``).
+        run_id = None
     _log.info("consume_breadcrumb: restoring targets=%s all_mode=%s run_id=%s "
               "migrated_legacy=%s", list(targets), all_mode, run_id, migrated)
 
@@ -363,9 +375,25 @@ async def consume_breadcrumb(app) -> None:
 
     # Restore review loop state before check_and_start so it sees existing loops
     review_loops_data = data.get("review_loops", {})
+    if not isinstance(review_loops_data, dict):
+        # Valid JSON, wrong shape (a list, a string, ...).  Every entry below
+        # is read structurally, and this whole function runs before the
+        # command queue is armed, so corruption must be dropped here rather
+        # than raising out of the mount (see the non-object check above).
+        _log.warning("consume_breadcrumb: ignoring non-object review_loops "
+                     "(%s)", type(review_loops_data).__name__)
+        review_loops_data = {}
     if review_loops_data:
         from pm_core.review_loop import ReviewLoopState, ReviewIteration
         for pr_id, loop_data in review_loops_data.items():
+            if not isinstance(loop_data, dict):
+                _log.warning("consume_breadcrumb: ignoring corrupt review "
+                             "loop entry %s (%s)", pr_id,
+                             type(loop_data).__name__)
+                continue
+            history = loop_data.get("history")
+            if not isinstance(history, list):
+                history = []
             rstate = ReviewLoopState(
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
@@ -374,10 +402,12 @@ async def consume_breadcrumb(app) -> None:
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
             )
-            for h in loop_data.get("history", []):
+            for h in history:
+                if not isinstance(h, dict):
+                    continue
                 rstate.history.append(ReviewIteration(
-                    iteration=h["iteration"],
-                    verdict=h["verdict"],
+                    iteration=h.get("iteration", 0),
+                    verdict=h.get("verdict", ""),
                     output="",  # not stored in breadcrumb
                     timestamp=h.get("timestamp", ""),
                 ))
@@ -417,22 +447,36 @@ async def consume_breadcrumb(app) -> None:
                     _log.info("consume_breadcrumb: %s", msg)
                     app.log_message(msg)
 
-    # Resume watchers (list format, or legacy single-watcher dict)
+    # Resume watchers (list format, or legacy single-watcher dict).  Wrong
+    # shapes are dropped, not raised: see the review-loop guard above.
     watchers_data = data.get("watchers", [])
     watcher_data = data.get("watcher")  # legacy single-watcher breadcrumb
+    if not isinstance(watchers_data, list):
+        _log.warning("consume_breadcrumb: ignoring non-list watchers (%s)",
+                     type(watchers_data).__name__)
+        watchers_data = []
+    if not isinstance(watcher_data, dict):
+        watcher_data = None
     if not watchers_data and watcher_data:
-        watchers_data = [{"type": "auto-start", "meta_pm_root": watcher_data.get("meta_pm_root")}]
+        watchers_data = [{"type": "auto-start",
+                          "meta_pm_root": watcher_data.get("meta_pm_root")}]
     if watchers_data:
         from pm_core.tui import watcher_ui
         tdir = get_transcript_dir(app)
+        resumed = 0
         for wd in watchers_data:
+            if not isinstance(wd, dict):
+                _log.warning("consume_breadcrumb: ignoring corrupt watcher "
+                             "entry (%s)", type(wd).__name__)
+                continue
             watcher_ui.start_watcher(
                 app,
                 transcript_dir=str(tdir),
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
-        _log.info("consume_breadcrumb: resumed %d watcher(s)", len(watchers_data))
+            resumed += 1
+        _log.info("consume_breadcrumb: resumed %d watcher(s)", resumed)
 
     # Summarise last: the per-loop resume messages above (one of them
     # sticky) would otherwise overwrite this before it is ever painted.

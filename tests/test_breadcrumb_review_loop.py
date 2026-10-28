@@ -805,6 +805,87 @@ class TestBreadcrumbSessionOwnership:
         assert not (tmp_path / "autostart-resume.json").exists()
 
 
+class TestCorruptBreadcrumbShapes:
+    """A corrupt-but-valid breadcrumb must never crash the mount.
+
+    ``consume_breadcrumb`` runs in the deferred startup *before* the TUI
+    command queue is armed, so an exception here disables all external IPC
+    (a healthy TUI that never drains ``queued…`` commands — the failure
+    class this PR removes).  Each section is therefore read structurally,
+    the same rule the top-level non-object check follows.
+    """
+
+    @staticmethod
+    def _write(home, payload):
+        (home / "autostart-resume.json").write_text(json.dumps(payload))
+
+    def _consume(self, home, app):
+        with patch("pm_core.tui.auto_start.pm_home", return_value=home), \
+             patch("pm_core.tui.auto_start.check_and_start",
+                   new_callable=AsyncMock):
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+        return app
+
+    def test_non_string_run_id_does_not_crash_the_mount(self, tmp_path):
+        """``run_id`` names a directory; ``Path / 5`` used to raise TypeError."""
+        self._write(tmp_path, {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-001"}],
+            "run_id": 123,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        assert not (tmp_path / "autostart-resume.json").exists()
+        # The corrupt value is dropped, not restored; a fresh run id is made.
+        assert isinstance(app._auto_start_run_id, str)
+
+    def test_wrong_typed_sections_are_ignored(self, tmp_path):
+        self._write(tmp_path, {
+            "auto_start": True,
+            "targets": {"pr-1": {}},       # not a list
+            "review_loops": ["pr-1"],      # not a dict
+            "watchers": 5,                 # not a list
+            "watcher": "nope",             # not a dict
+            "session": ["pm-alpha"],       # not a session name
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        # A wrong-typed ``session`` is corruption, not another session's
+        # request: it must not strand the file forever.
+        assert not (tmp_path / "autostart-resume.json").exists()
+        assert app._review_loops == {}
+
+    def test_corrupt_review_loop_entries_are_skipped(self, tmp_path):
+        self._write(tmp_path, {
+            "review_loops": {
+                "pr-1": ["not", "a", "dict"],
+                "pr-2": {"history": {"iteration": 1}},   # history not a list
+                "pr-3": {"iteration": 2, "history": ["bad"]},
+            },
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        # A non-dict entry is dropped; a dict entry with a corrupt
+        # ``history`` is restored without history rather than raising.
+        assert set(app._review_loops) == {"pr-2", "pr-3"}
+        assert app._review_loops["pr-2"].history == []
+        assert app._review_loops["pr-3"].iteration == 2
+        assert app._review_loops["pr-3"].history == []
+
+
 class TestMergeRestartMarkerSessionScope:
     """The marker is one shared file; it must belong to one session.
 

@@ -6,6 +6,7 @@ capabilities and a process start time; callers validate both before
 signaling, and the TUI claims the file exclusively at startup.
 """
 
+import asyncio
 import json
 import os
 import signal
@@ -1715,6 +1716,69 @@ class TestSignalGuards:
         app._install_reload_signal()
 
         assert tpf.read_pidfile(pidfile).caps == {tpf.CAP_RELOAD}
+
+
+class TestDeferredStartupArmsQueue:
+    """A failing restore must not disable external IPC.
+
+    ``_cmd_queue_ready`` is only ever set in ``_deferred_startup``, and
+    while it is False every queued command is deferred.  If a startup chore
+    or the breadcrumb restore raised first, the TUI stayed healthy but
+    never drained the queue — the picker spun on ``queued…`` forever and
+    its owner check never aborted it (the pidfile was valid).  Both steps
+    are therefore logged-and-continued.
+    """
+
+    @staticmethod
+    def _app(drained, sync_error=None):
+        app = ProjectManagerApp.__new__(ProjectManagerApp)
+        app._cmd_queue_ready = False
+
+        def _sync():
+            if sync_error is not None:
+                raise sync_error
+
+        app._deferred_startup_sync = _sync
+        app._drain_command_queue = (
+            lambda startup=False: drained.append(startup))
+        app.run_worker = lambda *a, **k: None
+        app._capture_frame = lambda *a, **k: None
+        return app
+
+    def test_queue_is_armed_when_the_restore_raises(self, monkeypatch):
+        drained = []
+        app = self._app(drained)
+
+        async def boom(_app):
+            raise RuntimeError("corrupt breadcrumb")
+
+        monkeypatch.setattr("pm_core.tui.auto_start.consume_breadcrumb", boom)
+        monkeypatch.setattr("pm_core.tui.sync.startup_github_sync",
+                            lambda app: None)
+
+        asyncio.run(app._deferred_startup())
+
+        assert app._cmd_queue_ready is True
+        assert drained == [True]
+
+    def test_queue_is_armed_when_a_startup_chore_raises(self, monkeypatch):
+        drained = []
+        app = self._app(drained, sync_error=RuntimeError("heal failed"))
+        restored = []
+
+        async def ok(_app):
+            restored.append(True)
+
+        monkeypatch.setattr("pm_core.tui.auto_start.consume_breadcrumb", ok)
+        monkeypatch.setattr("pm_core.tui.sync.startup_github_sync",
+                            lambda app: None)
+
+        asyncio.run(app._deferred_startup())
+
+        # The restore still runs after a failed chore, then the queue arms.
+        assert restored == [True]
+        assert app._cmd_queue_ready is True
+        assert drained == [True]
 
 
 class TestSignalDelivery:

@@ -600,14 +600,30 @@ class ProjectManagerApp(App):
         self.run_worker(self._deferred_startup(), exclusive=False)
 
     async def _deferred_startup(self) -> None:
-        """Run heavier startup tasks in a background worker."""
+        """Run heavier startup tasks in a background worker.
+
+        Neither step below may abort the queue dispatch that follows it:
+        ``_cmd_queue_ready`` is only ever set here, and while it is False
+        every externally queued command is deferred.  So a failing startup
+        chore (or a restore step choking on a corrupt breadcrumb) leaves
+        the TUI on defaults instead of silently disabling all external
+        IPC: with a healthy TUI the picker would then spin on ``queued…``
+        forever — the exact failure this IPC rework removes.
+        """
         import asyncio
         # Run blocking subprocess work off the event loop
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._deferred_startup_sync)
+        try:
+            await loop.run_in_executor(None, self._deferred_startup_sync)
+        except Exception:
+            _log.exception("deferred startup tasks failed; continuing")
         # Resume auto-start if a breadcrumb was left by a merge-triggered restart
         from pm_core.tui import auto_start
-        await auto_start.consume_breadcrumb(self)
+        try:
+            await auto_start.consume_breadcrumb(self)
+        except Exception:
+            _log.exception("consume_breadcrumb failed; continuing without "
+                           "restored state")
         # Now dispatch external commands, including any that arrived while
         # the previous process was exec'ing (signal lost) or before the
         # breadcrumb restore above (which would have overwritten them).
