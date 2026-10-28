@@ -12,8 +12,9 @@ A container is **owned** — never removed here — when any of:
    ``pm.tmux_socket`` label, the default server, the current server, or the
    shared-session socket for its tag;
 2. it is explicitly retained (``pm container retain``);
-3. it is being launched: its per-name launch lock is held, or it was created
-   less than ``LAUNCH_GRACE`` seconds ago.
+3. it is being launched: its per-name launch lock is held, its launch lease
+   is live, or it was created less than ``LAUNCH_GRACE`` seconds ago and its
+   launch has not yet attached (concluded its lease).
 
 Everything else in scope is removed (bounded parallel), after re-checking
 ownership under the container's launch lock so a concurrent launch/restart
@@ -1136,7 +1137,11 @@ def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
         attaching = container_mod.recent_launch(info.name, LAUNCH_GRACE, info.id)
     except OSError:
         return Decision(info, "keep", "launch lease unreadable — ownership unknown")
-    if attaching or info.created is not None and now - info.created < LAUNCH_GRACE:
+    # A young container whose launch already attached is not "launching": once
+    # its pane is gone (closed by the user) it is as abandoned as an old one.
+    young = (info.created is not None and now - info.created < LAUNCH_GRACE
+             and not (info.id and container_mod.launch_concluded(info.id, info.created)))
+    if attaching or young:
         return Decision(info, "keep", "launching (no pane yet)")
     if indeterminate:
         # Unknown beats merged: a pane we can't see may still be in use.

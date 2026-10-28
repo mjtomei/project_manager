@@ -1439,6 +1439,20 @@ def _conclude_launch_lease(name: str, container_id: str) -> None:
             pass
 
 
+def launch_concluded(container_id: str, created: float) -> bool:
+    """True when this allocation's launch already attached and concluded its lease.
+
+    :func:`_conclude_launch_lease` backdates the ID marker past the grace, so a
+    marker older than the container itself can only come from a concluded
+    attachment: from then on its pane, not the creation-age grace, owns it.
+    Unreadable or missing markers are not proof (the grace still applies).
+    """
+    try:
+        return _identity_generation_path(container_id).stat().st_mtime < created
+    except OSError:
+        return False
+
+
 def recent_launch(name: str, grace: float, container_id: str | None = None) -> bool:
     """Protect attachment by name and by rename-stable allocation identity."""
     now = time.time()

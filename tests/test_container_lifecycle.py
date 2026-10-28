@@ -423,6 +423,24 @@ class TestReaperOwnership:
         assert "launching" in reasons[fresh.name]
         assert "launch in progress" in reasons[locked.name]
 
+    def test_young_container_whose_launch_attached_is_not_launching(self, fake_env):
+        """QA S51: closing a just-finished worker's window and reaping kept the
+        container as "launching (no pane yet)" for the rest of LAUNCH_GRACE,
+        although its launch had attached and concluded its lease."""
+        attached = _info("pm-repo-ab12-impl-pr-aaaa", created=time.time() - 30)
+        pending = _info("pm-repo-ab12-impl-pr-bbbb", created=time.time() - 30)
+        fake_env["containers"] = [attached, pending]
+        fake_env["statuses"] = {"pr-aaaa": "merged", "pr-bbbb": "merged"}
+        for info in (attached, pending):
+            cm._write_identity_generation(info.id, "gen-" + info.name)
+        cm._conclude_launch_lease(attached.name, attached.id)
+
+        out = reaper.reconcile(reason="manual")
+
+        assert out.removed == [attached.name]
+        reasons = {d.info.name: d.reason for d in out.decisions}
+        assert "launching" in reasons[pending.name]
+
     def test_merged_pr_and_dead_session_reasons(self, fake_env):
         merged = _info("pm-repo-ab12-impl-pr-aaaa")
         dead = _info("pm-gone-1234-review-pr-bbbb", session_tag="gone-1234")
