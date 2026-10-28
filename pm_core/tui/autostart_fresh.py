@@ -432,7 +432,8 @@ def reconcile_idle_status(app, pr: dict, tracker) -> None:
         return
     from pm_core.verdict_transcript import latest_turn_state
     try:
-        state = latest_turn_state(transcript)
+        state = latest_turn_state(
+            transcript, _epoch(fresh_marker(pr).get("requested_at")))
     except Exception:
         _log.debug("autostart_fresh: idle reconcile read failed for %s",
                    pr_id, exc_info=True)
@@ -489,7 +490,14 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
         # the turn is over.  Do not additionally require the hook tracker's
         # idle flag — it can be stale (no turn-start hook) or miss the event
         # when ``Stop`` is written after ``idle_prompt``.
-        state = latest_turn_state(transcript)
+        #
+        # ``requested_at`` fences the one ambiguous record shape: an
+        # ``[Request interrupted by user]`` marker written *after* the request
+        # may be followed by a retyped prompt, so it keeps waiting; one from
+        # before the request means the turn was already over when the user
+        # asked (see :func:`pm_core.verdict_transcript.latest_turn_state`).
+        state = latest_turn_state(
+            transcript, _epoch(fresh_marker(pr).get("requested_at")))
         if state == "complete":
             return True
         if state == "in_progress":

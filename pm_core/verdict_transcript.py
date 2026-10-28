@@ -130,7 +130,8 @@ def _read_transcript_tail(path: Path, max_bytes: int = _TURN_TAIL_BYTES) -> str:
         return ""
 
 
-def latest_turn_state(transcript_path: str | Path | None) -> str:
+def latest_turn_state(transcript_path: str | Path | None,
+                      interrupted_before: float | None = None) -> str:
     """Whether the transcript's newest turn is finished.
 
     Returns ``"complete"`` when the newest record is an assistant message
@@ -146,6 +147,16 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     are not prompts and are skipped — see
     :func:`_is_non_prompt_user_record`.
 
+    An ``[Request interrupted by user]`` marker ends a turn (the CLI writes it
+    exactly when it aborts generation, and the agent owes no reply), but only
+    when it predates *interrupted_before* (epoch seconds — the fresh-autostart
+    request time).  A marker written *after* the request may be followed by a
+    retyped prompt, so it keeps the turn ``"in_progress"``; with no fence the
+    conservative ``"in_progress"`` is returned too.  This matters because the
+    marker is a *list*-content user record, so it is not covered by
+    :func:`_is_non_prompt_user_record`, and an interrupt left as the tail
+    would otherwise stall the handoff forever.
+
     Used by the explicit fresh-autostart handoff: a completed turn is the
     signal that the user's implementation feedback turn is over.
     """
@@ -160,7 +171,8 @@ def latest_turn_state(transcript_path: str | Path | None) -> str:
     # mid-record loses its first (partial) line, so a newest turn larger
     # than the window would otherwise read as "unknown" forever.
     for window in _TURN_TAIL_WINDOWS:
-        state = _turn_state_from_tail(_read_transcript_tail(path, window))
+        state = _turn_state_from_tail(_read_transcript_tail(path, window),
+                                      interrupted_before)
         if state != "unknown" or window >= size:
             return state
     return "unknown"
@@ -175,6 +187,40 @@ _NON_PROMPT_USER_PREFIXES = ("<local-command-", "<command-name>",
                              "<command-args>", "<command-message>",
                              "<task-notification>", "<bash-input>",
                              "<bash-stdout>", "<bash-stderr>")
+
+# Esc during a turn makes Claude Code write the aborted turn as a user record
+# (``[Request interrupted by user]`` / ``[Request interrupted by user for tool
+# use]``) whose content is a *list* of text blocks — so the prefix check above
+# misses it.  It is not a prompt: the agent owes no reply.
+_INTERRUPT_PREFIX = "[Request interrupted by user"
+
+
+def _record_text(rec: dict) -> str:
+    """The user-visible text of a ``type: "user"`` record ("" when none)."""
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+            and isinstance(block.get("text"), str))
+    return ""
+
+
+def _is_interrupt_record(rec: dict) -> bool:
+    """Whether a user record is Claude Code's turn-aborted marker."""
+    return _record_text(rec).lstrip().startswith(_INTERRUPT_PREFIX)
+
+
+def _record_epoch(rec: dict) -> float:
+    """The record's ``timestamp`` as epoch seconds (0.0 when unusable)."""
+    from pm_core.signoff import parse_ts
+    try:
+        return parse_ts(rec.get("timestamp")).timestamp()
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
 
 
 def _is_non_prompt_user_record(rec: dict) -> bool:
@@ -196,7 +242,8 @@ def _is_non_prompt_user_record(rec: dict) -> bool:
         _NON_PROMPT_USER_PREFIXES)
 
 
-def _turn_state_from_tail(text: str) -> str:
+def _turn_state_from_tail(text: str,
+                          interrupted_before: float | None = None) -> str:
     """Classify the newest user/assistant record in *text* (see above)."""
     if not text.strip():
         return "unknown"
@@ -212,6 +259,18 @@ def _turn_state_from_tail(text: str) -> str:
             continue
         typ = rec.get("type")
         if typ == "user":
+            if _is_interrupt_record(rec):
+                # The CLI writes this marker when it aborts the turn, so the
+                # turn is over — but only if the abort happened before the
+                # caller's fence (the fresh-autostart request).  A marker
+                # written after it may be followed by a retyped prompt, so
+                # wait rather than start a review over aborted work.  A
+                # missing fence (0.0 from an unparseable ``requested_at``) is
+                # not a fence: stay conservative.
+                if (interrupted_before
+                        and _record_epoch(rec) <= interrupted_before):
+                    return "complete"
+                return "in_progress"
             if _is_non_prompt_user_record(rec):
                 continue
             return "in_progress"

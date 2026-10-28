@@ -459,3 +459,74 @@ def test_turn_state_large_final_record_is_found(tmp_path: Path) -> None:
     big = "x" * (600 * 1024)
     p = _write(tmp_path, [_user_line("go"), _assistant_line(big)])
     assert latest_turn_state(p) == "complete"
+
+
+def _interrupt_line(ts: str, text: str = "[Request interrupted by user]") -> str:
+    # Esc during a turn is recorded as a user record whose content is a *list*
+    # of text blocks (so the non-prompt prefix check misses it), with the
+    # abort's timestamp.
+    return json.dumps({
+        "type": "user",
+        "timestamp": ts,
+        "message": {"role": "user", "content": [{"type": "text",
+                                                 "text": text}]},
+    })
+
+
+_EPOCH = "2026-10-27T12:00:00+00:00"
+_EPOCH_TS = 1793102400.0  # datetime.fromisoformat(_EPOCH).timestamp()
+
+
+def test_turn_state_interrupt_after_the_request_is_in_progress(
+        tmp_path: Path) -> None:
+    # The user aborted the feedback turn *after* asking for the fresh review;
+    # they may be about to retype, so a review must not start over the aborted
+    # work.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("done"),
+        _interrupt_line("2026-10-27T12:00:30+00:00"),
+    ])
+    assert latest_turn_state(p, _EPOCH_TS) == "in_progress"
+
+
+def test_turn_state_interrupt_before_the_request_is_complete(
+        tmp_path: Path) -> None:
+    # The turn was already aborted when the user asked for the fresh review
+    # and they have not typed since: the turn is over.  Left as in_progress,
+    # the handoff would stall forever with the pane sitting at the prompt.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("partial"),
+        _interrupt_line("2026-10-27T11:59:00+00:00"),
+    ])
+    assert latest_turn_state(p, _EPOCH_TS) == "complete"
+
+
+def test_turn_state_interrupt_for_tool_use_before_the_request_is_complete(
+        tmp_path: Path) -> None:
+    # Aborted during a tool call: the newest assistant record is a tool_use
+    # (which would otherwise read in_progress).  The abort marker is newer and
+    # predates the request, so the turn is over.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_tool_line(),
+        _interrupt_line("2026-10-27T11:59:00+00:00",
+                        "[Request interrupted by user for tool use]"),
+    ])
+    assert latest_turn_state(p, _EPOCH_TS) == "complete"
+
+
+def test_turn_state_interrupt_without_a_fence_is_in_progress(
+        tmp_path: Path) -> None:
+    # No request time to fence against: wait (a false "complete" would start a
+    # review over aborted work; a false "in_progress" is recoverable).  A
+    # zero/unparseable fence is not a fence either.
+    p = _write(tmp_path, [
+        _user_line("do it"),
+        _assistant_line("partial"),
+        _interrupt_line("2026-10-27T11:59:00+00:00"),
+    ])
+    assert latest_turn_state(p) == "in_progress"
+    assert latest_turn_state(p, 0.0) == "in_progress"
+

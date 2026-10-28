@@ -246,6 +246,13 @@ def _busy():
     return {"type": "user", "message": {"role": "user", "content": "more"}}
 
 
+def _interrupted(ts, text="[Request interrupted by user]"):
+    """Claude Code's turn-aborted marker (a list-content user record)."""
+    return {"type": "user", "timestamp": ts,
+            "message": {"role": "user",
+                        "content": [{"type": "text", "text": text}]}}
+
+
 class _Tracker:
     def __init__(self, path=None, idle=True, tracked=True, gone=False):
         self.path = path
@@ -324,6 +331,25 @@ class TestHandoff:
         with patch("pm_core.hook_events.read_event", return_value=new_event):
             assert not autostart_fresh.handoff_ready(
                 None, pr, _Tracker(path))
+
+    def test_an_interrupt_before_the_request_ends_the_turn(self, tmp_path):
+        # The user aborted a turn before asking for the fresh review and has
+        # not typed since: the turn is over, so hand off.  Left as
+        # in_progress the handoff would stall forever with the pane sitting
+        # at the prompt.
+        path = _transcript(tmp_path, [
+            _complete(), _interrupted("2020-01-01T00:00:00Z")])
+        pr = _marker_pr("2020-01-01T00:01:00Z")
+        assert autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+
+    def test_an_interrupt_after_the_request_keeps_waiting(self, tmp_path):
+        # The user aborted the feedback turn *after* asking for the fresh
+        # review; they may be about to retype, so a review must not start
+        # over the aborted work.
+        path = _transcript(tmp_path, [
+            _complete(), _interrupted("2020-01-01T00:02:00Z")])
+        pr = _marker_pr("2020-01-01T00:01:00Z")
+        assert not autostart_fresh.handoff_ready(None, pr, _Tracker(path))
 
     def test_spec_pending_blocks_handoff(self, tmp_path):
         path = _transcript(tmp_path, [_complete()])
@@ -457,6 +483,18 @@ class TestIdleStatusReconcile:
         pr[FRESH_KEY]["awaiting_handoff"] = False
         autostart_fresh.reconcile_idle_status(None, pr, tracker)
         assert tracker.marked == []
+
+    def test_an_interrupt_before_the_request_keeps_the_idle_flag(self, tmp_path):
+        # The aborted turn predates the request, so the transcript reads
+        # "complete" and the handoff fires on this same tick: the row must not
+        # be flipped back to "waiting for the current implementation turn".
+        path = _transcript(tmp_path, [_complete(),
+                                      _interrupted("2020-01-01T00:00:00Z")])
+        tracker = _IdleTracker(path)
+        autostart_fresh.reconcile_idle_status(
+            None, _marker_pr("2020-01-01T00:01:00Z"), tracker)
+        assert tracker.marked == []
+        assert tracker.idle is True
 
 
 def _poll_app(tmp_path, pr):

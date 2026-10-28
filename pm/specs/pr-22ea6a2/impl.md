@@ -125,6 +125,11 @@ turn is complete before advancing, and then start **one** fresh review:
 * `_poll_impl_idle` routes fresh-marker PRs through this explicit check
   instead of the generic `became_idle()` one-shot, so a stale idle flag
   cannot advance early and a later turn cannot be missed.
+* An `[Request interrupted by user]` / `... for tool use` marker (Esc during
+  a turn) also ends the turn, but only when its own timestamp predates
+  `requested_at`: an abort written *after* the request may be followed by a
+  retyped prompt, so it keeps waiting.  Without the pre-request case the
+  handoff stalls forever with the pane sitting at the prompt.
 * On completion, call the existing `_auto_review_idle_prs`, which transitions
   `in_progress → in_review` via `pr review --no-window` and starts exactly one
   `ReviewLoopState` (the loop object now guards against duplicates).
@@ -255,6 +260,8 @@ update; in-memory retirement and window teardown follow and are best-effort.
   end (new hook event or transcript completion).  No early review.
 * **Already-completed turn**: transcript says `complete`; start the review
   immediately.
+* **Interrupted turn**: an abort marker that predates the request ends the
+  turn (review starts); one written after it keeps waiting.
 * **TUI restarted while waiting**: marker is on disk; the impl pane is
   re-adopted via its pane command/transcript; waiting resumes.
 * **Old stopped review loop object**: popped; the fresh review starts.
@@ -699,3 +706,24 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   never ``idle``.  Pinned by ``TestIdleStatusReconcile`` and
   ``TestPollRouting::test_a_stale_idle_flag_is_cleared_before_the_handoff_check``
   (the latter fails without the call site).
+
+## Review-iteration notes (4e4d i2)
+
+* **An ``[Request interrupted by user]`` tail no longer stalls the handoff** —
+  Esc during a turn makes Claude Code append the aborted turn as a
+  ``type: "user"`` record whose content is a **list** of text blocks
+  (``[Request interrupted by user]`` / ``[Request interrupted by user for tool
+  use]``), verified against the local corpus: 54 real transcripts end that
+  way, and none of them match ``_is_non_prompt_user_record``'s string-only
+  prefix check.  ``latest_turn_state`` therefore read ``in_progress`` forever
+  and the fresh attempt never handed off — the same class of stall the i1
+  (``!`` shell records) and i4 (compaction summaries) notes fixed.
+  The abort marker now *ends* the turn, but only when its own ``timestamp``
+  predates ``fresh_autostart.requested_at``: an interrupt written *after* the
+  request may be followed by a retyped prompt, so that case keeps waiting
+  (the spec's "a false ``complete`` is not recoverable" asymmetry).  The fence
+  is threaded through ``latest_turn_state(..., interrupted_before=...)`` from
+  both call sites (``handoff_ready`` and ``reconcile_idle_status``), so the
+  status row agrees with the handoff.  Pinned by four ``latest_turn_state``
+  cases (before/after the request, a tool-use abort, and no fence) and two
+  ``handoff_ready`` / reconcile cases.
