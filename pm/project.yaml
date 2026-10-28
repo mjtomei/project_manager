@@ -16919,6 +16919,22 @@ prs:
       one restart/one marker.'
     created_at: '2026-10-28T15:19:41Z'
     last_edited: '2026-10-28T15:19:41Z'
+  - id: note-d72dfac
+    text: 'Refiner 2026-10-28 (QA S22 concurrent actors): verified against HEAD. Mechanics
+      for the next run: (a) make the auto-start target inert with `pm pr add` then
+      `pm pr edit <id> --status in_review` (no workdir) — ready_prs starts only `pending`
+      and review loops skip no-workdir, so the scheduler launches nothing; (b) hand-started
+      racing TUIs must be `PYTHONPATH=/workspace pm _tui` (verify `pm which` = /workspace/pm_core
+      in a session pane) and are found via heal_registry, since a typed command leaves
+      pane_start_command as the shell; (c) `pm tui restart` keeps the pid across exec
+      (started_at advances); count restarts with `pm log grep restart_app`; (d) run
+      every pm CLI from the project dir. S22 story 5 (two sessions, one --breadcrumb
+      + one plain restart at once) exercises the single global ~/.pm/merge-restart
+      / autostart-resume.json: if B preserves its state or A loses its targets, that
+      is a genuine cross-session marker race, not a scenario-spec mismatch. A plain
+      restart is a documented clean restart (spec A6).'
+    created_at: '2026-10-28T15:49:18Z'
+    last_edited: '2026-10-28T15:49:18Z'
   - id: note-0b05229
     text: 'QA scenario 21 (legacy-TUI A/B, original bug) PASS 2026-10-28 on build
       9a0f7a3e, all 4 triples. Legacy TUI = worktree 372f85f4^ (0e2cc2db, bare-number
