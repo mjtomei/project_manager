@@ -36189,8 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T06:17:34.247435+00:00'
-  updated_at: '2026-10-28T06:16:50.107237+00:00'
+  updated_at: '2026-10-28T06:27:12.686028+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36955,6 +36954,24 @@ prs:
       fails and `pm pr start` says "not committed on master yet"). Captures: /pm-captures/scenarios/22/{story1-supersede,story2-autosequence,story3-closed}.'
     created_at: '2026-10-28T06:16:50Z'
     last_edited: '2026-10-28T06:16:50Z'
+  - id: note-9e495c8
+    text: 'QA scenario 23 (per-PR isolation) re-run cleanly. Harness notes for future
+      runs of this scenario: (1) give PR A a LONG delay (120 s) on its iteration-1
+      scripted verdict, not 60 s — B has to be added, launched, passed and moved to
+      sign_off, and the container broken, all inside A''s iteration-1 window; with
+      60 s the repair lands after the first cooldown and the run burns a second 3-attempt
+      episode (six artifacts instead of the specified three, two re-arm lines). The
+      repair must land inside the FIRST cooldown. (2) `~/.pm/runtime/<pr>.json` is
+      keyed by PR id, which is content-derived from the title, so reusing "Alpha:
+      add login feature"/"Beta: fix database migration" across throwaway projects
+      inherits the previous run''s stale loop_id/verdict/lease entry — use distinct
+      PR titles per run. (3) To record the TUI home window, `tmux attach -t $SESS:0`
+      is not enough: the attach client follows the session''s active window when the
+      TUI switches to review/sign-off windows. Pin it with a background `while :;
+      do tmux select-window -t $SESS:0; sleep 0.3; done` for the whole capture. Evidence:
+      /pm-captures/scenarios/23/{run,cli-evidence,evidence}.'
+    created_at: '2026-10-28T06:27:12Z'
+    last_edited: '2026-10-28T06:27:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
