@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T09:15:01.326693+00:00'
+  updated_at: '2026-10-28T09:22:29.889972+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37506,6 +37506,30 @@ prs:
       Captures: /pm-captures/scenarios/35/.'
     created_at: '2026-10-28T09:15:01Z'
     last_edited: '2026-10-28T09:15:01Z'
+  - id: note-d94faf8
+    text: 'QA scenario 38 (merged-base behaviours in the sign-off flow) PASS at 35585cc1
+      — no code change. All four triples held live: (1) the driver-launched SIGNOFF_REVIEW
+      bounce retires the sign-off window and prunes its pane-registry entry (@15 gone,
+      no signoff-claude pane), relaunches review as a NEW window id (@9 -> @16), moves
+      the grouped client to it, and the picker signoff row loses [open]; (2) TUI `s`
+      logs "Launched Claude in tmux window ... (session: pm-<tag>)" and the fast-path
+      `pm pr start` prints "Switched to existing window ... (session: $S~1)"; (3)
+      the QA runtime mirror goes running->done/PASS, auto-start does NOT relaunch
+      QA and hands the recorded PASS off to sign_off; (4) manual `pm pr signoff` resolves
+      the project.yaml metadata conflict by record id and applies it, `pm pr show`
+      reports up_to_date with both resolved records, and `--fresh` prunes @28 from
+      tmux+registry and registers @29. Harness facts for next time: (a) attach the
+      recorder client with `env -u TMUX tmux attach` and RE-ATTACH before asserting
+      the fast-path message — with no attached client it correctly names the base
+      session instead of $S~1; (b) integration checks need real git first on PATH
+      (`export PATH=/usr/bin:/bin:$PATH`), else the container /home/pm/.local/bin/git
+      push-proxy shim makes `git fetch <local path>` fail; (c) a manual `pm pr signoff`
+      starts fake-claude WITHOUT --session-id, so the router never sees its verdict
+      — use the auto-start driver for a bounce; (d) agg is absent: `curl -sSL -o ~/.local/bin/agg
+      https://github.com/asciinema/agg/releases/download/v1.4.3/agg-aarch64-unknown-linux-gnu`
+      then chmod +x.'
+    created_at: '2026-10-28T09:22:29Z'
+    last_edited: '2026-10-28T09:22:29Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
