@@ -133,6 +133,19 @@ while :; do
     fi
     sleep 0.2
 done
+# Pane content alone does not prove the attach worked: a *failed* attach
+# (`tmux attach` to a session that is not there) prints its own error —
+# "can't find session: …" — into the pane and then exits, so the content
+# check above can break on asciinema's error text and the cast check in
+# step 5 then passes on a cast holding that error. The error is drawn
+# milliseconds before the recorder exits, so confirm the recorder is still
+# alive a moment later before treating the content as a drawn TUI.
+sleep 0.3
+if ! tmux has-session -t pm-recorder 2>/dev/null; then
+    echo "recorder exited before it drew — check 'asciinema rec' output" >&2
+    tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+    exit 1
+fi
 
 # 4. Drive the TUI from outside via pm tui send. Keys reach the TUI
 #    via the same tmux server; the recorder's attach client renders

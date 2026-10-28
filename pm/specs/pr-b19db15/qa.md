@@ -16,8 +16,9 @@ recording-recipe bugs that any worker following the recipe hits:
 - both clear a recorder session left by an aborted run before starting a new
   one (the CLI scaffold clears the session, not the server);
 - both wait (bounded) for the recorder to draw before sending keys; in the
-  tmux recipe a recorder that exits before drawing is a failure, not an early
-  finish;
+  tmux recipe a recorder that exits before drawing — or that prints its own
+  attach error ("can't find session: …") and then exits — is a failure, not
+  an early finish;
 - both stop by ending the recorded command and then wait (bounded) on the
   recorder's session handle and check the cast is non-empty;
 - the CLI no-TTY scaffold writes the cast where the render reads it;
@@ -131,6 +132,10 @@ run.
 - Keystrokes sent before the recorder draws are silently dropped → the tmux
   recipe waits (bounded) for pane content before driving it, and the CLI
   scaffold waits for the cast header (a quiet command draws nothing).
+- A failed `tmux attach` draws its own error into the recorder pane and exits
+  milliseconds later → the tmux recipe re-checks that the recorder is still
+  alive after the content appears, so the error text cannot pass as a drawn
+  TUI and the cast check cannot pass on a cast holding that error.
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
   `RECORDER_STOP_TIMEOUT` for a long command.

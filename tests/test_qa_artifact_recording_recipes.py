@@ -16,7 +16,8 @@ hits, regardless of how it waits for a background job:
 - keys are not sent before the recorder is up (they are silently lost); the
   tmux recipe waits on pane content, while the CLI scaffold waits on the cast
   file — a quiet command draws nothing but is recording, and a tmux recorder
-  that exits before drawing is a failure rather than an early finish;
+  that exits before drawing (or that draws its own attach error and then
+  exits) is a failure rather than an early finish;
 - the recorder is stopped by ending the recorded command and awaited with a
   bound, and the cast is checked non-empty; the CLI scaffold's bound is
   raisable (`RECORDER_STOP_TIMEOUT`) so a legitimately long one-shot command
@@ -221,6 +222,35 @@ class TestRecipes:
             "tmux recipe does not notice a recorder that exits before drawing")
         assert "recorder exited before it drew" in seg
         assert "exit 1" in seg, "a dead recorder is not reported as a failure"
+
+    def test_tmux_failed_attach_error_text_is_not_readiness(self):
+        """A failed attach draws its error into the pane before it exits.
+
+        ``tmux attach`` to a session that is not there prints "can't find
+        session: …" into the recorder pane and then exits, so the
+        pane-content readiness check can break on *asciinema's own error
+        text* rather than a drawn TUI — and step 5's cast check then passes
+        on a cast that holds that error, reporting a useless capture as
+        success. Verified live: the error is drawn ~50-75 ms after
+        ``new-session`` and the session is gone ~25 ms later, so a tight poll
+        takes it as readiness in 15 of 15 runs (the recipe's own 0.2 s
+        cadence usually misses the window, which is why the failure is
+        timing-dependent rather than frequent). The recipe has to confirm
+        the recorder is still alive a moment after the content appears.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        seg = block[block.index("new-session -d -s pm-recorder"):
+                    block.index("pm tui send")]
+        loop_end = seg.index("\ndone\n", seg.index("recorder did not come up"))
+        settle = seg[loop_end:]
+        assert re.search(r"^sleep ", settle, re.M), (
+            "tmux recipe treats the first pane content as a drawn TUI with no "
+            "settle window, so a failed attach's error text passes readiness")
+        assert "! tmux has-session -t pm-recorder" in settle, (
+            "tmux recipe does not re-check the recorder after it drew")
+        assert "recorder exited before it drew" in settle
+        assert "exit 1" in settle, (
+            "a recorder that died after drawing is not reported as a failure")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_scaffold_block_parses(self, name):

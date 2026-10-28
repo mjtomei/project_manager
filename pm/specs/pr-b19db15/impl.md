@@ -81,7 +81,23 @@ R3. **Wait for the recorder to be up before sending keys, on the right
    recorder that *exits* before drawing is a failure (the attach could not
    start; the cast it leaves holds asciinema's error, not the TUI), not a
    recording that finished early — the CLI scaffold still accepts an early
-   exit, because a one-shot command legitimately ends the pane.
+   exit, because a one-shot command legitimately ends the pane. In the tmux
+   recipe pane content alone is not proof the attach worked: a *failed*
+   attach prints "can't find session: …" into the pane and exits a few
+   milliseconds later, so the content check can break on asciinema's own
+   error text and the step-5 cast check then passes on a cast holding that
+   error. The recipe therefore confirms the recorder is still alive a moment
+   after the content appears (a settle window) and fails with the same
+   "recorder exited before it drew" message otherwise. The content signal is
+   unsound rather than frequently wrong: the error is drawn ~50–75 ms after
+   `new-session` and the session is gone ~25 ms later, so a tight poll takes
+   it as readiness in 15 of 15 runs, while the recipe's own 0.2 s cadence
+   missed the ~25 ms window in 100 of 100 idle runs (and 40 of 40 loaded) —
+   i.e. whether a run false-passes depends on timing, not on the state. The
+   settle check makes it deterministic (0 of 15 tight-poll runs, 0 of 100 at
+   the recipe cadence) and also catches a recorder that dies just after its
+   first draw, which would otherwise pass with a truncated cast. Evidence:
+   `$CAP/review-419c-i1/`.
 
 R4. **Stop by ending the recorded command, then wait on the recorder's real
    handle and check the cast.** The tmux recipe detaches the attach client and
@@ -130,8 +146,10 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    (and not `grep '^pm-'`), the bounded readiness polls (including the
    web-UI failure path stopping the server it started), clearing a stale
    recorder session before starting a new one (session, not server, for the
-   CLI scaffold), the transcript pipe being reattachable, and a tmux recorder
-   that exits before drawing failing instead of passing.
+   CLI scaffold), the transcript pipe being reattachable, a tmux recorder
+   that exits before drawing failing instead of passing, and the tmux
+   settle check that keeps a failed attach's error text from counting as a
+   drawn TUI.
 
 ## Non-goals
 

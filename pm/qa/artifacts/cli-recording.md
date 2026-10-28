@@ -142,9 +142,11 @@ done
 # 4. Wait (bounded) for asciinema to exit — the pane *is* the recording, so
 #    the session ending is the completion signal — then confirm the cast is
 #    there and non-empty. For a one-shot command that legitimately runs
-#    longer than the default bound, set RECORDER_STOP_TIMEOUT (seconds)
-#    before this step: the bound is a hang detector, not a time limit on
-#    the recorded work, and killing a healthy recording loses the evidence.
+#    longer than the default bound, raise RECORDER_STOP_TIMEOUT (seconds):
+#    prefix this block with RECORDER_STOP_TIMEOUT=120 (the variable does not
+#    survive a separate shell invocation, so set it in the same call). The
+#    bound is a hang detector, not a time limit on the recorded work, and
+#    killing a healthy recording loses the evidence.
 stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 deadline=$(( $(date +%s) + stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
