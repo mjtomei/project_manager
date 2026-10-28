@@ -37733,7 +37733,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T06:49:24.112565+00:00'
+  updated_at: '2026-10-28T07:04:36.777672+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -38534,6 +38534,27 @@ prs:
       Report: /pm-captures/report.html'
     created_at: '2026-10-28T06:49:24Z'
     last_edited: '2026-10-28T06:49:24Z'
+  - id: note-0790ce6
+    text: 'Integration done (HEAD f2a785e6, merge of master@89e3c501 into 7c6bffc4).
+      Both conflicts resolved. review_loop.py: kept this PRs shared _poll_adopted_review/_landed_verdict
+      structure and switched the single verdict reader _verdict_output_if_present
+      to master find_verdict_turn (returns hit.text or hit.verdict), so pr-8efa789
+      reaches the restart-handoff, retry-discovery and landed-verdict paths; the conflicts
+      inline copy in _adopt_in_flight_review was dropped in favour of _poll_adopted_review.
+      Verified master only changed review_loop.py by that switch since the merge base
+      450a6362. project.yaml: registry/notes 3-way union (508 unique ids; pr-e040aeb
+      identical to this branch, pr-25f4038 + pr-16e45ba identical to master, no master
+      id missing; only differences from master are this branch own cross-PR notes
+      + later updated_at). Dropped the two stale app._stop_before_merge lines from
+      tests/test_review_launch_retry.py (pr-25f4038). consume_breadcrumb keeps both
+      master targets_from_breadcrumb(data, prs) migration and this PR resume-before-scheduler
+      ordering. Tests: targeted 234 passed (test_review_launch_retry, test_breadcrumb_review_loop,
+      test_review_loop, test_verdict_transcript); full suite 4187 passed, 1 skipped,
+      1 failed = test_hook_events::test_installer_writes_standalone_receiver, which
+      fails identically on a clean 89e3c501 worktree (pre-existing hook-installer
+      env failure). Spec updated with the integration section and verification.'
+    created_at: '2026-10-28T07:04:36Z'
+    last_edited: '2026-10-28T07:04:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
