@@ -34,16 +34,33 @@ Why the current code allows this:
    land on an index whose directory still holds foreign files.
 
 **Relationship to #264 / pr-1e9c117 (do not duplicate).** That PR (commit
-`2739187c`, not yet merged) makes `captures_dir` fail closed when
-`PM_CAPTURES_PR` is absent/empty/mismatched, i.e. it *prevents* the nested
-write when the marker is missing. `master` still hands the mount to any PR
-when the marker is unset (`if mount.is_dir() and (not mount_pr or mount_pr
-== pr_id)`), so the incident's path is live until #264 lands. This PR does
-**not** touch that routing rule; it defends on the evidence side (the
+`2739187c`, plus `f20f156e` for the whitespace-stripped owner match) makes
+`captures_dir` fail closed when `PM_CAPTURES_PR` is absent/empty/mismatched,
+i.e. it *prevents* the nested write when the marker is missing. **It has
+since landed on `origin/master`**, so the mount is no longer handed to any
+PR with an unset marker:
+
+```python
+mount_pr = (os.environ.get(CAPTURES_PR_ENV) or "").strip()
+if mount.is_dir() and mount_pr and mount_pr == pr_id:
+    return mount
+```
+
+The incident's *write* path is therefore closed for anything running this
+`paths.py`. What remains live — and is what this PR owns — is: an older
+running controller that still carries the fail-open routing, a fixture
+writing before the fix, and legacy pre-fix records already on disk. This PR
+does **not** modify that routing rule (its `paths.py` diff is only the
+additive `create=False` reader mode); it defends on the evidence side (the
 `_captures_root_is_ours` quarantine guard, below). The two compose: routing
-stops the write; provenance makes any write that still happens (older
-controllers without the marker, a marker that matches, a legacy pre-fix
-record) detectable and non-authoritative.
+stops the write; provenance makes any write that still happens detectable and
+non-authoritative.
+
+Merge note: this branch is based on a pre-#264 `master`, so
+`paths.captures_dir`'s **docstring** conflicts at merge time. A trial merge
+into current `master` auto-resolves the routing code to master's fail-closed
+form (the branch did not touch those lines) and leaves only the docstring
+hunk to reconcile — no behavioural loss either way.
 
 ## 1. Requirements
 
@@ -288,8 +305,12 @@ is introduced for pre-existing reports.
   an existing dir is returned, a missing one is not created;
 - the sign-off head refers to "the scenarios listed below" only when a
   listing really follows it;
+- `_execute_and_finalize` re-syncs the evidence (quarantine + manifest) after
+  persisting the verdicts, carrying the final `overall` — and still does so
+  when the per-scenario persistence raised;
 - `run_qa_sync` records an empty membership at every post-planning early exit
-  (QA spec missing, planner handoff failed).
+  (QA spec missing, planner handoff failed) — those two live in
+  `tests/test_qa_planner_handoff.py`, next to the planning harness they drive.
 
 ## 2. Implicit requirements
 

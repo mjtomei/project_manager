@@ -617,6 +617,60 @@ def test_persist_scenario_verdicts_stamps_pr_and_run(tmp_path, monkeypatch):
     assert m["scenarios"][0]["verdict"] == "PASS"
 
 
+def _finalize_calls(tmp_path, *, persist_raises=False):
+    """Drive ``_execute_and_finalize`` and record its evidence calls in order."""
+    from pm_core import qa_loop
+
+    state = qa_loop.QALoopState(pr_id="pr-x")
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [qa_loop.QAScenario(index=1, title="one",
+                                          focus="f", steps="s")]
+    state.scenario_verdicts = {1: "PASS"}
+    state.verified_scenarios = {1}
+    calls: list[tuple[str, dict]] = []
+
+    def _persist(*args, **kwargs):
+        calls.append(("persist", kwargs))
+        if persist_raises:
+            raise OSError("captures mount went away")
+
+    with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+         patch("pm_core.qa_loop._write_status_file"), \
+         patch("pm_core.qa_loop._write_resume_file"), \
+         patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None), \
+         patch("pm_core.qa_loop._persist_scenario_verdicts",
+               side_effect=_persist), \
+         patch("pm_core.qa_loop._sync_captures_evidence",
+               side_effect=lambda *a, **k: calls.append(("sync", k))):
+        qa_loop._execute_and_finalize(
+            state, tmp_path, {"id": "pr-x", "branch": "b"}, {}, "pm-s", "qa",
+            str(tmp_path), tmp_path / "qa_status.json", None,
+            use_containers=False, concurrency_cap=0, queued_scenarios=[],
+            notify=lambda: None)
+    return state, calls
+
+
+def test_finalize_resyncs_evidence_after_persisting_verdicts(tmp_path):
+    """The incident's contamination is written *during* the outer run, so the
+    completion re-sync is what catches it: the run must quarantine foreign
+    records and re-publish its membership after the verdicts are persisted,
+    carrying the final overall verdict (pr-1ae1d2d)."""
+    state, calls = _finalize_calls(tmp_path)
+
+    assert [name for name, _ in calls] == ["persist", "sync"]
+    assert state.latest_verdict == "PASS"
+    assert calls[1][1].get("overall") == "PASS"
+
+
+def test_finalize_resyncs_evidence_even_if_persisting_raised(tmp_path):
+    """Evidence bookkeeping is best effort and must not be skipped because the
+    per-scenario persistence failed: the manifest still has to re-assert the
+    run's membership, or a fixture-written record could stand as coverage."""
+    _state, calls = _finalize_calls(tmp_path, persist_raises=True)
+
+    assert [name for name, _ in calls] == ["persist", "sync"]
+
+
 def test_status_file_carries_run_id(tmp_path):
     from pm_core import qa_loop
     p = tmp_path / "qa_status.json"

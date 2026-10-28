@@ -31530,7 +31530,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-27T20:17:01.336870+00:00'
+  updated_at: '2026-10-28T05:21:14.491528+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31579,6 +31579,15 @@ prs:
       identical on the pre-fix tree. (2026-10-27)'
     created_at: '2026-10-27T20:17:01Z'
     last_edited: '2026-10-27T20:17:01Z'
+  - id: note-b782c51
+    text: 'Review-loop 12d0: master has moved since this branch was cut — #264/pr-1e9c117
+      (fail-closed PM_CAPTURES_PR routing) is now on origin/master. A trial merge
+      into current master auto-resolves pm_core/paths.py routing to master fail-closed
+      form and conflicts only in the captures_dir docstring; reconcile that hunk at
+      merge time and keep create=False reader mode. Also added completion-resync tests
+      (fixture writes during the run).'
+    created_at: '2026-10-28T05:21:14Z'
+    last_edited: '2026-10-28T05:21:14Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
