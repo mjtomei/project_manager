@@ -465,7 +465,7 @@ def test_audit_without_a_captures_dir_never_walks_the_cwd(tmp_path,
     monkeypatch.chdir(tmp_path)
     (tmp_path / "scenarios" / "9").mkdir(parents=True)
     a = captures.audit(None, pr_id="pr-x", run_id="run1")
-    assert a.captures_root is None
+    assert a.pr_captures_dir is None
     assert a.dirs == {}
     assert a.members == []
     assert any("no captures dir" in x for x in a.anomalies)
@@ -833,6 +833,30 @@ def test_signoff_qa_block_promises_no_listing_when_the_status_has_none(
     head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
     assert listing == ""
     assert "not run-bound" in head
+    assert "listed below" not in head
+
+
+def test_signoff_qa_block_survives_a_non_mapping_status_file(tmp_path,
+                                                             monkeypatch):
+    """A truncated or hand-edited ``qa_status.json`` can parse as a list.  It
+    has no verdict and no listing, so the block must treat it like an
+    unreadable file — not raise on ``.get`` — and still bind the run from the
+    manifest, which is the evidence the session is told to trust."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    status = tmp_path / "pr-x-run1" / "qa_status.json"
+    status.parent.mkdir()
+    status.write_text(json.dumps([{"index": 1}]), encoding="utf-8")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+
+    head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+
+    assert "unreadable" in head
+    assert "QA run: `run1`" in head
+    assert listing == ""
     assert "listed below" not in head
 
 

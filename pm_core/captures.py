@@ -2,7 +2,16 @@
 
 Every scenario record the QA orchestrator writes is stamped with the PR and
 the QA *run* (``QALoopState.loop_id``) that produced it, and each run
-publishes a manifest at the captures root listing the scenarios it owns.
+publishes a manifest at the top of the PR's captures dir listing the
+scenarios it owns.
+
+Every ``*_dir`` / ``*_path`` helper here takes the **per-PR** captures dir —
+what ``pm qa captures-path <pr>`` prints and what a container sees as
+``/pm-captures`` — *not* ``paths.captures_root()``, which is its parent (the
+dir holding one subdirectory per PR).  Handing the parent to these helpers
+does not raise: ``read_manifest`` would silently find nothing and
+``write_manifest`` would put one manifest, shared by every PR, at the
+captures root.  That is why the parameter is named ``pr_captures_dir``.
 
 Why this exists: a nested fake-Claude QA fixture driven inside an outer
 scenario container, or an earlier implementation-verification run, could
@@ -40,9 +49,9 @@ _log = logging.getLogger("pm.captures")
 # record without ``schema`` as legacy (still readable, just unbound).
 SCHEMA = 1
 
-# The run manifest at the captures root (beside report.html and
-# integration.json — deliberately *not* inside ``scenarios/``, which is the
-# per-scenario namespace agents walk).
+# The run manifest at the top of the PR's captures dir (beside report.html
+# and integration.json — deliberately *not* inside ``scenarios/``, which is
+# the per-scenario namespace agents walk).
 MANIFEST_NAME = "qa_manifest.json"
 
 # Per-run copy of the same manifest.  The root file is the "current run"
@@ -65,27 +74,27 @@ _NUMERIC_DIR_RE = re.compile(r"^\d+$")
 # Paths
 # ---------------------------------------------------------------------------
 
-def manifest_path(captures_root: Path | str) -> Path:
-    """Path of the current-run manifest under *captures_root*."""
-    return Path(captures_root) / MANIFEST_NAME
+def manifest_path(pr_captures_dir: Path | str) -> Path:
+    """Path of the current-run manifest under *pr_captures_dir*."""
+    return Path(pr_captures_dir) / MANIFEST_NAME
 
 
-def run_manifest_path(captures_root: Path | str, run_id: str) -> Path:
+def run_manifest_path(pr_captures_dir: Path | str, run_id: str) -> Path:
     """Path of the per-run copy of a run's manifest."""
-    return Path(captures_root) / RUNS_DIR_NAME / f"{run_id}.json"
+    return Path(pr_captures_dir) / RUNS_DIR_NAME / f"{run_id}.json"
 
 
-def scenarios_dir(captures_root: Path | str) -> Path:
+def scenarios_dir(pr_captures_dir: Path | str) -> Path:
     """The per-scenario evidence namespace."""
-    return Path(captures_root) / "scenarios"
+    return Path(pr_captures_dir) / "scenarios"
 
 
-def scenario_dir(captures_root: Path | str, index: int) -> Path:
-    return scenarios_dir(captures_root) / str(index)
+def scenario_dir(pr_captures_dir: Path | str, index: int) -> Path:
+    return scenarios_dir(pr_captures_dir) / str(index)
 
 
-def scenario_record_path(captures_root: Path | str, index: int) -> Path:
-    return scenario_dir(captures_root, index) / SCENARIO_RECORD_NAME
+def scenario_record_path(pr_captures_dir: Path | str, index: int) -> Path:
+    return scenario_dir(pr_captures_dir, index) / SCENARIO_RECORD_NAME
 
 
 def _now() -> str:
@@ -141,7 +150,7 @@ def _atomic_write_json(path: Path, data: dict) -> bool:
 # Manifest
 # ---------------------------------------------------------------------------
 
-def write_manifest(captures_root: Path | str | None, *,
+def write_manifest(pr_captures_dir: Path | str | None, *,
                    pr_id: str, run_id: str,
                    scenarios: list[dict] | None = None,
                    overall: str = "",
@@ -158,11 +167,11 @@ def write_manifest(captures_root: Path | str | None, *,
     Best effort: returns ``None`` (and logs) rather than raising, because a
     missing manifest must never abort a QA run.
     """
-    if captures_root is None or not pr_id or not run_id:
+    if pr_captures_dir is None or not pr_id or not run_id:
         return None
-    path = manifest_path(captures_root)
+    path = manifest_path(pr_captures_dir)
     if started_at is None:
-        previous = read_manifest(captures_root, pr_id=pr_id)
+        previous = read_manifest(pr_captures_dir, pr_id=pr_id)
         if previous and previous.get("run_id") == run_id:
             started_at = previous.get("started_at")
     data = {
@@ -180,7 +189,7 @@ def write_manifest(captures_root: Path | str | None, *,
     # Per-run copy first: the root pointer below is what a nested fixture can
     # overwrite, and the copy is what makes this run's membership recoverable
     # afterwards.
-    run_path = run_manifest_path(captures_root, run_id)
+    run_path = run_manifest_path(pr_captures_dir, run_id)
     if not _atomic_write_json(run_path, data):
         return None
     return path if _atomic_write_json(path, data) else run_path
@@ -240,7 +249,7 @@ def _read_json(path: Path):
         return None
 
 
-def read_manifest(captures_root: Path | str | None,
+def read_manifest(pr_captures_dir: Path | str | None,
                   *, pr_id: str | None = None,
                   run_id: str | None = None) -> dict | None:
     """Read a run manifest, or ``None`` when none is usable for *pr_id*.
@@ -256,9 +265,9 @@ def read_manifest(captures_root: Path | str | None,
     trusted.  Steps 2 and 3 are what make this PR's membership survive a
     fixture overwriting the root pointer mid-run.
     """
-    if captures_root is None:
+    if pr_captures_dir is None:
         return None
-    root = Path(captures_root)
+    root = Path(pr_captures_dir)
     manifest = _valid_manifest(_read_json(manifest_path(root)), pr_id)
     if manifest is not None:
         return manifest
@@ -299,12 +308,12 @@ def _manifest_owner(data) -> str:
 # Per-scenario records
 # ---------------------------------------------------------------------------
 
-def read_scenario_record(captures_root: Path | str | None,
+def read_scenario_record(pr_captures_dir: Path | str | None,
                          index: int) -> dict | None:
     """The scenario's structured record, or ``None`` when absent/unreadable."""
-    if captures_root is None:
+    if pr_captures_dir is None:
         return None
-    path = scenario_record_path(captures_root, index)
+    path = scenario_record_path(pr_captures_dir, index)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -312,7 +321,7 @@ def read_scenario_record(captures_root: Path | str | None,
     return data if isinstance(data, dict) else None
 
 
-def write_scenario_record(captures_root: Path | str | None, index: int,
+def write_scenario_record(pr_captures_dir: Path | str | None, index: int,
                           record: dict, *,
                           pr_id: str, run_id: str) -> Path | None:
     """Write ``scenarios/<index>/scenario.json`` with PR/run identity.
@@ -321,7 +330,7 @@ def write_scenario_record(captures_root: Path | str | None, index: int,
     ``index/title/focus/steps/verdict/reason``); ``schema``, ``pr_id``,
     ``run_id`` and ``captured_at`` are added.
     """
-    if captures_root is None:
+    if pr_captures_dir is None:
         return None
     stamped = dict(record)
     stamped.update({
@@ -330,7 +339,7 @@ def write_scenario_record(captures_root: Path | str | None, index: int,
         "run_id": run_id,
         "captured_at": _now(),
     })
-    path = scenario_record_path(captures_root, index)
+    path = scenario_record_path(pr_captures_dir, index)
     return path if _atomic_write_json(path, stamped) else None
 
 
@@ -361,7 +370,7 @@ class ScenarioDirEvidence:
 @dataclass
 class EvidenceAudit:
     """Authoritative membership of a QA run, plus what else is on disk."""
-    captures_root: Path | None
+    pr_captures_dir: Path | None
     pr_id: str
     run_id: str
     manifest: dict | None
@@ -372,7 +381,7 @@ class EvidenceAudit:
     anomalies: list[str] = field(default_factory=list)
 
 
-def scenario_indices(captures_root: Path | str | None) -> list[int]:
+def scenario_indices(pr_captures_dir: Path | str | None) -> list[int]:
     """Indices of the numeric directories under ``scenarios/`` (sorted).
 
     Only *canonical* names count (``3``, not ``03``).  The index is what
@@ -382,9 +391,9 @@ def scenario_indices(captures_root: Path | str | None) -> list[int]:
     pm only ever writes ``str(index)``, so a non-canonical name is not ours
     to classify (or move).
     """
-    if captures_root is None:
+    if pr_captures_dir is None:
         return []
-    root = scenarios_dir(captures_root)
+    root = scenarios_dir(pr_captures_dir)
     try:
         entries = list(root.iterdir())
     except OSError:
@@ -399,9 +408,9 @@ def scenario_indices(captures_root: Path | str | None) -> list[int]:
     return sorted(out)
 
 
-def _classify(captures_root: Path, index: int,
+def _classify(pr_captures_dir: Path, index: int,
               pr_id: str, run_id: str) -> ScenarioDirEvidence:
-    record = read_scenario_record(captures_root, index)
+    record = read_scenario_record(pr_captures_dir, index)
     owner_pr = (record or {}).get("pr_id") or ""
     owner_run = (record or {}).get("run_id") or ""
     if not isinstance(owner_pr, str):
@@ -423,7 +432,7 @@ def _classify(captures_root: Path, index: int,
                                has_record=record is not None)
 
 
-def audit(captures_root: Path | str | None, *,
+def audit(pr_captures_dir: Path | str | None, *,
           pr_id: str, run_id: str = "") -> EvidenceAudit:
     """Authoritative membership for *run_id*, and every directory's claim.
 
@@ -441,15 +450,15 @@ def audit(captures_root: Path | str | None, *,
     reported as "prior run … this run's evidence is missing" directly beside
     a membership list that names that very run.
     """
-    if captures_root is None:
+    if pr_captures_dir is None:
         # No captures dir at all: nothing is bound to a run, and saying so is
         # the honest answer — never audit the process's current directory.
         return EvidenceAudit(
-            captures_root=None, pr_id=pr_id, run_id=run_id, manifest=None,
+            pr_captures_dir=None, pr_id=pr_id, run_id=run_id, manifest=None,
             manifest_run="",
             anomalies=["no captures dir — no QA evidence to audit"])
-    root = Path(captures_root)
-    manifest = read_manifest(captures_root, pr_id=pr_id, run_id=run_id or None)
+    root = Path(pr_captures_dir)
+    manifest = read_manifest(pr_captures_dir, pr_id=pr_id, run_id=run_id or None)
     manifest_run = (manifest or {}).get("run_id", "")
     effective_run = manifest_run or run_id
     # The root pointer is the "current run" file a nested fixture overwrites.
@@ -463,7 +472,7 @@ def audit(captures_root: Path | str | None, *,
     members = [m for m in ((manifest or {}).get("scenarios") or [])
                if isinstance(m, dict)]
     dirs = {i: _classify(root, i, pr_id, effective_run)
-            for i in scenario_indices(captures_root)}
+            for i in scenario_indices(pr_captures_dir)}
     member_indices = {i for m in members if (i := member_index(m)) is not None}
     orphans = sorted(i for i in dirs if i not in member_indices)
 
@@ -488,8 +497,8 @@ def audit(captures_root: Path | str | None, *,
         if not root_ok:
             if root_raw is None:
                 anomalies.append(
-                    "no qa_manifest.json at the captures root — membership "
-                    f"recovered from {RUNS_DIR_NAME}/")
+                    "no qa_manifest.json at the top of the captures dir — "
+                    f"membership recovered from {RUNS_DIR_NAME}/")
             elif _manifest_owner(root_raw) == pr_id:
                 anomalies.append(
                     "the root qa_manifest.json is unusable (no run id) — "
@@ -555,7 +564,7 @@ def audit(captures_root: Path | str | None, *,
             anomalies.append(
                 f"scenarios/{idx}: listed in the manifest but has no "
                 "evidence directory — its evidence is missing")
-    return EvidenceAudit(captures_root=root, pr_id=pr_id, run_id=effective_run,
+    return EvidenceAudit(pr_captures_dir=root, pr_id=pr_id, run_id=effective_run,
                          manifest=manifest, manifest_run=manifest_run,
                          members=members, dirs=dirs, orphans=orphans,
                          anomalies=anomalies)
@@ -576,7 +585,7 @@ def _free_target(base: Path) -> Path:
         n += 1
 
 
-def quarantine_foreign(captures_root: Path | str | None, *,
+def quarantine_foreign(pr_captures_dir: Path | str | None, *,
                        pr_id: str, run_id: str = "") -> list[Path]:
     """Move provably-foreign scenario dirs out of the scenario namespace.
 
@@ -590,9 +599,9 @@ def quarantine_foreign(captures_root: Path | str | None, *,
     ``scenarios/_foreign/<run_id>-<index>`` (with a numeric suffix when that
     already exists).  Best effort — never raises.
     """
-    if captures_root is None:
+    if pr_captures_dir is None:
         return []
-    root = Path(captures_root)
+    root = Path(pr_captures_dir)
     moved: list[Path] = []
     label = run_id or "unknown-run"
     for index in scenario_indices(root):

@@ -791,6 +791,14 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         return _qa_head_without_status(
             "_qa_status.json unreadable — read the captures dir directly._",
             pr_id, latest)
+    if not isinstance(data, dict):
+        # A truncated or hand-edited file can parse as a list/scalar.  It
+        # carries no verdict and no listing, so treat it exactly like an
+        # unreadable one instead of raising on ``data.get`` below — the
+        # sign-off session must still get its run binding.
+        return _qa_head_without_status(
+            "_qa_status.json unreadable — read the captures dir directly._",
+            pr_id, latest)
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
         scenarios = list(scenarios.values())
