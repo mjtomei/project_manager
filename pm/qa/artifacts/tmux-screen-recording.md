@@ -153,7 +153,12 @@ done
 #    this paste; step 5 clears it when the run ends. A claim left behind by an
 #    abandoned run is cleared with
 #    `tmux set-option -u -t <session> @pm_capture_dir` — the message below
-#    says so, because a stale claim would otherwise block this session.
+#    says so, because a stale claim would otherwise block this session. The
+#    claim is written *before* the pipe is attached: tmux has no
+#    compare-and-set, so two runs that read the option at the same instant can
+#    still both pass the check, but taking the claim first keeps the window
+#    from covering the pipe attachment itself — the takeover this guard is
+#    for.
 #    Like steps 4 and 5, this step is pasted on its own when a run re-attaches
 #    its transcript: an empty `$TARGET` would make `-t ''` resolve to whatever
 #    session tmux considers current (the claim below would be read from — and
@@ -184,14 +189,20 @@ if [ -n "$other" ]; then
         "end that capture, or use another capture directory" >&2
     exit 1
 fi
+# Take the claim before attaching the pipe, not after: the check above and
+# the claim are two separate tmux calls, so claiming afterwards leaves a
+# window in which a second run passes the same check, attaches its own pipe
+# (replacing this one — the takeover the claim exists to stop), and only then
+# writes its claim over this one. The claim is released again if the pipe
+# cannot be attached, so a failure here does not leave a stale claim behind.
+tmux set-option -t "$TARGET" @pm_capture_dir "<capture-dir>" || {
+    echo "could not claim <capture-dir> on $TARGET — the session went away" >&2
+    exit 1
+}
 tmux pipe-pane -t "$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
     echo "could not stream $TARGET:0.0 to <capture-dir>/transcript.log —" \
         "check that pane exists" >&2
-    exit 1
-}
-tmux set-option -t "$TARGET" @pm_capture_dir "<capture-dir>" || {
-    echo "could not claim <capture-dir> on $TARGET — the session went away" \
-        "between the pipe and the claim" >&2
+    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 
@@ -410,13 +421,14 @@ test -s <capture-dir>/transcript.log || {
     tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 }
-# Release this run's capture-directory claim (step 2). A later run in this
-# session may record into another directory; leaving the claim behind would
-# make it refuse. Best-effort like the pipe stop below: the session may already
-# be gone, which is why the claim lives on the session in the first place.
-tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
 tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
 tmux kill-session -t pm-recorder 2>/dev/null || true   # already gone if it exited
+# Release this run's capture-directory claim (step 2) last: a later run in
+# this session may record into another directory, and while the claim is set
+# this run's cleanup must not be able to stop *that* run's pipe — so the pipe
+# goes first. Best-effort like the pipe stop: the session may already be gone,
+# which is why the claim lives on the session in the first place.
+tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
 ```
 
 ## Render to video

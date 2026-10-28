@@ -190,8 +190,11 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # clears them for a fresh run; this covers step 2 alone. Every *.webm goes: a
 # killed driver leaves Playwright's auto-named `page@<hash>.webm` rather than
 # the renamed recording.webm, and that partial video is valid enough to pass
-# any file check. The paths are relative because the `cd` above succeeded.
-rm -f ./*.webm ./trace.zip ./dom.html ./*.png
+# any file check. The mp4 goes too: an earlier attempt that was already
+# finalized leaves the primary artifact, and a retry that fails would then end
+# with that video as the only recording the manifest can present as this
+# run's. The paths are relative because the `cd` above succeeded.
+rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png
 # The driver is an ES module, and Node's ES-module resolver ignores
 # NODE_PATH, so with only the image's global Playwright a bare
 # `node driver.mjs` fails at once with "ERR_MODULE_NOT_FOUND: Cannot find

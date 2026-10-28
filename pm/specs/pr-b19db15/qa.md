@@ -217,6 +217,9 @@ run's video in the capture directory.
 - a transcode whose `ffmpeg` reports success but writes an empty mp4 fails
   with "ffmpeg wrote nothing", leaves no mp4 behind, and keeps the webm so
   the step can be retried;
+- a host with no `ffmpeg` on `PATH` stops the finalize step with "ffmpeg is
+  not installed — the finalize step needs it" before any transcode, instead
+  of reporting the driver's webm as a failed encode;
 - the finalize step run with a `CAPDIR` that does not exist fails with
   "capture directory … does not exist", not "there is no webm to transcode";
 - a driver block whose Playwright resolution check fails leaves none of the
@@ -348,10 +351,12 @@ run's video in the capture directory.
   stops instead of letting the driver fall back to
   `http://localhost:8000` and record whatever answers there.
 - A web-UI driver fails before it produces its outputs in a capture directory
-  that already holds them → the driver step clears the previous run's webm,
-  mp4, `trace.zip`, `dom.html`, `http.log`, `sse.log` and screenshots first,
-  so a failed run cannot present the earlier run's trace, screenshots or
-  protocol logs as this run's evidence. The driver's own exit status is the
+  that already holds them → step 1 clears the previous run's mp4, `*.webm`,
+  `trace.zip`, `dom.html`, `*.png`, `http.log`, `sse.log` and `server.pid`
+  before the app starts, and the driver step repeats the attempt-scoped
+  cleanup (`recording.mp4`, `*.webm`, `trace.zip`, `dom.html`, `*.png`) after
+  its `cd`, so a failed run cannot present the earlier run's video, trace,
+  screenshots or protocol logs as this run's evidence. The driver's own exit status is the
   completion handle: the driver block stops with "the driver failed — this
   run's video, trace and screenshots are incomplete" instead of letting the
   finalize step transcode whatever is on disk (which misreports a driver
@@ -408,8 +413,9 @@ run's video in the capture directory.
   cast and transcript and overwrites them, and the first run's stop block
   then detaches the second run's recorder and reads its status as its own.
   Step 2 claims the capture directory in a `@pm_capture_dir` session option
-  and refuses a session recording a different directory, or a directory
-  another live pm session is recording; step 5 releases the claim. Both
+  *before* attaching the pipe, and refuses a session recording a different
+  directory, or a directory another live pm session is recording; step 5
+  releases the claim. Both
   collisions now fail loudly on at least one side instead of passing. A raw
   `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
   record it as a limitation, not a pass.

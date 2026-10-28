@@ -35,6 +35,12 @@ hits, regardless of how it waits for a background job:
   match this recipe's own ``pm-recorder``), and the web-UI step refuses a
   port something already answers on (that server would satisfy the poll and
   the driver would record the wrong app);
+- two runs on one tmux server must not read each other's evidence: the
+  transcript pipe is per-pane and a later one replaces it, so the tmux recipe
+  claims the capture directory in a session option — before attaching the
+  pipe, so the read/write gap does not cover the takeover it guards — and
+  refuses a session recording a different directory, or a directory another
+  live session records into; a finished run releases the claim;
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
   run's mp4 (which the manifest would present as this run's evidence); the
@@ -59,8 +65,10 @@ hits, regardless of how it waits for a background job:
 - the web-UI driver's own exit status is the capture's completion handle: the
   driver block stops on a failed driver instead of letting the finalize step
   transcode whatever is on disk, and it clears this attempt's outputs first
-  because that block is pasted on its own when a driver is retried. Every
-  ``*.webm`` is cleared, not only ``recording.webm``: a driver killed before
+  because that block is pasted on its own when a driver is retried — including
+  an earlier attempt's already-finalized ``recording.mp4``, which a failed
+  retry would otherwise leave as the manifest's only video. Every ``*.webm``
+  is cleared, not only ``recording.webm``: a driver killed before
   the rename leaves Playwright's auto-named ``page@<hash>.webm``, which is a
   valid, playable partial recording;
 - a step that cannot do its job says so where it fails instead of being
@@ -2030,18 +2038,22 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
     """A failed driver must name itself and leave no earlier attempt's video.
 
     Step 2 is pasted on its own whenever a driver is adapted and retried, so
-    the *previous* attempt's ``recording.webm``, trace, screenshots and DOM
-    dump are still in the capture directory. The block used to end on
-    ``node driver.mjs`` with no check: a retry that failed part-way left the
-    earlier attempt's complete webm in place, and the finalize step transcoded
-    it into "this run's" recording — a successful transcode of an incomplete
-    run. Without a stale webm the failure surfaced one block later as "ffmpeg
-    failed on the driver's webm", which sends the worker to the encoder
-    instead of the driver.
+    the *previous* attempt's outputs are still in the capture directory. The
+    block used to end on ``node driver.mjs`` with no check: a retry that
+    failed part-way left the earlier attempt's complete webm in place, and the
+    finalize step transcoded it into "this run's" recording — a successful
+    transcode of an incomplete run. Without a stale webm the failure surfaced
+    one block later as "ffmpeg failed on the driver's webm", which sends the
+    worker to the encoder instead of the driver. The earlier attempt's
+    ``recording.mp4`` goes too: an attempt that already reached the finalize
+    step leaves the primary artifact, and a retry that fails would otherwise
+    end with that video as the only recording the manifest can present as
+    this run's (the finalize step clears it only when it runs).
     """
     capdir = tmp_path / "cap"
     capdir.mkdir()
-    stale = {"recording.webm": "an earlier attempt\n",
+    stale = {"recording.mp4": "an earlier attempt's video\n",
+             "recording.webm": "an earlier attempt\n",
              "trace.zip": "an earlier trace\n",
              "dom.html": "<html>an earlier dump</html>\n",
              "01-loaded.png": "an earlier screenshot\n"}
@@ -2404,6 +2416,10 @@ case "$sub" in
       if [ ! -f "$STATE/${s%%:*}" ]; then
           echo "can't find session: $s" >&2; exit 1
       fi
+      # Record the session claim *as the pipe is attached*: the recipe has to
+      # take the capture-directory claim before this call, or a second run can
+      # pass the same check and take the pipe over in the gap.
+      cat "$STATE/claim.${s%%:*}" 2>/dev/null > "$STATE/pipeclaim" || true
       # `pipefail`: the attach itself fails. `notranscript`: the attach is
       # accepted but nothing is ever written, which only the end-of-run check
       # can catch.
@@ -2443,7 +2459,7 @@ case "$sub" in
       for f in "$STATE"/*; do
           [ -e "$f" ] || continue
           b=${f##*/}
-          case "$b" in pane|sends|claim.*) continue ;; esac
+          case "$b" in pane|sends|pipeclaim|claim.*) continue ;; esac
           echo "$b"
       done
       exit 0 ;;
@@ -2793,10 +2809,10 @@ class TestCaptureFlowExecution:
     def test_step_two_claims_the_capture_dir_on_the_session(self, tmp_path):
         """The claim is what the collision guards read; it has to be written.
 
-        Step 2 attaches the transcript pipe and records the capture directory
-        in a session option, so the guard survives the separate pastes that
-        follow. ``nostart`` fails the recorder start *after* step 2, which is
-        the earliest point the claim can be observed.
+        Step 2 records the capture directory in a session option, so the
+        guard survives the separate pastes that follow. ``nostart`` fails the
+        recorder start *after* step 2, which is the earliest point the claim
+        can be observed.
         """
         r, _cast = _run_block(
             _scaffold_block(_recipe_text("tmux-screen-recording.md")),
@@ -2805,6 +2821,26 @@ class TestCaptureFlowExecution:
         claim = tmp_path / "state" / "claim.pm-test"
         assert claim.exists(), "step 2 did not claim the capture directory"
         assert claim.read_text().strip() == str(tmp_path / "cap")
+
+    def test_step_two_claims_before_it_attaches_the_pipe(self, tmp_path):
+        """The claim has to be taken *before* the pipe it is meant to guard.
+
+        Step 2 reads the claim, writes it, and only then attaches the pipe.
+        With the write *after* the pipe, two runs that both pass the read
+        before either writes it both attach — and the second pipe replaces the
+        first, the takeover the claim exists to stop (verified live, QA S24:
+        the first run's transcript stops growing while its stop step still
+        exits 0). Taking the claim first does not make the read/write atomic
+        (tmux has no compare-and-set), but it keeps the race window off the
+        pipe attachment itself.
+        """
+        r, _cast = _run_block(_step_two_block(), "ok", tmp_path, target=True)
+        assert r.returncode == 0, r.stderr
+        seen = tmp_path / "state" / "pipeclaim"
+        assert seen.read_text().strip() == str(tmp_path / "cap"), (
+            "step 2 attached the transcript pipe before claiming the capture "
+            "directory, so a concurrent run can pass the same check and take "
+            "the pipe over")
 
     def test_a_second_capture_dir_on_one_session_is_refused(self, tmp_path):
         """Two runs recording one pm session must not take each other's pipe.
