@@ -13,6 +13,8 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
 
 import time
 
+from rich.markup import escape
+
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import held_by_text
@@ -23,6 +25,7 @@ from pm_core.review_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_KILLED,
     VERDICT_LAUNCH_FAILED,
     VERDICT_HOLD,
     VERDICT_CLOSED,
@@ -36,7 +39,7 @@ VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
-    "KILLED": "[red bold]☠ KILLED[/]",
+    VERDICT_KILLED: "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
     VERDICT_ERROR: "[red bold]! ERROR[/]",
     VERDICT_LAUNCH_FAILED: "[red bold]↻ LAUNCH_FAILED[/]",
@@ -368,7 +371,7 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     # verdict to the user instead of silently dismissing.
     final_state = ("failed"
                    if state.latest_verdict in (
-                       VERDICT_ERROR, "KILLED", VERDICT_LAUNCH_FAILED,
+                       VERDICT_ERROR, VERDICT_KILLED, VERDICT_LAUNCH_FAILED,
                        VERDICT_HOLD)
                    else "done")
     extras = {
@@ -517,12 +520,16 @@ def _poll_loop_state_inner(app) -> None:
             if upcoming > 1 and err \
                     and upcoming != state._ui_notified_retry:
                 state._ui_notified_retry = upcoming
+                # ``err`` is the launch child's own stderr: the log line is
+                # Rich markup, so escape it — an unescaped ``[podman]`` is
+                # swallowed and an unbalanced tag raises MarkupError (which
+                # log_message drops), silently hiding the failure.
                 msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
                        f"(attempt {upcoming}; attempt {upcoming - 1} failed: "
-                       f"{err[:200]})")
+                       f"{escape(err[:200])})")
                 artifact = getattr(state, "last_launch_artifact", None)
                 if artifact:
-                    msg += f"\n  Artifact: {artifact}"
+                    msg += f"\n  Artifact: {escape(str(artifact))}"
                 app.log_message(msg, sticky=15)
         elif not state._ui_notified_done:
             state._ui_notified_done = True
@@ -556,8 +563,10 @@ def _poll_loop_state_inner(app) -> None:
         )
         if state.latest_verdict in (VERDICT_ERROR, VERDICT_LAUNCH_FAILED,
                                     VERDICT_HOLD) and state.latest_output:
-            # Truncate for display but show enough to be useful
-            err_text = state.latest_output[:300]
+            # Truncate for display but show enough to be useful.  Escaped:
+            # the output is the child's own stderr and this line is Rich
+            # markup (see the retry notice above).
+            err_text = escape(state.latest_output[:300])
             msg += f"\n  Error: {err_text}"
             # The artifact belongs to a *failed launch attempt*.  A HOLD is
             # the trust/permission prompt the pane sits at (latest_output);
@@ -567,7 +576,7 @@ def _poll_loop_state_inner(app) -> None:
             if state.latest_verdict == VERDICT_LAUNCH_FAILED:
                 artifact = getattr(state, "last_launch_artifact", None)
                 if artifact:
-                    msg += f"\n  Artifact: {artifact}"
+                    msg += f"\n  Artifact: {escape(str(artifact))}"
             from pm_core.paths import command_log_file
             msg += f"\n  See log: {command_log_file()}"
             if state.latest_verdict == VERDICT_LAUNCH_FAILED:

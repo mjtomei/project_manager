@@ -2306,6 +2306,72 @@ def test_launch_failed_completion_notice_still_prints_its_artifact(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# The notices are Rich markup: child stderr must be escaped
+# ---------------------------------------------------------------------------
+
+def _notice_app(state, tmp_path):
+    app = MagicMock()
+    app._auto_start = False
+    app._auto_start_targets = {}
+    app._auto_start_all = False
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": [{"id": PR, "status": "in_review",
+                          "workdir": str(tmp_path)}]}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    return app
+
+
+def _poll_once(app):
+    from pm_core.tui import review_loop_ui
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+
+
+def test_retry_notice_shows_bracketed_child_stderr_verbatim(tmp_path):
+    """The retry notice interpolates the launch child's own stderr into a
+    Rich-markup log line.  Unescaped, ``[podman]`` is parsed as a style tag
+    and swallowed (the UI silently loses the error text), and an unbalanced
+    tag raises MarkupError which ``log_message`` drops — hiding the notice
+    entirely.  Escaped, the line renders the error verbatim."""
+    from textual.content import Content
+    state = ReviewLoopState(
+        pr_id=PR, running=True, iteration=2, launch_attempts=1,
+        next_retry_at=time.time() + 30,
+        last_launch_error="Error: [podman] failed to create container",
+        last_launch_artifact=str(tmp_path / "attempt1.log"))
+    app = _notice_app(state, tmp_path)
+    _poll_once(app)
+    msg = app.log_message.call_args[0][0]
+    rendered = Content.from_markup(msg).plain
+    assert "attempt 2" in rendered
+    assert "[podman] failed to create container" in rendered
+    assert str(tmp_path / "attempt1.log") in rendered
+
+
+def test_launch_failed_notice_shows_an_unbalanced_tag_in_stderr(tmp_path):
+    """An unbalanced ``[/...]`` in the child's stderr would raise MarkupError
+    inside the log line and drop the whole failure notice."""
+    from textual.content import Content
+    state = ReviewLoopState(
+        pr_id=PR, running=False, iteration=2,
+        latest_verdict=VERDICT_LAUNCH_FAILED, launch_retryable=False,
+        launch_attempts=3,
+        latest_output="Review window launch failed (rc=1): [/tmp/pm-review] not writable",
+        last_launch_artifact=str(tmp_path / "attempt3.log"))
+    app = _notice_app(state, tmp_path)
+    _poll_once(app)
+    msg = app.log_message.call_args[0][0]
+    rendered = Content.from_markup(msg).plain
+    assert "[/tmp/pm-review] not writable" in rendered
+    assert str(tmp_path / "attempt3.log") in rendered
+
+
+# ---------------------------------------------------------------------------
 # A re-armed retry is not described by the previous episode's failure
 # ---------------------------------------------------------------------------
 

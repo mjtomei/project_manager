@@ -1012,3 +1012,82 @@ runs and no verdict is fabricated (the new loop snapshots the stale
 symlink/pane), only the loop's history/iteration numbering restarts;
 `_interruptible_sleep` re-reads and re-validates the ~2 MB `project.yaml`
 every 2 s during a backoff.
+
+## QA-driven fixes (scenarios 8 and 9)
+
+Fixes applied from the live QA runs after iteration 9 (0688):
+
+1. **A loop-driven window replacement is visible in the log (QA scenario 8,
+   `b531c86b`).** `_launch_review_window` runs `pm pr review --fresh` as a
+   child and discards its stdout on success, so the child's
+   "Killed existing review window '<name>'" / "Switched to existing review
+   window '<name>'" notices never reached the log — a loop-driven launch
+   silently replaced a held or historical window with no trace.  `cli/pr.py`
+   now mirrors both notices into the debug log (`_log.info`).  Log only;
+   behaviour unchanged.
+2. **Every retry attempt is announced (QA scenario 9, `7f38066a`).** The TUI
+   retry notice was keyed on the observed `launch_attempts`, but an attempt
+   that starts and dies inside one ~1 s poll tick is never observed, so an
+   exhausted episode only ever showed "attempt 2; attempt 1 failed".  The
+   notice now derives the *upcoming* attempt (`launch_attempts + 1`) while
+   `next_retry_at` is still in the future (`_retry_backoff_pending`), so the
+   final attempt is announced too, and each attempt is still announced
+   exactly once across restarts and episodes.
+3. **The auto-start re-arm announcement is visible (QA scenario 9,
+   `7f38066a`).** "Auto-start: retrying review launch for <pr>" was logged but
+   immediately replaced by `_start_loop`'s "Review loop resumed …" in the same
+   tick; it now holds the log line for `CONFIRM_HOLD_SECONDS`, matching the
+   "targets +=" confirmation.
+4. **Test isolation (QA scenario 9, `7f38066a`).**
+   `test_old_window_then_container_failure_retries_the_same_command` patches
+   the process-wide `subprocess.run`, so running pytest inside a tmux pane let
+   an ambient `tmux display-message` session-name lookup consume the "first
+   call fails" slot.  The fake now only counts `--review-loop` launches.
+
+## Review iteration 1 (1fc4) — refinements
+
+1. **Child stderr is escaped before it enters a Rich-markup log line
+   (correctness fix — the failure notice can vanish).** `app.log_message`
+   renders through `LogLine(Static)`, i.e. Rich markup.  The new retry notice
+   interpolated `last_launch_error` (the launch child's own stderr) and the
+   completion notice interpolated `latest_output` unescaped, so a bracketed
+   token in the child's stderr was mangled or the notice was dropped
+   outright: `[podman]` is parsed as a style tag and swallowed, and an
+   unbalanced tag such as `[/tmp/pm-review]` raises `MarkupError`, which
+   `log_message`'s `try/except` swallows — the "concise error in the UI"
+   requirement fails exactly when the failure text is interesting.  Both
+   notices now `rich.markup.escape` the interpolated stderr and artifact path
+   (the codebase convention: `qa_loop_ui` escapes `latest_output` the same
+   way).  Covered by
+   `test_retry_notice_shows_bracketed_child_stderr_verbatim` and
+   `test_launch_failed_notice_shows_an_unbalanced_tag_in_stderr`, which render
+   the message through `textual.content.Content.from_markup` and fail
+   pre-fix.
+2. **`VERDICT_KILLED` instead of the literal.** `review_loop_ui` still keyed
+   `VERDICT_ICONS` on `"KILLED"` and compared `latest_verdict` against the
+   literal in the failed-completion tuple; both use the constant now, like the
+   rest of the module (iteration 9 of 0688 converted `VERDICT_ERROR`).
+
+Not changed (documented residuals): `review_loop.py` is ~1540 lines; two
+lease mechanisms coexist (`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9 of
+385e); `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED`
+after the bounded claim wait; the `runtime_state` mirror of a re-armed loop
+keeps the previous episode's `verdict`/`attempts` until the next iteration
+mirrors a new verdict (the runs popup reads `runtime_state`); a merge
+restart during the post-exhaustion re-arm *cooldown* does not persist the
+loop (`save_breadcrumb` only saves running loops), so auto-start starts a
+fresh loop for the PR instead of continuing the episode — the review still
+runs and no verdict is fabricated (the new loop snapshots the stale
+symlink/pane), only the loop's history/iteration numbering restarts;
+`_interruptible_sleep` re-reads and re-validates the ~2 MB `project.yaml`
+every 2 s during a backoff (`store.load` is dominated by the YAML parse, so
+`validate=False` would not help); a stop that lands in the window between
+`_start_loop` marking the loop running and the thread body breaks the loop
+at its top without recording an outcome, so the previous episode's
+`LAUNCH_FAILED` verdict (already made non-retryable by the re-arm) is what
+`_on_complete_from_thread` mirrors — no re-arm happens, but
+`pm autostart status` says "needs attention" for a loop the user stopped.
+The same top-of-loop break on a fresh loop mirrors `state="done"`; both are
+pre-existing "what does a stopped-before-iteration loop report" questions.
