@@ -53,6 +53,14 @@ slow concretizer no longer stalls the loop either.  To make this safe the
 launchers take an explicit `scenarios` list instead of the
 `state.scenarios` swap, and can skip their own status-file write.
 
+  This also closes the follow-up recorded from the pr-592e4bd review
+  (2026-10-22): `_launch_next_queued` no longer runs the queued scenario
+  refiner (`_concretize_scenario` / `poll_for_verdict`) synchronously
+  inside `_poll_tmux_verdicts`, so a long or route-stalled refiner (e.g.
+  one held by `_RouteStallWatch` during a mid-run route outage) cannot
+  block verdict collection, retries, verification or stop for its
+  duration.  Covered by `test_queued_launch_runs_off_the_poll_thread`.
+
 R3. **Per-scenario verdict grace.**  Replace the global `grace_start` with a
 per-scenario `grace_until`, set at loop start for pre-launched scenarios and
 whenever that scenario's worker pane is (re)created.  One scenario's relaunch
@@ -161,6 +169,19 @@ are unchanged apart from per-scenario grace.
   applies outcomes (pending/verdict/retry updates, status writes).
 - A successful start clears the stale launch-failure `verdict_reason` so the
   eventual transcript verdict isn't shown with an old launch error.
+- A `create` retry re-runs `_prepare_scenario`, which clears
+  `instruction_path` once the concretizer has inlined the steps.  The
+  original pm-relative reference is therefore kept in a new
+  `QAScenario.instruction_source` (persisted in the resume snapshot) so a
+  retried or resumed launch still reads the instruction content and
+  reinstalls the file; without it the retried concretizer would silently
+  lose the instruction steps.
+- A launch/diagnosis outcome that lands in the same tick as a stop request
+  is still applied: dropping it would leave the retry record `launching`
+  with no operation in flight, and the per-scenario loop would then
+  re-classify the scenario as a fresh failure and overwrite the real
+  cause.  Nothing in that block starts new work, and the loop exits on the
+  next condition check.
 - Concretizer rejections / trust-blocked concretizers record a verdict and
   must NOT be retried (existing "no session id + verdict present" branch).
 - Status/resume snapshot are refreshed when a background launch publishes a

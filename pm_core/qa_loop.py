@@ -150,6 +150,11 @@ class QAScenario:
     title: str
     focus: str
     instruction_path: str | None = None
+    # Original pm/qa-relative instruction reference.  ``instruction_path``
+    # is rewritten to the installed scratch path and then cleared once the
+    # concretizer has inlined the steps, so a retry (or a resumed run) needs
+    # this to find the source file again.
+    instruction_source: str | None = None
     artifact_paths: list[str] = field(default_factory=list)
     mock_ids: list[str] = field(default_factory=list)
     steps: str = ""
@@ -832,6 +837,7 @@ def _scenario_to_resume_dict(s: QAScenario) -> dict:
         "title": s.title,
         "focus": s.focus,
         "instruction_path": s.instruction_path,
+        "instruction_source": s.instruction_source,
         "artifact_paths": list(s.artifact_paths),
         "mock_ids": list(s.mock_ids),
         "steps": s.steps,
@@ -856,6 +862,7 @@ def _scenario_from_resume_dict(d: dict) -> QAScenario:
         title=d.get("title", ""),
         focus=d.get("focus", ""),
         instruction_path=d.get("instruction_path"),
+        instruction_source=d.get("instruction_source"),
         artifact_paths=list(d.get("artifact_paths") or []),
         mock_ids=list(d.get("mock_ids") or []),
         steps=d.get("steps", ""),
@@ -1864,20 +1871,30 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
     The instruction library lives in the pm project, not in the target repo.
     This copies the referenced file into ``{scratch_path}/qa-instructions/``
     and rewrites ``scenario.instruction_path`` to the absolute path as seen
-    by the agent (``{scratch_dir}/qa-instructions/{filename}``).
+    by the agent (``{scratch_dir}/qa-instructions/{filename}``).  The
+    original reference is remembered in ``scenario.instruction_source`` so a
+    retry can find the source again after ``instruction_path`` has been
+    cleared.
 
     *scratch_path* is the host-side path; *scratch_dir* is the path the
     agent sees (same on host, ``/scratch`` in containers).
     """
-    if not scenario.instruction_path:
+    if not scenario.instruction_path and not scenario.instruction_source:
         return
-    # instruction_path is e.g. "instructions/tui-manual-test.md"
-    src = pm_root / "qa" / scenario.instruction_path
+    # instruction_path is e.g. "instructions/tui-manual-test.md"; once an
+    # attempt has installed the file it holds the scratch path instead, so
+    # prefer the remembered source.  A create retry (or a resumed run)
+    # re-clones and re-concretizes the scenario, and without the source the
+    # retried concretizer would silently lose the instruction steps.
+    source = scenario.instruction_source or scenario.instruction_path
+    src = pm_root / "qa" / source
     if not src.is_file():
         _log.warning("Instruction file %s not found — clearing instruction_path",
                       src)
         scenario.instruction_path = None
+        scenario.instruction_source = None
         return
+    scenario.instruction_source = source
     dest_dir = scratch_path / "qa-instructions"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
@@ -2062,8 +2079,10 @@ def _launch_scenarios_in_tmux(
 
         # Read instruction content before installing (sets absolute path on scenario)
         instruction_content: str | None = None
-        if pm_root and scenario.instruction_path:
-            src = pm_root / "qa" / scenario.instruction_path
+        instruction_source = (scenario.instruction_source
+                              or scenario.instruction_path)
+        if pm_root and instruction_source:
+            src = pm_root / "qa" / instruction_source
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2296,8 +2315,10 @@ def _launch_scenarios_in_containers(
 
         # Read instruction content from source before installing
         instruction_content: str | None = None
-        if pm_root and scenario.instruction_path:
-            src = pm_root / "qa" / scenario.instruction_path
+        instruction_source = (scenario.instruction_source
+                              or scenario.instruction_path)
+        if pm_root and instruction_source:
+            src = pm_root / "qa" / instruction_source
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -3038,8 +3059,11 @@ def _poll_tmux_verdicts(
             scenario = _scenario_by_index(idx)
             if scenario is None or idx not in pending:
                 continue
-            if state.stop_requested:
-                break
+            # Apply the outcome even when a stop arrived: dropping it would
+            # leave the record "launching" with no op in flight, so the
+            # per-scenario loop below would re-classify the scenario as a
+            # fresh failure and overwrite the real cause.  Nothing here
+            # starts new work, and the loop exits on the next condition.
             verdicts_changed = True
             rec = retries.get(idx)
             if op == "diagnose":
@@ -3055,7 +3079,7 @@ def _poll_tmux_verdicts(
                 pending.discard(idx)
                 if rec:
                     rec["state"] = "running"
-                _launch_next_queued()
+                _settle(scenario, state.scenario_verdicts[idx])
                 continue
             if ok:
                 if rec:

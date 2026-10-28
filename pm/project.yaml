@@ -11830,7 +11830,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T18:42:17.175661+00:00'
+  updated_at: '2026-10-28T07:14:23.948085+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11878,6 +11878,17 @@ prs:
       says "pm session cleanup" (yours to fix).'
     created_at: '2026-10-22T18:42:17Z'
     last_edited: '2026-10-22T18:42:17Z'
+  - id: note-94d602b
+    text: 'pr-1ab9075 (#247) fixes the inline-backoff defect your QA S75 filed as
+      pr-d022825 ("QA dead-worker retry backoff sleeps inline in the verdict poll
+      loop"): retries now use per-scenario wall-clock deadlines, launches/relaunches/diagnosis
+      run in background threads, and queued dequeues no longer run the refiner synchronously.
+      When #247 merges, close pr-d022825 as a duplicate rather than re-fixing it.
+      #247 diagnoses PID/keyring exhaustion and names `pm container`/runtime restart
+      as the remediation but does not restart or reap containers — that stays with
+      you.'
+    created_at: '2026-10-28T07:14:23Z'
+    last_edited: '2026-10-28T07:14:23Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31296,7 +31307,7 @@ prs:
   plan: improvements
   title: 'Bug: one failed QA worker blocks verdict collection during retry backoff'
   branch: pm/pr-1ab9075-bug-one-failed-qa-worker-blocks-verdict-collection
-  status: pending
+  status: in_review
   depends_on: []
   description: 'Observed while manually recovering #236 on 2026-10-22: QA scenario
     28 exhausted its container PID limit (2041 processes, including 1929 treesample.sh,
@@ -31336,13 +31347,13 @@ prs:
     adoption. Keep all healthy workers/results moving while any one launch is retried.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/247
+  gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-22T18:42:20.245432+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-10-28T05:33:39.918891+00:00'
+  started_at: '2026-10-22T17:21:04.879323+00:00'
+  reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
   notes:
   - id: note-222cad3
@@ -31355,6 +31366,32 @@ prs:
       finish, z t during backoff, TUI restart mid-backoff.'
     created_at: '2026-10-22T18:42:20Z'
     last_edited: '2026-10-22T18:42:20Z'
+  - id: note-8a985a7
+    text: 'From pr-592e4bd review (2026-10-22): route-gate waits in queued launches
+      are now nonblocking there (defer/requeue + per-tick queue retry). Remaining,
+      not route-specific: _launch_next_queued still runs the queued scenario refiner
+      synchronously (_concretize_scenario/poll_for_verdict) inside _poll_tmux_verdicts,
+      so a long or stalled queued refiner (incl. a routed refiner held by _RouteStallWatch
+      during a mid-run route outage) blocks verdict collection, retries, verification
+      and stop for its duration. Cover this with the nonblocking retry/launch work.'
+    created_at: '2026-10-22T19:28:01Z'
+    last_edited: '2026-10-22T19:28:01Z'
+  - id: note-resume-247-20261028
+    created_at: '2026-10-28T05:33:39.918891+00:00'
+    last_edited: '2026-10-28T05:33:39.918891+00:00'
+    text: 'User authorized resumption from the retained reviewed branch in the #249
+      controller session. Preserve existing source/specs/review history and all local
+      files. Fresh native review, then fresh QA/signoff; historical outcomes are not
+      new approval. DeepSeek 1017/high for implementation/review/QA/helpers, work
+      Opus 5.5/high for signoff; manual wait_for_merge and spec review OFF. No force
+      push or master rewrite.'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-a80bde5
   plan: bugs
   title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations

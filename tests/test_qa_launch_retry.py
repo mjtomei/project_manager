@@ -539,6 +539,88 @@ def test_status_shows_window_of_inflight_launch(tmp_path):
     assert state.scenario_verdicts == {2: VERDICT_PASS}
 
 
+def test_failed_relaunch_keeps_kind_and_retries(tmp_path):
+    """A relaunch whose window creation fails is retried again with the
+    same failure kind — an exec failure does not become a create failure
+    (which would re-clone the scenario and lose the container)."""
+    sc = QAScenario(index=1, title="t", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    attempts = []
+
+    def fake_relaunch(scenario, st, *a):
+        attempts.append(st.launch_retries[1]["attempts"])
+        st.scenario_verdict_reasons[1] = "worker window relaunch failed: boom"
+        return False
+
+    def on_tick(clock):
+        if len(attempts) >= 2:
+            # Stop in the very tick that applies the second failure: the
+            # outcome must still be applied, or the scenario is re-classified
+            # as a fresh exec failure and the real cause is overwritten.
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._relaunch_scenario_window",
+              side_effect=fake_relaunch),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert attempts == [1, 2]
+    rec = state.launch_retries[1]
+    assert rec["kind"] == "exec"
+    assert rec["cause"] == "worker window relaunch failed: boom"
+    assert rec["state"] == "waiting"
+
+
+def test_create_retry_reinstalls_scenario_instruction(tmp_path):
+    """A create retry re-runs the launcher after the first attempt cleared
+    ``instruction_path``.  The retried concretizer must still receive the
+    instruction file's contents (and the file must be reinstalled), or the
+    scenario silently loses its instruction steps on every retry."""
+    pm_root = tmp_path / "pm"
+    instr = pm_root / "qa" / "instructions"
+    instr.mkdir(parents=True)
+    (instr / "x.md").write_text("# do the thing\n")
+
+    sc = QAScenario(index=1, title="t", focus="f",
+                    instruction_path="instructions/x.md")
+    state = QALoopState(pr_id="pr-x")
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [sc]
+    seen: list[str | None] = []
+
+    def fake_concretize_cmd(scenario, *a, **kw):
+        seen.append(kw.get("instruction_content"))
+        return "concretize-cmd"
+
+    with patch("pm_core.qa_loop._resolve_qa_model"), \
+         patch("pm_core.qa_loop.create_scenario_workdir",
+               return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+         patch("pm_core.qa_loop._build_concretize_cmd",
+               side_effect=fake_concretize_cmd), \
+         patch("pm_core.qa_loop._build_scenario_run_cmd",
+               return_value=("run-cmd", "/w")), \
+         patch("pm_core.qa_loop._concretize_scenario",
+               return_value=(None, None)), \
+         patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
+         patch("pm_core.tmux.split_pane_at", return_value="%10"), \
+         patch("pm_core.tmux.pane_window_id", return_value=None):
+        for _ in range(2):  # initial attempt, then a create retry
+            _launch_scenarios_in_tmux(
+                state, {}, {"id": "pr-x"}, "sess", None, str(tmp_path),
+                pm_root=pm_root, scenarios=[sc], write_status=False)
+
+    assert seen == ["# do the thing\n", "# do the thing\n"]
+    assert sc.instruction_source == "instructions/x.md"
+    # Worker prompt behaviour is unchanged: the inlined steps replace the ref.
+    assert sc.instruction_path is None
+    assert (tmp_path / "scratch" / "qa-instructions" / "x.md").exists()
+
+
 def test_create_retry_tears_down_previous_attempt(tmp_path):
     """The worker split failed after the container and concretizer window
     were created.  The full relaunch re-clones the scenario dir, so it must
