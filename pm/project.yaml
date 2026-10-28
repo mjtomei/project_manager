@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T12:22:35.308554+00:00'
+  updated_at: '2026-10-28T13:09:58.746575+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39315,7 +39315,6 @@ prs:
       lines (the PR status and the `## Sign-off` status) — read only the first. (6)
       Captures at /pm-captures/scenarios/43/{01b-two-syncs-live,02-sync-vs-recovery,02c-sync-vs-recovery-live,03b-two-recoveries-live}.'
     created_at: '2026-10-28T12:02:56Z'
-    last_edited: '2026-10-28T12:02:56Z'
     last_edited: '2026-10-28T12:22:35Z'
   - id: note-fd27427
     text: 'QA planner 2026-10-28 #2: extended pm/specs/pr-5cee3d5/qa.md with R15 for
@@ -39330,6 +39329,28 @@ prs:
       a pm session tag for fake-github; recovery does not run the merge gate.'
     created_at: '2026-10-28T10:43:58Z'
     last_edited: '2026-10-28T10:43:58Z'
+  - id: note-5402064
+    text: 'review-loop 0c92 i1: two residual hand-edited-state crashes, both fixed
+      with tests that fail on the pre-fix code; no change to the resolver / sign-off
+      / merge-gate logic (re-reviewed and found sound). (1) `integration.same_target`
+      is handed the approval''s `integration.target_repo` on the `pm pr merge` publish
+      path; the merge gate validates the approval''s revisions and candidate tree
+      but not `target_repo`, so a hand-edited non-string value reached `Path(5)` and
+      raised TypeError out of the command instead of the ''target repository changed''
+      refusal. A value that is not a string cannot name the same repository, so it
+      now reads as a different one (back to sign-off). (2) `pm pr list --timestamps`
+      sorted on the raw `updated_at`/`created_at`, so a hand-edited unquoted date
+      (a `datetime.date`) could not be compared with another PR''s ISO string — TypeError
+      out of the command. It now renders through `str` like `format_pr_line` and the
+      home window''s PR list already do. Also verified: resolver fuzz (1500 random
+      three-way documents; 1298 resolutions) held preservation, no-duplicate-id and
+      determinism invariants; per-file full-suite run of all 121 test files is green
+      (test_markdown_render needs the `markdown` dep installed; test_push_proxy takes
+      ~3.5 min). Cross-PR: noted a further unguarded `workdir` site (`pm_core/pr_sync.py`
+      `sync_prs`, outside its try/except) on pr-727073f rather than changing master-owned
+      code here.'
+    created_at: '2026-10-28T13:09:58Z'
+    last_edited: '2026-10-28T13:09:58Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
@@ -39748,11 +39769,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T04:29:24.986760+00:00'
-  updated_at: '2026-10-28T04:29:24.986760+00:00'
+  updated_at: '2026-10-28T13:09:49.392301+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-a5a7da9
+    text: 'Additional unguarded `workdir` site for this bug (found while reviewing
+      pr-5cee3d5): `pm_core/pr_sync.py` in `sync_prs` — `check_dir = wd if (wd and
+      Path(wd).exists()) else target_workdir` sits *outside* the loop body try/except,
+      so a hand-edited non-string `workdir` on an in_review/in_progress/qa/sign_off
+      PR raises TypeError out of `pm pr sync` and aborts the sync for every remaining
+      PR (the `is_merged`/verify block below it is guarded, this line is not). Same
+      fix shape as the other sites: read a non-string workdir as absent and fall back
+      to `target_workdir`. Not changed in pr-5cee3d5 because the line is master-owned
+      code outside that PR''s diff.'
+    created_at: '2026-10-28T13:09:38Z'
+    last_edited: '2026-10-28T13:09:49Z'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy
