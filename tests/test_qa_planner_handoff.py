@@ -126,6 +126,7 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                   idle_events: int = 1, grace: float | None = 0,
                   extra_patches: tuple = (),
                   settle_transcript_turns: list[tuple[str, str]] | None = None,
+                  plan_after_nudge_turns: list[tuple[str, str]] | None = None,
                   end_with_stop: bool = False,
                   state_hook=None):
     """Drive run_qa_sync's planning phase with a fake tmux + hook layer.
@@ -145,6 +146,11 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     *settle_transcript_turns*, when given, is written to the planner's
     transcript during the recovery settle wait (the "the plan landed just
     after the idle hook" race) and the wait reports no newer event.
+
+    *plan_after_nudge_turns*, when given, is written to the planner's
+    transcript on the first idle event *after* a recovery nudge was sent
+    (the "the planner answered the nudge" path), so a test can assert the
+    retry is accepted instead of being counted as another missing output.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     if grace is not None:
@@ -173,6 +179,7 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
 
     calls = {"n": 0}
     settle_writes = {"pending": settle_transcript_turns}
+    after_nudge = {"pending": plan_after_nudge_turns}
 
     def fake_wait_for_event(session_id, **kw):
         calls["n"] += 1
@@ -185,6 +192,17 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                               settle_writes["pending"])
             settle_writes["pending"] = None
             return None
+        if (after_nudge["pending"] is not None
+                and calls["n"] > idle_events + 1):
+            # The recovery nudge landed (the settle wait above — the call
+            # right after the last scripted idle — reported no newer event,
+            # so ``handle`` sent one).  The planner answers with its
+            # complete plan on a new turn.
+            _write_transcript(transcript_paths["planner"],
+                              after_nudge["pending"])
+            after_nudge["pending"] = None
+            return {"event_type": "idle_prompt",
+                    "timestamp": time.time() + 1}
         if end_with_stop:
             state.stop_requested = True
         return None
@@ -657,6 +675,39 @@ class TestPlannerRecovery:
             settle_transcript_turns=[("user", TEMPLATE_PROMPT),
                                      ("assistant", FULL_PLAN)])
 
+        assert [s.title for s in state.scenarios] == TITLES
+        assert "QA_PLAN_START" in state.plan_output
+
+    def test_nudged_planner_plan_is_accepted_on_the_next_turn(
+            self, tmp_path, monkeypatch):
+        """A planner that answers the recovery nudge is not nudged again.
+
+        The nudge asks the planner to re-emit its own QA_PLAN block.  When
+        it does so on the following turn the loop must accept that plan and
+        move on — the "retried, then succeeded" half of the acceptance
+        criteria.  Without this the retry could look bounded while a
+        recovered plan was silently ignored.
+        """
+        sent: list[str] = []
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            idle_events=1,
+            plan_after_nudge_turns=[("user", TEMPLATE_PROMPT),
+                                    ("assistant", FULL_PLAN)],
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+                # The harness clock advances 1 s per monotonic() call, so the
+                # default 3 s planner deadline would end the loop before the
+                # answered turn arrives.
+                patch.object(qa_loop, "_PLANNER_TIMEOUT", 20.0),
+                patch("pm_core.tmux.send_keys",
+                      side_effect=lambda _p, msg: sent.append(msg)),
+            ))
+
+        assert sent, "the planner was never nudged for its missing plan"
+        assert len(sent) == 1, f"planner re-nudged after answering: {sent}"
         assert [s.title for s in state.scenarios] == TITLES
         assert "QA_PLAN_START" in state.plan_output
 

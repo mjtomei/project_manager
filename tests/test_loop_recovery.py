@@ -1653,6 +1653,88 @@ class TestQARecoveryWiring:
         assert state.scenario_verdicts[1] == "PASS"
         assert sent == []
 
+    def test_nudged_scenario_worker_verdict_on_the_next_turn_is_recorded(
+            self, tmp_path, monkeypatch):
+        """A worker that answers the recovery nudge is recorded, not retired.
+
+        The nudge asks the worker for its own standalone outcome.  A worker
+        that then emits its verdict on a new turn must have it recorded (and
+        its recovery tracker dropped) instead of the answered turn being
+        counted as another missing output — the "retried, then succeeded"
+        half of the acceptance criteria for the tick loop.
+        """
+        from pm_core import loop_shared, qa_loop
+        from pm_core.qa_loop import QALoopState, QAScenario
+
+        scenario = QAScenario(index=1, title="S", focus="f")
+        scenario.window_name = "qa-s1"
+        scenario.session_id = "sid-s1"
+        scenario.pane_id = "%1"
+        scenario.transcript_path = str(
+            _transcript_with_assistant(tmp_path, "still testing"))
+
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        state.scenario_verdicts = {}
+        state.qa_workdir = None
+
+        clock = {"t": 1000.0}
+
+        def fake_time():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        def fake_monotonic():
+            clock["t"] += 1.0
+            return clock["t"]
+
+        sent: list[str] = []
+
+        def fake_read_event(_sid):
+            # The same idle turn (the worker waits for input) until the
+            # nudge is answered, then a genuinely new turn.
+            return {"event_type": "idle_prompt",
+                    "timestamp": 200.0 if sent else 100.0,
+                    "session_id": "sid-s1"}
+
+        def fake_extract(_path, _verdicts):
+            return "PASS" if sent else None
+
+        ticks = {"n": 0}
+
+        def fake_sleep(_seconds):
+            ticks["n"] += 1
+            assert ticks["n"] <= 500, "QA tick loop hung: no recovery"
+
+        monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+        monkeypatch.setattr(qa_loop, "recovery_max_attempts", lambda: 3)
+        monkeypatch.setattr(qa_loop, "recovery_settle_seconds", lambda: 5.0)
+        monkeypatch.setattr(qa_loop, "recovery_response_timeout", lambda: 0.0)
+        monkeypatch.setattr(qa_loop, "_is_verification_enabled",
+                            lambda: False)
+        monkeypatch.setattr(qa_loop, "_get_verdict_reminder_timeout",
+                            lambda: None)
+        monkeypatch.setattr(loop_shared.time, "monotonic", fake_monotonic)
+
+        with patch("pm_core.hook_events.read_event",
+                   side_effect=fake_read_event), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
+             patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=lambda _p, m: sent.append(m)), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", str(tmp_path),
+                tmp_path / "status.json", lambda *a: None,
+            )
+
+        assert len(sent) == 1, f"expected exactly one nudge, got {sent}"
+        assert state.scenario_verdicts[1] == "PASS"
+
     def test_scenario_worker_stop_event_does_not_strand_recovery(
             self, tmp_path, monkeypatch):
         """A Stop hook overwriting the idle event must not strand a worker.

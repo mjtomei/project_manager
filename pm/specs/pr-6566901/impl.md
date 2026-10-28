@@ -554,7 +554,10 @@ unbounded.
   (`INPUT_REQUIRED` + reason, slot freed); a verdict landing on the tick the
   post-nudge response deadline expires is recorded, not retired as
   `no_response`, and one that lands *after* that tick's scan is found by the
-  exhaustion re-scan; a stop that lands between ticks does not retire a
+  exhaustion re-scan; a *nudged* worker that answers with its verdict on the
+  next turn has it recorded with only that one nudge rather than being
+  retired — the tick loop's "retried, then succeeded" path; a stop
+  that lands between ticks does not retire a
   worker as `no_response`, and a stop set *inside* `handle` (after the
   `stopping` snapshot) does not retire it either (both are
   spurious-exhaustion guards during teardown); a review/watcher stop that
@@ -568,7 +571,9 @@ unbounded.
   `_error`, and the recovery *nudge* for that block names it too (single
   line, still no plan supplied); a plan written while recovery
   settles (the idle-hook/transcript-write race) is accepted from the settle
-  re-read rather than being asked for again.
+  re-read rather than being asked for again; a planner that answers the
+  nudge with its complete block on the next turn is accepted with exactly
+  one nudge (the planner's "retried, then succeeded" path).
 * `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`; the
   completion log line keeps a bracketed error detail intact (escaped for Rich
   markup) for both `NO_VERDICT` and `ERROR`, and omits the error block for a
