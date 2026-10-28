@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T09:26:45.655567+00:00'
+  updated_at: '2026-10-28T09:56:09.710079+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36530,6 +36530,40 @@ prs:
       least on the integrated code. Report: /pm-captures/report.html'
     created_at: '2026-10-28T09:26:45Z'
     last_edited: '2026-10-28T09:26:45Z'
+  - id: note-714c4af
+    text: 'review/integration i3 (impl, 2026-10-28): merged master@89e3c501 (merge
+      commit ce749f42) and reworked both sign-off findings. (1) pm/project.yaml resolved
+      with store.merge_3way — master''s newer registry state for every untouched entry,
+      this branch''s own PR entry+notes winning true conflicts; verified every id
+      from either side survives exactly once and all 12 notes are intact (store.load
+      validate=True OK). (2) _wait_for_follow_up_verdict now reads through verdict_transcript.find_verdict_turn
+      and returns hit.text — the sign-off bug (answer -> follow-up PASS -> a "# /loop
+      tick" turn made the waiter return the tick reply, parse_review_verdict=NEEDS_WORK,
+      relaunch) is fixed; task-scoping also means the question being answered can
+      never come back as its own follow-up. (3) is_human_prompt_record is built on
+      master''s _user_record_is_non_task; the duplicate _NON_TASK_PREFIXES/_NON_TASK_SENTINELS
+      and the duplicate _SYSTEM_REMINDER_BLOCK_RE are deleted. isMeta stays an explicit
+      check (the shared predicate treats a Stop-hook record as a task boundary, which
+      is not a human answer); a pasted image still counts as a prompt; a mixed tool_result+text
+      record is a prompt, same rule as the verdict scan. (4) Fixed a test-isolation
+      bug the full suite exposed: hook_events._HOOKS_BASE is frozen from $HOME at
+      import time and in a full run the first import can land inside another test''s
+      patched HOME, so TestHumanResponseWatch wrote into a deleted tmp_path — a module-level
+      autouse fixture now pins it per test. Tests: tests/test_review_input_required_state.py
+      29 passed; new test_follow_up_pass_survives_a_loop_tick_turn FAILS on the merged
+      pre-rework code (mock.call_count 2 vs 1, iteration 2 relaunched) and passes
+      after; new test_agrees_with_the_shared_task_boundary_predicate pins the predicate
+      alignment. Full suite: 55 failed / 36 errors / 4022 passed, identical to a pristine
+      origin/master@89e3c501 worktree in this sandbox (markdown_render 12, git_ops
+      1, hook_events 1, signoff_integration 22, merge_publish 19+17, sync_merge_integrity
+      19 errors) — none from this PR. Spec R4 + new R5b and the master-overlap edge
+      case updated. Evidence: /pm-captures/impl/post-fix/integration-signoff/ (pre/post
+      rework logs + both review_loop.py versions + manifest). The earlier impl/pre-fix
+      and impl/post-fix captures still hold for the original symptom (this rework
+      changes which turn the waiter reads, not the wait-state transitions). QA should
+      re-run S1-S3 at least on the integrated code, as the sign-off note asks.'
+    created_at: '2026-10-28T09:56:09Z'
+    last_edited: '2026-10-28T09:56:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
