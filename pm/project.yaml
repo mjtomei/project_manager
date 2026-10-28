@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-5887f3b
+  active_pr: pr-ed2ebe9
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -41525,6 +41525,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:55:14.879292+00:00'
   updated_at: '2026-10-28T03:55:14.879292+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ed2ebe9
+  plan: bugs
+  title: 'Bug: sign-off REQA hop starts QA over a live ''pm qa run'' and kills its
+    windows (two QA loops run at once)'
+  branch: pm/pr-ed2ebe9-bug-sign-off-reqa-hop-starts-qa-over-a-live-pm-qa-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/signoff_ui.py, hop == ''qa'' branch (~line 382)
+    calls qa_loop_ui.start_qa(app, pr_id) with no qa_loop.run_driven_elsewhere(pr_id)
+    check (unlike auto_start''s QA pass and review_loop_ui._launch_qa_after_review).
+    Repro (QA S117 story 4, pr-592e4bd HEAD 5e55b707, host, fake-claude; captures
+    /pm-captures/scenarios/117/head/s4): PR E in qa run by a qa-run-bg driver, auto-start
+    target; fake signoff = [SIGNOFF_REQA delay 60, SIGNOFF_BLOCKED], qa_scenario PASS
+    delay 90. Driver PASS -> TUI hands off -> signoff-E window. User runs ''pm qa
+    run d-check --pr E'' (qa_run.json names its pid 114336). At 06:42:09 the TUI logs
+    ''Sign-off routed E back to QA (SIGNOFF_REQA)'', ''Starting QA for E...'', then
+    ''Killing stale QA window qa-E'' and ''qa-E-s1'' (x2) - the live CLI run''s windows.
+    The CLI run relaunched its worker (new qa-E-s1 at 06:42:17) and printed Result:
+    PASS at 06:45:23 while the TUI REQA loop ran beside it (QA complete 06:45:37).
+    Expected (RQ56, one driver per QA run): the hop leaves a run driven elsewhere
+    alone and starts QA once it ends (e.g. defer like _launch_qa_after_review + the
+    30 s _recheck_after_driver).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T06:46:32.852795+00:00'
+  updated_at: '2026-10-28T06:46:32.852795+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
