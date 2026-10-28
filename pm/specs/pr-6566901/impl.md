@@ -378,6 +378,23 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   — no verdict recorded` and skips both the lifecycle transition and the
   QA note for it. `STOPPED` is not in `ALL_VERDICTS`: nothing about the PR
   was determined, so it must never parse as a result.
+* **The same contract covers a stop during execution** — the tick loop's
+  stop guards keep a worker from being *retired* while the run is torn down,
+  but the aggregation in `_execute_and_finalize` still saw its scenarios as
+  unverdicted and reported `INPUT_REQUIRED` ("Execution worker one: ?") with
+  a QA note, i.e. a user stop surfaced as a missing-outcome failure one
+  phase later. A stop that leaves *every* scenario unverdicted (and no
+  `_error` / `planner_code_changes`) now ends in `STOPPED`
+  (`latest_output = "QA stopped during execution"`), skips the finalize pane
+  (there is nothing to reconcile, and spawning one only logs "pane vanished
+  or stop_check fired"), and therefore records no QA note and does not
+  transition the PR. A stop *after* some scenarios reported keeps the
+  `INPUT_REQUIRED` coverage warning: real verdicts were recorded, so the run
+  is not "nothing determined" (and an incomplete run must still never be
+  reported as `PASS`). Regression tests:
+  `TestStoppedRunAggregation::test_stop_before_any_verdict_is_stopped_not_input_required`
+  and `::test_stopped_before_any_verdict_skips_the_finalizer`; the partial
+  case stays pinned by `::test_missing_verdict_is_input_required`.
 * **STOPPED is a hold verdict for auto-start** — `STOPPED` is recorded in
   runtime_state like any finished run (state `done`), so
   `auto_start.QA_HOLD_VERDICTS` must include it: otherwise

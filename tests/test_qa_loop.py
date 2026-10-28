@@ -2156,6 +2156,42 @@ class TestStoppedRunAggregation:
         state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_PASS}
         assert self._finalize(state, tmp_path) == VERDICT_PASS
 
+    def test_stop_before_any_verdict_is_stopped_not_input_required(self, tmp_path):
+        """A stop with no scenario outcome at all is teardown, not a result.
+
+        The workers were torn down mid-episode, so nothing about the PR was
+        determined: the run must end STOPPED (the planning phase's clean
+        teardown) instead of INPUT_REQUIRED, which pauses for a human and
+        records a QA note for a run the user deliberately stopped.
+        """
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.stop_requested = True
+        overall = self._finalize(state, tmp_path)
+        assert state.latest_verdict == VERDICT_STOPPED
+        assert overall == VERDICT_STOPPED
+        assert state.latest_output == "QA stopped during execution"
+
+    def test_stopped_before_any_verdict_skips_the_finalizer(self, tmp_path):
+        """No outcome means nothing to reconcile: no finalize pane."""
+        from pm_core import qa_loop
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a")]
+        state.stop_requested = True
+        with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane") as finalize:
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+        finalize.assert_not_called()
+        assert state.finalize_verdict is None
+
 
 class TestPlannerStopTeardown:
     """A stop while the planner is still working is a clean teardown.

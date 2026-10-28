@@ -4710,7 +4710,21 @@ def _execute_and_finalize(
     # that coverage PASS.
     unverdicted = [s.index for s in state.scenarios
                    if s.index not in state.scenario_verdicts]
-    if VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes:
+    # A user stop that landed before *any* scenario produced an outcome is
+    # teardown, not a QA result: nothing about the PR was determined, so it
+    # must not be surfaced as an INPUT_REQUIRED missing-outcome failure (or
+    # record a QA note) — the same clean-teardown contract the planning
+    # phase honours with its terminal STOPPED state.  A stop *after* real
+    # verdicts keeps the INPUT_REQUIRED coverage warning below: coverage
+    # was genuinely incomplete, and discarding recorded verdicts would hide
+    # what the run did find.
+    stopped_clean = (
+        state.stop_requested and unverdicted and not verdicts
+        and not state._error and not state.planner_code_changes
+    )
+    if stopped_clean:
+        state.latest_verdict = VERDICT_STOPPED
+    elif VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes:
         # Application code the planner committed was never reviewed:
         # route back to review rather than on to sign-off.
         state.latest_verdict = VERDICT_NEEDS_WORK
@@ -4736,7 +4750,14 @@ def _execute_and_finalize(
     except Exception:
         _log.exception("Failed to persist scenario verdicts")
 
-    if not state.scenarios:
+    if stopped_clean:
+        # No scenario produced an outcome, so there is nothing for the
+        # finalizer to reconcile.  Spawning one during teardown would only
+        # add a session that immediately reports "pane vanished or
+        # stop_check fired".
+        _log.info("QA finalize: skipped for %s — stopped before any verdict",
+                  state.pr_id)
+    elif not state.scenarios:
         # Nothing ran, so there are no scenario pushes to reconcile.  A
         # finalizer here only adds another session that can stall (#229:
         # it blocked at the same trust prompt as the planner).
@@ -4760,10 +4781,15 @@ def _execute_and_finalize(
     finalize_suffix = ""
     if state.finalize_verdict:
         finalize_suffix = f" [finalize: {state.finalize_verdict}]"
-    state.latest_output = (
-        f"QA complete: {state.latest_verdict}{finalize_suffix} — "
-        + qa_outcome_detail(state) + planner_code_changes_suffix(state)
-    )
+    if stopped_clean:
+        # Mirror the planning-phase wording: a stop is a teardown, not a
+        # completion with a per-scenario summary of "?" outcomes.
+        state.latest_output = "QA stopped during execution"
+    else:
+        state.latest_output = (
+            f"QA complete: {state.latest_verdict}{finalize_suffix} — "
+            + qa_outcome_detail(state) + planner_code_changes_suffix(state)
+        )
 
     _log.info("QA complete for %s: %s (finalize=%s)",
               state.pr_id, state.latest_verdict, state.finalize_verdict)
