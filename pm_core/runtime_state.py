@@ -302,7 +302,8 @@ def clear_action(pr_id: str, action: str) -> None:
 
 
 def sweep_stale_states(reason: str = "tui-restart",
-                       pr_ids: set[str] | None = None) -> int:
+                       pr_ids: set[str] | None = None,
+                       keep=None) -> int:
     """Reset any in-flight action states across all PRs.
 
     Called by the TUI on mount: a fresh TUI process can't own panes or
@@ -315,6 +316,9 @@ def sweep_stale_states(reason: str = "tui-restart",
 
     *pr_ids* limits the sweep to those PRs (the TUI's own project), since
     the runtime dir is shared by every project under ``~/.pm``.
+
+    *keep(pr_id, action)* returning True leaves that entry as it is: it
+    belongs to a live process other than the old TUI.
 
     Returns the number of action entries that were cleared.
     """
@@ -343,6 +347,8 @@ def sweep_stale_states(reason: str = "tui-restart",
         if pr_ids is not None and pr_id not in pr_ids:
             continue
         for action in targets:
+            if keep is not None and keep(pr_id, action):
+                continue
             try:
                 clear_action(pr_id, action)
                 swept += 1

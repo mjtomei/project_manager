@@ -744,7 +744,8 @@ def pane_closed_cmd():
 @click.argument("pane_id")
 def pane_opened_cmd(session: str, window: str, pane_id: str):
     """Internal: handle tmux after-split-window hook."""
-    pane_layout.handle_pane_opened(session, window, pane_id)
+    pane_layout.handle_pane_opened(pane_registry.pm_session_name(session),
+                                   window, pane_id)
 
 
 def _pin_popup_body(body: str, session: str, window: str | None) -> str:
@@ -844,7 +845,7 @@ def window_resized_cmd(session: str, window: str):
 
     _log.info("_window-resized: ENTERED session=%s window=%s pid=%d", session, window, os.getpid())
 
-    base = pane_registry.base_session_name(session)
+    base = pane_registry.pm_session_name(session)
     data = pane_registry.load_registry(base)
     wdata = pane_registry.get_window_data(data, window)
     if not wdata["panes"]:
@@ -870,7 +871,7 @@ def window_resized_cmd(session: str, window: str):
 
     _log.info("_window-resized: debounce won, rebalancing %s:%s", session, window)
     tmux_mod.unzoom_pane(session, window)
-    result = pane_layout.rebalance(session, window)
+    result = pane_layout.rebalance(base, window, query_session=session)
     _log.info("_window-resized: rebalance returned %s", result)
 
 
@@ -1976,7 +1977,7 @@ def popup_picker_cmd(session: str, window_name: str):
         _wait_dismiss()
         raise SystemExit(code)
 
-    base = pane_registry.base_session_name(session)
+    base = pane_registry.pm_session_name(session)
     rp = pane_registry.registry_path(base)
     _log.info("popup-picker invoked: session=%r window=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
               session, window_name, base, rp, rp.exists(),
@@ -1989,7 +1990,7 @@ def popup_picker_cmd(session: str, window_name: str):
     # client's session, not whichever client tmux considers current.
     os.environ[tmux_mod.POPUP_SESSION_ENV] = session
 
-    saved_root = _resolve_root_from_session(session)
+    saved_root = _resolve_root_from_session(base)
     try:
         root = saved_root if saved_root is not None else state_root()
         # Validate the raw snapshot below: the general loader repairs invalid
@@ -2560,7 +2561,7 @@ def popup_picker_cmd(session: str, window_name: str):
 @click.argument("session")
 def popup_cmd_cmd(session: str):
     """Internal: pm command prompt for tmux popup."""
-    base = pane_registry.base_session_name(session)
+    base = pane_registry.pm_session_name(session)
     rp = pane_registry.registry_path(base)
     _log.info("popup-cmd invoked: session=%r base=%r registry_path=%s exists=%s HOME=%r module=%s",
               session, base, rp, rp.exists(),
@@ -2575,7 +2576,7 @@ def popup_cmd_cmd(session: str):
     # Inherit the session's persisted root so user commands resolve
     # project state correctly even if the popup's cwd is outside the
     # repo or in a deleted workdir.
-    saved_root = _resolve_root_from_session(session)
+    saved_root = _resolve_root_from_session(base)
     if saved_root is not None:
         os.environ["PM_PROJECT"] = str(saved_root)
 

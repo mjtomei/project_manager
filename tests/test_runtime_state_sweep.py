@@ -23,3 +23,17 @@ def test_sweep_without_pr_ids_clears_every_in_flight_entry():
     rs.set_action_state("pr-other", "start", "idle")
     assert rs.sweep_stale_states("tui-restart") == 2
     assert rs.get_action_state("pr-other", "start") == {}
+
+
+def test_sweep_keeps_entries_the_keep_predicate_names():
+    """S121: a TUI restart swept the [working] entry of a QA run that a
+    ``pm pr auto-sequence`` driver still runs; nothing rewrote it."""
+    rs.set_action_state("pr-a", "qa", "running")
+    rs.set_action_state("pr-a", "review", "running")
+    rs.set_action_state("pr-b", "qa", "running")
+    kept = rs.sweep_stale_states(
+        "tui-mount", keep=lambda pr_id, action: (pr_id, action) == ("pr-a", "qa"))
+    assert kept == 2
+    assert rs.get_action_state("pr-a", "qa")["state"] == "running"
+    assert rs.get_action_state("pr-a", "review") == {}
+    assert rs.get_action_state("pr-b", "qa") == {}

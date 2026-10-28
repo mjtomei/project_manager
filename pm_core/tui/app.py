@@ -566,11 +566,17 @@ class ProjectManagerApp(App):
         # rewrite real entries as panes register and loops resume.
         # Only this project's PRs: ~/.pm/runtime is shared by every
         # project, and another project's live TUI owns its entries (S36).
+        # A QA run a ``pm pr auto-sequence`` driver runs is not the old
+        # TUI's either: nothing would rewrite its entry before its verdict,
+        # so the picker would lose its [working] badge (S121).
         try:
             from pm_core import runtime_state as _rs
+            from pm_core.qa_loop import run_driven_elsewhere
             _rs.sweep_stale_states(
                 "tui-mount",
-                pr_ids={p.get("id") for p in (self._data or {}).get("prs") or []})
+                pr_ids={p.get("id") for p in (self._data or {}).get("prs") or []},
+                keep=lambda pr_id, action: (action == "qa"
+                                            and run_driven_elsewhere(pr_id)))
         except Exception:
             _log.debug("runtime_state sweep on mount failed", exc_info=True)
         self._update_orientation()

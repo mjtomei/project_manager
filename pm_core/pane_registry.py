@@ -27,6 +27,22 @@ def base_session_name(session: str) -> str:
     return session.split("~")[0]
 
 
+def pm_session_name(session: str) -> str:
+    """The pm session that tmux session *session* shows (base name).
+
+    Like :func:`base_session_name`, but a user's own view grouped with a
+    pm session under another name (``tmux new-session -t pm-x -s myview``)
+    resolves through its group: tmux names that view in hooks and popups
+    while its client is the most recently active one (S121).
+    """
+    base = base_session_name(session)
+    if not session or base.startswith("pm-"):
+        return base
+    from pm_core import tmux as tmux_mod
+    group = tmux_mod.session_group(session)
+    return base_session_name(group) if group.startswith("pm-") else base
+
+
 def registry_dir() -> Path:
     """Return the directory for pane registry files."""
     from pm_core.paths import pane_registry_dir
