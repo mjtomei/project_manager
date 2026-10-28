@@ -135,6 +135,28 @@ def test_run_qa_finalize_pane_does_not_gate_when_verification_disabled(
         "finalize should proceed past the gate to find its window"
 
 
+def test_unverified_passes_uses_the_poll_snapshot_of_verification(monkeypatch):
+    """A mid-run qa-verify-pass toggle must not change what finalize waits on:
+    the poll never verified PASSes while the setting was off, so turning it on
+    later must not hold finalize (or downgrade them on stop) forever."""
+    from pm_core import qa_loop
+    state = QALoopState(pr_id="x")
+    state.scenario_verdicts = {1: "PASS", 2: "PASS"}
+    state.verified_scenarios = {2}
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    state.verify_pass_enabled = False
+    assert qa_loop._unverified_passes(state) == []
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    state.verify_pass_enabled = True
+    assert qa_loop._unverified_passes(state) == [1]
+
+    # Before the poll has run, the live setting decides.
+    state.verify_pass_enabled = None
+    assert qa_loop._unverified_passes(state) == []
+
+
 # --- (h) wiring test, textual-assertion fallback -------------------------
 # NOTE: A full integration test would require monkeypatching >12 helpers
 # (get_pm_session, store.load, _run_qa_finalize_pane, _launch_scenarios_*,

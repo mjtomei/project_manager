@@ -225,6 +225,11 @@ class QALoopState:
     # Scenarios whose PASS verdict has been confirmed by the verifier.
     # Finalize waits until every PASS in scenario_verdicts is in this set.
     verified_scenarios: set[int] = field(default_factory=set)
+    # ``qa-verify-pass`` as the verdict poll read it (None before polling).
+    # The finalize gate and the stop downgrade use this snapshot so a
+    # mid-run toggle cannot make them wait on verification the poll never
+    # started.
+    verify_pass_enabled: bool | None = None
     # Scenario 0 (interactive) — tracked separately, never polled for verdicts
     scenario_0: QAScenario | None = None
     # PR-branch commit the planner handed off (published before fan-out);
@@ -692,8 +697,13 @@ def _unverified_passes(state: "QALoopState") -> list[int]:
 
     With verification disabled (``qa-verify-pass`` off) nothing is ever
     verified and a PASS is final, so nothing is awaiting verification.
+    The poll's snapshot of that setting wins over a fresh read: turning it
+    on mid-run must not hold PASSes the poll never queued for verification.
     """
-    if not _is_verification_enabled():
+    enabled = state.verify_pass_enabled
+    if enabled is None:
+        enabled = _is_verification_enabled()
+    if not enabled:
         return []
     return [idx for idx, v in state.scenario_verdicts.items()
             if v == VERDICT_PASS and idx not in state.verified_scenarios]
@@ -2905,7 +2915,7 @@ def _poll_tmux_verdicts(
     """
     from pm_core import tmux as tmux_mod
 
-    verify_enabled = _is_verification_enabled()
+    verify_enabled = state.verify_pass_enabled = _is_verification_enabled()
     verify_max_retries = _get_verification_max_retries()
     if verify_enabled:
         _log.info("PASS verdict verification is enabled (max retries: %d)",
