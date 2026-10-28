@@ -209,6 +209,12 @@ done
 #    asciinema, so it does not stop the recording, and tearing the pane
 #    down first can leave a truncated cast. A single command or a
 #    `bash -c` script needs no driving at all.
+#    Check each send: a `send-keys` that fails means the pane — and so the
+#    recorded shell — is already gone, so that step of the scenario never
+#    ran. Step 4 cannot tell: asciinema exits 0 whenever its command ends,
+#    whether the shell was driven to `exit` or died first, so the cast
+#    stops before the behaviour under test and still passes every check.
+#    Re-run the capture rather than accept it.
 
 # 4. Wait (bounded) for asciinema to exit — the pane *is* the recording, so
 #    the session ending is the completion signal — then confirm the cast is

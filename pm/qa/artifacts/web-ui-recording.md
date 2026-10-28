@@ -27,6 +27,11 @@ under `/opt/ms-playwright` — and advertises the global install through
 locally; step 2 links it beside the driver and checks the import. Elsewhere,
 install with `npm i playwright && npx playwright install --with-deps chromium`.
 
+The finalize step (step 3) transcodes with `ffmpeg`, which the QA container
+image ships; install it (`apt-get install ffmpeg`) on a host without it. The
+block checks for it, because without the check a missing encoder is reported
+as a failed transcode of the driver's webm.
+
 ## What this recipe produces
 
 Write into `<capture-dir>/<short-name>/` (the scenario prompt
@@ -338,6 +343,16 @@ rm -f "$CAPDIR/recording.mp4"
 [ -s "$CAPDIR/recording.webm" ] || {
     echo "there is no webm to transcode — the driver wrote no video; re-run" \
         "step 2 and check the driver's recordVideo option" >&2
+    exit 1
+}
+# A missing encoder is not a bad webm. Without this check the shell answers
+# "ffmpeg: command not found" (status 127), the branch below reports it, and
+# the worker is told the driver's webm failed to transcode (verified) — the
+# same misdiagnosis as reporting a missing cast as an `agg` problem in the
+# recording recipes. Name the actual cause and how to get it.
+command -v ffmpeg >/dev/null || {
+    echo "ffmpeg is not installed — the finalize step needs it; install it" \
+        "(e.g. 'apt-get install ffmpeg') and re-run this step" >&2
     exit 1
 }
 # Check ffmpeg's own exit status as well as the file. A failed or killed

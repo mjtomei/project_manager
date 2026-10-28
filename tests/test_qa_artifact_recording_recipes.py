@@ -69,8 +69,16 @@ hits, regardless of how it waits for a background job:
   reads as "recorder exited before it drew" / "asciinema wrote no cast", both
   pointing at files that were never written), the web-UI driver block refuses
   a capture directory it cannot enter (``cd`` fails and the link lands in the
-  worker's cwd), and a web-UI start that never answers removes the pid it
-  recorded so the teardown cannot signal a recycled one.
+  worker's cwd), a web-UI start that never answers removes the pid it
+  recorded so the teardown cannot signal a recycled one, and the web-UI
+  finalize step names a missing ``ffmpeg`` instead of reporting it as a
+  failed transcode of the driver's webm;
+- a scenario-driving step checks its own sends: the tmux recipe's example
+  ``pm tui send`` lines are guarded (a mid-sequence failure was invisible,
+  because the block's status is its last command's), and the CLI scaffold —
+  which has no witness at all, since asciinema exits 0 whenever its recorded
+  command ends — says that a failed ``send-keys`` means the recorded shell
+  died before the behaviour under test and the capture must be re-run.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -495,6 +503,29 @@ class TestRecipes:
             "the driving step does not warn that a failed pm tui send means "
             "the scenario never ran, so the both-gone finish in step 5 passes "
             "a capture that never showed the behaviour: " + seg)
+
+    def test_cli_driving_step_warns_about_a_failed_send(self):
+        """The CLI pane has no witness, so a dead recorded shell looks finished.
+
+        The tmux recipe's driving step warns that a failed send means the
+        scenario never ran (step 5 cannot tell a crashed TUI from the scenario
+        quitting pm). The CLI scaffold has the same hole and no step-5 witness
+        at all: asciinema exits 0 whenever its recorded command ends, whether
+        the shell was driven to ``exit`` or died first, so a cast that stops
+        before the behaviour under test passes every check. Its driving step
+        is prose (the worker types its own sends), so the warning has to be
+        there.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        seg = block[block.index("# 3. Drive"):block.index("# 4. Wait")]
+        assert "send-keys" in seg
+        assert "Check each send" in seg, (
+            "the CLI driving step does not say to check its sends: " + seg)
+        assert "asciinema exits 0" in seg, (
+            "the warning does not say why step 4 cannot catch a dead shell "
+            "(asciinema's status is 0 either way): " + seg)
+        assert "Re-run" in seg, (
+            "the CLI driving step does not say what to do about it: " + seg)
 
     def test_tmux_recorder_readiness_is_bounded(self):
         """The recorder readiness wait needs its own deadline.
@@ -1340,6 +1371,48 @@ def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path):
     assert not (capdir / "recording.mp4").exists(), (
         "the no-webm failure left the previous run's mp4 as this run's "
         "recording")
+
+
+def test_web_ui_finalize_names_a_missing_encoder(tmp_path):
+    """A missing `ffmpeg` is not a failed transcode of the driver's webm.
+
+    The finalize step checked the webm (R19) and ffmpeg's exit status (R12),
+    but never that the encoder exists, and the recipe never named it as a
+    prerequisite. Verified: with no ``ffmpeg`` on ``PATH`` the shell answers
+    "ffmpeg: command not found" (status 127) and the block reports
+    "transcode produced no mp4 — ffmpeg failed on the driver's webm" — an
+    encoder/browser misdiagnosis for a tool that is simply not installed, the
+    same shape as the missing-cast/missing-webm messages the recipe now gets
+    right. The block names the cause, keeps the webm (so the transcode can be
+    retried once ffmpeg is installed) and still drops the stale mp4.
+    """
+    block = _web_ui_finalize_block()
+    tooling = _recipe_text("web-ui-recording.md").split("## Tooling", 1)[1]
+    tooling = tooling.split("## What this recipe produces", 1)[0]
+    assert "ffmpeg" in tooling, (
+        "the recipe does not name the encoder the finalize step needs")
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    (capdir / "recording.mp4").write_bytes(b"an earlier run's video")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # Only what the block needs before the transcode; no ffmpeg anywhere.
+    (bindir / "rm").symlink_to("/bin/rm")
+    env = {"CAPDIR": str(capdir), "PATH": str(bindir)}
+    r = subprocess.run(["/bin/bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, "a finalize step with no encoder succeeded"
+    assert "ffmpeg is not installed" in r.stderr, r.stderr
+    assert "ffmpeg failed on the driver's webm" not in r.stderr, (
+        "a missing encoder is reported as a failed transcode of the driver's "
+        "webm: " + r.stderr)
+    assert (capdir / "recording.webm").exists(), (
+        "the webm was dropped although nothing was transcoded")
+    assert not (capdir / "recording.mp4").exists(), (
+        "the failure left the previous run's mp4 as this run's recording")
 
 
 def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
@@ -2262,6 +2335,17 @@ case "$1 $2" in
   "session ")     exit 0 ;;
   "tui send")
       [ -n "$STUB_PM_SEND_LOG" ] && printf '%s\n' "$*" >> "$STUB_PM_SEND_LOG"
+      # `sendfail`: the *first* send fails and later ones succeed — the
+      # mid-scenario failure whose exit status the block's own (last command)
+      # status would otherwise hide.
+      if [ "$STUB_MODE" = sendfail ]; then
+          n=$(cat "$STATE/sends" 2>/dev/null || echo 0)
+          n=$((n + 1)); echo "$n" > "$STATE/sends"
+          if [ "$n" = 1 ]; then
+              echo "No TUI pane found. Is there a pm tmux session running?" >&2
+              exit 1
+          fi
+      fi
       case "$STUB_MODE" in
         midadied) rm -f "$STATE/pm-recorder" ;;
         midboth|midbothbad)
@@ -2641,6 +2725,33 @@ class TestCaptureFlowExecution:
         sends = log.read_text().splitlines()
         assert sends and all("-s pm-test" in line for line in sends), (
             "the driving step's sends do not carry the re-derived session: "
+            + repr(sends))
+
+    def test_tmux_driving_step_stops_when_a_send_fails(self, tmp_path):
+        """A failed send is checked, not left for step 5 to misread.
+
+        The prose above the example sends said to check them, but the lines
+        themselves were unchecked, so a *mid-sequence* failure was invisible:
+        the block's exit status is its last command's, so a first send that
+        failed and a second that succeeded ended with rc 0 (verified against
+        the pre-fix recipe, stub ``pm``: first send exits 1, second exits 0 →
+        rc 0, only the stub's own stderr). The run then reached step 5, which
+        sees the recorder and the session both gone, calls it a legitimate
+        finish, and passes a cast that stops before the behaviour under test.
+        The check has to be in the block, because the comment is not what a
+        worker pastes.
+        """
+        log = tmp_path / "sends"
+        r, _cast = _run_block(_driving_block(), "sendfail", tmp_path,
+                              env_extra={"STUB_PM_SEND_LOG": str(log)})
+        assert r.returncode != 0, (
+            "the driving step ran on after a failed pm tui send, so a cast "
+            "that never showed the behaviour can reach step 5 as a finish")
+        assert "pm tui send failed" in r.stderr, r.stderr
+        sends = log.read_text().splitlines()
+        assert len(sends) == 1, (
+            "the driving step sent more keys after a send had failed, so the "
+            "scenario was driven against a dead or different TUI: "
             + repr(sends))
 
     @pytest.mark.parametrize("name", RECIPES)

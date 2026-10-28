@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T19:28:33.587444+00:00'
+  updated_at: '2026-10-28T19:59:14.836724+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32992,6 +32992,42 @@ prs:
       work stays dropped.'
     created_at: '2026-10-28T19:28:33Z'
     last_edited: '2026-10-28T19:28:33Z'
+  - id: note-75f9b86
+    text: 'Review loop e7e1 i9: three leftovers in the kept recipe scope, all the
+      PR own class (a step that cannot do its job must say so, and a handle that cannot
+      tell a finished job from a dead one). (1) The tmux driving step''s example sends
+      were unchecked although the prose above them said to check them — and a block''s
+      exit status is its last command''s, so a *mid-sequence* failure was invisible:
+      verified with a stub `pm` whose first send exits 1 (real `pm tui send` exits
+      1 when no TUI pane is found, pm_core/cli/tui.py) and whose second succeeds,
+      the pre-fix block exits 0 with only the stub stderr, reaches step 5''s both-gone
+      branch and passes a cast that stops before the behaviour under test. Both example
+      sends now carry `|| { echo "pm tui send failed — …"; exit 1; }`; post-fix rc
+      1 with the message and no further keys (send log holds one entry), while the
+      all-succeed path still exits 0 with both sends carrying the re-derived session.
+      (2) The CLI scaffold''s driving step had no equivalent warning, and its pane
+      has no witness at all: asciinema exits 0 whenever its recorded command ends
+      — driven to `exit` or dead — so a shell that died early leaves a cast that passes
+      the readiness, stop, cast and status checks. Step 3 now says to check each `send-keys`,
+      why step 4 cannot tell, and to re-run. (3) The web-UI finalize step never named
+      `ffmpeg` and never checked it exists: verified with no `ffmpeg` on PATH, the
+      shell answers "ffmpeg: command not found" and the block reports "transcode produced
+      no mp4 — ffmpeg failed on the driver''s webm", sending the worker to re-drive
+      a UI for a missing tool. It now stops with "ffmpeg is not installed — the finalize
+      step needs it; install it (e.g. ''apt-get install ffmpeg'') and re-run this
+      step" (the stale mp4 is already removed, the webm kept for the retry), and the
+      Tooling section names the encoder. Considered and rejected: bounding `node driver.mjs`
+      with `timeout` (Playwright''s own 30s action timeouts bound it, the driver''s
+      exit status is already the completion handle, and a fixed bound would kill a
+      legitimately long walk-through). Tests: 3 new, all failing against the pre-fix
+      recipes (checked by restoring HEAD''s recipes in place, then restoring the post-fix
+      copies). File 121 pass; related suites 296 pass; full suite 3974 passed, 1 skipped,
+      94 deselected (test_merge_publish/test_signoff_integration excluded — the push
+      proxy rejects pushes to master — plus the two known baselines). impl.md R22
+      + Files/verification/evidence and qa.md updated. No pm_core/ change; the dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T19:59:14Z'
+    last_edited: '2026-10-28T19:59:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

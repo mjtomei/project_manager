@@ -150,7 +150,10 @@ session, stop the recorder, and render the cast,
 - a `pm tui send` that fails during the scenario is not accepted as a
   finish: the TUI is gone, so the scenario did not run, and step 5's
   both-gone branch cannot tell that apart from the scenario quitting pm —
-  the driving step says so and the capture is re-run; and driving from a
+  the driving step's example sends are checked, so the block stops with
+  "pm tui send failed … re-run the capture" instead of running on (the CLI
+  scaffold says the same about a failed `send-keys`, which its step 4 cannot
+  see because asciinema exits 0 either way); and driving from a
   fresh shell re-derives `$TARGET` (an empty one is refused), so the keys
   cannot auto-detect and drive a different TUI than the one recorded;
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files.

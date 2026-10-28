@@ -222,17 +222,25 @@ if [ -z "$TARGET" ]; then
         "step with pm on PATH, in the project directory" >&2
     exit 1
 fi
-#    Check each send. A `pm tui send` that fails means the TUI is gone, so
-#    that step of the scenario never ran — and step 5 would then see the
-#    recorder and the session both gone, call it a legitimate finish (it
-#    cannot tell that apart from the scenario quitting pm itself), and pass
-#    on a cast that stops before the behaviour under test. Re-run rather
-#    than accept that capture. (The send that ends the session on purpose is
-#    the one case where a failure is the quit racing the send; re-run rather
-#    than guess.)
-pm tui send q -s "$TARGET"            # e.g. navigate to the QA pane
-pm tui send a -s "$TARGET"            # open the picker
-# ... and so on for the scenario steps ...
+#    Check each send, in the block rather than only in this comment: a
+#    `pm tui send` that fails means the TUI is gone, so that step of the
+#    scenario never ran — and step 5 would then see the recorder and the
+#    session both gone, call it a legitimate finish (it cannot tell that
+#    apart from the scenario quitting pm itself), and pass on a cast that
+#    stops before the behaviour under test. Re-run rather than accept that
+#    capture. (The send that ends the session on purpose is the one case
+#    where a failure is the quit racing the send; re-run rather than guess.)
+pm tui send q -s "$TARGET" || {       # e.g. navigate to the QA pane
+    echo "pm tui send failed — the TUI is gone, so this scenario step never" \
+        "ran; re-run the capture instead of accepting it" >&2
+    exit 1
+}
+pm tui send a -s "$TARGET" || {       # open the picker
+    echo "pm tui send failed — the TUI is gone, so this scenario step never" \
+        "ran; re-run the capture instead of accepting it" >&2
+    exit 1
+}
+# ... and so on for the scenario steps, each checked the same way ...
 
 # 5. End the recording by detaching the recorder's attach client.
 #    The attach exits, the recorded command exits, asciinema flushes
