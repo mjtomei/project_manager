@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T12:38:04.647419+00:00'
+  updated_at: '2026-10-28T13:23:06.016257+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36632,6 +36632,29 @@ prs:
       from just after the resume line, the scenario thens all hold.'
     created_at: '2026-10-28T12:38:04Z'
     last_edited: '2026-10-28T12:38:04Z'
+  - id: note-0699bdd
+    text: 'QA scenario 9 re-evaluation (the first PASS was flagged): story 5 Then
+      genuinely failed on f31675d1 — after a plain restart with a restored iteration-6
+      INPUT_REQUIRED wait whose pane/transcript were gone, `pm autostart status` reported
+      waiting/review review #6 — review INPUT_REQUIRED (iteration 6) with input_required=true
+      from the TUI mount until the resumed loop reached its adopt check (~0.2-1s;
+      measured 12:22:42.441, 13:00:15.304, 13:16:21.061). Cause: consume_breadcrumb
+      restored the breadcrumb input_required verbatim, and run_review_loop_sync published
+      running=True before _adoptable_wait_transcript decided adoptability. Fixed in
+      09cadcee (restore no longer carries the flag; the resume clears it until the
+      pane is confirmed adoptable, then sets it so a genuine wait still publishes
+      immediately) with two regression tests that fail pre-fix. Runtime re-verification
+      on the fixed code: 0 waiting / 0 input_required=true samples in two continuous-sampler
+      runs across the restart (pre-fix: 1 in the same window); a genuine live wait
+      is still adopted (waiting, input_required=true, same pane, no relaunch) and
+      still answers -> follow-up NEEDS_WORK -> iteration 2 -> PASS; the latched-flag
+      story still reconciles to iteration 8; iteration 7 PASS and the pinned settle
+      verified. Residual, documented not a wait: for ~0.19s the row reads "review
+      iteration 6 (INPUT_REQUIRED answered; follow-up running)" while the resume runs.
+      Captures: /pm-captures/scenarios/9/{pre-fix,post-fix}/. Full suite 4039 passed,
+      43 failed/36 errors all in the documented git-env families.'
+    created_at: '2026-10-28T13:23:05Z'
+    last_edited: '2026-10-28T13:23:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
