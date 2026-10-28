@@ -36190,7 +36190,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-27T19:58:06.990503+00:00'
+  updated_at: '2026-10-28T04:45:27.755765+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -36211,6 +36211,19 @@ prs:
       Do not merge: manual merge gate applies.'
     created_at: '2026-10-27T19:58:06Z'
     last_edited: '2026-10-27T19:58:06Z'
+  - id: note-33a61cb
+    text: 'QA S7 (concurrent CLI clients) incidental fix @cfd01f0b: `pm autostart
+      status --json` now always carries `ok` — true on success, false (with `error`/`message`)
+      on an owner-side failure — matching add/remove/clear/list. The rest of the object
+      is still the `pm.autostart.status/1` document (additive field, cf. pr-e69afc4
+      "additive fields"; pm/specs/pr-0b87a97/impl.md R3 enumerates the fields without
+      `ok`). This makes a captured status snapshot self-describing and satisfies QA
+      S7 story 5, whose Then requires both status replies to be `ok: true`. Tests:
+      new `test_status_json_ok_true_on_success`; `ok is False` in `test_status_json_carries_owner_error`;
+      round-trip TUI-handler test asserts `ok is True`. Full suite 3849 passed, only
+      the pre-existing env-failure modules failing (none in autostart).'
+    created_at: '2026-10-28T04:45:27Z'
+    last_edited: '2026-10-28T04:45:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
