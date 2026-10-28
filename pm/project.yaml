@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T02:15:24.161572+00:00'
+  updated_at: '2026-10-28T02:29:34.054515+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38477,6 +38477,38 @@ prs:
       on HEAD and 15e2a918 alike.'
     created_at: '2026-10-28T02:15:24Z'
     last_edited: '2026-10-28T02:15:24Z'
+  - id: note-396eebf
+    text: 'S107 refine: verifier results land >=30 s after launch (poll_for_verdict
+      grace) and real-claude workers PASS ~60 s after the stub reply (idle_prompt),
+      so time the round with a long fake verifier delay (90 s) and release s2 ~25
+      s after s1 verifier pane; fake config is per session not per PR, so FLAGGED
+      stories run without H; on 0ad075ae a dropped flag shows "PASS (verifying)" (fails
+      not counted), not "(verifying:N)".'
+    created_at: '2026-10-28T01:25:25Z'
+    last_edited: '2026-10-28T01:25:25Z'
+  - id: note-75a872b
+    text: 'QA S107 (2026-10-28, RQ55 verifier path, host/TUI, real claude refiners/workers
+      vs router/main stubs, fake planner/verifier/finalizer; captures /pm-captures/scenarios/107,
+      REPORT.md): PASS on 239e2f04 (=abd23015 product code), no code change. Every
+      round below put sA and sB in the same poll interval on HEAD. Story 1 (hit r1):
+      sA "Verification passed" and the single "QA stopped" warning came in the same
+      second, and the TUI showed "PASS (verified)" then one stop line. Status: sA
+      PASS, sB PASS (verifying), sC queued, overall "", stopped set. Nothing launched
+      after the stop. H PASSed on the main stub only. Story 2 (retries 0, hit r1):
+      sA was marked NEEDS_WORK with reason "failed verification: Step 1: FAILED —
+      expected output not produced.", B stayed qa. Story 3 (retries 3, hit r2 with
+      sB released at Tv+27): sA "PASS (verifying:1)", no follow-up, worker scrollback
+      ends at its PASS, no new router request. Story 4: fixing vrf and pressing z
+      t gave a fresh run (Fresh QA start) that PASSed. The stopped qa_status.json
+      was byte-identical after the run and after pm tui restart, with no resume. Controls
+      in the same window: 0dad507b kept the VERIFIED sA as PASS (verifying); 0ad075ae
+      (hit r2) kept the FLAGGED sA as PASS (verifying). Observation only: a stopped
+      run QA status pane keeps a verifying spinner and shows no stopped marker. Harness
+      trap: a grouped tmux session named pm-* (e.g. pm-recview) makes the TUI QA thread
+      resolve that session tag, so fake-claude config is ignored. Record from a separate
+      tmux -L server.'
+    created_at: '2026-10-28T02:29:33Z'
+    last_edited: '2026-10-28T02:29:33Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
