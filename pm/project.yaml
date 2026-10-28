@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T17:16:39.264240+00:00'
+  updated_at: '2026-10-28T17:40:19.925786+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36911,6 +36911,32 @@ prs:
       evidence.'
     created_at: '2026-10-28T17:16:39Z'
     last_edited: '2026-10-28T17:16:39Z'
+  - id: note-161d001
+    text: 'review baa8 i1 (PASS-with-fixes, 4de9868d). Reviewed the integrated branch
+      at 8a50c446. No correctness defects found in the wait state: master@89e3c501
+      is merged (ce749f42); _wait_for_follow_up_verdict reads through find_verdict_turn/hit.text
+      and is_human_prompt_record is built on _user_record_is_non_task with no duplicate
+      _NON_TASK_* / _SYSTEM_REMINDER_BLOCK_RE; the INPUT_REQUIRED->NEEDS_WORK auto-answer
+      is gone; _adopting_wait closes the adopt-check false state. Verified pre/post-fix
+      captures (/pm-captures/impl/) reproduce all three reported symptoms pre-fix
+      and clear them post-fix; project.yaml has 509 PRs with no id lost or duplicated
+      vs origin/master. Two fixes this iteration: (1) build_status dropped the resuming
+      flag that review_progress_input computes, so a status reader could only learn
+      the loop was mid-adopt-check by string-matching the reason — published it next
+      to follow_up and extended test_adopting_wait_is_not_reported_as_an_answered_follow_up
+      to assert the published value; (2) impl.md still described that window as a
+      live residual reading "INPUT_REQUIRED answered; follow-up running" — 7280536b
+      fixed it with ReviewLoopState._adopting_wait, so the edge case and R6 (now also
+      covering "review resuming (iteration N)") were updated. Full suite 4121 passed,
+      1 skipped, 0 failed (review-container recipe). Observation, not a defect: the
+      review waiter deliberately duplicates part of loop_shared.wait_for_follow_up_verdict
+      because it must also report whether the human answered; unifying them needs
+      an answered-hook on the shared waiter and would touch the QA/watcher paths (pr-e0f54ca,
+      pr-4caa36a are the tracked analogues). Not re-litigated: the open QA S16 story-4
+      item is a tech-tree paint-ordering concern (the status/runtime-state path never
+      shows a pre-adopt wait), not a wait-state defect — left to the QA gate.'
+    created_at: '2026-10-28T17:40:19Z'
+    last_edited: '2026-10-28T17:40:19Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
