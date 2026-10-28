@@ -423,6 +423,35 @@ def test_started_worker_without_session_keeps_clone(tmp_path):
     assert full_launches == []
 
 
+def test_verdict_emitted_before_pane_death_is_collected(tmp_path):
+    """A worker that wrote its verdict and then died before the poll loop
+    collected it is settled from its transcript instead of being relaunched:
+    the transcript is the verdict source of truth and the dead worker can
+    never supersede it (R9 / E2)."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="t", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1",
+                    transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+
+    def on_tick(clock):
+        if state.scenario_verdicts:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {"sid-1": _idle("sid-1")},
+                            {str(tp): VERDICT_PASS}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert state.scenario_verdicts == {1: VERDICT_PASS}
+    assert not state.launch_retries
+
+
 def test_started_worker_without_window_is_not_recloned(tmp_path):
     """A worker that ran but whose attempt never recorded a window name (the
     resume snapshot was written before the launcher published it) is still an

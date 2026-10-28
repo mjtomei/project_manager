@@ -3331,6 +3331,31 @@ def _poll_tmux_verdicts(
                     verdicts_changed = True
                     _settle(scenario, state.scenario_verdicts[idx])
                     continue
+                # A worker that emitted its verdict just before its pane
+                # died must not be relaunched: the transcript is the verdict
+                # source of truth and the dead worker can never supersede it,
+                # so collect it now instead of spending a retry (R9 / E2).
+                # A scenario whose verdict was cleared for a verification
+                # re-evaluation is excluded — its old verdict is still in the
+                # transcript and a dead pane must not resurrect it.
+                if (_worker_has_started(scenario)
+                        and idx not in verification_failures):
+                    verdict = extract_verdict_from_transcript(
+                        scenario.transcript_path, ALL_VERDICTS)
+                    if verdict:
+                        reason = extract_verdict_reason_from_transcript(
+                            scenario.transcript_path)
+                        if reason:
+                            state.scenario_verdict_reasons[idx] = reason
+                        state.scenario_verdicts[idx] = verdict
+                        pending.discard(idx)
+                        verdicts_changed = True
+                        _log.info(
+                            "Scenario %d (%s) verdict: %s (worker pane gone; "
+                            "collected from its transcript)",
+                            idx, scenario.title, verdict)
+                        _settle(scenario, verdict)
+                        continue
                 if scenario.container_name:
                     # Find out why the worker died before scheduling the
                     # retry — off this thread, the runtime may be slow to
