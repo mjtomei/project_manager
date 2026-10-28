@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T03:07:22.043826+00:00'
+  updated_at: '2026-10-28T03:09:57.953682+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11440,6 +11440,19 @@ prs:
       podman exec -u 0. Captures /pm-captures/scenarios/90.'
     created_at: '2026-10-28T03:07:21Z'
     last_edited: '2026-10-28T03:07:21Z'
+  - id: note-abf54cd
+    text: 'QA S85 (2026-10-28, 17e68cc3, nested rootless podman 3.4.4, fake-claude):
+      S69/S77 rerun, all 3 stories PASS live, no code change. NEEDS_WORK s2 removed
+      13 s after the loop verdict; verified PASS s4 Up in all 25 samples through the
+      60 s verifier, removed 17 s after VERIFIED; IR s3 Up/dead=0 in 131 samples,
+      echo alive 5.7 min later; attached PASS s1 got "keeping … 1 other exec session(s)
+      open" after VERIFIED, stayed Up/dead=0 127 s after exit; samples 0->2 peak.
+      Policy off + z t: only running s1/s3 sampled (2->4), s5 NEEDS_WORK kept Up 78
+      s, no stop/sample. Retries 0 + FLAGGED: marking NEEDS_WORK -> stats -> removed
+      12 s later, verdict_reason "failed verification: …", 5->6. All dead panes status
+      137. Captures /pm-captures/scenarios/85.'
+    created_at: '2026-10-28T03:09:57Z'
+    last_edited: '2026-10-28T03:09:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
