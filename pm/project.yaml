@@ -16859,6 +16859,19 @@ prs:
       is the evidence.'
     created_at: '2026-10-28T13:55:42Z'
     last_edited: '2026-10-28T13:55:42Z'
+  - id: note-451fa17
+    text: 'QA scenario 16 (pane discovery) found and fixed a stale-pane defect: after
+      a TUI exits, the pane registry keeps its role="tui" entry until the next heal_registry,
+      and _find_tui_pane returned it without checking liveness, so `pm tui view` printed
+      an empty frame with exit 0 and `pm tui send` raised a raw tmux "can t find pane"
+      traceback. Fix: new helpers._find_live_tui_pane (checks the resolved pane against
+      tmux list-panes, falls back only to a live pm _tui pane in the SAME session)
+      used by `pm tui view`/`send`/`restart`; _find_tui_pane is unchanged so `pm autostart`
+      still reports the right session s stale pidfile (a first attempt that added
+      the check inside _find_tui_pane made autostart fall through to ANOTHER session
+      s live TUI - do not move it back). Tests: tests/test_cli_helpers.py::TestFindLiveTuiPane.'
+    created_at: '2026-10-28T13:52:28Z'
+    last_edited: '2026-10-28T13:52:28Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
