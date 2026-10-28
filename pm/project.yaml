@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-bab46cf
+  active_pr: pr-bac971d
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T17:46:28.541902+00:00'
+  updated_at: '2026-10-28T19:36:35.494842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35913,6 +35913,20 @@ prs:
       fixed. Commit 95867725.'
     created_at: '2026-10-28T17:46:28Z'
     last_edited: '2026-10-28T17:46:28Z'
+  - id: note-1fda63c
+    text: 'QA scenario 3 (ownership-checked finalization under concurrent loops) PASS:
+      verified end-to-end with two overlapping review loops on one PR plus a stale
+      pre-upgrade legacy review-<pr>-i1 link. Loop-scoped iteration paths, sid ownership
+      checks, freeze+archive of a superseded loop, untouched live link of the current
+      loop, and the legacy link left live all behaved as specified (captures /pm-captures/scenarios/3/).
+      Incidental, pre-existing on master 89e3c501, filed as pr-bac971d: pressing zz
+      d again within ~2s of a loop starting makes the superseded loop adopt the new
+      loop window pane (it re-finds the pane by window name after a 2s sleep), so
+      it does not complete until that window closes and its transcript stays an unfinalized
+      symlink meanwhile. A restart >=2s after start (the scenario window) behaves
+      correctly.'
+    created_at: '2026-10-28T19:36:35Z'
+    last_edited: '2026-10-28T19:36:35Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
@@ -38622,6 +38636,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T16:31:28.497958+00:00'
   updated_at: '2026-10-28T16:31:28.497958+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bac971d
+  plan: bugs
+  title: 'Bug: restarting a review loop within ~2s leaves the superseded loop polling
+    the new loop''s review pane'
+  branch: pm/pr-bac971d-bug-restarting-a-review-loop-within-2s-leaves-the-
+  status: pending
+  depends_on: []
+  description: 'Observed in QA scenario 3 of pr-9ee4d64 (2026-10-28). Repro: start
+    a review loop with ''zz d'' in the TUI, then press ''zz d'' again within ~2s (before
+    the loop''s 2s settle). pm_core/review_loop._run_claude_review does time.sleep(2)
+    and then re-finds the Claude pane by window NAME (_find_claude_pane(session, ''review-<pr>'')).
+    The supersede has already killed the old window and launched the replacement under
+    the same name, so the superseded loop adopts the NEW loop''s pane and blocks in
+    poll_for_verdict (its own dead session never emits an idle event). It therefore
+    does not complete (no KILLED) until the replacement window closes, so its iteration
+    transcript stays an unfinalized symlink (never archived) for that whole time and
+    a background thread leaks. Pressing ''zz d'' >=2s after start behaves correctly
+    (poller bails KILLED, transcript frozen+archived). Pre-existing on master 89e3c501.
+    Fix sketch: capture the pane/window id returned by _launch_review_window and poll
+    that, instead of re-finding by name; or bail before the pane lookup when stop_requested/superseded.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T19:36:19.523510+00:00'
+  updated_at: '2026-10-28T19:36:19.523510+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
