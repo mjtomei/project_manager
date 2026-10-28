@@ -121,7 +121,7 @@ deadline=$(( $(date +%s) + 30 ))
 while :; do
     if ! tmux has-session -t pm-recorder 2>/dev/null; then
         echo "recorder exited before it drew — check 'asciinema rec' output" >&2
-        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+        tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
     fi
     tmux capture-pane -p -t pm-recorder 2>/dev/null \
@@ -130,7 +130,7 @@ while :; do
         echo "recorder did not come up within 30s — check" \
             "'tmux capture-pane -p -t pm-recorder'" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
-        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+        tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
     fi
     sleep 0.2
@@ -145,7 +145,7 @@ done
 sleep 0.3
 if ! tmux has-session -t pm-recorder 2>/dev/null; then
     echo "recorder exited before it drew — check 'asciinema rec' output" >&2
-    tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+    tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 fi
 
@@ -170,12 +170,15 @@ pm tui send a -s "$TARGET"            # open the picker
 #    finished one. `test -s` below cannot tell the difference, so fail here
 #    instead of rendering a truncated cast as this run's evidence. A
 #    recorder that ended because the session itself ended is a legitimate
-#    finish — the wait below sees it.
+#    finish — the wait below sees it. (Every pipe stop below is best-effort:
+#    when the session is already gone the pipe is gone with it, and
+#    `tmux pipe-pane` would otherwise print "can't find session: …" on a run
+#    that succeeded.)
 if ! tmux has-session -t pm-recorder 2>/dev/null; then
     if tmux has-session -t "$TARGET" 2>/dev/null; then
         echo "recorder exited while the TUI was still running — the cast is" \
             "incomplete, not a finished recording" >&2
-        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+        tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
     fi
     # Both are gone: the session itself ended, which ended the attach and so
@@ -189,17 +192,17 @@ while tmux has-session -t pm-recorder 2>/dev/null; do
         echo "recorder did not exit within 30s — check" \
             "'tmux capture-pane -p -t pm-recorder'" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
-        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+        tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         exit 1
     fi
     sleep 0.2
 done
 test -s <capture-dir>/recording.cast || {
     echo "asciinema wrote no cast — check the recorder pane" >&2
-    tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+    tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 }
-tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
 tmux kill-session -t pm-recorder 2>/dev/null || true   # already gone if it exited
 ```
 

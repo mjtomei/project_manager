@@ -34,6 +34,10 @@ hits, regardless of how it waits for a background job:
   quotes inside the outer double-quoted argument, so the recipe has to show
   the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
   string and leaves asciinema with a broken command.
+
+The capture flow's readiness and stop logic is also *executed* against stub
+``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
+silent: a wait that ends badly looks like a finished recording.
 """
 
 import os
@@ -592,6 +596,171 @@ def test_web_ui_clears_a_previous_video():
         "web-ui recipe only drops the old mp4 after the transcode")
     assert 'test -s "$CAPDIR/recording.mp4"' in finalize_block, (
         "web-ui recipe does not check that the transcode produced the mp4")
+
+
+# ---------------------------------------------------------------------------
+# Capture-flow execution
+# ---------------------------------------------------------------------------
+#
+# The capture flow's failure modes are silent — a wait that ends badly looks
+# like a finished recording — and every regression found in this recipe so far
+# (a failed attach's error text counted as a drawn TUI; a recorder that died
+# mid-scenario passing on a truncated cast) was *behavioural*: the text
+# assertions above described the flow correctly while it still did the wrong
+# thing. These cases run the fenced block a worker pastes against stub
+# ``tmux``/``pm``, so the readiness and stop logic is exercised rather than
+# matched.
+
+_STUB_TMUX = r"""
+STATE="$STUB_STATE"
+while [ "$1" = "-L" ]; do shift 2; done
+sub=$1; shift
+val() { f=$1; shift; while [ $# -gt 0 ]; do
+          if [ "$1" = "$f" ]; then echo "$2"; return; fi; shift; done; }
+case "$sub" in
+  has-session)  [ -f "$STATE/$(val -t "$@")" ] && exit 0 || exit 1 ;;
+  kill-session) rm -f "$STATE/$(val -t "$@")"; exit 0 ;;
+  kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder"; exit 0 ;;
+  pipe-pane)
+      s=$(val -t "$@")
+      [ -f "$STATE/${s%%:*}" ] && exit 0
+      echo "can't find session: $s" >&2; exit 1 ;;
+  capture-pane) cat "$STATE/pane" 2>/dev/null; exit 0 ;;
+  send-keys)    rm -f "$STATE/$(val -t "$@")"; exit 0 ;;
+  new-session)
+      s=$(val -s "$@")
+      touch "$STATE/$s"
+      case "$STUB_MODE" in
+        norec) : ;;
+        dies)  rm -f "$STATE/$s" ;;
+        failedattach)
+            printf "can't find session: pm-test\n" > "$STATE/pane"
+            ( sleep 0.02; rm -f "$STATE/$s" ) & ;;
+        *)
+            printf '{"version": 2}\n' > "$STUB_CAST"
+            printf 'TUI drawn\n' > "$STATE/pane" ;;
+      esac
+      [ "$STUB_MODE" = oneshot ] && ( sleep 0.3; rm -f "$STATE/$s" ) &
+      exit 0 ;;
+esac
+exit 0
+"""
+
+_STUB_PM = r"""
+STATE="$STUB_STATE"
+case "$1 $2" in
+  "session name") echo pm-test ;;
+  "session ")     exit 0 ;;
+  "tui send")
+      case "$STUB_MODE" in
+        midadied) rm -f "$STATE/pm-recorder" ;;
+        midboth)  rm -f "$STATE/pm-recorder" "$STATE/pm-test" ;;
+      esac
+      exit 0 ;;
+esac
+exit 0
+"""
+
+
+def _run_capture_block(name, mode, tmp_path, target=False):
+    """Run a recipe's capture block against stub tmux/pm; return (proc, cast)."""
+    capture = tmp_path / "cap"
+    state = tmp_path / "state"
+    bindir = tmp_path / "bin"
+    for d in (capture, state, bindir):
+        d.mkdir()
+    _stub_tool(bindir, "tmux", _STUB_TMUX)
+    _stub_tool(bindir, "pm", _STUB_PM)
+    if target:
+        (state / "pm-test").touch()
+    raw = _scaffold_block(_recipe_text(name))
+    # The CLI scaffold writes under <capture-dir>/<short-name>/, the tmux
+    # recipe directly under <capture-dir>/.
+    sub = ("run/" if "<short-name>/recording.cast" in raw else "")
+    block = (raw.replace("<capture-dir>", str(capture))
+                .replace("<short-name>", "run")
+                .replace("<command-to-record>", "echo hi"))
+    # Shorten every deadline so the failing cases finish quickly; the recipes'
+    # own bounds are asserted as text above.
+    block = block.replace("+ 30 ))", "+ 2 ))").replace("+ 60 ))", "+ 2 ))")
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
+               STUB_STATE=str(state), STUB_MODE=mode,
+               STUB_CAST=str(capture / sub / "recording.cast"))
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True, timeout=120)
+    return r, capture / sub / "recording.cast"
+
+
+class TestCaptureFlowExecution:
+    """Run the capture block end to end against a stub tmux server."""
+
+    def test_cli_recording_completes(self, tmp_path):
+        r, cast = _run_capture_block("cli-recording.md", "oneshot", tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert cast.stat().st_size > 0, "the completed cast is missing"
+
+    def test_cli_recorder_that_never_writes_a_cast_fails(self, tmp_path):
+        """A recorder that starts but records nothing is a failure, not a hang."""
+        r, cast = _run_capture_block("cli-recording.md", "norec", tmp_path)
+        assert r.returncode != 0, "an empty recording was reported as success"
+        assert "did not start within" in r.stderr, r.stderr
+        assert not cast.exists()
+
+    def test_cli_recorder_that_dies_without_a_cast_fails(self, tmp_path):
+        """asciinema failing to start must not pass as a finished recording."""
+        r, cast = _run_capture_block("cli-recording.md", "dies", tmp_path)
+        assert r.returncode != 0, "a recorder that never ran was reported as success"
+        assert "asciinema wrote no cast" in r.stderr, r.stderr
+        assert not cast.exists()
+
+    def test_tmux_recording_completes(self, tmp_path):
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "ok", tmp_path, target=True)
+        assert r.returncode == 0, r.stderr
+        assert cast.stat().st_size > 0, "the completed cast is missing"
+        assert "can't find session" not in r.stderr, (
+            "a clean run prints a tmux error while stopping the transcript pipe")
+
+    def test_tmux_recorder_exiting_before_drawing_fails(self, tmp_path):
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "dies", tmp_path, target=True)
+        assert r.returncode != 0, "a recorder that never drew was reported as success"
+        assert "recorder exited before it drew" in r.stderr, r.stderr
+
+    def test_tmux_failed_attach_that_drew_its_error_fails(self, tmp_path):
+        """The attach error text is content, so it must not count as readiness.
+
+        ``tmux attach`` to a missing session prints "can't find session: …"
+        into the recorder pane and exits a few milliseconds later; a content
+        poll takes that as a drawn TUI. The settle re-check after the content
+        appears is what turns it into a failure.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "failedattach", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "a failed attach's error text was accepted as a drawn TUI")
+        assert "recorder exited before it drew" in r.stderr, r.stderr
+
+    def test_tmux_recorder_dying_mid_scenario_fails(self, tmp_path):
+        """A truncated cast must not be reported as a finished recording."""
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "midadied", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "a recorder that died mid-scenario passed on its truncated cast")
+        assert "incomplete" in r.stderr, r.stderr
+
+    def test_tmux_recording_that_ends_with_the_session_passes(self, tmp_path):
+        """Both gone before the detach is a legitimate finish, not a failure.
+
+        The scenario ended the pm session itself, which ended the attach and
+        so the recording. Failing here would reject a complete recording; and
+        the pipe cleanup must not print an error for a session that is gone.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "midboth", tmp_path, target=True)
+        assert r.returncode == 0, r.stderr
+        assert cast.stat().st_size > 0
+        assert "can't find session" not in r.stderr, r.stderr
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

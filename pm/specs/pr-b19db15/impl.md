@@ -143,7 +143,12 @@ R6. **Bound the remaining readiness polls, and poll the right handle.** The
    when none is attached): a pipe left behind by an aborted run would
    otherwise make the step a silent no-op, so no `transcript.log` is ever
    written while the cast check still passes. Every tmux failure path stops
-   the pipe before exiting.
+   the pipe before exiting. The stop is best-effort (`2>/dev/null || true`):
+   a recording that legitimately ended because the pm session itself ended
+   reaches the cleanup with the target gone, where `tmux pipe-pane` prints
+   "can't find session: …" and returns 1 — noise on a *successful* run that a
+   worker can read as a failure. The pipe is closed by the session's death
+   anyway, so the error carries no information.
 
 R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    asserts the kept recipe behaviour: capture-dir creation in the runnable
@@ -162,6 +167,18 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    the target session still exists failing instead of passing on a truncated
    cast, and the recorder readiness wait carrying its own deadline (the
    pm-session poll's `deadline` would otherwise satisfy a looser assertion).
+   The capture flow is also *executed*, not only matched as text
+   (`TestCaptureFlowExecution`): each recipe's fenced capture block runs
+   against stub `tmux`/`pm` that drive a session table, so the readiness and
+   stop logic is exercised. Cases: CLI completes; a recorder that never
+   writes a cast fails at its bound; a recorder that dies without a cast
+   fails; tmux completes (and prints no tmux error while stopping the pipe);
+   a recorder that exits before drawing fails; a failed attach that drew its
+   error text fails; a recorder that died mid-scenario fails on its
+   truncated cast; and a recording that ended with the session itself passes.
+   Each of those fails when its fix is reverted (checked by mutation: dropping
+   the settle re-check, the mid-scenario branch, the CLI cast check, and the
+   `2>/dev/null` on the pipe stop each fail exactly one case).
    The render/finalize assertions cover both recording recipes (a failed
    render leaves no mp4/gif and exits non-zero with its message) and the
    web-UI recipe (the pre-driver cleanup drops the previous run's webm, mp4,
@@ -224,8 +241,10 @@ R8. **A failed render must not leave the previous run's video, and the
 
 1. Run `tests/test_qa_artifact_recording_recipes.py` — all pass (including
    the execution tests: a failed render with stub `agg`/`ffprobe`/`ffmpeg`
-   leaves no mp4/gif and exits non-zero, and the scaffold's documented
-   escaped command form reaches asciinema's `-c` intact).
+   leaves no mp4/gif and exits non-zero, the scaffold's documented
+   escaped command form reaches asciinema's `-c` intact, and the capture
+   flow runs end to end against a stub `tmux`/`pm` for its success and
+   failure paths).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
