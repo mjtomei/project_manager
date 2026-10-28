@@ -380,14 +380,25 @@ class TestRunDrivenElsewhereRecheck:
         from pm_core.tui.review_loop_ui import _maybe_start_qa
         from pm_core import runtime_state
         app = self._app(tmp_path, "in_review")
-        # An earlier QA run's PASS, from before this review.
+        # An earlier QA run's PASS, from before this review and the run.
         runtime_state.set_action_state("pr-001", "qa", "done", verdict="PASS")
+        self._driver_started_now(tmp_path)
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
             assert _maybe_start_qa(app, "pr-001")[0] == "driven"
         mock_start.assert_not_called()
         # It must not read as this review's QA result (sign-off catch-up).
         assert runtime_state.get_action_state("pr-001", "qa") == {}
         assert store.get_pr(store.load(app._root), "pr-001")["status"] == "qa"
+
+    @staticmethod
+    def _driver_started_now(tmp_path):
+        """Date the driver's start record after anything written so far."""
+        import json, time
+        path = (tmp_path / ".pm" / "workdirs" / "qa" / "pr-001-cli-pr-001"
+                / "qa_run.json")
+        rec = json.loads(path.read_text())
+        rec["started_at"] = time.time() + 1
+        path.write_text(json.dumps(rec))
 
     def _hand_off(self, app):
         from pm_core.tui.review_loop_ui import (
@@ -444,6 +455,26 @@ class TestRunDrivenElsewhereRecheck:
         assert "pr-001" not in pending
         assert runtime_state.get_action_state("pr-001", "qa")["verdict"] \
             == "PASS"
+
+    def test_hand_off_keeps_the_verdict_a_live_driver_just_recorded(
+            self, tmp_path, driver):
+        """qa-run-bg records its verdict and then exits: a poll tick in that
+        gap keeps the verdict, so the hand-off does not QA the PR again."""
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+            runtime_state.set_action_state("pr-001", "qa", "done",
+                                           verdict="PASS")
+            self._hand_off(app)  # the driver has not exited yet
+            assert pending["pr-001"][0] == "driven"
+            assert runtime_state.get_action_state(
+                "pr-001", "qa")["verdict"] == "PASS"
+            driver.kill()
+            driver.wait()
+            self._hand_off(app)
+        mock_start.assert_not_called()
+        assert "pr-001" not in pending
 
 
 # ---------------------------------------------------------------------------

@@ -615,15 +615,19 @@ def _launch_qa_after_review(app, pr_id: str, *,
     # A start would have replaced an earlier run's recorded verdict, which
     # now reads as this review's QA result: the catch-up hand-off took a
     # PASS from before the review to sign-off.  Drop it, but not the live
-    # driver's own [running] entry and panes.
+    # driver's own [running] entry and panes, nor the verdict a qa-run-bg
+    # driver records just before it exits (a tick in that gap would drop
+    # it and then run QA a second time).
     from pm_core import runtime_state as _rs
     from pm_core.qa_loop import run_driven_elsewhere
     try:
-        qa_state = (_rs.get_action_state(pr_id, "qa") or {}).get("state")
+        qa_rec = _rs.get_action_state(pr_id, "qa") or {}
     except Exception:
-        qa_state = None
+        qa_rec = {}
+    qa_state = qa_rec.get("state")
     if run_driven_elsewhere(pr_id):
-        if qa_state == "done":
+        if qa_state == "done" and _predates_own_run(
+                pr_id, qa_rec.get("updated_at")):
             try:
                 _rs.set_action_state(pr_id, "qa", None)
             except Exception:
@@ -642,6 +646,18 @@ def _launch_qa_after_review(app, pr_id: str, *,
             reason = str(e)
         return ("launch", reason)
     return None
+
+
+def _predates_own_run(pr_id: str, at) -> bool:
+    """True when a QA entry written at ISO time *at* is older than a run of
+    *pr_id* this session started (so not that run's own verdict).  An entry
+    without a readable time counts as older."""
+    from pm_core.qa_loop import own_run_started_since
+    from pm_core.signoff import parse_ts
+    try:
+        return own_run_started_since(pr_id, parse_ts(at).timestamp())
+    except (TypeError, ValueError):
+        return True
 
 
 def _maybe_start_qa(app, pr_id: str) -> tuple | None:
