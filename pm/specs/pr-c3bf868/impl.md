@@ -311,6 +311,21 @@ implementing and QA-ing it, and ship here (each has a PR note):
   Tests in `tests/test_breadcrumb_review_loop.py`
   (`TestOrphanedMergeRestartMarker`, `TestMergeRestartMarkerSessionScope`,
   `TestBreadcrumbSessionOwnership`).
+
+  **Known remaining limitation (filed as `pr-000d03e`, review-loop 9aa2
+  i1).** Only the *read* side of the breadcrumb is session-scoped:
+  `save_breadcrumb` still writes the single shared
+  `~/.pm/autostart-resume.json`, so two sessions that both restart
+  state-preserving within the window between `save_breadcrumb` and the
+  next mount overwrite each other, and the session whose breadcrumb was
+  clobbered loses its auto-start / review-loop / watcher state (the mount
+  correctly leaves the other session's file alone). This is not a
+  regression — before the scoping the first session *consumed* the other
+  session's breadcrumb, which was worse — and the on-disk filename is part
+  of the QA-observed contract, so making the path session-scoped
+  (`autostart-resume-<session>.json`, with the legacy shared file still
+  read as a fallback) is deliberately left to its own PR with its own QA
+  pass rather than changed here.
 - `pm_core/tui_pidfile.py` merge-restart marker I/O (review-loop c0c9 i1):
   the marker was read with a bare `read_text()` that caught only `OSError`
   and written with a non-atomic `write_text`. Three consequences, all the

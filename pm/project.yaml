@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-1b170f4
+  active_pr: pr-000d03e
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -39954,6 +39954,48 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T13:54:30.231666+00:00'
   updated_at: '2026-10-28T13:54:30.231666+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-000d03e
+  plan: bugs
+  title: 'Bug: concurrent state-preserving TUI restarts in two pm sessions clobber
+    the shared autostart-resume.json, silently dropping one session''s auto-start
+    state'
+  branch: pm/pr-000d03e-bug-concurrent-state-preserving-tui-restarts-in-tw
+  status: pending
+  depends_on: []
+  description: "pm_core/tui/auto_start.py::save_breadcrumb writes a single shared\
+    \ file, pm_home()/autostart-resume.json, and consume_breadcrumb reads the same\
+    \ path.\n\nThe session scoping added by pr-c3bf868 (QA scenario 22) fixed the\
+    \ READ side: consume_breadcrumb leaves a breadcrumb whose \"session\" names another\
+    \ session in place for its owner, and tui_pidfile scopes the merge-restart marker\
+    \ per session. The WRITE side is still a single file, so two sessions that both\
+    \ undergo a state-preserving restart within the window between save_breadcrumb\
+    \ and the next mount overwrite each other.\n\nRepro: two pm sessions A and B under\
+    \ one PM home. Trigger a state-preserving restart in both at (nearly) the same\
+    \ moment -- `pm tui restart --breadcrumb` in each, or two merges completing at\
+    \ once (each merge writes the merge-restart marker, so action_restart calls save_breadcrumb).\
+    \ Sequence:\n  1. A: save_breadcrumb writes {\"session\": \"pm-A\", \"targets\"\
+    : [...]}\n  2. B: save_breadcrumb write_text() overwrites it with {\"session\"\
+    : \"pm-B\", ...}\n  3. A mounts: consume_breadcrumb reads owner=pm-B != pm-A,\
+    \ logs \"leaving breadcrumb for session pm-B\" and returns -> A loses its auto-start\
+    \ targets, review-loop state and watchers (mode ends up off)\n  4. B mounts and\
+    \ consumes its own state\n\nObserved class: the same \"restart state leaks between\
+    \ sessions\" hazard QA scenario 22 fixed, in the one direction the read-side scoping\
+    \ cannot cover. Not a regression (before pr-c3bf868 A consumed B's breadcrumb\
+    \ and applied B's targets to A's project, which was worse), but still silent state\
+    \ loss.\n\nSuggested fix: make the breadcrumb path session-scoped, e.g. pm_home()/f\"\
+    autostart-resume-{session.split(chr(126))[0]}.json\", with consume_breadcrumb\
+    \ falling back to the legacy shared autostart-resume.json for a breadcrumb written\
+    \ before the upgrade (that file keeps its current session/owner check). Needs\
+    \ its own QA pass because the on-disk filename is part of the QA-observed contract."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T19:29:42.080267+00:00'
+  updated_at: '2026-10-28T19:29:42.080267+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
