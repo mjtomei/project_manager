@@ -428,8 +428,12 @@ def echo_reap_outcome(outcome) -> None:
     for name, error in outcome.failures.items():
         if name not in listed:
             click.echo(f"  FAILED   {name}: {error}")
-    for proxy in [*outcome.proxies_stopped, *outcome.proxies_released]:
+    from pm_core.push_proxy import proxy_key_dir
+    for proxy in outcome.proxies_stopped:
         click.echo(f"  stopped  push proxy {proxy}")
+    # The sweep reports failure keys; show the directory it stopped instead.
+    for key in outcome.proxies_released:
+        click.echo(f"  stopped  push proxy {proxy_key_dir(key) or key}")
     for name, pids, limit, why in outcome.pid_pressure:
         click.echo(f"  WARNING  {name} at {pids}/{limit} PIDs ({why}) — run "
                    f"'pm container restart {name}' once its session is done")

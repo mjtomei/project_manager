@@ -2007,6 +2007,20 @@ def proxy_key(proxy: dict) -> str:
     return f"{key}/{proxy['token']}" if proxy.get("token") else key
 
 
+def proxy_key_dir(key: str) -> str | None:
+    """Socket directory a :func:`proxy_key` names, or None for other keys.
+
+    Pure computation, so it still answers after the directory is gone. A
+    ``tag/pr`` key is from before workdir keying and names the legacy dir.
+    """
+    parts = key.split("/")
+    if len(parts) == 3 and all(parts):
+        return _shared_sock_dir_path(*parts)
+    if len(parts) == 2 and all(parts):
+        return _legacy_shared_sock_dir_path(*parts)
+    return None
+
+
 PROXY_RELEASED = "released"      # stopped (or already absent): nothing pending
 PROXY_IN_USE = "in-use"          # a live container still needs it (definitive)
 PROXY_UNAVAILABLE = "unavailable"  # runtime inventory unreadable: retry later

@@ -203,3 +203,31 @@ def test_reap_output_lists_proxies_stopped_with_containers(capsys):
     assert "removed  pm-tag-impl-pr-aaaa" in text
     assert "stopped  push proxy /tmp/pm-push-proxy-tag-pr-aaaa" in text
     assert "removed 1, kept 0, failed 0, stopped 1 unused proxy(ies)" in text
+
+
+def test_reap_output_names_the_directories_the_sweep_stopped(capsys):
+    """Swept proxies are reported by directory, like those stopped with a container."""
+    from pm_core.cli.container import echo_reap_outcome
+    tag, token = "proj-0156bacd", "aa4e1185868b5232"
+    out = reaper.Outcome(scope="all pm containers",
+                         proxies_released=[f"{tag}/pr-aaaa", f"{tag}/pr-bbbb/{token}",
+                                           "unshared pm-x-qa-pr-cccc-s1"])
+    echo_reap_outcome(out)
+    text = capsys.readouterr().out
+    # Legacy (pre-workdir-keying) key -> the tokenless directory.
+    assert f"stopped  push proxy /tmp/pm-push-proxy-{tag}-pr-aaaa\n" in text
+    assert f"stopped  push proxy /tmp/pm-push-proxy-{tag}-pr-bbbb-{token}\n" in text
+    # Keys that name no shared directory are shown as they are.
+    assert "stopped  push proxy unshared pm-x-qa-pr-cccc-s1\n" in text
+    assert "stopped 3 unused proxy(ies)" in text
+
+
+def test_proxy_key_dir_follows_hashed_directories():
+    tag = "t" * 60
+    assert push_proxy.proxy_key_dir(f"{tag}/pr-aaaa") == \
+        push_proxy._legacy_shared_sock_dir_path(tag, "pr-aaaa")
+    assert push_proxy.proxy_key_dir(f"{tag}/pr-aaaa/abcd") == \
+        push_proxy._shared_sock_dir_path(tag, "pr-aaaa", "abcd")
+    assert push_proxy.proxy_key_dir(f"{tag}/pr-aaaa/abcd").startswith("/tmp/pm-push-proxy-")
+    assert push_proxy.proxy_key_dir("unshared x") is None
+    assert push_proxy.proxy_key_dir("a//b") is None

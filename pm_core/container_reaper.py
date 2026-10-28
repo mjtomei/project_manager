@@ -1344,17 +1344,12 @@ def _proxy_failure_actionable(key: str) -> bool:
         stem = target[len("unshared "):]
         return (container_mod.container_state_dir() / "proxy-releases"
                 / f"{stem}.json").exists()
-    parts = target.split("/")
-    if len(parts) not in (2, 3) or not all(parts):
-        return True
     from pm_core import push_proxy
     try:
-        if len(parts) == 3:
-            return os.path.exists(push_proxy._shared_sock_dir_path(*parts))
-        # A key from before workdir-keyed proxies names the PR's legacy dir.
-        return os.path.exists(push_proxy._legacy_shared_sock_dir_path(*parts))
+        sock_dir = push_proxy.proxy_key_dir(target)
     except (OSError, ValueError):
         return True
+    return sock_dir is None or os.path.exists(sock_dir)
 
 
 def _release_unused_proxies(scope: Scope, failures: dict[str, str],
