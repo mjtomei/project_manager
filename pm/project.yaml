@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T00:33:18.796986+00:00'
+  updated_at: '2026-10-28T00:51:57.339498+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14859,6 +14859,28 @@ prs:
       works — use `pm pr edit`/any CLI mutation (which calls trigger_tui_reload) instead.'
     created_at: '2026-10-28T00:33:18Z'
     last_edited: '2026-10-28T00:33:18Z'
+  - id: note-88db3e8
+    text: 'Review loop 4060 i3 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace
+      races, unqueue rollback, picker spinner abort, autostart dispatch) and found
+      no production defect in the signalling, capability, or takeover logic. One robustness
+      gap fixed: `TuiPidfileClaim.owned_by_other()` returned False for an *empty*
+      pidfile, so `on_unmount` could unlink the session command queue while a successor
+      TUI was between its O_EXCL create and its first write; an empty file now counts
+      as "owned by another process" (it can only be there because someone else created
+      it after our release, and `release()` already refuses to unlink it). Two tests
+      added (claim-level ownership + `on_unmount` keeps the queue mid-claim); the
+      unmount test was verified to fail against the pre-fix implementation. Spec impl.md
+      E14 / test item 15 updated. Full suite: 3889 passed, 1 skipped, 1 failed — tests/test_hook_events.py::test_installer_writes_standalone_receiver,
+      which also fails on origin/master in this review container (pre-existing, unrelated).
+      Evidence unchanged: /pm-captures/impl/{pre-fix,post-fix,failing-test} still
+      accurate (this iteration changes only shutdown-side ownership). Merge-conflict
+      heads-up for later: #204 and #206 also edit `_wait_for_tui_command`; #3951487
+      (respawn naming) sits on the same `_respawn_tui` path where a stale registry
+      plus a live TUI now yields a refused second TUI pane (exit 2, documented behaviour,
+      not two competing TUIs).'
+    created_at: '2026-10-28T00:51:57Z'
+    last_edited: '2026-10-28T00:51:57Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
