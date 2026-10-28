@@ -11263,9 +11263,20 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-11T21:03:47.534988+00:00'
-  updated_at: '2026-04-11T21:03:47.534988+00:00'
+  updated_at: '2026-10-27T05:25:57.422453+00:00'
   started_at: null
   reviewed_at: null
+  notes:
+  - id: note-3758e29
+    text: 'From pr-e040aeb (failed review-launch recovery): the loop now surfaces
+      each failed launch attempt in the TUI log ("Review launch retry for <pr> (attempt
+      k): <concise error>" + artifact path), keeps the complete child stderr in <transcript_dir>/launch-artifacts/,
+      and exposes launch_attempts / last_launch_error / last_launch_artifact / retry_ready_at
+      on ReviewLoopState and in pm autostart status ("review launch failed (retryable)
+      ... [artifact: ...]"). If you add launch visibility, consume those fields; do
+      not relaunch to make a failure visible.'
+    created_at: '2026-10-27T05:25:57Z'
+    last_edited: '2026-10-27T05:25:57Z'
 - id: pr-8719fee
   plan: bugs
   title: 'Bug: switching backend from local to github leaves existing PRs on local
@@ -11899,6 +11910,17 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-daeb892
+    text: 'From pr-e040aeb (failed review-launch recovery): the native review loop
+      now raises ReviewLaunchError when the `pm pr review --fresh --review-loop` child
+      exits non-zero, and retains the child''s complete stderr + the failed attempt''s
+      prompt under <transcript_dir>/launch-artifacts/. That means any low-level container
+      teardown/setup cause you surface or fix should keep reaching the child''s stderr
+      (or the exception it exits with) so the artifact names it; we do not change
+      container cleanup. A failure that leaves a half-created review window is rediscovered
+      before retry and replaced, not duplicated.'
+    created_at: '2026-10-27T05:25:49Z'
+    last_edited: '2026-10-27T05:25:49Z'
   - id: note-404a5b1
     text: 'Shared helper from pr-8cdbe60 (container git proxy scope fix): pm_core/push_proxy.py
       now has module-level _long_option_match(arg, options), which returns the long
@@ -18256,11 +18278,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T14:37:35.402123+00:00'
-  updated_at: '2026-05-04T14:37:35.402123+00:00'
+  updated_at: '2026-10-27T05:25:51.503809+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-667f47d
+    text: 'From pr-e040aeb (failed review-launch recovery): a failed authorized review
+      launch is now an explicit LAUNCH_FAILED loop outcome (with retryable/attempts/error/artifact/retry_ready_at
+      in runtime_state) or HOLD for workspace-trust/permission/auth. It never writes
+      a fabricated PASS/NEEDS_WORK, and runtime_state records state=failed so a popup
+      cannot report success. A retryable failure is re-armed after 60s and the entry
+      goes back to running with the same loop_id; please read those fields when you
+      fix stale done/success reporting rather than keying only on verdict text.'
+    created_at: '2026-10-27T05:25:51Z'
+    last_edited: '2026-10-27T05:25:51Z'
 - id: pr-3251c21
   plan: null
   title: 'Bug: TUI review-loop reads stale workdir from in-memory PR snapshot, bails
@@ -28399,11 +28431,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T04:50:44.346668+00:00'
+  updated_at: '2026-10-27T05:25:59.189527+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-c3eb1e0
+    text: 'From pr-e040aeb (failed review-launch recovery): the loop now distinguishes
+      (a) a failed launch with no transcript/session id (ReviewLaunchError, retryable,
+      artifact) from (b) a real verdict and (c) a pane that disappears while polling
+      (PaneKilledError, not retried). Before every retry, _discover_iteration adopts
+      a recovered transcript, a landed verdict, or another driver''s live pane. If
+      you add idle-agent/missing-output handling, route it through that discovery
+      / a classified outcome rather than relaunching blindly, so the two paths do
+      not duplicate or kill each other.'
+    created_at: '2026-10-27T05:25:59Z'
+    last_edited: '2026-10-27T05:25:59Z'
   - id: note-d8d9490
     text: 'Coordination from pr-8efa789 (impl 4f902f18, pushed): verdict extraction
       is now task-scoped, not latest-turn-only. It walks back across non-task wakeup
@@ -38054,7 +38097,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  updated_at: '2026-10-27T05:26:04.848995+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38070,6 +38113,18 @@ prs:
       preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
+  - id: note-9b00f90
+    text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
+    created_at: '2026-10-27T05:26:04Z'
+    last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
   plan: plan-doc-eval
   title: Reader-model generation with interleaved reader annotations
@@ -39235,6 +39290,1014 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e040aeb
+  plan: bugs
+  title: 'Bug: failed review iteration launch strands an autostart target until a
+    manual loop restart'
+  branch: pm/pr-e040aeb-bug-failed-review-iteration-launch-strands-an-auto
+  status: in_progress
+  depends_on: []
+  description: 'Observed after otherwise successful verdict collection: the native
+    next review iteration closes the historical window, fails while removing/replacing
+    its container, exits nonzero before the new SID produces a transcript, and leaves
+    the target stopped until a shepherd sends native `review-loop start`. Reproductions:
+    #2432026-10-26T23:03 recovery; #241 d019i5 and #2421905i2 recovered2026-10-27T01:42-01:43.
+    Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-d019-i5-launch-recovery.json,
+    242-review-1905-i2-launch-recovery.json and check-20261027T013830Z. The exception
+    tail was truncated in the launch log, so the exact low-level teardown exception
+    is unconfirmed. Do NOT label these as E2BIG; prompt-size transport is already
+    fixed by merged#250.
+
+
+    Provide bounded, observable native retry of a genuinely failed authorized review
+    launch, preserving review-loop/iteration history, complete prompt, source, dirty
+    metadata, stashes, captures, assigned providers and manual merge gates. Retain
+    complete actionable child stderr in an artifact and a concise error in the UI.
+    Before every retry, rediscover native run identity and live panes/processes/transcripts;
+    if the attempt recovered or a new owner exists, adopt it rather than launch a
+    duplicate. Serialize retry ownership across TUI/background drivers and restarts,
+    use bounded nonblocking backoff, and stop on cancellation, closure, permission/auth
+    holds or real INPUT_REQUIRED. Exhaustion must leave an explicit retryable failure,
+    never a fabricated agent verdict. Do not kill retained discussion/QA sessions
+    or replay completed iterations.
+
+
+    Regressions: failure before pane creation; old-window removal followed by container
+    setup failure; route/native recovery racing a scheduled retry; TUI restart during
+    backoff; a healthy unrelated review continues; cancellation prevents retry; successful
+    replacement executes the original complete task on the assigned provider and collects
+    its own verdict. Test failure injection and one real launch/recovery path without
+    exhausting host resources. Coordinate low-level cleanup/error causes with active#241,
+    stale done/popup reporting with pr-55c265f, launch visibility with pr-8a56712
+    and idle-agent/missing-output handling with pr-6566901. Those existing bugs do
+    not provide this confirmed failed-launch recovery; do not duplicate their implementation
+    or broaden into user-triggered transfer duplicate sessions.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/259
+  gh_pr_number: 259
+  created_at: '2026-10-27T04:19:02.749373+00:00'
+  updated_at: '2026-10-28T09:51:37.088062+00:00'
+  started_at: '2026-10-27T04:26:41.499360+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-17247be
+    text: 'Implementation (0c3b1c3e): bounded native retry of a failed authorized
+      review launch.
+
+      - review_loop: ReviewLaunchError (full stderr/artifact/retryable), ReviewHoldError,
+      ReviewClosedError. Pre-attempt _discover_iteration adopts a recovered transcript/session,
+      another driver''s live pane, or a landed verdict; stands down for another loop;
+      replaces only the historical window. 3 attempts, 5s/20s backoff, budget persisted
+      on ReviewLoopState/breadcrumb (merge-restart mid-backoff continues it). Exhaustion
+      -> LAUNCH_FAILED (retryable), never a fabricated verdict; history gains no failed-iteration
+      entry. Complete child stderr + failed prompt copy under <transcript_dir>/launch-artifacts/.
+
+      - runtime_state: per-PR launch lease (loop:<loop_id>, 180s TTL, refreshed while
+      polling); supersede paths release it; pm pr auto-sequence yields to a live loop
+      lease.
+
+      - auto-start: retryable LAUNCH_FAILED re-arms the same loop after 60s (resume_state
+      preserves history/iteration; 5-episode cap); KILLED/HOLD/closure and manual
+      loops never re-arm. HOLD = workspace-trust/permission/auth.
+
+      - Tests: tests/test_review_launch_retry.py (32) + test_failed_launch_is_retried_not_terminal
+      (fails pre-fix). Full suite 3759 passed; only the base tree''s pre-existing
+      env failures remain. Pre/post captures: /pm-captures/impl/{pre,post}-fix.
+
+      - Not E2BIG; prompt transport unchanged. Container cleanup causes still belong
+      to pr-1139060.'
+    created_at: '2026-10-27T05:25:36Z'
+    last_edited: '2026-10-27T05:25:36Z'
+  - id: note-f9fc28c
+    text: 'Review 385e i1 (59c01894): the pre-retry rediscovery adopted any transcript/verdict
+      it found for the iteration, but the transcript dir outlives a loop (manual-<token>
+      lives for the whole TUI session; a sign-off REVIEW return restarts the loop
+      on the same dir), so a fresh loop recorded the previous run''s verdict — including
+      PASS — with zero launches. Discovery now recovers only after this loop has launched
+      the iteration (ReviewLoopState.iteration_attempted, persisted in the breadcrumb;
+      launch_attempts>0 also enables it for older breadcrumbs). Also fixed: the TUI
+      "Review launch retry" notice fired on every loop start (attempts==1) — now needs
+      attempts>1 + a recorded error; WorkspaceTrustBlocked on the adopt path is HOLD
+      not ERROR; _start_loop returns False on bail so auto-start restores the retry
+      episode instead of disarming it, and the cooldown keeps a timer armed; _claim_launch
+      fails open only when no live other loop owns the lease; post-launch failure
+      artifacts record the launch command. Full suite 3837 passed; the one failure
+      (test_hook_events::test_installer_writes_standalone_receiver) also fails on
+      base. Still open/non-blocking: AttemptDiscovery "hold" kind is never produced
+      (three handlers for a state that cannot occur), review_loop.py is ~1200 lines,
+      and two lease mechanisms now coexist (signoff launch_claim in project.yaml vs
+      claim_action_lease in runtime_state).'
+    created_at: '2026-10-27T05:59:23Z'
+    last_edited: '2026-10-27T05:59:23Z'
+  - id: note-5087a44
+    text: 'Review 385e i2 (10f5e0c5): retry discovery now adopts a live pane whose
+      session is not historical once this loop has launched the iteration (allow_recovery),
+      so a sign-off route racing a scheduled retry is polled instead of killed by
+      --fresh; removed the never-produced AttemptDiscovery("hold") kind and its dead
+      handlers; the restart-handoff adopt path converts WorkspaceTrustBlocked to HOLD
+      (was ERROR); autostart_state._progress no longer says "launch retry 1" for every
+      running review (needs attempts > 1); the launch lease is refreshed through an
+      INPUT_REQUIRED wait and never refreshed after stop_requested. Spec updated:
+      backoff is 5 s then 10 s (the old "5 s, 20 s" text was wrong) and the iteration-2
+      refinements are recorded. Full suite 3782 passed; the 43 failed + 17 errors
+      are the base tree''s pre-existing git/signoff/merge env failures (identical
+      on origin/master). Residual (non-blocking): review_loop.py is ~1250 lines and
+      two lease mechanisms coexist (signoff launch_claim vs claim_action_lease); _progress
+      keeps a dead local (mode_label, pre-existing). (2026-10-27)'
+    created_at: '2026-10-27T06:22:16Z'
+    last_edited: '2026-10-27T06:22:16Z'
+  - id: note-fa427a0
+    text: 'Review 385e i3 (fix): a failed launch could still adopt a previous run''s
+      transcript for the same iteration — after the first attempt failed, rediscovery
+      read the shared dir''s older review-<pr>-i<N>.jsonl (a launch that dies before
+      the child writes the symlink leaves it in place) and recorded that run''s verdict,
+      e.g. PASS, for an iteration that never ran. ReviewLoopState.stale_session_id
+      now snapshots the symlink session id at episode start (breadcrumb-persisted);
+      discovery only adopts a symlink whose session differs, and _is_historical_session
+      treats the stale id as historical. Also: _reset_launch_retry clears _ui_notified_retry
+      so a later iteration''s retry is announced; _retry_rearm_blocked lost its unused
+      app arg. Tests: test_retry_never_adopts_a_previous_runs_transcript + notice-per-episode;
+      full suite 3831 passed (13 pre-existing env failures: missing markdown module
+      + hook receiver installer). (2026-10-27T06:55:00Z)'
+    created_at: '2026-10-27T06:43:19Z'
+    last_edited: '2026-10-27T06:43:19Z'
+  - id: note-08f35aa
+    text: 'Review 385e i4 (fixes applied): _AUTH_FAILURE_RE no longer treats a container
+      "permission denied" teardown/mount error as an auth hold (that was non-retryable
+      and re-stranded the target — the bug this PR fixes); _discover_iteration returns
+      pending for a live pane with no session id yet once recovery is allowed, so
+      a racing recovery/route start is not killed by --fresh; _start_loop marks the
+      loop running synchronously so the 1 s poll / a second starter (breadcrumb resume
+      after check_and_start re-armed the same loop) cannot re-announce a stale verdict
+      or start a duplicate thread; the completion mirror drops stale retry evidence
+      (retryable/attempts/error/artifact/retry_ready_at) from runtime_state; a PR
+      that merges while the loop waits out another loop''s lease is CLOSED, not LAUNCH_FAILED;
+      _reset_launch_retry clears retry_ready_at; a raising re-arm starter restores
+      the retry episode instead of disarming it. 7 new tests (52 in the retry file).
+      Full suite 3779 passed; 55 failed + 17 errors are the base tree''s pre-existing
+      env failures (markdown module, hook installer, merge/signoff/git), including
+      test_git_ops::test_keeps_unpushed_merge which also fails on origin/master in
+      isolation. Spec updated with iteration 4. Residual (non-blocking): review_loop.py
+      ~1300 lines; two lease mechanisms coexist (signoff claim_return_launch vs claim_action_lease);
+      _retry_rearm_blocked logs once per scheduler pass at the episode cap. (2026-10-27)'
+    created_at: '2026-10-27T07:07:37Z'
+    last_edited: '2026-10-27T07:07:37Z'
+  - id: note-23080bb
+    text: 'Review 385e i6 (fixes applied): the restart handoff now passes discovery''s
+      allow_recovery gate (a merge restart between the iteration bump and the first
+      launch can no longer adopt a previous run''s transcript) and falls back to a
+      relaunch when an adopted transcript has no recoverable session id (that was
+      a terminal ERROR). Both adopt paths re-read a verdict that landed between discovery
+      and the poll (the poller only wakes on idle events newer than its start). AttemptDiscovery
+      now carries the session it resolved to and both callers record it as last_session_id,
+      so the next iteration replaces a still-live adopted pane instead of re-adopting
+      its verdict (an idle adopted pane previously made the next iteration read the
+      same verdict again). Auth classification now sees stderr+stdout (a 401 printed
+      on stdout was retried and re-armed as transient). _wait_for_claim claims the
+      iteration it retries; a failed thread start no longer leaves the loop marked
+      running. Spec updated (iteration 6 + re-arm scope wording). Full suite 3789
+      passed; remaining failures are the base tree''s pre-existing markdown/hook-installer/merge/signoff/git
+      env failures. Residual (non-blocking): review_loop.py ~1360 lines; two lease
+      mechanisms coexist; the runs popup can show the previous episode''s attempt
+      count while a re-armed loop runs. (2026-10-27)'
+    created_at: '2026-10-27T08:01:10Z'
+    last_edited: '2026-10-27T08:01:10Z'
+  - id: note-1bc031d
+    text: 'Review 385e i7 (fixes applied): (1) the retry adopt path polled an already-running
+      session with the 20 s startup grace; poll_for_verdict drops an idle event that
+      lands inside the grace and waits for a second one, which an idle session never
+      emits, so a review finishing shortly after adoption hung until its pane died.
+      Adopted panes now poll with no grace (matches _adopt_in_flight_review and the
+      _landed_verdict pre-check). (2) The LAUNCH_FAILED notice promised "Will retry
+      automatically" for manual loops / PRs outside the auto-start set / auto-start
+      disabled / the episode cap, none of which re-arm; _retry_rearm_applies() now
+      backs both _schedule_retry_rearm and the message. (3) Removed dead ReviewLoopState.last_pane_id
+      (written + persisted, never read; discovery uses session ids). Full suite 3792
+      passed; remaining failures are the base tree pre-existing markdown/hook-installer/merge/signoff/git
+      env failures. Residual (non-blocking): review_loop.py ~1390 lines; two lease
+      mechanisms coexist; the launch artifact prompt copy can name the stale session
+      prompt when a failed attempt died before rewriting the transcript symlink (artifact
+      records that session id); the runs popup can show the previous episode attempt
+      count while a re-armed loop runs. (2026-10-27)'
+    created_at: '2026-10-27T08:30:17Z'
+    last_edited: '2026-10-27T08:30:17Z'
+  - id: note-fbb4388
+    text: 'Review 385e i8 (fixes applied): (1) consume_breadcrumb now resumes restored
+      review loops *before* the auto-start scheduler pass. A re-armed loop keeps latest_verdict=LAUNCH_FAILED
+      + launch_retryable while it runs, so a restored-but-not-yet-started loop looked
+      like a completed retryable failure: the pass re-armed it, clearing the saved
+      launch_attempts, dropping the remaining backoff and burning an episode. The
+      saved budget/deadline now survives the restart. (2) A user stop while waiting
+      out another loop launch lease raises PaneKilledError -> KILLED instead of a
+      non-retryable LAUNCH_FAILED. (3) A HOLD completion records latest_output (the
+      trust/permission prompt) instead of a stale launch error from an earlier attempt.
+      (4) Dropped the unreachable `latest_verdict != PASS` gate on the retry notice;
+      artifact section headers say chars not bytes. Tests: test_restored_loop_is_running_before_the_scheduler_pass,
+      test_cancellation_while_waiting_for_the_lease_is_killed, test_hold_records_the_hold_message_not_a_stale_launch_error
+      (all fail pre-fix). Full suite 3854 passed; the 13 failures are the base tree
+      pre-existing markdown-module/hook-installer env failures. Residual (non-blocking):
+      review_loop.py ~1395 lines; two lease mechanisms coexist; the _progress label
+      can show the previous episode attempt count while a re-armed loop runs; the
+      artifact prompt copy can name the stale session prompt. (2026-10-27T09:05:00Z)'
+    created_at: '2026-10-27T09:04:42Z'
+    last_edited: '2026-10-27T09:04:42Z'
+  - id: note-0154dbb
+    text: 'Review 385e i9 (fixes applied): (1) `pm autostart status` now names the
+      trust/permission prompt for a HOLD: `autostart_state.review_progress_input`
+      reports `latest_output` instead of a stale `last_launch_error` (iteration 8
+      fixed only the runtime_state mirror; the CLI reads the live loop state). (2)
+      `_lease_keepalive` claims the launch lease on its first check, so the restart-handoff
+      adopt path (`_adopt_in_flight_review`), which polls a live review without `_claim_launch`,
+      owns it immediately instead of after 30 s — closing a window where `pm pr auto-sequence`
+      could launch over the adopted session. (3) The launch artifact no longer attaches
+      a previous run''s prompt: `stale_session_id` is threaded through `_launch_review_window`/`_write_launch_artifact`
+      and the artifact records `prompt: (skipped — ...)` when the symlink still names
+      the pre-episode session (this closes the iteration-7 residual). (4) `_locked_action_mutate`
+      writes nothing when the mutator changed nothing, so a lost claim / non-owner
+      release cannot create a `{updated_at}` stub action entry or rewrite another
+      loop''s entry. Tests: 4 new in test_review_launch_retry.py (71 in the file);
+      targeted review/autostart/runtime-state suites 572 passed. Full suite 3799 passed;
+      the 55 failed + 17 errors are the base tree''s pre-existing markdown-module/hook-installer/signoff/merge/git
+      env failures (test_git_ops::test_keeps_unpushed_merge included, which also fails
+      on origin/master). Residual (non-blocking): review_loop.py ~1400 lines; two
+      lease mechanisms coexist (signoff claim_return_launch vs claim_action_lease);
+      the re-arm `_progress` label can show the previous episode''s attempt count
+      while the resumed loop runs; discovery still adopts a transcript verdict without
+      requiring an idle hook event — documented rationale in the spec (the extractor
+      only matches a bare verdict keyword on its own JSON-string-bounded line, and
+      requiring idle would strand completed reviews on hosts without hooks). (2026-10-27)'
+    created_at: '2026-10-27T09:26:07Z'
+    last_edited: '2026-10-27T09:26:07Z'
+  - id: note-a1c0168
+    text: 'Review 385e i10 (fixes applied): a retry could still adopt the review window
+      that was already open when the iteration episode started. Iteration 1 of a fresh
+      loop has no last_session_id and its (new) transcript dir holds no earlier symlink,
+      so nothing identified a pre-existing review window as historical: when attempt
+      1 failed *before* `--fresh` replaced that window (route down, workdir gone,
+      a tmux error on the kill), the retry read the old review verdict (e.g. PASS)
+      for an iteration that never ran, with zero launches. ReviewLoopState.stale_pane_session_id
+      now snapshots the review window session at episode start, _is_historical_session
+      treats it as historical (replace, never adopt), and the field round-trips through
+      the breadcrumb; a session that appears after the episode start (a sign-off route
+      racing the retry) still differs from the snapshot and is adopted, so the iteration-2
+      regression stays fixed. Also review_loop_ui now uses VERDICT_ERROR instead of
+      the literal. Tests: test_retry_never_adopts_the_window_that_was_live_at_episode_start
+      (fails pre-fix: records the old PASS with no launch), test_discovery_replaces_the_window_that_was_live_at_episode_start,
+      test_discovery_still_adopts_a_session_started_after_the_stale_one, plus breadcrumb
+      round-trip assertions. Full suite 3802 passed; the 55 failed + 17 errors are
+      the base tree pre-existing merge/signoff/git + markdown-module + hook-installer
+      env failures (failure sets verified identical on a HEAD worktree). Residual
+      (non-blocking): review_loop.py ~1470 lines; two lease mechanisms coexist; discovery
+      still adopts a transcript verdict without requiring an idle hook event (documented).
+      (2026-10-27)'
+    created_at: '2026-10-27T09:54:17Z'
+    last_edited: '2026-10-27T09:54:17Z'
+  - id: note-334479d
+    text: 'Review 0688 i1 (fixes applied): (1) a completed iteration left ReviewLoopState.iteration_attempted
+      True; run_review_loop_sync bumps state.iteration before _run_iteration_with_retry
+      re-snapshots the episode, so a merge restart in that window persisted True for
+      the NEXT iteration number and the restart handoff adopted an earlier run review-<pr>-i<N>.jsonl
+      verdict (e.g. PASS) for an iteration this loop never launched — the iteration-6
+      guard only covered a loops first iteration. _reset_launch_retry now clears the
+      flag on every completed iteration (a restart during an in-flight iteration still
+      adopts). Covered by test_restart_between_iterations_does_not_adopt_the_old_run
+      (fails pre-fix: persisted flag True for iteration 2). (2) a HOLD now drops the
+      failed attempts artifact/retry_ready_at from runtime_state (iteration 8 fixed
+      only the message), so pm autostart status cannot point at the wrong evidence.
+      Full suite 3875 passed, 1 skipped. Residual (non-blocking): review_loop.py ~1480
+      lines; two lease mechanisms coexist; discovery adopts a transcript verdict without
+      an idle hook event (documented); other_owner stand-down surfaces as a non-retryable
+      LAUNCH_FAILED after the bounded claim wait, so a second TUI on the same PR reports
+      needs attention for a review another loop is running.'
+    created_at: '2026-10-27T16:34:17Z'
+    last_edited: '2026-10-27T16:34:17Z'
+  - id: note-c9047e2
+    text: 'Review 0688 i2 (fixes applied): (1) the restart handoff adopt path bypassed
+      _run_iteration_with_retry, so a resumed loop that adopted its in-flight iteration
+      left iteration_attempted=True; run_review_loop_sync bumps the counter and only
+      re-snapshots inside _run_iteration_with_retry, so a merge restart in that window
+      persisted True for the NEXT iteration number and the handoff adopted an earlier
+      run review-<pr>-i<N>.jsonl verdict (e.g. PASS) for an iteration this loop never
+      launched — the same fabrication iteration 1 (0688) closed for a normally finished
+      iteration. The adopt branch now calls _reset_launch_retry on a successful adoption
+      (nothing adopted still relaunches the same iteration with its episode intact).
+      Covered by test_restart_after_an_adopted_iteration_does_not_adopt_the_old_run
+      (fails pre-fix: flag True at the bump; the next iteration adopts the old PASS
+      with zero launches). (2) _concise_launch_detail chose the stream before stripping,
+      so whitespace-only stderr hid a real stdout error and the UI said "no output
+      from the launch command"; each stream is stripped before the fallback (test_whitespace_only_stderr_falls_back_to_stdout,
+      fails pre-fix). Full suite 3877 passed, 1 skipped. Residual (non-blocking):
+      review_loop.py ~1490 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      surfaces as a non-retryable LAUNCH_FAILED.'
+    created_at: '2026-10-27T16:58:34Z'
+    last_edited: '2026-10-27T16:58:34Z'
+  - id: note-15a9ae3
+    text: 'Review 0688 i3 (fixes applied): (1) a stopping/superseded loop could re-take
+      the launch lease between its loop-top stop check and the launch, then create
+      a review window the replacement just asked to replace; the new loop then waited
+      out its bounded claim and expired into a non-retryable LAUNCH_FAILED (re-stranding
+      the target). _claim_launch now refuses when stop_requested, and the retry re-checks
+      stop_requested right before launching. (2) autostart_state.review_progress_input
+      drops the failed attempt artifact for a HOLD, matching the runtime_state mirror
+      (pm autostart status --json no longer attaches stale evidence to a trust/permission
+      prompt). (3) The restart handoff and the retry adopt branch share _poll_adopted_review
+      (landed-verdict read + no-grace poll + trust-hold conversion); the handoff records
+      the adopted transcript session as last_session_id even when the verdict had
+      already landed. Tests: test_stopping_loop_does_not_claim_the_launch_lease, test_stop_between_claim_and_launch_does_not_launch
+      (both fail pre-fix), plus the HOLD artifact assertion. Full suite 3807 passed;
+      55 failed + 17 errors are the base tree pre-existing markdown/hook-installer/signoff/merge/git
+      env failures (verified identical on origin/master). Residual (non-blocking):
+      review_loop.py ~1500 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      is a non-retryable LAUNCH_FAILED.'
+    created_at: '2026-10-27T18:08:05Z'
+    last_edited: '2026-10-27T18:08:05Z'
+  - id: note-92678f2
+    text: 'Review 0688 i4 (fixes applied): (1) a stop landing between `_start_loop`
+      marking the loop running synchronously (iteration 4 of 385e) and the loop thread''s
+      first line was swallowed — `run_review_loop_sync` reset `state.stop_requested
+      = False`, so the TUI said "Review loop stopping" while the loop created a review
+      window and container anyway. `_start_loop` already owns the reset (it clears
+      it for a resumed loop; a fresh state defaults False), so the loop no longer
+      resets it. Covered by test_stop_landing_before_the_thread_body_prevents_the_launch
+      (fails pre-fix: the launch runs to max_iterations). Full suite 3808 passed,
+      1 skipped; the 55 failed + 17 errors are the base tree pre-existing markdown-module/hook-installer/merge/signoff/git
+      env failures (test_git_ops::test_keeps_unpushed_merge verified failing identically
+      on an origin/master worktree). Residual (non-blocking, documented in the spec):
+      review_loop.py ~1500 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      is a non-retryable LAUNCH_FAILED; the runtime_state mirror of a re-armed loop
+      keeps the previous episode verdict/attempts until the next iteration mirrors
+      one, so `pm autostart status` says "review iteration N (last LAUNCH_FAILED)"
+      while the retry runs; `_interruptible_sleep` re-reads/validates the ~2 MB project.yaml
+      every 2 s (~3% of a core during backoff, loop thread); session._format_action_status
+      has no tests (the new `[failed; retryable]` badge included).'
+    created_at: '2026-10-27T18:42:26Z'
+    last_edited: '2026-10-27T18:42:26Z'
+  - id: note-26408eb
+    text: 'Review 0688 i5 (fixes applied): (1) `_wait_for_claim` only checked `stop_requested`;
+      a merge/close during the up-to-15 s wait for another loop''s launch lease was
+      noticed by `_interruptible_sleep` (early return) but ignored, so the wait kept
+      polling and could claim the freed lease and launch a review for a merged PR
+      without re-checking terminal status. It now re-checks `_pr_is_terminal` after
+      each sleep and returns False (caller already maps that to `ReviewClosedError`
+      -> CLOSED). (2) `pending_checks` counted across the whole episode: a starting
+      pane discovered before attempt 2 was replaced at once (counter past the cap)
+      instead of getting its own bounded grace; the counter now resets when an attempt
+      is launched. (3) The episode-reset lists had drifted — the new-iteration episode
+      start and `_reset_launch_retry` cleared the same five fields by hand and the
+      episode start missed `retry_ready_at`; both now call `_clear_launch_failure`,
+      and the episode start also clears `retry_ready_at`. (4) Added test_action_status_badge_flags_a_retryable_launch_failure
+      for the `pm session` [failed; retryable] badge (iteration-4 gap). Tests: test_claim_wait_stops_when_the_pr_closes
+      and test_pending_grace_is_per_launch_attempt (both fail pre-fix), 84 in test_review_launch_retry.py.
+      Full suite 3883 passed, 1 skipped (review-container recipe). Spec records iteration
+      5. Residual (non-blocking): review_loop.py ~1520 lines; two lease mechanisms
+      coexist (signoff claim_return_launch vs claim_action_lease); discovery adopts
+      a transcript verdict without requiring an idle hook event (documented); other_owner
+      stand-down is a non-retryable LAUNCH_FAILED; the re-armed loop''s runtime_state
+      mirror keeps the previous episode verdict/attempts until the next iteration
+      mirrors one; `_interruptible_sleep` re-reads the ~2 MB project.yaml every 2
+      s (~3% of a core during backoff). (2026-10-27)'
+    created_at: '2026-10-27T19:12:55Z'
+    last_edited: '2026-10-27T19:12:55Z'
+  - id: note-0983f7b
+    text: 'Review 0688 i6 (fixes applied): (1) the new auto-start re-arm path could
+      start a review loop while a sign-off REVIEW return still awaited its launch
+      — both launches are `--fresh` (each kills the window it finds), so the re-armed
+      loop and the return launcher (a `pm pr auto-sequence` tick or the TUI return
+      catch-up) could kill each other''s session. The fresh-loop path already took
+      the return''s launch claim first; the re-arm path now shares that guard via
+      `_yield_to_pending_review_return`. Losing the claim keeps the retryable failure
+      intact (episode count/budget untouched) and arms `_recheck_after_claim` so an
+      expired claim is taken over instead of stranding the target. Covered by test_auto_start_rearm_yields_to_a_pending_review_return
+      (fails pre-fix: the re-arm starts a loop and clears launch_retryable while another
+      driver owns the return launch). (2) `_live_review_pane_session` (the episode-start
+      stale-pane snapshot from 385e iteration 10) had no test; test_episode_start_snapshots_the_live_review_window
+      covers the resolved session and every total path. (3) `_auto_start_review_loops`
+      docstring now says it also re-arms a retryable failed launch. Full suite 3813
+      passed, 1 skipped; failures are the base tree''s pre-existing markdown-module/hook-installer/signoff/merge/git
+      env failures (test_git_ops::test_keeps_unpushed_merge verified failing identically
+      on an origin/master worktree). Still open (non-blocking, documented in the spec):
+      review_loop.py ~1530 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event; other_owner stand-down surfaces
+      as a non-retryable LAUNCH_FAILED (a proper SUPERSEDED outcome would touch the
+      verdict constants, tech-tree/popup rendering and auto-start''s re-arm gate);
+      the re-armed loop''s mirror/status keeps the previous episode''s verdict/attempts
+      until a new one lands; `_interruptible_sleep` re-reads the ~2 MB project.yaml
+      every 2 s during backoff.'
+    created_at: '2026-10-27T19:47:49Z'
+    last_edited: '2026-10-27T19:47:49Z'
+  - id: note-cc06975
+    text: 'QA S5 (restart handoff during the retry) PASS. Evidence: /pm-captures/scenarios/5
+      (recording.mp4 + transcript logs + status JSON/text snapshots). Two cosmetic
+      observations, both non-blocking: (1) ~1 s after "Review loop resumed for <pr>
+      at iteration 2 loop=<id>" the resumed loop re-emits the persisted "Review launch
+      retry for <pr> (attempt 2): ..." notice, a duplicate of the pre-restart notice
+      for the same attempt; (2) the retry notice for attempt N carries the PREVIOUS
+      attempt error text, so "Review launch retry for <pr> (attempt 3): Review window
+      launch failed ..." is logged even when attempt 3 launches fine (relauncher rc=0)
+      — the wording reads like the new attempt failed. Functional behaviour was correct
+      throughout: same loop id across the restart, attempt 3 (not a fresh attempt
+      1) after the remaining backoff, iteration-2 history and the attempt-2 artifact
+      preserved, no re-arm, no LAUNCH_FAILED, one review window.'
+    created_at: '2026-10-27T21:24:21Z'
+    last_edited: '2026-10-27T21:24:21Z'
+  - id: note-47acb82
+    text: 'QA scenario 2 (2026-10-27, PASS): exhaustion + re-arm verified end-to-end
+      on the real surfaces. Two spec-text details to reuse next run: (1) `pm autostart
+      status --json` emits `run_id`/`targets`/`runs` at the TOP level — `.status.runs[]`
+      / `.status.run_id` are null, so a jq read of `.status.*` errors with "Cannot
+      iterate over null"; the evidence is under `.runs[0].review` and `.targets[0].state`.
+      (2) launch artifacts live under `<project>/pm/transcripts/<run_id>/launch-artifacts/`
+      (the `pm/` segment is omitted in the scenario text). Observed residual (already
+      documented in i4/i6/i9): while the re-armed loop runs, `pm autostart status`
+      reads `running/review review #2 (launch retry N) — review iteration 2 (last
+      LAUNCH_FAILED)` rather than a bare `review iteration 2` — the previous episode
+      verdict lingers in the mirror until the next iteration lands; the row is not
+      the stuck failed entry and the loop produced PASS on its own. Captures: /pm-captures/scenarios/2/{story1-launch-retry,story4-manual-loop}.'
+    created_at: '2026-10-27T21:26:49Z'
+    last_edited: '2026-10-27T21:26:49Z'
+  - id: note-86585e6
+    text: 'QA scenario 3 refined (cancel during backoff): story 3 reshaped from "another
+      loop holds the launch lease" to the user cancel path `z d`, because a live other-loop
+      lease cannot be produced from one TUI (only native review loops claim review-loop;
+      a second TUI on the same session is refused; starting a second TUI sweeps the
+      lease). The claim-wait branch is covered by tests/test_review_launch_retry.py::test_cancellation_while_waiting_for_the_lease_is_killed
+      and remains the documented residual (other_owner stand-down -> non-retryable
+      LAUNCH_FAILED). Refined setup notes: local-backend scaffold needs `pm push`
+      + `git merge pm/sync-*` before `pm pr start` (else "not committed on master
+      yet"); the fake-claude stand-in and the broken podman/docker shim must be on
+      the TUI PATH at `pm session` time; backoff windows are 5 s then 10 s, so the
+      cancel must land in the 10 s window (poll `pm log grep "retrying in 10s"`).'
+    created_at: '2026-10-27T21:05:35Z'
+    last_edited: '2026-10-27T21:05:35Z'
+  - id: note-7436948
+    text: 'QA scenario 3 (cancel/supersede during the retry backoff) found and fixed
+      one issue: a loop the user cancelled during the backoff (z d, KILLED) kept its
+      earlier attempts'' retry evidence in the live status input, so `pm autostart
+      status --json` reported `review.verdict: "KILLED"` with `retryable: true`, `attempts:
+      2`, and a non-empty `error`/`artifact`. KILLED is never re-armed, so `retryable:
+      true` is wrong (the runtime_state mirror already drops these fields for every
+      non-LAUNCH_FAILED completion; `review_progress_input` special-cased only HOLD).
+      autostart_state.review_progress_input now drops the retry evidence once the
+      loop has stopped with a non-LAUNCH_FAILED outcome, while a loop still running
+      its retry episode (no verdict yet, or a re-armed LAUNCH_FAILED loop) keeps reporting
+      it, so the GIVEN backoff state is unchanged. Tests: test_autostart_status_does_not_report_a_cancelled_loop_as_retryable
+      + test_autostart_status_keeps_the_retry_evidence_while_the_retry_runs. Runtime
+      evidence: /pm-captures/scenarios/3/{story1-2,pre-fix,post-fix}. Note for future
+      runs: `z d` + `pm container disable` in one line races — the fresh review can
+      read the still-enabled container setting and fail; run the disable first (inside
+      the same backoff) if the fresh window matters. Also, auto-start targets are
+      TUI-process state and are lost when the TUI/session restarts (project.yaml keeps
+      no record), so re-add them after a restart.'
+    created_at: '2026-10-27T21:58:43Z'
+    last_edited: '2026-10-27T21:58:43Z'
+  - id: note-32cdcad
+    text: 'QA S1 (pr-e040aeb) PASS: both live stories verified with a podman shim
+      — iteration-2 attempt 1 killed the historical window then failed; loop kept
+      iteration 2, logged bounded retries (5 s/10 s), showed "review #2 (launch retry
+      2)" in the runs popup and running=true/attempts=2 in status --json; after disabling
+      container mode during the backoff attempt 3 launched a fresh i2 window that
+      emitted PASS and the PR advanced to QA. Exhaustion run ended ↻ LAUNCH_FAILED
+      (2 iterations) with retryable status + complete launch artifacts and no fabricated
+      verdict; auto-start re-armed after 60 s. Repro test fails on origin/master (assert
+      1 == 2) and passes here; 169 targeted tests pass. Evidence: /pm-captures/scenarios/1/{s1-retry-succeeds,s3-exhaustion}.
+      Cosmetic (non-blocking): pm autostart status prints the artifact path twice
+      (the error string embeds "(artifact: …)" and the status appends "[artifact:
+      …]"); per-attempt launch failures log at ERROR level before the retry warning
+      (loop does not terminate). QA spec text says "failed/in_review"; code emits
+      "failed/review".'
+    created_at: '2026-10-27T21:24:00Z'
+    last_edited: '2026-10-27T21:24:00Z'
+  - id: note-4b55a5c
+    text: 'QA scenario 6 (classification) refinement handoff. The qa.md failure-injection
+      premise is wrong for wording: a podman/docker shim stderr does NOT reach the
+      launch child. wrap_claude_cmd wraps any container-creation exception in a generic
+      ContainerError ("Failed to create container ... Is podman running?"), so the
+      shim cannot select the classification text. Live wording injection that does
+      work: with container mode enabled and a podman shim whose "image inspect" exits
+      1, run "pm container set image <text>"; the launch child then exits 1 with stderr
+      "Image <text> not found in podman. ..." and the review loop classifies that
+      child stderr. Verified: image "unauthorized:latest" -> non-retryable (1 attempt);
+      "permission denied:latest" -> retryable (3 attempts); "process 403 exited" ->
+      retryable (3 attempts). HOLD is live-inducible: clear fake-claude, put a "claude"
+      stand-in on the session PATH that prints the trust dialog and blocks, "pm set
+      trust-prompt-grace-seconds 10", and disable container mode during the 5 s backoff
+      (watch the log for "launch attempt 1/3 failed"); the retry then holds. Caveat:
+      the TUI completion notice may still print the earlier attempt Artifact line
+      for a HOLD (state.last_launch_artifact is not cleared), though autostart status
+      and the runs popup drop it.'
+    created_at: '2026-10-27T21:03:05Z'
+    last_edited: '2026-10-27T21:03:05Z'
+  - id: note-d0b2fc7
+    text: 'Review f076 i1 (fixes applied): three QA-observed polish items. (1) The
+      TUI retry notice for attempt N carried attempt N-1''s error unlabelled, reading
+      as a failure of the attempt starting now; it now says "attempt N; attempt N-1
+      failed: …". (2) A TUI restart mid-retry re-announced the persisted notice; `_ui_notified_retry`
+      is persisted in the breadcrumb, `_start_loop` no longer resets it on resume,
+      and it is cleared at the episode boundary (`_clear_launch_failure`) and by the
+      auto-start re-arm (restored if the start bails). (3) `pm autostart status` printed
+      the artifact path twice (the concise error already embeds "(artifact: …)");
+      `_derive` appends "[artifact: …]" only when the error does not name it. Tests:
+      5 new/strengthened in test_review_launch_retry.py + test_breadcrumb_review_loop.py.
+      Full suite 3831 passed, 1 skipped; the 43 failed + 17 errors are the base tree
+      pre-existing signoff/merge/git + hook-installer env failures (verified on an
+      origin/master worktree). Spec updated (QA refinement + iteration 7). Residual
+      (non-blocking, documented): review_loop.py ~1530 lines; two lease mechanisms
+      coexist; discovery adopts a transcript verdict without an idle hook event; other_owner
+      stand-down is a non-retryable LAUNCH_FAILED; the runtime_state mirror of a re-armed
+      loop keeps the previous episode''s verdict/attempts until the next iteration
+      mirrors one; `_interruptible_sleep` re-reads the ~2 MB project.yaml every 2
+      s during backoff. (2026-10-27)'
+    created_at: '2026-10-27T22:29:33Z'
+    last_edited: '2026-10-27T22:29:33Z'
+  - id: note-08c5c07
+    text: 'Review f076 i2 (fixes applied): three surface-polish items. (1) A HOLD''s
+      "Review loop done" notice appended the earlier failed attempt''s `Artifact:
+      …` under the trust/permission prompt it sits at (QA scenario 6); the artifact
+      line is now shown only for LAUNCH_FAILED, matching the runtime_state mirror
+      and `pm autostart status`. (2) A re-armed retry keeps latest_verdict=LAUNCH_FAILED
+      until the new iteration lands, so `pm autostart status` said "review iteration
+      N (last LAUNCH_FAILED)" while the retry ran; `_derive`''s running branch now
+      suppresses the "(last …)" suffix for LAUNCH_FAILED only (a real previous verdict
+      still shows) — closes a residual documented since 0688 i4. (3) The per-attempt
+      `launch failed (rc=…)` line logged at ERROR though the loop retries it (QA s1);
+      it now logs WARNING for a retryable failure and keeps ERROR for auth, while
+      the loop still logs ERROR when it gives up. Tests: 6 added (96 in test_review_launch_retry.py);
+      the three behaviour tests fail on the previous HEAD and pass here. Full suite
+      3825 passed, 1 skipped; the 55F+17E are the base tree pre-existing signoff/merge/git
+      + markdown-module + hook-installer env failures (identical counts/files on an
+      origin/master worktree). Spec records iteration 8 (0688). Residual (non-blocking):
+      review_loop.py ~1540 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event; other_owner stand-down is a non-retryable
+      LAUNCH_FAILED; the runtime_state mirror of a re-armed loop keeps the previous
+      episode verdict/attempts (runs popup) though the live status path no longer
+      shows it; `_interruptible_sleep` re-reads the ~2 MB project.yaml every 2 s during
+      backoff.'
+    created_at: '2026-10-27T22:55:26Z'
+    last_edited: '2026-10-27T22:55:26Z'
+  - id: note-0a1f894
+    text: 'Review f076 i3 (fixes applied): (1) the supersede paths (`z d`/`zz d`)
+      and `_on_complete_from_thread` each carried their own inline `release_action_lease`
+      block; all three now call `review_loop._release_lease`, the helper the loop
+      finally already uses, so the "only release a lease this owner still holds" rule
+      lives in one place. (2) `VERDICT_ICONS` keys the error icon on `VERDICT_ERROR`
+      instead of the `"ERROR"` literal. (3) A HOLD is the trust/permission prompt
+      a *launched* review sits at, so `_derive` no longer says "review launch held:
+      …" — it reports "review held at a permission prompt: …" (the loop log line matches).
+      (4) `review_progress_input` dropped `retryable`/`error`/`artifact` for a loop
+      stopped with a non-LAUNCH_FAILED outcome (QA scenario 3) but kept `attempts`,
+      so `pm autostart status --json` showed `verdict: "KILLED", attempts: 2` while
+      the runtime_state mirror drops `attempts` for the same completion; the live
+      path now drops it too. Tests: two strengthened (`test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error`
+      asserts the new wording, `test_autostart_status_does_not_report_a_cancelled_loop_as_retryable`
+      asserts attempts==0); targeted review/autostart/runtime-state suites 447 passed.
+      Full suite 3825 passed, 1 skipped; the 55 failed + 17 errors are the base tree
+      pre-existing signoff/merge/git + markdown-module + hook-installer env failures
+      (verified identical set on origin/master). New documented residual (spec iteration
+      9): a merge restart during the post-exhaustion re-arm *cooldown* does not persist
+      the loop (`save_breadcrumb` saves only running loops), so auto-start starts
+      a fresh loop for the PR instead of continuing the episode — the review still
+      runs and no verdict is fabricated (the new loop snapshots the stale symlink/pane),
+      only the loop history/iteration numbering restarts. Residual (non-blocking):
+      review_loop.py ~1540 lines; two lease mechanisms coexist; discovery adopts a
+      transcript verdict without an idle hook event (documented); other_owner stand-down
+      is a non-retryable LAUNCH_FAILED; the runtime_state mirror of a re-armed loop
+      keeps the previous episode verdict/attempts (runs popup); `_interruptible_sleep`
+      re-reads the ~2 MB project.yaml every 2 s during backoff. (2026-10-27)'
+    created_at: '2026-10-27T23:31:38Z'
+    last_edited: '2026-10-27T23:31:38Z'
+  - id: note-dd660c6
+    text: 'QA S8 (HOLD on a retry landing at a workspace-trust prompt) NEEDS_WORK
+      fixed in b531c86b. Story 1 passed fully on the live surface: attempt 1 died
+      in the podman shim run (container), attempt 2 launched the claude stand-in ->
+      trust dialog for /tmp, 10 s grace -> "⏸ HOLD (1 iteration)" naming the prompt
+      with NO Artifact line (retry line carries the attempt-1 artifact); review window
+      stayed live; pm autostart status --json = state failed / phase review / reason
+      "review held at a permission prompt: …" / verdict HOLD / retryable false / artifact
+      "" / attempts 2; runs popup = FAILED review — review held at a permission prompt;
+      after 95 s past the 60 s cooldown no third attempt, no re-arm, status unchanged.
+      Story 2 recovery replaced the held window and ran to fake PASS (no LAUNCH_FAILED,
+      no fabricated verdict, PR advanced to QA pre-fix). Gap: the scenario expects
+      the TUI log to show "Killed existing review window ''review-<pr>''" but it never
+      appears on the loop path — the replacement happens in the launch child (pm pr
+      review --fresh), whose stdout _launch_review_window discards on success (pre-existing
+      on master). Fix (b531c86b): mirror the "Killed existing review window" / "Switched
+      to existing review window" click.echo notices into the debug log in cli/pr.py,
+      so pm log show now contains the exact line (verified post-fix: "01:16:16 INFO
+      [cli] Killed existing review window ''review-pr-95325c4''"). Log-only, behaviour
+      unchanged; targeted suites 159 + 118 passed. Residual/non-blocking: the kill
+      line logs just after "Review loop started" (the child performs the replacement),
+      not before it as the scenario listed; the post-fix recovery used a manual loop
+      (auto-start off to avoid a stale armed target), so the auto-start review->QA
+      transition was verified in the pre-fix auto-start run (runs[0].status == "qa").
+      Captures: /pm-captures/scenarios/8/{story1-hold,story2-recovery (pre-fix),post-fix}.'
+    created_at: '2026-10-28T01:21:38Z'
+    last_edited: '2026-10-28T01:21:38Z'
+  - id: note-8888aeb
+    text: 'QA scenario 7 (pr-e040aeb) PASS — both stories verified live. S1 cancel
+      during backoff: loop 4f2a retried 1/3 then 2/3; `pm container disable` + `z
+      d` inside the 10 s window -> debug `pane killed on iteration 1: Review loop
+      stopped during launch retry`, TUI `Review loop done for pr-95325c4: ☠ KILLED
+      (1 iteration)`, exactly two attempt lines and exactly attempt1/attempt2 launch
+      artifacts (no attempt 3, no relauncher attempt=3), one review window `review-pr-95325c4`
+      (the fresh one-off) with PASS, status `◎ pr-95325c4 [stop-before-merge] failed/review
+      review #1 — review loop ended KILLED` (no retryable, no artifact), JSON review
+      {verdict KILLED, running false, retryable false, attempts 0, error "", artifact
+      ""}; after the 60 s cooldown a forced scheduler pass produced no re-arm, still
+      one review window, JSON unchanged. S2 supersede during backoff: loop 328d (attempts
+      1/3, 2/3) superseded by `zz d` -> `Fresh review loop started for pr-95325c4
+      loop=1b48`; old loop KILLED with no further attempt, no LAUNCH_FAILED anywhere;
+      `review-` window count 0 in the backoff/supersede state then 1 for all 44 half-second
+      samples (never >1); new-loop row `running/review review #1 — review iteration
+      1` (JSON running=true, attempts=1), it polls review-pr-95325c4 and gets PASS;
+      final review {iteration 1, running false, verdict PASS}; forced pass: no re-arm,
+      one review window. tests/test_review_launch_retry.py 96 passed. Evidence: /pm-captures/scenarios/7/{story1-cancel,story2-supersede}.
+      Mechanics for future runs: the control pane rendered blank in this tmux server
+      while its pty worked, so CLI steps ran from an equivalent shell with the session
+      PYTHONPATH/venv; the recorder attach client follows the TUI into the new review
+      window, so the home pane KILLED completion line lands in transcript.log rather
+      than the cast; after a review PASS the auto-start target advances the PR to
+      QA (fake-claude has no QA verdicts -> QA INPUT_REQUIRED), which is expected
+      and does not affect the review checks.'
+    created_at: '2026-10-28T01:29:01Z'
+    last_edited: '2026-10-28T01:29:01Z'
+  - id: note-db4d845
+    text: 'QA scenario 9 (first-iteration launch failure) NEEDS_WORK, fixed 7f38066a.
+      Core behavior verified end-to-end with a failing podman shim: 3 attempts at
+      +0/+5/+10 s, two "launch attempt N/3 … retrying in 5s/10s" WARNINGs and three
+      per-attempt "launch failed (rc=1)" WARNINGs, one ERROR at exhaustion, no review-<id>
+      window, PR stays in_review, ↻ LAUNCH_FAILED (1 iteration); attempt artifacts
+      are complete (timestamp/pr/iteration/loop_id/attempt/returncode/cmd/session_id/prompt/prompt_copy
+      + full stderr/stdout, one per attempt); `pm autostart status` names the artifact
+      exactly once; --json review = {iteration 1, LAUNCH_FAILED, running false, retryable
+      true, attempts 3, error, artifact} with targets[0].state=failed; runs popup
+      FAILED/review/review #1; session picker shows "[failed; retryable]"; auto-start
+      re-arms every 60 s with a fresh attempt budget (episodes 1–5) and the re-armed
+      run reports "review #1 (launch retry 2) — review iteration 1" with no stale
+      "(last LAUNCH_FAILED)". Two TUI-notice defects found and fixed: (1) the final
+      retry attempt was never announced — the notice was keyed on launch_attempts,
+      which the ~1 s poll never observes for an attempt that starts and dies inside
+      one tick, so every exhausted episode showed only "attempt 2; attempt 1 failed";
+      the poll now announces the upcoming attempt during the backoff (next_retry_at
+      in the future) and still announces each attempt exactly once across restarts/episodes;
+      (2) "Auto-start: retrying review launch for <pr>" was logged but never visible
+      because _start_loop''s "Review loop resumed …" replaced it in the same tick
+      — the re-arm announcement is now held (CONFIRM_HOLD_SECONDS), matching the "targets
+      +=" confirmation. Also fixed a latent test-isolation bug: test_old_window_then_container_failure_retries_the_same_command
+      patches the process-wide subprocess.run, so running pytest inside a tmux pane
+      let an ambient `tmux display-message` session-name lookup consume the "first
+      call fails" slot (failed inside tmux, passed outside). Reproduction test: 1
+      passed on the PR tree, 1 failed (assert 1 == 2) on a clean origin/master worktree.
+      Three targeted suites 183 passed; full suite 43F+17E, identical counts on a
+      clean origin/master worktree (pre-existing signoff/merge/git/hook-installer
+      env failures). Captures: /pm-captures/scenarios/9/{pre-fix,post-fix,story5-tests,evidence}.'
+    created_at: '2026-10-28T01:33:57Z'
+    last_edited: '2026-10-28T01:33:57Z'
+  - id: note-bb9fffa
+    text: 'Review 1fc4 i2 (fixes applied): two stranded-target paths found and closed.
+      (1) `consume_breadcrumb` restores the saved loop into `app._review_loops` and
+      then calls `_start_loop`, which returns False when it cannot start (missing
+      workdir, no tmux, unusable transcript dir). The resume path ignored that result:
+      it announced "Review loop resumed …" anyway and left a NON-RUNNING loop entry,
+      and `_auto_start_review_loops` skips a PR whose entry is non-running and not
+      a retryable launch failure — so the PR was stranded until a manual `review-loop
+      start`, the exact symptom this PR removes, reached through a failed resume instead
+      of a failed launch. The resume now logs honestly and drops the restored entry
+      so the scheduler pass can start a fresh loop; a starter that raises (e.g. a
+      missing project root) is treated the same way so it cannot take the TUI mount
+      down. (2) `_lease_keepalive._check` checked `stop_requested` before claiming,
+      but the supersede paths (`z d` / `zz d`) set `stop_requested` and release the
+      old lease in between, so a claim already in flight re-took the lease the replacement
+      needs; the new loop bounded claim wait then expired into a non-retryable LAUNCH_FAILED.
+      The keepalive now hands the lease straight back (`_release_lease`) when a stop
+      landed during the claim — the same guard iteration 3 of 0688 added inside `_claim_launch`.
+      (3) `runtime_state` schema docstring now documents the `lease` field and its
+      `_locked_action_mutate` writer. Tests: `test_a_resume_that_cannot_start_drops_the_phantom_loop`,
+      `test_a_raising_resume_is_treated_like_a_refusal`, `test_lease_keepalive_releases_a_lease_claimed_after_a_stop`
+      (all fail pre-fix for the reason they cover); targeted review/autostart/breadcrumb
+      suites 370 passed. Full suite 3832 passed, 1 skipped; the 55 failed + 17 errors
+      are the base tree pre-existing signoff/merge/git + markdown-module + hook-installer
+      env failures (same file set as the documented baseline). Spec records iteration
+      2 and corrects the iteration-1 residual wording: neither the runs popup nor
+      `pm autostart status` reads the runtime_state mirror for a review loop (the
+      popup uses `collect_status_inputs`, i.e. live `review_progress_input`; the CLI
+      status is answered by the TUI), so a re-armed loop stale mirror fields are only
+      visible to a reader of `~/.pm/runtime/<pr>.json` itself. Residual (non-blocking,
+      documented): review_loop.py ~1550 lines; two lease mechanisms coexist; discovery
+      adopts a transcript verdict without requiring an idle hook event; other_owner
+      stand-down is a non-retryable LAUNCH_FAILED; a merge restart during the post-exhaustion
+      re-arm cooldown does not persist the loop (fresh loop instead, no fabricated
+      verdict); `_interruptible_sleep` re-reads the ~2 MB project.yaml every 2 s during
+      a backoff; a stop landing inside the launch child subprocess is not noticed
+      until it returns (old loop bows out at its next checkpoint, lease already released).'
+    created_at: '2026-10-28T02:53:27Z'
+    last_edited: '2026-10-28T02:53:27Z'
+  - id: note-b032388
+    text: 'Scenario 23 concretizer note. The draft''s "move PR A''s workdir aside"
+      does NOT make only A''s launch fail: `_ensure_workdir` re-clones a missing workdir,
+      and tmux `new-window -c <non-directory>` returns rc 0 and falls back to the
+      server cwd (verified), so with fake-claude the review child still creates the
+      transcript symlink and the loop polls a transcript that never lands (hang, not
+      a launch failure). Use the spec''s primary container-runtime injection with
+      timing isolation instead: launch B''s review first and let it finish (PASS ->
+      sign_off under `pm project set skip-qa on`) BEFORE `pm container enable` + `pm
+      container set image pm-qa-missing:latest`; only A''s pending iteration-2 launch
+      is then affected (3 attempts, one artifact each). Repair with `pm container
+      disable` (+ restore `pm container set image pm-dev:latest`) DURING the 60 s
+      cooldown — repairing after it expires burns another 3-attempt episode and another
+      60 s. Container mode is a GLOBAL pm setting: do not run this scenario concurrently
+      with another container-mode scenario in the same HOME. Both PRs share ONE auto-start
+      run dir (`pm/transcripts/<run_id>`); isolation is per-PR filenames (`review-<pr>-i<N>.jsonl`,
+      `launch-artifacts/review-<pr>-i<N>-attempt<K>-*.log`), not per-PR run dirs.
+      The scripted fake-review cursor is shared across PRs, so add A as the first
+      target and wait for its `review-<A>` window before adding B (A takes slot 0
+      = NEEDS_WORK, B slot 1 = PASS).'
+    created_at: '2026-10-28T05:42:34Z'
+    last_edited: '2026-10-28T05:42:34Z'
+  - id: note-7e975c0
+    text: 'QA scenario 19 (launch-failure reporting end to end) PASS on 67a75a7c —
+      all four stories verified live: (1) auto-start iteration 1 NEEDS_WORK -> iteration
+      2 attempt 1 dies with "Image ''[podman]'' not found in podman. ...", the TUI
+      renders "Review launch retry for pr-51aebc9 (attempt 2; attempt 1 failed: ...)"
+      with the [podman] token intact, the user repairs the host in the 5 s backoff,
+      attempt 2 launches a fresh window and PASSes (i1+i2 jsonl only, PR -> qa); (2)
+      manual loop with image "[/tmp/pm-review]" renders both attempt-2/3 notices verbatim
+      plus "↻ LAUNCH_FAILED (1 iteration)", 3 artifacts with the exact 134-char stderr,
+      no verdict, PR stays in_review; (3) exhausted auto-start re-arms visibly ("Auto-start:
+      retrying review launch" sticky ~2.6 s, then "Review loop resumed ... (hidden
+      by sticky message)"), status reads "review iteration 1" with no "(last LAUNCH_FAILED)",
+      --json runs[0].state=running / review.running=true / iteration=1 / targets[0].state=running,
+      and a new attempt-2 line lands after the re-arm; (4) repro test passes here
+      and fails on origin/master with assert 1 == 2; 188 targeted tests pass. Harness
+      facts for the next run: `pm log grep` has NO -q flag (a `while ! pm log grep
+      -q ...` repair watcher spins forever and silently lets the episode exhaust —
+      use `grep -aq` on ~/.pm/debug/<session>.log instead), and `pm autostart status`
+      without -s resolves via the cwd of the invoking shell, so it silently reports
+      another pm session when several are alive on one tmux server (always pass -s).
+      Evidence: /pm-captures/scenarios/19/{story1-repair-mid-backoff,story2-manual-loop-markup,story3-rearm,story4-tests}.'
+    created_at: '2026-10-28T06:18:07Z'
+    last_edited: '2026-10-28T06:18:07Z'
+  - id: note-d3dd7aa
+    text: 'QA scenario 21 (third pass, 1fc4 i2 item 1) PASS: a breadcrumb restart
+      whose saved loop cannot resume no longer strands the target. Live run: in_review
+      PR + auto-start target, loop in the 10 s backoff after a failed container launch
+      (podman shim, image qa-broken:latest); the loop own manual-<token> transcript
+      dir was replaced by a stray file while the auto-start run dir stayed usable;
+      pm tui restart --breadcrumb. Observed: no "Review loop resumed" anywhere; log
+      says "Cannot create transcript dir …: [Errno 17] File exists" + "consume_breadcrumb:
+      could not resume the review loop …; dropping the restored state so the scheduler
+      can restart it"; the scheduler started a fresh loop (new loop id) into the run
+      dir, fake-claude PASS, PR advanced to QA; pm autostart status right after the
+      restart read "running/review review #1 — review iteration 1" (JSON state=running,
+      review.running=true, attempts=1); TUI stayed responsive. Mechanics for future
+      runs: start the manual loop BEFORE enabling auto-start so its transcript dir
+      differs from the auto-start run dir (enabling auto-start first makes get_transcript_dir
+      return the run dir, and replacing that one would make consume_breadcrumb own
+      mkdir raise); watch the debug log for "launch attempt 2/3 failed … retrying
+      in 10s" and do the break + pm container disable + restart inside that 10 s window.
+      Minor observation (non-blocking): the on-screen single sticky log line ends
+      up as "Auto-start: resumed after merge restart → <pr>", so the refusal reason
+      is visible via pm log show rather than the one-line pane log. Evidence: /pm-captures/scenarios/21/failed-resume/
+      (recording.mp4/cast, transcript, status-after-restart/, final-state/, test-evidence/).'
+    created_at: '2026-10-28T06:17:34Z'
+    last_edited: '2026-10-28T06:17:34Z'
+  - id: note-454c1ee
+    text: 'Scenario 22 refinement (2026-10-28): drive the closed outcome with `pm
+      pr edit <pr> --status closed` — `_pr_is_terminal` only treats status merged/closed
+      as terminal; `pm pr close` removes the PR entry, so the loop instead retries
+      into a retryable LAUNCH_FAILED. Script each supersede/close timeline in ONE
+      shell command (wall-clock between tool calls is 20-80 s). The fake-claude review
+      entry needs `delay` >= ~25 s (> the 20 s verdict grace) so the host can be broken
+      between iteration 1 and iteration 2. Use a private PM_TMUX_SOCKET + HOME so
+      the TUI, panes, CLI and fake-claude all share the same ~/.pm.'
+    created_at: '2026-10-28T05:39:07Z'
+    last_edited: '2026-10-28T05:39:07Z'
+  - id: note-c0c8816
+    text: 'QA scenario 22 (concurrent actors during the backoff) PASS 2026-10-28 on
+      f14de47b. All three stories verified live with a podman shim: (1) two supersedes
+      during the 5 s and 10 s windows -> 2x "superseding running loop" + 2x "Fresh
+      review loop started" (loop=5c51, loop=05cd), both superseded loops KILLED with
+      no further attempt, review-* window samples 18x0 / 101x1 (never 2), no "owned
+      by another loop", no LAUNCH_FAILED, surviving loop -> single "Review loop done
+      ... PASS"; (2) 8 backoff `pm pr auto-sequence` calls all "running: review (owned
+      by loop:a17a)" with no advanced:/started:/sign_off:, post-repair call same owner
+      and "window unchanged: yes", one PASS; (3) `pm pr edit --status closed` in the
+      10 s window -> "merged/closed during review launch", verdict=CLOSED, exactly
+      2 launch attempts, no attempt 3, target pruned ("Auto-start: target pr-closed
+      — removed"), no re-arm across two forced scheduler passes (second past the 65
+      s cooldown), autostart status "off". Targeted tests: tests/test_review_launch_retry.py
+      101 passed; test_lease_keepalive_releases_a_lease_claimed_after_a_stop + tests/test_breadcrumb_review_loop.py
+      25 passed. Mechanics for the next run: `pm log grep` has NO -q flag (only --source/-i)
+      so the scenario`s `until pm log grep -q ...` waits hang — use `pm log grep "X"
+      | wc -l`; use a SEPARATE tmux socket per story (PM_TMUX_SOCKET=$QA_ROOT/sN.sock)
+      because `pm session` reattaches by the path-derived session name, so re-running
+      setup in the same dir can leave the previous TUI (cwd = deleted dir) as the
+      owner, which then auto-launches the setup guide and makes `pm autostart add`
+      fail with unknown_pr; `pm push` prints the sync branch twice, so use `grep -o
+      "pm/sync-[0-9]*-[0-9]*" | head -1` before `git merge` (otherwise the merge silently
+      fails and `pm pr start` says "not committed on master yet"). Captures: /pm-captures/scenarios/22/{story1-supersede,story2-autosequence,story3-closed}.'
+    created_at: '2026-10-28T06:16:50Z'
+    last_edited: '2026-10-28T06:16:50Z'
+  - id: note-9e495c8
+    text: 'QA scenario 23 (per-PR isolation) re-run cleanly. Harness notes for future
+      runs of this scenario: (1) give PR A a LONG delay (120 s) on its iteration-1
+      scripted verdict, not 60 s — B has to be added, launched, passed and moved to
+      sign_off, and the container broken, all inside A''s iteration-1 window; with
+      60 s the repair lands after the first cooldown and the run burns a second 3-attempt
+      episode (six artifacts instead of the specified three, two re-arm lines). The
+      repair must land inside the FIRST cooldown. (2) `~/.pm/runtime/<pr>.json` is
+      keyed by PR id, which is content-derived from the title, so reusing "Alpha:
+      add login feature"/"Beta: fix database migration" across throwaway projects
+      inherits the previous run''s stale loop_id/verdict/lease entry — use distinct
+      PR titles per run. (3) To record the TUI home window, `tmux attach -t $SESS:0`
+      is not enough: the attach client follows the session''s active window when the
+      TUI switches to review/sign-off windows. Pin it with a background `while :;
+      do tmux select-window -t $SESS:0; sleep 0.3; done` for the whole capture. Evidence:
+      /pm-captures/scenarios/23/{run,cli-evidence,evidence}.'
+    created_at: '2026-10-28T06:27:12Z'
+    last_edited: '2026-10-28T06:27:12Z'
+  - id: note-f6569ff
+    text: 'Sign-off (HEAD 33c19886, base master@89e3c501) -> SIGNOFF_IMPL for integration
+      only: the behaviour is complete, reviewed and live-QA PASS. Merge master and
+      resolve the conflicts in pm/project.yaml (mechanical registry/notes 3-way) and
+      pm_core/review_loop.py. Semantic item: master (pr-8efa789) switched _adopt_in_flight_review
+      to verdict_transcript.find_verdict_turn (returns hit.text or hit.verdict) so
+      a later /loop wakeup turn cannot hide the verdict; this PR moved that logic
+      into _verdict_output_if_present (used by _landed_verdict and retry discovery),
+      which still uses extract_verdict_from_transcript + read_latest_assistant_text.
+      Switch _verdict_output_if_present to find_verdict_turn, or master fix is silently
+      dropped on every adopt/retry path. Also: master (pr-25f4038) removed app._stop_before_merge
+      / POLICY_STOP; drop the two stale app._stop_before_merge = set() lines in this
+      PR tests, and re-check consume_breadcrumb keeps both master targets_from_breadcrumb(data,
+      prs) change and this PR resume-before-scheduler ordering. Then run tests/test_review_launch_retry.py,
+      test_breadcrumb_review_loop.py, test_review_loop.py, test_verdict_transcript.py.
+      Report: /pm-captures/report.html'
+    created_at: '2026-10-28T06:49:24Z'
+    last_edited: '2026-10-28T06:49:24Z'
+  - id: note-0790ce6
+    text: 'Integration done (HEAD f2a785e6, merge of master@89e3c501 into 7c6bffc4).
+      Both conflicts resolved. review_loop.py: kept this PRs shared _poll_adopted_review/_landed_verdict
+      structure and switched the single verdict reader _verdict_output_if_present
+      to master find_verdict_turn (returns hit.text or hit.verdict), so pr-8efa789
+      reaches the restart-handoff, retry-discovery and landed-verdict paths; the conflicts
+      inline copy in _adopt_in_flight_review was dropped in favour of _poll_adopted_review.
+      Verified master only changed review_loop.py by that switch since the merge base
+      450a6362. project.yaml: registry/notes 3-way union (508 unique ids; pr-e040aeb
+      identical to this branch, pr-25f4038 + pr-16e45ba identical to master, no master
+      id missing; only differences from master are this branch own cross-PR notes
+      + later updated_at). Dropped the two stale app._stop_before_merge lines from
+      tests/test_review_launch_retry.py (pr-25f4038). consume_breadcrumb keeps both
+      master targets_from_breadcrumb(data, prs) migration and this PR resume-before-scheduler
+      ordering. Tests: targeted 234 passed (test_review_launch_retry, test_breadcrumb_review_loop,
+      test_review_loop, test_verdict_transcript); full suite 4187 passed, 1 skipped,
+      1 failed = test_hook_events::test_installer_writes_standalone_receiver, which
+      fails identically on a clean 89e3c501 worktree (pre-existing hook-installer
+      env failure). Spec updated with the integration section and verification.'
+    created_at: '2026-10-28T07:04:36Z'
+    last_edited: '2026-10-28T07:04:36Z'
+  - id: note-9b098e0
+    text: 'Review c945 i1 (integration verified; one guard added): the merge (7541411f,
+      master@89e3c501) is verified — project.yaml is a correct 508-entry union (pr-e040aeb
+      identical to this branch, every master-only entry identical to master, only
+      differences are this branch own cross-PR notes), review_loop.py keeps master
+      find_verdict_turn inside the shared _verdict_output_if_present, the auto-merged
+      auto_start.py/review_loop_ui.py keep both sides (targets_from_breadcrumb migration
+      + resume-before-scheduler ordering; master _maybe_auto_merge hold text), and
+      no _stop_before_merge/POLICY_STOP references remain. Gap closed: the merged
+      verdict-reader fix had no helper-level test (master tests cover find_verdict_turn,
+      not the review-loop reader), so test_review_launch_retry.py::test_verdict_reader_survives_a_later_wakeup_postscript
+      now pins it — verdict turn + /loop wakeup tick + postscript returns the verdict
+      text and parse_review_verdict yields PASS; with the pre-merge read_latest_assistant_text
+      reader it returns the postscript and fabricates NEEDS_WORK (verified directly,
+      so the test fails on the pre-merge helper). Tests: test_review_launch_retry.py
+      102 passed; targeted review/breadcrumb/verdict suites 235 passed; full suite
+      env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace -> 4188 passed,
+      1 skipped (the integration run 1 failure is the documented PM_HOST_HOME hook-installer
+      env trap). Non-blocking residuals unchanged (review_loop.py ~1550 lines; two
+      lease mechanisms; discovery adopts a transcript verdict without an idle hook
+      event; other_owner stand-down is a non-retryable LAUNCH_FAILED; runtime_state
+      mirror keeps a re-armed loop previous episode verdict/attempts; a merge restart
+      during the post-exhaustion cooldown starts a fresh loop; _interruptible_sleep
+      re-reads project.yaml every 2s).'
+    created_at: '2026-10-28T07:20:32Z'
+    last_edited: '2026-10-28T07:20:32Z'
+  - id: note-515308c
+    text: 'Review c945 i1 (second finding, test-quality): tests/test_review_loop.py::test_failed_launch_is_retried_not_terminal
+      was passing WITHOUT exercising a retry. It patches the process-wide subprocess.run
+      and fails the first call, but since 385e i10 the episode start snapshots the
+      live review window via _live_review_pane_session -> tmux display-message, so
+      that ambient probe consumed the "first call fails" slot; the first real launch
+      returned rc=0 and created the transcript, the test saw 2 calls + PASS, and it
+      would pass on a tree with no retry at all (it only failed pre-fix because the
+      snapshot did not exist then). Fixed by counting only --review-loop launches,
+      matching the QA-fixed test_old_window_then_container_failure_retries_the_same_command.
+      Verified: 1 ambient probe, 2 launch attempts (attempt 1 fails, attempt 2 succeeds),
+      verdict PASS, iteration 1. test_review_loop.py 63 passed.'
+    created_at: '2026-10-28T07:24:55Z'
+    last_edited: '2026-10-28T07:24:55Z'
+  - id: note-d33dfe0
+    text: 'Review c945 i2 (fix applied): a HOLD kept its retry attempt count in the
+      live status path. autostart_state.review_progress_input dropped artifact/retryable
+      for a HOLD but left attempts=launch_attempts, while the runtime_state mirror
+      (_on_complete_from_thread) drops it for a HOLD — the same live-path-vs-mirror
+      divergence 0688 i9 closed for KILLED. The attempt count is retry-episode evidence
+      belonging to the failed launch, not the hold, so the live path now drops it
+      too (a HOLD still reports its own prompt message as error). Strengthened test_autostart_status_reports_the_hold_prompt_not_a_stale_launch_error
+      (state carries launch_attempts=2; asserts attempts==0 and retryable False, fails
+      pre-fix). Targeted review/breadcrumb/verdict/autostart suites 426 passed; full
+      suite 4189 passed, 1 skipped (env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace).
+      No other findings: the retry state machine, lease, discovery fabrication guards,
+      breadcrumb round-trip and auto-start re-arm all re-reviewed against the spec
+      and the documented residuals; captures /pm-captures/impl/{pre,post}-fix present
+      and convincing.'
+    created_at: '2026-10-28T08:15:26Z'
+    last_edited: '2026-10-28T08:15:26Z'
+  - id: note-4cbb831
+    text: 'QA S24 (verdict reader past a later /loop wakeup) PASS. Both stories induced
+      the live two-turn transcript with a stand-in claude that appends, in ONE write,
+      the verdict turn + an isMeta "# Autonomous loop tick (dynamic pacing)" user
+      record + a no-verdict postscript ("Verdict already submitted; nothing else to
+      do."). S1 (retry path; container image broken after iteration 1 then repaired
+      inside the 10 s backoff): iteration 1 NEEDS_WORK, attempts 1-2 fail (5 s/10
+      s), attempt 3 = the stand-in -> iteration 2 verdict=PASS, no iteration 3, no
+      LAUNCH_FAILED, exactly one review window, JSON review {iteration 2, PASS, attempts
+      0, retryable false}. S2 (restart handoff adopt path): pm tui restart --breadcrumb
+      issued the moment the loop logged "polling pane ...-i2.jsonl"; resumed loop
+      logged "consume_breadcrumb: Review loop resumed ... at iteration 2" + "adopting
+      in-flight iteration 2 (pane %8, ...)" + "poll_for_verdict ... grace=0s" for
+      the same pane/session, one relauncher line only, iteration 2 verdict=PASS, target
+      still armed [wait-for-merge] with attempts 0. Both transcripts are 4 records
+      ending with the wakeup + postscript. Direct helper check on both live transcripts:
+      _verdict_output_if_present -> PASS, the pre-merge read_latest_assistant_text
+      -> the postscript -> fabricated NEEDS_WORK. Repro test test_verdict_reader_survives_a_later_wakeup_postscript
+      passes; tests/test_review_launch_retry.py 102 passed. Captures /pm-captures/scenarios/24/{story1-retry-wakeup,story2-restart-adopt}.
+      No code change.'
+    created_at: '2026-10-28T09:41:00Z'
+    last_edited: '2026-10-28T09:41:00Z'
+  - id: note-c638ef7
+    text: 'QA S26 PASS (a retry never adopts a pre-episode transcript or window).
+      Both live stories verified with a podman shim (image pm-nonexistent-qa:latest).
+      (1) A new loop against the broken runtime killed the pre-episode PASS window,
+      wrote the i1 symlink and failed at container creation; the pre-armed 5 s repair
+      landed, attempt 2 relaunched a fresh review (new --session-id 6d07c2a6, polled
+      by the loop) and the loop recorded iteration 1 NEEDS_WORK then iteration 2 PASS
+      with exactly one review window and no re-adopted PASS. (2) A loop whose attempts
+      1-2 failed at container creation in the SAME shared manual-6c1a36 dir as a pre-episode
+      i1=PASS was in its 10 s backoff when pm tui restart --breadcrumb ran; the new
+      TUI resumed the same loop (id 9144), launched attempt 3 at the persisted next_retry_at,
+      and recorded i1 NEEDS_WORK / i2 PASS; no stale PASS, no grace=0s poll, i1 now
+      carries the fresh session bdcedf30, both failed-attempt artifacts remain, one
+      review window. Non-blocking cosmetic observation: the sticky retry notice truncates
+      the launch error at 200 chars, so its inline ''(artifact: …)'' suffix can be
+      cut to a fragment like ''(artifact: /scratch/p''; the full artifact path still
+      appears on the notice''s own ''Artifact:'' line, so the notice does name the
+      artifact. Captures: /pm-captures/scenarios/26/{story1,story2} (cast+mp4+manifest+evidence).'
+    created_at: '2026-10-28T09:46:51Z'
+    last_edited: '2026-10-28T09:46:51Z'
+  - id: note-c29501c
+    text: 'QA S27 (breadcrumb restart mid-episode) PASS on 521430b4 (integrated tree).
+      S1: `pm tui restart --breadcrumb` landed ~1s into the 5s backoff after iteration
+      2 attempt 1 failed; log shows `Review loop resumed for pr-3f5e474 at iteration
+      2 loop=1680` with the same id as `Review loop started ... loop=1680`; in-flight
+      `pm autostart status --json` = one run, iteration 2, running true, attempts
+      1, artifact = the attempt-1 log (exists; identical to the path in the pre-restart
+      TUI notice); the breadcrumb saved `next_retry_at` 09:43:50.126 and attempt 2
+      relaunched at 09:43:50 = the ORIGINAL deadline (not restart+5s); no `Auto-start:
+      review loop`/`Auto-start: retrying review launch` after `consume_breadcrumb:
+      restoring targets=`; exactly one attempt-2 notice; after repair attempt 2 PASS
+      -> `✓ PASS (2 iterations)`, one run, one review window. S2: manual loop (own
+      manual-<hex> dir) in its 10s backoff, dir replaced by a stray file + restart
+      -> `Cannot create transcript dir ... [Errno 17] File exists` and `consume_breadcrumb:
+      could not resume the review loop ...; dropping the restored state so the scheduler
+      can restart it`, no `Review loop resumed`; scheduler started fresh loop=ccfe
+      in the intact autostart-<pr>-<hex> run dir; target kept [wait-for-merge] and
+      read `running/review review #1 — review iteration 1`; `✓ PASS (1 iteration)`;
+      `pm tui view` returned in 0.08s. Observation (non-blocking, scenario-text nit
+      only): during a live retry `.review.verdict` is `NEEDS_WORK` (the last completed
+      review verdict) and the row carries `(last NEEDS_WORK)`; LAUNCH_FAILED is set
+      only on retry exhaustion by design (review_progress_input reads latest_verdict),
+      so the scenario parenthetical "JSON verdict is still LAUNCH_FAILED while the
+      retry runs" does not match — the hard requirements (iteration 2/running/attempts>=1/artifact)
+      all hold. Evidence: /pm-captures/scenarios/27/{story1-resume-in-place,story2-failed-resume}.'
+    created_at: '2026-10-28T09:51:37Z'
+    last_edited: '2026-10-28T09:51:37Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-e040aeb-bug-failed-review-iteration-launch-s-b57b0f06
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy
