@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T15:59:34.062397+00:00'
+  updated_at: '2026-10-28T16:37:09.578312+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38663,6 +38663,26 @@ prs:
       and the merge reconciliation.'
     created_at: '2026-10-28T15:59:33Z'
     last_edited: '2026-10-28T15:59:33Z'
+  - id: note-8e43503
+    text: 'review-loop 26e3 i1 (0ccf28de). Behaviour fix: `zz t` (`start_or_stop_qa_loop`)
+      starts a full QA loop without going through `start_qa`, so it never consumed
+      an owed REQA — a self-driving loop on an owed PR was followed by a SECOND full
+      run from the reconciler when the loop ended. It now clears `awaiting`/the claim
+      like `start_qa` (and mirrors that in `app._data`); the spec edge case that claimed
+      `zz t` already consumed it was wrong and is corrected. QA: pressing `zz t` on
+      an owed PR must now produce exactly one loop and no follow-up full run; `t`/`z
+      t` unchanged. Hygiene: after a reconciler start the consumed obligation is dropped
+      from `app._data`, so the 5 s tick no longer re-attempts the claim (a full project.yaml
+      read + fsynced rewrite) until a reload; `arm_owed_reqa` no longer re-reads project.yaml
+      when nothing is owed (both callers reload first — I1 now holds for the mount
+      hook); auto-start announces "QA for X" only when its pass won the claim; `_CLAIMED_RETURN_HOPS`
+      comment now explains why `qa` is deliberately absent. Tests added: run_qa_sync/resume_qa_sync
+      run-record wiring (the old test called `write_run_record` directly), mount hook
+      arms+starts and is quiet when nothing is owed, in-memory consumption after a
+      start, zz t consumption. Full suite in the review container: 4112 passed, 1
+      skipped (markdown installed, PM_HOST_HOME unset, PATH=/usr/bin:/bin). (2026-10-28T16:40:00Z)'
+    created_at: '2026-10-28T16:37:09Z'
+    last_edited: '2026-10-28T16:37:09Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
