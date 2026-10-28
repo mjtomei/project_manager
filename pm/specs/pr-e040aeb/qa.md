@@ -32,14 +32,20 @@ Each scenario builds its own throwaway project (see `tui-manual-test.md`), with:
   `[{"verdict": "NEEDS_WORK", "delay": 20}, "PASS"]`, which the scenarios use to
   have time to break and repair the launch environment between iterations).
 - The TUI started from the test project (`pm session`), auto-start target added
-  where the scenario needs it (`pm autostart add <pr> --stop-before-merge`).
+  where the scenario needs it (`pm autostart add <pr>`). New targets default to
+  `--wait-for-merge`; the pre-integration `--stop-before-merge` flag is now a
+  deprecated alias for it (status prints `[wait-for-merge]`, not
+  `[stop-before-merge]`).
 - The local-backend scaffold must be pushed and synced before `pm pr start`
   (`pm push` then `git merge pm/sync-*` in the main repo), or start fails with
   "not committed on master yet".
 - The fake-claude stand-in and any broken runtime shim must be on the session
   PATH when `pm session` starts (the panes inherit it).
-- Auto-start targets are TUI-process state, not project.yaml records: a TUI
-  restart loses them, so re-add after restart when the scenario needs one.
+- Auto-start targets are TUI-process state, not project.yaml records: a *plain*
+  TUI restart loses them, so re-add after restart when the scenario needs one.
+  A `--breadcrumb` restart is supposed to preserve them (master's
+  `targets_from_breadcrumb` migration plus this PR's resume-before-scheduler
+  ordering), which is itself worth asserting.
 - Launch artifacts live under `<project>/pm/transcripts/<run_id>/launch-artifacts/`
   (the `pm/` segment matters).
 - `pm autostart status --json` emits `run_id`, `targets` and `runs` at the TOP
@@ -244,12 +250,15 @@ THEN the outcome is a hold (`HOLD`) — not a launch failure, not retried — an
 
 ## Pass / fail criteria
 
-Pass = every THEN above is observable on the surface named, on a branch built
-from this PR; the reproduction test
+Pass = every THEN above is observable on the surface named, on the integrated
+PR tree (HEAD after the master@89e3c501 merge); the reproduction test
 (`tests/test_review_loop.py::test_failed_launch_is_retried_not_terminal`, which
-fails on the base tree) passes; and the targeted suites
-(`tests/test_review_launch_retry.py`, `tests/test_review_loop.py`,
-`tests/test_breadcrumb_review_loop.py`) pass.
+fails on a clean origin/master worktree) passes and genuinely makes two launch
+attempts; the pinned verdict-reader test
+(`tests/test_review_launch_retry.py::test_verdict_reader_survives_a_later_wakeup_postscript`)
+passes; and the targeted suites (`tests/test_review_launch_retry.py`,
+`tests/test_review_loop.py`, `tests/test_breadcrumb_review_loop.py`,
+`tests/test_verdict_transcript.py`) pass.
 
 Fail = a failed launch ends the loop with `ERROR`/a fabricated verdict; the
 target stays stopped with no re-arm and no explanation; a retry adopts a
@@ -415,6 +424,66 @@ Shared resources to exercise concurrently: the per-PR launch lease in
 `~/.pm/runtime/<pr>.json`, the review window name (`review-<pr>`), the
 per-run transcript dir and `launch-artifacts/` dir, and the single
 `~/.pm/autostart-resume.json` breadcrumb.
+
+## Post-integration changes to verify (merge of master@89e3c501 + c945 i1–i2)
+
+The branch now merges master@89e3c501 (HEAD after 7541411f and the c945
+review fixes). The merge is not itself a user-facing change, but it changes
+what a scenario must assert:
+
+1. **The verdict reader is master's `find_verdict_turn`.** `_verdict_output_if_present`
+   is the single reader behind retry discovery, the restart-handoff adopt path
+   and `_landed_verdict`; the merge moved master's pr-8efa789 fix into it. A
+   review transcript whose verdict turn is followed by a later `/loop` wakeup
+   turn must still yield the *verdict turn's* verdict. The pre-merge reader
+   (`read_latest_assistant_text`) returns the postscript and
+   `parse_review_verdict` fabricates `NEEDS_WORK` for a PASS review. Pinned by
+   `tests/test_review_launch_retry.py::test_verdict_reader_survives_a_later_wakeup_postscript`
+   (which fails with the old reader). Live induction needs a `claude` stand-in
+   that writes a native JSONL transcript with [user turn, assistant verdict
+   turn, assistant wakeup/postscript turn]; the loop's adopt/retry path must
+   record the verdict turn's verdict and finish, not launch another iteration.
+2. **A HOLD reports no retry attempt count** (c945 i2). `review_progress_input`
+   now drops `attempts` for a HOLD (the runtime_state mirror already did), so
+   `pm autostart status` / `--json` show `verdict: HOLD`, `retryable: false`,
+   `attempts: 0`, `artifact: ""`, and `error` = the trust/permission prompt.
+   The earlier live run (scenario 8) observed `attempts: 2` — that is the
+   pre-c945-i2 behaviour and must not be accepted now.
+3. **The reproduction test genuinely exercises the retry** (c945 i1).
+   `tests/test_review_loop.py::test_failed_launch_is_retried_not_terminal` now
+   counts only `--review-loop` launches, so an ambient `tmux display-message`
+   probe cannot consume the "first call fails" slot. Run it (and
+   `tests/test_review_launch_retry.py::test_old_window_then_container_failure_retries_the_same_command`)
+   from a shell that is not inside a tmux pane.
+4. **The merge-restart ordering survives.** `consume_breadcrumb` keeps master's
+   `targets_from_breadcrumb(data, prs)` migration *and* this PR's ordering
+   (resume restored loops before the auto-start scheduler pass), so a
+   breadcrumb restart must not start a second fresh loop for a PR whose saved
+   loop resumes.
+
+## Fourth QA pass focus (scenarios 24+)
+
+Earlier passes verified R1–R9 broadly. This pass targets the integration and
+the fixes landed after the last live run:
+
+1. **Adopt paths read the verdict turn, not a later wakeup turn** (integration
+   item 1): retry discovery adopting a user-started review, and the restart
+   handoff adopting a live review, both with a verdict-turn + wakeup-postscript
+   transcript.
+2. **A HOLD carries no retry evidence on any status surface** (c945 i2).
+3. **A retry never adopts the window/transcript that predates the episode**
+   (385e i1/i3/i10): a previous run's `review-<pr>-i<N>.jsonl` in the shared
+   transcript dir, or a review window already live when the episode started,
+   must not supply this iteration's verdict; the retry launches fresh. The
+   contrast (a review the user starts *during* the backoff is adopted, not
+   duplicated) is the boundary and must still hold.
+4. **A breadcrumb restart mid-episode on the integrated tree** resumes the same
+   iteration with its remaining attempt budget, preserves the auto-start target
+   and its policy, starts no second loop, and keeps the failed attempt's
+   artifact; a resume that cannot start still drops the phantom entry so the
+   scheduler starts a fresh loop.
+5. **The reproduction test and targeted suites** pass on the integrated tree,
+   and the reproduction test fails on a clean origin/master worktree.
 
 ## Known residuals (record as evidence, do not fail a scenario)
 
