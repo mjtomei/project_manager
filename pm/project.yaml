@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T05:21:46.803059+00:00'
+  updated_at: '2026-10-28T07:30:52.745508+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15011,6 +15011,21 @@ prs:
       R3 was kept by reap.'
     created_at: '2026-10-28T04:59:45Z'
     last_edited: '2026-10-28T04:59:45Z'
+  - id: note-4172344
+    text: 'QA S81 (b2dd37d6 → fix 2c26ddad; real rootless Podman 3.4.4, fake agents,
+      two PRs with colliding s1-s4; evidence /pm-captures/scenarios/81/manifest.md):
+      NEEDS_WORK, fixed 2c26ddad. A TUI restart within one 5 s poll after a per-poll
+      release relaunched a settled scenario ("Scenario 11 window died — retry 1/10",
+      new container), because qa_resume.json was written only at the top of the poll,
+      before verdicts were read. Now the snapshot is persisted just before a per-poll
+      release; regression test added; full suite 4318 passed / 2 skipped. Post-fix,
+      the same restart race had no relaunch. All other Thens held: per-run verify-pass
+      snapshot across concurrent A(off)/B(on) runs, mid-run on/off toggles, zz t (no
+      downgrade of settled PASS with snapshot off; IR "PASS was not verified…" with
+      snapshot on, no FLAG after the held verifier VERIFIED), finalize skipped on
+      stop, kept IR container reaped after window close.'
+    created_at: '2026-10-28T07:30:52Z'
+    last_edited: '2026-10-28T07:30:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
