@@ -95,8 +95,10 @@ Rules, in order:
        if present must be `str`. Any other malformed field/entry rejects the
        entire set (all-or-nothing; never silently drop a merge gate).
    - empty list:
-     - if `auto_start` is truthy, or `run_id` is present → reject with
-       "saved auto-start state has no target PRs; auto-start remains off".
+     - if `auto_start` is truthy, or `run_id` is present **and non-null** →
+       reject with "saved auto-start state has no target PRs; auto-start
+       remains off".  (A `null` run_id is not a request: no producer ever
+       wrote one, and it carries no authority either way.)
      - otherwise → no autostart data (`targets={}`, no error).
    - `auto_start` explicitly `False` → do not restore (explicit off, no error).
    - valid non-empty list + `auto_start` absent/true → restore exactly those
@@ -115,8 +117,9 @@ Rules, in order:
        diagnostic is more accurate than "invalid legacy target" for that
        historical shape, and no producer wrote `target: null` with an
        autostart request that was not all-mode.
-   - `target` absent and (`auto_start` truthy or `run_id` present) →
-     reject as targetless legacy data. It must **not** become `all_mode`.
+   - `target` absent and (`auto_start` truthy or `run_id` present and
+     non-null) → reject as targetless legacy data. It must **not** become
+     `all_mode`.
    - otherwise → no autostart data.
 7. No result may ever set a wildcard/all flag. `targets` is the sole
    authority; empty means OFF.
@@ -181,6 +184,11 @@ Rules, in order:
   that the restriction overrides them.
   When the argument is `None` (callers that never had a scope, e.g. plain
   `generate_watcher_prompt(data)`), behavior is unchanged.
+  Note: `AutoStartWatcher` always passes a list (never `None`), so a
+  standalone `pm watcher` / `pm watcher start auto-start` outside the TUI —
+  which owns no targets — is observation-only too. That is the intended
+  fail-closed consequence of "a watcher started with no targets must not be
+  a general fixer"; it is documented in the CLI/watcher docstrings.
 - No other background driver may derive scope without `is_enabled` +
   `in_scope`: review/QA/sign-off/merge paths already do
   (`review_loop_ui`, `qa_loop_ui`, `signoff_ui`); verify `in_scope` is
@@ -311,12 +319,14 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
 8. Malformed `stop_before_merge` → autostart OFF but review-loop restore
    still happens; a valid set is restored even when the target parse was
    rejected.
-9. Non-boolean `all_mode`, non-string `run_id`, `auto_start` with no target
-   key, and a legacy `target` without `auto_start` (migrates).
+9. Non-boolean `all_mode`, non-string `run_id`, a null `run_id` with no
+   targets (off, no error), `auto_start` with no target key, and a legacy
+   `target` without `auto_start` (migrates).
 10. Save→consume while autostart is off writes no autostart fields;
     enabled-with-empty-targets writes no breadcrumb at all.
-11. A malformed review-loop history entry does not abort the restore, and
-    the loop-resume summary never paints over the rejection diagnostic.
+11. A malformed review-loop history entry does not abort the restore, the
+    loop-resume summary never paints over the rejection diagnostic, and an
+    all-malformed `review_loops` file claims no resume.
 
 Updated existing tests: remove `_auto_start_all` fields and all-mode
 assertions; replace targetless fixtures with explicit targets; update

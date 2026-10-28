@@ -427,6 +427,7 @@ async def consume_breadcrumb(app) -> None:
     if not isinstance(review_loops_data, dict):
         _log.warning("consume_breadcrumb: ignoring malformed review_loops")
         review_loops_data = {}
+    restored_loops = 0
     if review_loops_data:
         from pm_core.review_loop import ReviewLoopState, ReviewIteration
         for pr_id, loop_data in review_loops_data.items():
@@ -462,7 +463,11 @@ async def consume_breadcrumb(app) -> None:
                     timestamp=h.get("timestamp", ""),
                 ))
             app._review_loops[pr_id] = rstate
-        _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
+            restored_loops += 1
+        # Count what was actually restored: every record in the file may be
+        # malformed, in which case no loop state was adopted.
+        _log.info("consume_breadcrumb: restored %d review loop state(s)",
+                  restored_loops)
 
     app._update_display()
 
@@ -538,10 +543,12 @@ async def consume_breadcrumb(app) -> None:
         else:
             _log.info("consume_breadcrumb: restored targets all completed "
                       "during downtime; auto-start remains off")
-    elif review_loops_data:
-        # A rejected restore's diagnostic is the message the user must see;
-        # do not paint this informational summary over it.  (It is still
-        # recorded in the ``L`` command log.)
+    elif restored_loops:
+        # Only claim a resume when loop state was actually adopted; every
+        # record in the file may have been malformed.  A rejected restore's
+        # diagnostic is the message the user must see, so do not paint this
+        # informational summary over it.  (It is still recorded in the ``L``
+        # command log.)
         app.log_message("Resumed review loop state after restart",
                         sticky=0 if diagnostic else 5)
 

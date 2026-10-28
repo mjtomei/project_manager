@@ -279,6 +279,15 @@ class TestBreadcrumbParserFailClosed:
         assert list(result.targets) == ["pr-a"]
         assert result.migrated is True and result.error is None
 
+    def test_null_run_id_with_no_targets_is_off_without_error(self):
+        """A ``null`` run_id is not an autostart request (the pre-multi-target
+        writer always emitted a string), so it carries no authority to
+        restore and nothing to diagnose."""
+        result = st.targets_from_breadcrumb({"targets": [], "run_id": None})
+        assert result.targets == {} and result.error is None
+        legacy = st.targets_from_breadcrumb({"target": None, "run_id": None})
+        assert legacy.targets == {} and legacy.error is None
+
 
 # ---------------------------------------------------------------------------
 # consume_breadcrumb: remain OFF, diagnose, preserve evidence
@@ -576,6 +585,20 @@ class TestConsumeFailClosed:
         summary = [kw for msg, kw in zip(app.logs, app.log_kwargs)
                    if msg == "Resumed review loop state after restart"]
         assert summary and summary[-1].get("sticky", 0) == 0
+
+    def test_all_malformed_loop_records_claim_no_resume(self, tmp_path):
+        """When every saved loop record is malformed nothing is adopted, so
+        the startup summary must not claim loop state was resumed."""
+        app = FakeApp([_pr("pr-a", status="in_review", workdir="/tmp/wd")],
+                      tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "review_loops": {"pr-a": "not a record", "pr-b": 3},
+        })
+        with patch("pm_core.tui.review_loop_ui._start_loop") as start_loop:
+            _consume(app, tmp_path)
+        assert app._review_loops == {}
+        start_loop.assert_not_called()
+        assert not any("Resumed review loop state" in m for m in app.logs)
 
 
 class TestSaveNeverPersistsWildcard:
