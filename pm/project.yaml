@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T16:26:55.809624+00:00'
+  updated_at: '2026-10-28T16:30:10.926426+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36755,6 +36755,42 @@ prs:
       shows a wait.'
     created_at: '2026-10-28T16:26:55Z'
     last_edited: '2026-10-28T16:26:55Z'
+  - id: note-e5360bc
+    text: 'QA scenario 16 (adoption of an in-flight iteration, waits nobody can answer):
+      PASS at 7b153815. All five stories driven live (real TUI + interactive stand-in),
+      captures /pm-captures/scenarios/16/ (5 casts+mp4, per-story samples/logs). (1)
+      breadcrumb restart with iteration 2 in flight: "adopting in-flight iteration
+      2 ... pane %7, transcript=...review-pr-720da2d-i2.jsonl", no new iteration-2
+      launch, same window @5/pane %7, stand-in launch count 1; the held turn then
+      ends INPUT_REQUIRED and the wait is published for iteration 2 (text row waiting/review
+      review #2, ir=true, fu=false, marker ⏸2, popup WAITING); answer -> running in
+      ~0.5s, follow-up NEEDS_WORK read from that transcript -> iteration 3 -> PASS.
+      (2) restored iteration-6 wait whose pane/transcript are gone: "restored 1 review
+      loop state(s)", "INPUT_REQUIRED wait for pr-720da2d iteration 6 has no live
+      pane; continuing", "iteration 7 for"; 77 successful samples with 0 input_required=true
+      and 0 review INPUT_REQUIRED reasons; iteration 7 -> PASS, not KILLED. (3) latched
+      stale flag (iteration 7, NEEDS_WORK, input_required true): cleared at restore,
+      iteration 8 reports running (verdict NEEDS_WORK, fu=false, marker ⟳8, never
+      ⏸7), then PASS. (4) breadcrumb restart during a genuine live wait: the only
+      sample between mount and the adopt line (14.200 vs adopt 14.880) is the documented
+      resume row running ... (INPUT_REQUIRED answered; follow-up running) with input_required=false;
+      after adoption the wait is visible on the same window/pane %24, relauncher count
+      and stand-in count unchanged, marker ⏸1; answer -> follow-up NEEDS_WORK -> iteration
+      2 -> PASS. (5) kill-window during the wait: failed/review review #1 - review
+      loop ended KILLED 1.65s later (verdict=KILLED, ir=false, fu=false), "pane gone
+      during follow-up wait", "☠ KILLED (1 iteration)", marker ⟳1☠, runs popup FAILED,
+      stable 25s, no relaunch. Observations, not failures: (a) the consume_breadcrumb
+      resume debug line (pm_core/tui/auto_start.py:336, pre-existing since e7e8abdc7)
+      can print the already-advanced iteration because the resumed loop thread starts
+      before the line is built — saw "at iteration 8" for a seeded 7; the painted
+      sticky message is the correct "at iteration 7 loop=seeded" and the later line
+      is logged "(hidden by sticky message)"; (b) during the ~0.6s adopt check the
+      tree widget was not repainted, so the pane kept the pre-restart ⏸1 frame and
+      no ⟳1 frame rendered before adoption (the ⟳1 frames appear after the answer);
+      the status/runtime-state publication path never reported a wait, matching the
+      S9 post-fix capture.'
+    created_at: '2026-10-28T16:30:10Z'
+    last_edited: '2026-10-28T16:30:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
