@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T11:42:50.156439+00:00'
+  updated_at: '2026-10-28T12:25:11.746569+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16687,6 +16687,26 @@ prs:
       snapshots (a whole repaint can arrive in one output event).'
     created_at: '2026-10-28T11:04:27Z'
     last_edited: '2026-10-28T11:04:27Z'
+  - id: note-5b97561
+    text: 'Merge master@89e3c501 (sign-off SIGNOFF_IMPL): the only conflicts were
+      the import blocks in tests/test_autostart_merge_wait.py and tests/test_autostart_multi_target.py
+      — master removed POLICY_STOP (wait-for-merge is now the only manual policy)
+      and this branch added TuiIpcResult. Resolution keeps master''s `from pm_core.autostart_state
+      import POLICY_AUTO, POLICY_WAIT` plus this branch''s `from pm_core.cli.helpers
+      import TuiIpcResult` in both files; neither referenced POLICY_STOP outside its
+      import. All other changed-on-both-sides files (pm_core/cli/autostart.py, cli/tui.py,
+      qa_loop.py, tui/app.py, tui/pane_ops.py, tests/test_qa_resume.py, pm/project.yaml)
+      auto-merged; verified the branch code is intact (autostart._request -> submit_tui_command,
+      heal_registry pane_window_id, qa_loop errors="replace", pidfile claim in cli/tui.py)
+      and project.yaml kept all 507 PR entries with no notes lost. Verification: 729
+      targeted tests (autostart*, pidfile, popup/picker, qa_resume, pane_layout, tui_cmd_queue)
+      pass; FULL SUITE 4217 passed, 1 skipped (pytest 8.4.2, textual 8.2.8, env -u
+      PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace). A test merge of the
+      branch into 89e3c501 in a scratch worktree is clean (no conflicts). Pushed d3ac60c6.
+      No production code changed by this merge, so the QA-validated message surface
+      and scenario expectations still hold.'
+    created_at: '2026-10-28T12:25:11Z'
+    last_edited: '2026-10-28T12:25:11Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
