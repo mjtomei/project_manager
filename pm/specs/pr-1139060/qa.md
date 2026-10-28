@@ -29,6 +29,17 @@ User-visible behavior added after `8c5fad86` that fresh scenarios must cover:
 - Popups and proxy reporting: a `pr start` launched from a popup labels the container with the session's project root (`-C`/`PM_PROJECT`), not the viewed PR workdir clone. Reap and `session cleanup` print `stopped  push proxy <dir>` for proxies they stop (9d26eb3a).
 - Status output: `pm container status` lists only this runtime's retention markers (61cf62b5), and no longer lists a retained container that cleanup has since removed (incidental fix made during this planning pass). Against a hung runtime, status finishes within one bounded probe. A legacy unlabeled container's PR status is resolved through the owning session's project, not the caller's cwd (fdf4a1d5).
 
+Refresh on 2026-10-28 at HEAD `afc151b5` (QA fixes from scenarios 49–57 plus review-loop 090d i1–i4). Scenarios 49–57 are locked historical evidence; fresh scenarios begin at 58. Results of the 49–57 run (aggregate NEEDS_WORK): S55 and S56 PASS. S49, S50, S52, S53, S54 and S57 held their stories only after in-run fixes (ae2c2520, e2aabd97, 4276eb87/53b5d4f8, 5292bea9, 700b0157, 025c8d53), so the fixed paths need clean reruns on the current head. S51 stories 1–2 held; story 3 found two reap bugs (ebba345e, 272e3c52) and a 7 = L+2 peak that the user ruled a failure (resolution 21, fixed by 7257da86), so it is rerun.
+
+User-visible behavior added after `76081338` that fresh scenarios must cover:
+- Process pressure: a fork failure (EAGAIN/ENOMEM) during the QA poll, a verification hand-back or its follow-up Enters no longer ends the run as ERROR or orphans its workers; a flagged verification is counted once, and a follow-up is never sent twice (ae2c2520, ab2c3d56, 7e824be9). A run-end release deferred because the runtime could not run is retried on the run's own thread for a bounded time, so the stopped run's containers go away after recovery without a manual reap.
+- Pane exits at send boundaries: a worker pane that exits between PM's liveness check and the verification follow-up, the verdict-format reminder or the trust-prompt accept makes that scenario INPUT_REQUIRED ("window gone") or is retried on the next tick; the QA run itself continues (bf72c4fd, afc151b5).
+- Dead-worker relaunch: a successful relaunch registers the new worker pane, never the still-open concretizer pane in the same-named window; the verifier runs in the worker's window; tmux's own error is logged when a relaunch fails; a run that keeps everything logs "released containers: none (kept sN INPUT_REQUIRED)" (e2aabd97).
+- Retained containers count toward `container-max-running` (7257da86, resolution 21).
+- Cleanup races: a container removed by another actor (pane EXIT release vs `pm pr cleanup --resources`, a replacing `--fresh` launch) during a listing or release is not a cleanup failure and leaves no "owner release pending" record; a Podman `ps`/inspect that races a removal retakes the inventory once instead of reporting "runtime inventory unavailable" (5292bea9, 53b5d4f8, 71b8f7b8, fcb5ce9c, 4276eb87). A reap stops a shared proxy and reports it once, not once per container (272e3c52). A young container whose launch already attached and whose window then closed is reclaimed, not kept as "launching (no pane yet)" (ebba345e).
+- Periodic reconciliation waits up to 60 s for a busy reaper lock held by a short scoped pass instead of skipping a whole interval; startup and keyring-pressure passes still skip (025c8d53).
+- Container commits work when the host git identity exists only in the system config (700b0157).
+
 Source grounding:
 - `pm_core/container.py`: serialized launch/reuse, completed setup/config probes, runtime cause classification, ID-specific EXIT cleanup, PID recovery, bounded creation and legacy cleanup.
 - `pm_core/container_reaper.py`: exact pane ownership, scope, retention, launch grace, pre-delete rechecks, bounded removal, persisted failures and unused-proxy cleanup.
@@ -67,6 +78,19 @@ These resources are shared within a scenario only. No scenario relies on another
 - workdirs/evidence: all
 - popups: 54
 - locale: 55
+
+Fresh scenarios 58–63 re-cover them on HEAD `afc151b5`:
+- runtime namespace/identity: 58, 59, 62
+- locks/leases: 62, 63
+- reaper outcomes: 61, 62, 63
+- retention: 59, 62
+- tmux sockets/clients: 58, 60, 61
+- push proxies: 58, 62
+- headroom/queues: 59, 61
+- process trees/PID: 61
+- workdirs/evidence: all
+- popups: none changed since S54 PASS; not re-run
+- locale: none changed since S55 PASS; not re-run
 
 ## Setup
 
@@ -111,6 +135,16 @@ These resources are shared within a scenario only. No scenario relies on another
       - Gates on inspect/list-panes must release within their 10 s or 5 s probe timeout, and must match tmux argv after `-S <sock>`.
     - PID budget: in a worker whose PID 1 does not reap zombies, size worker counts to the cgroup PID budget and record it.
     - Budget-heavy stories: dead-worker retry backoff and hour-aged lock aging need a declared wall-clock budget of up to 90 minutes. S35 showed that such a budget can be completed.
+
+21. Fixture lessons from 49–57:
+    - Shared Podman store with private tmux servers: one fixture's reap removes another fixture's containers whose tmux session it cannot see. Run independent fixtures sequentially or give each its own store.
+    - Nested containers have no cgroup of their own; `podman stats` PIDs is the shared outer counter. Per-container process evidence comes from `podman exec ps`. Run any `sleep infinity` zombie control after PM iterations and remove it first.
+    - Nested `podman run -d` decoys need `--uts host`. Create `$HOME/.claude` in an isolated HOME or container transcripts never reach the host.
+    - Removal recheck inspect has a 10 s timeout and tmux probes 5 s; gates that must outlast them hold ≥12 s, gates that must not hold ≤4.5 s.
+    - A worker whose PID 1 does not reap zombies should run the session under a child-subreaper loop so conmon zombies do not exhaust the PID budget (S49).
+    - Fresh PR branches have no upstream: push with `git push origin HEAD`. `pm pr review` on a sign_off PR moves it back to in_review; reset status with `pm pr edit --status` before re-running sign-off.
+    - Plain `pm pr start` after a forced restart only focuses a companion-only window (pr-bbad0d0); close the companion first.
+    - Deleted-cwd releases may log to `~/.pm/debug/default.log`; grep every `~/.pm/debug/*.log`.
 
 ## Requirements — user stories
 
@@ -238,5 +272,8 @@ BLOCKED/unsupported is required if the worker cannot obtain real runtime/image/n
 19. S44 outage peak: an unreadable inventory clamps to one launch (the at-least-one floor), and deferred releases still count. While the inventory is unreadable, the run's peak may therefore reach L+1. After recovery it must return to at most L, and the batch must grow back. A larger excess, or permanent serialization after recovery, fails.
 20. Prerequisite-gated S46/S47/S48 are not re-emitted to unqualified workers. A fresh scenario that runs with a declared 90-minute budget covers hour-aged lock pruning (as S35's 94-minute run did). Docker parity, genuine keyring relief and delegated PID-cgroup pressure remain open acceptance items that need a provisioned VM or Docker host; they are not waived. PID-1 orphan reaping inside PM containers (R14) does not need those prerequisites and is planned separately under ordinary nested Podman.
 21. S51 retained-container peak (resolved by the user, note-6e8fde3 / controller note-c21abc7: "Count retained containers toward the limit"; impl A8). With the inventory readable, the running count may reach L+1 only through one floor launch by a run that holds no container of its own. A run whose scenario is kept for a human after INPUT_REQUIRED must not launch another queued scenario past the limit: the queued row stays "queued" until another process frees room or the retained pane is closed and reclaimed. The retained container and its INPUT_REQUIRED evidence are preserved. S51's observed A4 + B + C s1 (retained) + C s2 = 7 = L+2 fails under this rule; the S51 Then "≤ L+1" stands. The unreadable-inventory peak of resolution 19 is unchanged.
+
+22. A run-end release deferred by a runtime outage is retried as the whole run-end release (review 090d). A window that was viewed at run end but is no longer viewed when the retry runs is released by that retry; "viewed" is judged at release time. A window still viewed at retry time stays.
+23. A release recorded while the runtime identity probe failed carries no runtime domain. It never authorizes removal and `pm container status` shows it only as a diagnostic ("Unverifiable release records … not retried"), never as a retryable failure that makes `pm container reap` exit nonzero. Such records are currently never cleared even after their allocation is gone (S49 open item); that accumulation is tracked separately as pr-a4c4500 and is not an acceptance criterion here. QA does require that the stopped run's containers are actually removed after recovery.
 
 No unresolved product ambiguities remain. This refresh records planning only; it does not claim runtime validation.
