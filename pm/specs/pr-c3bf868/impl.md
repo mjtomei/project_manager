@@ -141,6 +141,8 @@ I6. `_canonical_session` / `~N` grouped-session normalization must be
 I7. The TUI session name must be resolvable before `app.run()` for the
     pre-run claim. Factor the existing `on_mount` logic into
     `current_session_name()` in `app.py` and reuse it in `pm_core/cli/tui.py`.
+    It resolves through `pm_core.tmux.get_session_name()` (pane-targeted),
+    not a bare `display-message -p` — see E17.
 
 I8. When the launcher claimed a pidfile, `on_mount` must use that claim's
     session name (`_session_for_claim`) rather than asking tmux again: a
@@ -299,6 +301,20 @@ E16. **The target process's own `/proc` entry can be non-UTF-8.**
     (the QA resume snapshot's recorded owner PID) is fixed the same way
     — see the PR note for that incidental fix.
 
+E17. **The pidfile key must be *our* pane's session, not tmux's "current
+    client".** The pidfile is keyed by session name, and with I8 the
+    launcher's claim makes that name authoritative for the life of the
+    TUI. `display-message -p "#{session_name}"` with no `-t` resolves
+    against the most recently active client, so when a second client is
+    attached to another pm session the TUI would claim *that* session's
+    pidfile — and every caller, which resolves the session from
+    `$TMUX_PANE` (`_find_tui_pane` -> `tmux.get_session_name`), would
+    find no pidfile and silently lose IPC (autostart then reports
+    `owner_unavailable`). `current_session_name()` therefore delegates to
+    `tmux.get_session_name()`, which targets `$TMUX_PANE` — the same
+    pitfall the popup bodies already pin `$S` for
+    (`pm_core/cli/session.py`, `_pin_popup_body`).
+
 ## Tests
 
 New `tests/test_tui_pidfile.py` (shared module + helper + app integration)
@@ -423,6 +439,12 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     (`qa_loop.resume_owned_elsewhere` / `_proc_start_time`) likewise
     reports "not our owner" instead of raising. All five tests were
     verified to fail against the pre-fix strict decode.
+30. `current_session_name()` resolves through the pane-targeted
+    `tmux.get_session_name()` (E17): it strips the `~N` group suffix,
+    never issues a bare `display-message -p`, and returns `None` outside
+    tmux or when the tmux lookup fails. Verified to fail against the
+    pre-fix bare-query implementation (which returns `None`/the wrong
+    session under the same monkeypatches).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

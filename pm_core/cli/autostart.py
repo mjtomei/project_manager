@@ -136,9 +136,9 @@ def _request(session: str | None, args: list[str], timeout: float) -> dict:
         # TUI") the user needs.
         _log.warning("autostart dispatch failed: %s (%s)",
                      result.reason, result.message)
+        fallback = f"could not signal the TUI for session {sess}"
         raise _Fail(EXIT_OWNER, "owner_unavailable",
-                    result.message or f"could not signal the TUI for "
-                    f"session {sess}", session=sess)
+                    result.message or fallback, session=sess)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if reply.exists():

@@ -4,7 +4,10 @@ import shlex
 from pathlib import Path
 
 from pm_core.paths import configure_logger
-from pm_core.tui._shell import _run_shell
+# Re-exported (not used here since current_session_name moved to the
+# pane-targeted tmux helper): ``pm_core.tui.app`` stays the import surface
+# for the symbols extracted into submodules — see tests/test_tui_imports.py.
+from pm_core.tui._shell import _run_shell  # noqa: F401
 
 _log = configure_logger("pm.tui")
 
@@ -67,15 +70,19 @@ def current_session_name() -> str | None:
 
     ``None`` when not running inside tmux.  Shared with the ``pm _tui``
     launcher so the pidfile can be claimed before the app starts.
+
+    Delegates to :func:`pm_core.tmux.get_session_name`, which targets
+    ``$TMUX_PANE``: a bare ``display-message -p`` resolves against tmux's
+    "current client" (the most recently active one), so with a second
+    attached client this process could claim *another* session's pidfile.
+    Callers look the pidfile up by our real session name, so the file
+    would never be found and IPC would be silently dead — the same
+    pitfall the popup bodies pin ``$S`` for.
     """
     if not tmux_mod.in_tmux():
         return None
     try:
-        result = _run_shell(
-            tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
-            capture_output=True, text=True, timeout=5
-        )
-        name = result.stdout.strip()
+        name = tmux_mod.get_session_name()
     except Exception:
         return None
     return name.split("~")[0] or None

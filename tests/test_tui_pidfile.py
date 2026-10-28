@@ -1438,3 +1438,40 @@ class TestSessionName:
         # Without a claim (app constructed directly) tmux is the source.
         assert app_mod._session_for_claim(None) == "pm-renamed"
 
+    def test_uses_the_pane_targeted_lookup(self, monkeypatch):
+        """The pidfile key must be *our* pane's session, not tmux's client.
+
+        ``display-message -p`` without ``-t`` resolves against the most
+        recently active client, so with a second attached client the TUI
+        would claim another session's pidfile and every caller looking up
+        our real session would find no pidfile (IPC silently dead).
+        """
+        from pm_core.tui import app as app_mod
+
+        monkeypatch.setattr(app_mod.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(app_mod.tmux_mod, "get_session_name",
+                            lambda: "pm-demo-c5a1006b~3")
+
+        def _no_bare_query(*a, **k):  # pragma: no cover - must not run
+            raise AssertionError("current_session_name must target the pane")
+
+        monkeypatch.setattr(app_mod.tmux_mod, "_tmux_cmd", _no_bare_query)
+
+        assert app_mod.current_session_name() == "pm-demo-c5a1006b"
+
+    def test_none_outside_tmux(self, monkeypatch):
+        from pm_core.tui import app as app_mod
+
+        monkeypatch.setattr(app_mod.tmux_mod, "in_tmux", lambda: False)
+        assert app_mod.current_session_name() is None
+
+    def test_none_when_tmux_lookup_fails(self, monkeypatch):
+        from pm_core.tui import app as app_mod
+
+        def _boom():
+            raise RuntimeError("no server")
+
+        monkeypatch.setattr(app_mod.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(app_mod.tmux_mod, "get_session_name", _boom)
+        assert app_mod.current_session_name() is None
+
