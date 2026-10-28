@@ -2013,10 +2013,10 @@ PROXY_UNAVAILABLE = "unavailable"  # runtime inventory unreadable: retry later
 PROXY_UNDETERMINED = "undetermined"  # not evaluated: busy lock / foreign owner
 
 
-def _mounts_socket_dir(info: dict, real: str) -> bool:
-    return any(mount.get("Destination") == _CONTAINER_SOCKET_DIR
-               and os.path.realpath(mount.get("Source", "")) == real
-               for mount in info.get("Mounts") or [])
+def _socket_dir_mounts(info: dict) -> set[str]:
+    return {os.path.realpath(mount.get("Source", ""))
+            for mount in info.get("Mounts") or []
+            if mount.get("Destination") == _CONTAINER_SOCKET_DIR}
 
 
 def _inspect_batch(names: list[str]) -> list[dict] | None:
@@ -2041,46 +2041,50 @@ def _inspect_batch(names: list[str]) -> list[dict] | None:
     return rows
 
 
-def _mounted_by(sock_dir: str, names: set[str]) -> bool | None:
-    """Whether any of *names* bind-mounts *sock_dir*; None when unknown.
+def _mounted_socket_dirs(names: set[str]) -> set[str] | None:
+    """Real paths of the socket directories *names* bind-mount; None when unknown.
 
     Each workdir (every QA scenario clone) has its own socket directory, so
-    a release typically checks a directory nobody mounts against all of the
-    PR's other containers.  That runs under the PR's proxy lock, which
-    launches and the other releases wait on: one batched inspect instead of
-    one per container keeps a large run-end release from queueing the lock
-    past its timeout.
+    a release checks directories against all of the PR's other containers.
+    That runs under the PR's proxy lock, which launches and the other
+    releases wait on: one batched inspect for the whole set (shared by every
+    directory one decision evaluates) instead of one per container and
+    directory keeps a large run-end release from queueing the lock past its
+    timeout.
     """
-    real = os.path.realpath(sock_dir)
     ordered = sorted(names)
+    mounted: set[str] = set()
     try:
         rows = _inspect_batch(ordered) if len(ordered) > 1 else None
         if rows is not None:
-            return any(_mounts_socket_dir(info, real) for info in rows)
+            for info in rows:
+                mounted |= _socket_dir_mounts(info)
+            return mounted
         for name in ordered:
             try:
                 info = _proxy_container_info(name)
             except ContainerError:
                 return None
-            if info is None:
-                continue  # removed since the inventory: not a user
-            if _mounts_socket_dir(info, real):
-                return True
+            if info is not None:  # None: removed since the inventory
+                mounted |= _socket_dir_mounts(info)
     except subprocess.TimeoutExpired:
         return None
     except (AttributeError, TypeError):
         return None
-    return False
+    return mounted
 
 
-def _release_shared_dir(proxy: dict, users: set[str], sibling_dirs: int) -> str:
+def _release_shared_dir(proxy: dict, users: set[str], sibling_dirs: int,
+                        mounted_dirs=None) -> str:
     """Release one shared socket directory unless a container still needs it.
 
     Caller holds the PR's cross-process proxy lock.  *users* are the PR's
     containers (any state).  When this is the PR's only socket directory
     every user mounts it, so any user keeps it; otherwise the users' actual
     mounts decide (an implementation container must not pin each QA clone's
-    proxy, nor a QA clone the implementation proxy).
+    proxy, nor a QA clone the implementation proxy).  *mounted_dirs*
+    returns those mounts (see :func:`_mounted_socket_dirs`), so one decision
+    over several directories inspects the users once.
     """
     sock_dir, sock_path = proxy["sock_dir"], proxy["sock_path"]
     if not _owner_domain_matches(sock_dir):
@@ -2088,10 +2092,11 @@ def _release_shared_dir(proxy: dict, users: set[str], sibling_dirs: int) -> str:
     if users:
         if sibling_dirs <= 1:
             return PROXY_IN_USE
-        mounted = _mounted_by(sock_dir, users)
+        mounted = (mounted_dirs() if mounted_dirs is not None
+                   else _mounted_socket_dirs(users))
         if mounted is None:
             return PROXY_UNAVAILABLE
-        if mounted:
+        if os.path.realpath(sock_dir) in mounted:
             return PROXY_IN_USE
     # The start lock keeps a concurrent start of this exact directory (which
     # may not have created its container yet) from losing its socket.
@@ -2184,7 +2189,15 @@ def release_proxy_decision(session_tag: str, pr_id: str,
         if users is None:
             return PROXY_UNAVAILABLE
         users = users - set(exclude)
-        decisions = [_release_shared_dir(p, users, len(dirs)) for p in targets]
+        mounts: list = []
+
+        def mounted_dirs() -> set[str] | None:
+            if not mounts:
+                mounts.append(_mounted_socket_dirs(users))
+            return mounts[0]
+
+        decisions = [_release_shared_dir(p, users, len(dirs), mounted_dirs)
+                     for p in targets]
         if unattributed:
             decisions.append(PROXY_UNDETERMINED)
     for decision in (PROXY_UNAVAILABLE, PROXY_UNDETERMINED, PROXY_IN_USE):

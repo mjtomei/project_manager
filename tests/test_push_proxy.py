@@ -1450,6 +1450,34 @@ class TestWorkdirKeyedProxies:
         assert not os.path.exists(s_impl)
         assert push_proxy_mod.proxy_is_alive(s_qa)
 
+    def test_pr_wide_release_inspects_users_once(
+            self, tmp_path, live_proxies, monkeypatch):
+        """A removal by a process that did not start the container evaluates
+        every socket dir of the PR under its proxy lock; the users' mounts
+        are read once for all of them, not once per directory."""
+        dirs = [os.path.dirname(self._start(f"qa-wd{i}",
+                                            self._workdir(tmp_path, f"qa-s{i}")))
+                for i in range(3)]
+        monkeypatch.setattr("pm_core.container.containers_for_pr",
+                            lambda tag, pr_id: {"user-a", "user-b"})
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            rows = [{"Mounts": [{"Destination": push_proxy_mod._CONTAINER_SOCKET_DIR,
+                                 "Source": dirs[0]}]}, {"Mounts": []}]
+            return subprocess.CompletedProcess([], 0, stdout=json.dumps(rows),
+                                               stderr="")
+
+        monkeypatch.setattr("pm_core.container._run_runtime", run)
+
+        decision = push_proxy_mod.release_proxy_decision(self.TAG, self.PR)
+
+        assert decision == push_proxy_mod.PROXY_IN_USE
+        assert calls == [("inspect", "user-a", "user-b")]
+        assert os.path.isdir(dirs[0])
+        assert not any(os.path.lexists(d) for d in dirs[1:])
+
     def _key_for(self, workdir):
         return push_proxy_mod._shared_proxy_key(
             self.TAG, self.PR, push_proxy_mod._workdir_token(str(workdir)))
@@ -2904,10 +2932,9 @@ class TestMountedByBatchesInspect:
         with patch("pm_core.container._run_runtime", side_effect=run), \
                 patch.object(push_proxy_mod, "_proxy_container_info",
                              side_effect=AssertionError("per-name inspect")):
-            assert push_proxy_mod._mounted_by(mine, {"a", "b", "c"}) is True
-            assert push_proxy_mod._mounted_by(str(tmp_path / "x"),
-                                              {"a", "b", "c"}) is False
-        assert calls == [("inspect", "a", "b", "c")] * 2
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b", "c"}) == {
+                os.path.realpath(mine), os.path.realpath(other)}
+        assert calls == [("inspect", "a", "b", "c")]
 
     def test_failed_batch_falls_back_per_name(self, tmp_path):
         """A container removed since the inventory fails the batch; per-name
@@ -2918,7 +2945,8 @@ class TestMountedByBatchesInspect:
                    return_value=self._result(rc=125, stderr="no such container a")), \
                 patch.object(push_proxy_mod, "_proxy_container_info",
                              side_effect=lambda name: infos[name]):
-            assert push_proxy_mod._mounted_by(mine, {"a", "b"}) is True
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b"}) == {
+                os.path.realpath(mine)}
 
     def test_incomplete_batch_falls_back_per_name(self, tmp_path):
         mine = str(tmp_path / "mine")
@@ -2926,11 +2954,11 @@ class TestMountedByBatchesInspect:
                    return_value=self._result(rows=[self._row(mine)])), \
                 patch.object(push_proxy_mod, "_proxy_container_info",
                              side_effect=push_proxy_mod.ContainerError("down")):
-            assert push_proxy_mod._mounted_by(mine, {"a", "b"}) is None
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b"}) is None
 
     def test_batch_timeout_is_unknown(self, tmp_path):
         with patch("pm_core.container._run_runtime",
                    side_effect=subprocess.TimeoutExpired("podman", 30)), \
                 patch.object(push_proxy_mod, "_proxy_container_info",
                              side_effect=AssertionError("per-name inspect")):
-            assert push_proxy_mod._mounted_by(str(tmp_path), {"a", "b"}) is None
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b"}) is None
