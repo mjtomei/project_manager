@@ -756,3 +756,105 @@ def test_queued_scenarios_stay_queued_on_the_dashboard_during_launches(
 
     assert seen == [([1, 2, 3, 4], {3, 4}), ([1, 2, 3, 4], {4}),
                     ([1, 2, 3, 4], set())]
+
+
+def _info(name, running=True):
+    return container_reaper.ContainerInfo(name=name, id=f"id-{name}", running=running)
+
+
+def test_other_runs_dequeued_launch_counts_before_its_container_exists(monkeypatch):
+    """S90: two QA runs in one PM process. Run A has dequeued s8 (8 running
+    → 9) but its container does not exist yet; run B's headroom check must not
+    see 8 and fill the same slot (10 = L+1 with neither making a floor launch).
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 9)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 8)
+    listed = [_info(f"pm-t-other-{i}") for i in range(8)]
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: list(listed))
+    # Without a reservation, B (2 active) may grow to 3.
+    assert qa_loop._container_launch_room_known(2, desired=4, active=2) == (3, 0, True)
+    token = qa_loop._reserve_launches(["pm-t-qa-pr-a-L-s8"])
+    try:
+        batch, held, known = qa_loop._container_launch_room_known(2, desired=4, active=2)
+        assert (batch, held, known) == (2, 0, True), "A's in-flight launch is in use"
+        assert qa_loop._clamp_to_container_headroom(4) == 1
+        # Once A's container exists it is counted once, not twice.
+        listed.append(_info("pm-t-qa-pr-a-L-s8"))
+        monkeypatch.setattr(container_mod, "running_container_count", lambda: 9)
+        assert qa_loop._container_launch_room_known(2, desired=4, active=2)[0] == 2
+    finally:
+        qa_loop._release_launches(token)
+    assert qa_loop._inflight_launches == {}
+    # A run holding nothing still gets its single floor launch into a full runtime.
+    assert qa_loop._container_launch_room_known(1, desired=4, active=0)[0] == 1
+
+
+def test_unreadable_inventory_counts_every_reservation(monkeypatch):
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: None)
+    token = qa_loop._reserve_launches(["a", "b"])
+    try:
+        assert qa_loop._inflight_unlisted() == 2
+    finally:
+        qa_loop._release_launches(token)
+    assert qa_loop._inflight_unlisted() == 0
+
+
+def test_queued_launch_reserves_its_name_only_while_creating(tmp_path, monkeypatch):
+    """The poll reserves the dequeued scenario's container name before the
+    launch starts and releases it once the launch returns (also on failure)."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa", loop_id="L", session_tag="t")
+    state.scenarios = [qa_loop.QAScenario(index=i, title=f"s{i}", focus="")
+                       for i in range(1, 3)]
+    seen = []
+
+    def launch(st, *a, **k):
+        scenario = st.scenarios[0]
+        seen.append(set().union(*qa_loop._inflight_launches.values()))
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(MagicMock(scenarios=[state.scenarios[0]]))
+    seen.clear()
+
+    class ImmediateThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: [])
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 12, "the verdict poll must terminate"
+
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None, kept_indices=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers", launch)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=2, use_containers=True)
+
+    assert seen == [{container_mod.qa_container_name("pr-aaaa", "L", 2, session_tag="t")}]
+    assert qa_loop._inflight_launches == {}

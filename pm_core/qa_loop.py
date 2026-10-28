@@ -3188,60 +3188,69 @@ def _poll_tmux_verdicts(
             return False
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
-        if use_containers:
-            # Re-clamp the *total* batch from the run's desired size with a
-            # fresh running count, before the cap check. The batch was clamped
-            # at run start, when the running-container count may have been
-            # unreadable (an unknown inventory clamps to one). Re-clamping the
-            # already-clamped value could only keep or lower it, so a degraded
-            # batch would serialize the rest of the run. ``active`` must be
-            # passed because ``container-max-running`` counts every running pm
-            # container — including this run's own workers — so the remaining
-            # headroom is *additional* capacity, not the total batch. The
-            # default (unlimited) path performs no inventory.
-            # This run's settled containers that are still running (kept for
-            # a human, viewed, or release deferred) count against the batch.
-            own = {ident for s in state.scenarios
-                   if s.index in state.scenario_verdicts
-                   and s.index not in pending and s.index not in verifying
-                   for ident in (s.container_id, s.container_name) if ident}
-            concurrency_cap, held, known = _container_launch_room_known(
-                concurrency_cap, desired_cap, active=active, own=own)
-            if known:
-                _blind_launches[0] = 0
-            elif _blind_launches[0]:
-                # Releases need the same inventory, so while it is unreadable
-                # every settled worker's release is deferred and its container
-                # keeps running. The outage admits one floor launch (qa.md
-                # resolution 19, at most L+1); after it, the settled
-                # containers not yet released count as held, or each further
-                # one-at-a-time launch would add another container (L+2...).
-                # So do the ones a release kept for a human or a viewer.
-                held = sum(1 for s in state.scenarios
-                           if s.container_name and s.index in state.scenario_verdicts
-                           and s.index not in pending and s.index not in verifying
-                           and (s.index not in released_indices
-                                or s.index in kept_indices))
-        else:
-            held, known = 0, True
-        if concurrency_cap > 0 and active + held >= concurrency_cap:
+        # Size and reserve the launch atomically with the other runs in this
+        # process (see _launch_admission_lock).
+        launch_reservation = None
+        with _launch_admission_lock:
+            if use_containers:
+                # Re-clamp the *total* batch from the run's desired size with a
+                # fresh running count, before the cap check. The batch was clamped
+                # at run start, when the running-container count may have been
+                # unreadable (an unknown inventory clamps to one). Re-clamping the
+                # already-clamped value could only keep or lower it, so a degraded
+                # batch would serialize the rest of the run. ``active`` must be
+                # passed because ``container-max-running`` counts every running pm
+                # container — including this run's own workers — so the remaining
+                # headroom is *additional* capacity, not the total batch. The
+                # default (unlimited) path performs no inventory.
+                # This run's settled containers that are still running (kept for
+                # a human, viewed, or release deferred) count against the batch.
+                own = {ident for s in state.scenarios
+                       if s.index in state.scenario_verdicts
+                       and s.index not in pending and s.index not in verifying
+                       for ident in (s.container_id, s.container_name) if ident}
+                concurrency_cap, held, known = _container_launch_room_known(
+                    concurrency_cap, desired_cap, active=active, own=own)
+                if known:
+                    _blind_launches[0] = 0
+                elif _blind_launches[0]:
+                    # Releases need the same inventory, so while it is unreadable
+                    # every settled worker's release is deferred and its container
+                    # keeps running. The outage admits one floor launch (qa.md
+                    # resolution 19, at most L+1); after it, the settled
+                    # containers not yet released count as held, or each further
+                    # one-at-a-time launch would add another container (L+2...).
+                    # So do the ones a release kept for a human or a viewer.
+                    held = sum(1 for s in state.scenarios
+                               if s.container_name and s.index in state.scenario_verdicts
+                               and s.index not in pending and s.index not in verifying
+                               and (s.index not in released_indices
+                                    or s.index in kept_indices))
+            else:
+                held, known = 0, True
+            if concurrency_cap > 0 and active + held >= concurrency_cap:
+                if not known:
+                    if held and held != _held_logged[0]:
+                        _log.info("QA %s: %d queued scenario(s) wait for a readable "
+                                  "container inventory; %d of this run's container "
+                                  "release(s) are deferred (container-max-running)",
+                                  state.pr_id, len(_launch_queue), held)
+                elif held and held != _held_logged[0]:
+                    _log.info("QA %s: %d queued scenario(s) wait for container "
+                              "headroom; %d of this run's container(s) are retained "
+                              "(container-max-running)", state.pr_id,
+                              len(_launch_queue), held)
+                _held_logged[0] = held
+                return False
+            scenario = _launch_queue.pop(0)
+            _queued_indices.discard(scenario.index)
             if not known:
-                if held and held != _held_logged[0]:
-                    _log.info("QA %s: %d queued scenario(s) wait for a readable "
-                              "container inventory; %d of this run's container "
-                              "release(s) are deferred (container-max-running)",
-                              state.pr_id, len(_launch_queue), held)
-            elif held and held != _held_logged[0]:
-                _log.info("QA %s: %d queued scenario(s) wait for container "
-                          "headroom; %d of this run's container(s) are retained "
-                          "(container-max-running)", state.pr_id,
-                          len(_launch_queue), held)
-            _held_logged[0] = held
-            return False
-        scenario = _launch_queue.pop(0)
-        _queued_indices.discard(scenario.index)
-        if not known:
-            _blind_launches[0] += 1
+                _blind_launches[0] += 1
+            if use_containers:
+                from pm_core import container as container_mod
+                launch_reservation = _reserve_launches([container_mod.qa_container_name(
+                    state.pr_id, state.loop_id, scenario.index,
+                    session_tag=state.session_tag)])
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
         # Launch this single scenario by temporarily swapping state.scenarios
@@ -3262,6 +3271,7 @@ def _poll_tmux_verdicts(
                 )
         finally:
             state.scenarios = orig
+            _release_launches(launch_reservation)
             # Persist the attempt immediately (even if the launch raises): the
             # snapshot written at the top of the poll still lists this scenario
             # as queued, so a crash between the dequeue and the next snapshot
@@ -4734,14 +4744,23 @@ def run_qa_sync(
     # unreadable inventory (or a momentarily full runtime) must grow back.
     desired_cap = max_scenarios if max_scenarios is not None else _get_max_scenarios()
     concurrency_cap = desired_cap
-    if use_containers:
-        concurrency_cap = _clamp_to_container_headroom(desired_cap)
-    if concurrency_cap > 0:
-        launch_scenarios = state.scenarios[:concurrency_cap]
-        queued_scenarios = state.scenarios[concurrency_cap:]
-    else:
-        launch_scenarios = state.scenarios
-        queued_scenarios = []
+    launch_reservation = None
+    with _launch_admission_lock:
+        if use_containers:
+            concurrency_cap = _clamp_to_container_headroom(desired_cap)
+        if concurrency_cap > 0:
+            launch_scenarios = state.scenarios[:concurrency_cap]
+            queued_scenarios = state.scenarios[concurrency_cap:]
+        else:
+            launch_scenarios = state.scenarios
+            queued_scenarios = []
+        if use_containers:
+            from pm_core import container as container_mod
+            launch_reservation = _reserve_launches(
+                container_mod.qa_container_name(
+                    state.pr_id, state.loop_id, s.index,
+                    session_tag=state.session_tag)
+                for s in launch_scenarios)
 
     _log.info("QA execution phase: %d scenarios for %s (%d to launch, %d queued)",
               len(state.scenarios), state.pr_id,
@@ -4749,23 +4768,27 @@ def run_qa_sync(
 
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
-    # Ensure the main QA window exists (has the planner pane)
-    planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
+    try:
+        # Ensure the main QA window exists (has the planner pane)
+        planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
 
-    # Write initial status file and add the status pane before launching
-    # scenarios — scenario launch blocks until all concretizers finish, so
-    # the status pane must be up first so users can see progress.
-    queued_indices = {s.index for s in queued_scenarios}
-    _write_status_file(status_path, state.pr_id, state.scenarios,
-                       state.scenario_verdicts,
-                       scenario_0=state.scenario_0,
-                       queued_scenarios=queued_indices,
-                       error=state._error,
-                       verdict_reasons=state.scenario_verdict_reasons)
+        # Write initial status file and add the status pane before launching
+        # scenarios — scenario launch blocks until all concretizers finish, so
+        # the status pane must be up first so users can see progress.
+        queued_indices = {s.index for s in queued_scenarios}
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           scenario_0=state.scenario_0,
+                           queued_scenarios=queued_indices,
+                           error=state._error,
+                           verdict_reasons=state.scenario_verdict_reasons)
 
-    # Add status pane to the main QA window (split planner pane horizontally)
-    if planner_pane:
-        _add_status_pane(session, planner_pane, status_path)
+        # Add status pane to the main QA window (split planner pane horizontally)
+        if planner_pane:
+            _add_status_pane(session, planner_pane, status_path)
+    except BaseException:
+        _release_launches(launch_reservation)
+        raise
 
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
@@ -4787,6 +4810,8 @@ def run_qa_sync(
                 )
         finally:
             state.scenarios = all_scenarios
+            _release_launches(launch_reservation)
+            launch_reservation = None
 
         if state.scenarios:
             state.latest_output = f"Running {len(state.scenarios)} scenario(s)..."
@@ -4814,6 +4839,52 @@ def run_qa_sync(
     )
 
 
+# In-process launch admission. Each PR's QA run polls on its own thread of one
+# PM process (the TUI), and sizes its launches from the runtime inventory. The
+# inventory cannot list a container another run has dequeued but not created
+# yet (clone, proxy start and ``run`` take seconds), so two runs could both
+# fill the last slot and run past ``container-max-running`` with neither making
+# a floor launch (S90). A run therefore reserves the names it is about to
+# create under this lock, and every headroom check counts the reserved names
+# that the inventory does not list yet. Separate PM processes are not
+# coordinated (qa.md resolution 24).
+_launch_admission_lock = threading.RLock()
+_inflight_launches: dict[object, frozenset[str]] = {}
+
+
+def _reserve_launches(names) -> object:
+    """Reserve container names about to be created; returns a release token."""
+    token = object()
+    with _launch_admission_lock:
+        _inflight_launches[token] = frozenset(n for n in names if n)
+    return token
+
+
+def _release_launches(token: object | None) -> None:
+    if token is None:
+        return
+    with _launch_admission_lock:
+        _inflight_launches.pop(token, None)
+
+
+def _inflight_unlisted(inventory=None) -> int:
+    """Reserved launches the runtime inventory does not list yet.
+
+    Reads the inventory only while a reservation exists; an unreadable one
+    counts every reservation.
+    """
+    with _launch_admission_lock:
+        reserved = set().union(*_inflight_launches.values())
+    if not reserved:
+        return 0
+    if inventory is None:
+        from pm_core.container_reaper import list_containers
+        inventory = list_containers()
+        if inventory is None:
+            return len(reserved)
+    return len(reserved - {info.name for info in inventory})
+
+
 def _clamp_to_container_headroom(cap: int) -> int:
     """Clamp the scenario launch batch to ``container-max-running`` headroom.
 
@@ -4825,6 +4896,10 @@ def _clamp_to_container_headroom(cap: int) -> int:
     if limit <= 0:
         return cap
     running = container_mod.running_container_count()
+    if running is not None:
+        # Another run's dequeued launch is capacity in use before its
+        # container exists (see _launch_admission_lock).
+        running += _inflight_unlisted()
     if running is None:
         # An unavailable inventory is not zero running containers — a busy
         # runtime is exactly when the cap matters.  Launch one scenario and
@@ -4895,6 +4970,7 @@ def _container_launch_room_known(cap: int, desired: int | None = None,
         # Legacy callers keep the old clamp semantics.
         return _clamp_to_container_headroom(cap), 0, True
     held = 0
+    inventory = None
     if own:
         from pm_core.container_reaper import list_containers
         inventory = list_containers()
@@ -4905,6 +4981,10 @@ def _container_launch_room_known(cap: int, desired: int | None = None,
         running_count = None if running is None else len(running)
     else:
         running_count = container_mod.running_container_count()
+    if running_count is not None:
+        # Another run's dequeued launch is capacity in use before its
+        # container exists (see _launch_admission_lock).
+        running_count += _inflight_unlisted(inventory)
     if running_count is None:
         # An unreadable inventory is unknown, not zero running containers:
         # launch one at a time and re-clamp on the next poll.
