@@ -11533,6 +11533,23 @@ prs:
       after the runs, or seed 90 samples + history-size 100. Captures /pm-captures/scenarios/83.'
     created_at: '2026-10-28T05:09:43Z'
     last_edited: '2026-10-28T05:09:43Z'
+  - id: note-c026cc3
+    text: 'QA S82 (2026-10-28, 17e68cc3, nested rootless podman, fake-claude): all
+      Thens PASS live, no code change. Bar 0M/40G -> 8G/40G 15 s after PR1 Up; 15g
+      refusals with exact arithmetic for impl/review/signoff (exit 0, PR3 -> sign_off)/qa-debug
+      (stderr rc=1), only PR1 container, bar qa-debug smoke +3, 4 Blocked newest first;
+      1g single-container and 99% host-headroom texts; d PR2 at 40g admitted, +3 ->
+      impl +2 in 5 s, entries expired 607-610 s after their latest refusal -> plain
+      bar. Reuse at 1g: TUI Switched + CLI Switched rc=0, same ID, empty Blocked/queue.
+      Stop-on-idle: s PR4/d PR2/z d PR5/zz d PR5 refused at 1g (P 4.7G), zz d "! ERROR
+      (1 iteration) ... Review window launch failed (rc=1)", all 3 dead panes cmp-identical,
+      no container; at 40g Created -> kill_window -> new_window for all 3, both Closed...relaunching
+      lines, PR5 loop PASS (1 iteration). Shim: max keypress 0.20 s; hang unmeasurable
+      24 s, timed out after 10s refusal; fail (from measured) 15 s, rc=125 refusal;
+      measured 12 s after removal. Harness: unset TMUX in the in-session sh window
+      breaks pm qa debug ("No pm session found") - export TMUX there. Captures /pm-captures/scenarios/82.'
+    created_at: '2026-10-28T03:21:45Z'
+    last_edited: '2026-10-28T03:21:45Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
