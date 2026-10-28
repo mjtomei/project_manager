@@ -491,3 +491,29 @@ covered by tests in `tests/test_qa_input_required.py` /
 - **Test coverage for the restore contract.** `test_restored_completed_scenario_is_not_re_polled`
   pins the `_needs_polling` rule that a restored run never re-reads a completed
   scenario's stale turn (only an unverified PASS is polled again).
+
+## 14. Implementation notes (review iteration 9)
+
+- **A run that leaves QA does not advertise a wait it can no longer serve.**
+  The finalize status write passed `waiting_for_input=state.waiting_for_input`
+  unconditionally, so a run whose overall was NEEDS_WORK/PASS still rendered
+  the remaining INPUT_REQUIRED scenario as `(waiting)` in `qa_status` — telling
+  the user to answer a worker pane whose follow-up nothing polls (the hold is
+  not entered for those verdicts, by design).  The hold decision now happens
+  before that write and the status file flags waiting scenarios only while the
+  run is genuinely held.  The INPUT_REQUIRED evidence itself is still kept in
+  `scenario_verdicts`/`waiting_for_input` for the next run.  Covered by
+  `test_status_file_marks_the_wait_while_the_run_is_held` and
+  `test_status_file_drops_the_waiting_marker_once_the_run_leaves_qa`.
+- **A completion whose verdict was cleared records nothing.**  `_on_qa_complete`
+  read `state.latest_verdict` again after `poll_qa_state`'s entry check; the
+  hold thread can reopen the run (clearing the verdict) in that window, and the
+  old code then logged `QA finished for <pr>: ` and recorded a `QA : ...` note.
+  The callback now returns on an empty verdict.
+  `test_on_qa_complete_ignores_a_completion_with_no_verdict` pins it.
+- **Docstring corrections.**  `_attempt_is_current`'s rationale claimed the
+  pinned transcript path detects a relaunched worker; a relaunch keeps the same
+  per-scenario path, so the session id is what detects it and the path pin is
+  defence in depth.  `test_restored_held_run_finalizes_a_collected_follow_up`
+  still said `_clear_waiting` clears `held` (iteration 7 moved that to
+  `_poll_waiting`).

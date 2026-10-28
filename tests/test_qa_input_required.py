@@ -865,7 +865,7 @@ class TestFinalizeHoldsForInput:
     def test_restored_held_run_finalizes_a_collected_follow_up(self, tmp_path):
         """A restored held run whose follow-up is collected on the first
         iteration must still run the finalize pane for the new result.
-        ``_clear_waiting`` clears ``held`` when the live loop records the
+        The live loop's ``_poll_waiting`` clears ``held`` when it records the
         follow-up, so ``was_held`` is False for that iteration; if it stayed
         True the follow-up PASS would be promoted without the push /
         fast-forward verification the finalize pane performs."""
@@ -991,6 +991,68 @@ class TestFinalizeHoldsForInput:
         assert in_progress == [{"held": False, "latest_verdict": "",
                                 "waiting": [1]}]
 
+    def test_status_file_marks_the_wait_while_the_run_is_held(self, tmp_path):
+        """A held run is the genuine input wait: the status file must flag
+        the scenario so qa_status renders its "(waiting)" marker."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.qa_workdir = str(tmp_path)
+        calls = []
+
+        with patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._write_status_file",
+                   side_effect=lambda *_a, **kw: calls.append(kw)), \
+             patch("pm_core.qa_loop._hold_for_follow_up",
+                   return_value=False), \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane",
+                   return_value="FINALIZE_DONE"):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        assert calls[0]["waiting_for_input"] == {1}
+
+    def test_status_file_drops_the_waiting_marker_once_the_run_leaves_qa(
+            self, tmp_path):
+        """A NEEDS_WORK result ends the hold.  The remaining INPUT_REQUIRED
+        scenario stays recorded as evidence for the next run, but nothing
+        polls its pane any more — advertising it as "(waiting)" would send
+        the user to answer a worker whose follow-up can never be collected."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.qa_workdir = str(tmp_path)
+        second = QAScenario(index=2, title="Two", focus="t",
+                            window_name="qa-s2", session_id="sid-2",
+                            transcript_path=str(tmp_path / "t2.jsonl"))
+        state.scenarios = [state.scenarios[0], second]
+        state.scenario_verdicts = {1: VERDICT_INPUT_REQUIRED,
+                                   2: VERDICT_NEEDS_WORK}
+        calls = []
+
+        with patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._write_status_file",
+                   side_effect=lambda *_a, **kw: calls.append(kw)), \
+             patch("pm_core.qa_loop._hold_for_follow_up",
+                   return_value=False), \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane",
+                   return_value="FINALIZE_DONE"):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        assert state.latest_verdict == VERDICT_NEEDS_WORK
+        assert state.held is False
+        assert calls[0]["waiting_for_input"] == set()
+        # The INPUT_REQUIRED evidence itself is kept.
+        assert state.waiting_for_input == {1}
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
 
 # ---------------------------------------------------------------------------
 # Prompt reconciliation
@@ -1100,6 +1162,24 @@ def test_poll_qa_state_keeps_a_run_reopened_mid_tick(tmp_path):
     assert app._qa_loops.get("pr-001") is state
     assert (tmp_path / "qa_resume.json").exists()
     assert state._ui_complete_notified is False
+
+
+def test_on_qa_complete_ignores_a_completion_with_no_verdict(tmp_path):
+    """The held watcher reopens the run (clearing ``latest_verdict``) from
+    its own thread.  If that lands between the TUI's entry check and this
+    callback's read, there is nothing to record — noting it would write a
+    bogus "QA : ..." note and log a verdict-less "QA finished" line."""
+    from pm_core.tui import qa_loop_ui
+
+    app = _poll_app(tmp_path)
+    state = _waiting_state(tmp_path / "t.jsonl")
+    state.latest_verdict = ""  # cleared by the reopen
+
+    with patch.object(qa_loop_ui, "_record_qa_note") as note:
+        qa_loop_ui._on_qa_complete(app, state)
+
+    note.assert_not_called()
+    app.log_message.assert_not_called()
 
 
 def test_stop_qa_requests_stop_on_a_held_run(tmp_path):

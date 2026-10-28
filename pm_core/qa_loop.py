@@ -1102,9 +1102,11 @@ def _attempt_is_current(state: QALoopState, scenario: QAScenario, src: dict,
 
     The resume identity contract: a verdict or waiting source is trusted
     only for the same run (pr_id, loop_id), scenario and worker session
-    (pr-4a89e52).  Waiting sources additionally pin the transcript path,
-    because a relaunched worker reuses the per-scenario transcript path
-    with a new session.
+    (pr-4a89e52).  The session check is what catches a relaunched worker
+    (a relaunch registers a new session).  Waiting sources additionally pin
+    the transcript path so a wait can never be applied to a scenario whose
+    transcript is a different file — defence in depth against a foreign or
+    hand-edited snapshot.
     """
     if (str(src.get("pr_id") or "") != state.pr_id
             or str(src.get("loop_id") or "") != state.loop_id
@@ -4978,13 +4980,30 @@ def _execute_and_finalize(
         else:
             state.latest_verdict = VERDICT_PASS
 
+        # Decide the hold before writing the final status: a run that has
+        # left QA (NEEDS_WORK/PASS) keeps its INPUT_REQUIRED evidence for the
+        # next run, but nothing polls those panes any more — advertising
+        # them as "(waiting)" would send the user to answer a pane whose
+        # follow-up can never be collected.  ``was_held`` is the flag the run
+        # was restored with: a restored held run already finalized this
+        # result, so re-running the finalize pane would spawn a duplicate
+        # session and can stall.  A reopened run (held was cleared when the
+        # follow-up was accepted) finalizes normally.
+        was_held = state.held
+        state.held = (
+            bool(state.waiting_for_input)
+            and state.latest_verdict == VERDICT_INPUT_REQUIRED
+            and not state.stop_requested
+        )
+
         # Write final status file with overall verdict
         _write_status_file(status_path, state.pr_id, state.scenarios,
                            state.scenario_verdicts,
                            overall=state.latest_verdict,
                            scenario_0=state.scenario_0, error=state._error,
                            verdict_reasons=state.scenario_verdict_reasons,
-                           waiting_for_input=state.waiting_for_input)
+                           waiting_for_input=(state.waiting_for_input
+                                              if state.held else set()))
 
         # Run the post-QA finalize pane synchronously: it verifies scenario
         # pushes reached origin/<branch> and fast-forwards the user's PR
@@ -4996,19 +5015,9 @@ def _execute_and_finalize(
         except Exception:
             _log.exception("Failed to persist scenario verdicts")
 
-        # Decide the hold before the (potentially long) finalize pane so a
-        # restart while it runs still recovers the wait instead of treating
-        # the run as finished and dropping it.  ``was_held`` is the flag the
-        # run was restored with: a restored held run already finalized this
-        # result, so re-running the finalize pane would spawn a duplicate
-        # session and can stall.  A reopened run (held was cleared when the
-        # follow-up was accepted) finalizes normally.
-        was_held = state.held
-        state.held = (
-            bool(state.waiting_for_input)
-            and state.latest_verdict == VERDICT_INPUT_REQUIRED
-            and not state.stop_requested
-        )
+        # Snapshot the hold decision before the (potentially long) finalize
+        # pane so a restart while it runs still recovers the wait instead of
+        # treating the run as finished and dropping it.
         _write_resume_file(state, use_containers, concurrency_cap,
                            queued_indices)
 

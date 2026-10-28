@@ -624,6 +624,11 @@ def _on_qa_complete(app, state: QALoopState) -> None:
     """
     if state._ui_complete_notified:
         return
+    # The held watcher can clear ``latest_verdict`` (reopening the run) while
+    # this call is being set up; a completion with no verdict has nothing to
+    # record, and noting it would write a bogus "QA : ..." note.
+    if not state.latest_verdict:
+        return
 
     pr_id = state.pr_id
     verdict = state.latest_verdict
