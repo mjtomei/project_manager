@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T18:10:00.459867+00:00'
+  updated_at: '2026-10-28T19:09:46.017688+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17125,6 +17125,32 @@ prs:
       Relevant modules: 748 passed.'
     created_at: '2026-10-28T18:10:00Z'
     last_edited: '2026-10-28T18:10:00Z'
+  - id: note-cdb013c
+    text: 'Review loop c0c9 i3 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range/non-UTF-8/empty-argv/exec-window
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount,
+      pane discovery, session-scoped restart state) - no defect in the pidfile/IPC
+      path. Fixed one hole in the same class: mount-time state restore could disable
+      ALL external IPC. consume_breadcrumb was total only for a non-object top level,
+      so a corrupt-but-valid breadcrumb raised out of the mount (non-string run_id
+      -> TypeError from Path / run_id; non-dict review_loops or loop entry, non-list
+      history, non-list watchers, non-dict watcher -> AttributeError/TypeError), and
+      _cmd_queue_ready is only set after it returns in _deferred_startup, so the TUI
+      stayed healthy but never drained the command queue - the picker spun on "queued..."
+      forever with a valid pidfile. Every section is now read structurally; a non-string
+      "session" reads as unscoped (same rule as tui_pidfile._marker_owner) instead
+      of stranding the file as another session''s forever; _deferred_startup now wraps
+      both the blocking startup chores and the restore so _cmd_queue_ready + the startup
+      drain always run. 5 new tests (TestCorruptBreadcrumbShapes x3, TestDeferredStartupArmsQueue
+      x2), all verified to fail against the pre-fix implementation. Also confirmed
+      the SIGNOFF_IMPL blocker is already resolved on this branch: 89e3c501 is an
+      ancestor of HEAD (merge d3ac60c6), 0 behind origin/master, both conflicted test
+      files keep master''s POLICY_AUTO/POLICY_WAIT import plus this branch''s TuiIpcResult,
+      and no POLICY_STOP references remain. Full suite on the final tree: 4252 passed,
+      1 skipped (pytest 8.4.2, env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace
+      + scratch pylibs). Pushed 23a05814.'
+    created_at: '2026-10-28T19:09:45Z'
+    last_edited: '2026-10-28T19:09:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
