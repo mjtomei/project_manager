@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T13:09:58.746575+00:00'
+  updated_at: '2026-10-28T13:34:42.742319+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39351,6 +39351,32 @@ prs:
       code here.'
     created_at: '2026-10-28T13:09:58Z'
     last_edited: '2026-10-28T13:09:58Z'
+  - id: note-aa5fee9
+    text: 'review-loop 0c92 i2: closed a residual hand-edited-state crash on the recorded
+      *verdict* member itself, with a test that fails on the pre-fix code; no change
+      to the resolver / sign-off / merge-gate logic (re-reviewed and found sound).
+      (1) `signoff.latest_signoff_verdict`, `display_signoff_verdict` and `fresh_recorded_verdict`
+      returned a recorded `signoff.verdict` / `signoff_return.verdict` as-is, and
+      `signoff_verdict_icon` did `SIGNOFF_VERDICT_ICONS.get(verdict or "")`; `tech_tree._signoff_verdict`
+      fed it into the (documented hashable) layout signature. A hand-edited dict/list
+      value (`verdict: {SIGNOFF_MERGE: true}`, `verdict: [SIGNOFF_MERGE]`) raised
+      `TypeError: unhashable type` out of `pm pr list`, `pm pr show`, the home window
+      PR list and every TUI tech-tree render — and the driver freshness check adopted
+      it as a real (fresh) verdict. New `signoff.verdict_of` reads a non-string as
+      absent; the three readers and `tech_tree._signoff_verdict` go through it. Verified
+      live on a throwaway project: `pm pr list`/`pm pr show` render the row (pre-fix:
+      traceback), a real verdict still shows its icon. (2) Fuzzed the PRs reader surfaces
+      — 500 random malformed mutations across signoff/integration/signoff_return/evidence/resolution/notes/merge_integrity,
+      calling every prompt builder, the merge gate, the return text, `pm pr show`
+      helpers and the integration readers — no remaining crash. (3) Full suite: 4326
+      passed; only the known environment gaps fail (12x test_markdown_render needs
+      the `markdown` dep; test_hook_events::test_installer_writes_standalone_receiver
+      fails because PM_HOST_HOME is set in this container, passes with it unset).
+      Cross-PR: added a note to pr-727073f listing the remaining unguarded `workdir`
+      sites this PR does not own (`pm_core/pr_sync.py` find_workdir/second sync site,
+      the `pm pr sync` copy in `cli/pr.py`, `pm pr cleanup`, `pm pr list --workdirs`).'
+    created_at: '2026-10-28T13:34:42Z'
+    last_edited: '2026-10-28T13:34:42Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
@@ -39769,7 +39795,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T04:29:24.986760+00:00'
-  updated_at: '2026-10-28T13:09:49.392301+00:00'
+  updated_at: '2026-10-28T13:27:31.797099+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39786,6 +39812,19 @@ prs:
       code outside that PR''s diff.'
     created_at: '2026-10-28T13:09:38Z'
     last_edited: '2026-10-28T13:09:49Z'
+  - id: note-a2a61a7
+    text: 'More unguarded `workdir` sites for this bug (found reviewing pr-5cee3d5,
+      not changed there — master-owned code outside its diff): `pm_core/pr_sync.py`
+      `find_workdir` (:128) and the second `check_dir = wd if (wd and Path(wd).exists())`
+      in `sync_prs` (:396); `pm_core/cli/pr.py` `pr_sync` (:3402) — the CLI `pm pr
+      sync` copy of the same line, also outside a try/except; `pm pr cleanup` (`_cleanup_pr`
+      :3698 `Path(pr_entry["workdir"])`, the `--prune` loop :3763, and the `--all`/merged
+      auto-select list comprehensions :3779/:3803); and `pm pr list --workdirs` (:710
+      `Path(wd)` + `_workdir_is_dirty`). Same fix shape: a non-string workdir reads
+      as absent (fall back / skip / report missing) instead of `Path(5)` raising out
+      of the command.'
+    created_at: '2026-10-28T13:27:31Z'
+    last_edited: '2026-10-28T13:27:31Z'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy
