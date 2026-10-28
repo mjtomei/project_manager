@@ -2814,6 +2814,52 @@ def _relaunch_scenario_window(
 # Verdict polling helpers
 # ---------------------------------------------------------------------------
 
+def _send_verification_followup(pane_id: str, scenario_idx: int,
+                                reason: str) -> bool:
+    """Ask a worker whose PASS was flagged to re-evaluate.
+
+    Returns False when tmux refuses the follow-up (the pane exited after its
+    liveness check), so the caller treats the window as gone instead of the
+    error ending the whole QA run.  A fork failure still raises for the
+    poll's handback, which retries it.  The two extra Enters are best effort:
+    the follow-up already carries its own Enter, so their failure must
+    neither hand the flag back (resending it) nor end the run.
+    """
+    from pm_core import tmux as tmux_mod
+    followup_msg = (
+        f"Your verdict was reviewed and flagged: {reason} — "
+        f"Please re-evaluate this scenario. Make sure you "
+        f"actually execute the test steps (run commands, "
+        f"create test files, verify runtime behavior). "
+        f"Do not just read code. "
+        f"End with `Reason: <one sentence>` on the "
+        f"second-to-last line and a new verdict "
+        f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
+        f"on the last line."
+    )
+    try:
+        tmux_mod.send_keys(pane_id, followup_msg)
+    except subprocess.CalledProcessError as e:
+        _log.warning("Follow-up to scenario %d failed: %s",
+                     scenario_idx, tmux_mod.launch_error_detail(e))
+        return False
+    # Extra Enters to ensure the message is submitted — sometimes newlines
+    # don't trigger.
+    try:
+        for _ in range(2):
+            time.sleep(1)
+            tmux_mod.send_keys(pane_id, "")
+    except subprocess.CalledProcessError as e:
+        _log.warning("Extra Enter to scenario %d skipped: %s",
+                     scenario_idx, tmux_mod.launch_error_detail(e))
+    except OSError as e:
+        if e.errno not in (errno.EAGAIN, errno.ENOMEM):
+            raise
+        _log.warning("Extra Enter to scenario %d skipped: %s", scenario_idx, e)
+    _log.info("Sent follow-up message to scenario %d pane", scenario_idx)
+    return True
+
+
 def _poll_tmux_verdicts(
     state: QALoopState,
     data: dict,
@@ -3160,35 +3206,10 @@ def _poll_tmux_verdicts(
                         # pane, not the verification pane that may now be pane 0.
                         pane_id = _live_worker_pane(
                             session, scenario, scenario_idx in dead_workers)
+                        if pane_id and not _send_verification_followup(
+                                pane_id, scenario_idx, reason):
+                            pane_id = None  # pane gone since the liveness check
                         if pane_id:
-                            followup_msg = (
-                                f"Your verdict was reviewed and flagged: {reason} — "
-                                f"Please re-evaluate this scenario. Make sure you "
-                                f"actually execute the test steps (run commands, "
-                                f"create test files, verify runtime behavior). "
-                                f"Do not just read code. "
-                                f"End with `Reason: <one sentence>` on the "
-                                f"second-to-last line and a new verdict "
-                                f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
-                                f"on the last line."
-                            )
-                            tmux_mod.send_keys(pane_id, followup_msg)
-                            # Send extra Enters to ensure the message is
-                            # submitted — sometimes newlines don't trigger.
-                            # Best effort: the follow-up (with its own Enter)
-                            # is already delivered, so a fork failure here
-                            # must not hand the flag back to be resent.
-                            try:
-                                for _ in range(2):
-                                    time.sleep(1)
-                                    tmux_mod.send_keys(pane_id, "")
-                            except OSError as e:
-                                if e.errno not in (errno.EAGAIN, errno.ENOMEM):
-                                    raise
-                                _log.warning("Extra Enter to scenario %d skipped: %s",
-                                             scenario_idx, e)
-                            _log.info("Sent follow-up message to scenario %d pane",
-                                      scenario_idx)
                             # Clear verdict and put back in pending.  Stamp the
                             # last-hook-ts to *now* — not 0 — so the next poll
                             # only re-extracts the verdict after a fresh

@@ -2002,6 +2002,66 @@ class TestPollTmuxVerdictsForkFailure:
         assert state.scenario_verdicts[1] == VERDICT_PASS
         assert 1 in state.verified_scenarios
 
+    def _run_flagged_once(self, tmp_path, send_keys):
+        """Poll one PASS that verification flags once, then passes."""
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=1), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=[(False, "flagged", None), (True, "", None)]):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        return state
+
+    def test_refused_followup_is_window_gone_not_run_error(self, tmp_path):
+        """tmux refusing the follow-up (pane exited after the liveness check)
+        settles the scenario as window-gone instead of ending the QA run."""
+        import subprocess
+
+        def send_keys(pane, keys):
+            raise subprocess.CalledProcessError(
+                1, ["tmux"], stderr=b"can't find pane: %41")
+
+        state = self._run_flagged_once(tmp_path, send_keys)
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert "window gone" in state.scenario_verdict_reasons[1]
+
+    def test_refused_extra_enter_keeps_reevaluation(self, tmp_path):
+        """The follow-up carries its own Enter: a refused extra Enter neither
+        ends the run nor stops the scenario's re-evaluation."""
+        import subprocess
+        sent = []
+
+        def send_keys(pane, keys):
+            sent.append(keys)
+            if keys == "" and sent.count("") == 1:
+                raise subprocess.CalledProcessError(1, ["tmux"], stderr="gone")
+
+        state = self._run_flagged_once(tmp_path, send_keys)
+        followups = [k for k in sent if k.startswith("Your verdict was reviewed")]
+        assert len(followups) == 1
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert 1 in state.verified_scenarios
+
     def test_other_errors_still_raise(self, tmp_path):
         def pane_exists(pane):
             raise FileNotFoundError(errno.ENOENT, "tmux")
