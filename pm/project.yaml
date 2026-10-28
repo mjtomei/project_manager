@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T12:11:05.639129+00:00'
+  updated_at: '2026-10-28T13:39:58.704763+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15503,6 +15503,53 @@ prs:
       launch/setup (S27) and final acceptance (S84/S85) reruns on the integrated code.'
     created_at: '2026-10-28T12:11:05Z'
     last_edited: '2026-10-28T12:11:05Z'
+  - id: note-06fe717
+    text: 'Refine S86 (2026-10-28, 6672efdc, code trace only): (1) a release removes
+      a shared dir together with <dir>.lock and the discovery link. Links exist only
+      for HASHED dirs, i.e. when /tmp/pm-push-proxy-<tag>-<pr>-<token16>/push.sock
+      would be >107 bytes, so use a project dir name of 42+ chars (tag >50). (2) An
+      impl relaunch cannot interleave with its old pane-exit release: _remove_checked
+      holds launch_lock(name) through remove_container -> stop_push_proxy (and that
+      holds proxy_lock(tag,pr) through ps/inspect). With no other PR container left,
+      the old release removes the dir and the relaunch (blocked up to 300 s) starts
+      a NEW daemon at the same path. To gate, hold the release process''s first podman
+      ps after its rm -f (ps timeout 30 s, so hold <=20 s). (3) Neither pm session
+      cleanup --dry-run nor reap --dry-run (plan()) prints proxies. The preview only
+      shows the exited container as remove. Apply prints "stopped  push proxy <real
+      dir>" once, from the removal sink. (4) The QA run-end/per-poll release keeps
+      viewed windows, so keep clients off qa-* windows. A different PR''s launch never
+      contends (proxy_lock is per tag+PR). (5) An impl push after a QA clone push
+      needs git pull --rebase via the proxy first, or it is rejected as non-fast-forward.'
+    created_at: '2026-10-28T13:13:36Z'
+    last_edited: '2026-10-28T13:13:36Z'
+  - id: note-2b4df81
+    text: 'Incidental fix b20dfb80 (QA S86, pre-existing on master): pm set list printed
+      "qa-verify-pass off" when the setting was unset, although _is_verification_enabled()
+      and the help text treat unset as on (so PASS verification actually ran). An
+      unset boolean now lists as its _SETTING_DEFAULTS value ("on (default)"). Test
+      tests/test_set_list_defaults.py: 1 failed pre-fix, 2 passed post-fix.'
+    created_at: '2026-10-28T13:39:57Z'
+    last_edited: '2026-10-28T13:39:57Z'
+  - id: note-ee7ad00
+    text: 'QA S86 PASS (6672efdc = code bfa7fc55, integrated master@89e3c501; real
+      rootless Podman 3.4.4, unmodified build-base, fake agents, 61-char tag so all
+      dirs hashed with link+lock; evidence /pm-captures/scenarios/86/manifest.md).
+      S1: impl+review share one dir (same pid/inodes); review kill-window removed
+      the container in 1.2 s, dir/link/lock/pid unchanged; master push rejected. S2:
+      5 distinct dirs (A + s1-s4 clones), each with its own link/lock/daemon/clone
+      workdir; qa-probe and impl-3 each one commit. S3: per clone, dir+link+lock vanished
+      in the same 0.25 s sample 0.4-1.3 s after the container; each removal has its
+      own Stopped unused shared push proxy line (s4+s3 batched as "removed 2 ... stopped
+      2"); pm pr start B on the first remove_container exited 0 with its own dir;
+      hashes unchanged. S4: release rm -f, then its next ps held 4 s; pm pr start
+      A made no runtime call until the gate opened, then a new daemon on the SAME
+      path (new pid/sock inode), old ID gone; status clean, dry-run keep owned by
+      live pane. S5: session cleanup dry-run shows no proxies; apply prints stopped
+      push proxy once; reap removed 0 kept 1. Observation: the pane-exit release logs
+      its push_proxy Stopped line to default.log, but its container lines to the workdir-named
+      log.'
+    created_at: '2026-10-28T13:39:58Z'
+    last_edited: '2026-10-28T13:39:58Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
