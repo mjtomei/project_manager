@@ -855,3 +855,56 @@ class TestBaseGate:
         assert result.exit_code == 0, result.output
         assert "base_conflict: returning to impl (relaunched)" in result.output
         launch.assert_called_once()
+
+    def test_in_review_with_open_return_repairs_status_and_stops(self, runner):
+        """A raced in_review status must not advance beside the rework."""
+        pr = _pr("in_review", workdir="/wd", base_return=_base_return())
+        with patch("pm_core.cli.pr.state_root", return_value=Path("/tmp/pm-test")), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_review_verdict",
+                   return_value=("PASS", 1)) as verdict, \
+             patch("pm_core.base_check.ensure_impl_status") as fix, \
+             patch("pm_core.cli.pr._launch_qa_detached") as qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "base_conflict" in result.output
+        verdict.assert_not_called()
+        qa.assert_not_called()
+        fix.assert_called_once()
+
+    def test_launch_review_iteration_gate_gets_a_transcript_file(self, tmp_path):
+        """The gate derives the impl transcript dir from the path's parent.
+
+        Passing the auto-sequence *directory* would put ``impl-<pr>.jsonl``
+        one level too high and leave ``_check_impl_idle`` watching a missing
+        symlink.
+        """
+        from pm_core import base_check
+        from pm_core.cli.pr import _launch_review_iteration
+        tdir = tmp_path / "transcripts" / "auto-sequence" / "pr-001"
+        waiting = base_check.GateResult(
+            base_check.WAIT, base_check.STAGE_REVIEW_ITERATION,
+            reason="rework pending")
+        with patch("pm_core.base_check.gate", return_value=waiting) as gate, \
+             patch("pm_core.base_check.ensure_impl_status"):
+            line = _launch_review_iteration(
+                "pr-001", tdir, 2, fresh=True, root=tmp_path)
+        assert line and line.startswith("base_conflict")
+        transcript = Path(gate.call_args.kwargs["transcript"])
+        assert transcript.parent == tdir
+
+    def test_qa_run_bg_does_not_flip_status_for_an_open_return(self, runner, tmp_path):
+        """The base-return guard runs before the in_review->qa transition."""
+        pr = _pr("in_review", workdir="/wd", base_return=_base_return())
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)) as update, \
+             patch("pm_core.qa_loop.run_qa_sync") as run:
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        run.assert_not_called()
+        update.assert_not_called()                 # status not flipped to qa
+        assert pr["status"] == "in_review"

@@ -651,8 +651,8 @@ def _record_error(root: Path, pr_id: str, record: dict, stage: str,
         _log.warning("base_check: recording error for %s failed: %s", pr_id, e)
 
 
-def evaluate(root: Path, pr_id: str, pr: dict, stage: str,
-             *, data: dict | None = None) -> dict:
+def evaluate(root: Path, pr_id: str, pr: dict, *,
+             data: dict | None = None) -> dict:
     """Run the integration check and record it; never raises.
 
     Returns the full integration record (``status`` is ``error`` when the
@@ -690,10 +690,12 @@ def gate(root: Path, pr_id: str, stage: str, *,
             return GateResult(SKIPPED, stage, reason="sign-off owns integration")
 
         # An open return blocks every downstream writer.  The gate may still
-        # SELF-HEAL (a stale callback, a manual `d` after a hand reconciliation):
-        # it re-checks, and only proceeds when the return's relaunch happened
-        # and the workdir is quiescent — so an implementation that is still
-        # editing cannot race a review/QA writer.
+        # SELF-HEAL (a stale callback, a manual `d` after a hand
+        # reconciliation): it re-checks, and only proceeds when no rework
+        # launch is pending and the workdir is quiescent — so an
+        # implementation that is still editing cannot race a review/QA
+        # writer.  A capped (``needs_human``) return is re-checked too, so a
+        # human who reconciled the base resumes instead of being stuck.
         open_rec = open_return(pr)
         workdir = pr.get("workdir")
         head = head_sha(workdir)
@@ -717,8 +719,6 @@ def gate(root: Path, pr_id: str, stage: str, *,
             return GateResult(SKIPPED, stage, reason=f"status is {status}")
 
         if open_rec is not None:
-            if open_rec.get("needs_human"):
-                return _wait("base conflict needs a human decision")
             if open_rec.get("awaiting") == "impl":
                 return _wait("returned to implementation; rework has not launched")
             if not head:
@@ -750,7 +750,7 @@ def gate(root: Path, pr_id: str, stage: str, *,
                 reason=(f"recent base check failed ({rec.get('error') or 'unknown'}); "
                         f"retrying after {rec.get('retry_after')}"))
 
-        record = evaluate(root, pr_id, pr, stage, data=data)
+        record = evaluate(root, pr_id, pr, data=data)
         record.setdefault("head", head)
         st = record.get("status")
         if st == integration.ERROR:
@@ -764,6 +764,12 @@ def gate(root: Path, pr_id: str, stage: str, *,
 
         if st == integration.CONFLICT:
             pair = (record.get("head"), record.get("base_sha"))
+            if open_rec is not None and open_rec.get("needs_human"):
+                # The automatic loop is capped: never write another episode
+                # (or spam a note) while it still conflicts.  The clean path
+                # below is still reachable — a human who reconciled the base
+                # resumes the phase instead of leaving the PR stuck forever.
+                return _wait("base conflict still needs a human decision")
             if open_rec is not None and \
                     pair == (open_rec.get("head"), open_rec.get("base_sha")):
                 # The unchanged unresolved pair never bounces again.
@@ -853,9 +859,6 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
                                     bool((pr or {}).get("base_return", {})
                                          .get("resume_loop")))
         resume_loop = bool(rec.get("resume_loop"))
-        if rec.get("needs_human"):
-            return CompletionResult(False,
-                                    "base conflict needs a human decision")
         if rec.get("awaiting") == "impl":
             return CompletionResult(False, "rework session has not launched")
         workdir = pr.get("workdir")
@@ -901,8 +904,7 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
             return CompletionResult(
                 False, "HEAD and base unchanged since the return")
 
-        record = evaluate(root, pr_id, pr, rec.get("stage") or STAGE_REVIEW,
-                          data=data)
+        record = evaluate(root, pr_id, pr, data=data)
         st = record.get("status")
         if st == integration.ERROR:
             _record_error(root, pr_id, record, rec.get("stage") or STAGE_REVIEW,
@@ -916,6 +918,11 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
             if pair == old_pair:
                 return CompletionResult(
                     False, "still conflicts with the same HEAD/base pair")
+            if rec.get("needs_human"):
+                # The cap already fired: no new episode, no note spam.  A
+                # human who reconciles the base reaches the clean path below.
+                return CompletionResult(
+                    False, "base conflict still needs a human decision")
             new = return_to_impl(
                 root, pr_id, record, rec.get("stage") or STAGE_REVIEW,
                 iteration=rec.get("iteration"), resume_loop=resume_loop,

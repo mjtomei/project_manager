@@ -217,7 +217,6 @@ def test_clean_moved_base_proceeds_without_reset(w):
     launch.assert_not_called()
     p = pr(w)
     assert p["status"] == "in_review"
-    assert p.get("reviewed_at") is None or True  # no phase reset
     assert p.get("base_return") is None
 
 
@@ -563,5 +562,46 @@ def test_gate_self_heals_a_return_when_the_base_moves_clean(w):
     commit(w.repo, "other.txt", "x\n", "clean base")
     res = gate(w)
     assert res.decision == base_check.PROCEED
+    assert base_check.open_return(pr(w)) is None
+    assert pr(w)["base_return"]["resolved_at"]
+
+
+def test_capped_return_resumes_once_a_human_reconciles_the_base(w):
+    """``needs_human`` stops auto-rework, not recovery.
+
+    The note/``format_return`` text says a human must reconcile the base
+    "before review/QA resumes" — so a reconciled (now clean) base must let
+    the phase continue instead of leaving the PR permanently stuck.
+    """
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+        for i in range(base_check.MAX_RETURNS_PER_BASE + 2):
+            base_check.clear_return_awaiting(w.pm_dir, PR)
+            commit(w.wd, f"f{i}.txt", "x\n", f"impl {i}")
+            commit(w.repo, "shared.txt", f"base {i}\n", f"base {i}")
+            completion(w, transcript_dir=w.tdir)
+    ret = pr(w)["base_return"]
+    assert ret.get("needs_human")
+    # Still conflicting: the gate waits and never writes a new episode.
+    before = pr(w)["base_return"]
+    with patch("pm_core.base_check.launch_impl") as launch:
+        still = gate(w)
+    assert still.decision == base_check.WAIT
+    launch.assert_not_called()
+    assert pr(w)["base_return"] == before          # no new episode/note
+
+    # A human reconciles the current base by hand; the gate resumes.
+    subprocess.run(["/usr/bin/git", "fetch", str(w.repo), "master"],
+                   cwd=w.wd, capture_output=True)
+    subprocess.run(["/usr/bin/git", "merge", "--no-edit", "FETCH_HEAD"],
+                   cwd=w.wd, capture_output=True, text=True)
+    if git(w.wd, "status", "--porcelain"):
+        (w.wd / "shared.txt").write_text("base\nmaster side\npr side\n")
+        git(w.wd, "add", "shared.txt")
+        git(w.wd, "commit", "-q", "-m", "merge base")
+    with patch("pm_core.base_check.launch_impl") as launch:
+        healed = gate(w)
+    assert healed.decision == base_check.PROCEED
+    launch.assert_not_called()
     assert base_check.open_return(pr(w)) is None
     assert pr(w)["base_return"]["resolved_at"]

@@ -163,7 +163,11 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     _log.info("relauncher: pr=%s iteration=%s loop_id=%s cmd=%s",
               pr_id, iteration, loop_id, cmd)
     t0 = time.monotonic()
-    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=120)
+    # The pre-review base gate runs inside this subprocess: on a conflict it
+    # fetches the base and relaunches implementation (``pm pr start``, itself
+    # bounded at 300s).  Keep the outer budget above that so a slow fetch or
+    # launch is not mistaken for a loop error instead of the exit-3 routing.
+    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=360)
     elapsed = time.monotonic() - t0
     if result.returncode == 3:
         # The pre-review base integration gate refused the launch: the PR

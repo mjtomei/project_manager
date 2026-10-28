@@ -130,6 +130,12 @@ already drops it because the status is no longer `qa`.
   the same base across *moved* heads are capped at `MAX_RETURNS_PER_BASE`.
   Past the cap the return is marked `needs_human` and no further impl is
   auto-launched (the note says so), so a pathological loop cannot spin.
+  The cap stops *automatic rework*, not recovery: the gate and
+  `impl_completion` still re-run the integration check (never writing
+  another episode or note while it conflicts), so a human who reconciles
+  the base lets review/QA resume — matching the note's "a human must
+  reconcile the base before review/QA resumes" instead of leaving the PR
+  permanently stuck with no `pm` command to clear it.
 - **R9 — Sign-off ownership preserved.** The gate skips when the PR is
   `sign_off` or an open `signoff_return` exists (`open_return`): sign-off
   owns integration there, and a sign-off REVIEW/REQA hop must still launch.

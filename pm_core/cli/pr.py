@@ -3776,8 +3776,13 @@ def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
     root = root or state_root()
     stage = (base_check.STAGE_REVIEW_ITERATION if iteration > 1
              else base_check.STAGE_REVIEW)
-    res = base_check.gate(root, pr_id, stage, iteration=iteration,
-                          transcript=tdir)
+    # ``gate`` derives the relaunched impl transcript directory from this
+    # path's parent, so pass the iteration's transcript file (not ``tdir``
+    # itself, whose parent would put ``impl-<pr>.jsonl`` one level too high
+    # and leave this driver's idle tracker watching a missing symlink).
+    res = base_check.gate(
+        root, pr_id, stage, iteration=iteration,
+        transcript=tdir / f"review-{pr_id}-i{iteration}.jsonl")
     if res.decision in (base_check.CONFLICT, base_check.WAIT):
         base_check.ensure_impl_status(root, pr_id)
         if res.decision == base_check.CONFLICT:
@@ -3923,6 +3928,15 @@ def pr_auto_sequence(pr_id: str):
     if status == "in_review":
         if not pm_session:
             click.echo("paused: no pm tmux session")
+            return
+        if base_return is not None:
+            # A raced transition back to in_review while the return owns the
+            # PR: repair the status and never advance (a stale PASS would
+            # otherwise flip it to qa and spawn a throwaway QA driver).
+            base_check.ensure_impl_status(root, pr_id)
+            click.echo(
+                f"base_conflict: "
+                f"{base_return.get('reason') or 'base rework pending'}")
             return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         if verdict and _older_than(
@@ -4195,6 +4209,15 @@ def pr_qa_run_bg(pr_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    # A base-conflict return owns the PR: never launch the QA planner on it.
+    # Checked before the status transition so an in_review PR whose rework is
+    # still pending is not flipped to qa on the way to an early return.
+    from pm_core import base_check
+    if base_check.has_open_return(pr_entry):
+        _log.info("pr_qa_run_bg: %s has an open base return; skipping QA",
+                  pr_id)
+        return
+
     # Transition to qa if necessary
     def _to_qa(d):
         p = store.get_pr(d, pr_id)
@@ -4219,9 +4242,10 @@ def pr_qa_run_bg(pr_id: str):
                   pr_id, pr_entry.get("status"))
         return
 
-    # A base-conflict return owns the PR: never launch the QA planner on it.
-    from pm_core import base_check
+    # A return recorded concurrently (after the check above, before the
+    # transition landed) still owns the PR: re-check before opening QA.
     if base_check.has_open_return(pr_entry):
+        base_check.ensure_impl_status(root, pr_id)
         _log.info("pr_qa_run_bg: %s has an open base return; skipping QA",
                   pr_id)
         return
