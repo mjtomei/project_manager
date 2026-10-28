@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T11:06:44.503147+00:00'
+  updated_at: '2026-10-28T12:04:34.285194+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32520,6 +32520,47 @@ prs:
       would be the fix if that is wanted.'
     created_at: '2026-10-28T11:06:44Z'
     last_edited: '2026-10-28T11:06:44Z'
+  - id: note-e235217
+    text: 'Review loop 419c i10: two leftovers in the kept recipe scope, both the
+      same class as the PR (a completion check that cannot tell a finished job from
+      a dead one, and a step acting on a handle it does not have). (1) The CLI no-TTY
+      scaffold''s only completion check was `test -s` on the cast — but an asciinema
+      killed mid-recording leaves a cast holding just its header, so a killed recorder
+      was reported as a successful recording (verified live with real tmux 3.2a +
+      asciinema 2.1.0: SIGKILL 1 s into a 60 s one-shot left a 117-byte cast and the
+      previous block printed success). The pane''s shell now records asciinema''s
+      *own* exit status (`…; echo \$? > …/recorder.status`; `\$?` is escaped so the
+      pane''s shell expands it), step 4 fails on a missing file (pane torn down before
+      asciinema returned) or a non-zero one, and step 0 clears a stale status file
+      with the stale cast. Checked that asciinema 2.1.0 returns 0 whenever the recording
+      ran to completion — `-c ''exit 3''` and a recorded command killed by a signal
+      both exit 0, so a failing recorded command is still a valid recording — and
+      128+N when asciinema itself is killed. Verified live: one-shot success (rc 0,
+      status 0), asciinema SIGKILLed with the pane alive (status 137, "asciinema exited
+      137 — the cast is incomplete", rc 1), pane torn down with a pre-seeded stale
+      status 0 and stale cast (both cleared, "recorder status is missing", rc 1),
+      interactive `-c bash` driven with `exit` (rc 0, status 0, cast holds the driven
+      command). This closes the hole i9 recorded as still open. (2) The web-UI driver
+      block had the i9 finalize-step hole one step earlier, with a filesystem side
+      effect: `cd "$CAPDIR"` with CAPDIR unset returns 0 and silently stays in the
+      worker''s cwd, so the conditional link created `node_modules -> /usr/lib/node_modules`
+      there (the PR workdir, say), the resolution check printed "playwright ok" on
+      that stray link, and the run died with a bare "Cannot find module …/driver.mjs".
+      It now stops with `: "${CAPDIR:?…}"` first, as the finalize step does. Tests:
+      5 new (status write/read paths agree and a stale status is cleared; the scaffold
+      statement run through a stub tmux + stub asciinema exiting 7 lands 7 in the
+      status file, proving the `\$?` escaping; execution cases for a killed recorder
+      with a non-empty cast and for a missing status; the driver block refusing an
+      unset CAPDIR without linking node_modules in cwd) — all 5 fail against the previous
+      recipes. File 56 pass; related suites 250 pass; full suite 3897 passed / 1 skipped
+      with only the known env/baseline failures (12 markdown tests need the missing
+      markdown dep, 13/13 pass with it; test_git_ops::test_keeps_unpushed_merge and
+      test_hook_events::test_installer_writes_standalone_receiver reproduce on origin/master;
+      test_merge_publish/test_signoff_integration deselected — push proxy). impl.md
+      R4/R7/R10/Files/verification and qa.md R1/R3 updated. No pm_core/ change; the
+      dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T12:04:34Z'
+    last_edited: '2026-10-28T12:04:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
