@@ -248,13 +248,24 @@ def is_zombie(pid: int) -> bool:
 
 
 def proc_cmdline(pid: int) -> list[str] | None:
-    """argv of *pid* as a list, or ``None`` when procfs is unavailable."""
+    """argv of *pid* as a list, or ``None`` when it cannot be read.
+
+    An *empty* argv is reported as ``[]``, not ``None``: a process can
+    legitimately have no command line — a kernel thread (``mm == NULL``)
+    or a zombie — and that is positive evidence that it is *not* a pm
+    TUI.  ``None`` is reserved for "we cannot tell" (no procfs, or the
+    read failed), which degrades the identity check to liveness.
+    Conflating the two made a stale pidfile whose recycled PID belonged
+    to such a process look like a live TUI: the startup claim refused to
+    start (the exact failure this module exists to avoid) and callers
+    would have signaled it.
+    """
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
         return None
     if not raw:
-        return None
+        return []
     return [part.decode("utf-8", "replace")
             for part in raw.rstrip(b"\0").split(b"\0")]
 
@@ -298,6 +309,8 @@ def identity_problem(desc: TuiPidfile) -> str | None:
     Checks, in order: liveness, zombie state, PID reuse via
     ``starttime``, and the command line.  Off-procfs platforms degrade
     to the liveness check (``starttime`` is absent and cmdline unknown).
+    An empty argv (``[]``) is a *known* non-TUI, not "unknown" — see
+    :func:`proc_cmdline`.
     """
     if not pid_alive(desc.pid):
         return "process is not running"

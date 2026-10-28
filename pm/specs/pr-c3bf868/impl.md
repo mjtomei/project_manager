@@ -332,6 +332,21 @@ E17. **The pidfile key must be *our* pane's session, not tmux's "current
     pitfall the popup bodies already pin `$S` for
     (`pm_core/cli/session.py`, `_pin_popup_body`).
 
+E18. **An empty argv is a known non-TUI, not "unknown".** A process can
+    have a zero-length `/proc/<pid>/cmdline` — a kernel thread
+    (`mm == NULL`), or a zombie (already caught by `is_zombie`). The
+    read used to return `None` for that, which `identity_problem` reads
+    as "procfs unavailable, skip the cmdline check", so a stale pidfile
+    whose recycled PID happened to name such a process looked like a
+    live TUI: `claim_tui_pidfile` refused to start (`pm _tui` would not
+    run until the file was deleted by hand) and
+    `trigger_tui_reload` / `submit_tui_command` would have signaled it.
+    `proc_cmdline` now returns `[]` for an empty read — positive evidence
+    of a non-TUI — and keeps `None` for "cannot tell" (no procfs, read
+    failed), which still degrades to liveness. This is the same class as
+    E3/E16: an identity check must never misclassify an unrelated
+    process as the TUI.
+
 ## Tests
 
 New `tests/test_tui_pidfile.py` (shared module + helper + app integration)
@@ -472,6 +487,14 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     orphaned instead of raising `OverflowError` out of
     `resume_owned_elsewhere`. Verified to fail against the pre-fix
     `os.kill` call.
+33. an empty argv (E18): `proc_cmdline` returns `[]` (not `None`) for a
+    process whose `/proc/<pid>/cmdline` is empty (a not-yet-reaped
+    zombie), `identity_problem` reports "pid belongs to a different
+    program" instead of skipping the check, `claim_tui_pidfile` takes a
+    stale pidfile over instead of refusing to start, and
+    `submit_tui_command` reports `stale_pidfile`, removes the file and
+    never signals the unrelated process. All four verified to fail
+    against the pre-fix `return None`.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

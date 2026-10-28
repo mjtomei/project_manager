@@ -218,6 +218,98 @@ class TestCmdline:
         assert not tpf.cmdline_is_tui(argv)
 
 
+def _empty_cmdline_for(monkeypatch, pid):
+    """Make ``/proc/<pid>/cmdline`` read as empty, as a kernel thread's does.
+
+    Only that one file is faked, so the real :func:`tpf.proc_cmdline` and
+    :func:`tpf.identity_problem` run; a kernel thread has ``mm == NULL``,
+    so the kernel serves a zero-length cmdline for it.
+    """
+    real = tpf.Path
+    target = f"/proc/{pid}/cmdline"
+
+    class _Path:
+        def __init__(self, raw):
+            self._inner = real(raw)
+
+        def read_bytes(self):
+            if str(self._inner) == target:
+                return b""
+            return self._inner.read_bytes()
+
+        def read_text(self, *args, **kwargs):
+            return self._inner.read_text(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(tpf, "Path", _Path)
+
+
+class TestEmptyCmdline:
+    """An empty argv is a *known* non-TUI, not "cannot tell".
+
+    Kernel threads (and zombies) have an empty ``/proc/<pid>/cmdline``.
+    Reporting that as ``None`` ("unknown") made ``identity_problem`` skip
+    the cmdline check, so a stale pidfile whose recycled PID happened to
+    name such a process looked like a live TUI: ``pm _tui`` refused to
+    start — the failure this module exists to prevent — and callers would
+    have signaled it.
+    """
+
+    @pytest.mark.skipif(not Path("/proc/self/cmdline").exists(),
+                        reason="needs procfs")
+    def test_empty_cmdline_reads_as_an_empty_argv(self):
+        pid = os.fork()
+        if pid == 0:  # pragma: no cover - the child exits immediately
+            os._exit(0)
+        try:
+            # A not-yet-reaped child is a zombie, whose cmdline is empty.
+            assert _wait_for(lambda: tpf.is_zombie(pid))
+            assert tpf.proc_cmdline(pid) == []
+        finally:
+            os.waitpid(pid, 0)
+
+    def test_identity_problem_rejects_an_empty_argv(self, monkeypatch):
+        _empty_cmdline_for(monkeypatch, os.getpid())
+        desc = tpf.TuiPidfile(pid=os.getpid(),
+                              caps=frozenset({tpf.CAP_RELOAD}))
+        assert (tpf.identity_problem(desc)
+                == "pid belongs to a different program")
+
+    def test_claim_takes_over_a_pidfile_naming_an_empty_argv_process(
+            self, tmp_path, procs, monkeypatch):
+        other = subprocess.Popen(["sleep", "300"])
+        procs.append(other)
+        path = tmp_path / "tui-pm-test.pid"
+        _write_legacy(path, other.pid)
+        _empty_cmdline_for(monkeypatch, other.pid)
+
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        try:
+            assert tpf.read_pidfile(path).pid == os.getpid()
+        finally:
+            claim.release()
+        assert other.poll() is None
+
+    def test_submit_reports_stale_and_removes_the_pidfile(
+            self, ipc_paths, procs, monkeypatch):
+        other = subprocess.Popen(["sleep", "300"])
+        procs.append(other)
+        pidfile, queue = ipc_paths
+        # The starttime matches, so only the cmdline check can catch it —
+        # without the fix this signals SIGUSR2 to the unrelated process.
+        _write_json(pidfile, other.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        _empty_cmdline_for(monkeypatch, other.pid)
+
+        result = helpers.submit_tui_command(SESSION, "pr list")
+
+        assert not result.ok and result.reason == "stale_pidfile"
+        assert not pidfile.exists()
+        assert not queue.exists()
+        assert other.poll() is None
+
+
 # ---------------------------------------------------------------------------
 # Startup claim
 
