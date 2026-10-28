@@ -186,6 +186,20 @@ class TestSyncPrBranch:
         assert _head(s) == s["L"]
         assert (s["wd"] / "app.py").read_text() == "my uncommitted edit\n"
 
+    def test_untracked_file_blocking_the_fast_forward_holds(self, repos):
+        """git cannot stash untracked files, so the hold has to say to move
+        or remove them; the local copy must survive untouched."""
+        s = repos
+        (s["wd"] / "new.py").write_text("mine\n")  # untracked, absent from L
+        _worker_push(s, "new.py", "theirs\n")      # the ff would create it
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "fast-forward was refused" in sync.detail
+        assert "new.py" in sync.detail
+        assert "move or remove" in sync.detail
+        assert _head(s) == s["L"]
+        assert (s["wd"] / "new.py").read_text() == "mine\n"
+
     def test_dirty_divergence_holds(self, repos):
         s = repos
         _commit(s["wd"], "pm/x.md", "x\n", "planner")
@@ -217,6 +231,24 @@ class TestSyncPrBranch:
         assert sync.outcome == "hold" and "MERGE_HEAD" in sync.detail
         assert _head(s) == c
         assert (s["wd"] / ".git" / "MERGE_HEAD").exists()
+
+    def test_unfinished_rebase_holds(self, repos):
+        """A stopped rebase detaches HEAD, so the hold must name the rebase
+        (finish or abort it) rather than tell the user to check out the
+        branch — git refuses that checkout until the index is resolved."""
+        s = repos
+        _git(s["wd"], "checkout", "--quiet", "master")
+        _commit(s["wd"], "app.py", "master side\n", "master edit")
+        _git(s["wd"], "checkout", "--quiet", BRANCH)
+        _commit(s["wd"], "app.py", "pr side\n", "pr edit")
+        r = subprocess.run(["git", *GIT_ID, "rebase", "master"], cwd=s["wd"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert (s["wd"] / ".git" / "rebase-merge").exists()
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "rebase-merge" in sync.detail
+        assert "detached HEAD" not in sync.detail
 
     def test_wrong_branch_checked_out_holds_when_up_to_date(self, repos):
         """Nothing to fast-forward, but the planner would still read the

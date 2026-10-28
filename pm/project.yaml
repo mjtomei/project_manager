@@ -29687,7 +29687,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T07:28:36.879132+00:00'
+  updated_at: '2026-10-28T08:02:07.602484+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -29749,6 +29749,22 @@ prs:
       and unrelated to qa_loop.'
     created_at: '2026-10-28T07:28:36Z'
     last_edited: '2026-10-28T07:28:36Z'
+  - id: note-38a435c
+    text: 'review 53f0 i3: no new functional defects in the sync/handoff/route logic.
+      Two changes: (1) _workdir_state_hold now checks unfinished git operations (MERGE_HEAD/cherry-pick/revert/rebase)
+      before the checkout state — a stopped rebase also detaches HEAD, so QA used
+      to tell the user to "check out <branch>" (git refuses that mid-rebase, and the
+      rebase-merge/rebase-apply markers were unreachable as written); the hold now
+      names the rebase and says to finish or abort it. (2) Coverage for the refused-ff
+      untracked-file remedy (i1 wording was untested) and for a stopped rebase. Spec
+      R5 updated. Full suite: 3374 passed, 13 environment-only failures (12x test_markdown_render
+      missing markdown module, 1x test_hook_events HOME), none in qa_loop (/pm-captures/review-53f0-i3/).
+      Bug-fix captures under /pm-captures/impl/ unchanged and still representative
+      (this iteration only refines a hold message). Accepted as-is: the documented
+      ls-remote/fetch race can still let the planner run one step behind; the handoff
+      guard then holds once (R7 fallback).'
+    created_at: '2026-10-28T08:02:07Z'
+    last_edited: '2026-10-28T08:02:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high

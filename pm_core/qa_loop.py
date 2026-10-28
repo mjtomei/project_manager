@@ -560,13 +560,10 @@ def _workdir_state_hold(workdir_path: str, branch: str,
         # reports the missing branch.
         return None
     where = f"PR workdir {workdir_path} has {branch} at {local[:12]}"
-    current = _git_capture(workdir_path, "symbolic-ref", "--quiet", "HEAD")
-    checked_out = current.stdout.strip()
-    if checked_out != f"refs/heads/{branch}":
-        return BranchSync("hold", local=local, detail=(
-            f"{where}, but the workdir has "
-            f"{checked_out or 'a detached HEAD'} checked out. "
-            f"Check out {branch} there, then restart QA."))
+    # Unfinished operations before the checkout check: a stopped rebase
+    # also detaches HEAD, and "check out the branch" is not its remedy
+    # (git refuses it until the index is resolved) — the operation has to
+    # be finished or aborted.
     for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
                    "rebase-merge", "rebase-apply"):
         p = _git_capture(workdir_path, "rev-parse", "--git-path", marker)
@@ -575,6 +572,13 @@ def _workdir_state_hold(workdir_path: str, branch: str,
             return BranchSync("hold", local=local, detail=(
                 f"{where}, but the workdir has an unfinished git operation "
                 f"({marker}). Finish or abort it, then restart QA."))
+    current = _git_capture(workdir_path, "symbolic-ref", "--quiet", "HEAD")
+    checked_out = current.stdout.strip()
+    if checked_out != f"refs/heads/{branch}":
+        return BranchSync("hold", local=local, detail=(
+            f"{where}, but the workdir has "
+            f"{checked_out or 'a detached HEAD'} checked out. "
+            f"Check out {branch} there, then restart QA."))
     return None
 
 

@@ -88,6 +88,10 @@ R5. **Specific actionable holds** (INPUT_REQUIRED, no planning) for:
     The workdir checkout and unfinished-merge holds are local checks: they
     apply on every sync, including local-only repos and an up-to-date
     branch (a stale checkout or half-done merge is as unplannable there).
+    The unfinished-operation markers are checked before the checkout: a
+    stopped rebase also detaches HEAD, and "check out the branch" is not
+    its remedy (git refuses it until the index is resolved), so the hold
+    names the rebase and says to finish or abort it.
 
 R6. **Early exits are visible to every driver.** Each sync exit writes
     `qa_status.json` with `overall` and `error` (auto-sequence reads only
