@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T02:57:42.758837+00:00'
+  updated_at: '2026-10-28T03:07:22.043826+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11426,6 +11426,20 @@ prs:
       Host free. Captures /pm-captures/scenarios/81.'
     created_at: '2026-10-28T02:57:42Z'
     last_edited: '2026-10-28T02:57:42Z'
+  - id: note-eb1c2cd
+    text: 'QA S90 (2026-10-28, 17e68cc3, nested rootless podman 3.4.4): all 4 stories
+      PASS live, no code change; Docker SKIPPED (no binary). pm-dev python containers
+      make nested podman report the outer cgroup per container (3.909GB each with
+      3x1GiB held), so pm scope = 2x3728 MiB = 7.3G (other-hog excluded) rather than
+      "2G"; system 86.7G = meminfo. Peaks 5736/5769x4/5876 = ceil(outer memory.peak/2^20)
+      via cleanup --pr, 4 parallel pr cleanup --resources (exactly 4), session kill
+      (impl sampled before EXIT-trap rm). history 3 kept 3 newest, oddname sha unchanged.
+      Snapshot refusal "773M used + 5G expected growth + 2.3G projected > 8G target
+      (pm scope)" (1580x1.5), default 1500m -> 1.5G, off + memory-limit 6g -> 6G,
+      control T+1g admitted. Harness: pm-dev runs as non-root, so remove cat with
+      podman exec -u 0. Captures /pm-captures/scenarios/90.'
+    created_at: '2026-10-28T03:07:21Z'
+    last_edited: '2026-10-28T03:07:21Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
