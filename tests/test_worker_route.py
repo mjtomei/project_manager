@@ -1470,6 +1470,38 @@ class TestPollLoopNoRouteGating:
                        queued_scenarios=[q2, q3], concurrency_cap=1)
         assert seen == [(2, {3})]
 
+    def test_setup_error_at_queued_launch_records_settled_verdicts(
+            self, tmp_path):
+        """S106: a provider that broke mid-run stops the run at the queued
+        launch, which raises before the loop's dashboard write.  The
+        stopped run's qa_status.json still shows the verdict settled just
+        before (not a stale "" / "PASS (verifying)"), and the scenario
+        that never launched as "queued"."""
+        from pm_core import qa_loop
+        sc = qa_loop.QAScenario(index=1, title="a", focus="f")
+        sc.window_name, sc.session_id, sc.pane_id = "w1", "sid-1", "%9"
+        q2 = qa_loop.QAScenario(index=2, title="b", focus="f")
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [sc, q2]
+        err = ProviderNotFoundError("provider 'x' is not configured")
+        ev = {"event_type": "idle_prompt", "timestamp": time.time() + 1e4}
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.hook_events.read_event", return_value=ev), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+                   side_effect=err):
+            with pytest.raises(ProviderNotFoundError, match="'x'"):
+                self._poll(state, tmp_path,
+                           queued_scenarios=[q2], concurrency_cap=1)
+        status = json.loads((tmp_path / "status.json").read_text())
+        assert {s["index"]: s["verdict"] for s in status["scenarios"]} == {
+            1: "PASS", 2: "queued"}
+
     def test_launch_status_write_marks_queued(self, tmp_path):
         """The prep-phase dashboard write of a launch batch lists the whole
         run, with queued scenarios as "queued"."""

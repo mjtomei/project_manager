@@ -3320,6 +3320,19 @@ def _poll_tmux_verdicts(
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
             return
+        # A provider setup error stops the run inside this launch, before
+        # the loop's own dashboard write: record the verdicts and
+        # verifications settled so far first, so the stopped run's
+        # qa_status.json does not keep a stale "PASS (verifying)".
+        with verification_lock:
+            verifying_snapshot = set(verifying)
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           scenario_0=state.scenario_0,
+                           verifying_scenarios=verifying_snapshot,
+                           queued_scenarios=_queued_indices,
+                           verification_failures=verification_failures,
+                           verdict_reasons=state.scenario_verdict_reasons)
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
