@@ -185,6 +185,28 @@ def test_independent_additions_from_both_sides_survive():
     assert actions["added"]["new base"] == ["pr-250"]
 
 
+def test_an_identical_nan_on_both_sides_is_not_a_conflict():
+    """``nan != nan``, but two identical hand-edited ``.nan`` are one value.
+
+    YAML parses an unquoted ``.nan`` to ``float('nan')``, which is unequal to
+    itself, so the resolver saw "changed differently on both sides" for a
+    value neither side touched and refused the whole document — including the
+    independent record additions the feature exists to merge.
+    """
+    base = BASE_YAML + "  model: .nan\n"
+    ours = BASE_YAML + "  model: .nan\n  reviewed_at: 2026-01-01\n"
+    theirs = BASE_YAML + "  model: .nan\n  started_at: 2026-01-01\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is not None, details
+    assert "model: .nan" in merged
+    assert "reviewed_at" in merged and "started_at" in merged
+    # A *different* value is still a conflict.
+    merged, details = integration.resolve_project_yaml(
+        BASE_YAML, BASE_YAML + "  model: .nan\n",
+        BASE_YAML + "  model: .inf\n")
+    assert merged is None
+
+
 def test_same_record_field_conflict_is_refused():
     ours = BASE_YAML.replace("status: sign_off", "status: qa")
     theirs = BASE_YAML.replace("status: sign_off", "status: merged")
@@ -778,6 +800,25 @@ def test_malformed_qa_evidence_does_not_crash_the_record(w):
     assert f"qa@{'f' * 12}" in text
     assert f"review@{'f' * 12}" not in text
     assert "cannot tell whether QA committed changes" in text
+
+    # A *present* null is malformed too (pm always writes the key as a list):
+    # treating it as "QA recorded no changes" would infer a review revision
+    # from a value pm cannot read.  An *absent* key is the documented
+    # "not recorded" shape the inference may use.
+    (qa_dir / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    (qa_dir / "qa_resume.json").write_text(json.dumps(
+        {"planner_head": "f" * 40, "planner_code_changes": None}))
+    evidence = signoff.qa_evidence(PR)
+    assert evidence["planner_code_changes_error"] == "malformed"
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_REVIEW, rec["head"], "manual",
+        integration=integration.binding(rec))
+    block = pr_entry(w)["signoff"]["evidence"]
+    assert block["review"]["sha"] is None
+    (qa_dir / "qa_resume.json").write_text(json.dumps({"planner_head": "f" * 40}))
+    evidence = signoff.qa_evidence(PR)
+    assert "planner_code_changes_error" not in evidence
+    assert evidence["planner_code_changes"] == []
 
 
 def test_malformed_qa_status_does_not_crash_the_signoff_prompt(w):
@@ -5819,6 +5860,42 @@ def test_a_malformed_invalidation_record_is_not_a_pointer(w):
 
 
 # --- honesty of the deletion / applied-merge / path surfaces ---------------
+
+def test_an_unresolved_entry_without_details_is_not_rendered_as_none(w):
+    """A hand-edited ``unresolved`` entry that names no conflicts is described.
+
+    ``project.yaml`` is hand-editable state: an entry with a missing or null
+    ``conflicts`` cannot name what pm failed to reconcile, and rendering the
+    raw value presented ``None`` as if it were the conflict (in the router's
+    coercion message, the sign-off prompt, the return text and the CLI).  All
+    of them now use the same phrase R9-14 specifies, so the surfaces agree.
+    """
+    record = {"status": integration.RESOLVED, "head": "a" * 40,
+              "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+              "base_branch": "master",
+              "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                             "unresolved": [{"path": "pm/project.yaml"}]}}
+    phrase = "unresolved conflicts recorded without details"
+    assert integration.resolution_conflicts_text(
+        {"path": "pm/project.yaml"}) == phrase
+    assert integration.resolution_conflicts_text({"conflicts": None}) == phrase
+    assert integration.resolution_conflicts_text({"conflicts": []}) == phrase
+    assert integration.resolution_conflicts_text(
+        {"conflicts": ["a: changed"]}) == "['a: changed']"
+
+    _, reason = signoff.effective_verdict(SIGNOFF_MERGE, record, "a" * 40)
+    assert phrase in reason and "None" not in reason, reason
+
+    pr = {"id": PR, "integration": record,
+          "signoff_return": {"verdict": SIGNOFF_IMPL, "hop": "impl",
+                             "reviewed_head": "a" * 40,
+                             "integration": record,
+                             "ts": "2026-01-01T00:00:00Z"}}
+    block = prompt_gen._signoff_integration_block(pr, PR)
+    assert phrase in block and "None" not in block, block
+    text = signoff.format_signoff_return(pr)
+    assert phrase in text and "None" not in text, text
+
 
 def test_modify_delete_of_project_yaml_is_a_deletion_edit_conflict():
     """A deleted side has no document to merge by record id.

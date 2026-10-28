@@ -411,8 +411,13 @@ def qa_evidence(pr_id: str) -> dict | None:
     # A non-list value is malformed evidence, not "QA committed nothing": the
     # review-revision inference below treats an empty list as proof that QA
     # saw the reviewed revision, so a malformed value must stay distinguishable
-    # (it is recorded as a marker and suppresses the inference).
-    changes_malformed = changes is not None and not isinstance(changes, list)
+    # (it is recorded as a marker and suppresses the inference).  A *present*
+    # null is one: pm always writes the key as a list (``qa_loop``'s resume
+    # snapshot), so a null is hand-edited/legacy state pm cannot read as "no
+    # changes" — while an *absent* key is the documented "not recorded" shape
+    # the inference is allowed to use.
+    changes_malformed = ("planner_code_changes" in resume
+                         and not isinstance(changes, list))
     # The revision is printed/sliced by the prompt and written to project.yaml:
     # a non-string value is malformed evidence, not a revision (slicing it
     # would raise out of the sign-off launch).
@@ -696,7 +701,7 @@ def effective_verdict(verdict: str | None, integration: dict | None,
             # built from the entries that can be described.
             unresolved = _resolution_entries(resolution, "unresolved")
             reasons = "; ".join(
-                str(u.get("conflicts")) for u in unresolved[:3]) \
+                integ.resolution_conflicts_text(u) for u in unresolved[:3]) \
                 or "unresolved conflicts recorded without details"
             return SIGNOFF_IMPL, (
                 f"{verdict} coerced to {SIGNOFF_IMPL}: pm could not resolve "
@@ -1361,6 +1366,17 @@ def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _text(value, default: str = "?") -> str:
+    """*value* when it is text, else *default*.
+
+    ``project.yaml`` is hand-editable state: a reader must not print a value
+    the record does not hold, so an absent (or non-string) ``target_repo`` /
+    ``base_branch`` renders as the ``?`` placeholder the rest of the return
+    text and ``pm pr show`` use — not the literal ``None``.
+    """
+    return value if isinstance(value, str) and value else default
+
+
 def _resolution_of(record) -> dict:
     """See :func:`pm_core.integration.resolution_of`."""
     from pm_core import integration as integ_mod
@@ -1402,14 +1418,14 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         "\n## Previous sign-off return" if for_signoff
         else "\n## Returned from sign-off",
         "",
-        f"Sign-off routed this PR back with **{rec['verdict']}** "
-        f"(to {rec.get('hop')}) after reviewing HEAD `{head}`.",
-        f"Reason: {rec.get('reason')}",
+        f"Sign-off routed this PR back with **{_text(rec['verdict'])}** "
+        f"(to {_text(rec.get('hop'))}) after reviewing HEAD `{head}`.",
+        f"Reason: {_text(rec.get('reason'), 'not recorded')}",
     ]
     if rec.get("original_verdict"):
-        lines.append(f"(The router chose {rec['original_verdict']}; pm "
+        lines.append(f"(The router chose {_text(rec['original_verdict'])}; pm "
                      f"routed it to the earliest affected step: "
-                     f"{rec.get('coerced_reason')})")
+                     f"{_text(rec.get('coerced_reason'), 'not recorded')})")
     integ = _mapping(rec.get("integration"))
     # The merge a resolution applied, when this block already names it: the
     # ``applied`` block below reports the same merge on a bounce, and saying
@@ -1419,10 +1435,11 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
         base_rev = integ.get("base_sha")
         base_rev = (base_rev[:12]
                     if isinstance(base_rev, str) and base_rev else "?")
-        base = (f"`{integ.get('base_branch')}` @ "
+        base = (f"`{_text(integ.get('base_branch'))}` @ "
                 f"`{base_rev}` from "
-                f"`{integ.get('target_repo')}`")
-        lines.append(f"Integration with {base}: **{integ.get('status')}**.")
+                f"`{_text(integ.get('target_repo'))}`")
+        lines.append(f"Integration with {base}: "
+                     f"**{_text(integ.get('status'))}**.")
         # Built lazily: the marker is only needed when a list is actually
         # abbreviated.  (The pointer is runtime-resolved — it names
         # `pm qa captures-path` / `pm pr show` rather than resolving a path —
@@ -1491,8 +1508,9 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                     # contract as the resolved-path list above) instead of
                     # rendering the malformed value as one.
                     upath = integration.resolution_entry_path(entry)
-                    lines.append(f"- `{upath}`: "
-                                 f"{entry.get('conflicts')}")
+                    lines.append(
+                        f"- `{upath}`: "
+                        f"{integration.resolution_conflicts_text(entry)}")
             elif carried:
                 # The record carries a resolution an *earlier* merge applied
                 # (``_carry_forward``); the conflict above is a different,

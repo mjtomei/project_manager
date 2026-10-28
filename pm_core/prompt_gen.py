@@ -834,6 +834,16 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         """The 12-character form of a revision/tree, or *default*."""
         return value[:12] if isinstance(value, str) and value else default
 
+    def _text(value, default="?"):
+        """*value* when it is text, else *default* (hand-edited state).
+
+        A reader must not print a value the record does not hold: an absent
+        (or non-string) ``target_repo``/``base_branch`` rendered as the
+        literal ``None``, beside the ``?`` placeholders the rest of this block
+        and ``pm pr show`` use for an absent revision.
+        """
+        return value if isinstance(value, str) and value else default
+
     # Revisions from the record are interpolated into commands the agent is
     # told to run (``git diff <rev> HEAD``).  project.yaml is hand-editable
     # state, so only a git object name may become part of that command — the
@@ -842,12 +852,13 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
     base_sha = integ._sha_like(raw_base) or ""
     resolution = integ.resolution_of(rec)
     lines = [
-        f"- Target: `{rec.get('base_branch')}` of `{rec.get('target_repo')}`",
+        f"- Target: `{_text(rec.get('base_branch'))}` of "
+        f"`{_text(rec.get('target_repo'))}`",
         # Neutral label: an ``error`` record may carry the base the last
         # successful check assessed (``integration._carry_assessed_base``),
         # so "fetched" would claim a fetch this check did not make.
         f"- Base revision: `{base_sha or '?'}`",
-        f"- PR HEAD checked: `{rec.get('head') or '?'}`",
+        f"- PR HEAD checked: `{_text(rec.get('head'))}`",
         f"- Candidate tree: `{_short(rec.get('candidate_tree'))}`",
         f"- Result: **{rec.get('status')}** — {integ.summary(rec)}",
     ]
@@ -1028,7 +1039,7 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             # value as one.
             path = integ.resolution_entry_path(entry)
             lines.append(f"- **Unresolved** `{path}`: "
-                         f"{entry.get('conflicts')}")
+                         f"{integ.resolution_conflicts_text(entry)}")
         diff_path = resolution.get("diff_path")
         if isinstance(diff_path, str) and diff_path:
             lines.append(f"- Resolution delta: `$CAP/{Path(diff_path).name}`")

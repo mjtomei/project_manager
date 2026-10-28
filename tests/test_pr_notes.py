@@ -1204,6 +1204,38 @@ class TestPrNoteWritePaths:
         assert after["title"] == "Don't break the -- dash"
         assert after["description"] == 'Uses a - b and "quotes".'
 
+    def test_a_noop_editor_save_keeps_a_hand_edited_title(self, tmp_path):
+        """A non-string or multi-line title is not rewritten by a no-op save.
+
+        The template renders the stored title through ``str`` and holds it on
+        one line, while ``_apply_pr_edit`` coerced a non-string current title
+        to ``""`` before comparing.  An unchanged save therefore looked like
+        an edit and replaced the hand-edited value with its text form (an int
+        became a string, a mapping its laundered repr), and a multi-line
+        title was truncated to its first line — the same "a no-op save is a
+        true no-op" contract the notes and description already follow.
+        """
+        for index, title in enumerate((20261026, {"a": 1}, ["x", "y"], True,
+                                       1.5, "line one\nline two")):
+            case_dir = tmp_path / f"case-{index}"
+            case_dir.mkdir()
+            root = _make_state(case_dir)
+            data = store.load(root)
+            store.get_pr(data, "pr-001")["title"] = title
+            store.save(data, root)
+
+            def fake_editor(template, on_save):
+                on_save(template)   # the user saved without changing anything
+                return 0, True
+
+            with patch("pm_core.editor.run_watched_editor", fake_editor):
+                result = CliRunner().invoke(
+                    cli, ["-C", str(root), "pr", "edit", "pr-001"])
+            assert result.exit_code == 0, (title, result.output)
+            assert "No changes detected." in result.output, (title, result.output)
+            after = store.get_pr(store.load(root), "pr-001")
+            assert after["title"] == title, (title, after["title"])
+
     def test_a_noop_editor_save_keeps_markdown_headings_in_the_description(
             self, tmp_path):
         """A ``#`` line in the description is content, not a template comment.

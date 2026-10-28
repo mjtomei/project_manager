@@ -479,7 +479,9 @@ def _same(a, b) -> bool:
     resolver must treat a change of scalar *kind* as a change.
 
     Containers compare structurally under the same rule, so a nested
-    ``true``/``1`` pair cannot hide inside a record either.
+    ``true``/``1`` pair cannot hide inside a record either.  Two ``nan``
+    values are the same value (``nan != nan`` would otherwise make a
+    hand-edited ``.nan`` — identical on both sides — refuse the document).
     """
     if isinstance(a, dict) and isinstance(b, dict):
         return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
@@ -488,6 +490,12 @@ def _same(a, b) -> bool:
             _same(x, y) for x, y in zip(a, b))
     if type(a) is not type(b):
         return False
+    if isinstance(a, float) and a != a:
+        # ``nan != nan``, but an identical hand-edited ``.nan`` on both sides
+        # is the *same* value, not a change.  Reading it as one refused the
+        # whole metadata resolution for the document ("changed differently on
+        # both sides") even though neither side changed anything.
+        return b != b
     return a == b
 
 
@@ -923,6 +931,26 @@ def resolution_entry_path(entry) -> str:
     """
     path = _mapping(entry).get("path")
     return path if isinstance(path, str) and path else "project.yaml"
+
+
+_UNRESOLVED_WITHOUT_DETAILS = "unresolved conflicts recorded without details"
+
+
+def resolution_conflicts_text(entry) -> str:
+    """An ``unresolved`` entry's ``conflicts`` as text, never the literal None.
+
+    ``project.yaml`` is hand-editable state: an entry without a usable
+    ``conflicts`` value (a missing key, a ``null``, an empty list) cannot name
+    what pm failed to reconcile, and rendering the raw value would present a
+    missing one as ``None`` — a value the record does not hold.  Shared by the
+    sign-off prompt, the return text, the CLI and the router's coercion
+    message so every surface describes the same refusal the same way (the
+    phrase R9-14 specifies).
+    """
+    value = _mapping(entry).get("conflicts")
+    if not value:
+        return _UNRESOLVED_WITHOUT_DETAILS
+    return str(value)
 
 
 def _digest_payload(value):

@@ -230,9 +230,23 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         # verbatim.
         if parsed["title"] is not None:
             current_title = pr_entry.get("title", "")
-            current_title = (current_title
-                             if isinstance(current_title, str) else "")
-            if parsed["title"] != _rendered_text(current_title):
+            # The template renders the stored value through ``str`` (a
+            # hand-edited non-string is shown as its text form), so the
+            # comparison must use that same form: coercing the *stored* value
+            # to "" made a no-op save look like an edit and rewrite a
+            # hand-edited title (an int, a mapping) as a string — the exact
+            # mutation the note and description paths already avoid.  The
+            # template also holds the title on one line, so only its first
+            # line is shown; a parse equal to that line is an unchanged save
+            # of a multi-line (hand-written) title, not a truncation.
+            current_title_text = (current_title
+                                  if isinstance(current_title, str)
+                                  else str(current_title))
+            rendered_title = _rendered_text(current_title_text)
+            if "\n" in current_title_text:
+                rendered_title = _rendered_text(
+                    current_title_text.split("\n", 1)[0])
+            if parsed["title"] != rendered_title:
                 pr_entry["title"] = parsed["title"]
                 changes.append(f"title={parsed['title']}")
 
@@ -1099,7 +1113,7 @@ def pr_show(pr_id: str):
                 # malformed value as one.
                 upath = integration.resolution_entry_path(entry)
                 click.echo(f"Unresolved: {upath}: "
-                           f"{entry.get('conflicts')}")
+                           f"{integration.resolution_conflicts_text(entry)}")
             applied = integration.revision_of(
                 resolution.get("applied_merge_sha"))
             click.echo("Applied merge: "
@@ -2436,7 +2450,7 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
         # as one.
         upath = integration.resolution_entry_path(entry)
         click.echo(f"  unresolved: {upath}: "
-                   f"{entry.get('conflicts')}", err=True)
+                   f"{integration.resolution_conflicts_text(entry)}", err=True)
     if applied_clean:
         # ``prepare`` can return the stored record when a concurrent apply won:
         # hand-edited state, so a non-string revision reads as absent instead
