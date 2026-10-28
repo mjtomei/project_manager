@@ -493,6 +493,37 @@ def test_reqa_route_restarts_tui_qa(world_factory):
     assert w.merges() == []
 
 
+def test_reqa_route_waits_for_a_run_driven_elsewhere(world_factory):
+    """S117: a ``pm qa run`` of the PR is live when sign-off says REQA.  A
+    start now would kill its windows as stale; QA starts once it ends, also
+    with auto-start off (a manual sign-off still owes the re-run)."""
+    app, w = world_factory(stop=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=True), \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer") as timer:
+        _poll(app)
+        assert app.pr()["status"] == "qa"
+        sq.assert_not_called()
+        timer.assert_called_once_with(app)
+        assert review_loop_ui._pending_auto_qa(app)[PR][0] == "driven"
+        assert any("QA starts once" in m and PR in m for m in app.logs)
+        app._auto_start = False
+        app._auto_start_targets = {}
+        review_loop_ui._start_qa_after_review(app, PR)   # still driven
+        sq.assert_not_called()
+        assert PR in review_loop_ui._pending_auto_qa(app)
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False):
+        review_loop_ui._start_qa_after_review(app, PR)   # the run ended
+        review_loop_ui._start_qa_after_review(app, PR)
+    sq.assert_called_once_with(app, PR, lock_timeout=store.NO_WAIT)
+    assert review_loop_ui._pending_auto_qa(app) == {}
+    assert review_loop_ui._reqa_waiting(app) == set()
+    assert w.merges() == []
+
+
 def test_review_route_restarts_review_loop(world_factory):
     app, w = world_factory(stop=True)
     _qa_pass(app)

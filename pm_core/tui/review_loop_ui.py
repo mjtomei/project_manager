@@ -527,10 +527,41 @@ def _pending_auto_qa(app) -> dict:
     return pending
 
 
+def _reqa_waiting(app) -> set:
+    """PRs a sign-off REQA routed back to QA while another process drove a
+    QA run of them: their pending start is owed whatever drives the PR."""
+    waiting = getattr(app, "_reqa_waiting", None)
+    if not isinstance(waiting, set):
+        waiting = set()
+        app._reqa_waiting = waiting
+    return waiting
+
+
+def defer_reqa_start(app, pr_id: str) -> None:
+    """Start the QA a sign-off REQA asked for once the run another process
+    drives (a ``pm qa run`` the user started) is over.
+
+    Starting now would kill that run's windows as stale and run a second
+    loop beside it (S117); the poll tick retries like a review → QA
+    hand-off that met such a run.
+    """
+    reason = "the QA run another process drives"
+    _pending_auto_qa(app)[pr_id] = ("driven", reason)
+    _reqa_waiting(app).add(pr_id)
+    _log.info("signoff: %s REQA; QA starts once %s ends", pr_id, reason)
+    app.log_message(escape(
+        f"Sign-off REQA for {pr_id} — QA starts once {reason} ends"),
+        sticky=10)
+    _ensure_poll_timer(app)
+
+
 def _qa_handoff_wanted(app, pr_id: str) -> bool:
-    """Self-driving (zz t) still owns the PR, or auto-start still covers it."""
+    """Self-driving (zz t) still owns the PR, auto-start still covers it,
+    or a sign-off REQA is still owed its QA run."""
     from pm_core.tui import auto_start as _auto_start
     if getattr(app, "_self_driving_qa", {}).get(pr_id):
+        return True
+    if pr_id in _reqa_waiting(app):
         return True
     return _auto_start.is_enabled(app) and _auto_start.in_scope(app, pr_id)
 
@@ -550,6 +581,7 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     entry = pending.get(pr_id)
     if entry is not None and not _qa_handoff_wanted(app, pr_id):
         pending.pop(pr_id, None)
+        _reqa_waiting(app).discard(pr_id)
         _log.info("auto_qa: pending QA hand-off for %s dropped (no longer "
                   "self-driving or in auto-start scope)", pr_id)
         return
@@ -559,6 +591,7 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     else:
         result = _maybe_start_qa(app, pr_id)
     if result is None:
+        _reqa_waiting(app).discard(pr_id)
         if pending.pop(pr_id, None) is not None:
             _log.info("auto_qa: pending QA hand-off for %s done", pr_id)
         return

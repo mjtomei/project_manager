@@ -378,8 +378,15 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             _rs.set_action_state(pr_id, "qa", None)
         except Exception:
             _log.debug("runtime_state qa clear failed", exc_info=True)
-        from pm_core.tui import qa_loop_ui
-        qa_loop_ui.start_qa(app, pr_id)
+        from pm_core.qa_loop import run_driven_elsewhere
+        if run_driven_elsewhere(pr_id):
+            # A ``pm qa run`` of this PR is live: a new loop's planning
+            # would kill its windows as stale (S117).  Start once it ends.
+            from pm_core.tui.review_loop_ui import defer_reqa_start
+            defer_reqa_start(app, pr_id)
+        else:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.start_qa(app, pr_id)
     elif hop == "review":
         app.log_message(
             f"Sign-off routed {pr_id} back to review (SIGNOFF_REVIEW)")
