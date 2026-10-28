@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T01:25:19.468524+00:00'
+  updated_at: '2026-10-28T01:34:06.974259+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11317,6 +11317,24 @@ prs:
       set -g PYTHONPATH /workspace before pm session. Captures /pm-captures/scenarios/74.'
     created_at: '2026-10-28T01:25:19Z'
     last_edited: '2026-10-28T01:25:19Z'
+  - id: note-e9ec6c9
+    text: 'QA S76 (2026-10-28, 619ae5c6, nested rootless podman, fake-claude): all
+      5 stories PASS live, no code change. Restart: same PID, 8 keys/ids/enqueued_at
+      kept, 0 stale removals, raise launched P3 head first. 180 s lock: 73 h/l redraws
+      max 0.064 s, t focuses, zz t stops, busy reason reached P3 pane 152.7 s after
+      restart, P3 ids kept after release, P4 entries gone. SIGKILL (Zsl+) + 60 s lock
+      + pm session: new PID adopted all 8 at the release second; raise launched P3
+      first scenario only. Stale acquired s6 removed 1 s after restart, growth 7.2G->3.6G
+      on s6 removal, no reserved term. Workdir-missing abort: reason + ERROR, P4 keys
+      gone <6 s, second restart skips P4, z t after restore makes 4 new entries. Observations:
+      (1) a zz t landing mid poll iteration still admitted+launched queued scenarios
+      (real grant, likely shared-host memory dip), which failed window creation and
+      were marked INPUT_REQUIRED instead of ? (no container); 2 deliberate repros
+      gave the normal all-?; a stop_requested guard in _launch_next_queued would avoid
+      it. (2) adopt_run takes now before waiting on the lock, so a 29 s lock wait
+      stamps a 29 s old heartbeat (cosmetic at 300 s TTL). Captures /pm-captures/scenarios/76.'
+    created_at: '2026-10-28T01:34:06Z'
+    last_edited: '2026-10-28T01:34:06Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
