@@ -428,6 +428,19 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   held). `autostart_state._derive` reports it as `waiting` with "last QA run
   was stopped; press t / z t to re-run QA" — an explicit re-run (which
   overwrites the record) is the way back.
+* **Queued scenarios stay on the dashboard during launch** — the
+  launch-time status write inside `_launch_scenarios_in_tmux` /
+  `_launch_scenarios_in_containers` runs while `state.scenarios` is
+  temporarily narrowed to the launch batch, and it previously passed no
+  `queued_scenarios` set. It therefore overwrote the correct initial
+  `qa_status.json` with a rows-only-for-the-batch version, so scenarios
+  still waiting on the concurrency cap showed as *pending* instead of
+  *queued* (and disappeared from the status pane) until a later rewrite.
+  Both launchers take `_status_scenarios` (the full list) and
+  `_queued_indices` (the still-queued set) and pass them to
+  `_write_status_file`; the initial launch in `run_qa_sync` and every
+  queued relaunch in `_launch_next_queued` supply them. Regression tests:
+  `TestQueuedScenariosStayVisible` in `tests/test_qa_loop.py`.
 
 ### Settings (all optional, defaulted)
 
@@ -589,4 +602,7 @@ unbounded.
   of the QA scenario-worker settle interval is covered end to end (a 1 s
   override nudges within a couple of ticks even when the shared settle is
   100 s).
+* `tests/test_qa_loop.py`: `TestQueuedScenariosStayVisible` — the
+  launch-time status write keeps the still-queued rows (verdict "queued")
+  and receives the full scenario list plus the queued set.
 * Existing suite (4100+ tests) must stay green.
