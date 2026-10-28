@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T15:14:07.851781+00:00'
+  updated_at: '2026-10-28T17:36:54.697041+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15652,6 +15652,33 @@ prs:
       container.'
     created_at: '2026-10-28T13:12:46Z'
     last_edited: '2026-10-28T13:12:46Z'
+  - id: note-f001728
+    text: 'S92 refine: a fault that delays the ~/.claude.json copy cannot produce
+      "setup did not finish (finish setup within 30s)". _post_setup runs the cp with
+      timeout=10, so it reports "setup did not finish (receive ~/.claude.json)". The
+      30s wording comes only from _wait_for_setup, so fault the readiness probe instead:
+      exec <64hex> test -f /tmp/.pm-ready exits 1 while armed. In story 4, start the
+      second pm qa run only after the first worker pane has attached. Before that,
+      the refusal is "still owned by an attaching launch" and names no pane. After
+      it, the re-clone deletes the first mount, and the refusal names the live panes.'
+    created_at: '2026-10-28T16:59:13Z'
+    last_edited: '2026-10-28T16:59:13Z'
+  - id: note-fb68e76
+    text: 'QA S92 (1285ff26 + 368409a5/e96d90eb; real rootless Podman 3.4.4, unmodified
+      build-base incl. Chromium smoke, fake agents; evidence /pm-captures/scenarios/92/manifest.md):
+      NEEDS_WORK, fixed b20f084d. Stories 1-4 and every product Then of story 5 held
+      (30s setup-sentinel timeout names the container and discards it; B copy failure
+      keeps the interrupted container with its marker and finishes in place; pm qa
+      run recreates a re-cloned-mount leftover, refuses a retained one and a live-owned
+      one naming panes %37,%38; s2 proxy rc=7 -> launch failed, INPUT_REQUIRED; canary
+      only as -e NAME; reap keeps live s1/s3/s4). FIXED b20f084d: at an 80x24 QA window
+      the status pane is 39x12; c3c2e991 wrapped the run-end error to the width but
+      not the height, so ERROR and the error scrolled off the top and the 45-col key
+      hint wrapped. qa_status._finish now fits the render (drop hint, then spacers,
+      then error tail with an ellipsis). Filed pr-541c2c1 (repeated pm qa run stacks
+      status panes and qa-X-s1 windows).'
+    created_at: '2026-10-28T17:36:54Z'
+    last_edited: '2026-10-28T17:36:54Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
@@ -42929,6 +42956,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-541c2c1
+  plan: bugs
+  title: 'Bug: repeated `pm qa run` on one PR stacks QA status panes and leaves duplicate
+    qa-<pr>-s1 windows'
+  branch: pm/pr-541c2c1-bug-repeated-pm-qa-run-on-one-pr-stacks-qa-status-
+  status: pending
+  depends_on: []
+  description: 'Seen in QA S92 for pr-1139060 (fixture /pm-captures/scenarios/92/story3,
+    story4). `pm qa run <instr> --pr X` uses the fixed loop id cli-X. Each rerun adds
+    another qa_status pane (and a placeholder pane) to the existing qa-X window, and
+    adds another qa-X-s1 window without closing the previous run''s finished one.
+    After 7 runs on one PR the qa-X window had 6+ panes (%7 %8 %10 %14 %16 %18) and
+    there were three qa-X-s1 windows. Repro: run `pm qa run <instr> --pr X` to completion
+    3 times in one pm session, then `tmux list-windows` and `tmux list-panes -t <session>:qa-X`.
+    Expected: a rerun reuses or replaces the previous run''s status pane and scenario
+    window. Not checked against master.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T17:36:43.301507+00:00'
+  updated_at: '2026-10-28T17:36:43.301507+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
