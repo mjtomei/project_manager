@@ -423,8 +423,15 @@ def derive_action_status(pr_id: str, action: str) -> dict:
     flips to [idle] when *all* scenarios have gone idle.  Terminal
     entries (``state=done`` with a ``verdict``) are returned as-is so
     the [done VERDICT] badge survives picker invocations.
+
+    A live ``pm qa run`` of the PR shows as running: it leaves the entry
+    to full runs, so the entry still holds the last full run's verdict.
     """
     entry = dict(get_action_state(pr_id, action))
+    if action == "qa":
+        from pm_core.qa_loop import instruction_run_live
+        if instruction_run_live(pr_id):
+            return {**entry, "state": "running"}
     if not entry:
         return {}
     if action == "qa":

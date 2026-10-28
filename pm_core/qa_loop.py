@@ -1355,6 +1355,16 @@ def own_run_driven(pr_id: str) -> bool:
     return False
 
 
+def instruction_run_live(pr_id: str) -> bool:
+    """True while a ``pm qa run`` of one instruction against *pr_id*,
+    started in this pm session, still runs in another process.  It never
+    writes the PR's ``qa`` runtime entry (its verdict is not the PR's QA
+    result), so the picker would show the last full run's badge over it
+    (S125)."""
+    return any(is_instruction_run(pr_id, qa_wd) and resume_owned_elsewhere(rec)
+               for qa_wd, rec in _own_run_records(pr_id))
+
+
 def run_driven_elsewhere(pr_id: str) -> bool:
     """True when another live process of this pm session drives a run of
     *pr_id*: a ``pm pr qa-run-bg`` driver that ``pm pr auto-sequence``

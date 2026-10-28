@@ -124,3 +124,32 @@ def test_session_created_concurrently_is_left_as_it_is(home, monkeypatch):
     rs._seed_session_dir(shared, d)
     assert (d / "pr-p.json").read_text() == '{"pr_id": "pr-p", "actions": {}}'
     assert sorted(p.name for p in shared.iterdir()) == ["pm-A-1111", "pr-p.json"]
+
+
+def test_live_pm_qa_run_shows_working_over_the_last_full_runs_verdict(
+        home, monkeypatch):
+    """S125: ``pm qa run`` never writes the PR's qa entry, so while it ran
+    the picker kept the last full run's ``[done PASS]``.  Its verdict is
+    still never the PR's: once it exits, the full run's badge is back."""
+    import json
+    import subprocess
+    from pm_core import qa_loop
+    from pm_core.cli.session import _format_action_status
+    _as(monkeypatch, "pm-A-1111")
+    monkeypatch.setattr(qa_loop, "get_pm_session", lambda: "pm-A-1111")
+    rs.set_action_state("pr-p", "qa", "done", verdict="PASS")
+    wd = home / ".pm" / "workdirs" / "qa" / "pr-p-cli-pr-p"
+    wd.mkdir(parents=True)
+    child = subprocess.Popen(["sleep", "30"])
+    try:
+        (wd / "qa_run.json").write_text(json.dumps({
+            "pr_id": "pr-p", "loop_id": "cli-pr-p", "session_tag": "A-1111",
+            "started_at": 1.0, "owner_pid": child.pid,
+            "owner_start": qa_loop._proc_start_time(child.pid)}))
+        assert _format_action_status("pr-p", "qa") == " [working]"
+        # The recorded entry is untouched: auto-start still reads the PASS.
+        assert auto_start.recorded_qa_verdict("pr-p") == "PASS"
+    finally:
+        child.kill()
+        child.wait()
+    assert _format_action_status("pr-p", "qa") == " [done PASS]"
