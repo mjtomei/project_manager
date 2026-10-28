@@ -266,11 +266,15 @@ def _note_text(pr_id: str, record: dict, stage: str,
     base = (record.get("base_sha") or "?")[:12]
     branch = record.get("base_branch") or "base"
     conflicts = list(record.get("conflicts") or [])
-    total = record.get("conflicts_total")
-    if not isinstance(total, int) or isinstance(total, bool) or total < len(conflicts):
-        total = len(conflicts)
     shown = conflicts[:10]
-    more = f" (+{total - len(shown)} more)" if total > len(shown) else ""
+    # ``integration.omitted_path_count`` is the shared rule for "how many of
+    # the real paths does this abbreviation hide" (the stored list is already
+    # bounded by ``integration.compact``); re-deriving it here drifted from
+    # the prompt's rendering of the same record.
+    omitted = integration.omitted_path_count(
+        conflicts, record.get("conflicts_total"), len(conflicts) - len(shown))
+    total = len(shown) + omitted
+    more = f" (+{omitted} more)" if omitted else ""
     paths = ", ".join(shown) + more if shown else "(none listed)"
     pointer = integration.integration_pointer(pr_id)
     return (
@@ -1060,12 +1064,16 @@ def format_return(pr: dict) -> str:
         f"(`{base_sha}`) from `{target}`: **conflict**.",
     ]
     conflicts = list(rec.get("conflicts") or [])
-    total = rec.get("conflicts_total")
-    if not isinstance(total, int) or isinstance(total, bool) or total < len(conflicts):
-        total = len(conflicts)
     if conflicts:
-        shown = ", ".join(f"`{c}`" for c in conflicts[:10])
-        more = f" (+{total - min(total, 10)} more)" if total > min(total, 10) else ""
+        shown_paths = conflicts[:10]
+        # Same shared abbreviation rule as the note (see _note_text): the
+        # stored list is already bounded, so counting only what this render
+        # drops would under-report a large conflict set.
+        omitted = integration.omitted_path_count(
+            conflicts, rec.get("conflicts_total"),
+            len(conflicts) - len(shown_paths))
+        shown = ", ".join(f"`{c}`" for c in shown_paths)
+        more = f" (+{omitted} more)" if omitted else ""
         lines.append(f"Conflicting paths: {shown}{more}")
         lines.append(
             f"Full record: {integration.integration_pointer(pr_id)}")
