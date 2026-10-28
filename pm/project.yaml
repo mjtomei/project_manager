@@ -31383,7 +31383,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T08:59:09.603711+00:00'
+  updated_at: '2026-10-28T09:26:45.655567+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -31577,6 +31577,28 @@ prs:
       before ~/.local/bin) or SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED.'
     created_at: '2026-10-28T08:00:02Z'
     last_edited: '2026-10-28T08:00:02Z'
+  - id: note-a17ffc9
+    text: 'SIGNOFF_IMPL (sign-off 2026-10-28, HEAD 95ebede0, base master@89e3c501).
+      Fix is well evidenced on the branch alone; integration needs code work. (1)
+      pm/project.yaml conflicts with master: merge master and keep both sides. (2)
+      Semantic overlap: master (pr-8efa789: 4f902f18, f5157153, afecb1fe, 374051fd)
+      made verdict reads task-scoped (find_verdict_turn returns hit.text; loop_shared.wait_for_follow_up_verdict
+      has a line-index baseline + pre-wait scan; _user_record_is_non_task is the harness-record
+      predicate). This PR bypasses that waiter with review_loop._wait_for_follow_up_verdict,
+      which returns read_latest_assistant_text(). Reproduced on the auto-merged candidate:
+      answer, then follow-up PASS, then a "# /loop tick" turn -> waiter returns the
+      tick reply text -> parse_review_verdict = NEEDS_WORK (a PASS recorded as NEEDS_WORK,
+      next iteration launched); master hit.text gives PASS. Probe: /pm-captures/signoff/loop-tick-probe.txt.
+      Also, the merged verdict_transcript.py defines _NON_TASK_SENTINELS twice (the
+      PR copy overwrites master; identical today). To do: build the waiter on find_verdict_turn/hit.text
+      (+ the line-index baseline alongside HumanResponseWatch, or extend the shared
+      loop_shared waiter with an answered hook), build is_human_prompt_record on _user_record_is_non_task
+      and delete the duplicate _NON_TASK_* lists, and add a regression for answer
+      -> PASS -> /loop tick. Targeted tests pass on the candidate (156 passed; test_installer_writes_standalone_receiver
+      is a pre-existing env failure). After rework, re-run review and QA S1-S3 at
+      least on the integrated code. Report: /pm-captures/report.html'
+    created_at: '2026-10-28T09:26:45Z'
+    last_edited: '2026-10-28T09:26:45Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
