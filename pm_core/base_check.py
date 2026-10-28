@@ -101,10 +101,6 @@ class GateResult:
     reason: str = ""
     record: dict = field(default_factory=dict)
 
-    @property
-    def proceed(self) -> bool:
-        return self.decision in (PROCEED, SKIPPED)
-
 
 @dataclass
 class CompletionResult:
@@ -627,8 +623,7 @@ def _retry_open(pr: dict, head: str | None) -> bool:
     return bool(at and datetime.now(timezone.utc) < at)
 
 
-def _record_error(root: Path, pr_id: str, record: dict, stage: str,
-                  pr: dict) -> None:
+def _record_error(root: Path, pr_id: str, record: dict, stage: str) -> None:
     """Record a retryable probe failure (no bounce, no approval)."""
     def _apply(d):
         p = store.get_pr(d, pr_id)
@@ -738,7 +733,7 @@ def gate(root: Path, pr_id: str, stage: str, *,
                       "error": "PR workdir has no readable HEAD",
                       "checked_at": _now(), "head": None,
                       "conflicts": [], "overlap": []}
-            _record_error(root, pr_id, record, stage, pr)
+            _record_error(root, pr_id, record, stage)
             return GateResult(RETRY, stage, status=integration.ERROR,
                               error=record["error"], record=record,
                               reason=record["error"])
@@ -754,7 +749,7 @@ def gate(root: Path, pr_id: str, stage: str, *,
         record.setdefault("head", head)
         st = record.get("status")
         if st == integration.ERROR:
-            _record_error(root, pr_id, record, stage, pr)
+            _record_error(root, pr_id, record, stage)
             if open_rec is not None:
                 return _wait(f"returned to implementation; base check failed "
                              f"(retryable): {record.get('error') or 'unknown'}")
@@ -907,8 +902,8 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
         record = evaluate(root, pr_id, pr, data=data)
         st = record.get("status")
         if st == integration.ERROR:
-            _record_error(root, pr_id, record, rec.get("stage") or STAGE_REVIEW,
-                          pr)
+            _record_error(root, pr_id, record,
+                          rec.get("stage") or STAGE_REVIEW)
             return CompletionResult(
                 False, f"base check failed (retryable): "
                        f"{record.get('error') or 'unknown'}")

@@ -275,6 +275,49 @@ def test_completion_after_reconciled_base_resolves_the_return(w):
     assert base_check.open_return(p) is None
 
 
+def test_review_loop_bounce_records_and_reports_resume_loop(w):
+    """A TUI review-loop bounce resumes the loop once the rework finishes.
+
+    The marker travels gate -> ``base_return`` -> ``impl_completion``; the
+    TUI scheduler reads it to restart the interrupted loop (a one-shot
+    ``z d`` has no loop to resume).
+    """
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        res = gate(w, base_check.STAGE_REVIEW, resume_loop=True)
+    assert res.decision == base_check.CONFLICT
+    assert pr(w)["base_return"].get("resume_loop") is True
+    simulate_launch(w)
+    reconcile(w)
+    done = completion(w, transcript_dir=w.tdir)
+    assert done.complete, done.reason
+    assert done.resume_loop is True
+
+
+def test_one_shot_bounce_does_not_resume_a_loop(w):
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+    assert "resume_loop" not in pr(w)["base_return"]
+    simulate_launch(w)
+    reconcile(w)
+    done = completion(w, transcript_dir=w.tdir)
+    assert done.complete, done.reason
+    assert done.resume_loop is False
+
+
+def test_moved_base_during_handoff_keeps_the_resume_loop_marker(w):
+    """Superseding the episode must not drop the loop-resume intent."""
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w, base_check.STAGE_REVIEW, resume_loop=True)
+    simulate_launch(w)
+    commit(w.wd, "more.txt", "x\n", "more impl work")
+    commit(w.repo, "shared.txt", "new master side\n", "master moves")
+    res = completion(w, transcript_dir=w.tdir)
+    assert not res.complete
+    ret = pr(w)["base_return"]
+    assert ret["attempt"] == 2
+    assert ret.get("resume_loop") is True
+
+
 def test_completion_ignores_idle_evidence_from_before_the_relaunch(w):
     """The killed session's idle event is not the rework session's turn.
 
