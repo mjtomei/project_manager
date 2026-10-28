@@ -38526,7 +38526,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T14:50:54.597479+00:00'
+  updated_at: '2026-10-28T15:02:01.316907+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38553,6 +38553,15 @@ prs:
       env failures (markdown module missing, hook test needs PM_HOST_HOME unset).'
     created_at: '2026-10-28T14:50:54Z'
     last_edited: '2026-10-28T14:50:54Z'
+  - id: note-0b7edf1
+    text: 'Final impl HEAD c65fe8b3 (rebased? no — linear on 093f0ac6). Full suite:
+      4086 passed, 1 skipped; only the pre-existing env failures remain (tests/test_markdown_render.py
+      needs the `markdown` package; tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Live TUI/CLI review trigger from the host: press
+      `d` on #274 or run `pm pr review pr-f0f4129` from the base pm dir (this impl
+      container cannot reach the host TUI).'
+    created_at: '2026-10-28T15:02:01Z'
+    last_edited: '2026-10-28T15:02:01Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
