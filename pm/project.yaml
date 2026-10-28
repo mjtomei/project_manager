@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T04:18:19.641627+00:00'
+  updated_at: '2026-10-28T04:44:32.182917+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15080,6 +15080,38 @@ prs:
       so the i3/i6 QA expectations still hold.'
     created_at: '2026-10-28T04:18:19Z'
     last_edited: '2026-10-28T04:18:19Z'
+  - id: note-29312b2
+    text: 'Review loop e44d i3 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range/non-UTF-8
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found one real gap of the E3/E16 class ("an identity check must
+      never misclassify an unrelated process as the TUI"): proc_cmdline reported a
+      zero-length /proc/<pid>/cmdline as None ("cannot tell"), and identity_problem
+      treats None as "skip the cmdline check". A zero-length cmdline is what the kernel
+      serves for a kernel thread (mm == NULL) and for a zombie, so a stale pidfile
+      whose recycled PID happened to name one looked like a live TUI: claim_tui_pidfile
+      refused to start (pm _tui would not run until the file was deleted by hand)
+      and submit_tui_command/trigger_tui_reload would have signaled the unrelated
+      process. proc_cmdline now returns [] for an empty read (positive evidence of
+      a non-TUI) and keeps None for "cannot tell" (no procfs / read failed), which
+      still degrades to liveness. Reproduced end-to-end with a live sleep whose cmdline
+      read is emptied: pre-fix the claim raised TuiPidfileConflict and submit_tui_command
+      would have sent SIGUSR2; post-fix the claim takes the file over and submit reports
+      stale_pidfile + removes it. 4 new tests (TestEmptyCmdline), each verified to
+      fail against the pre-fix return None. Spec impl.md E18 + test 33. Full suite:
+      3919 passed, 1 skipped (pytest 8.4.2; env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      PYTHONPATH=/workspace, markdown on the path). No user-visible message changed
+      this iteration, so the i3/i6 QA expectations still hold. Non-blocking observations
+      left as-is: (a) the startup-refusal message is printed to the pane but the real
+      pm session has no remain-on-exit, so the pane vanishes on exit and the text
+      is only in the pm log; (b) helpers.trigger_tui_command is production-dead (kept
+      as the documented bool API); (c) autostart._resolve_owner keeps its own liveness+zombie
+      check (spec I1) and reports a mid-claim empty pidfile as "stale pidfile" rather
+      than "starting up"; (d) _atomic_write can leave a hidden .<pidfile>.<pid>.tmp
+      if SIGKILLed mid-publish; (e) a legacy numeric pidfile has no starttime, so
+      its identity rests on the cmdline marker alone.'
+    created_at: '2026-10-28T04:44:32Z'
+    last_edited: '2026-10-28T04:44:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
