@@ -712,16 +712,20 @@ def _qa_run_binding(pr_id: str, status: dict, status_path,
             "Scenario membership: **none** — `$CAP/qa_manifest.json` lists no "
             "scenarios for this QA run, so this run captured no coverage. Do "
             "not treat `$CAP/scenarios/<n>/` directories as its evidence.")
-    manifest_idx = [m.get("index") for m in manifest.get("scenarios") or []
-                    if isinstance(m, dict)]
+    # Both listings are untrusted-ish input (the manifest lives in a tree a
+    # nested fixture can write), so only real int indices take part in the
+    # comparison — ``captures.member_index`` returns None for anything else,
+    # and a set of those used to raise on an unhashable value.
+    manifest_idx = [i for m in manifest.get("scenarios") or []
+                    if (i := captures.member_index(m)) is not None]
     # Scenario 0 is the interactive window: it stays in qa_status.json (the
     # display contract) but is deliberately not a manifest member, so
     # comparing the two listings verbatim would warn on every normal run.
     listed = status.get("scenarios") or []
     if isinstance(listed, dict):
         listed = list(listed.values())
-    listed_idx = [s.get("index") for s in listed
-                  if isinstance(s, dict) and s.get("index") != 0]
+    listed_idx = [i for s in listed
+                  if (i := captures.member_index(s)) is not None and i != 0]
     if manifest_idx and listed_idx and set(manifest_idx) != set(listed_idx):
         lines.append(
             "**Warning:** `qa_manifest.json` lists scenarios "

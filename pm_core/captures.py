@@ -92,6 +92,25 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _canonical_index(name: str) -> int | None:
+    """The index a canonical numeric name means, or ``None``.
+
+    Canonical means ``str(int(name)) == name`` — ``3``, not ``03``: every
+    helper turns an index back into a path, so treating ``03`` as index 3
+    would make :func:`quarantine_foreign` move ``scenarios/3`` on ``03``'s
+    record.  ``int()`` itself raises on an absurdly long digit string
+    (Python's int-from-str limit), which an untrusted tree can contain, so
+    the conversion is guarded rather than assumed.
+    """
+    if not _NUMERIC_DIR_RE.match(name):
+        return None
+    try:
+        value = int(name)
+    except ValueError:
+        return None
+    return value if str(value) == name else None
+
+
 def _atomic_write_json(path: Path, data: dict) -> bool:
     """Write *data* as JSON via ``tmp`` + ``rename``; False on any OSError.
 
@@ -178,9 +197,40 @@ def _valid_manifest(data, pr_id: str | None) -> dict | None:
         return None
     if not isinstance(data.get("run_id"), str) or not data["run_id"]:
         return None
-    if not isinstance(data.get("scenarios"), list):
-        data["scenarios"] = []
+    scenarios = data.get("scenarios")
+    if not isinstance(scenarios, list):
+        scenarios = []
+    # The manifest is untrusted input — a nested fixture or a hand-edited file
+    # can write into this tree — so normalise the entries once, here, instead
+    # of trusting every reader to be defensive.  Non-mappings are dropped; a
+    # canonical numeric-string index (``"3"``) becomes the int every helper
+    # turns back into a path.  Any other index value is kept on the member (so
+    # the audit still lists it) but never matched to a directory: consumers go
+    # through :func:`member_index`, which returns ``None`` for it.
+    clean: list[dict] = []
+    for entry in scenarios:
+        if not isinstance(entry, dict):
+            continue
+        idx = entry.get("index")
+        if isinstance(idx, str):
+            coerced = _canonical_index(idx)
+            if coerced is not None:
+                entry = {**entry, "index": coerced}
+        clean.append(entry)
+    data["scenarios"] = clean
     return data
+
+
+def member_index(entry) -> int | None:
+    """The canonical scenario index of a manifest member, or ``None``.
+
+    Membership lists come from the (untrusted) manifest, so consumers must not
+    assume an index is an int: a list/dict value used to raise ``TypeError:
+    unhashable type`` while building the membership set, crashing the very
+    ``audit``/``pm qa evidence`` surface that exists to report a damaged tree.
+    """
+    idx = entry.get("index") if isinstance(entry, dict) else None
+    return idx if isinstance(idx, int) and not isinstance(idx, bool) else None
 
 
 def _read_json(path: Path):
@@ -341,12 +391,11 @@ def scenario_indices(captures_root: Path | str | None) -> list[int]:
         return []
     out: list[int] = []
     for entry in entries:
-        if not entry.is_dir() or not _NUMERIC_DIR_RE.match(entry.name):
+        if not entry.is_dir():
             continue
-        index = int(entry.name)
-        if str(index) != entry.name:
-            continue
-        out.append(index)
+        index = _canonical_index(entry.name)
+        if index is not None:
+            out.append(index)
     return sorted(out)
 
 
@@ -415,7 +464,7 @@ def audit(captures_root: Path | str | None, *,
                if isinstance(m, dict)]
     dirs = {i: _classify(root, i, pr_id, effective_run)
             for i in scenario_indices(captures_root)}
-    member_indices = {m.get("index") for m in members}
+    member_indices = {i for m in members if (i := member_index(m)) is not None}
     orphans = sorted(i for i in dirs if i not in member_indices)
 
     anomalies: list[str] = []
@@ -499,9 +548,8 @@ def audit(captures_root: Path | str | None, *,
             anomalies.append(
                 f"scenarios/{i}: not in the current run's manifest")
     for m in members:
-        idx = m.get("index")
-        if (isinstance(idx, int) and not isinstance(idx, bool)
-                and idx not in dirs):
+        idx = member_index(m)
+        if idx is not None and idx not in dirs:
             # Membership without evidence: the run claims the scenario but
             # nothing is on disk — the report must not paper over it.
             anomalies.append(

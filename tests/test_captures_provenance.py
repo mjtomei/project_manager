@@ -260,6 +260,67 @@ def test_audit_flags_a_current_run_dir_missing_from_the_manifest(tmp_path):
     assert any("not in the current run's manifest" in x for x in a.anomalies)
 
 
+def test_audit_survives_a_manifest_with_a_non_scalar_index(tmp_path):
+    """The manifest is untrusted input (a nested fixture or a hand-edited file
+    can write into this tree).  A damaged entry must be *reported*, not crash
+    the audit that exists to describe the damage: a list-valued index used to
+    raise ``TypeError: unhashable type`` while building the membership set."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    _scenario_dir(root, 1, {"index": 1, "pr_id": "pr-x", "run_id": "run1"})
+    mpath = root / captures.MANIFEST_NAME
+    m = json.loads(mpath.read_text(encoding="utf-8"))
+    m["scenarios"].append({"index": [2], "title": "damaged"})
+    mpath.write_text(json.dumps(m), encoding="utf-8")
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.dirs[1].state == captures.CURRENT
+    assert a.orphans == []
+    # The entry stays visible in the membership, but is never matched to a
+    # directory (so it cannot produce a bogus "no evidence directory" line).
+    assert any(x.get("title") == "damaged" for x in a.members)
+
+
+def test_audit_coerces_a_numeric_string_index(tmp_path):
+    """``"3"`` and ``3`` name the same ``scenarios/<n>/`` directory.  Left as a
+    string, the member never matched its own directory and the audit printed
+    "not in the current run's manifest" beside a membership listing it."""
+    root = _root(tmp_path)
+    _scenario_dir(root, 1, {"index": 1, "pr_id": "pr-x", "run_id": "run1"})
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1",
+        "started_at": "x", "updated_at": "x", "overall": "",
+        "scenarios": [{"index": "1", "title": "one"}],
+    }), encoding="utf-8")
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.members[0]["index"] == 1
+    assert a.orphans == []
+    assert not any("not in the current run's manifest" in x
+                   for x in a.anomalies)
+
+
+def test_absurd_numeric_names_are_skipped_not_fatal(tmp_path):
+    """``int()`` raises on an absurdly long digit string (Python's int-from-str
+    limit).  An untrusted tree can contain such a name, so neither the audit
+    nor the canonicality helper may die on it."""
+    assert captures._canonical_index("9" * 5000) is None
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1",
+        "started_at": "x", "updated_at": "x", "overall": "",
+        "scenarios": [{"index": "9" * 5000, "title": "damaged"}],
+    }), encoding="utf-8")
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.orphans == []
+    assert [m["title"] for m in a.members] == ["damaged"]
+
+
 def test_audit_flags_a_clobbered_root_pointer(tmp_path):
     """The incident's signature is a foreign writer replacing the root
     ``qa_manifest.json``.  Membership is recovered from ``qa_runs/``, but the
@@ -684,6 +745,31 @@ def test_signoff_qa_block_ignores_the_interactive_scenario(tmp_path,
     monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
     head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
     assert "QA run: `run1`" in head
+    assert "disagree" not in head
+
+
+def test_signoff_qa_block_survives_a_damaged_manifest_entry(tmp_path,
+                                                            monkeypatch):
+    """The membership comparison must not raise on a manifest entry whose
+    index is not a scalar: the manifest is the untrusted file the prompt is
+    telling the session to trust, so a damaged one still has to render."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1",
+        "started_at": "x", "updated_at": "x", "overall": "PASS",
+        "scenarios": [{"index": 1, "title": "one"},
+                      {"index": [2], "title": "damaged"}],
+    }), encoding="utf-8")
+    status = _status_file(tmp_path, "run1")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+
+    assert "QA run: `run1`" in head
+    # The damaged entry is ignored for comparison, so the real member still
+    # matches the status listing instead of producing a false disagreement.
     assert "disagree" not in head
 
 
