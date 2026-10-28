@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T19:52:32.069351+00:00'
+  updated_at: '2026-10-28T20:12:36.867893+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38788,6 +38788,44 @@ prs:
       over, so nothing is stranded. (2026-10-28T20:05:00Z)'
     created_at: '2026-10-28T19:52:31Z'
     last_edited: '2026-10-28T19:52:31Z'
+  - id: note-3c28f19
+    text: 'review-loop a6a3 i6 (4bf25b28). Three gaps closed around "a status written
+      before the owed run is not its verdict"; handoff contract unchanged.
+
+
+      1. `pm pr auto-sequence`''s qa branch still acted on a status while the owed
+      run was in flight. i5 only deferred a PASS while `awaiting: qa` was still set,
+      but the owed run clears `awaiting` as it *starts* and writes its own qa_status.json
+      only after planning (minutes). For that window the previous run''s status stayed
+      newest: PASS advanced the PR to sign_off (so the reconciler stopped seeing the
+      obligation, and the owed run''s own verdict landed on a PR already in sign-off)
+      and NEEDS_WORK bounced it to in_review. The branch now refuses to act on any
+      status while an open sign-off return is present and `run_driven_elsewhere` holds,
+      echoing "running: qa (driven elsewhere)". Scoped to `open_return(...) is not
+      None` so a plain qa PR is unchanged. Tests: `test_a_status_from_before_the_owed_run_does_not_act[PASS|NEEDS_WORK]`
+      (both fail with the guard neutralised) and `test_a_status_without_a_reqa_episode_still_advances`.
+
+
+      2. `_on_qa_complete`''s `zz t` branch (pass_count >= required) handed the PR
+      to sign-off on a PASS even with the owed REQA on disk — the same supersede R6
+      already prevents on the legacy branch. A self-driving loop can still be running
+      when sign-off routes the PR back (the user presses `i` during a loop); its run
+      began before the bounce (a later restart would have consumed the obligation).
+      It now logs "the owed sign-off re-run has not run yet", ends the loop, and leaves
+      the obligation to the reconciler. Test: `test_a_pre_return_self_driving_pass_does_not_supersede_the_owed_reqa`.
+
+
+      3. The REQA hop popped `app._qa_loops[pr_id]` unconditionally, so with a loop
+      still running it erased the owner and the owed start (and every later reconciler
+      tick) started a second full run over it in the same process — the duplicate
+      `start_owed_reqa`''s running check exists to prevent. The pop is now conditional
+      on the entry not running. Test: `test_reqa_route_keeps_a_running_loop_entry`.
+
+
+      Broad suite in this container (pre-existing env-broken files excluded as before):
+      4015 passed, 1 skipped. Spec amended (a6a3 i6).'
+    created_at: '2026-10-28T20:12:36Z'
+    last_edited: '2026-10-28T20:12:36Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
