@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T10:37:36.422523+00:00'
+  updated_at: '2026-10-28T10:42:52.056885+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38880,6 +38880,38 @@ prs:
       z t recovers, so the RQ56 text "t starts the re-run" is inaccurate.'
     created_at: '2026-10-28T09:23:07Z'
     last_edited: '2026-10-28T09:23:07Z'
+  - id: note-f0bc075
+    text: 'Refine S123 (c774b5af): tick _qa_run_driven -> qa_loop.own_run_driven reads
+      ONLY qa_resume.json. `pm qa run` writes qa_run.json at start but its first qa_resume.json
+      only after _launch_scenarios_in_tmux returns, i.e. after its refiner (qa_concretize)
+      finishes. So a pm qa run still refining when the sign-off REQA lands is invisible
+      to the tick hop and to the awaiting-qa branch (pre-return start => _qa_run_starting
+      false too): predicted launch over it. The TUI path uses run_driven_elsewhere
+      (qa_run.json) and does defer. Widen the window with a fake qa_concretize type-level
+      "delay". The in_review PASS -> qa tick branch has no driven check at all (first
+      QA over a live pm qa run).'
+    created_at: '2026-10-28T10:01:26Z'
+    last_edited: '2026-10-28T10:01:26Z'
+  - id: note-40ad841
+    text: 'QA S123 (2026-10-28, host, all fake-claude, HEAD b0579323 vs control fedcdd01
+      vs post-fix; master 9f9449ac for story 3; captures /pm-captures/scenarios/123,
+      REPORT.md, 66 mp4): CODE CHANGE 82a6e1a9 needs normal re-review. Story 1 reproduced
+      the predicted gap: own_run_driven read only qa_resume.json, which pm qa run
+      writes after its refiner, so a REQA landing 1.03/2.06/3.05/4.98/9.98 s after
+      the CLI started made the hop tick spawn qa-run-bg with a claim, kill the CLI
+      windows (CLI "window died - retry 1/10") and print advanced: sign_off while
+      the CLI still lived. The fix: own_run_driven also counts a pm qa run (is_instruction_run)
+      whose qa_run.json owner is a live other process. Post-fix 8 runs (offsets 0.95-46.47
+      s) each held (running: qa, no bg, no claim, CLI windows kept), then one running:
+      qa (launched) 0.4-1.6 s after the CLI exit, one sign-off. 2a HEAD PASS (324
+      s hold, past the claim expiry), control fedcdd01 launched over the CLI as expected,
+      2b (TUI hop) / 4 (Ctrl-C dead CLI never holds) / 5 (two clones) PASS on HEAD+fix.
+      Suite 4475 passed. Story 3: the review-PASS tick starts the first QA over a
+      live pm qa run on HEAD and master -> pr-17ddbfe (HEAD additionally kills the
+      CLI windows). Story 2b as written is not drivable: the TUI never adopts a tick-launched
+      sign-off run -> pr-66432ce; 2b was run with the TUI launching sign-off.'
+    created_at: '2026-10-28T10:42:51Z'
+    last_edited: '2026-10-28T10:42:51Z'
   - id: note-1e9ce11
     text: 'S122 refine (HEAD b0579323/c774b5af): (1) A plain `pm tui restart` drops
       auto-start (only --breadcrumb keeps it), and the resume scan runs every ~5 s
@@ -41800,6 +41832,69 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T09:08:37.363689+00:00'
   updated_at: '2026-10-28T09:08:37.363689+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-17ddbfe
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence review-PASS tick starts the first QA run over a
+    live `pm qa run` of the same PR'
+  branch: pm/pr-17ddbfe-bug-pm-pr-auto-sequence-review-pass-tick-starts-th
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_auto_sequence, status == "in_review",
+    verdict == "PASS": it moves the PR to qa and calls _launch_qa_detached with no
+    check for a run another process drives (the awaiting-qa/hop branches check _qa_run_driven
+    since d7e65156; the TUI review-PASS hand-off waits via run_driven_elsewhere, RQ56).
+    Repro (QA S123 story 3, host, fake-claude review [{PASS, delay 90}], qa_scenario
+    [{PASS,180},{PASS,20}], 2 s ticks on B inside the pm session): right after the
+    tick prints advanced: in_review, run `pm qa run d-check --pr B` and wait for its
+    qa_resume.json; when the review PASS lands the tick prints advanced: qa and spawns
+    pm pr qa-run-bg B while the CLI lives, so two QA loops run at once and the tick
+    prints advanced: sign_off on the full run PASS while the CLI still runs. origin/master
+    9f9449ac does the same (captures /pm-captures/scenarios/123/s3-m: advanced: qa
+    10:15:11, CLI live 10:13:42-10:18:04, no window kill). On pr-592e4bd HEAD b0579323
+    it is worse: the driver also logs Killing stale QA window qa-B and qa-B-s1, the
+    CLI windows, so the CLI prints "Scenario 1 window died - retry 1/10" and reruns
+    its worker (captures /pm-captures/scenarios/123/s3, advanced: qa 10:15:10.9, CLI
+    live 10:13:41-10:16:53). Expected: while the pm qa run process lives, no tick
+    launches QA; the first full QA starts once it exits.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T10:19:16.854772+00:00'
+  updated_at: '2026-10-28T10:19:16.854772+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-66432ce
+  plan: bugs
+  title: 'Bug: TUI auto-start never records the verdict of a sign-off a pm pr auto-sequence
+    tick launched; the PR reads "running" forever'
+  branch: pm/pr-66432ce-bug-tui-auto-start-never-records-the-verdict-of-a-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/signoff_ui.py step/_adopt_orphaned_run. The
+    TUI steps a driven sign_off PR every 5 s through signoff.step_signoff with its
+    own autostart-* tdir; _adopt_orphaned_run only globs transcripts/*/signoff-<pr>.head
+    (one level), but a tick writes its sign-off run under pm/transcripts/auto-sequence/<pr>/
+    (two levels), so it is never adopted and step_signoff returns running (debug:
+    "signoff step <pr>: SignoffStep(action=running ...)" every 5 s). Repro (QA S123
+    story 2b, host, fake-claude, HEAD b0579323 + f6b78ab3): 2 s ticks `pm pr auto-sequence
+    A` until advanced: sign_off, stop the ticks, `pm autostart add A` while the sign-off
+    (fake SIGNOFF_REQA delay 60) runs. The verdict lands in transcripts/auto-sequence/A/signoff-A.jsonl
+    and the TUI never applies the hop (no Sign-off REQA line, A stays sign_off 6+
+    min). Captures: /pm-captures/scenarios/123/invalid/s2b2-f-tick-signoff-never-adopted
+    (pm-debug.log signoff step lines, samples.log). Expected: a tick-launched sign-off
+    handed to TUI auto-start is adopted like an earlier autostart-* run (or the TUI
+    reads the auto-sequence dir), so its verdict is recorded and routed.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T10:29:47.762239+00:00'
+  updated_at: '2026-10-28T10:29:47.762239+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
