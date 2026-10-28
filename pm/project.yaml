@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T16:00:36.110796+00:00'
+  updated_at: '2026-10-28T16:47:06.004966+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9342,6 +9342,30 @@ prs:
       run; that race exists for any live detached run and is not specific to the hold.'
     created_at: '2026-10-28T16:00:36Z'
     last_edited: '2026-10-28T16:00:36Z'
+  - id: note-3e0fdb3
+    text: 'Review i13 (5865): (1) fixed — a hold that ended without a follow-up (stop,
+      PR left qa) left the held finalize''s `(waiting)` marker in qa_status.json and
+      `latest_output` saying "waiting for input" for a run nothing polled any more
+      — the same stale advertisement iteration 9 removed for the run-left-QA case.
+      The hold-exit path now rewrites the status with an empty waiting set and the
+      settled "QA complete: …" output (test_status_file_drops_the_waiting_marker_when_the_hold_ends).
+      (2) fixed — sign-off''s REQA return hop (signoff_ui.step) popped a tracked run
+      from _qa_loops without stopping it; harmless before this PR (runs were finished
+      by then) but a held run has no timeout, so its thread kept polling the worker
+      panes and its snapshot could be re-adopted over the replacing run. The discard
+      pattern (stop + superseded + clear snapshot) is now one helper, qa_loop_ui.discard_qa_state,
+      used by fresh-start, the zz t restart and the REQA hop (test_discard_qa_state_stops_and_supersedes).
+      (3) docstring/UX: _on_qa_complete no longer documents a held INPUT_REQUIRED
+      as pausing the self-driving loop, and start_qa''s held message points at the
+      scenario worker pane rather than the status dashboard. (4) test robustness:
+      test_pr_notes asserted a literal line wrap of the refiner prompt. Full suite:
+      4054 passed, 1 skipped, 55 failed / 36 errors — the same files fail on origin/master
+      (markdown dep, git/network env; verified by running them in a master worktree).
+      Accepted, unchanged: the hold is unbounded by design (stop / PR leaving qa /
+      TUI shutdown end it), and follow-ups are read from the transcript without an
+      idle_prompt gate (spec §9). (2026-10-28T17:05:00Z)'
+    created_at: '2026-10-28T16:47:05Z'
+    last_edited: '2026-10-28T16:47:05Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
