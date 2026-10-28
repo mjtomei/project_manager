@@ -527,19 +527,25 @@ class ProjectManagerApp(App):
 
     def on_mount(self) -> None:
         import os
+        # Get session name for frame capture file naming.  Reuse the
+        # launcher's claim when there is one so the pidfile we publish to
+        # is always the one that was claimed (see _session_for_claim).
+        # Resolved before the merge-restart check: the marker is shared by
+        # every session under one PM home, so only this session's marker
+        # (or an unscoped legacy one) may trigger or be dropped here.
+        self._session_name = _session_for_claim(self._pidfile_claim)
         try:
             from pm_core.tui import auto_start as _auto_start
-            trigger = ("merge_restart"
-                       if _auto_start.has_merge_restart_marker()
-                       else "initial")
+            # A merge-restart marker that survives to mount was never
+            # consumed (save_breadcrumb unlinks it before the old process
+            # re-execs), so it belongs to a restart request that lost a
+            # race; resolve_mount_trigger drops it so a later start does
+            # not silently behave as a merge restart.
+            trigger = _auto_start.resolve_mount_trigger(self._session_name)
         except Exception:
             trigger = "initial"
         _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
                   os.getpid(), Path.cwd(), trigger)
-        # Get session name for frame capture file naming.  Reuse the
-        # launcher's claim when there is one so the pidfile we publish to
-        # is always the one that was claimed (see _session_for_claim).
-        self._session_name = _session_for_claim(self._pidfile_claim)
         # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).
         from pm_core.tui import perf
         perf.setup_event_loop(self._session_name)
@@ -1288,7 +1294,9 @@ class ProjectManagerApp(App):
 
     def action_restart(self) -> None:
         from pm_core.tui import auto_start
-        if auto_start.has_merge_restart_marker():
+        # Scoped to this session: another session's marker is not a request
+        # for us to preserve our state (see tui_pidfile.has_merge_restart_marker).
+        if auto_start.has_merge_restart_marker(self._session_name):
             auto_start.save_breadcrumb(self)
             _log.info("action_restart: reason=merge_restart_marker")
         else:

@@ -611,3 +611,206 @@ class TestTuiRestartCommand:
 
         assert result.exit_code == 1
         assert "No TUI pane found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Orphaned merge-restart marker
+# ---------------------------------------------------------------------------
+
+class TestOrphanedMergeRestartMarker:
+    """A marker that outlives its restart must not poison the next start.
+
+    Two concurrent restarts -- one ``--breadcrumb``, one plain -- race on the
+    shared ``~/.pm/merge-restart`` file.  When the plain one reaches the old
+    TUI first it restarts as ``reason=user`` without consuming the marker, so
+    the marker is left behind and would make the *next* start (even a plain
+    Ctrl+R) behave as a merge restart.
+    """
+
+    def test_resolve_mount_trigger_discards_orphan(self, tmp_path):
+        from pm_core.tui import auto_start
+
+        (tmp_path / "merge-restart").touch()
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            trigger = auto_start.resolve_mount_trigger()
+            assert trigger == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+            # A second mount is a plain start again.
+            assert auto_start.resolve_mount_trigger() == "initial"
+
+    def test_resolve_mount_trigger_clean_start(self, tmp_path):
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            assert auto_start.resolve_mount_trigger() == "initial"
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_discard_missing_marker_is_noop(self, tmp_path):
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            assert auto_start.discard_merge_restart_marker() is False
+            (tmp_path / "merge-restart").touch()
+            assert auto_start.discard_merge_restart_marker() is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_consumed_marker_leaves_nothing_for_mount(self, tmp_path):
+        """The normal path is unchanged: save_breadcrumb consumes it."""
+        from pm_core.tui import auto_start
+
+        (tmp_path / "merge-restart").touch()
+        app = _make_app(auto_start=False, root=tmp_path)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            auto_start.save_breadcrumb(app)
+            # save_breadcrumb removed the marker, so the mount is "initial".
+            assert auto_start.resolve_mount_trigger() == "initial"
+
+
+# ---------------------------------------------------------------------------
+# Per-session breadcrumb ownership
+# ---------------------------------------------------------------------------
+
+class TestBreadcrumbSessionOwnership:
+    """The breadcrumb file is shared by every pm session in a PM home.
+
+    Two sessions restarting at the same moment must not restore each other's
+    state: session B's mount used to consume session A's breadcrumb, apply
+    A's targets to B's project (dropping them as "missing"), and leave A with
+    nothing to restore.
+    """
+
+    @staticmethod
+    def _write(home, payload):
+        (home / "autostart-resume.json").write_text(json.dumps(payload))
+
+    def _consume(self, home, app):
+        with patch("pm_core.tui.auto_start.pm_home", return_value=home), \
+             patch("pm_core.tui.auto_start.check_and_start",
+                   new_callable=AsyncMock):
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+        return app
+
+    def test_save_records_owning_session(self, tmp_path):
+        from pm_core.tui.auto_start import save_breadcrumb
+
+        app = _make_app(root=tmp_path)
+        app._session_name = "pm-alpha"
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            save_breadcrumb(app)
+
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert data["session"] == "pm-alpha"
+
+    def test_other_session_breadcrumb_is_left_alone(self, tmp_path):
+        self._write(tmp_path, {
+            "session": "pm-alpha", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-bravo"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        # Nothing restored...
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        # ...and the file is still there for its owner.
+        assert (tmp_path / "autostart-resume.json").exists()
+
+    def test_own_breadcrumb_is_consumed(self, tmp_path):
+        self._write(tmp_path, {
+            "session": "pm-alpha", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-alpha"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert app._auto_start is True
+        assert "pr-alpha" in app._auto_start_targets
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+    def test_legacy_breadcrumb_without_session_still_consumed(self, tmp_path):
+        """Breadcrumbs written before the session field must still restore."""
+        self._write(tmp_path, {
+            "auto_start": True, "targets": [{"pr_id": "pr-legacy"}],
+            "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-alpha"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert "pr-legacy" in app._auto_start_targets
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+
+class TestMergeRestartMarkerSessionScope:
+    """The marker is one shared file; it must belong to one session.
+
+    Observed before the fix: with session A's ``--breadcrumb`` restart racing
+    session B's plain restart, B's TUI saw A's marker, preserved *B's* state
+    and consumed the marker, so A lost the state its user asked to keep.
+    """
+
+    def test_marker_for_another_session_is_ignored(self, tmp_path):
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+
+            assert auto_start.has_merge_restart_marker("pm-alpha") is True
+            assert auto_start.has_merge_restart_marker("pm-bravo") is False
+
+            # B's mount must not drop A's marker...
+            assert auto_start.resolve_mount_trigger("pm-bravo") == "initial"
+            assert (tmp_path / "merge-restart").exists()
+            # ...and A's mount still sees (and consumes) it.
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_grouped_session_name_matches_its_base(self, tmp_path):
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            # The CLI resolves the grouped session (``pm-alpha~1``) while the
+            # TUI keys everything by the base name.
+            assert tui_pidfile.has_merge_restart_marker("pm-alpha~1") is True
+            assert tui_pidfile.clear_merge_restart_marker("pm-alpha~1") is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_unscoped_legacy_marker_still_honoured(self, tmp_path):
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            (tmp_path / "merge-restart").touch()  # what older CLIs wrote
+            assert tui_pidfile.has_merge_restart_marker("pm-bravo") is True
+            assert tui_pidfile.read_merge_restart_marker() == (True, None)
+
+    def test_save_breadcrumb_deletes_only_own_marker(self, tmp_path):
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        app = _make_app(root=tmp_path)
+        app._session_name = "pm-bravo"
+        with patch("pm_core.paths.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            auto_start.save_breadcrumb(app)
+            # A's marker survives; B's breadcrumb names B.
+            assert (tmp_path / "merge-restart").exists()
+            data = json.loads((tmp_path / "autostart-resume.json").read_text())
+            assert data["session"] == "pm-bravo"

@@ -91,6 +91,87 @@ def command_queue_path(session: str) -> Path:
     return pm_home() / f"tui-{session.split('~')[0]}.cmd-queue"
 
 
+# ---------------------------------------------------------------------------
+# Merge-restart marker
+#
+# ``pm tui restart --breadcrumb`` (and the merge-triggered restart) writes
+# this marker so the TUI's ``action_restart`` knows to preserve auto-start /
+# review-loop state before it re-execs.  Unlike the pidfile and queue it is
+# a *single* file shared by every pm session under one PM home, so it names
+# its session: a second session restarting at the same moment must neither
+# consume it nor preserve its own state because of it.  An empty marker (what
+# older CLIs wrote) is unscoped and keeps the old consume-anywhere behaviour.
+# ---------------------------------------------------------------------------
+
+MERGE_RESTART_MARKER = "merge-restart"
+
+
+def merge_restart_marker_path() -> Path:
+    """Path to the merge-restart marker file."""
+    from pm_core.paths import pm_home
+    return pm_home() / MERGE_RESTART_MARKER
+
+
+def read_merge_restart_marker() -> tuple[bool, str | None]:
+    """``(exists, owning session)`` for the merge-restart marker.
+
+    The session is ``None`` for an unscoped marker: empty, unparseable, or
+    written by a CLI that predates session scoping.
+    """
+    try:
+        raw = merge_restart_marker_path().read_text()
+    except OSError:
+        return False, None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return True, None
+    if isinstance(data, dict):
+        session = data.get("session")
+        if isinstance(session, str) and session:
+            return True, session.split("~")[0]
+    return True, None
+
+
+def write_merge_restart_marker(session: str | None) -> Path:
+    """Write the marker, scoped to *session* when one is known."""
+    path = merge_restart_marker_path()
+    payload: dict[str, str] = {}
+    if session:
+        payload["session"] = session.split("~")[0]
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def has_merge_restart_marker(session: str | None = None) -> bool:
+    """Is there a marker this *session* should act on?
+
+    Unscoped markers apply to any session (legacy behaviour); a marker
+    naming another session belongs to that session's restart.
+    """
+    exists, owner = read_merge_restart_marker()
+    if not exists:
+        return False
+    if owner is None or session is None:
+        return True
+    return owner == session.split("~")[0]
+
+
+def clear_merge_restart_marker(session: str | None = None) -> bool:
+    """Remove the marker when it is unscoped or owned by *session*.
+
+    Returns True when a marker was removed.  Another session's marker is
+    left in place for its own TUI to consume.
+    """
+    if not has_merge_restart_marker(session):
+        return False
+    try:
+        merge_restart_marker_path().unlink()
+    except OSError:
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class TuiPidfile:
     """A parsed pidfile descriptor."""

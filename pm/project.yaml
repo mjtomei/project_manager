@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T16:31:25.394271+00:00'
+  updated_at: '2026-10-28T16:41:29.250180+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17036,6 +17036,52 @@ prs:
       (cast + mp4 + transcript.log + manifest).'
     created_at: '2026-10-28T16:31:25Z'
     last_edited: '2026-10-28T16:31:25Z'
+  - id: note-46141be
+    text: 'QA S22 (concurrent actors on the shared pidfile / command queue / restart
+      marker / pane registry) 2026-10-28: stories 2 (two TUIs racing after kill -9),
+      3 (restart --breadcrumb vs autostart add) and 4 (two concurrent adds) passed
+      as written. Stories 1 and 5 exposed two real defects, both fixed in this run.
+
+
+      (1) ORPHANED ~/.pm/merge-restart. `pm tui restart --breadcrumb` touches the
+      marker then sends C-r; a concurrent plain `pm tui restart` does less work, so
+      its C-r reaches the TUI first, the TUI logs `action_restart: reason=user`, and
+      nothing consumes the marker. It survives the restart, and the next PLAIN `pm
+      tui restart` is then logged as `reason=merge_restart_marker` — a clean restart
+      silently becomes state-preserving (exactly the hazard the marker docstring warns
+      about). Fix: auto_start.resolve_mount_trigger(session) discards a marker that
+      survived to mount; the only consumer (save_breadcrumb) unlinks it before the
+      old process re-execs, so a marker present at mount is orphaned by definition.
+
+
+      (2) BOTH RESTART FILES WERE GLOBAL, NOT PER-SESSION. ~/.pm/merge-restart and
+      ~/.pm/autostart-resume.json are shared by every pm session under one PM home.
+      Two sessions restarting at once: B consumed A breadcrumb, applied A targets
+      to B project, dropped them as "missing", and A ended mode=off. A re-run failed
+      the opposite way: B consumed A marker and preserved ITS OWN state on a restart
+      the user asked to be clean. Fix: the marker records its owning session (tui_pidfile.write/read/has/clear_merge_restart_marker,
+      ~N group suffix normalized) and action_restart/on_mount act only on their own;
+      save_breadcrumb stamps "session" and consume_breadcrumb leaves another session
+      file in place. Empty/legacy markers and session-less breadcrumbs keep the old
+      unscoped behaviour.
+
+
+      RE-RUN NOTES: the marker race is timing-dependent in BOTH directions (both branches
+      observed on one build) — assert the invariants (no marker left behind; each
+      session ends in the state its own restart asked for), never which caller won.
+      `pm tui restart` resolves the GROUPED session name (pm-foo~1) while the TUI
+      keys its pidfile/marker by the base name, so normalize with split("~")[0]. Stop
+      an asciinema recorder session between stories or it keeps appending to the same
+      cast (and `tmux new-session -s pm-recorder` then fails with "duplicate session").
+      Two racing panes are far easier to capture as two panes of ONE window; keep
+      separate spare windows too so the session survives its only TUI window dying.
+
+
+      Tests: tests/test_breadcrumb_review_loop.py gained TestOrphanedMergeRestartMarker
+      + TestMergeRestartMarkerSessionScope + TestBreadcrumbSessionOwnership. Full
+      suite 4240 passed, 1 skipped. Captures: /pm-captures/scenarios/22/{story1-concurrent-restart/{pre-fix,post-fix},story2-racing-tuis,story3-restart-vs-add,story4-concurrent-adds,story5-two-sessions-one-marker/{pre-fix,post-fix}}.'
+    created_at: '2026-10-28T16:41:29Z'
+    last_edited: '2026-10-28T16:41:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

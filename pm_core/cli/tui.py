@@ -327,16 +327,18 @@ def tui_restart(breadcrumb: bool, session: str | None):
 
     marker = None
     if breadcrumb:
-        from pm_core.paths import pm_home
-        marker = pm_home() / "merge-restart"
-        marker.touch()
+        from pm_core import tui_pidfile
+        # Scoped to the session whose TUI is being restarted: the marker is
+        # a single shared file, and a concurrent restart in another session
+        # must not consume it (nor preserve its own state because of it).
+        marker = tui_pidfile.write_merge_restart_marker(sess)
         click.echo("Wrote merge-restart marker for state persistence")
 
     try:
         tmux_mod.send_keys_literal(pane_id, "C-r")
     except Exception:
-        if marker and marker.exists():
-            marker.unlink(missing_ok=True)
+        if marker is not None:
+            tui_pidfile.clear_merge_restart_marker(sess)
         raise
     click.echo(f"Sent restart to TUI pane {pane_id} (session: {sess})")
 

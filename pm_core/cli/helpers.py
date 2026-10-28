@@ -943,18 +943,16 @@ def trigger_tui_restart() -> None:
         if not (tui_pane and session):
             _log.debug("trigger_tui_restart: no live TUI pane to restart")
             return
-        from pm_core.paths import pm_home
-        marker = pm_home() / "merge-restart"
-        marker.touch()
+        # Scoped to the session whose TUI is being restarted: the marker is
+        # a single shared file, so an unscoped one would let a concurrent
+        # restart in another session consume it (and preserve its own state).
+        marker = tui_pidfile.write_merge_restart_marker(session)
         _log.debug("Wrote merge-restart marker %s", marker)
         tmux_mod.send_keys_literal(tui_pane, "C-r")
         _log.debug("Sent restart to TUI pane %s in session %s", tui_pane, session)
     except Exception as e:
         if marker is not None:
-            try:
-                marker.unlink(missing_ok=True)
-            except OSError:
-                pass
+            tui_pidfile.clear_merge_restart_marker(session)
         _log.debug("Could not trigger TUI restart: %s", e)
 
 
