@@ -558,21 +558,29 @@ def run_review_loop_sync(
                 adopt_wait = False
                 wait_transcript = _adoptable_wait_transcript(
                     state, pr_data, saved_transcript_dir)
-                # The check is over: from here on the wait is either live
-                # (input_required set below) or gone (iteration reruns).
-                state._adopting_wait = False
                 if wait_transcript is None:
                     _log.info("review_loop: INPUT_REQUIRED wait for %s "
                               "iteration %d has no live pane; continuing",
                               state.pr_id, state.iteration)
                     state.input_required = False
+                    # Keep ``_adopting_wait`` set: the recorded wait is gone
+                    # but the iteration has not been superseded yet, so
+                    # clearing it here would publish "INPUT_REQUIRED answered;
+                    # follow-up running" (running + no wait + a recorded
+                    # INPUT_REQUIRED history) for a question nobody answered.
+                    # The next-iteration branch clears it once the new
+                    # iteration owns the work.
                     continue
+                # The question is live again.  Publish the wait *before*
+                # clearing ``_adopting_wait``: between the two writes a
+                # status reader would see running + no wait + the recorded
+                # INPUT_REQUIRED history and report "answered; follow-up
+                # running" for a question nobody has answered yet.
+                state.input_required = True
+                state._adopting_wait = False
                 _log.info("review_loop: adopting INPUT_REQUIRED wait for %s "
                           "iteration %d (transcript=%s)", state.pr_id,
                           state.iteration, wait_transcript)
-                # The question is live again: publish the wait now, before
-                # _wait_for_follow_up_verdict re-derives it from the pane.
-                state.input_required = True
                 verdict = VERDICT_INPUT_REQUIRED
             else:
                 # A new or adopted in-flight iteration owns the work now.
@@ -594,6 +602,11 @@ def run_review_loop_sync(
                                 state, saved_transcript_dir)
                     if output is None:
                         state.iteration += 1
+                        # A new iteration owns the work: the resumed wait is
+                        # gone (a dead pane, above) and the stale history
+                        # entry no longer belongs to the current iteration,
+                        # so the resuming flag is cleared only now.
+                        state._adopting_wait = False
                         _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
                         iter_transcript = _iteration_transcript(state, transcript_dir)
                         output = _run_claude_review(

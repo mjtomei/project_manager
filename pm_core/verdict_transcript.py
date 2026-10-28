@@ -149,14 +149,15 @@ _WAKEUP_TEXT_PREFIXES = (
 # asked Claude nothing — so they neither answer a question nor start a task.
 _LOCAL_COMMAND_PREFIXES = ("<command-name>", "<command-message>",
                            "<local-command-stdout>", "<local-command-stderr>")
+# Harness marker written when the user hits Esc / stops the turn
+# (``[Request interrupted by user]`` and the ``for tool use`` variant).
+_INTERRUPT_PREFIX = "[Request interrupted by user"
 # Dynamic / loop.md loop ticks and the autonomous-loop sentinels.
 _NON_TASK_TEXT_PREFIXES = _WAKEUP_TEXT_PREFIXES + _LOCAL_COMMAND_PREFIXES + (
-    # Harness marker written when the user hits Esc / stops the turn
-    # (``[Request interrupted by user]`` and the ``for tool use`` variant).
     # It is not a new task: the user asked for nothing, so a verdict emitted
     # before the interruption still stands.  A follow-up instruction the user
     # types afterwards is a separate record and remains a task boundary.
-    "[Request interrupted by user",
+    _INTERRUPT_PREFIX,
     # qa_loop's own "your verdict must be alone on its line" nudge.
     "Reminder: your verdict must appear alone",
 )
@@ -589,6 +590,29 @@ def is_wakeup_record(rec: object) -> bool:
     return text in _NON_TASK_SENTINELS or text.startswith(_WAKEUP_TEXT_PREFIXES)
 
 
+def _opens_assistant_turn(rec: dict) -> bool:
+    """True when *rec* opens an assistant turn of its own.
+
+    A harness wakeup and a genuine human task do.  The *transparent* records
+    — system reminders, local-command echoes, compact summaries, the loop's
+    own nudge, tool results — do not: they are injected around a turn, not a
+    turn of their own, so they must not change whose turn the assistant is
+    in.  (Treating one as a new turn made a reminder landing between a
+    wakeup and its idle look like a human-started turn, so the idle was read
+    as a prose question and re-armed a wait nobody was asked.)  The Esc
+    interrupt marker does end the human's turn, so it counts as theirs — and
+    is not a wakeup.
+    """
+    if is_wakeup_record(rec):
+        return True
+    if _is_tool_result_record(rec):
+        return False
+    text = _unwrap_system_reminder(_record_text(rec))
+    if text is not None and text.startswith(_INTERRUPT_PREFIX):
+        return True
+    return not _user_record_is_non_task(rec)
+
+
 def _record_epoch(rec: dict) -> float | None:
     """The record's ISO ``timestamp`` as epoch seconds, or None."""
     from datetime import datetime
@@ -642,10 +666,12 @@ class HumanResponseWatch:
     while the question is unanswered.  :attr:`assistant_after_answer` says
     whether Claude has produced any assistant record *after* that answer, so
     a repeated idle for the turn just answered is distinguishable from a new
-    turn.  :attr:`wakeup_turn` says the newest non-tool-result user record is
-    a harness wakeup (a ``/loop`` tick, a task notification): the assistant
-    turn it started is not a response to the human, so its idle is not a
-    question either.
+    turn.  :attr:`wakeup_turn` says the newest *turn-opening* user record
+    (:func:`_opens_assistant_turn` — transparent records such as system
+    reminders and local-command echoes are injected around a turn and do not
+    change it) is a harness wakeup (a ``/loop`` tick, a task notification):
+    the assistant turn it started is not a response to the human, so its
+    idle is not a question either.
     """
 
     def __init__(self, transcript_path: str | Path | None, verdict: str):
@@ -683,7 +709,7 @@ class HumanResponseWatch:
             elif _USER_RE.search(line):
                 rec = _parse_record(line)
                 if (not newest_user_seen and rec is not None
-                        and not _is_tool_result_record(rec)):
+                        and _opens_assistant_turn(rec)):
                     newest_user_seen = True
                     self.wakeup_turn = is_wakeup_record(rec)
                 if answer is None:
@@ -720,7 +746,7 @@ class HumanResponseWatch:
         for line in data[:last_nl + 1].decode(errors="replace").splitlines():
             if _USER_RE.search(line):
                 rec = _parse_record(line)
-                if rec is not None and not _is_tool_result_record(rec):
+                if rec is not None and _opens_assistant_turn(rec):
                     self.wakeup_turn = is_wakeup_record(rec)
                 at = self._answer_epoch(rec)
                 if at is not None:

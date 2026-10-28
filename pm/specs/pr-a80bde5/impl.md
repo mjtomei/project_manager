@@ -72,7 +72,15 @@ R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
     (a `/loop` tick, a scheduled firing, a `<task-notification>`): those turns
     have their own `idle_prompt` but nobody asked the human anything, so the wait
     must not re-arm for them (`HumanResponseWatch.wakeup_turn`,
-    `verdict_transcript.is_wakeup_record`; QA spec E9).
+    `verdict_transcript.is_wakeup_record`; QA spec E9).  Turn ownership is
+    decided by the newest record that *opens* an assistant turn
+    (`_opens_assistant_turn`): a wakeup or a genuine human task.  The
+    transparent records (system reminders, local-command echoes, compact
+    summaries, the loop's own nudge, tool results) are injected around a turn
+    and must not change it — a reminder landing between a wakeup and its idle
+    would otherwise make the wakeup's turn look human-started and re-arm the
+    wait.  The Esc interrupt marker ends the human's own turn, so it is
+    theirs, not a wakeup.
 
 R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     with `"type":"user"` whose `message.content` is a string or contains a
@@ -209,13 +217,19 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   an assistant turn of its own, with an `idle_prompt` and no verdict.  That idle
   is not a prose question — nobody asked the human anything — so the wait must
   not re-arm for it (QA spec E9).  `HumanResponseWatch.wakeup_turn` tracks
-  whether the newest non-`tool_result` user record is a wakeup
-  (`is_wakeup_record`), so the answer keeps reading as
-  `running / … (INPUT_REQUIRED answered; follow-up running)`.  Without this the
+  whether the newest *turn-opening* user record (`_opens_assistant_turn`) is
+  a wakeup (`is_wakeup_record`), so the answer keeps reading as
+  `running / … (INPUT_REQUIRED answered; follow-up running)`.  Transparent
+  records injected around the turn (a system reminder, a local-command echo)
+  do not change that classification — otherwise one landing between the
+  wakeup and its idle made the turn look human-started and re-armed the
+  wait.  Without this the
   status flipped back to `waiting / review INPUT_REQUIRED (iteration N)` while
   the reviewer was working — the same false wait this PR fixes.  (Added in
-  review baa8 i2; regression
-  `test_wakeup_turn_after_the_answer_does_not_rearm_the_wait`.)
+  review baa8 i2, hardened in review e386 i2; regressions
+  `test_wakeup_turn_after_the_answer_does_not_rearm_the_wait`,
+  `test_wakeup_turn_survives_transparent_records`,
+  `test_transparent_records_do_not_rearm_a_wakeup_turn`.)
 - Answer and follow-up verdict both land during a TUI restart gap: Claude
   won't idle again, so the resumed waiter starts from the current idle event
   (not "newer than now") and accepts it when it is newer than the answer.
@@ -253,7 +267,17 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   follow-up running" there, which would claim the user answered a question
   nobody has been shown yet.  (QA S15 re-evaluation; fixed in 7280536b,
   regressions `test_adopting_wait_is_not_reported_as_an_answered_follow_up` and
-  `test_restart_adopt_check_never_reads_as_follow_up_running`.)  Residual, not
+  `test_restart_adopt_check_never_reads_as_follow_up_running`.)  The two flags
+  are written in an order that leaves no observable gap (review e386 i2):
+  when the wait is adoptable, `input_required` is set *before*
+  `_adopting_wait` is cleared; when it is not (dead pane/transcript),
+  `_adopting_wait` stays set until the next iteration has taken over
+  (`state.iteration` advanced), because the recorded INPUT_REQUIRED history
+  entry would otherwise read as an answered wait.  `review_progress_input`
+  reads them in that same order (`_adopting_wait`, then `iteration`, then
+  `input_required`), so a reader that sees the flag cleared is guaranteed to
+  see the wait or the superseding iteration.  Regression
+  `test_adopt_decision_never_reads_as_an_answered_follow_up`.  Residual, not
   a wait and not repainted: the TUI tech-tree widget keeps its pre-restart
   frame until the first post-mount paint, which can land after the adopt line;
   the status/runtime-state publication path never reports a pre-adopt wait.

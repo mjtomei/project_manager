@@ -152,7 +152,9 @@ THEN the wait stays cleared: status remains `running` with the
 `follow_up=true`, the marker stays the working `⟳N`, and no new INPUT_REQUIRED
 notice appears. The wakeup reply is never recorded as a verdict; the real
 follow-up verdict still resolves the wait (a second genuine INPUT_REQUIRED
-after the answer is still a question → R4).
+after the answer is still a question → R4). A transparent record injected
+around that turn (a system reminder, a local-command echo) does not make it
+a human-started turn: the wait stays cleared just the same.
 
 R6. **Prose question after an answer waits again.**
 GIVEN an answered follow-up.

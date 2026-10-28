@@ -374,6 +374,62 @@ class TestHumanResponseWatch:
         assert w.answered_at is not None and w.assistant_after_answer is True
         assert w.wakeup_turn is True
 
+    def test_wakeup_turn_survives_transparent_records(self, tmp_path):
+        """Transparent records are injected around a turn, not a turn of
+        their own: a reminder or a local-command echo landing after the
+        wakeup must not make the turn look human-started (its idle would
+        then be read as a prose question and re-arm a wait nobody asked)."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        pane.user("use option A")
+        pane.harness("# /loop tick\ncontinue")
+        w.poll()
+        assert w.wakeup_turn is True
+        for text in (
+            "<system-reminder>\nThe user opened the file a.py.\n"
+            "</system-reminder>",
+            "<local-command-stdout>$0.12</local-command-stdout>",
+            "<command-name>/model</command-name>",
+        ):
+            pane.harness(text)
+            w.poll()
+            assert w.wakeup_turn is True, (
+                f"a transparent record ({text.splitlines()[0]}) changed the "
+                "turn ownership")
+        # A turn the human starts still ends the wakeup's turn.
+        pane.user("and the other file")
+        w.poll()
+        assert w.wakeup_turn is False
+
+    def test_wakeup_turn_survives_transparent_records_in_back_scan(self,
+                                                                   tmp_path):
+        """Same rule after a restart, where the watch back-scans the file."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        pane.user("use option A")
+        pane.harness("# /loop tick\ncontinue")
+        pane.harness("<system-reminder>\nOpened a.py.\n</system-reminder>")
+        pane.say("Nothing new to do.")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        assert w.answered_at is not None and w.assistant_after_answer is True
+        assert w.wakeup_turn is True
+
+    def test_interrupt_marker_keeps_the_turn_the_humans(self, tmp_path):
+        """Esc is the human stopping their own turn: it is not a wakeup, so
+        an idle after it still re-arms the wait (the human acted, and nobody
+        else can move the loop on)."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        pane.user("use option A")
+        pane.harness("# /loop tick\ncontinue")
+        w.poll()
+        assert w.wakeup_turn is True
+        pane.harness("[Request interrupted by user]")
+        w.poll()
+        assert w.wakeup_turn is False
+
 
 # ---------------------------------------------------------------------------
 # Live loop: INPUT_REQUIRED → answer → follow-up → NEEDS_WORK → next iteration
@@ -649,6 +705,44 @@ class TestLiveFlow:
             state.stop_requested = True
             p.stop()
 
+    def test_transparent_records_do_not_rearm_a_wakeup_turn(self, env):
+        """A reminder or local-command echo landing between a wakeup turn and
+        its idle is injected around the turn, not a turn of its own: the idle
+        must not be read as a prose question and re-arm the wait."""
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        t, mock, p = _start(state, tdir, {1: it1})
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            panes[1].user("use option A")
+            _until(lambda: not state.input_required, what="answer clears wait")
+            panes[1].harness("# /loop tick\ncontinue")
+            panes[1].say("Nothing new to do.")
+            panes[1].harness(
+                "<system-reminder>\nThe user opened a.py.\n</system-reminder>")
+            panes[1].harness(
+                "<local-command-stdout>$0.12</local-command-stdout>")
+            panes[1].idle()
+            time.sleep(0.3)
+            assert state.input_required is False, (
+                "a transparent record turned the wakeup turn into a question")
+            assert _status(state)[:2] == (
+                "running",
+                "review iteration 1 (INPUT_REQUIRED answered; follow-up running)")
+            assert mock.call_count == 1
+            panes[1].verdict("PASS")
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
     def test_harness_record_does_not_answer_the_question(self, env):
         """A system reminder / task notification / loop tick is a
         ``type: "user"`` record but not a human answer: the wait must stay."""
@@ -804,6 +898,43 @@ class TestRestartAdoption:
             release.set()
             state.stop_requested = True
             p.stop()
+
+    def test_adopt_decision_never_reads_as_an_answered_follow_up(self, env):
+        """The adopted wait is published *before* the resuming flag clears.
+
+        Sampling at the adopt decision's own log line (the widest point of
+        the window between the two writes) must already show the live wait:
+        clearing the flag first left running + no wait + the recorded
+        INPUT_REQUIRED history, i.e. "INPUT_REQUIRED answered; follow-up
+        running" for a question nobody has answered yet.
+        """
+        tdir, _ = env
+        pane = Pane(tdir, 1)
+        pane.verdict("INPUT_REQUIRED", "Which option?")
+        state = _restored(tdir, 1, ["INPUT_REQUIRED"])
+        seen = []
+        real_info = rl._log.info
+
+        def spy(msg, *args, **kwargs):
+            if msg.startswith("review_loop: adopting INPUT_REQUIRED wait"):
+                review = autostart_state.review_progress_input(state)
+                seen.append((review["input_required"], review["follow_up"],
+                             review["resuming"]))
+            return real_info(msg, *args, **kwargs)
+
+        with patch.object(rl._log, "info", side_effect=spy):
+            t, mock, p = _start(state, tdir, {})
+            try:
+                _until(lambda: state.input_required, what="adopted wait")
+            finally:
+                state.stop_requested = True
+                p.stop()
+        assert seen, "the adopt decision was never logged"
+        for ir, follow_up, resuming in seen:
+            assert ir is True, "the adopted wait was not published yet"
+            assert follow_up is False, (
+                "the adopt decision published an answered follow-up")
+            assert resuming is False
 
     def test_restart_after_answer_shows_follow_up_running(self, env):
         tdir, _ = env

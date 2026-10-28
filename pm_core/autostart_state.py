@@ -850,11 +850,19 @@ def review_progress_input(state) -> dict:
     INPUT_REQUIRED wait has a live pane to adopt.  The wait is neither live
     nor answered then, so neither ``input_required`` nor ``follow_up`` may
     be reported (a status reader would otherwise show a phantom wait or a
-    phantom "answered; follow-up running" for the length of the check)."""
+    phantom "answered; follow-up running" for the length of the check).
+
+    ``follow_up`` is inferred from the flags, so the fields are read in an
+    order that can never observe the transient between the loop's writes
+    (see ``run_review_loop_sync``): ``_adopting_wait`` first, then
+    ``iteration`` and ``input_required``.  A reader that sees the adopt flag
+    already cleared is guaranteed to see the wait it published, or the
+    iteration that superseded it."""
     running = bool(getattr(state, "running", False))
+    # Read these in the order the writer updates them — do not reorder.
+    adopting_wait = bool(getattr(state, "_adopting_wait", False))
     iteration = getattr(state, "iteration", 0) or 0
     input_required = bool(getattr(state, "input_required", False))
-    adopting_wait = bool(getattr(state, "_adopting_wait", False))
     history = getattr(state, "history", None) or []
     last = history[-1] if history else None
     return {
