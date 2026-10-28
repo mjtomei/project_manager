@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T11:27:22.746337+00:00'
+  updated_at: '2026-10-28T23:52:06.080745+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14145,6 +14145,24 @@ prs:
       and PM_HOST_HOME unset).'
     created_at: '2026-10-28T11:27:22Z'
     last_edited: '2026-10-28T11:27:22Z'
+  - id: note-fe4d97a
+    text: 'Review i11: finished the single terminal-status definition — qa_loop.py''s
+      four "abort QA against a terminal PR" guards, home_window/pr_list.py''s open-only
+      filter, and pr_sync.sync_from_github''s qa/sign_off preservation tuple now use
+      pr_utils.TERMINAL_PR_STATES; no behavior change (spec R11 item 27 and §5 updated).
+      Targeted tests (test_qa_loop, test_home_window, test_pr_sync, test_sync_merge_integrity,
+      test_pr_close, test_pr_enhancements): 308 passed. Full suite 4124 passed, 1
+      skipped (/pm-captures/review-c02f-i11/full-suite.log). Two observations left
+      for the user/next iteration: (1) A4 cross-PR question still open — #217/pr-3d1fa55''s
+      _reclaim_terminal_pr_windows would reclaim live windows/containers for closed
+      PRs on every 5-minute sync, i.e. the automatic cleanup this PR''s A4/R4 rules
+      out; does closed authorize live-resource reclamation, or should #217 limit the
+      sweep to merged? (2) Bare `pm pr cleanup` (no id) auto-selects only merged PRs
+      with workdirs, so following `pm pr close`''s pointer after a close says "No
+      merged PRs with workdirs to clean up"; `pm pr cleanup <closed-id>` works. Left
+      as-is (spec §6 scopes pr_cleanup behavior out).'
+    created_at: '2026-10-28T23:52:06Z'
+    last_edited: '2026-10-28T23:52:06Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
