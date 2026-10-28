@@ -980,12 +980,16 @@ S13, S14, S22, S101.
   `C-b P`/`C-b M` popups, the `after-split-window` and `window-resized`
   pane hooks (one pane registry, `pm-<tag>.json`; no stray
   `<view>.json`), and the picker's ● active-window markers for every
-  attached client of the group (S121 89d914a0, c1027cd6). Open point for
-  the forty-third pass (S124): `pane_registry.pm_session_name` and
-  `_get_current_pm_session` skip the group lookup when the view's own
-  name starts with `pm-` (e.g. `pm-laptop`), and `_get_current_pm_session`
-  strips a `~` before looking the group up (a view named `my~view`).
-  The TUI's `_own_session_name` asks the group first and is not affected. Only a host without tmux uses the shared path. Given two clones,
+  attached client of the group (S121 89d914a0, c1027cd6). This holds for
+  a view of any name, including one that starts with `pm-` (`pm-laptop`)
+  or contains `~` (`my~view`): `pane_registry.pm_session_name` looks the
+  full name up in `#{session_group}` for every session, and
+  `_get_current_pm_session`, the `_pane-closed` hook (`C-b x`),
+  `pm rebalance` (`C-b R`), the popup dispatch and `pm session home` use
+  it, so `pm session home` typed in a view switches that view's client
+  (S124 920633fe; the forty-third pass's open point is closed). tmux
+  3.2a has no `window-resized` hook, so resize is not drivable there.
+  Only a host without tmux uses the shared path. Given two clones,
   When one clone's run writes running, done or a verdict, Then the
   other clone's picker, auto-start and mount sweep never see it (S93).
   Given records written at the shared path by an older pm, When a
@@ -1074,8 +1078,12 @@ S13, S14, S22, S101.
     An auto-sequence tick in the awaiting-qa branch, and the tick's
     sign_off→qa hop, start nothing while any QA run of the PR that this
     pm session launched still has a live driver, however old; the tick
-    prints `running: qa`. The next tick after the run ends launches one
-    `qa-run-bg`. A one-instruction run's `qa_status.json` (workdir
+    prints `running: qa`. A `pm qa run` holds from its start, while its
+    refiner still runs and before it has a resume snapshot: its start
+    record names its live process (S123 c5af52f0). Only that run's own
+    record (`<pr>-cli-<pr>/qa_run.json`) of this pm session counts, read
+    owner pid first (review 1cfa 3110c6f3). The next tick after the run
+    ends launches one `qa-run-bg`. A one-instruction run's `qa_status.json` (workdir
     `<pr>-cli-<pr>`) is never the PR's QA status anywhere: ticks never
     advance on it, and the sign-off prompt's QA verdict and the finalize
     prompt's pointer name the latest full run. master has the same tick
@@ -1085,6 +1093,15 @@ S13, S14, S22, S101.
     `pm qa run`), so the picker keeps its `[working]` badge until the
     verdict (S121 89d914a0). An entry whose driver is dead is still
     swept.
+  - The picker shows the PR's `qa` row as `[working]` while this
+    session's `pm qa run` of that PR is live, from any client or view
+    (S125 ca2a0657). This is display only. The CLI run still writes no
+    `qa` runtime entry, so once its process ends the row shows the last
+    full run's badge again (for example `[done PASS]`), never the one
+    instruction's verdict. A dead (Ctrl-C'd or killed) CLI run, or one
+    from another clone, never shows `[working]`. This supersedes the S124
+    story 4 Then "no `[working]` while `pm qa run` is live" (decided by
+    the QA44 planner; the S124 note-3a217f2 conflict).
 
 ### Generic providers and per-PR configuration (2026-10-27; impl.md R10–R13)
 - **RQ48** (R10, 87fd093f) Generic router provider. Given a router
@@ -2536,6 +2553,75 @@ S13, S14, S22, S101.
       that meets the user's live `pm qa run`, watched from a user's
       grouped view. Routing, bridge mount, stub logs, hooks and
       transcripts as in RQ52/R9, and exactly one routed full re-run.
+    Results (run b5025bad8fc5d142):
+    - S122 PASS, no code change. Filed pr-7824490 (`pm qa run` always
+      uses scenario index 1 and overwrites the full run's
+      `scenarios/1/verdict.md` capture; master too).
+    - S123 NEEDS_WORK. A `pm qa run` still refining was invisible to the
+      tick hold, so a REQA made the tick launch `qa-run-bg` over it and
+      kill its windows. Fixed in c5af52f0 and held post-fix for 8 offsets
+      (0.95–46.47 s). Filed pr-17ddbfe (the review-PASS tick starts the
+      first QA over a live `pm qa run`; master too) and pr-66432ce (the
+      TUI never adopts a tick-launched sign-off run).
+    - S124 NEEDS_WORK. Views named `pm-laptop` and `my~view`, and
+      `C-b x`/`C-b R`/`pm session home` from any view, missed the group
+      lookup. Fixed in 920633fe and held post-fix. Filed pr-ee18218 (the
+      global split hook writes `<session>.json` for unrelated sessions).
+    - S125 NEEDS_WORK, incomplete. Story 1 (container) held every routing
+      and REQA Then, but the picker from `myview` showed `[done PASS]`
+      over a live `pm qa run`. Fixed in ca2a0657. The post-fix rerun and
+      story 2 (host router outage) did not run: the QA container hit
+      `pids.max` 2048 because its PID 1 (`sleep infinity`) never reaps
+      and a `>(tee)` tick loop left ~1840 zombies.
+    - The S124 story 4 Then ("no `[working]` while `pm qa run` is live")
+      conflicts with ca2a0657. Decided by the QA44 planner: ca2a0657 is
+      intended (RQ56 already keeps `[working]` for a driven `pm qa run`
+      across a mount sweep). RQ56 now states it.
+    - Review 1cfa i1 3110c6f3 (`instruction_run_live` reads only the
+      `<pr>-cli-<pr>` record, owner pid first), i2 PASS.
+  - Forty-fourth pass (S126+), delta-only, QA44 planner 2026-10-28, HEAD
+    3110c6f3. Product changes since run b5025bad8fc5d142 are c5af52f0,
+    920633fe, ca2a0657 and 3110c6f3. c5af52f0 and 920633fe ran live
+    post-fix. ca2a0657 and 3110c6f3 have not run live. Every scenario
+    publishes `recording.mp4`. Controls, run beside HEAD: 920633fe
+    (pre-ca2a0657) and ca2a0657 (pre-3110c6f3). A PASS must show the
+    control failing where the fix applies. Harness:
+    `/pm-captures/scenarios/125/scripts`, `/pm-captures/scenarios/123/scripts`
+    and `/pm-captures/scenarios/124/scripts`. Keep `PM_CAPTURES_PR`
+    exported. Harness rule from S125: the QA container's PID 1 does not
+    reap, so do not use process substitution or per-tick subshell
+    pipelines in long tick loops, reap background jobs with `wait`, watch
+    `/sys/fs/cgroup/pids.current`, and run one story at a time. Not to
+    redo: S103–S124.
+    - S126: host, fake-claude. The picker's `qa` badge for a live
+      `pm qa run` (ca2a0657), from the base client, a `~N` view and a
+      user's own view: over a full-run PASS, with no earlier QA, a
+      Ctrl-C'd or SIGKILLed CLI run, two CLI runs in a row, and a full
+      QA that auto-start starts once the CLI ends. Another clone sharing
+      `~/.pm` runs `pm qa run` of the same PR id, alone and at the same
+      time as this clone's run. Both share the fixed `<pr>-cli-<pr>`
+      workdir, which is a pre-existing master design. Probe: does the
+      second start's fresh `qa_run.json` drop the first clone's
+      `[working]` and its REQA hold? A finding here goes to a bug PR if
+      master shares it, otherwise to RQ56. Picker latency with many
+      kept full-run records (3110c6f3).
+    - S127: container mode (podman 3, slirp4netns), fresh container. The
+      S125 story 1 rerun on HEAD 3110c6f3: real claude routed
+      refiner/worker on the router stub beside an unrouted PR. Ticks from
+      outside tmux, and a sign-off REQA that meets the user's live
+      `pm qa run` while its refiner still runs, watched from a user's
+      grouped view (`[working]` during the CLI run). Routing, bridge
+      mount, stub logs, hooks and transcripts as in RQ52/R9, and exactly
+      one routed full re-run.
+    - S128: host. The S125 story 2 that never ran: the same flow with the
+      router down at the re-run's launch and back mid-run, beside an
+      unrouted PR's QA. RQ52 ordinary API errors only, with no route
+      wait line and no main-endpoint hit for routed roles.
+    - Not in this pass: origin/master 89e3c501 no longer merges cleanly.
+      A trial merge conflicts in 11 files, including `qa_loop.py`,
+      `tui/auto_start.py`, `tmux.py`, `signoff.py`, `claude_launcher.py`,
+      `container.py` and `providers.py`. A master integration needs an
+      implementation session, then a merge smoke QA, before sign-off.
 
 ## 3. Edge cases
 
