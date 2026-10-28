@@ -320,6 +320,27 @@ class TestRecipes:
             "tmux recipe attaches the transcript pipe with -o: a leftover "
             "pipe from an earlier run silently prevents transcript.log")
 
+    def test_tmux_transcript_is_required_and_checked(self):
+        """The transcript is a promised artifact, so a run without one fails.
+
+        ``-o`` was only one way for the transcript to go missing: the attach
+        itself can fail (the pane is gone, tmux cannot spawn the command) and
+        ``pipe-pane`` can accept the attach while nothing is ever written. In
+        both cases ``transcript.log`` is missing or empty while the cast check
+        passes — the manifest then lists a transcript this run never produced,
+        the same "the promised artifact is not there" bug as rendering a stale
+        cast. The attach's failure is reported where it happens, and the file
+        is checked before the run is declared finished.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        assert re.search(r"transcript\.log\" \|\| \{", block), (
+            "tmux recipe ignores a failed pipe-pane, so the transcript is "
+            "lost silently")
+        assert "could not stream" in block, (
+            "a failed transcript pipe has no actionable message")
+        assert "test -s <capture-dir>/transcript.log" in block, (
+            "tmux recipe never checks that this run wrote a transcript")
+
     def test_tmux_recorder_exiting_before_it_draws_fails(self):
         """A recorder that exits before drawing recorded nothing.
 
@@ -830,6 +851,92 @@ def test_failed_render_leaves_no_video(name, tmp_path):
         f"{name}: a failed render left the previous run's gif in place")
 
 
+def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
+                ffmpeg_body=None, with_cast=True):
+    """Run a recipe's render block against stubbed ``agg``/``ffprobe``/``ffmpeg``.
+
+    Returns ``(proc, mp4_path, gif_path)``. The stubs are the real stage
+    contracts: ``agg`` writes the gif, ``ffprobe`` reports dimensions then the
+    codec, ``ffmpeg`` writes the mp4.
+    """
+    block = _render_block(name)
+    cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
+    block = (block.replace("<capture-dir>", str(tmp_path))
+                  .replace("<short-name>", "run"))
+    cast = Path(cast_rel.replace("<capture-dir>", str(tmp_path))
+                       .replace("<short-name>", "run"))
+    cast.parent.mkdir(parents=True, exist_ok=True)
+    if with_cast:
+        cast.write_text('{"version": 2}\n')
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    _stub_tool(bindir, "agg", agg_body or (
+        'for a in "$@"; do last=$a; done\nprintf gif > "$last"\n'))
+    _stub_tool(bindir, "ffprobe", ffprobe_body or (
+        'case "$*" in *width,height*) echo 640,480 ;; *) echo h264 ;; esac\n'))
+    _stub_tool(bindir, "ffmpeg", ffmpeg_body or (
+        'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+    return r, cast.with_suffix(".mp4"), cast.with_name(cast.name + ".gif")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_failed_encode_does_not_leave_a_partial_mp4(name, tmp_path):
+    """`test -s` on the mp4 is not proof the encode finished.
+
+    Verified live with the recipe's own render block and real `ffmpeg`: a
+    SIGKILLed encode leaves a **267,945-byte** mp4 (a SIGTERM one leaves
+    119,704 bytes), so a render whose encoder failed exits 0 with a broken
+    mp4 that the manifest and the report present as this run's recording —
+    the same header-only-cast bug as the recorder step, one artifact over.
+    The encoder's own exit status is the handle, and its partial output goes.
+    """
+    r, mp4, gif = _run_render(name, tmp_path, ffmpeg_body=(
+        'for a in "$@"; do last=$a; done\nprintf partial > "$last"\nexit 1\n'))
+
+    assert r.returncode != 0, (
+        f"{name}: an encoder that failed on a partial mp4 was reported as a "
+        "successful render")
+    assert "render produced no mp4" in r.stderr, r.stderr
+    assert "ffmpeg failed" in r.stderr, (
+        f"{name}: the failure does not name the stage that broke: " + r.stderr)
+    assert not mp4.exists(), (
+        f"{name}: a failed encode left its partial mp4 as this run's video")
+    assert not gif.exists()
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_succeeds_with_a_playable_mp4(name, tmp_path):
+    """The new checks must not reject a healthy render."""
+    r, mp4, gif = _run_render(name, tmp_path)
+
+    assert r.returncode == 0, r.stderr
+    assert mp4.read_bytes() == b"mp4"
+    assert not gif.exists(), "the intermediate gif is left behind"
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_says_when_there_is_no_cast(name, tmp_path):
+    """A missing cast is not an `agg` problem, and must not send the worker there.
+
+    The CLI recipe documents a `tee transcript.log` fallback for a host with
+    no asciinema, and that fallback writes no cast at all. The render step
+    used to fail with "check 'agg' is installed and the cast is readable" for
+    every failure, so a worker on that path went and installed a renderer it
+    already had. The message has to name the actual state.
+    """
+    r, mp4, gif = _run_render(name, tmp_path, with_cast=False)
+
+    assert r.returncode != 0, f"{name}: a render with no cast succeeded"
+    assert "there is no cast to render" in r.stderr, r.stderr
+    assert "is 'agg' installed" not in r.stderr, (
+        f"{name}: the no-cast failure sends the worker to install a renderer")
+    assert not mp4.exists()
+    assert not gif.exists()
+
+
 @pytest.mark.parametrize("name", RECIPES)
 def test_render_documents_how_to_get_the_renderer(name):
     """The render step fails without `agg`, so the recipe has to say how to get it.
@@ -929,6 +1036,121 @@ def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
     assert (capdir / "recording.mp4").read_bytes() == b"mp4"
     assert not (capdir / "recording.webm").exists(), (
         "the finalize step keeps the webm although the mp4 exists")
+
+
+def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
+    """`test -s` on the mp4 is not proof the transcode finished.
+
+    Verified with real ``ffmpeg``: killing an encode mid-flight leaves a
+    *non-empty* output (267,945 bytes on SIGKILL, 119,704 on SIGTERM, neither
+    a playable video), so the finalize step's file check alone reports a
+    successful transcode for a video the report cannot play — the
+    header-only-cast bug again, one artifact over. ffmpeg's own exit status is
+    the handle, and its partial output goes with it.
+    """
+    text = _recipe_text("web-ui-recording.md")
+    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
+    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "ffmpeg",
+               'for a in "$@"; do last=$a; done\nprintf partial > "$last"\nexit 1\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "a failed transcode that left a partial mp4 was reported as success")
+    assert "transcode produced no mp4" in r.stderr, r.stderr
+    assert not (capdir / "recording.mp4").exists(), (
+        "a failed transcode left its partial mp4 as this run's recording")
+
+
+def test_web_ui_teardown_refuses_an_unset_server_pid(tmp_path):
+    """`kill ""` is a silent no-op, so the app keeps holding the port.
+
+    The teardown block is pasted separately from step 1, so a fresh shell has
+    no ``SERVER_PID``. ``kill "" 2>/dev/null || true`` then does nothing at
+    all: the app keeps running and holding the port, and the next run's port
+    pre-check refuses with "something already answers" — a failure the worker
+    cannot connect to its own missed teardown. Same rule as the finalize and
+    driver blocks: a step that cannot do its job says so.
+    """
+    text = _recipe_text("web-ui-recording.md")
+    section = text.split("### Teardown", 1)[1].split("## Manifest", 1)[0]
+    block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+
+    env = {k: v for k, v in os.environ.items() if k != "SERVER_PID"}
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "the teardown ran with no SERVER_PID and silently did nothing")
+    assert "SERVER_PID" in r.stderr, r.stderr
+
+
+def _run_in_interactive_shell(block, env, cwd=None):
+    """Feed ``block`` to an interactive bash on a pty (``script``)."""
+    if shutil.which("script") is None:
+        pytest.skip("script(1) is required")
+    return subprocess.run(["script", "-qec", "bash", "/dev/null"],
+                          input=block, env=env, cwd=cwd,
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_web_ui_finalize_guard_stops_an_interactive_paste(tmp_path):
+    """`${VAR:?}` aborts only its own command in an interactive shell.
+
+    Verified in a real interactive bash: `: "${CAPDIR:?…}"` prints the error
+    and *the next line still runs*, so the `rm -f "$CAPDIR/recording.mp4"`
+    below it aimed at `/recording.mp4`. The guard only stopped a scripted
+    run, not the paste-into-a-shell form the recipe is written for. The block
+    therefore has to stop itself (`if … exit 1`), which is what this drives.
+    """
+    text = _recipe_text("web-ui-recording.md")
+    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
+    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = {k: v for k, v in os.environ.items() if k != "CAPDIR"}
+    env["PATH"] = f"{bindir}:{os.environ['PATH']}"
+
+    r = _run_in_interactive_shell(block, env)
+
+    assert "CAPDIR" in (r.stdout + r.stderr), r.stdout + r.stderr
+    assert not called.exists(), (
+        "an interactive paste ran ffmpeg with an unset CAPDIR: the `:?` guard "
+        "aborted its own command but the next line still ran")
+
+
+def test_web_ui_driver_guard_stops_an_interactive_paste(tmp_path):
+    """Same interactive-shell hole in the driver block's guard.
+
+    With `CAPDIR` unset, an interactive paste that carries on past the guard
+    reaches `cd ""` (which succeeds and stays put) and the conditional link,
+    creating ``node_modules`` in the worker's cwd — the filesystem side effect
+    the guard exists to prevent.
+    """
+    block = _web_ui_driver_block().replace("/usr/lib/node_modules",
+                                           str(_fake_playwright(tmp_path / "global")))
+    work = tmp_path / "cwd"
+    work.mkdir()
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CAPDIR", "APP_URL")}
+
+    r = _run_in_interactive_shell(block, env, cwd=work)
+
+    assert "CAPDIR" in (r.stdout + r.stderr), r.stdout + r.stderr
+    assert not os.path.lexists(work / "node_modules"), (
+        "an interactive paste linked node_modules into the worker's cwd")
 
 
 def _web_ui_driver_block():
@@ -1236,8 +1458,23 @@ case "$sub" in
   kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder"; exit 0 ;;
   pipe-pane)
       s=$(val -t "$@")
-      [ -f "$STATE/${s%%:*}" ] && exit 0
-      echo "can't find session: $s" >&2; exit 1 ;;
+      if [ ! -f "$STATE/${s%%:*}" ]; then
+          echo "can't find session: $s" >&2; exit 1
+      fi
+      # `pipefail`: the attach itself fails. `notranscript`: the attach is
+      # accepted but nothing is ever written, which only the end-of-run check
+      # can catch.
+      if [ "$STUB_MODE" = pipefail ]; then
+          echo "can't find pane: $s" >&2; exit 1
+      fi
+      for a in "$@"; do cmd=$a; done
+      if [ "$STUB_MODE" != notranscript ]; then
+          case "$cmd" in
+            *">>"*) out=${cmd#*>> }; out=${out%% *}
+                    printf 'pane output\n' >> "$out" ;;
+          esac
+      fi
+      exit 0 ;;
   capture-pane) cat "$STATE/pane" 2>/dev/null; exit 0 ;;
   send-keys)
       s=$(val -t "$@")
@@ -1418,6 +1655,35 @@ class TestCaptureFlowExecution:
         assert cast.stat().st_size > 0, "the completed cast is missing"
         assert "can't find session" not in r.stderr, (
             "a clean run prints a tmux error while stopping the transcript pipe")
+
+    def test_tmux_transcript_that_is_never_written_fails(self, tmp_path):
+        """The pipe can accept the attach and still write nothing.
+
+        ``transcript.log`` is one of the artifacts this recipe promises, and
+        ``test -s`` on the cast cannot tell whether it was written. A run
+        whose pipe never wrote anything has no transcript, so it must not be
+        reported as a finished capture.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "notranscript", tmp_path, target=True)
+        assert cast.stat().st_size > 0, "the fixture left no cast to misread"
+        assert r.returncode != 0, (
+            "a capture with no transcript was reported as a success")
+        assert "transcript.log is empty" in r.stderr, r.stderr
+
+    def test_tmux_failed_transcript_pipe_is_reported(self, tmp_path):
+        """A failed ``pipe-pane`` must say so where it happens.
+
+        ``tmux pipe-pane`` returns non-zero when the pane is gone or the
+        command cannot be spawned. Ignoring that leaves the rest of the
+        recording to run and fail later with a message about the transcript
+        that does not name the attach.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "pipefail", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "a failed transcript pipe was ignored and the run continued")
+        assert "could not stream" in r.stderr, r.stderr
 
     def test_tmux_recorder_exiting_before_drawing_fails(self, tmp_path):
         r, cast = _run_capture_block(

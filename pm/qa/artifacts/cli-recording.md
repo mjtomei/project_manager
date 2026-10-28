@@ -237,7 +237,11 @@ tmux -L scaffold kill-server 2>/dev/null || true   # cleanup
 
 If `asciinema` isn't installed and can't be installed, fall back to
 appending `| tee transcript.log` to the command line — you lose
-animation but keep the output. Note the fallback in the manifest.
+animation but keep the output. Note the fallback in the manifest. That
+fallback writes no cast, so the render step below has nothing to render
+and fails with "there is no cast to render"; a capture taken this way has
+no video, so say so in the manifest rather than presenting it as a
+complete recording.
 
 ## Render to video
 
@@ -269,7 +273,22 @@ cast=<capture-dir>/<short-name>/recording.cast
 # manifest and the report would present as this run's evidence. The gif goes
 # too, so a failed `agg` cannot fall back to encoding an earlier one.
 rm -f "${cast%.cast}.mp4" "$cast.gif"
-agg --idle-time-limit 2 "$cast" "$cast.gif"
+# One failure shape for the whole render, so the worker sees the same
+# sentence whichever stage broke. A renderer that fails may still leave a
+# partial output behind (verified: a killed `ffmpeg` leaves a non-empty mp4),
+# so the partial file goes too — `test -s` alone would accept it.
+render_fail() {
+    rm -f "$cast.gif" "${cast%.cast}.mp4"
+    echo "render produced no mp4 — $*" >&2
+    exit 1
+}
+# No cast means no video, and that is *not* an `agg` problem: say which it
+# is, so the worker does not go install a renderer it already has. (The
+# `tee transcript.log` fallback above produces no cast at all.)
+[ -s "$cast" ] || render_fail \
+    "there is no cast to render (the recording wrote nothing)"
+agg --idle-time-limit 2 "$cast" "$cast.gif" || render_fail \
+    "agg failed on the cast — is 'agg' installed?"
 # 2x nearest-neighbor upscale for crisp text — but only while the result
 # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
 # A terminal large enough to blow that budget is already crisp at native
@@ -283,15 +302,14 @@ if [ -n "$gw" ] && [ -n "$gh" ] && \
 fi
 ffmpeg -y -i "$cast.gif" -vf "$vf" \
     -c:v libx264 -profile:v high -level:v 5.1 -pix_fmt yuv420p -crf 18 \
-    -movflags +faststart "${cast%.cast}.mp4"
+    -movflags +faststart "${cast%.cast}.mp4" || render_fail \
+    "ffmpeg failed on the gif"
 rm -f "$cast.gif"
 # The mp4 is the required artifact: fail here, visibly, rather than leaving
-# the caller to notice the video is missing (or stale) later.
-test -s "${cast%.cast}.mp4" || {
-    echo "render produced no mp4 — check 'agg' is installed and the cast is" \
-        "readable" >&2
-    exit 1
-}
+# the caller to notice the video is missing (or stale) later. The exit status
+# above is what proves the encode ran; this catches a renderer that reports
+# success and writes nothing.
+test -s "${cast%.cast}.mp4" || render_fail "ffmpeg wrote no mp4"
 ```
 
 Notes:

@@ -32,8 +32,17 @@ recording-recipe bugs that any worker following the recipe hits:
   mp4 afterwards, so a failed render ends with no video and a clear error
   instead of the previous run's mp4 (and the CLI scaffold documents the
   escaped `bash -c` command form that actually survives its quoting). The
-  render sections name `agg` as a prerequisite and carry its install line,
-  and the web-UI finalize step refuses to run with no `CAPDIR`.
+  render sections name `agg` as a prerequisite and carry its install line;
+  they also check the renderers' own exit statuses (a failed `agg`/`ffmpeg`
+  leaves a partial mp4 that `test -s` accepts), say "there is no cast to
+  render" when the recording wrote nothing, and the tmux recipe reports a
+  failed transcript pipe and checks `transcript.log`;
+- the web-UI finalize/driver/teardown guards stop the block with
+  `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
+  interactive shell the next line still runs (the `rm` aimed at
+  `/recording.mp4`, the driver's link landed `node_modules` in the worker's
+  cwd) — and the teardown refuses an unset `SERVER_PID` instead of silently
+  leaving the app holding the port.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -92,7 +101,10 @@ foreground render block,
   cannot tell — and a stale `recorder.status` from an earlier run is cleared
   with the earlier cast, so it cannot make a torn-down recorder look finished;
 - `recording.mp4` is freshly written, non-empty, and `ffprobe` reports
-  `codec_name=h264`;
+  `codec_name=h264`; a render whose `agg`/`ffmpeg` fails partway (leaving a
+  non-empty partial mp4) exits non-zero with the "render produced no mp4 — …"
+  message and leaves no mp4, and a render with no cast at all says "there is
+  no cast to render" instead of blaming a missing `agg`;
 - `manifest.md` exists and its `## Files` section lists the produced files.
 
 ### R2 — The tmux screen-recording recipe records a TUI and renders it (nominal)
@@ -101,7 +113,10 @@ foreground render block,
 **When** the worker follows the tmux screen-recording recipe to record a TUI
 session, stop the recorder, and render the cast,
 **Then**
-- `transcript.log` and `recording.cast` are non-empty and from this run;
+- `transcript.log` and `recording.cast` are non-empty and from this run; a
+  failed `pipe-pane` fails the run where it happens ("could not stream …"),
+  and a pipe that never writes fails it at the end ("transcript.log is
+  empty") instead of reporting a capture with no transcript;
 - the recorder session ends before the cast check (the completion signal is
   observed, not assumed), and a recorder that was killed mid-scenario — even
   when the pm session ended too, leaving no live witness — fails on
@@ -205,6 +220,28 @@ run.
   the recipe's own install line (`agg-$(uname -m)-unknown-linux-gnu`, verified
   as agg 1.9.0) has to make the same cast render to H.264; substituting a
   different renderer is not a pass.
+- An encoder fails *partway* → the render steps check `agg`'s and `ffmpeg`'s
+  own exit statuses, not only the output file: a killed `ffmpeg` leaves a
+  non-empty partial mp4 (verified: 267,945 bytes) that `test -s` accepts, so
+  the file alone would be reported as a successful render. A failed encode
+  must end with no mp4 and the "render produced no mp4 — ffmpeg failed …"
+  message, and a healthy render must still produce its H.264 mp4.
+- A capture has no cast at all (the CLI recipe's `tee transcript.log`
+  fallback, or a recording that wrote nothing) → the render step says "there
+  is no cast to render" rather than sending the worker to install `agg`.
+- The tmux transcript pipe fails, or is attached to a pane that never emits
+  anything → the recipe reports the failed `pipe-pane` where it happens and
+  fails the run on an empty `transcript.log`, instead of declaring success
+  with no transcript (a quiet pane leaves a 0-byte file, which `test -s`
+  catches).
+- The web-UI finalize, driver, or teardown block is pasted into an
+  *interactive* shell with no `CAPDIR`/`SERVER_PID` → the block stops with its
+  message. The `: "${VAR:?}"` form only stops a scripted run: in an
+  interactive shell it aborts its own command and the next line still runs
+  (verified — the `rm` would have aimed at `/recording.mp4`, and the driver
+  block's link landed `node_modules` in the worker's cwd). A teardown that
+  silently does nothing leaves the app holding the port, which the next run's
+  port pre-check then reports as "something already answers".
 - The web-UI finalize step is run in a fresh shell (no `CAPDIR`) → it stops
   with the "CAPDIR is unset" message instead of aiming its `rm -f` and ffmpeg
   at `/recording.mp4` / `/recording.webm`; with `CAPDIR` set it still produces

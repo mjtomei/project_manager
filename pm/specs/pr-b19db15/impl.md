@@ -272,6 +272,18 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    the file holds what the recorder drew. The tmux readiness timeout is
    executed too (mode `norec`). All ten new/tightened assertions fail
    against the previous recipes.
+   R12's leftovers are covered as well: the render block is *executed* with
+   stubs that model each stage's contract — a failed `ffmpeg` that leaves a
+   partial mp4 (the file is removed and the run fails), a healthy render (rc
+   0, mp4 written, gif dropped), and a missing cast (fails with "there is no
+   cast to render" and does not tell the worker to install `agg`); the
+   web-UI transcode gets the partial-mp4 case; the tmux transcript is
+   covered both as text (the attach's failure branch, the end-of-run check)
+   and by execution (stub modes `pipefail` and `notranscript`); and the
+   finalize/driver guards are driven through a *real interactive bash on a
+   pty* (`script -qec bash`), where the old `: "${VAR:?}"` form let the next
+   line run and created `node_modules` in the worker's cwd. All of those fail
+   against the previous recipes.
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
@@ -296,10 +308,10 @@ R8. **A failed render must not leave the previous run's video, and the
      otherwise present the earlier run's logs as this run's. This is the
      same bug class as rendering a stale cast (R2), one level up.
    - Each render step then `test -s` the mp4 and exits 1 with an actionable
-     message ("render produced no mp4 — check 'agg' is installed and the cast
-     is readable" / "transcode produced no mp4 — check the driver's webm")
-     instead of exiting 0 with no video. The web-UI step keeps the webm until
-     the mp4 exists so a failed transcode can be retried.
+     message ("render produced no mp4 — …") instead of exiting 0 with no
+     video. The web-UI step keeps the webm until the mp4 exists so a failed
+     transcode can be retried. R12 checks the renderers' exit statuses too,
+     because a failed renderer leaves a partial output that `test -s` accepts.
    - The CLI scaffold's `<command-to-record>` sits inside single quotes
      inside the outer double-quoted `new-session` argument, so the recipe
      documents the *escaped* form for the `bash -c` command form:
@@ -410,8 +422,59 @@ R11. **A failure message has to point at evidence that still exists, and the
      cleared in step 0 with the stale cast (R2), so an earlier run's reason
      cannot be read as this run's.
 
-## Non-goals
+R12. **A renderer's exit status is the handle; a promised artifact that was
+   never written is a failure; and a guard has to stop the block, not just
+   print.** Three leftovers of the "validate the artifact before declaring
+   success, and act only on a handle you have" class:
+   - **A failed renderer leaves a partial output.** `test -s` on the mp4 is
+     not proof the encode finished: verified live in this container with real
+     `ffmpeg` 4.4.2, a SIGKILLed encode leaves a **267,945-byte** mp4 (and a
+     SIGTERM one 119,704 bytes), which the file check accepted as a
+     successful render — the header-only-cast bug one artifact over. Both
+     recording recipes and the web-UI finalize step now check the renderer's
+     own exit status (`agg … || render_fail …`, `ffmpeg … || render_fail …`)
+     and remove the partial output; `test -s` stays, to catch a renderer that
+     reports success and writes nothing. Evidence:
+     `/pm-captures/review-419c-i13/` (wrapper log + the recipe's own render
+     block: rc 1, "render produced no mp4 — ffmpeg failed on the gif", no mp4
+     left) and a healthy render of a real cast with agg 1.9.0 → rc 0,
+     H.264 mp4, gif dropped.
+   - **A missing cast is not an `agg` problem.** Every render failure used to
+     say "check 'agg' is installed and the cast is readable", but the CLI
+     recipe documents a `tee transcript.log` fallback for a host without
+     asciinema — and that fallback writes no cast at all, so the worker was
+     sent to install a renderer it already had. The render block now checks
+     the cast first and says "there is no cast to render (the recording wrote
+     nothing)", and the fallback paragraph says the render step will fail and
+     the capture has no video.
+   - **A `${VAR:?}` guard does not stop an interactive paste.** Verified in a
+     real interactive bash (`script -qec bash`): `: "${CAPDIR:?…}"` prints
+     the error, aborts only its own command, and the *next line still runs* —
+     so the finalize block's `rm -f "$CAPDIR/recording.mp4"` aimed at
+     `/recording.mp4`, and the driver block's `cd ""` + conditional link
+     created `node_modules` in the worker's cwd (both reproduced; the link
+     case is what the new execution test sees). The guard only stopped a
+     scripted run. All three standalone guards (finalize, driver, teardown)
+     are now `if [ -z "${VAR:-}" ]; then … exit 1; fi`. Step 1's cleanup keeps
+     its in-command `${CAPDIR:?}` glob, which is sound in both modes because
+     the expansion fails before `rm` runs (verified).
+   - **The tmux transcript is a promised artifact too.** `tmux pipe-pane`
+     returns non-zero when the pane is gone (verified with tmux 3.2a:
+     "can't find window: 9", rc 1) and the recipe ignored it, so the run
+     carried on and reported success with no `transcript.log` — the same
+     silent loss as the `-o` bug, through a different cause. The attach's
+     failure is now reported where it happens, and the file is checked
+     (`test -s <capture-dir>/transcript.log`) before the run is called
+     finished; a pipe attached to a pane that emits nothing leaves a 0-byte
+     file (verified), which that check catches.
+   - **The web-UI teardown silently did nothing in a fresh shell.**
+     `kill "$SERVER_PID" 2>/dev/null || true` with the variable unset is a
+     no-op, so the app kept the port and the *next* run's port pre-check
+     refused with "something already answers" — a failure the worker cannot
+     connect to its own missed teardown. The teardown now stops with that
+     reason, and says to run it in the shell that started the app.
 
+## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
   were the dropped scope above.
@@ -421,9 +484,9 @@ R11. **A failure message has to point at evidence that still exists, and the
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11) |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; asciinema's own stderr + the pane's last screen saved on failure (R11) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver block refuses an unset `CAPDIR` too (it would otherwise link `node_modules` in the worker's cwd); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -480,6 +543,22 @@ R11. **A failure message has to point at evidence that still exists, and the
   reject a real recording. The execution harness reproduces the hole the fix
   closes: with a killed recorder *and* the target session gone, the previous
   recipe exits 0 on the non-empty cast.
+- Review loop 419c i13 verified R12 live in this container (real agg 1.9.0,
+  ffmpeg/ffprobe 4.4.2, tmux 3.2a, asciinema 2.1.0). A healthy render of a
+  real cast through the recipe's own render block → rc 0, H.264 mp4, gif
+  dropped. A real `ffmpeg` SIGKILLed 0.35 s into the encode left a
+  **267,945-byte** mp4 (a SIGTERM one leaves 119,704 bytes) — a file the old
+  `test -s` accepted as a successful render; with the exit-status check the
+  same block exits 1 with "render produced no mp4 — ffmpeg failed on the gif"
+  and removes the partial mp4. `tmux pipe-pane` against a gone target
+  returns 1 ("can't find session"/"can't find window"), and a pipe attached
+  to a quiet pane leaves a 0-byte transcript — both previously ignored. In a
+  real interactive bash on a pty, `: "${CAPDIR:?…}"` printed its error and
+  the next line still ran (`rm` would have aimed at `/recording.mp4`), and
+  the driver block's link landed `node_modules` in the shell's cwd; the
+  `if … exit 1` form stops both. Evidence: `/pm-captures/review-419c-i13/`
+  (`render.sh`, `ffmpeg-killed-wrapper.sh`, `wrapper.log`,
+  `tmux-and-teardown.log`). File 80 pass; related suites 255 pass.
 - Review loop 419c i12 verified R11 live in this container (real tmux 3.2a +
   asciinema 2.1.0, the recipes' own fenced blocks, private sockets). The
   contradiction reproduced in both recipes: the CLI scaffold printed

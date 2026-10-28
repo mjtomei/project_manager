@@ -70,9 +70,11 @@ mkdir -p "$CAPDIR"
 # auto-named video onto it. The Layer 2 logs go with them: a run that never
 # re-captures the protocol would otherwise present the earlier run's http.log
 # and sse.log as this run's evidence.
-# The `${CAPDIR:?}` on the glob (not `$CAPDIR`) makes the shell stop if the
-# variable is unset: otherwise `"$CAPDIR"/*.png` would expand against the
-# filesystem root and the cleanup would target every PNG there.
+# The `${CAPDIR:?}` on the glob (not `$CAPDIR`) makes the whole `rm` command
+# abort if the variable is unset: the expansion fails before `rm` runs, so the
+# command never executes — even in an interactive shell, unlike the
+# `: "${CAPDIR:?}"` form below. Without it `"$CAPDIR"/*.png` would expand
+# against the filesystem root and the cleanup would target every PNG there.
 rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
       "$CAPDIR/http.log" "$CAPDIR/sse.log" "${CAPDIR:?}"/*.png
@@ -122,9 +124,16 @@ it with the capture dir and base URL in the environment:
 # `cd ""` silently stays put — the link below would then be created in
 # whatever directory the worker happens to be in (e.g. the PR workdir), the
 # resolution check would pass on *that* link, and the driver would fail with
-# a bare "Cannot find module …/driver.mjs". Stop instead, as the finalize
-# step does.
-: "${CAPDIR:?CAPDIR is unset — set the placeholders from step 1 first}"
+# a bare "Cannot find module …/driver.mjs". Stop the block instead, as the
+# finalize step does. This has to be an `if … exit 1`, not `: "${CAPDIR:?}"`:
+# in an *interactive* shell the `:?` form prints the error, aborts only its
+# own command, and the next line still runs (verified) — it only stops a
+# scripted run.
+if [ -z "${CAPDIR:-}" ]; then
+    echo "CAPDIR is unset — set the placeholders from step 1 first; the" \
+        "node_modules link below would otherwise land in the worker's cwd" >&2
+    exit 1
+fi
 cd "$CAPDIR"                                 # where driver.mjs lives
 # The driver is an ES module, and Node's ES-module resolver ignores
 # NODE_PATH, so with only the image's global Playwright a bare
@@ -233,20 +242,36 @@ decode. Transcode to H.264 and keep only the mp4:
 # The placeholders above are shell variables; a block pasted into a fresh
 # shell has no CAPDIR, and `"$CAPDIR/recording.mp4"` then becomes
 # `/recording.mp4` — the cleanup and ffmpeg would run against the filesystem
-# root. Stop instead (step 1's cleanup guards its glob the same way).
-: "${CAPDIR:?CAPDIR is unset — set the placeholders from step 1 first}"
+# root. Stop the block instead (step 1's cleanup guards its glob the same
+# way). An `if … exit 1` rather than `: "${CAPDIR:?}"`: in an *interactive*
+# shell the `:?` form prints the error, aborts only its own command, and the
+# `rm -f` below still runs against `/recording.mp4` (verified).
+if [ -z "${CAPDIR:-}" ]; then
+    echo "CAPDIR is unset — set the placeholders from step 1 first; the" \
+        "cleanup and ffmpeg below would otherwise aim at the filesystem root" >&2
+    exit 1
+fi
 # Drop the old mp4 first: ffmpeg leaves an existing output untouched when it
 # fails, so a failed transcode would otherwise keep the previous run's video
 # as this run's recording.
 rm -f "$CAPDIR/recording.mp4"
+# Check ffmpeg's own exit status as well as the file. A failed or killed
+# transcode leaves a *partial* mp4 behind (verified: a killed ffmpeg leaves a
+# non-empty output), which the `test -s` below accepts — the same
+# header-only-cast problem as the recording step, one artifact over.
 ffmpeg -y -i "$CAPDIR/recording.webm" -c:v libx264 -profile:v high \
     -pix_fmt yuv420p -crf 18 -movflags +faststart \
-    "$CAPDIR/recording.mp4"
+    "$CAPDIR/recording.mp4" || {
+    rm -f "$CAPDIR/recording.mp4"
+    echo "transcode produced no mp4 — ffmpeg failed on the driver's webm" >&2
+    exit 1
+}
 # The mp4 is the required artifact: fail here, visibly, rather than leaving
 # the caller to notice the video is missing later. The webm is kept until the
 # mp4 exists so a failed transcode can be retried without re-driving the UI.
 test -s "$CAPDIR/recording.mp4" || {
-    echo "transcode produced no mp4 — check the driver's webm" >&2
+    echo "transcode produced no mp4 — ffmpeg wrote nothing; check the" \
+        "driver's webm" >&2
     exit 1
 }
 rm -f "$CAPDIR/recording.webm"
@@ -283,7 +308,20 @@ kill "$SSE_PID" 2>/dev/null || true
 
 ### Teardown
 
+Run this in the same shell as step 1 — `SERVER_PID` comes from there. A
+fresh shell has no `SERVER_PID`, and `kill ""` is a silent no-op, so the app
+would keep running and holding the port; the next run's port pre-check then
+refuses with "something already answers", which looks like someone else's
+server. Stop with that reason instead (an `if … exit 1`, because the
+`: "${SERVER_PID:?}"` form only stops a *scripted* run — in an interactive
+shell it prints the error and the next line still runs).
+
 ```bash
+if [ -z "${SERVER_PID:-}" ]; then
+    echo "SERVER_PID is unset — run the teardown in the shell that started" \
+        "the app (step 1); the app keeps the port otherwise" >&2
+    exit 1
+fi
 kill "$SERVER_PID" 2>/dev/null || true
 ```
 
