@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T00:13:22.655092+00:00'
+  updated_at: '2026-10-28T01:50:54.501120+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38440,6 +38440,28 @@ prs:
       build-base fails (sethostname EPERM), so build with `podman build --uts host`.'
     created_at: '2026-10-27T22:30:07Z'
     last_edited: '2026-10-27T22:30:07Z'
+  - id: note-61d34b0
+    text: 'QA S109 (2026-10-28, container mode podman 3 slirp4netns, real claude 2.1.312
+      refiner/worker via acme router stub + bridge, fake planner/verifier/finalizer;
+      captures /pm-captures/scenarios/109, REPORT.md): PASS on 239e2f04, no code change.
+      Story 1 (verifier stop): s2 PASS polled at T1+40 with acme-v broken; the stop
+      tick logged "Verification passed for scenario 1" then one "QA stopped for R:
+      provider acme-v ... has no host"; stopped status s1 PASS / s2 PASS (verifying)
+      / s3 queued, overall empty, stopped set, resume gone; 1 s sampler proves s1
+      stayed PASS (verifying) until the stop write; nothing launched after. Story
+      2 (relaunch stop): s1 PASS + s2 pane kill in one tick -> "window died retry
+      1/10 (backoff 5s)" -> 5.3 s later one QA stopped (acme); s1 PASS / s2 empty;
+      no relaunch, no new claude/container, bridge PID+socket+mounts intact, provider
+      test --container OK, z t rerun PASS through the bridge. U PASS on main both
+      times; no routed request on main, no U on router; no wait/nudge lines. Timing
+      note: worker verdict is accepted ~61 s after the stub reply (idle_prompt), so
+      the "release s2 at T1+Δ−5" / "kill within 2 s of release" steps must be offset
+      by ~61 s (drivers phase-align to the 5 s tick via qa_resume.json mtime). Observations:
+      QA status window keeps a spinner on a stopped run PASS (verifying) row with
+      no stopped marker; kill-pane leaves the worker claude alive inside the container
+      (ppid 1).'
+    created_at: '2026-10-28T01:50:54Z'
+    last_edited: '2026-10-28T01:50:54Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
