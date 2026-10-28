@@ -150,6 +150,25 @@ def test_same_unresolved_pair_does_not_bounce_again(w):
     assert len([n for n in pr(w)["notes"] if "Base integration conflict" in n["text"]]) == 1
 
 
+def test_conflict_before_a_later_review_iteration_records_the_stage(w):
+    """The third transition point: a conflict before iteration N > 1.
+
+    The return must name the stage it blocked (and which iteration) so the
+    rework prompt and ``pm pr show`` say what was about to run.
+    """
+    with patch("pm_core.base_check.launch_impl",
+               return_value=(True, "")) as launch:
+        res = gate(w, base_check.STAGE_REVIEW_ITERATION, iteration=3)
+    assert res.decision == base_check.CONFLICT
+    assert res.returned and res.launched
+    launch.assert_called_once()
+    ret = pr(w)["base_return"]
+    assert ret["stage"] == base_check.STAGE_REVIEW_ITERATION
+    assert ret["iteration"] == 3
+    assert ret["head"] == git(w.wd, "rev-parse", "HEAD")
+    assert any("review iteration 3" in n["text"] for n in pr(w)["notes"])
+
+
 def test_conflict_before_qa_returns_to_implementation(w):
     set_pr(w, status="qa")
     with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
@@ -259,6 +278,26 @@ def test_completion_waits_for_a_launched_rework(w):
     res = completion(w)
     assert not res.complete
     assert "unchanged" in res.reason
+
+
+def test_completion_requires_idle_evidence(w):
+    """No idle timestamp is no evidence: an idle notification alone never
+    qualifies, so a caller that cannot read the pane's turn must not complete.
+
+    Without this a missing timestamp silently skips both the settle window
+    and the ``launched_at`` guard, letting a review start beside a rework
+    session whose turn was never observed to end.
+    """
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+    simulate_launch(w)
+    reconcile(w)
+    res = base_check.impl_completion(w.pm_dir, PR, pr(w))
+    assert not res.complete
+    assert "idle evidence" in res.reason
+    # A real idle turn still completes.
+    done = completion(w)
+    assert done.complete, done.reason
 
 
 def test_completion_after_reconciled_base_resolves_the_return(w):

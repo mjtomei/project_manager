@@ -38526,7 +38526,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T16:45:00.355499+00:00'
+  updated_at: '2026-10-28T18:05:11.283179+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38602,6 +38602,26 @@ prs:
       env failures (markdown module, PM_HOST_HOME hook test). (2026-10-28T16:55:00Z)'
     created_at: '2026-10-28T16:45:00Z'
     last_edited: '2026-10-28T16:45:00Z'
+  - id: note-dc6ef32
+    text: 'Review-loop a6f7 i2 fixes. (1) impl_completion: a missing idle timestamp
+      is now "no evidence" instead of skipping both the IDLE_SETTLE_SECONDS window
+      and the launched_at (post-relaunch) guard — a caller that could not read the
+      pane turn could declare completion and start a reviewer beside the rework writer.
+      (2) review_loop_ui._start_loop: the open-base-return refusal now repairs a raced
+      in_review status via base_check.ensure_impl_status; the base-return completion
+      handoff only polls in_progress PRs, so a stale in_review (a callback writing
+      it before the return landed, e.g. the `pr review --no-window` auto-start path)
+      left the rework with no reviewer and no completion check — symmetric with start_qa/start_or_stop_qa_loop,
+      which already repair. (3) Tests: real-git coverage for the review-iteration
+      transition point (stage/iteration recorded, exactly one impl launch), the idle-evidence
+      requirement, and the raced-status repair. Spec R6/R13 updated. Full suite: 4129
+      passed, 1 skipped, 13 failed — all pre-existing env (12x test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Note: tests must run with /usr/bin first in PATH
+      here — the container `git` wrapper proxies fetch/ls-remote and breaks the real-git
+      fixtures.'
+    created_at: '2026-10-28T18:05:11Z'
+    last_edited: '2026-10-28T18:05:11Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

@@ -115,7 +115,10 @@ already drops it because the status is no longer `qa`.
   `idle_prompt` — still visible through a stale `impl-<pr>.jsonl` symlink in
   another driver's transcript dir — is not the rework session's turn, so the
   relaunch re-points those symlinks (`_share_impl_transcript`) to keep the
-  new session trackable. An idle notification alone never qualifies. The TUI
+  new session trackable. An idle notification alone never qualifies: a
+  missing idle timestamp (`idle_since is None`, e.g. the pane/tracker could
+  not be read) is *no evidence* and must not skip the settle/relaunch
+  guards. The TUI
   runs the network check in a worker thread (throttled to
   `BASE_CHECK_POLL_SECONDS`, keyed to the return episode); the CLI passes the
   tracker's idle timestamp so the same settle window applies.
@@ -166,7 +169,9 @@ already drops it because the status is no longer `qa`.
   `qa_status.json`, so a previous QA PASS cannot hand the PR to sign-off
   beside the rework.
 - **R13 — TUI coverage.** `_start_loop` and `_auto_start_review_loops` refuse
-  to start a review while a base return is open; `start_qa` /
+  to start a review while a base return is open (the refusal repairs a raced
+  `in_review` status back to `in_progress` — the handoff only polls
+  `in_progress`, so leaving it would strand the rework); `start_qa` /
   `_auto_start_qa_loops` / `qa-run-bg` refuse to start QA likewise;
   `_poll_impl_idle` evaluates `impl_completion` in a **thread worker**
   (fetch must not block the TUI event loop), logs a wait reason once, and

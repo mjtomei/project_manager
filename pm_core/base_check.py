@@ -837,11 +837,13 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
     """Whether a returned PR's implementation genuinely finished.
 
     An idle notification alone is not completion.  Requires: the fresh
-    session launched (``awaiting`` cleared), the pane idle for at least
-    :data:`IDLE_SETTLE_SECONDS`, no in-progress merge/rebase/cherry-pick,
-    no uncommitted tracked edits, and a fresh integration check that is no
-    longer a conflict.  A moved base that still conflicts produces one new
-    return (bounded); a clean integration resolves the episode.
+    session launched (``awaiting`` cleared), a readable idle timestamp
+    (``idle_since`` — no timestamp is no evidence) at least
+    :data:`IDLE_SETTLE_SECONDS` old and later than the relaunch, no
+    in-progress merge/rebase/cherry-pick, no uncommitted tracked edits, and
+    a fresh integration check that is no longer a conflict.  A moved base
+    that still conflicts produces one new return (bounded); a clean
+    integration resolves the episode.
     """
     try:
         data = store.load(root)
@@ -859,9 +861,16 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
         workdir = pr.get("workdir")
         if not workdir or not Path(workdir).is_dir():
             return CompletionResult(False, "no PR workdir")
+        if idle_since is None:
+            # No idle turn was observed, so there is nothing that says the
+            # rework session's work is finished.  Treating a missing
+            # timestamp as satisfied would skip both the settle window and
+            # the ``launched_at`` guard below — an idle notification alone
+            # never qualifies as completion.
+            return CompletionResult(
+                False, "no idle evidence from the rework session yet")
         launched = _parse_ts(rec.get("launched_at") or rec.get("ts"))
-        if idle_since is not None and launched is not None \
-                and float(idle_since) < launched.timestamp():
+        if launched is not None and float(idle_since) < launched.timestamp():
             # The idle event predates the relaunch: it belongs to the session
             # this return killed (a stale transcript symlink still points at
             # it), so it says nothing about the rework.  Without this an
@@ -869,8 +878,7 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
             # completion and a reviewer could start beside the new writer.
             return CompletionResult(
                 False, "no idle evidence from the rework session yet")
-        if idle_since is not None and (
-                time.time() - float(idle_since) < IDLE_SETTLE_SECONDS):
+        if time.time() - float(idle_since) < IDLE_SETTLE_SECONDS:
             return CompletionResult(
                 False, "implementation just went idle; letting it settle")
         op = git_op_in_progress(workdir)

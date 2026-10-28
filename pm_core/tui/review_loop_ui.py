@@ -205,6 +205,11 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     # launch anyway; skipping here avoids a wasted loop start/log line.)
     from pm_core import base_check
     if base_check.has_open_return(pr):
+        # A stale callback may have written in_review before the return
+        # landed.  The base-return completion handoff only polls
+        # in_progress PRs, so leaving the status behind would strand the
+        # rework: no reviewer runs and nothing ever re-checks the base.
+        base_check.ensure_impl_status(app._root, pr_id)
         app.log_message(
             f"{pr_id}: base integration rework pending — review not started",
             force=True)

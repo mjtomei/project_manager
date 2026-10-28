@@ -109,6 +109,26 @@ def test_start_qa_refuses_with_open_base_return(tmp_path):
                for c in app.log_message.call_args_list)
 
 
+def test_start_loop_repairs_a_raced_in_review_status(tmp_path):
+    """A refused loop must leave the PR in_progress, not stranded in_review.
+
+    The TUI's base-return handoff only watches ``in_progress`` PRs, so a
+    raced ``in_review`` status (a stale callback wrote it before the return
+    landed) would otherwise strand the rework: no reviewer runs, and the
+    completion check never sees the PR.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(status="in_review", base_return=_return())
+    app = _app(tmp_path, [pr])
+    with patch("pm_core.tmux.in_tmux", return_value=True):
+        review_loop_ui._start_loop(app, "pr-001", pr,
+                                   transcript_dir=str(tmp_path / "tdir"))
+    assert app._review_loops == {}
+    stored = store.get_pr(store.load(app._root), "pr-001")
+    assert stored["status"] == "in_progress"
+
+
 # --- idle is not completion ------------------------------------------------
 
 def test_completion_tick_waits_for_settle(tmp_path):
