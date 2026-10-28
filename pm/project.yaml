@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T05:12:12.184557+00:00'
+  updated_at: '2026-10-28T05:21:46.803059+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14899,6 +14899,31 @@ prs:
       so merged-PR leftovers are usually gone before the TUI restart startup pass.'
     created_at: '2026-10-28T04:23:17Z'
     last_edited: '2026-10-28T04:23:17Z'
+  - id: note-0272a1d
+    text: 'QA S78 (6e3a4d5a = code 1bc65b72; real rootless Podman 3.4.4, unmodified
+      build-base, fake agents; evidence /pm-captures/scenarios/78/manifest.md): INPUT_REQUIRED
+      only for Then wording; all product behaviour held, no code change. S1: A NEEDS_WORK
+      -> z t run2 first container +6.4 s (run1 +7 s, no lock wait); superseded B run1
+      removed by qa-run-start in 5 s; zz t during verify -> s6/s7 INPUT_REQUIRED "PASS
+      was not verified before the run was stopped", finalize skipped, kept while windows
+      live; every run released its own containers while the other PR windows were
+      alive; end running 5 = baseline 3 + 2 kept. S2: nogit image -> rc1 "could not
+      finish setup. Runtime error: ... container state improper" + "git: command not
+      found", no container/proxy left; retry clean, marker+trust only, push rc0. S3:
+      merge detached reap[manual] removed A impl+proxy, pane-exit removed signoff,
+      ctrl+r startup pass removed closed B stopped-run containers; h/l moved within
+      40 ms; final 3 = B impl+retained+C impl; 280 hashes unchanged. Supplementary
+      S4: B and C both ran s19-s28 concurrently (637 sampler rows), all released.
+      Then conflicts for the next spec refresh: (1) B fresh run renumbers from created
+      dirs, so z t right after qa-B-s1 gives s5-s14, not s11-s20 (press z t only after
+      all 10 launched); (2) A run1 and B run1 windows cannot coexist under the When
+      order (A run2 kills run1 windows first); (3) end-count formula double counts
+      B impl/retained already in the baseline (observed 3 = documented kept set).
+      Fixture traps: QA windows keep the concretizer pane, so the verifier is the
+      3rd pane; podman build needs --uts host here; t on a PR with an open qa window
+      only focuses it.'
+    created_at: '2026-10-28T05:21:46Z'
+    last_edited: '2026-10-28T05:21:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
