@@ -14924,6 +14924,93 @@ prs:
       only focuses it.'
     created_at: '2026-10-28T05:21:46Z'
     last_edited: '2026-10-28T05:21:46Z'
+  - id: note-33d043c
+    text: 'S74 refine (2026-10-28, HEAD fdb3c7d3): reshaped onto the S59 fixture (/pm-captures/scenarios/59/drivers
+      -> /scratch/s74). C (P2 project) starts first, then A (main project, with B).
+      Story 2 is a fresh A run (z t) after C s1 retained from story 1 is closed and
+      reaped, so the runtime is B + A x4 = L. A gets exactly 2 INPUT_REQUIRED (one
+      of s1-s4, and the outage floor launch): with 3+ kept, A holds containers in
+      a full runtime and stalls, so the batch cannot grow back. Story 3 is a fresh
+      C run (z t) whose first two scenarios are both INPUT_REQUIRED, which fills B
+      + 2 A-kept + 2 C = L, so C really waits. Per res 24, the Thens do not assert
+      which run owns each L+1 sample.'
+    created_at: '2026-10-28T04:21:26Z'
+    last_edited: '2026-10-28T04:21:26Z'
+  - id: note-fdfd4d7
+    text: 'QA S74 (fdb3c7d3, code 1bc65b72; real rootless Podman 3.4.4 overlay, unmodified
+      build-base, 2 PM processes, fake agents; evidence /pm-captures/scenarios/74/manifest.md):
+      INPUT_REQUIRED on a spec conflict only, no code change. Story 2 outage held:
+      one floor launch s15 after all four settled (6=L+1), PASS releases deferred,
+      IR s12/s15 kept, log "5 queued ... wait for a readable container inventory;
+      4/5 ... release(s) are deferred", no 7, 78/78 TUI nav ok; rm -f x3 1.5 s after
+      clear, B+2 kept=3, then 2 workers overlapping, all post-recovery samples <=5,
+      s11-s15 hashes match. Story 3 held: C batch 2 both IR, waits with "2 ... retained";
+      reap removed closed-window s11 / kept s12, C s13 run 3.6 s later pre 4 -> 5,
+      C final INPUT_REQUIRED. Story 1 held (C launches all pre-sample 4, peak 6 no
+      7, retained s2 Up + dry-run keep, B probe pushed) EXCEPT "C final verdict INPUT_REQUIRED":
+      the scenario fake scripts NEEDS_WORK twice and qa_loop gives NEEDS_WORK precedence
+      over INPUT_REQUIRED (pre-PR rule), so C ended NEEDS_WORK. Next rerun: change
+      that Then to NEEDS_WORK or drop the NW entries from the C fake. Recorded: 3
+      A/C launch pairs off the same pre-sample 4 (no cross-process admission), and
+      grow-back run calls 19 s apart (serial dequeue pr-ab66887).'
+    created_at: '2026-10-28T05:16:59Z'
+    last_edited: '2026-10-28T05:16:59Z'
+  - id: note-54f387d
+    text: 'S75 refine: (1) a container worker trust-blocked at a non-/workspace dialog
+      is INPUT_REQUIRED, so run-end release KEEPS its container ("kept sN INPUT_REQUIRED");
+      it is not removed. (2) To exercise eac0ccdd the TUI restart must land in a backoff
+      AFTER a failed relaunch (qa_resume.json pane_id null + worker_died true). A
+      restart in the first backoff still has the dead pane id in the snapshot and
+      passes even pre-fix. Use the S60 persistent retarget gate on new-window -n qa-<pr>-s2,
+      disarm after "Resuming QA".'
+    created_at: '2026-10-28T04:20:38Z'
+    last_edited: '2026-10-28T04:20:38Z'
+  - id: note-d7260ec
+    text: 'QA S75 (fdb3c7d3, code 1bc65b72; real rootless Podman 3.4.4, fake agents;
+      evidence /pm-captures/scenarios/75/manifest.md): PASS. A: 3 container /workspace
+      trust dialogs accepted within one 5 s tick (approved workdir qa/.../s-K/repo),
+      PASS, host /workspace untrusted, trust list unchanged, removed 3. B (z t; plain
+      t on a completed QA only focuses the window): s8 /etc dialog never accepted,
+      blocked after 30 s grace -> INPUT_REQUIRED, container kept (kept s8 INPUT_REQUIRED),
+      others PASS+removed. C x2: pm tui restart during retry 3/10 backoff -> resumed
+      retry 3/10, relaunch W2 in new window, PASS 130 s after restart, qa_resume never
+      recorded C, registry C=qa-concretize-s1, one container. Worker launch order
+      varies, so the 86400 s entry landed on s1 both times (story driven on s1). Filed
+      pr-d022825 (inline backoff sleep stalls other scenarios).'
+    created_at: '2026-10-28T05:05:27Z'
+    last_edited: '2026-10-28T05:05:27Z'
+  - id: note-c427674
+    text: 'S76 refine (2026-10-28, HEAD fdb3c7d3, code trace only): reuse /pm-captures/scenarios/62/drivers
+      (podman-shim, drv.sh, mkproject.sh, subreaper). Story 1: a single hold around
+      the release listing yields ONE vanish (passes even pre-d3d1b4fc). To exercise
+      the consecutive retake, hold the A review release_on_exit inventory inspect
+      (argv has {{json .Config.Labels}}, parent cmdline arg 4 = review name) twice,
+      and in the pm pr cleanup process let the first rm -f through and hold the rest
+      until attempt 2 is held. Plain terminal (TMUX unset) means session=None: no
+      windows killed, all tags. Story 3: launcher itself runs ps during --fresh, so
+      the outage must be scoped to ps from `pm container status`. Gate old release
+      info until the old ID is gone (<=8 s, so forget_releases_of_removed misses it),
+      then hold its first ps <=25 s; status under outage lists "owner release pending;
+      retry with pm container reap", and after recovery it is hidden while the record
+      still exists. Proxy stop evidence: exactly one "Stopped unused shared push proxy
+      for <tag>/<A>" (grep -a ~/.pm/debug/*.log).'
+    created_at: '2026-10-28T04:21:38Z'
+    last_edited: '2026-10-28T04:21:38Z'
+  - id: note-404f7eb
+    text: 'QA S76 PASS (fdb3c7d3, code 1bc65b72 incl. d3d1b4fc; real rootless Podman
+      3.4.4, unmodified build-base incl. Chromium smoke, fake agents; evidence /pm-captures/scenarios/76/manifest.md).
+      S1: the review pane-exit release inventory hit two consecutive vanishes (no
+      such object review, then signoff) and its 3rd attempt succeeded. Plain-terminal
+      pr cleanup printed Cleaned A: 3 container(s), rc=0; status was clean before
+      reap; reap --pr found nothing in scope; the shared proxy stopped exactly once;
+      B was unchanged and could push its branch but was refused master; hashes OK.
+      S2: review/signoff --fresh with the old release info gated until the old ID
+      was gone: 6 statuses clean; reap --session kept live panes; decoys untouched.
+      S3: during a status-scoped ps outage, status listed "owner release pending"
+      for D review; after recovery it was hidden while the record was still on disk;
+      R3 was kept by reap.'
+    created_at: '2026-10-28T04:59:45Z'
+    last_edited: '2026-10-28T04:59:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -31997,7 +32084,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T07:34:49.309576+00:00'
-  updated_at: '2026-10-28T03:12:49.696067+00:00'
+  updated_at: '2026-10-28T05:05:26.506052+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32021,6 +32108,15 @@ prs:
       then trust a host /workspace by proxy).'
     created_at: '2026-10-28T03:12:49Z'
     last_edited: '2026-10-28T03:12:49Z'
+  - id: note-e63a1ff
+    text: 'QA S75 (pr-1139060, fd9bbdb4): a container QA worker blocked at a trust
+      dialog for a path outside /workspace (e.g. /etc) gets the remedy "run `pm trust
+      add /etc` (or accept the prompt in the pane), then restart this step". The container
+      watch refuses every non-/workspace path, so pm trust add cannot unblock it;
+      only accepting in the pane applies. Container-worker remedy text should drop
+      the pm trust add advice. Evidence /pm-captures/scenarios/75/storyB/qa_status.json.'
+    created_at: '2026-10-28T05:05:26Z'
+    last_edited: '2026-10-28T05:05:26Z'
 - id: pr-e835d8f
   plan: bugs
   title: 'Bug: local-backend merge-resolution window runs in the unapproved project
@@ -35118,6 +35214,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T02:45:35.737191+00:00'
   updated_at: '2026-10-28T02:45:35.737191+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d022825
+  plan: bugs
+  title: 'Bug: QA dead-worker retry backoff sleeps inline in the verdict poll loop,
+    stalling every other scenario'
+  branch: pm/pr-d022825-bug-qa-dead-worker-retry-backoff-sleeps-inline-in-
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py (poll loop, ~L3321): when a scenario worker pane
+    dies, the loop logs "Scenario N window died — retry K/10 (backoff Bs)" and calls
+    time.sleep(backoff) inline, with backoff = 5*2^retries (up to 2560 s on retry
+    10). While it sleeps, no other scenario is polled: verdicts, verification, trust-prompt
+    watches and stop requests for every other scenario wait. Repro (QA S75 story C
+    on pr-1139060, /pm-captures/scenarios/75/storyC-run1-target-s1): two scenarios;
+    s2 worker emitted PASS after 5 s at ~04:55:35, but s1 W1 was killed at 04:55:34
+    and every relaunch failed (tmux retarget gate), so s2 verdict was only logged
+    at 04:57:02 after the s1 backoffs (5+10+20 s, plus a restart). Fix idea: record
+    a per-scenario next-retry deadline and skip that scenario until it passes, instead
+    of sleeping.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T05:00:30.672081+00:00'
+  updated_at: '2026-10-28T05:00:30.672081+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
