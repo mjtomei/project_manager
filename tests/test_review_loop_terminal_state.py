@@ -100,3 +100,40 @@ def test_empty_verdict_writes_done_state(tmp_path, monkeypatch):
 
     entry = runtime_state.get_action_state("pr-stop1", "review-loop")
     assert entry["state"] == "done"
+
+
+class TestCompletionMessage:
+    """The review-loop stop line must survive Rich markup parsing.
+
+    ``latest_output`` is arbitrary text (exception messages, agent output)
+    and the log line is Rich markup, so an unescaped ``[...]`` would be
+    parsed as a style tag and vanish — the same defect the watcher's stop
+    line had.
+    """
+
+    def _plain(self, verdict: str, output: str) -> str:
+        from rich.text import Text
+        from pm_core.tui.review_loop_ui import _format_completion_message
+
+        state = _make_state("pr-nv1", verdict)
+        state.latest_output = output
+        return Text.from_markup(_format_completion_message(state)).plain
+
+    def test_no_verdict_line_names_the_outcome(self):
+        plain = self._plain(
+            "NO_VERDICT",
+            "review_loop: session abc produced no expected outcome "
+            "(PASS / NEEDS_WORK / INPUT_REQUIRED); pane %5 was left open.",
+        )
+        assert "! NO_VERDICT" in plain
+        assert "pane %5 was left open" in plain
+
+    def test_error_output_is_escaped_too(self):
+        plain = self._plain("ERROR", "boom [red]not markup[/red]")
+        assert "boom [red]not markup[/red]" in plain
+
+    def test_clean_verdict_has_no_error_block(self):
+        plain = self._plain("PASS", "should not appear")
+        assert "Error:" not in plain
+        assert "should not appear" not in plain
+

@@ -126,6 +126,10 @@ New terminal verdict `NO_VERDICT = "NO_VERDICT"` (exported from
 TUI wiring: `NO_VERDICT` icons/styles in `review_loop_ui`, `watcher_ui`,
 `tech_tree`; review loop maps `NO_VERDICT` to runtime state `failed` (same as
 `ERROR`/`KILLED`) and logs a sticky message with the error text and log path.
+Both the review-loop and watcher stop lines escape the error text before it
+reaches the Rich-markup log line (the text is arbitrary — exception messages,
+agent output — and an unescaped `[...]` would be parsed as a style tag and
+dropped from the log line).
 
 ### R4 — Apply consistently across review, watcher, QA
 
@@ -547,7 +551,10 @@ unbounded.
   line, still no plan supplied); a plan written while recovery
   settles (the idle-hook/transcript-write race) is accepted from the settle
   re-read rather than being asked for again.
-* `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`.
+* `tests/test_review_loop_terminal_state.py`: `NO_VERDICT` → `failed`; the
+  completion log line keeps a bracketed error detail intact (escaped for Rich
+  markup) for both `NO_VERDICT` and `ERROR`, and omits the error block for a
+  clean verdict.
 * `tests/test_autostart_multi_target.py`: `NO_VERDICT` review loop → phase
   state `failed` in the status builder; a recorded `STOPPED` QA run is a
   hold verdict (the scheduler does not relaunch it) and reports as

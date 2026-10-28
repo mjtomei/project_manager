@@ -11,6 +11,8 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
+from rich.markup import escape as _escape
+
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import held_by_text
@@ -396,6 +398,27 @@ def _poll_loop_state(app) -> None:
         raise
 
 
+def _format_completion_message(state: ReviewLoopState) -> str:
+    """Build the sticky log line announcing a finished review loop.
+
+    ``state.latest_output`` is arbitrary text (exception messages, agent
+    output) and the log line is Rich markup, so the error detail is escaped:
+    an unescaped ``[...]`` would be parsed as a style tag and dropped from
+    the log line (the watcher's identical stop line had the same defect).
+    """
+    verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
+    msg = (
+        f"Review loop done for {state.pr_id}: {verdict_icon} "
+        f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
+    )
+    if state.latest_verdict in ("ERROR", VERDICT_NO_VERDICT) and state.latest_output:
+        # Truncate for display but show enough to be useful
+        msg += f"\n  Error: {_escape(state.latest_output[:300])}"
+        from pm_core.paths import command_log_file
+        msg += f"\n  See log: {command_log_file()}"
+    return msg
+
+
 def _poll_loop_state_inner(app) -> None:
     """Inner implementation of poll loop state."""
     any_running = False
@@ -437,18 +460,7 @@ def _poll_loop_state_inner(app) -> None:
 
     # Announce completed loops and auto-merge passing PRs
     for state in newly_done:
-        verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
-        msg = (
-            f"Review loop done for {state.pr_id}: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
-        )
-        if state.latest_verdict in ("ERROR", VERDICT_NO_VERDICT) and state.latest_output:
-            # Truncate for display but show enough to be useful
-            err_text = state.latest_output[:300]
-            msg += f"\n  Error: {err_text}"
-            from pm_core.paths import command_log_file
-            msg += f"\n  See log: {command_log_file()}"
-        app.log_message(msg, sticky=10)
+        app.log_message(_format_completion_message(state), sticky=10)
 
         # Auto-start next step: review pass → QA (then QA pass → merge)
         if state.latest_verdict == VERDICT_PASS:
