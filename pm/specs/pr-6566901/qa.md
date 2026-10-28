@@ -40,8 +40,17 @@ Since the first QA round the implementation also: names a validator rejection
 in the planner's recovery request and exhaustion error (a malformed
 `QA_PLAN` block is not treated like "emitted nothing"); re-scans the
 transcript before retiring a worker; routes the verifier's machine-driven
-*re-check* through the same bounded poller; and records the QA verdict in
-shared runtime state so auto-start can hold `STOPPED`.
+*re-check* through the same bounded poller; records the QA verdict in shared
+runtime state so auto-start can hold `STOPPED`; mirrors the CLI/auto-sequence
+detached QA driver (`pm pr qa-run-bg`) into that runtime state so the picker
+and auto-start see its progress and verdict; keeps scheduler-driven QA starts
+from stealing an attached client's focus while user starts still focus the QA
+window; prefers a *running* watcher in the manager's type lookup so the
+watcher toggle cannot start a second instance over the live one; escapes the
+`NO_VERDICT` reason in the review/watcher log lines (a bracketed
+`watcher[<type>]` prefix was being eaten as Rich markup); and recreates a QA
+window that was killed between runs with a live main pane plus a pruned pane
+registry.
 
 ## Setup (cross-cutting)
 
@@ -79,9 +88,20 @@ shared runtime state so auto-start can hold `STOPPED`.
   pane death rather than exhaustion. Use the default settle when the
   expected observation is the terminal verdict, and a short settle only when
   the observation is the recovery request appearing in the pane.
-* Loops are started from the TUI (`zz d` review loop, `t` QA run, `zz t` QA
-  loop) or from the CLI (`pm watcher`, `pm qa run`, `pm autostart`), and pm
-  commands are run inside a pane of the test tmux session.
+* Loops are started from the TUI (`zz d` review loop, `t` QA run, `z t` fresh
+  QA start, `zz t` QA loop) or from the CLI (`pm watcher`, `pm autostart`,
+  `pm pr auto-sequence <id>` — which drives QA through the hidden detached
+  `pm pr qa-run-bg`). pm commands are run inside a pane of the test tmux
+  session. `pm qa run` is the QA *instruction* runner, not the QA loop.
+* A running QA run is stopped from the TUI with the QA-loop toggle (`zz t`,
+  or the command bar `pr qa loop <id>`); `z t` / `pr qa fresh` stops the
+  current run and immediately starts a fresh one. A plain `t` run has no
+  standalone stop key.
+* `qa-pass-count` (default 1) sets how many consecutive QA passes the
+  self-driving QA loop (`zz t`) requires before it hands off to sign-off.
+* The PR picker (the popup `pm` shows) renders a QA action from shared
+  runtime state as `[working]` / `[done <VERDICT>]` / `[failed]`; it is the
+  surface for a run the TUI did not own (auto-sequence's detached driver).
 
 ## Requirements
 
@@ -205,6 +225,56 @@ waiting out the shared settle. Given a verifier that emits `VERIFIED` on the
 initial check but no outcome on the machine-driven re-check, Then the re-check
 is bounded and reports `verifier produced no verdict` instead of hanging.
 
+**R13 — A QA run driven by auto-sequence reports a missing planner outcome
+and pauses the sequence.**
+Given a PR in `qa` whose planner never emits a complete plan, When
+`pm pr auto-sequence <id>` launches the detached QA driver and later ticks
+run, Then the run ends on its own as `INPUT_REQUIRED`, later ticks print
+`paused: input_required (qa)` instead of relaunching, the PR stays in `qa`,
+the PR picker shows the QA action as finished with its verdict (e.g.
+`[done INPUT_REQUIRED]`) rather than `[working]`, and a run that ends without
+any verdict leaves no live/working entry behind.
+
+**R14 — Scheduler-driven and user QA starts are distinguishable, and their
+confirmations stay visible.**
+Given a client attached to the TUI, When a scheduler-driven start launches
+QA (auto-start, review PASS → QA, auto-sequence's detached driver), Then the
+client stays on the TUI window while QA runs in the background; When the user
+starts QA on that PR instead (`t`, `z t`, `zz t`), Then the QA window is
+focused. Given a loop-completion line is holding the TUI log line, When the
+user starts or re-asks for QA, Then the confirmation ("Starting QA for …",
+"Launched qa pane", "Focused existing qa pane", "QA already running for …",
+"QA loop started") is visible rather than swallowed.
+
+**R15 — The watcher loop reports `NO_VERDICT` legibly and its toggle drives
+exactly one watcher.**
+Given a watcher session that idles without its watcher verdict, When an
+iteration ends, Then the TUI stop line names `NO_VERDICT` together with the
+full recovery reason — including the bracketed `watcher[<type>]` qualifier,
+which must not be eaten as markup — and the command-log path, and the loop
+does not hang. Given a watcher run has finished, When the user toggles the
+watcher, Then a single new watcher starts (no second instance and no duelling
+over the one watcher window); When the user toggles it while it is running,
+Then that run is stopped. Given the watcher pane is killed mid-iteration,
+Then the iteration ends `KILLED`, not `NO_VERDICT`, and a watcher can be
+started again.
+
+**R16 — A QA window that disappears does not wedge the run or the next one.**
+Given a QA run in progress, When the user kills its QA window, Then the run
+ends in bounded time in a visible needs-attention state (no hang, PR not
+advanced), and When the user starts QA again, Then a new QA window is
+created with a live main pane and the status dashboard, the run proceeds to
+its normal verdict, and no stale pane from the killed window is reused.
+
+**R17 — The self-driving QA loop counts passes and pauses on a missing
+outcome.**
+Given `qa-pass-count` set above 1, When the user starts the QA loop on a PR
+whose runs pass, Then the log reports each consecutive pass and the automatic
+restart, and after the required passes the PR hands off to sign-off instead
+of starting another run. When instead the planner produces no complete plan,
+Then the loop pauses after one `INPUT_REQUIRED` (no second pass, no review
+loop launched) and the run can be restarted once the planner is fixed.
+
 ## Edge cases
 
 * **Idle inside the grace window.** A verdict that arrives before the review
@@ -242,6 +312,15 @@ is bounded and reports `verifier produced no verdict` instead of hanging.
   nothing": the nudge and the exhaustion error name the rejection.
 * **Killing a session's pane mid-episode** ends the review/watcher loop on
   its pane-gone path (`KILLED`), not as `NO_VERDICT`, and does not hang.
+* **Killing the QA window mid-planning** is bounded: the run ends
+  `INPUT_REQUIRED` ("Planner produced no parseable scenarios" or the recovery
+  error), not a hang, and a later start recreates the window.
+* **A healthy session is never nudged.** A fast verdict inside the grace
+  window and a long working turn both complete normally with no recovery
+  text in the pane and no extra iteration.
+* **A sticky log line never hides an answer to a user key** (QA start /
+  launch / loop confirmations, including the loop's own PASS/NEEDS_WORK
+  lines).
 
 ## Residuals (documented, not failures)
 
@@ -304,3 +383,19 @@ concurrent run is disturbed.
    mid-episode ends the loop as `KILLED` via the pane-gone path; a killed QA
    scenario-worker pane is relaunched by the existing retry logic (fresh
    identity, fresh recovery budget), not immediately retired.
+10. **Follow-up turns are not fake-drivable.** The fake exits as soon as
+    input arrives, so a machine-driven follow-up (the verifier's re-check, a
+    scenario's FLAGGED follow-up) ends its turn via pane death, not by
+    idling. Assert the user-visible bounded outcome (a specific reason, no
+    merge, pane left open) rather than which internal path produced it.
+11. **`NO_VERDICT` vs `KILLED` after a stop.** A stop that lands while
+    recovery is deciding is teardown: review breaks without recording a
+    verdict, the watcher records `KILLED`, the QA run ends `STOPPED`. A stop
+    requested *after* a verdict was already recorded keeps that verdict, so
+    a run stopped after some scenarios reported still ends `INPUT_REQUIRED`
+    (never `PASS`) — that is expected, not a clean-teardown failure.
+12. **Where the `NO_VERDICT` reason is visible.** Review and watcher put it
+    on the TUI log line (with the command-log path); the QA run puts its
+    per-role reason in the status dashboard and the run's error block. The
+    bracketed `watcher[<type>]` prefix is part of the reason text and must
+    survive markup rendering.
