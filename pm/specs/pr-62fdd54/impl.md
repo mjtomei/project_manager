@@ -41,7 +41,13 @@ R1. **Refresh before planning.** In `run_qa_sync`'s planning phase, after
     repo left on the wrong tree still holds (a non-git workdir is left to
     the planner handoff guard).  The planner prompt and command are built
     after the sync (they used to be built before stale-window cleanup), so
-    nothing the planner is given predates it.
+    nothing the planner is given predates it.  Because the build moved,
+    it keeps the provider-env transport the build site now owns:
+    `build_claude_shell_cmd(..., env_out=planner_env)` collects the
+    provider env and `tmux_mod.new_window(..., env=planner_env)` hands it
+    to the planner pane — the values are never interpolated into the
+    logged command string.  (Integration with master@89e3c501, which added
+    that transport at the old build site.)
 
 R2. **Behind-only fast-forwards automatically.** L ancestor of U →
     `git merge --ff-only U` in the workdir (the branch is checked out).
