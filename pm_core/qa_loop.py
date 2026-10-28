@@ -3175,9 +3175,18 @@ def _poll_tmux_verdicts(
                             tmux_mod.send_keys(pane_id, followup_msg)
                             # Send extra Enters to ensure the message is
                             # submitted — sometimes newlines don't trigger.
-                            for _ in range(2):
-                                time.sleep(1)
-                                tmux_mod.send_keys(pane_id, "")
+                            # Best effort: the follow-up (with its own Enter)
+                            # is already delivered, so a fork failure here
+                            # must not hand the flag back to be resent.
+                            try:
+                                for _ in range(2):
+                                    time.sleep(1)
+                                    tmux_mod.send_keys(pane_id, "")
+                            except OSError as e:
+                                if e.errno not in (errno.EAGAIN, errno.ENOMEM):
+                                    raise
+                                _log.warning("Extra Enter to scenario %d skipped: %s",
+                                             scenario_idx, e)
                             _log.info("Sent follow-up message to scenario %d pane",
                                       scenario_idx)
                             # Clear verdict and put back in pending.  Stamp the

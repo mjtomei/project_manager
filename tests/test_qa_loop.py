@@ -1958,6 +1958,50 @@ class TestPollTmuxVerdictsForkFailure:
         assert state.scenario_verdicts[1] == VERDICT_PASS
         assert 1 in state.verified_scenarios
 
+    def test_fork_failure_after_followup_sends_it_once(self, tmp_path):
+        """A fork failing on the extra Enters does not resend the follow-up.
+
+        The follow-up (with its own Enter) is already delivered; handing the
+        flag back would re-send it to the worker on the next poll.
+        """
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        sent = []
+
+        def send_keys(pane, keys):
+            sent.append(keys)
+            if keys == "" and sent.count("") == 1:
+                raise OSError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=1), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=[(False, "flagged", None), (True, "", None)]):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        followups = [k for k in sent if k.startswith("Your verdict was reviewed")]
+        assert len(followups) == 1
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert 1 in state.verified_scenarios
+
     def test_other_errors_still_raise(self, tmp_path):
         def pane_exists(pane):
             raise FileNotFoundError(errno.ENOENT, "tmux")
