@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T20:12:36.867893+00:00'
+  updated_at: '2026-10-28T21:49:19.578999+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38826,6 +38826,44 @@ prs:
       4015 passed, 1 skipped. Spec amended (a6a3 i6).'
     created_at: '2026-10-28T20:12:36Z'
     last_edited: '2026-10-28T20:12:36Z'
+  - id: note-39e7813
+    text: 'QA scenario 1 (owed REQA deferred behind a live run, auto-start off) PASSED
+      on this branch: with `pm qa run` in flight the sign-off hop printed `sign_off:
+      re-qa deferred: a QA run is in flight`; the restarted TUI logged "Sign-off REQA
+      for <pr> — QA starts once the QA run another process drives ends" once per process
+      (no repeats over 20 s), left the live run and its windows/workdir untouched,
+      and started exactly one owed full QA within seconds of that run''s `Result:
+      PASS` — one new `~/.pm/workdirs/qa/<pr>-<16hex>/`, one window set, no duplicate
+      verifier/finalize panes. The pre-return PASS did not advance the PR (`QA PASS
+      for <pr> — the owed sign-off re-run has not run yet`, Status stayed `qa`), and
+      auto-start stayed off throughout.
+
+
+      Incidental, pre-existing (NOT introduced by this PR — `_poll_tmux_verdicts`,
+      `_verify_single_scenario` and the send_keys sites are untouched by the diff):
+      a TUI restart during a QA run''s *verification* phase kills the resumed run.
+      `resume_qa_sync` re-enters `_execute_and_finalize`, which nudges the scenario/verifier
+      panes by id with `tmux send-keys`. Those panes'' processes have already written
+      their verdict and exited, so the panes are gone and the nudge raises `subprocess.CalledProcessError:
+      Command ''[''tmux'',''send-keys'',''-t'',''%2778'','''',''Enter'']'' returned
+      non-zero exit status 1` → "Verification thread crashed ... leaving unverified
+      so finalize blocks" → "QA resume thread crashed" → `verdict=ERROR`, `overall:
+      ""`, and the PR is stranded at `qa` (the owed run cleared `awaiting` at start,
+      so the reconciler sees nothing owed). Repro: start an owed REQA run, wait for
+      `Verification: created verifier pane`, then `pm tui restart`; the TUI logs `Resuming
+      QA for <pr> after restart...` and crashes ~30 s later. Restarting during the
+      *execution* phase (scenario agent still alive) resumes and finishes with `overall:
+      PASS`, as specified.
+
+
+      Related, same area: a restart during the planning/concretization phase does
+      not resume at all — `_resume_incomplete_qa` is keyed on `qa_resume.json`, which
+      is not written until execution, even though this PR''s `qa_run.json` exists
+      from the top of `run_qa_sync`. A liveness check before `send_keys` (fall back
+      to the pane''s transcript for the verdict) and keying resume on the run record
+      would close both. (2026-10-28T21:49:00Z)'
+    created_at: '2026-10-28T21:49:19Z'
+    last_edited: '2026-10-28T21:49:19Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
