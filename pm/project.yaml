@@ -15255,6 +15255,18 @@ prs:
       $PR'' in a session pane and press t for the tui-routed qa action.'
     created_at: '2026-10-28T06:07:37Z'
     last_edited: '2026-10-28T06:07:37Z'
+  - id: note-613afda
+    text: 'Refiner (scenario 1 healthy IPC): prefix+P only lists PRs that have an
+      open window (or the invoking window''s PR), so the picker triple needs the PR
+      started first. Setup: commit pm state to the base branch (`pm pr start` refuses
+      a PR not committed on base), set a fake-claude config (impl via _all + qa_planning)
+      BEFORE `pm pr start <id>` so the impl window uses the fake, then drive the picker''s
+      exact popup body `pm _popup-picker "$S" main` in a pane (a tmux display-popup
+      cannot receive send-keys). The qa window appears before the planner spec gate;
+      a later INPUT_REQUIRED "QA spec missing" is expected and out of scope for the
+      IPC Then.'
+    created_at: '2026-10-28T06:00:24Z'
+    last_edited: '2026-10-28T06:00:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
