@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T13:10:12.238287+00:00'
+  updated_at: '2026-10-28T13:53:22.933272+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32615,6 +32615,46 @@ prs:
       No pm_core/ change.'
     created_at: '2026-10-28T13:10:12Z'
     last_edited: '2026-10-28T13:10:12Z'
+  - id: note-4d32fdf
+    text: 'Review loop 419c i13: four leftovers in the kept recipe scope, all the
+      PR own class (a completion check that cannot tell a finished job from a dead
+      one, a promised artifact never written, a guard that only prints). (1) The render
+      steps validated with `test -s` on the mp4, but a failing renderer leaves a *partial*
+      output — verified live with the recipe own block and real ffmpeg 4.4.2: a SIGKILLed
+      encode left a 267,945-byte mp4 (119,704 on SIGTERM), which the file check accepted
+      as a successful render. Both recording recipes and the web-UI finalize now check
+      agg/ffmpeg own exit status, remove the partial output, and keep `test -s` for
+      a renderer that reports success and writes nothing (one shared `render_fail`
+      message shape). (2) Every render failure said "check agg is installed", but
+      the CLI recipe documents a `tee transcript.log` fallback that writes no cast
+      — so the worker was sent to install a renderer it already had; the block now
+      checks the cast first ("there is no cast to render (the recording wrote nothing)")
+      and the fallback paragraph says the render will fail and the capture has no
+      video. (3) `: "${VAR:?}"` does not stop an interactive paste: verified in a
+      real interactive bash on a pty, it prints the error, aborts only its own command,
+      and the next line still runs — the finalize block `rm -f` aimed at /recording.mp4
+      and the driver block link created node_modules in the worker cwd (reproduced).
+      All three standalone guards (finalize, driver, teardown) are now `if [ -z ...
+      ]; then ... exit 1`; step 1 in-command ${CAPDIR:?} glob stays (sound in both
+      modes, verified). The teardown also refuses to silently no-op with no SERVER_PID,
+      which left the app holding the port for the next run pre-check. (4) The tmux
+      recipe promises transcript.log but never checked it: real `pipe-pane` returns
+      1 for a gone pane ("can t find window: 9") and the recipe ignored it, and a
+      pipe attached to a quiet pane leaves a 0-byte file — either way the run reported
+      success with no transcript; the attach failure is reported where it happens
+      and the file is checked at the end. Tests: 12 new (execution-based where the
+      failure is behavioural) — failed-encode partial mp4 removed, healthy render
+      still passes, no-cast named as such, web-UI transcode partial mp4, tmux transcript
+      (text + stub modes pipefail/notranscript), finalize/driver guards driven through
+      a real interactive bash on a pty; all fail against the previous recipes except
+      the healthy-render guard. File 80 pass; related suites 255 pass; full suite
+      3921 passed / 1 skipped with only the missing-markdown-dep tests failing (13/13
+      pass with it) and the two push-proxy-blocked files plus the two known baselines
+      deselected. Evidence /pm-captures/review-419c-i13/ (render.sh, ffmpeg-killed-wrapper.sh,
+      wrapper.log, tmux-and-teardown.log). No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped. (2026-10-28)'
+    created_at: '2026-10-28T13:53:22Z'
+    last_edited: '2026-10-28T13:53:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
