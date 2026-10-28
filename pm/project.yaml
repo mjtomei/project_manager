@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-16e45ba
+  active_pr: pr-3df0c15
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T11:48:23.443775+00:00'
+  updated_at: '2026-10-28T11:52:27.408134+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39219,6 +39219,45 @@ prs:
       survives; that window is not in the pane registry. (5) Captures at /pm-captures/scenarios/42/{01-tui-signoff,02-cli-verify,03-tui-sync}.'
     created_at: '2026-10-28T11:48:23Z'
     last_edited: '2026-10-28T11:48:23Z'
+  - id: note-e66c0b0
+    text: 'QA scenario 39 (publish + --propagation-only recovery, post-publication
+      integrity check) PASS at 72dd782a — all nine triples held live on fake-GitHub
+      stand-ins; no code change. Verified: (1) publish prints Checking master / Merging
+      GitHub PR #1 / GitHub PR #1 merged / Pulled latest master / PR #1 marked as
+      merged, exit 0, no WARNING and no Merge integrity text; note list says "No notes
+      on #1", show is Status: merged with no ## Notes, list is ✅ #1 [merged], project.yaml
+      has status: merged and no merge_integrity, and the stand-in merge has first
+      parent = signed-off base and tree = the approved candidate tree. (2) --propagation-only
+      before publication refuses with the "only recover an already-completed merge"
+      line, exit 1, PR stays in_review, no merge_integrity, master unchanged. (3)
+      an unreviewed commit on the stand-in branch refuses publication naming the remote
+      tip, publishes nothing, and does not invalidate the approval. (4) after a teammate
+      merges that branch on the stand-in, --propagation-only prints the WARNING naming
+      the unreviewed tip and the merge sha, exits 0, records exactly one Merge integrity:
+      note and merge_integrity.{problem,merge_sha}. (5) with an unpushed local master
+      commit the pull fails, prints Pull failed / fatal: Not possible to fast-forward
+      / Resolve this manually and exits 1 with the note+merge_integrity already recorded
+      and the PR unfinalized; after reset --mixed origin/master the retry finalizes
+      with exactly one note (no duplicate). (6-8) a hand-edited scalar signoff, a
+      non-text signoff.sha, and a non-text candidate_tree each produce no traceback,
+      no WARNING and no merge_integrity; the PR finalizes and the hand-written note
+      survives; the bad_tree case on the clean-merge shape prints the exact "...published
+      tree <t12>, approved ?." WARNING and records the mismatch. HARNESS FACTS for
+      the next run: (a) ANY tmux pane sets PM_IN_TMUX_SESSION=1 via wrapper.py, so
+      `pm pr merge` defaults to --resolve-window even with no pm session; record CLI
+      runs under `script -qec "stty rows 40 cols 120; asciinema rec ..."` (TMUX unset)
+      or pass --no-resolve-window, else the pull-failure path takes the window branch
+      instead of exiting. (b) `pm pr list` prints no pr ids — parse the id from `pm
+      init --backend github --no-import` output (`+ pr-XXXX: title`); it is deterministic
+      (pr-7e0c334 for "Feature X"). (c) each fixture gets a distinct workdir because
+      the seeded project.yaml differs, so fixtures can be built in parallel. (d) for
+      the interrupted-update fixture add the unpushed empty commit AFTER the stand-in
+      merge, or the merge pull itself fails. (e) incidental bug filed as pr-3df0c15:
+      with resolve_window True and no pm session, a failed post-merge pull prints
+      "Merge window: tmux session ... not found." and exits 0 without finalizing.
+      Captures: /pm-captures/scenarios/39/{story1-publish,story2-propagation-refusal,story3-merge-refused,story4-recovery-warning,story5-pull-fails,story6-retry-finalize,story7-scalar-signoff,story8-bad-sha,story9-bad-tree}.'
+    created_at: '2026-10-28T11:52:27Z'
+    last_edited: '2026-10-28T11:52:27Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
@@ -40479,6 +40518,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3df0c15
+  plan: bugs
+  title: 'Bug: pm pr merge --propagation-only exits 0 without finalizing when the
+    post-merge resolve window cannot open'
+  branch: pm/pr-3df0c15-bug-pm-pr-merge-propagation-only-exits-0-without-f
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/cli/pr.py — _launch_merge_window / _pull_after_merge\
+    \ / _sync_main_repo_and_finalize (present on master, not introduced by pr-5cee3d5).\n\
+    \nRepro (any tmux pane, no pm session for the project):\n1. GitHub-backed project;\
+    \ the stand-in has published a merge the PR workdir cannot fast-forward to (an\
+    \ unpushed commit on the base checkout), so the post-merge pull fails.\n2. From\
+    \ a plain tmux pane (TMUX set, so wrapper.py sets PM_IN_TMUX_SESSION=1 and pr_merge\
+    \ defaults resolve_window=True), run `pm pr merge <pr> --propagation-only`.\n\n\
+    Observed:\n  PR <pr> is already in master; recovering.\n  WARNING: GitHub merged\
+    \ <pr> at ..., not the approved head ...; merge ... on master.\n  Pull failed\
+    \ in <TEST_DIR>:\n  fatal: Not possible to fast-forward, aborting.\n  Merge window:\
+    \ tmux session 'pm-<tag>' not found.\n  [exit code: 0]\nThe PR is left in_review\
+    \ (not finalized) and merge_integrity is recorded, but the command reports success\
+    \ and never prints the `Resolve this manually, then run ...` line.\n\nExpected:\
+    \ the same failure the --no-resolve-window path gives — the manual-resolve hint\
+    \ and exit 1 — whenever no merge window was actually opened. _launch_merge_window\
+    \ returns None on every early return (no tmux / no pm session / no workdir), and\
+    \ _pull_after_merge ignores that, so _sync_main_repo_and_finalize only exits 1\
+    \ when resolve_window is False.\n\nFix shape: have _launch_merge_window report\
+    \ whether it opened a window; when it did not, fall back to the manual-resolve\
+    \ message and exit 1.\n\nEvidence: /pm-captures/scenarios/39/incidental-tmux-resolve-window/pane.txt\
+    \ (QA scenario 39)."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T11:52:14.360143+00:00'
+  updated_at: '2026-10-28T11:52:14.360143+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
