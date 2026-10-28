@@ -1295,9 +1295,12 @@ class TestQARelease:
             got["names"], got["kw"] = names, kw
             return reaper.Outcome(removed=list(names))
         monkeypatch.setattr(reaper, "release_containers", _release)
-        assert qa_loop._release_scenario_containers(st, "pm-t") is False
+        kept: set[int] = set()
+        assert qa_loop._release_scenario_containers(
+            st, "pm-t", kept_indices=kept) is False
         assert got["names"] == ["pm-t-qa-pr-aaaa-L-s1"]
         assert got["kw"]["owner_release"] is True
+        assert kept == {2, 3}  # INPUT_REQUIRED and viewed keep running
 
     def test_failed_release_is_visible(self, monkeypatch):
         from pm_core import qa_loop

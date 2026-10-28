@@ -180,7 +180,7 @@ def test_queued_launch_is_persisted_before_it_returns(tmp_path, monkeypatch):
     monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
     monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
     monkeypatch.setattr(qa_loop, "_release_scenario_containers",
-                        lambda st, session, *, scenarios=None: False)
+                        lambda st, session, *, scenarios=None, kept_indices=None: False)
 
     class Crash(RuntimeError):
         pass

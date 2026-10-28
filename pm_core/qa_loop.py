@@ -3012,6 +3012,9 @@ def _poll_tmux_verdicts(
             # sees the result (race condition).
 
     released_indices: set[int] = set()
+    # Settled scenarios whose release deliberately kept the container running
+    # (INPUT_REQUIRED, viewed window); they are in released_indices too.
+    kept_indices: set[int] = set()
     release_retry_at = 0.0
     # Scenarios whose recorded worker pane died this run (see _live_worker_pane),
     # including before a resume.
@@ -3037,7 +3040,8 @@ def _poll_tmux_verdicts(
                        and s.index not in released_indices
                        and s.index in state.scenario_verdicts]
             if settled and time.monotonic() >= release_retry_at:
-                if _release_scenario_containers(state, session, scenarios=settled):
+                if _release_scenario_containers(state, session, scenarios=settled,
+                                                kept_indices=kept_indices):
                     # A failed or deferred release (e.g. an unreadable
                     # inventory) leaves these workers running, and
                     # container-max-running counts them against this run's
@@ -3080,10 +3084,12 @@ def _poll_tmux_verdicts(
                 # resolution 19, at most L+1); after it, the settled
                 # containers not yet released count as held, or each further
                 # one-at-a-time launch would add another container (L+2...).
+                # So do the ones a release kept for a human or a viewer.
                 held = sum(1 for s in state.scenarios
                            if s.container_name and s.index in state.scenario_verdicts
                            and s.index not in pending and s.index not in verifying
-                           and s.index not in released_indices)
+                           and (s.index not in released_indices
+                                or s.index in kept_indices))
         else:
             held, known = 0, True
         if concurrency_cap > 0 and active + held >= concurrency_cap:
@@ -4881,7 +4887,8 @@ def _viewed_window_ids(session: str) -> set[str] | None:
 
 
 def _release_scenario_containers(state: QALoopState, session: str, *,
-                                 scenarios: list[QAScenario] | None = None) -> bool:
+                                 scenarios: list[QAScenario] | None = None,
+                                 kept_indices: set[int] | None = None) -> bool:
     """Release this run's scenario containers once it completed or stopped.
 
     Containers hold kernel keyring keys while running, so leaving them for
@@ -4893,6 +4900,7 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
     Returns True when a removal failed (noted in ``state.latest_output``);
     the reaper records such failures as owner releases, so its later passes
     (and ``pm container reap``) retry them despite the still-live panes.
+    Indices of deliberately kept scenarios are added to *kept_indices*.
     """
     from pm_core import container_reaper
     from pm_core import tmux as tmux_mod
@@ -4915,12 +4923,16 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
             continue
         if state.scenario_verdicts.get(sc.index) == VERDICT_INPUT_REQUIRED:
             kept.append(f"s{sc.index} INPUT_REQUIRED")
+            if kept_indices is not None:
+                kept_indices.add(sc.index)
             continue
         if viewed and sc.pane_id:
             try:
                 window_id = tmux_mod.pane_window_id(sc.pane_id)
                 if window_id in viewed:
                     kept.append(f"s{sc.index} viewed")
+                    if kept_indices is not None:
+                        kept_indices.add(sc.index)
                     continue
                 # ``None`` is "no window id" — the pane is gone or the lookup
                 # failed. Only a pane the server positively no longer lists is
