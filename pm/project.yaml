@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T21:49:19.578999+00:00'
+  updated_at: '2026-10-28T21:53:22.143862+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38864,6 +38864,37 @@ prs:
       would close both. (2026-10-28T21:49:00Z)'
     created_at: '2026-10-28T21:49:19Z'
     last_edited: '2026-10-28T21:49:19Z'
+  - id: note-71f94c8
+    text: 'QA scenario 2 (watcher-only auto-sequence) — two setup gaps in the bound
+      "TUI Manual Testing" instruction, folded into this scenario''s refined steps:
+      (1) `pip install -e .` does not put `fake-claude` on PATH; add `export PATH=<clone>/bin:$PATH`
+      (or run `./install.sh --local`). (2) `pm session` starts a TUI, and the TUI''s
+      sign-off scheduler and owed-REQA reconciler are NOT gated by auto-start, so
+      a watcher-only run must create a work window and `tmux kill-window -t <session>:main`
+      before driving ticks. Also note `pm qa run` (planning_phase=False) creates only
+      `qa-<id>-sN` windows; the `qa-<id>` main window used by the "finished run''s
+      window does not strand the owed re-run" check comes from a tick-launched `pm
+      pr qa-run-bg` run, so reach the REQA bounce via one tick-launched QA run first.'
+    created_at: '2026-10-28T21:12:04Z'
+    last_edited: '2026-10-28T21:12:04Z'
+  - id: note-fa77b58
+    text: 'QA scenario 2 (watcher-only auto-sequence) PASS. Third setup gap in the
+      bound "TUI Manual Testing" instruction, on top of note-71f94c8: a planning-phase
+      QA run (tick-launched `pm pr qa-run-bg`, or any `pm qa run` without pre-loaded
+      scenarios) aborts at the "QA spec missing" gate with INPUT_REQUIRED, because
+      the fake planner emits QA_PLAN text but does not write the spec its Step 0 would
+      normally produce. Generate it before the run: `pm pr spec <pr> qa` (routes through
+      fake-claude in print mode and writes a non-empty pm/specs/<pr>/qa.md; the content
+      is placeholder prose, which is enough for the gate). Without it the first auto-sequence
+      tick reports `running: qa (launched)` and the detached driver exits ~4 s later
+      with overall "" and a runtime verdict of INPUT_REQUIRED — the PR then looks
+      stranded, which is NOT the bug under test. Evidence: captures/pr-db3bf10/scenarios/2/watcher-only-auto-sequence/
+      (cast + mp4 + manifest). All five triples passed: deferral line, `running: qa
+      (driven elsewhere)`, owed `running: qa (launched)` exactly once, pre-verdict
+      `running: qa` ticks, and no relaunch across 3 further ticks; the owed run finished
+      PASS with one workdir.'
+    created_at: '2026-10-28T21:53:22Z'
+    last_edited: '2026-10-28T21:53:22Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
