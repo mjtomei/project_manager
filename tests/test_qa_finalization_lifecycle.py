@@ -159,6 +159,22 @@ def test_verified_pass_survives_a_stop(tmp_path, monkeypatch):
     assert result.scenario_verdicts[1] == qa_loop.VERDICT_PASS
 
 
+def test_stopped_run_says_finalize_was_skipped(tmp_path, monkeypatch):
+    """The TUI's "QA complete" line, not only the debug log, says why no
+    finalize pane opened."""
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [qa_loop.QAScenario(index=1, title="s1", focus="",
+                                          window_name="qa-s1", pane_id="%1")]
+    state.scenario_verdicts[1] = qa_loop.VERDICT_PASS
+    state.verified_scenarios.add(1)
+    state.stop_requested = True
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    result = _finalize_stopped(state, tmp_path, monkeypatch)
+    qa_loop._run_qa_finalize_pane.assert_not_called()
+    assert result.latest_output.startswith(
+        "QA complete: PASS [finalize: skipped — run was stopped] — ")
+
+
 def test_queued_launch_is_persisted_before_it_returns(tmp_path, monkeypatch):
     """A crash during a queued launch must not leave it listed as unattempted.
 

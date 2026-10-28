@@ -4840,6 +4840,7 @@ def _finalize_scenarios(
     except Exception:
         _log.exception("Failed to persist scenario verdicts")
 
+    finalize_skipped = ""
     if not state.scenarios:
         # Nothing ran, so there are no scenario pushes to reconcile.  A
         # finalizer here only adds another session that can stall (#229:
@@ -4850,6 +4851,7 @@ def _finalize_scenarios(
         # Its poll aborts on the first stop check, so splitting the pane would
         # only leave an abandoned Claude session behind.
         _log.info("QA finalize: skipped for %s — run was stopped", state.pr_id)
+        finalize_skipped = "run was stopped"
     else:
         try:
             state.finalize_verdict = _run_qa_finalize_pane(
@@ -4882,6 +4884,9 @@ def _finalize_scenarios(
     finalize_suffix = ""
     if state.finalize_verdict:
         finalize_suffix = f" [finalize: {state.finalize_verdict}]"
+    elif finalize_skipped:
+        # Say so in the TUI too, not only in the debug log.
+        finalize_suffix = f" [finalize: skipped — {finalize_skipped}]"
     state.latest_output = (
         f"QA complete: {state.latest_verdict}{finalize_suffix} — "
         + qa_outcome_detail(state) + planner_code_changes_suffix(state)
