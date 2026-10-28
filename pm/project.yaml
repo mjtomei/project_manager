@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T00:19:16.616675+00:00'
+  updated_at: '2026-10-28T00:31:48.501185+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14649,6 +14649,27 @@ prs:
       signoff sets status sign_off so cleanup warns sign_off not qa.'
     created_at: '2026-10-28T00:19:16Z'
     last_edited: '2026-10-28T00:19:16Z'
+  - id: note-c7e23a8
+    text: 'QA S49 (2026-10-28, HEAD a696fa52 then fix ae2c2520; real rootless Podman
+      3.4.4 + tmux TUI, fake agents, session under a PR_SET_CHILD_SUBREAPER loop so
+      conmons are reaped; evidence /pm-captures/scenarios/49/manifest.md). T1 fresh-over-fresh
+      held: attempt-1 ten removed 3-6 s after first z t, attempt-2 in-flight containers
+      (no workers) gone <=16 s after second z t, attempt-3 first container 6.7 s,
+      no periodic, B IDs/pushes intact. T2 held: one QA PASS note for the newest loop,
+      no A resume/recover across --breadcrumb and plain restarts, no A qa_resume.json,
+      status stays qa, A released before the PASS line. T3 NEEDS_WORK, fixed ae2c2520:
+      (1) RLIMIT_NPROC starvation crashed B resumed QA thread via _poll_tmux_verdicts
+      -> pane_exists EAGAIN (ERROR, snapshot dropped, 10 live workers orphaned); poll
+      now skips the iteration. (2) C stopped run release ran while podman could not
+      fork -> owner release recorded with runtime_domain null (unverifiable, never
+      retried); live panes kept C owned; periodic and pm container reap both kept
+      it (advice in the TUI message is ineffective). Run-end release deferral is now
+      retried (~16 min bounded) on the run own thread - a spawned retry thread failed
+      live with "can not start new thread". Post-fix C gone T1+25 s. Open: pm container
+      status keeps listing unverifiable release records for allocations that no longer
+      exist.'
+    created_at: '2026-10-28T00:31:48Z'
+    last_edited: '2026-10-28T00:31:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
