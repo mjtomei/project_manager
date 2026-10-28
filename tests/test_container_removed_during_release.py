@@ -127,7 +127,62 @@ def test_ps_racing_a_removal_retakes_inventory(monkeypatch):
     assert sum(a[0] == "ps" for a in calls) == 3
 
 
+def test_consecutive_removals_racing_ps_retake_inventory(monkeypatch):
+    # S62: pm pr cleanup --resources removed two containers 15 ms apart while
+    # a pane's exit release listed them; each removal failed one ps listing.
+    first = (125, "", "Error: container fccbe80f does not exist in database: no such container")
+    second = (125, "", "Error: container c82d89ea does not exist in database: no such container")
+    ok = (0, f"{LIVE}\n", "")
+    calls = _ps_runtime(monkeypatch, [first, second, ok, ok])
+    assert [i.name for i in reaper.list_containers()] == [LIVE]
+    assert sum(a[0] == "ps" for a in calls) == 4
+
+
+def test_same_vanished_container_twice_fails_closed(monkeypatch):
+    race = (125, "", "Error: container 69905ace does not exist in database: no such container")
+    calls = _ps_runtime(monkeypatch, [race, race, (0, f"{LIVE}\n", "")])
+    assert reaper.list_containers() is None
+    assert sum(a[0] == "ps" for a in calls) == 2
+
+
 def test_other_ps_failure_still_fails_closed(monkeypatch):
     calls = _ps_runtime(monkeypatch, [(125, "", "Error: cannot connect to the runtime socket")])
     assert reaper.list_containers() is None
     assert sum(a[0] == "ps" for a in calls) == 1
+
+
+def _pending_status(monkeypatch, inventory):
+    # S62: review/sign-off --fresh removed the old allocation before the old
+    # pane's exit release recorded itself; status listed the removed name as
+    # "owner release pending; retry with pm container reap" until the
+    # release's own deferred pass finished.
+    monkeypatch.setattr(reaper, "last_state", lambda: {})
+    monkeypatch.setattr(reaper, "unavailable_runtime_diagnostics", lambda: [])
+    monkeypatch.setattr(reaper, "local_retained_names", lambda *_: [])
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: None)
+    pending = "owner release pending; retry with pm container reap"
+    domain = {"runtime": "podman", "graph_root": "/g"}
+    monkeypatch.setattr(reaper, "pending_failures", lambda: {
+        GONE: {"id": "id-a", "owner_release": True, "runtime_domain": domain, "error": pending},
+        LIVE: {"id": "id-b", "owner_release": True, "runtime_domain": domain, "error": pending},
+    })
+    monkeypatch.setattr(reaper, "is_retained", lambda name, cid="": False)
+    cmd = click.Command("s", callback=lambda: cli_container._echo_reaper_state(True, inventory))
+    return CliRunner().invoke(cmd, []).output
+
+
+def test_owner_release_of_removed_allocation_not_listed_as_failure(monkeypatch):
+    out = _pending_status(monkeypatch, [reaper.ContainerInfo(name=LIVE, id="id-b", running=True)])
+    assert "Cleanup failures (1)" in out and LIVE in out and GONE not in out
+
+
+def test_same_name_replacement_keeps_old_release_hidden(monkeypatch):
+    # The replacing launch reuses the name with a new ID: the old ID is gone.
+    out = _pending_status(monkeypatch, [reaper.ContainerInfo(name=GONE, id="id-new", running=True),
+                                        reaper.ContainerInfo(name=LIVE, id="id-b", running=True)])
+    assert f"{GONE}:" not in out and f"{LIVE}:" in out
+
+
+def test_unknown_inventory_keeps_listing_pending_releases(monkeypatch):
+    out = _pending_status(monkeypatch, None)
+    assert "Cleanup failures (2)" in out and GONE in out and LIVE in out

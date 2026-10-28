@@ -530,13 +530,24 @@ def list_containers() -> list[ContainerInfo] | None:
     """All pm containers (any state), or None when the runtime is unavailable."""
     # A container removed between the listing and the inspect (a concurrent
     # cleanup) fails the inspect batch. That is not a runtime failure: take
-    # the whole inventory once more. Any other failure still fails closed.
-    for _ in range(2):
+    # the whole inventory again. A cleanup removing several containers can
+    # race consecutive listings (S62: pr cleanup removed two A containers
+    # 15 ms apart under a pane's exit release), so keep retaking while each
+    # failure names a container not already seen vanishing. A repeated or
+    # any other failure still fails closed.
+    seen: set[str] = set()
+    for _ in range(_INVENTORY_ATTEMPTS):
         vanished: list[str] = []
         inventory = _list_containers_once(vanished)
         if inventory is not None or not vanished:
             return inventory
+        if any(v in seen for v in vanished):
+            return None
+        seen.update(vanished)
     return None
+
+
+_INVENTORY_ATTEMPTS = 6
 
 
 def _list_containers_once(vanished: list[str]) -> list[ContainerInfo] | None:

@@ -94,6 +94,14 @@ def _echo_reaper_state(runtime_ok: bool = True, inventory=None) -> None:
             present = container_reaper.inventory_has(inventory)
             deferred = {name: info for name, info in deferred.items()
                         if present(name, info.get("id"))}
+            # Likewise a pending owner release (this runtime's record) of an
+            # allocation already removed by ID: review/sign-off --fresh can
+            # remove the old allocation before the old pane's release records
+            # itself (S62), and a retry has nothing left to do.
+            for name, info in list(failures.items()):
+                if (info.get("owner_release") and info.get("runtime_domain")
+                        and info.get("id") and not present(name, info["id"])):
+                    failures.pop(name)
         if deferred:
             click.echo("Released while retained (removed once "
                        "'pm container retain --release' drops the retention):")
