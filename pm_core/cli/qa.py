@@ -224,9 +224,12 @@ def qa_evidence(pr_id: str):
 
     Prints the QA run that owns this PR's captures (from
     ``$CAP/qa_manifest.json``) and the scenarios that run ran, then every
-    ``$CAP/scenarios/<n>/`` directory that does *not* match: a foreign record
-    written by another PR's project (a nested QA fixture), a legacy record
-    with no PR/run identity, or a directory the current run never listed.
+    anomaly.  A ``$CAP/scenarios/<n>/`` directory that does *not* match is
+    flagged: a foreign record written by another PR's project (a nested QA
+    fixture), a legacy record with no PR/run identity, or a directory the
+    current run never listed.  A root ``qa_manifest.json`` that a foreign
+    writer overwrote is flagged too — membership is then recovered from
+    ``$CAP/qa_runs/`` and the anomaly says so.
 
     Scenario membership is the manifest's, never "the directory exists" —
     this is the reader a sign-off session uses instead of walking the
@@ -281,7 +284,8 @@ def qa_evidence(pr_id: str):
         click.echo("Scenarios (authoritative membership):")
         for m in audit.members:
             click.echo(f"  Scenario {m.get('index', '?')} — "
-                       f"{m.get('title') or ''}: {m.get('verdict') or '(no verdict)'}")
+                       f"{m.get('title') or ''}: "
+                       f"{m.get('verdict') or '(no verdict)'}")
     else:
         click.echo("Scenarios (authoritative membership): (none)")
     if audit.anomalies:

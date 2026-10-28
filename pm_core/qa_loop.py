@@ -1886,6 +1886,7 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
 def _write_scenario_capture_file(pr_id: str, scenario_index: int,
                                   name: str, content: str,
                                   session_tag: str | None = None,
+                                  base: Path | None = None,
                                   ) -> Path | None:
     """Write a per-scenario capture file under the host captures dir.
 
@@ -1901,11 +1902,14 @@ def _write_scenario_capture_file(pr_id: str, scenario_index: int,
     ``QALoopState.session_tag``) so this lands in the same dir the
     review pane's bind-mount and scenario containers' ``/pm-captures``
     point at. Callers that don't supply one fall back to
-    :func:`captures_dir`'s tmux-then-cwd resolution.
+    :func:`captures_dir`'s tmux-then-cwd resolution.  *base* is the
+    already-resolved captures dir, for a caller that resolved it once
+    and writes several files (``_persist_scenario_verdicts``).
     """
     try:
-        from pm_core.paths import captures_dir
-        base = captures_dir(pr_id, session_tag=session_tag)
+        if base is None:
+            from pm_core.paths import captures_dir
+            base = captures_dir(pr_id, session_tag=session_tag)
         if base is None:
             _log.warning("captures_dir unavailable for pr=%s (no session tag)",
                          pr_id)
@@ -1963,10 +1967,15 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str,
         body = f"# Scenario {s.index}: {s.title}\n\n{verdict}\n"
         if reason:
             body += f"\n{reason}\n"
-        _write_scenario_capture_file(
-            state.pr_id, s.index, "verdict.md", body,
-            session_tag=state.session_tag,
-        )
+        if base is not None:
+            # Reuse the resolved captures dir: resolving twice would let the
+            # two files (verdict.md, scenario.json) land in different trees if
+            # the resolution changed between calls, and it re-created the dir
+            # as a side effect.
+            _write_scenario_capture_file(
+                state.pr_id, s.index, "verdict.md", body,
+                session_tag=state.session_tag, base=base,
+            )
         # Also persist a structured per-scenario record so the sign-off
         # agent (pr-2d5f712 + pr-8e693f6) can synthesize the BDD framing
         # (steps / focus / verdict / reason) into report.html without

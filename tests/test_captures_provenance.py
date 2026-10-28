@@ -131,8 +131,11 @@ def test_manifest_round_trip(tmp_path):
     assert m["overall"] == "PASS"
     assert m["scenarios"][0]["index"] == 1
     assert m["started_at"] and m["updated_at"]
-    # Atomic write leaves no temp file behind.
-    assert not list(root.glob("*.tmp"))
+    # Atomic write leaves no temp file behind (the temp names are hidden —
+    # ``.qa_manifest.json.<pid>.<rand>.tmp`` — so a plain ``*.tmp`` glob would
+    # match nothing and prove nothing).
+    assert not list(root.glob(".*.tmp"))
+    assert not list((root / captures.RUNS_DIR_NAME).glob(".*.tmp"))
 
 
 def test_manifest_for_another_pr_is_ignored(tmp_path):
@@ -255,6 +258,60 @@ def test_audit_flags_a_current_run_dir_missing_from_the_manifest(tmp_path):
     a = captures.audit(root, pr_id="pr-x", run_id="run1")
     assert a.orphans == [5]
     assert any("not in the current run's manifest" in x for x in a.anomalies)
+
+
+def test_audit_flags_a_clobbered_root_pointer(tmp_path):
+    """The incident's signature is a foreign writer replacing the root
+    ``qa_manifest.json``.  Membership is recovered from ``qa_runs/``, but the
+    audit must *say* the pointer was overwritten — otherwise `pm qa evidence`
+    presents recovered data as if the pointer still named this PR's run."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    captures.write_manifest(root, pr_id="pr-fixture", run_id="fixrun",
+                            scenarios=[{"index": 6, "title": "Beta check"}])
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.manifest_run == "run1"
+    assert [m["index"] for m in a.members] == [1]
+    assert any("pr-fixture" in x and "overwrote" in x
+               for x in a.anomalies)
+
+
+def test_audit_flags_a_foreign_root_pointer_with_no_membership(tmp_path):
+    """No recoverable membership *and* a foreign root pointer: the anomaly
+    names the foreign owner instead of claiming no manifest exists."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-fixture", run_id="fixrun",
+                            scenarios=[])
+    # Remove the per-run copy so nothing is recoverable for pr-x.
+    for f in (root / captures.RUNS_DIR_NAME).glob("*.json"):
+        f.unlink()
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.manifest is None
+    assert any("pr-fixture" in x and "no run-bound membership" in x
+               for x in a.anomalies)
+    assert not any("not run-bound" in x and "no qa_manifest" in x
+                   for x in a.anomalies)
+
+
+def test_audit_names_a_legacy_member_record_as_having_no_identity(tmp_path):
+    """A member index holding a pre-fix/synthetic record (no ``pr_id``) is a
+    *record without identity*, not a scenario with "no verdict captured" —
+    the incident's fake PASS records look exactly like this."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    _scenario_dir(root, 1, {"index": 1, "title": "Smoke", "verdict": "PASS"})
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.dirs[1].has_record is True
+    assert any("carries no PR/run identity" in x for x in a.anomalies)
+    assert not any("no verdict captured" in x for x in a.anomalies)
 
 
 def test_audit_without_manifest_reports_unbound_membership(tmp_path):
@@ -586,6 +643,25 @@ def test_signoff_qa_block_names_the_run_and_manifest(tmp_path, monkeypatch):
     head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
     assert "QA run: `run1`" in head
     assert "qa_manifest.json" in head
+
+
+def test_signoff_qa_block_says_an_empty_manifest_owns_no_coverage(tmp_path,
+                                                                  monkeypatch):
+    """A run that exited before launching anything publishes an empty
+    manifest; the block must say the run has no coverage, not "the 0
+    scenario(s) listed" (which reads like a formatting slip)."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1", scenarios=[])
+    status = _status_file(tmp_path, "run1")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+
+    assert "**none**" in head
+    assert "captured no coverage" in head
+    assert "the 0 scenario(s)" not in head
 
 
 def test_signoff_qa_block_ignores_the_interactive_scenario(tmp_path,

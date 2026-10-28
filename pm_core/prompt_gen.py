@@ -698,10 +698,20 @@ def _qa_run_binding(pr_id: str, status: dict, status_path,
             f"`{status_run}` — the scenario evidence may not match this "
             f"run. Re-run QA before routing on it.")
     members = [m for m in manifest.get("scenarios") or [] if isinstance(m, dict)]
-    lines.append(
-        f"Scenario membership: the {len(members)} scenario(s) listed in "
-        f"`$CAP/qa_manifest.json` — not whatever directories exist under "
-        f"`$CAP/scenarios/`.")
+    if members:
+        lines.append(
+            f"Scenario membership: the {len(members)} scenario(s) listed in "
+            f"`$CAP/qa_manifest.json` — not whatever directories exist under "
+            f"`$CAP/scenarios/`.")
+    else:
+        # An empty manifest is a run that owns no evidence (it planned
+        # nothing or launched nothing).  Say that plainly: "the 0 scenario(s)"
+        # reads like a formatting slip, and the whole point is that such a
+        # run must not be mistaken for coverage.
+        lines.append(
+            "Scenario membership: **none** — `$CAP/qa_manifest.json` lists no "
+            "scenarios for this QA run, so this run captured no coverage. Do "
+            "not treat `$CAP/scenarios/<n>/` directories as its evidence.")
     manifest_idx = [m.get("index") for m in manifest.get("scenarios") or []
                     if isinstance(m, dict)]
     # Scenario 0 is the interactive window: it stays in qa_status.json (the

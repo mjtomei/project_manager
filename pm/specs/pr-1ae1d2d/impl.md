@@ -172,13 +172,18 @@ a nested fixture's record is provably not this PR's evidence.
   - `unowned` — no record, or a record with no `pr_id` (legacy/pre-fix).
 - `orphans`: directories not present in `members`.
 - `anomalies`: human-readable one-liners for foreign/unowned/orphan dirs, a
-  manifest/`qa_status.json` run-id disagreement, and a **manifest member with
-  no evidence directory** (its evidence was destroyed or never captured —
-  sign-off must see missing evidence, not a synthetic record). A member whose
-  directory exists but holds no provenance record (a launched scenario that
-  never produced a verdict writes only `prompt.md`) is reported as a member
-  without a record, not as "not bound to a QA run" — the audit must not
-  contradict the membership it just printed.
+  manifest/`qa_status.json` run-id disagreement, a root `qa_manifest.json`
+  that is missing, unusable, or names another PR while the membership came
+  from `qa_runs/` (the fixture-clobber signature — the audit is the surface
+  that has to show it), and a **manifest member with no evidence directory**
+  (its evidence was destroyed or never captured — sign-off must see missing
+  evidence, not a synthetic record). A member whose directory exists but
+  holds no provenance record is reported as a member without a record, not as
+  "not bound to a QA run" — the audit must not contradict the membership it
+  just printed — and the wording distinguishes a launched scenario that never
+  produced a verdict (only `prompt.md`) from a record that exists but carries
+  no PR/run identity (legacy/pre-fix, or the incident's synthetic fixture
+  records).
 
 New CLI command `pm qa evidence <pr_id>` (`pm_core/cli/qa.py`, beside
 `captures-path`) prints the audit: PR, run id, manifest scenario list, and
@@ -200,7 +205,9 @@ listing arbitrary directories.
     adds a one-line warning naming both sets (this is the "a later run
     replaced this evidence" case);
   - states that membership is the manifest's scenarios, "not whatever
-    directories exist under `$CAP/scenarios/`";
+    directories exist under `$CAP/scenarios/`"; when the manifest lists no
+    scenarios (a run that launched nothing), says plainly that the run
+    captured no coverage rather than rendering "the 0 scenario(s)";
   - when no manifest exists (legacy), says so in one line so the session knows
     membership is not run-bound.  That line only promises "the scenarios
     listed below" when a per-scenario listing really follows the head: on the
@@ -388,6 +395,10 @@ No **[UNRESOLVED]** items.
 - **A manifest member whose only record is from a prior run**: reported as
   "manifest member whose record is from prior QA run X — this run's evidence
   for it is missing", not merely as history.
+- **The root pointer clobbered but membership recovered**: the audit keeps
+  reporting the recovered membership (that is the point of `qa_runs/`) and
+  adds an anomaly naming the foreign owner, so `pm qa evidence` shows both
+  the truth and the tampering instead of silently presenting recovered data.
 
 ## 5. Implementation notes (files touched)
 

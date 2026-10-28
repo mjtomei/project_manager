@@ -239,6 +239,12 @@ def _mtime_or_zero(path: Path) -> float:
         return 0.0
 
 
+def _manifest_owner(data) -> str:
+    """A manifest file's claimed owner, for an anomaly that has to name it."""
+    owner = data.get("pr_id") if isinstance(data, dict) else None
+    return owner if isinstance(owner, str) and owner else "no PR"
+
+
 # ---------------------------------------------------------------------------
 # Per-scenario records
 # ---------------------------------------------------------------------------
@@ -295,6 +301,11 @@ class ScenarioDirEvidence:
     state: str
     owner_pr: str = ""
     owner_run: str = ""
+    # Whether the directory holds a ``scenario.json`` at all.  A launched
+    # scenario that never produced a verdict writes only ``prompt.md``; a
+    # record with no ``pr_id``/``run_id`` is legacy or synthetic.  Both audit
+    # as unowned, but they are different facts and the anomaly says which.
+    has_record: bool = False
 
 
 @dataclass
@@ -359,7 +370,8 @@ def _classify(captures_root: Path, index: int,
         # against — either way nothing binds it to the run being audited.
         state = UNOWNED
     return ScenarioDirEvidence(index=index, state=state,
-                               owner_pr=owner_pr, owner_run=owner_run)
+                               owner_pr=owner_pr, owner_run=owner_run,
+                               has_record=record is not None)
 
 
 def audit(captures_root: Path | str | None, *,
@@ -391,6 +403,14 @@ def audit(captures_root: Path | str | None, *,
     manifest = read_manifest(captures_root, pr_id=pr_id, run_id=run_id or None)
     manifest_run = (manifest or {}).get("run_id", "")
     effective_run = manifest_run or run_id
+    # The root pointer is the "current run" file a nested fixture overwrites.
+    # :func:`read_manifest` recovers this PR's membership from ``qa_runs/``
+    # when that happens; the audit must say so rather than present recovered
+    # data as the pointer's own content — the clobber is the incident's
+    # signature, and this is the surface that has to show it.
+    root_pointer = manifest_path(root)
+    root_raw = _read_json(root_pointer) if root_pointer.is_file() else None
+    root_ok = _valid_manifest(root_raw, pr_id) is not None
     members = [m for m in ((manifest or {}).get("scenarios") or [])
                if isinstance(m, dict)]
     dirs = {i: _classify(root, i, pr_id, effective_run)
@@ -400,12 +420,37 @@ def audit(captures_root: Path | str | None, *,
 
     anomalies: list[str] = []
     if manifest is None:
-        anomalies.append(
-            "no qa_manifest.json — scenario membership is not run-bound")
-    elif run_id and manifest_run and manifest_run != run_id:
-        anomalies.append(
-            f"the manifest belongs to QA run {manifest_run}, "
-            f"not {run_id}; the manifest is authoritative")
+        if root_raw is None:
+            anomalies.append(
+                "no qa_manifest.json — scenario membership is not run-bound")
+        elif _manifest_owner(root_raw) == pr_id:
+            anomalies.append(
+                "the root qa_manifest.json is unusable (no run id) — "
+                "scenario membership is not run-bound")
+        else:
+            anomalies.append(
+                f"the root qa_manifest.json names {_manifest_owner(root_raw)}, "
+                f"not {pr_id} — no run-bound membership for this PR")
+    else:
+        if run_id and manifest_run and manifest_run != run_id:
+            anomalies.append(
+                f"the manifest belongs to QA run {manifest_run}, "
+                f"not {run_id}; the manifest is authoritative")
+        if not root_ok:
+            if root_raw is None:
+                anomalies.append(
+                    "no qa_manifest.json at the captures root — membership "
+                    f"recovered from {RUNS_DIR_NAME}/")
+            elif _manifest_owner(root_raw) == pr_id:
+                anomalies.append(
+                    "the root qa_manifest.json is unusable (no run id) — "
+                    f"membership recovered from {RUNS_DIR_NAME}/")
+            else:
+                anomalies.append(
+                    f"the root qa_manifest.json names "
+                    f"{_manifest_owner(root_raw)}, not {pr_id} — a foreign "
+                    "writer overwrote the current-run pointer; membership "
+                    f"recovered from {RUNS_DIR_NAME}/")
     for i, ev in sorted(dirs.items()):
         if ev.state == FOREIGN:
             anomalies.append(
@@ -414,15 +459,21 @@ def audit(captures_root: Path | str | None, *,
         elif ev.state == UNOWNED:
             if i in member_indices:
                 # The manifest says this run owns the scenario, but nothing
-                # on disk carries provenance: a launched scenario that never
-                # produced a verdict writes only ``prompt.md`` (and any
-                # pre-fix record at that index has no identity).  Reporting
-                # that as "not bound to a QA run" would contradict the
-                # membership the same audit just printed.
-                anomalies.append(
-                    f"scenarios/{i}: manifest member with no provenance "
-                    "record (no verdict captured) — its files cannot be "
-                    "verified as this run's evidence")
+                # on disk carries provenance: either no verdict was captured
+                # (only ``prompt.md``) or the record predates provenance (a
+                # pre-fix or synthetic fixture record).  Reporting either as
+                # "not bound to a QA run" would contradict the membership the
+                # same audit just printed.
+                if ev.has_record:
+                    anomalies.append(
+                        f"scenarios/{i}: manifest member whose record carries "
+                        "no PR/run identity (legacy or synthetic) — its files "
+                        "cannot be verified as this run's evidence")
+                else:
+                    anomalies.append(
+                        f"scenarios/{i}: manifest member with no provenance "
+                        "record (no verdict captured) — its files cannot be "
+                        "verified as this run's evidence")
             elif ev.owner_run:
                 anomalies.append(
                     f"scenarios/{i}: record names QA run {ev.owner_run}, but "
