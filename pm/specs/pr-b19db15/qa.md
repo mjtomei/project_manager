@@ -159,6 +159,10 @@ run.
   mp4/gif (and the web-UI webm) first and then check the mp4, so the run ends
   with no video and an actionable error, never with the previous run's video
   presented as this run's capture.
+- A web-UI driver fails before it produces its outputs in a capture directory
+  that already holds them → the driver step clears the previous run's webm,
+  mp4, `trace.zip`, `dom.html` and screenshots first, so a failed run cannot
+  present the earlier run's trace and screenshots as this run's evidence.
 - The CLI scaffold's `bash -c` command form → it must be pasted escaped
   (`-c 'bash -c \"…\"'`); the unescaped form ends the outer double-quoted
   argument, the recorder exits, and step 4 reports "asciinema wrote no cast".

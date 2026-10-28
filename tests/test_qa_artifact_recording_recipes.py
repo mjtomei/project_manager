@@ -28,7 +28,8 @@ hits, regardless of how it waits for a background job:
   also match this recipe's own ``pm-recorder``);
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
-  run's mp4 (which the manifest would present as this run's evidence);
+  run's mp4 (which the manifest would present as this run's evidence); the
+  web-UI driver's trace, screenshots and DOM dump are cleared the same way;
 - the CLI scaffold's ``<command-to-record>`` placeholder sits inside single
   quotes inside the outer double-quoted argument, so the recipe has to show
   the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
@@ -555,13 +556,35 @@ def test_web_ui_clears_a_previous_video():
     fresh-looking mp4 of that earlier run. Both the webm and the mp4 are
     cleared before the driver starts, and the mp4 again before the transcode
     (``ffmpeg`` leaves an existing output untouched when it fails).
+
+    The driver's other outputs are cleared with them: a driver that dies at
+    the first locator writes no trace, screenshots or DOM dump, so without
+    this the earlier run's files stay in the capture directory and the
+    manifest lists them as this run's evidence — the same stale-artifact bug
+    as the webm, one artifact class over.
     """
     text = _recipe_text("web-ui-recording.md")
     capture = text.split("### 1. Start the UI under test", 1)[1].split(
         "### 2.", 1)[0]
-    assert 'rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4"' in capture, (
+    # Join backslash-continued lines so the cleanup is one logical command.
+    joined = re.sub(r"\\\n\s*", " ", capture)
+    clear = next((ln for ln in joined.splitlines()
+                  if ln.startswith("rm -f") and "recording.webm" in ln), None)
+    assert clear, (
         "web-ui recipe keeps an earlier run's webm/mp4, so a failed driver "
         "transcodes the previous run into this run's recording")
+    for artifact in ("recording.webm", "recording.mp4", "trace.zip",
+                     "dom.html", "*.png"):
+        assert artifact in clear, (
+            f"web-ui recipe leaves a previous run's {artifact} in place, so a "
+            "failed driver presents the earlier run's evidence as this run's")
+    assert joined.index(clear) < joined.index('$APP_START --port'), (
+        "web-ui recipe clears the previous run's outputs only after the app "
+        "and driver have started")
+    assert '"${CAPDIR:?}"/*.png' in clear, (
+        "web-ui recipe globs \"$CAPDIR\"/*.png without the `${CAPDIR:?}` "
+        "guard: with CAPDIR unset the glob expands against the filesystem "
+        "root, so the cleanup would target every PNG there")
     finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
     finalize_block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
     rm = finalize_block.index('rm -f "$CAPDIR/recording.mp4"')

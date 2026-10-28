@@ -54,11 +54,18 @@ CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<s
 PORT=8000                    # the port your app serves on
 APP_URL="http://localhost:$PORT"
 mkdir -p "$CAPDIR"
-# A previous run's webm/mp4 must not survive a failed driver or transcode:
-# the finalize step would otherwise turn an earlier run's webm into a
-# fresh-looking mp4 of that run, which the report would present as this
-# run's evidence.
-rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4"
+# A previous run's outputs must not survive a failed driver or transcode: the
+# finalize step would otherwise turn an earlier run's webm into a
+# fresh-looking mp4 of that run, and the driver's trace, screenshots and DOM
+# dump would sit in the capture directory as this run's evidence while this
+# run never produced them (a driver that dies at the first locator writes
+# none of them). The webm is dropped too because the driver renames its
+# auto-named video onto it.
+# The `${CAPDIR:?}` on the glob (not `$CAPDIR`) makes the shell stop if the
+# variable is unset: otherwise `"$CAPDIR"/*.png` would expand against the
+# filesystem root and the cleanup would target every PNG there.
+rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
+      "$CAPDIR/trace.zip" "$CAPDIR/dom.html" "${CAPDIR:?}"/*.png
 
 # Launch the web UI on the chosen port and background it; keep the pid so
 # we can stop it in teardown. Replace APP_START with your app's command.

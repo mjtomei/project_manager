@@ -162,20 +162,31 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    the target session still exists failing instead of passing on a truncated
    cast, and the recorder readiness wait carrying its own deadline (the
    pm-session poll's `deadline` would otherwise satisfy a looser assertion).
+   The render/finalize assertions cover both recording recipes (a failed
+   render leaves no mp4/gif and exits non-zero with its message) and the
+   web-UI recipe (the pre-driver cleanup drops the previous run's webm, mp4,
+   trace, DOM dump and screenshots before the app starts, and the transcode
+   drops the old mp4 before running and checks the new one exists).
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
    - The render steps delete this run's outputs before rendering:
      `rm -f "${cast%.cast}.mp4" "$cast.gif"` in both recording recipes, and
-     `rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4"` before the
-     web-UI driver (plus the mp4 again before the transcode). `ffmpeg` does
+     `rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" "$CAPDIR/trace.zip"
+     "$CAPDIR/dom.html" "${CAPDIR:?}"/*.png` before the
+     web-UI driver (plus the mp4 again before the transcode). The `${CAPDIR:?}`
+     on the glob is the guard that keeps an unset variable from expanding the
+     pattern against the filesystem root. `ffmpeg` does
      not touch an existing output when it fails (verified: a missing input
      leaves the old mp4 byte-for-byte), so without this a render that failed
      — `agg` missing, unreadable cast, failed transcode — still ends with a
      `recording.mp4` that the manifest and the report present as this run's
      evidence; the stale gif likewise lets a failed `agg` encode an earlier
-     run. This is the same bug class as rendering a stale cast (R2), one
-     level up.
+     run. The web-UI driver's trace, screenshots and DOM dump are cleared
+     with the webm for the same reason: a driver that dies at the first
+     locator writes none of them, so the earlier run's files would be listed
+     as this run's evidence. This is the same bug class as rendering a stale
+     cast (R2), one level up.
    - Each render step then `test -s` the mp4 and exits 1 with an actionable
      message ("render produced no mp4 — check 'agg' is installed and the cast
      is readable" / "transcode produced no mp4 — check the driver's webm")
@@ -204,7 +215,7 @@ R8. **A failed render must not leave the previous run's video, and the
 |---|---|
 | `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked |
-| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4 cleared + mp4 checked |
+| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
