@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T16:30:10.926426+00:00'
+  updated_at: '2026-10-28T16:39:01.421995+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36791,6 +36791,33 @@ prs:
       S9 post-fix capture.'
     created_at: '2026-10-28T16:30:10Z'
     last_edited: '2026-10-28T16:30:10Z'
+  - id: note-45ff9e7
+    text: 'QA scenario 14 RERUN (supersedes the caveat in my previous scenario-14
+      note): the review flag was right — story 2 had sampled only JSON/text inside
+      the iteration-1 follow-up window, and no CLI capture existed. Re-ran all five
+      stories on a fresh project (A pr-882760d, B pr-c936713) and sampled the window
+      properly: 17 one-second JSON+text+TREE samples plus 3 runs-popup samples inside
+      the 30 s window after answering A. Tree: ⏸1 + spinner (B) vs ⟳1 + spinner (A)
+      in 17/17 samples. Popup at 16:32:20/22/23: A "RUNNING review review #1 ⧉ review-pr-882760d"
+      with "review iteration 1 (INPUT_REQUIRED answered; follow-up running)", B "WAITING
+      review review #1 — review INPUT_REQUIRED (iteration 1)". No re-armed INPUT_REQUIRED
+      notice between answer (16:32:17) and follow-up verdict (16:32:47); NEEDS_WORK
+      then launched iteration 2 (⏸2 vs ⏸1). Stories 1, 3, 4, 5 re-verified in the
+      same run: second genuine question re-raised iteration 2 on the same window @12
+      / pane %15 / session b83c9fa5 with one "follow-up asked INPUT_REQUIRED again"
+      and no iteration 3; breadcrumb restart resumed both loops, adopted B and re-watched
+      A with ids unchanged (243 JSON-reader samples, zero non-zero rc, no phantom
+      wait); three typed lines left A running/follow_up with notice count 2→2. Tests:
+      80 passed. Captures now use a named subdirectory per recipe: /pm-captures/scenarios/14/tui-wait-surfaces/
+      (TUI cast+mp4; the story-2 popup frame is at ~77 s) and /pm-captures/scenarios/14/cli-status-readers/
+      (CLI cast+mp4 of pm autostart status at 1.5 s intervals across the answer, showing
+      waiting -> running for A while B stays waiting). Evidence: /pm-captures/scenarios/14/{manifest.md,evidence/};
+      the superseded first run is kept under evidence-run1-partial/. Note: agg has
+      no pause/refresh glyphs, so the mp4 shows fallback boxes — the cast carries
+      the real characters and the tui-view text samples are the authoritative marker
+      evidence.'
+    created_at: '2026-10-28T16:39:01Z'
+    last_edited: '2026-10-28T16:39:01Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
