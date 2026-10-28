@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T10:12:55.185722+00:00'
+  updated_at: '2026-10-28T11:06:01.375371+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38964,6 +38964,24 @@ prs:
       -> filed pr-7824490.'
     created_at: '2026-10-28T10:37:36Z'
     last_edited: '2026-10-28T10:37:36Z'
+  - id: note-df53337
+    text: 'QA S125 (2026-10-28, container podman 3, real claude 2.1.312 vs main +
+      acme router stubs; captures /pm-captures/scenarios/125, README.md): CODE CHANGE
+      ca2a0657 needs normal re-review. Story 1 ran in full pre-fix on 9d2704f5. Held:
+      routing (router stub = R refiner/worker only, acme-opus-1, no main key; /run/pm-route
+      only on R QA containers incl. the CLI run and the re-run; route=acme via=container-bridge
+      / U route=none; no route wait/stall lines), REQA hand-off (re-qa once, running:
+      qa throughout the CLI run, one running: qa (launched) after its Result: PASS,
+      one new loop id), U never re-qa, hooks + transcripts for every routed sid, 0
+      secret hits. Failed: C-b P in myview showed R qa [done PASS] (not [working])
+      while the CLI pm qa run was live. Fixed ca2a0657 (derive_action_status reports
+      qa running while a live own pm qa run record exists). NOT RUN: post-fix live
+      rerun and story 2 (host router outage). This QA container hit pids.max 2048:
+      PID 1 is sleep infinity and never reaps; ~1840 permanent zombies, mostly from
+      a `>(tee)` tick loop. Next QA run: fresh container, no process substitution
+      in tick loops, one story at a time.'
+    created_at: '2026-10-28T11:06:01Z'
+    last_edited: '2026-10-28T11:06:01Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
