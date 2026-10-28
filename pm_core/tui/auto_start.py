@@ -1093,6 +1093,7 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         if run_driven_elsewhere(pr_id):
             _log.debug("auto_start: %s QA run is driven by another process, "
                        "not starting", pr_id)
+            _recheck_after_driver(app)
             continue
         _log.info("auto_start: starting QA loop for %s", pr_id)
         app.log_message(f"Auto-start: QA for {pr_id}")
@@ -1120,6 +1121,33 @@ def _recheck_after_claim(app) -> None:
 
     app._return_claim_recheck = True
     set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
+
+
+# How often a pass is re-run while another process drives a run auto-start
+# left alone (see _recheck_after_driver).
+DRIVER_RECHECK_SECONDS = 30
+
+
+def _recheck_after_driver(app) -> None:
+    """Run another scheduler pass once a run driven elsewhere may be over.
+
+    A ``pm qa run`` instruction run ends without a PR verdict, so full QA
+    is still due once it exits; the TUI has no periodic auto-start pass, so
+    without this the PR would sit in qa until some unrelated event (S111).
+    A ``qa-run-bg`` driver records its verdict and the re-run pass then
+    finds the run ended.  The pass re-arms this while the run lives; one
+    pending re-check covers every PR.
+    """
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_driver_recheck", False):
+        return
+
+    def _fire():
+        app._driver_recheck = False
+        app.run_worker(check_and_start(app))
+
+    app._driver_recheck = True
+    set_timer(DRIVER_RECHECK_SECONDS, _fire)
 
 
 def _adopt_return_review(app, pr: dict) -> bool:

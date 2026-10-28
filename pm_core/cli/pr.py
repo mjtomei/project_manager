@@ -7,6 +7,7 @@ import contextlib
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -3929,9 +3930,19 @@ def pr_auto_sequence(pr_id: str):
                 if p and p.get("status") == "in_review":
                     p["status"] = "qa"
                     _record_status_timestamp(p, "qa")
-            store.locked_update(root, _to_qa)
+            # A run record names this tick (then the driver) before the PR
+            # shows qa: a TUI auto-start pass in between saw no driver and
+            # started a second loop (S111).
+            from pm_core.qa_loop import drop_launch_record, write_launch_record
+            loop_id = secrets.token_hex(8)
+            write_launch_record(pr_id, loop_id, os.getpid())
+            try:
+                store.locked_update(root, _to_qa)
+            except BaseException:
+                drop_launch_record(pr_id, loop_id)
+                raise
             trigger_tui_refresh()
-            _launch_qa_detached(root, pr_id)
+            _launch_qa_detached(root, pr_id, loop_id=loop_id)
             click.echo("advanced: qa")
             return
 
@@ -4167,7 +4178,8 @@ def _check_qa_launch(root: Path, pr_id: str) -> None:
     check_qa_providers(store.get_pr(data, pr_id) or {}, data)
 
 
-def _launch_qa_detached(root: Path, pr_id: str) -> None:
+def _launch_qa_detached(root: Path, pr_id: str,
+                        loop_id: str | None = None) -> None:
     """Spawn a detached subprocess to drive the QA loop for *pr_id*.
 
     Uses the hidden ``pm pr qa-run-bg`` subcommand so the QA scenarios
@@ -4178,22 +4190,33 @@ def _launch_qa_detached(root: Path, pr_id: str) -> None:
     session is raised here (one ``Error:`` line from
     this tick, no driver spawned) instead of ending the driver unseen and
     being relaunched on every tick.
+
+    The run's start record names this process and then the driver from
+    before the spawn (qa_loop.write_launch_record): the driver writes its
+    own only after setting up, and a TUI auto-start pass in that gap would
+    start a second loop.
     """
     _check_qa_launch(root, pr_id)
+    from pm_core.qa_loop import write_launch_record
+    loop_id = loop_id or secrets.token_hex(8)
+    write_launch_record(pr_id, loop_id, os.getpid())
     cmd = [sys.executable, "-m", "pm_core.wrapper",
-           "pr", "qa-run-bg", pr_id]
+           "pr", "qa-run-bg", pr_id, "--loop-id", loop_id]
     # start_new_session detaches from the parent process group so the
     # caller can exit while QA continues.
-    subprocess.Popen(
+    proc = subprocess.Popen(
         cmd, cwd=str(root), start_new_session=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
     )
+    write_launch_record(pr_id, loop_id, proc.pid)
 
 
 @pr.command("qa-run-bg", hidden=True)
 @click.argument("pr_id")
-def pr_qa_run_bg(pr_id: str):
+@click.option("--loop-id", default=None, hidden=True,
+              help="Run id whose start record the launcher wrote.")
+def pr_qa_run_bg(pr_id: str, loop_id: str | None):
     """Hidden: run the QA loop synchronously to completion.
 
     Used by ``pm pr auto-sequence`` to spawn a detached QA driver.  Not
@@ -4208,15 +4231,26 @@ def pr_qa_run_bg(pr_id: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    # Transition to qa if necessary
+    # Transition to qa if necessary.  The launching tick has normally done
+    # it already; only lock when there is something to write, and wait out
+    # a busy project.yaml (another pm command) rather than die before the
+    # run starts: nothing would report it (output goes nowhere) (S111).
     def _to_qa(d):
         p = store.get_pr(d, pr_id)
         if p and p.get("status") == "in_review":
             p["status"] = "qa"
             _record_status_timestamp(p, "qa")
-    store.locked_update(root, _to_qa)
-    data = store.load(root)
-    pr_entry = store.get_pr(data, pr_id) or pr_entry
+    if pr_entry.get("status") == "in_review":
+        try:
+            store.locked_update(root, _to_qa)
+        except store.StoreLockTimeout as e:
+            from pm_core.signoff import RETURN_CLEAR_WAIT_SECONDS
+            _log.warning("pr_qa_run_bg: %s; waiting up to %ss more", e,
+                         RETURN_CLEAR_WAIT_SECONDS)
+            store.locked_update(root, _to_qa,
+                                timeout=RETURN_CLEAR_WAIT_SECONDS)
+        data = store.load(root)
+        pr_entry = store.get_pr(data, pr_id) or pr_entry
 
     # Guard against an out-of-band status change that landed between the
     # auto-sequence sign_off->qa bounce (apply_signoff_hop) that spawned this
@@ -4244,7 +4278,8 @@ def pr_qa_run_bg(pr_id: str):
     from pm_core import runtime_state as _rs
     _suppress = (_rs.get_action_state(pr_id, "qa") or {}).get("suppress_switch")
     _rs.set_action_state(pr_id, "qa", "running", suppress_switch=_suppress)
-    state = QALoopState(pr_id=pr_id)
+    state = (QALoopState(pr_id=pr_id, loop_id=loop_id) if loop_id
+             else QALoopState(pr_id=pr_id))
     try:
         run_qa_sync(state, root, pr_entry, on_update=None, max_scenarios=None)
     except Exception as e:

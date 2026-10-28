@@ -595,6 +595,24 @@ def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
     loop = app._qa_loops.get(pr_id)
     if loop is not None and loop.running:
         return None
+    # Another process drives a run of it (a ``pm qa run`` the user started,
+    # a ``qa-run-bg`` driver): starting here would kill its windows as
+    # stale.  Auto-start takes the PR over once that run is over (S111).
+    # A start would have replaced an earlier run's recorded verdict, which
+    # now reads as this review's QA result: the catch-up hand-off took a
+    # PASS from before the review to sign-off.  Drop it.
+    from pm_core.qa_loop import run_driven_elsewhere
+    if run_driven_elsewhere(pr_id):
+        _log.info("auto_qa: %s QA run is driven by another process, "
+                  "not starting", pr_id)
+        try:
+            from pm_core import runtime_state as _rs
+            _rs.set_action_state(pr_id, "qa", None)
+        except Exception:
+            _log.debug("runtime_state qa clear failed", exc_info=True)
+        from pm_core.tui import auto_start as _auto_start
+        _auto_start._recheck_after_driver(app)
+        return None
     if qa_loop_ui.start_qa(app, pr_id, lock_timeout=store.NO_WAIT) is False:
         try:
             store.load(app._root)

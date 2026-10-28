@@ -25,6 +25,20 @@ def _isolated_runtime_state(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_qa_launch_records(monkeypatch):
+    """Keep QA launch records out of the real ``~/.pm/workdirs/qa``.
+
+    Launching a detached QA driver writes its run record under the home
+    directory, which most tests do not redirect; one leaked record would
+    make later tests' PRs look driven.  Tests of the records restore
+    ``qa_loop.write_launch_record`` with their own HOME.
+    """
+    from pm_core import qa_loop
+    monkeypatch.setattr(qa_loop, "write_launch_record",
+                        lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_claude_config(tmp_path_factory, monkeypatch):
     """Point Claude's global config at a temp dir.
 

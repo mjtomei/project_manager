@@ -2803,7 +2803,8 @@ def test_auto_sequence_qa_launch_spawns_driver_when_configured(pm_home_dir,
                         lambda root: {"project": {}, "prs": [pr]})
     with patch.object(pr_cli.subprocess, "Popen") as popen:
         pr_cli._launch_qa_detached(Path("/nonexistent"), "pr-001")
-    assert popen.call_args.args[0][-2:] == ["qa-run-bg", "pr-001"]
+    assert popen.call_args.args[0][-4:-1] == ["qa-run-bg", "pr-001",
+                                              "--loop-id"]
 
 
 @pytest.mark.parametrize("error,level", [
@@ -2903,7 +2904,8 @@ def test_reqa_hop_refused_then_fixed_launches_over_judged_window(
     result, popen = _reqa_tick(tmp_path, data, status_path=old)
     assert result.exit_code == 0, result.output
     assert result.output.strip() == "running: qa (launched)"
-    assert popen.call_args.args[0][-2:] == ["qa-run-bg", "pr-001"]
+    assert popen.call_args.args[0][-4:-1] == ["qa-run-bg", "pr-001",
+                                              "--loop-id"]
     assert pr["signoff_return"]["launch_claim"]["hop"] == "qa"
 
     # The driver has not cleared ``awaiting`` yet: a second tick leaves it.
@@ -2999,7 +3001,8 @@ def test_review_pass_tick_refuses_before_moving_the_pr_to_qa(pm_home_dir):
     result, popen = _review_pass_tick(pr, data)
     assert result.exit_code == 0 and result.output.strip() == "advanced: qa"
     assert pr["status"] == "qa"
-    assert popen.call_args.args[0][-2:] == ["qa-run-bg", "pr-001"]
+    assert popen.call_args.args[0][-4:-1] == ["qa-run-bg", "pr-001",
+                                              "--loop-id"]
 
 
 @pytest.mark.parametrize("verify", [True, False])

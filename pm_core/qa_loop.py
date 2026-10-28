@@ -19,6 +19,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -1229,7 +1230,8 @@ def write_run_record(state: QALoopState) -> None:
     if not state.qa_workdir:
         return
     path = Path(state.qa_workdir) / _RUN_RECORD
-    if path.exists():
+    if path.exists() and not (read_run_record(state.qa_workdir)
+                              or {}).get("launch"):
         return
     data = {"pr_id": state.pr_id, "loop_id": state.loop_id,
             "session_tag": state.session_tag, "started_at": time.time(),
@@ -1242,6 +1244,42 @@ def write_run_record(state: QALoopState) -> None:
         tmp.rename(path)
     except OSError:
         _log.warning("QA: could not write %s", path, exc_info=True)
+
+
+def write_launch_record(pr_id: str, loop_id: str, owner_pid: int) -> None:
+    """Name *owner_pid* as the driver of run *loop_id* before it starts.
+
+    ``pm pr auto-sequence`` moves a PR to qa and spawns ``pm pr qa-run-bg``,
+    which writes its own start record only after taking the project.yaml
+    lock and setting up (seconds, more while another pm command holds the
+    lock).  A TUI auto-start pass in that gap saw no driver and started a
+    second loop, whose windows the driver then killed as stale (S111).  The
+    launching tick writes this record first, naming itself until the
+    driver is spawned and then the driver; the driver replaces it with its
+    own record.  Best-effort."""
+    try:
+        qa_wd = create_qa_workdir(pr_id, loop_id)
+        path = qa_wd / _RUN_RECORD
+        rec = read_run_record(qa_wd)
+        if rec and not rec.get("launch"):
+            return  # the driver already wrote its own
+        data = {"pr_id": pr_id, "loop_id": loop_id,
+                "session_tag": own_session_tag(), "started_at": time.time(),
+                "owner_pid": owner_pid,
+                "owner_start": _proc_start_time(owner_pid), "launch": True}
+        tmp = path.with_name(_RUN_RECORD + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+    except (OSError, TypeError, ValueError):
+        _log.warning("QA: could not write the launch record of %s-%s",
+                     pr_id, loop_id, exc_info=True)
+
+
+def drop_launch_record(pr_id: str, loop_id: str) -> None:
+    """Remove a launch record whose driver was never spawned."""
+    qa_wd = Path.home() / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
+    if (read_run_record(qa_wd) or {}).get("launch"):
+        shutil.rmtree(qa_wd, ignore_errors=True)
 
 
 def read_run_record(qa_workdir: str | Path) -> dict | None:
