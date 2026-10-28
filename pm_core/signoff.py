@@ -1912,7 +1912,11 @@ def _step_signoff_locked(root: Path, pr_entry: dict, *, session: str,
     original, coerced = record.get("original_verdict"), \
         record.get("coerced_reason")
 
-    if verdict is None and record.get("verdict"):
+    # Hand-edited state: a non-string ``verdict`` is no verdict
+    # (``verdict_of``), so a malformed value must not take the stale branch.
+    # ``record.get("verdict")`` was truthy for a mapping/list, so the driver
+    # cleared the record and reported "HEAD moved" when HEAD had not moved.
+    if verdict is None and verdict_of(record.get("verdict")):
         reason = stale_reason(record)
         retire(session, pr_entry, tdir)
 
