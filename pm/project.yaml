@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T23:20:26.895678+00:00'
+  updated_at: '2026-10-28T01:07:17.029750+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25965,6 +25965,26 @@ prs:
       re-check hang) remains subsumed by this PR i2. (2026-10-27T23:20:26Z)'
     created_at: '2026-10-27T23:20:26Z'
     last_edited: '2026-10-27T23:20:26Z'
+  - id: note-37d3c80
+    text: 'QA S11 (watcher NO_VERDICT surface + pane-gone teardown): fixed two defects
+      found driving the scenario. (1) In-scope: the new NO_VERDICT stop line interpolated
+      the VerdictRecoveryExhausted summary into a Rich-markup log message, so `watcher[auto-start]`
+      was eaten as a style tag - pm log grep / the L pane showed `Error: watcher:`
+      while the raw [watcher_base] line in the same file kept the qualifier. The summary
+      is now escaped. (2) Pre-existing but it broke the scenario stop step: `ws` started
+      a second watcher instead of stopping the running one once an earlier instance
+      had finished. WatcherManager.find_by_type() returned the first registered (dead)
+      instance, so _action_watcher_toggle saw running=False and took the start branch;
+      the two loops then fought over the single watcher window (each kills/recreates
+      it at iteration start) and the newer one was reported X KILLED. find_by_type
+      now prefers a running instance (also repairs the start_watcher duplicate guard,
+      stop_watcher and the auto-start scope update). Regression tests for both, each
+      failing on the prior code. Captures: /pm-captures/scenarios/11/pre-fix/ (story2
+      shows the double start) and post-fix/. Not fixed, out of scope: the L pane recap
+      pattern is `Auto-(start|sequence|merge)` (lowercase s) so it never matches the
+      watcher''s `Auto-Start Watcher ...` lines; the backlog still shows them.'
+    created_at: '2026-10-28T01:07:16Z'
+    last_edited: '2026-10-28T01:07:16Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
