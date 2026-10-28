@@ -131,10 +131,12 @@ with the private server, cannot reach another pm session.
 
 ### R5b — Never adopt an ambient session this HOME does not know
 
-`_session_start()` must resolve the target name through
-`_resolve_start_session_name()`: it uses the ambient `$TMUX_PANE` session
-only when that session's pane registry exists in the **current** HOME.
-Otherwise it falls back to the cwd-derived name.  Without this guard, a
+`_known_ambient_session()` returns the ambient `$TMUX_PANE` session only
+when that session's pane registry exists in the **current** HOME.
+`_session_start()` resolves its target through
+`_resolve_start_session_name()` (ambient or cwd-derived); `pm session
+kill`/`mobile` include the ambient session as a fallback candidate only
+when it is known.  Otherwise the cwd-derived name is used.  Without this guard, a
 process running under a different HOME (tests, tooling, a temporary sandbox)
 that inherits `$TMUX`/`$TMUX_PANE` adopts a foreign session, sees an empty
 registry, concludes the TUI is missing, and respawns a TUI into the live
