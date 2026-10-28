@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T20:44:46.959099+00:00'
+  updated_at: '2026-10-28T21:40:36.616189+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39655,6 +39655,50 @@ prs:
       scope (pr-2478bf4, pr-852dde2, pr-727073f, pr-4ee6b33 — all still pending).'
     created_at: '2026-10-28T20:44:46Z'
     last_edited: '2026-10-28T20:44:46Z'
+  - id: note-f655fa9
+    text: 'review-loop 4f1e i3: a third review pass (two independent reviewers — one
+      over integration.py, one over signoff.py/prompt_gen.py/merge_integrity.py/cli/pr.py
+      — plus my own fuzzes) found six residual defects, all fixed in 640cfddb with
+      a test that fails on the pre-fix code (verified by stashing the source). (1)
+      `_as_int` caught TypeError/ValueError but not OverflowError, and `int(float("inf"))`
+      raises the latter — YAML `.inf` made one hand-edited count raise out of `compact`
+      (every recorded check, inside the store lock), `summary`/`pm pr show`, and `_apply_resolution`
+      paths_total guard. (2) The resolver compared with `==`, which conflates `True
+      == 1 == 1.0`: a branch that changed a field to `1` and a base that changed it
+      to `0` read as "unchanged on the branch" and the base won silently — a real
+      field conflict resolved by side selection, invisible to the preservation check
+      (which compared the same way). `_same` now requires the same scalar kind, containers
+      structurally. (3) `_record_check` carried provenance before the lock and again
+      inside it, but the carry only fills a record with no resolution, so a resolution
+      carried from the pre-lock read suppressed the newer one a concurrent apply recorded
+      in between: stored record kept the older applied_merge_sha/resolved_from while
+      base_sha described the newer merge, and an approval bound its digest to the
+      wrong resolution. The in-lock carry now starts from the record the check computed
+      (falling back to the pre-lock carry only when the stored record carries no resolution
+      at all). (4) `_report_evidence` attributed a report reuse statement on the head
+      tag alone, so a leftover report from another base was recorded (and printed
+      by `pm pr show`) as this decisions evidence though the gate refuses such a MERGE;
+      it now applies the same base rule, and reads a non-string `reviewed_head` as
+      absent instead of raising AttributeError out of the record write. (5) `_apply_locked`
+      accepted any non-empty string as `base_sha` and handed it to `git merge` — a
+      hand-edited `HEAD`/ref name is a no-op merge reporting a successful "apply"
+      without integrating anything; only a git object name counts now. (6) `spec_gen._build_spec_prompt`
+      interpolated a hand-edited `project.base_branch` into `git diff <base>...HEAD`;
+      it now reads as absent and falls back to `master` (the same rule `_launch_review_window`
+      applies). Independent checks: 400-trial resolver fuzz (no ours/theirs asymmetry,
+      no lost change under an independent preservation checker); 18 hand-edited documents
+      x all pairs (no exception, symmetric); ~700 malformed-state combinations across
+      every integration/sign-off reader incl. `.inf` in every field (0 exceptions);
+      the resolver still reproduces this branch own hand-reconciled pm/project.yaml
+      at merge b2d1a15c byte-identically; resolver timing on the real 2 MB / 515-PR
+      document unchanged (853-879 ms before, 867-892 ms after — YAML parsing dominates);
+      live read-only `pm pr signoff integrate pr-5cee3d5` = up to date with master@89e3c501.
+      Full suite: 4367 passed, 1 skipped. NOTED, NOT FIXED (note added to pr-852dde2):
+      prompt_gen.py has 13 unguarded `base_branch` readers that build the same diff
+      commands; and `tests/test_push_proxy.py::TestWorkdirKeyedProxies::test_stop_all_proxies_skips_a_busy_directory`
+      failed once under heavy machine load and passes in isolation (flaky, unrelated).'
+    created_at: '2026-10-28T21:40:36Z'
+    last_edited: '2026-10-28T21:40:36Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
