@@ -37733,7 +37733,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T08:15:26.595608+00:00'
+  updated_at: '2026-10-28T09:41:00.628171+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -38612,6 +38612,28 @@ prs:
       and convincing.'
     created_at: '2026-10-28T08:15:26Z'
     last_edited: '2026-10-28T08:15:26Z'
+  - id: note-4cbb831
+    text: 'QA S24 (verdict reader past a later /loop wakeup) PASS. Both stories induced
+      the live two-turn transcript with a stand-in claude that appends, in ONE write,
+      the verdict turn + an isMeta "# Autonomous loop tick (dynamic pacing)" user
+      record + a no-verdict postscript ("Verdict already submitted; nothing else to
+      do."). S1 (retry path; container image broken after iteration 1 then repaired
+      inside the 10 s backoff): iteration 1 NEEDS_WORK, attempts 1-2 fail (5 s/10
+      s), attempt 3 = the stand-in -> iteration 2 verdict=PASS, no iteration 3, no
+      LAUNCH_FAILED, exactly one review window, JSON review {iteration 2, PASS, attempts
+      0, retryable false}. S2 (restart handoff adopt path): pm tui restart --breadcrumb
+      issued the moment the loop logged "polling pane ...-i2.jsonl"; resumed loop
+      logged "consume_breadcrumb: Review loop resumed ... at iteration 2" + "adopting
+      in-flight iteration 2 (pane %8, ...)" + "poll_for_verdict ... grace=0s" for
+      the same pane/session, one relauncher line only, iteration 2 verdict=PASS, target
+      still armed [wait-for-merge] with attempts 0. Both transcripts are 4 records
+      ending with the wakeup + postscript. Direct helper check on both live transcripts:
+      _verdict_output_if_present -> PASS, the pre-merge read_latest_assistant_text
+      -> the postscript -> fabricated NEEDS_WORK. Repro test test_verdict_reader_survives_a_later_wakeup_postscript
+      passes; tests/test_review_launch_retry.py 102 passed. Captures /pm-captures/scenarios/24/{story1-retry-wakeup,story2-restart-adopt}.
+      No code change.'
+    created_at: '2026-10-28T09:41:00Z'
+    last_edited: '2026-10-28T09:41:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
