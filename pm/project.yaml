@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T06:58:06.660907+00:00'
+  updated_at: '2026-10-28T08:59:20.805450+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36035,6 +36035,29 @@ prs:
       for that reason instead.'
     created_at: '2026-10-28T06:55:01Z'
     last_edited: '2026-10-28T06:55:01Z'
+  - id: note-8fab064
+    text: 'QA scenario 14 (key surfaces / runs popup / status text after the help-width
+      fix) PASS, all 4 stories. Verified at runtime on the fake backend (project pm-test-1793177166,
+      PR pr-95325c4): (1) help screen at 80x24 and 200x50 shows the three fresh rows
+      complete with their merge-policy suffixes, popup measures 66 columns (fix bc7247d0
+      holds); plain a/O/A still labelled runs popup / add-target / toggle-auto-merge.
+      (2) `pm tui keys` documents the three fresh chords + policy semantics and lists
+      `fresh` among the autostart command-bar verbs; README names `pm autostart fresh
+      pr-abc123` and states the z a policy rule and the plain-key continuation rule.
+      (3) after `pm autostart fresh --wait-for-merge`, the runs popup, `pm autostart
+      status` and `pm autostart list` agree on PR, wait-for-merge policy, phase (WAITING
+      implementation), reason and run id; Escape changes nothing. (4) `z a` on the
+      selected in-review PR flips the node to `◎ in_progress` with the target marker,
+      logs both the reset line and the waiting line, and the popup reason agrees with
+      the log; pm pr show = in_progress, no review window, one impl window. Captures:
+      /pm-captures/scenarios/14/ (01-help-80cols, 02-help-200cols, 03-tui-keys-readme,
+      04-runs-popup, 05-za-chord). Mechanics note: story 4 Given was reached through
+      the product handoff (append an assistant reply to the impl transcript so the
+      poll starts one fresh review, then append a new user feedback prompt), so the
+      pre-state is genuine rather than hand-set; the PR was already a wait-for-merge
+      target, so z a preserved that policy. (2026-10-28)'
+    created_at: '2026-10-28T08:59:20Z'
+    last_edited: '2026-10-28T08:59:20Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
