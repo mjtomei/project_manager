@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T03:28:24.781863+00:00'
+  updated_at: '2026-10-28T03:39:44.559149+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38526,6 +38526,36 @@ prs:
       filed pr-35449b0. No /pm-captures leaks (only concurrent 111-115 changed).'
     created_at: '2026-10-28T03:28:24Z'
     last_edited: '2026-10-28T03:28:24Z'
+  - id: note-afaddda
+    text: 'S115 refine (HEAD 9a2dacaa): route wait/stall/recovery code is gone; a
+      routed refiner has no timeout, so restart the router within ~30 s of the first
+      ECONNRESET retry (Claude gives up ~3 min after the drop, then the run hangs).
+      The refiner finishes before the worker launches, so story 1 needs two outages:
+      down before the refiner, then stub hold + kill on the worker first turn. Reuse
+      /pm-captures/scenarios/101 + 104 scripts (pin_tui, noticeloop, render_cast).
+      No pm-dev image or agg on this host: build with podman build --uts host and
+      install agg 1.9.0 aarch64. Keep PM_CAPTURES_PR=pr-592e4bd exported in the env.sh
+      scrub. Credentials non-read proof: touch -a -d 2020-01-01, then stat %X with
+      a positive control.'
+    created_at: '2026-10-28T03:00:28Z'
+    last_edited: '2026-10-28T03:00:28Z'
+  - id: note-7342842
+    text: 'QA S115 (2026-10-28, container mode podman 3 slirp4netns, upgrade from
+      34fa3d24, real claude 2.1.312 refiner/worker/s0 vs router/main stubs, fake planner/verifier/finalizer;
+      captures /pm-captures/scenarios/115, REPORT.md, s1/s2 recording.mp4): PASS on
+      9a2dacaa, no code change. Retired-key warning (list + show "warning: "), classifier
+      "not set" line + CLAUDE_CODE_AUTO_MODE_MODEL in launch unsets, router-down status/Preflight
+      FAILED rc 1, Routes for R only; R refiner and worker rode out a router stop
+      and a SIGKILL mid-reply via Claude retries (attempt 5/10) and reached PASS with
+      no pm action; no route/stall/recover lines; bridge mount R only; creds atime
+      untouched (relatime control), refresh-marker never created. --clear removed
+      exactly the two keys and the warning; --classifier-model work/claude-sonnet-5
+      reached R routed processes in the container, U none; router then saw classifier
+      calls as work/claude-sonnet-5 (before: claude-sonnet-5). Harness note: the first
+      outage driver matched s0 retries and started the router before the refiner launched,
+      so R was re-run with z t; match only scenario>=1 panes.'
+    created_at: '2026-10-28T03:39:44Z'
+    last_edited: '2026-10-28T03:39:44Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -38724,7 +38754,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T23:36:34.815807+00:00'
-  updated_at: '2026-10-23T07:38:52.266239+00:00'
+  updated_at: '2026-10-28T03:39:46.620175+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38738,6 +38768,19 @@ prs:
       both.'
     created_at: '2026-10-23T07:38:52Z'
     last_edited: '2026-10-23T07:38:52Z'
+  - id: note-196c4a9
+    text: 'Related (seen in pr-592e4bd QA S115, container mode): stopping/restarting
+      QA (TUI z t) while a scenario refiner is still running leaves that scenario
+      container running forever (sleep infinity, Up 28 min at the end). Only the worker
+      pane has the podman rm -f EXIT trap; when the refiner window is closed before
+      the worker is split off, _concretize_and_launch logs "refiner pane gone — worker
+      not launched" / "worker pane not created in container <name>" and nothing removes
+      the container. master _launch_scenarios_in_containers has the same shape. Fix
+      idea: remove the container (remove_container) whenever the worker is not launched.
+      Evidence: /pm-captures/scenarios/115/s2/podman-ps.txt (pr-592e4bd captures),
+      pm log 03:09:12.'
+    created_at: '2026-10-28T03:39:46Z'
+    last_edited: '2026-10-28T03:39:46Z'
 - id: pr-0f85376
   plan: bugs
   title: 'Bug: TUI recovery of a completed QA run whose driver died mid-finalizer
