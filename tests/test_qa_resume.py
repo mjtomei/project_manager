@@ -381,13 +381,49 @@ def test_resume_held_run_keeps_watching(tmp_path):
         qa_loop_ui._resume_incomplete_qa(app)
 
     resume_bg.assert_called_once()
-    on_complete.assert_not_called()
+    # Unprocessed completion → noted once during adoption.
+    on_complete.assert_called_once()
     state = app._qa_loops["pr-001"]
     assert state.held is True
     assert state.waiting_for_input == {1}
-    # Unprocessed completion → the normal poll path will note it once.
-    assert state._ui_complete_notified is False
+    assert state._ui_complete_notified is True
     assert _resume_file_path(qa_dir).is_file()
+
+
+def test_resume_held_run_notes_the_unprocessed_result_once(tmp_path):
+    """The held result finalized while the TUI was down must be recorded on
+    adoption.  The re-spawned watcher publishes ``running`` immediately, so
+    the normal completion poll never sees it — without noting it here the
+    result would be lost whenever no follow-up arrives (stop, PR leaves qa).
+    A second restart must not note it again."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=False)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background"):
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    data = store.load(app._root)
+    notes = [n for n in (store.get_pr(data, "pr-001").get("notes") or [])
+             if n["text"].startswith("QA INPUT_REQUIRED")]
+    assert len(notes) == 1
+    # The flag is persisted so the next restart adopts without re-noting.
+    assert json.loads(
+        _resume_file_path(qa_dir).read_text())["completion_processed"] is True
+
+    # Simulate a second restart: the in-memory tracking is gone, the store
+    # and snapshot survive.
+    app._qa_loops = {}
+    app._resumed_qa_pr_ids = set()
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    data = store.load(app._root)
+    notes = [n for n in (store.get_pr(data, "pr-001").get("notes") or [])
+             if n["text"].startswith("QA INPUT_REQUIRED")]
+    assert len(notes) == 1
 
 
 def test_resume_held_run_already_processed_does_not_renote(tmp_path):

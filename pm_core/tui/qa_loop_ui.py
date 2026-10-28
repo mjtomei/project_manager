@@ -549,16 +549,29 @@ def _resume_incomplete_qa(app) -> None:
         # during downtime must be collected, and an already-processed
         # result must not be noted/transitioned twice.
         if state.held and state.waiting_for_input:
-            state._ui_complete_notified = state.completion_processed
             state.running = True
+            if not state.completion_processed:
+                # The held result finalized while the TUI was down and was
+                # never recorded.  Note it here, exactly as the live path
+                # does when it publishes the held result: the re-spawned
+                # watcher sets ``running`` immediately, so the normal
+                # completion poll never observes (not running,
+                # INPUT_REQUIRED) and the note would otherwise be lost
+                # whenever no follow-up ever arrives (stop, PR leaves qa,
+                # the user abandons the wait).  Persist the flag so a second
+                # restart does not note it again.
+                _on_qa_complete(app, state)
+                qa_loop.mark_completion_processed(state)
+            else:
+                app.log_message(
+                    f"QA for {pr_id} is waiting for input — still watching "
+                    "for a follow-up verdict...")
+            state._ui_complete_notified = True
 
             def _on_update(s, _app=app):
                 _app.call_from_thread(_on_qa_update, _app, s)
 
             app._qa_loops[pr_id] = state
-            app.log_message(
-                f"QA for {pr_id} is waiting for input — still watching "
-                "for a follow-up verdict...")
             _log.info("Re-adopting held QA run for %s (waiting=%s, "
                       "processed=%s)", pr_id,
                       sorted(state.waiting_for_input),
@@ -731,7 +744,12 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
             )
         if sd:
-            _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
+            # A held run is not paused: it keeps watching the worker pane and
+            # resumes the self-driving loop when the follow-up lands.
+            _log.info(
+                "QA self-driving: INPUT_REQUIRED — %s",
+                "holding the run for a follow-up verdict" if state.held
+                else "loop paused")
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 

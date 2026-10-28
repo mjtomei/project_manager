@@ -517,3 +517,46 @@ covered by tests in `tests/test_qa_input_required.py` /
   defence in depth.  `test_restored_held_run_finalizes_a_collected_follow_up`
   still said `_clear_waiting` clears `held` (iteration 7 moved that to
   `_poll_waiting`).
+
+## 15. Implementation notes (review iteration 10)
+
+- **A held result that finalized while the TUI was down is noted on
+  adoption.** R3 promised that a held snapshot with
+  `completion_processed=False` is "processed by the normal
+  `poll_qa_state` completion path".  It was not: `_resume_incomplete_qa`
+  publishes `running=True` and re-spawns the watcher immediately, and
+  `poll_qa_state` only processes a completion while `running` is false, so
+  the held `INPUT_REQUIRED` result was never noted — and the note was lost
+  outright whenever no follow-up ever arrived (stop, PR leaves qa, the user
+  abandons the wait).  The adoption now records it itself (exactly as the
+  live path does when it publishes the held result) and persists
+  `completion_processed` so a second restart does not note it again.  A
+  follow-up that reopens the run still produces its own note, matching the
+  live path.  Covered by
+  `test_resume_held_run_notes_the_unprocessed_result_once`; the existing
+  `test_resume_held_run_keeps_watching` assertion (which encoded the old,
+  wrong behaviour) was corrected.
+- **A held self-driving run is not "paused".** `_on_qa_complete` logged
+  "QA self-driving: INPUT_REQUIRED — loop paused" for a held run, but the
+  hold keeps watching and resumes the self-driving loop on the follow-up.
+  The log line now distinguishes a held run from a genuinely paused one.
+- **No upstream head query once a head move is recorded.** `_poll_waiting`
+  resolved the PR head for every follow-up even after
+  `input_wait_code_changes` was set (the flag already forces NEEDS_WORK).
+  The lookup is now skipped in that case, keeping the verdict-collection
+  loop off the network on later follow-ups.
+- **The auto-sequence tick no longer launches a second QA driver over a live
+  one.** `pm pr auto-sequence` treats a status file with an empty `overall`
+  plus no qa window as a dead run and launches a fresh driver.  That is
+  exactly the tuple a *reopened* held run publishes (the reopen writes
+  `overall=""` so a restart re-adopts the collection instead of finalizing
+  it), so closing the main QA window during the reopen window — or during
+  any in-progress run — could stack a second driver.  The second driver's
+  `_cleanup_stale_scenario_windows` kills the `qa-<id>-s*` worker panes the
+  live driver is polling, i.e. the very worker the user is answering.  The
+  tick now consults the run's resume snapshot with the same
+  `resume_owned_elsewhere` owner check a restarting TUI uses and reports
+  `running: qa` instead of relaunching; an orphaned run (dead owner) is
+  still recovered.  Covered by
+  `test_in_progress_run_with_live_owner_is_not_relaunched` and
+  `test_in_progress_run_with_dead_owner_is_relaunched`.

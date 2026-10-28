@@ -3484,15 +3484,15 @@ def _poll_tmux_verdicts(
             source = state.waiting_input_sources.get(idx) or {}
             baseline = state.planner_head or source.get("head")
             # Only query the upstream when there is a baseline to compare
-            # against (the call can block on the network).
+            # against and no head move has been recorded yet (the call can
+            # block on the network, and the flag already forces NEEDS_WORK).
             head = (
                 _current_pr_head(workdir_path, pr_data.get("branch", ""))
-                if baseline else None
+                if baseline and not state.input_wait_code_changes else None
             )
             override_verdict = None
             override_reason = ""
-            if (baseline and head and head != baseline
-                    and not state.input_wait_code_changes):
+            if baseline and head and head != baseline:
                 state.input_wait_code_changes = [
                     f"{baseline[:12]}..{head[:12]}"]
                 override_verdict = VERDICT_NEEDS_WORK
