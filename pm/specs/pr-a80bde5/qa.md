@@ -22,6 +22,13 @@ worked; (3) a repeated genuine INPUT_REQUIRED was auto-converted to
 NEEDS_WORK (and a stale re-read of the same turn was treated as a new
 question / auto-answered the human).
 
+The sign-off rework added a fourth, related guarantee: the follow-up verdict
+is read task-scoped (`find_verdict_turn`), so a non-task wakeup turn landing
+after the verdict (e.g. a `/loop` tick) can neither hide the verdict nor be
+parsed as one; and a `type:"user"` record with no real human text (empty,
+whitespace-only, harness-injected) never counts as the answer that clears a
+wait.
+
 ## Setup (shared by all scenarios)
 
 The tester works in a throwaway project inside the workdir (see
@@ -102,7 +109,17 @@ nudge), or tool output contains words like `PASS`, `yes`, `INPUT_REQUIRED`.
 THEN the reported state does not flip: an unanswered question stays `waiting`,
 an answered one stays `running (… follow-up running)`, and the question is
 recorded exactly once (no repeated notification, no repeated on-iteration
-record, no busy loop).
+record, no busy loop). An empty/whitespace-only user record (the user pressed
+Enter on an empty prompt) is not an answer either.
+
+R5b. **The follow-up verdict survives a later non-task turn.**
+GIVEN an answered follow-up whose verdict turn is PASS or NEEDS_WORK.
+WHEN a non-task wakeup turn lands after it (a `/loop` or autonomous-loop tick,
+a Monitor notification, a scheduled prompt) whose reply carries no verdict.
+THEN the recorded verdict is still the one from the verdict turn: a PASS
+follow-up stops the loop with verdict PASS (it does not relaunch with
+NEEDS_WORK), and a NEEDS_WORK follow-up advances to the next iteration. The
+question being answered never comes back as its own follow-up.
 
 R6. **Prose question after an answer waits again.**
 GIVEN an answered follow-up.
@@ -146,13 +163,19 @@ asked for.
 
 R11. **Unrelated holds are preserved (no auto-answering user decisions).**
 GIVEN each of: a PR with a spec awaiting human input (`spec_pending`), a QA run
-that ended INPUT_REQUIRED, a merge window INPUT_REQUIRED, and a signed-off PR
-held for manual merge.
+that ended INPUT_REQUIRED, and a signed-off PR held for manual merge.
 WHEN status is read (before and after the review fix's paths run).
 THEN each keeps its own unchanged reason/state (`spec generation awaiting
-input`, `QA INPUT_REQUIRED — answer in QA window`, `merge INPUT_REQUIRED —
-answer in merge window`, `waiting for manual merge … press g`), and none is
-cleared or auto-answered by the review-loop logic.
+input`, `last QA run ended INPUT_REQUIRED (see QA note); press t / z t to
+re-run QA`, `signed off (fresh SIGNOFF_MERGE); waiting for manual merge
+(held by …) — press g`), and none is cleared or auto-answered by the
+review-loop logic.
+
+*Merge-window INPUT_REQUIRED is out of local-backend QA scope:* a local-backend
+project never opens a `merge-<pr>` window (the window exists only for a failed
+post-merge main-repo update on a remote backend), so `merge INPUT_REQUIRED —
+answer in merge window` cannot be driven here. Covered by code inspection and
+unit tests, not a QA scenario.
 
 ## Edge cases
 
@@ -183,7 +206,19 @@ between) count as answers; the wait stays cleared and does not re-arm.
 
 E7. **Notification re-arm.** After a second genuine question the TUI notice is
 shown again (once), and after it is answered no further notice appears for that
-turn.
+turn. Note: the TUI drops a log message identical to the previous recorded one
+(`pm_core/tui/app.py::_record_log_message`), so the *debug log* may show the
+notice once even though `log_message` ran once per question — judge re-arm from
+the visible notice/frame captures, not from a single debug-log line.
+
+E8. **Empty or non-human user records.** An empty, null, whitespace-only or
+tool_result `type:"user"` record arriving while the loop waits does not clear
+`input_required` and does not become the follow-up. A pasted image (a real
+non-text content block) still counts as a human answer.
+
+E9. **Verdict turn vs transcript tail.** A `/loop` (or other non-task) wakeup
+turn after the follow-up verdict must not change which verdict is recorded;
+the wait state must also not re-arm for it.
 
 ## Pass/Fail criteria
 
@@ -194,11 +229,15 @@ turn.
   cleared wait that nobody answered, any relaunch/`--fresh` that kills a
   pending question, any auto-conversion of a repeated INPUT_REQUIRED, any
   surface disagreement, or any unrelated hold cleared.
+- Also FAIL if a PASS follow-up followed by a non-task wakeup turn (e.g. a
+  `/loop` tick) is recorded as NEEDS_WORK or relaunches an iteration (R5b).
 - The reproduction tests from the diff
   (`tests/test_review_input_required_state.py`: `TestLiveFlow`,
-  `TestRestartAdoption`; `tests/test_review_loop.py::TestInputRequired`) may be
-  run as supporting evidence, but the primary evidence is the user-facing
-  behaviour above.
+  `TestRestartAdoption`, `test_follow_up_pass_survives_a_loop_tick_turn`,
+  `test_record_with_no_text_is_not_an_answer`; `tests/test_review_loop.py::
+  TestInputRequired`) may be run as supporting evidence, but the primary
+  evidence is the user-facing behaviour above. The PR was reworked on top of
+  master at review i3 / 3bf4 i1, so run these against the integrated HEAD.
 
 ## Ambiguities
 
@@ -215,5 +254,11 @@ Resolved:
   statuses are unchanged.
 - *Timer vs transcript:* the ~2 s poll only bounds latency; detection is
   transcript + hook driven. Tests assert state, not elapsed time.
+- *Merge-window INPUT_REQUIRED is not drivable on a local backend* (no
+  `merge-<pr>` window exists locally) → dropped from R11's drivable set; see
+  the note under R11. (S6 refinement, 2026-10-28.)
+- *A follow-up verdict is read task-scoped* (integration rework): a later
+  `/loop`/non-task turn must not be parsed as the follow-up → R5b/E9.
+- *An empty user record is not an answer* (3bf4 i1) → E8.
 
 No **[UNRESOLVED]** ambiguities.
