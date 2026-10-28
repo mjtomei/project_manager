@@ -25,6 +25,13 @@ changes `pm_core/`.
 The original failures (self-matching `pgrep -f` waits, a bare `wait` blocked
 on a persistent reaper) are **not** fixed here; see `impl.md`.
 
+**Scenario mapping for re-QA.** Keep the three recipe scenarios from the
+previous round — S14 (CLI capture + render, stale dir, no-TTY form), S18
+(tmux TUI capture, bounded readiness/stop), S20 (web-UI readiness bound +
+cleanup) — and re-verify them against the reduced diff. Retire S15, S16, S17,
+and S19: they exercised the dropped helper, the shared prompt guidance, and
+the QA-loop helper install, none of which exist in this PR any more.
+
 ## Setup (cross-cutting)
 
 - Run inside the repo (or a clone) at the PR head. The pm-dev image ships
