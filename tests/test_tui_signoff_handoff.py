@@ -64,6 +64,18 @@ class App:
         self.logs: list[str] = []
         self.log_kw: list[dict] = []
         self.workers: list = []
+        self.timers: list = []    # (delay, callback) from app.set_timer
+
+    def set_timer(self, delay, callback):
+        """Stand-in for Textual's one-shot timer (recorded, fired by tests)."""
+        self.timers.append((delay, callback))
+        return object()
+
+    def fire_timers(self):
+        """Run the callbacks ``set_timer`` was given, oldest first."""
+        pending, self.timers = self.timers, []
+        for _delay, callback in pending:
+            callback()
 
     def log_message(self, msg, **kw):
         self.logs.append(msg)
@@ -511,6 +523,11 @@ def test_reqa_route_waits_for_a_run_driven_elsewhere(world_factory):
         sq.assert_not_called()
         timer.assert_called_once_with(app)      # the retry tick is armed
         assert app.pr()["signoff_return"]["awaiting"] == "qa"
+        # The hop arms the mount-style hook: the reconcile is deferred past
+        # the first frame (it costs two locked project.yaml rewrites), so the
+        # deferral line lands on the timer, not in the hop.
+        assert app.timers
+        app.fire_timers()
         assert any("QA starts once" in m and PR in m for m in app.logs)
 
         # The live run ends: the owed start happens once, and only once.

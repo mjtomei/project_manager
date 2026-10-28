@@ -174,7 +174,12 @@ edit that branch's captures or widen `#249` acceptance.
   scheduler-driven starts (never steal attached clients), the stale runtime
   PASS record drop, and `_ensure_poll_timer`.
 - **I5** The mount hook must run after state is loaded and must not block the
-  first frame (`start_qa` only spawns the background thread).
+  first frame.  `start_qa` itself only spawns the background thread, but it
+  first takes the launch claim and clears `awaiting` — two locked
+  project.yaml rewrites (~1 s each on a large project) — so the mount hook
+  arms the poll timer synchronously and hands the reconcile to a one-shot
+  `app.set_timer(0.1, ...)` (the same "defer past the first frame" idiom as
+  `on_resize`).
 
 ## Edge cases
 
@@ -336,3 +341,26 @@ one full QA starts (one `qa-<pr>` window set, one verifier, one finalizer, one
   refused → no driver spawned), `test_no_status_driven_elsewhere_does_not_launch`
   and `test_owed_reqa_catch_up_loses_the_claim` (asserting the
   `require_status="qa"` claim).
+
+## Review-loop amendments (a6a3 i4)
+
+- **The mount hook no longer blocks the first frame (I5).**  `arm_owed_reqa`
+  called `reconcile_owed_reqa` synchronously, and an owed start is two locked
+  project.yaml rewrites — the claim, then `start_qa`'s `awaiting` clear —
+  ~1 s each on a large project (measured: 65 ms per load, 830 ms per fsynced
+  save at 509 PRs / 2.2 MB).  Because `App.on_mount` runs before the first
+  frame, a restarted TUI with an owed REQA (exactly the bug's scenario)
+  appeared hung for ~2 s at startup.  It now arms the poll timer
+  synchronously and defers the reconcile to a one-shot
+  `app.set_timer(_OWED_REQA_ARM_DELAY = 0.1, ...)`, matching `on_resize`'s
+  "defer so the first frame paints" idiom.  The obligation is on disk
+  either way, and the tick path is unchanged (a start there costs what a
+  user's `t` press already costs).  Tests: the mount hook starts nothing
+  synchronously, records a positive sub-second timer and starts the run when
+  it fires; the sign-off hop's deferral line now lands on that timer.
+- **A return record with no `ts` is still reported.**  The once-per-episode
+  deferral dedupe keyed on `signoff_return.ts`; a hand-edited record without
+  it keyed on `None`, which compares equal to "never reported", so
+  "QA starts once the QA run another process drives ends" was never logged
+  for that PR.  The key is now `ts or ""`.  Test:
+  `test_deferral_is_reported_for_a_return_without_a_ts` (once, not per tick).

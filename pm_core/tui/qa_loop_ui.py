@@ -217,6 +217,12 @@ def _ensure_poll_timer(app) -> None:
 # not be started over a run another live process drives (S117: the new loop
 # retires that run's windows as stale and runs QA twice).
 
+# How long ``arm_owed_reqa`` waits before reconciling: enough for the first
+# frame to paint (see that function), short enough that the owed run still
+# reads as "at startup".
+_OWED_REQA_ARM_DELAY = 0.1
+
+
 def _is_owed_reqa(pr: dict | None) -> bool:
     """Whether *pr* still owes the full QA run a sign-off REQA asked for.
 
@@ -356,7 +362,11 @@ def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
         if loop is not None and loop.running:
             deferrals.pop(pr_id, None)
             continue
-        ts = (pr.get("signoff_return") or {}).get("ts")
+        # The return record's ``ts`` names the episode, so the deferral is
+        # reported once per bounce rather than every tick.  ``or ""`` keeps a
+        # hand-edited record with no ``ts`` reportable at all — keying on
+        # None would compare equal to "never reported" and swallow the line.
+        ts = (pr.get("signoff_return") or {}).get("ts") or ""
         if run_driven_elsewhere(pr_id):
             if deferrals.get(pr_id) != ts:
                 deferrals[pr_id] = ts
@@ -373,17 +383,32 @@ def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
 def arm_owed_reqa(app) -> None:
     """Mount/routing hook: make sure an owed REQA is not left to memory.
 
-    Reconciles once against the in-memory state (both callers — the mount
-    hook and the sign-off hop — reload it immediately before this, so no
-    extra project.yaml read is needed) and arms the poll timer so the
-    obligation is retried even when auto-start is off and no loop is running
-    to keep the tick alive.
+    Arms the poll timer so the obligation is retried even when auto-start is
+    off and no loop is running to keep the tick alive, then reconciles once
+    against the in-memory state (both callers — the mount hook and the
+    sign-off hop — reload it immediately before this, so no extra
+    project.yaml read is needed).
+
+    The reconcile itself is deferred by a timer tick: actually starting the
+    run costs two locked project.yaml rewrites (the claim and the
+    ``awaiting`` clear), ~1 s each on a large project, and the mount hook
+    runs before the first frame — a restarted TUI with an owed REQA must not
+    appear hung while it starts.  The obligation is on disk either way.
     """
     prs = (getattr(app, "_data", None) or {}).get("prs") or []
     if not owed_reqa_prs(app, prs):
         return
     _ensure_poll_timer(app)
-    reconcile_owed_reqa(app, prs)
+
+    def _reconcile() -> None:
+        # The caller's own guard cannot cover a deferred call, and a silent
+        # failure here is exactly the bug this hook exists to prevent.
+        try:
+            reconcile_owed_reqa(app)
+        except Exception:
+            _log.warning("owed REQA arm: reconcile failed", exc_info=True)
+
+    app.set_timer(_OWED_REQA_ARM_DELAY, _reconcile)
 
 
 # ---------------------------------------------------------------------------

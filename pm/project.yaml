@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T18:45:23.929221+00:00'
+  updated_at: '2026-10-28T19:18:42.608345+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38720,6 +38720,38 @@ prs:
       (a6a3 i3).'
     created_at: '2026-10-28T18:45:23Z'
     last_edited: '2026-10-28T18:45:23Z'
+  - id: note-6f56c8e
+    text: 'review-loop a6a3 i4. Two fixes, no behaviour change to the handoff contract.
+
+
+      1. The mount hook no longer blocks the first frame (spec I5). `arm_owed_reqa`
+      called `reconcile_owed_reqa` synchronously, and an owed start is two locked
+      project.yaml rewrites — the launch claim, then `start_qa`''s `awaiting` clear
+      — measured at ~65 ms per load and ~830 ms per fsynced save on this repo (509
+      PRs, 2.2 MB), so ~2 s. `App.on_mount` runs before the first frame, so a restarted
+      TUI with an owed REQA (exactly the bug''s scenario) looked hung at startup.
+      It now arms the poll timer synchronously and defers the reconcile to a one-shot
+      `app.set_timer(0.1, ...)` (the same idiom `on_resize` uses), with the reconcile
+      wrapped so the mount hook''s error containment still applies to the deferred
+      call. The tick path is unchanged — a start there costs what a user''s `t` press
+      already costs.
+
+
+      2. A hand-edited return record with no `ts` never reported the deferral. The
+      once-per-episode dedupe keyed on `signoff_return.ts`; with no `ts` the key was
+      None, which compares equal to "never reported", so "Sign-off REQA for <pr> —
+      QA starts once the QA run another process drives ends" was silently never logged
+      for that PR. Key is now `ts or ""`.
+
+
+      Tests: mount hook starts nothing synchronously and records a positive sub-second
+      timer that starts the run when fired; a failing deferred reconcile is contained;
+      the ts-less record reports the deferral exactly once; the sign-off hop test
+      now fires the armed timer. Full suite in the review container: 4126 passed,
+      1 skipped (markdown installed, PM_HOST_HOME unset, PATH=/usr/bin:/bin). Spec
+      amended (I5 + a6a3 i4).'
+    created_at: '2026-10-28T19:18:42Z'
+    last_edited: '2026-10-28T19:18:42Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

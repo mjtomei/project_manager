@@ -78,10 +78,22 @@ class App:
         self.logs = []
         self.log_kw = []
         self.workers = []
+        self.timers = []          # (delay, callback) from app.set_timer
 
     def set_interval(self, interval, callback):
         """Stand-in for Textual's timer registration (never fires here)."""
         return object()
+
+    def set_timer(self, delay, callback):
+        """Stand-in for Textual's one-shot timer (recorded, fired by tests)."""
+        self.timers.append((delay, callback))
+        return object()
+
+    def fire_timers(self):
+        """Run the callbacks ``set_timer`` was given, oldest first."""
+        pending, self.timers = self.timers, []
+        for _delay, callback in pending:
+            callback()
 
     def log_message(self, msg, **kw):
         self.logs.append(msg)
@@ -373,6 +385,25 @@ def test_owed_qa_waits_for_a_live_run_then_starts_once(tmp_path, home,
     sq.assert_called_once_with(app, PR)
 
 
+def test_deferral_is_reported_for_a_return_without_a_ts(tmp_path, home,
+                                                        live_owner):
+    """A hand-edited return record need not carry ``ts``.  Keying the
+    once-per-episode dedupe on it must not compare equal to "never reported"
+    (None), which would swallow the deferral line on every tick."""
+    rec = _owed_return()
+    rec.pop("ts")
+    root = _project(tmp_path, ret=rec)
+    owner = live_owner()
+    _qa_workdir(home, owner_pid=owner.pid,
+                owner_start=qa_loop._proc_start_time(owner.pid))
+    app = App(root)
+    with patch.object(qa_loop_ui, "start_qa") as sq:
+        qa_loop_ui.reconcile_owed_reqa(app)
+        qa_loop_ui.reconcile_owed_reqa(app)
+    sq.assert_not_called()
+    assert sum("QA starts once" in m for m in app.logs) == 1
+
+
 def test_a_bare_qa_status_is_not_authorization(tmp_path):
     root = _project(tmp_path, ret=None)
     app = App(root)
@@ -592,8 +623,40 @@ def test_arm_owed_reqa_arms_the_tick_and_starts_the_run(tmp_path):
          patch.object(qa_loop_ui, "start_qa") as sq, \
          patch("pm_core.tui.review_loop_ui._ensure_poll_timer") as timer:
         qa_loop_ui.arm_owed_reqa(app)
-    timer.assert_called_once_with(app)
+        timer.assert_called_once_with(app)
+        app.fire_timers()
+        sq.assert_called_once_with(app, PR)
+
+
+def test_arm_owed_reqa_defers_the_reconcile_past_the_first_frame(tmp_path):
+    """``on_mount`` runs before the first frame, and actually starting the
+    owed run costs two locked project.yaml rewrites (the claim, then the
+    ``awaiting`` clear) — ~1 s each on a large project.  The mount hook must
+    hand that to a timer, or a restarted TUI with an owed REQA looks hung."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+    with _driven(False), \
+         patch.object(qa_loop_ui, "start_qa") as sq, \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
+        qa_loop_ui.arm_owed_reqa(app)
+        sq.assert_not_called()            # nothing blocking in on_mount
+        assert len(app.timers) == 1
+        delay, _callback = app.timers[0]
+        assert 0 < delay <= 1.0
+        app.fire_timers()
     sq.assert_called_once_with(app, PR)
+
+
+def test_arm_owed_reqa_contains_a_failing_reconcile(tmp_path):
+    """The mount hook's guard wraps the arm, not the deferred call: a failure
+    inside the timer must not escape into Textual's timer machinery (and a
+    silent loss there is the bug the hook exists to prevent)."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+    with patch.object(qa_loop_ui, "reconcile_owed_reqa",
+                      side_effect=RuntimeError("boom")):
+        qa_loop_ui.arm_owed_reqa(app)
+        app.fire_timers()                  # must not raise
 
 
 def test_arm_owed_reqa_is_quiet_when_nothing_is_owed(tmp_path):
