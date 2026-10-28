@@ -1008,13 +1008,18 @@ def _recheck_after_claim(app) -> None:
     if set_timer is None or getattr(app, "_return_claim_recheck", False):
         return
     from pm_core.signoff import RETURN_LAUNCH_CLAIM_SECONDS
+    from pm_core import base_check
 
     def _fire():
         app._return_claim_recheck = False
         app.run_worker(check_and_start(app))
 
     app._return_claim_recheck = True
-    set_timer(RETURN_LAUNCH_CLAIM_SECONDS + 5, _fire)
+    # Both handshakes have their own claim lifetime; wait out the longer one
+    # so this pass cannot re-skip a claim that is still held.
+    delay = max(RETURN_LAUNCH_CLAIM_SECONDS,
+                base_check.RETURN_LAUNCH_CLAIM_SECONDS) + 5
+    set_timer(delay, _fire)
 
 
 def _awaiting_on_disk(app, pr_id: str, hop: str) -> bool:
