@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T18:08:39.171138+00:00'
+  updated_at: '2026-10-28T18:45:23.929221+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38708,6 +38708,18 @@ prs:
       a naive guard would strand self-driving mode, so it needs deferral + retry).'
     created_at: '2026-10-28T18:08:39Z'
     last_edited: '2026-10-28T18:08:39Z'
+  - id: note-b6993da
+    text: 'review-loop a6a3 i3: the `pm pr auto-sequence` guards added in i1/i2 had
+      no test. Added four to tests/test_pr_auto_sequence.py — the sign_off->qa hop
+      deferring behind a live run (no launch, awaiting:qa kept, no claim taken) and
+      losing the launch claim, plus the qa catch-up branch refusing a driven-elsewhere
+      run and a claim it lost (asserting require_status="qa"). Verified they fail
+      with the guards neutralised (3 assert on the new echo strings; the catch-up
+      one would otherwise launch a second driver) and pass with them. Full suite in
+      the review container: 4123 passed, 1 skipped. No behaviour change. Spec amended
+      (a6a3 i3).'
+    created_at: '2026-10-28T18:45:23Z'
+    last_edited: '2026-10-28T18:45:23Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

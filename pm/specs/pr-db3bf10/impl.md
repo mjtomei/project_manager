@@ -323,3 +323,16 @@ one full QA starts (one `qa-<pr>` window set, one verifier, one finalizer, one
   loss there is the bug the hook exists to prevent), and
   `claim_return_launch`'s docstring now describes the `qa` hop correctly:
   its claim is taken by every starter, not held from the transition.
+
+## Review-loop amendments (a6a3 i3)
+
+- **The `pm pr auto-sequence` guards are covered.** R5's two new branches in
+  `pm_core/cli/pr.py` — the `sign_off` → `qa` hop deferring behind a live run
+  or losing the launch claim, and the `qa` catch-up branch refusing to launch
+  over a live run or without the claim — had no test. Added to
+  `tests/test_pr_auto_sequence.py`:
+  `test_reqa_defers_behind_a_run_driven_elsewhere` (no launch, `awaiting: qa`
+  kept, no claim taken), `test_reqa_hop_loses_the_launch_claim` (claim
+  refused → no driver spawned), `test_no_status_driven_elsewhere_does_not_launch`
+  and `test_owed_reqa_catch_up_loses_the_claim` (asserting the
+  `require_status="qa"` claim).
