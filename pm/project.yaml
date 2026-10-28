@@ -30866,11 +30866,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-28T08:51:49.689657+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-607d399
+    text: 'Supersede variant of the transcript-collision bug (found in pr-a80bde5
+      QA scenario 4, 2026-10-28). Superseding a *running* review loop (zz d) can kill
+      the FRESH loop: the superseded loop keeps polling its killed pane for up to
+      15 s, then _on_complete_from_thread finalizes every review-<pr>-*.jsonl symlink
+      in the shared autostart transcript dir -- including the fresh loop''s review-<pr>-i1.jsonl
+      -- replacing it with a copy. The fresh loop then fails session_id_from_transcript
+      at its INPUT_REQUIRED follow-up wait and exits KILLED (status failed / review
+      loop ended KILLED). Repro: scripted review verdicts [INPUT_REQUIRED delay 0,
+      NEEDS_WORK delay 120]; start a loop (iteration 1 runs 120 s), reset the fake
+      cursor, send z,z,d; at ~20 s the new loop reads INPUT_REQUIRED then logs "could
+      not recover session_id from transcript=...review-<pr>-i1.jsonl" and dies KILLED.
+      Observed twice (08:36:44 and 08:47:40 UTC in the QA debug log); evidence /pm-captures/scenarios/4/evidence/50-repro-running-supersede.json.
+      Superseding a *waiting* loop is clean (it exits before the fresh symlink matters),
+      so pr-a80bde5 QA scenario 4 still passes. Same class as this PR; suggest also
+      keying the fresh loop''s transcripts by loop id or skipping finalize for superseded
+      loops.'
+    created_at: '2026-10-28T08:51:49Z'
+    last_edited: '2026-10-28T08:51:49Z'
 - id: pr-ccdec71
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
