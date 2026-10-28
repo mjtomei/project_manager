@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T06:02:06.102167+00:00'
+  updated_at: '2026-10-28T07:19:13.209983+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32291,6 +32291,30 @@ prs:
       the tmux or web-ui recipes. (2026-10-28)'
     created_at: '2026-10-28T06:02:06Z'
     last_edited: '2026-10-28T06:02:06Z'
+  - id: note-66a8bcc
+    text: 'Review loop 419c i1: one soundness hole in the kept tmux recipe fix. The
+      recorder readiness check used pane content as proof the attach client drew the
+      TUI, but a *failed* attach writes its own error ("can''t find session: …") into
+      the pane and exits ~25 ms later, so the content check can break on asciinema''s
+      error text, the stop wait then sees the session gone, and test -s passes on
+      a cast holding that error — a useless capture reported as success. Verified
+      live (tmux 3.2a, asciinema 2.1.0): error drawn 46-75 ms after new-session, session
+      gone 72-99 ms after it (a 21-28 ms window); a tight poll false-passes 15/15,
+      the recipe''s own 0.2 s cadence missed the window 100/100 idle runs — so the
+      signal is unsound, not frequently wrong, and timing decides. Fix: after the
+      content break the recipe sleeps 0.3 s and requires the recorder session to still
+      exist, failing with the existing "recorder exited before it drew" message; 0/15
+      tight-poll and 0/100 recipe-cadence false passes, healthy recording still passes
+      end to end. Also documented that RECORDER_STOP_TIMEOUT must be set in the same
+      shell invocation as the stop step (workers paste steps separately, so "set it
+      before this step" did nothing). New test test_tmux_failed_attach_error_text_is_not_readiness
+      fails against the previous recipe. Evidence: $CAP/review-419c-i1/ (probe.sh,
+      pre/post logs, healthy-path.log, manifest.md). New file 25 pass; related suites
+      200 pass; full suite 3878 pass with only the known env/baseline failures (test_git_ops::test_keeps_unpushed_merge,
+      test_installer_writes_standalone_receiver) and the two push-proxy-blocked files
+      excluded. No pm_core/ change. (2026-10-28)'
+    created_at: '2026-10-28T07:19:13Z'
+    last_edited: '2026-10-28T07:19:13Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
