@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T10:45:33.213936+00:00'
+  updated_at: '2026-10-28T11:27:22.746337+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14126,6 +14126,25 @@ prs:
       synced (R11 item 26, §5 pr_utils.py). Full suite 4123 passed, 1 skipped (/pm-captures/review-c02f-i9/full-suite.log).'
     created_at: '2026-10-28T10:45:33Z'
     last_edited: '2026-10-28T10:45:33Z'
+  - id: note-8780ed3
+    text: 'Review i10: consolidated the terminal-status definition (autostart_state.TERMINAL_STATUSES
+      and cli/session._TERMINAL_STATUSES now derive from pr_utils.TERMINAL_PR_STATES;
+      pr_review/pr_qa_run_bg use the constant), stopped pr_cleanup warning "not merged"
+      for the now-normal closed input (close points users there for the explicit workdir
+      removal), made `pm pr merge <closed>` name the concrete reopen command (`pm
+      pr edit <id> --status pending`), documented terminal durability in `pm pr sync-github
+      --help`, and added a cleanup-after-close regression test. Filed pr-a3b86b7 (TUI
+      has no show-closed toggle, unlike merged) and added a cross-PR note to pr-3d1fa55:
+      its `_reclaim_terminal_pr_windows` sweep reclaims windows/containers for any
+      merged/closed PR every sync (background_sync -> do_normal_sync every 5 min),
+      i.e. an automatic cleanup triggered by closing, which this PR spec A4/R4 ruled
+      out; user decision pending on whether `closed` authorizes live-resource reclamation
+      or #217 should limit the sweep to `merged`. Full suite 4111 passed, 1 skipped,
+      13 failed (all env-only: 12 markdown-render without the markdown package, 1
+      hook installer with PM_HOST_HOME set; all 33 pass with markdown on PYTHONPATH
+      and PM_HOST_HOME unset).'
+    created_at: '2026-10-28T11:27:22Z'
+    last_edited: '2026-10-28T11:27:22Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
