@@ -38537,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T22:06:24.746342+00:00'
+  updated_at: '2026-10-28T23:08:49.041425+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38712,6 +38712,32 @@ prs:
       (test_markdown_render needs the `markdown` package).'
     created_at: '2026-10-28T22:06:24Z'
     last_edited: '2026-10-28T22:06:24Z'
+  - id: note-f76d5aa
+    text: 'Review-loop a6f7 i9 fixes (on da968668). (1) A capped (`needs_human`) base
+      return could never complete from the TUI/auto-sequence handoff: the capped record
+      launches nothing, so it had no `launched_at` of its own and `impl_completion`
+      fell back to its creation time, which always postdates the previous rework session''s
+      idle turn — the "idle evidence must postdate the relaunch" guard then rejected
+      it forever, so a human who reconciled the base left the PR stuck (R8''s "impl_completion
+      still re-runs the check" was unreachable). A superseding return now keeps the
+      superseded episode''s `launched_at`; a fresh launch overwrites it via `clear_return_awaiting`.
+      (2) `share_impl_transcript` now stores an absolute link target: a relatively-spelled
+      transcript (a direct path, or a relative link target) previously became a dangling
+      symlink in every other driver''s directory. (3) `pr_review`''s `in_review` write
+      refuses unless the PR is still `in_progress`/`in_review`, so a qa/sign_off transition
+      landing inside the gate''s fetch is not demoted (the old guard covered only
+      merged/closed); the refusal now says "left the pre-review phase". (4) The note/prompt
+      path lists use `integration.omitted_path_count` (the shared rule) instead of
+      re-deriving "(+N more)" — a hand-edited record with fewer stored paths than
+      the total rendered the wrong count. Tests: real-git capped-return recovery (no
+      new launch; the previous session''s idle turn resolves it), absolute target,
+      qa/sign_off demotion refusal — each verified to fail without its fix. Spec R3/R6/R8
+      + test plan updated. Full suite: 4155 passed, 1 skipped, 0 failed (excluding
+      tests/test_markdown_render.py, which needs the `markdown` package). One test_push_proxy
+      socket test flaked once under a full-suite -x run and passes in isolation (158
+      passed) — unrelated to this PR.'
+    created_at: '2026-10-28T23:08:48Z'
+    last_edited: '2026-10-28T23:08:48Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
