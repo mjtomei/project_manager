@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T08:56:38.142524+00:00'
+  updated_at: '2026-10-28T09:37:33.034607+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32384,6 +32384,31 @@ prs:
       — push proxy rejects pushes to master).'
     created_at: '2026-10-28T08:56:24Z'
     last_edited: '2026-10-28T08:56:38Z'
+  - id: note-bf5dcb0
+    text: 'Review loop 419c i5: the capture flow now has *execution* coverage, plus
+      one leftover in the kept recipe scope. (1) Every capture-flow regression found
+      so far (i1: a failed attach whose error text counted as a drawn TUI; i3: a recorder
+      that died mid-scenario passing on a truncated cast) was behavioural — the text
+      assertions described the flow correctly while it still did the wrong thing —
+      so TestCaptureFlowExecution runs each recipe''s fenced capture block against
+      a stub tmux/pm session table: CLI completes; a recorder that never writes a
+      cast fails at its bound; a recorder that dies without a cast fails; tmux completes;
+      a recorder that exits before drawing fails; a failed attach that drew its error
+      fails; a recorder that died mid-scenario fails on its truncated cast; a recording
+      that ended with the session itself passes. Mutation-checked: dropping the settle
+      re-check, the step-5 mid-scenario branch, the CLI cast check, or the 2>/dev/null
+      below each fail exactly one case. (2) The tmux recipe''s transcript-pipe stop
+      was the only unsilenced cleanup, so the legitimate "both gone" finish (a recording
+      that ended because the pm session itself ended) printed "can''t find session:
+      …" and returned 1 while reporting success; the pipe is closed by the session''s
+      death anyway, so every stop is now 2>/dev/null || true like the adjacent kill-session
+      (verified live that tmux pipe-pane prints that error and returns 1 on a gone
+      session). New file 39 pass (3 runs); related suites 214 pass; full suite 3892
+      passed / 1 skipped with the two push-proxy-blocked files excluded and the two
+      known baselines deselected (both reproduce on origin/master). No change to wait/stop
+      semantics otherwise; no pm_core/ change. (2026-10-28T09:40:00Z)'
+    created_at: '2026-10-28T09:37:32Z'
+    last_edited: '2026-10-28T09:37:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
