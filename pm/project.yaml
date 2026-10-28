@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T15:19:41.321666+00:00'
+  updated_at: '2026-10-28T16:00:03.709096+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16919,6 +16919,37 @@ prs:
       one restart/one marker.'
     created_at: '2026-10-28T15:19:41Z'
     last_edited: '2026-10-28T15:19:41Z'
+  - id: note-0b05229
+    text: 'QA scenario 21 (legacy-TUI A/B, original bug) PASS 2026-10-28 on build
+      9a0f7a3e, all 4 triples. Legacy TUI = worktree 372f85f4^ (0e2cc2db, bare-number
+      pidfile, only "Installed SIGUSR1 reload handler"); pre-fix CLI = worktree 89e3c501
+      (`pm which` -> /scratch/s21-prefix/pm_core). (1) fixed CLI `pm autostart add
+      pr-95325c4 -s $S` -> exit 2 verbatim "owner_unavailable ... predates the command-queue
+      feature"; legacy pid 2378 alive (Ssl+), pidfile byte-identical (sha a7631504),
+      queue 0 bytes, log `autostart dispatch failed: missing_capability` and NO queue-dispatch
+      line. (2) `pm pr add "Add password reset"` -> exit 0 "Created pr-c715bb9 ...
+      (now active)"; board auto-reloaded 2->3 PRs with no keypress (headers "2 PRs"->"3
+      PRs"), same pid, pidfile byte-identical, log `action: reload (state only)`.
+      (3) pre-fix CLI `--timeout 3` -> legacy TUI killed (pid reaped, not zombie),
+      window 0 gone, session survives on driver, exit 2 verbatim owner_timeout text,
+      `pm tui view -s $S` -> "No TUI pane found." rc 1, queue left with exactly "autostart
+      add pr-95325c4 --reply 1793203042-69f6bc03" (53 B), pidfile stale naming 2378.
+      (4) pytest tests/test_tui_pidfile.py -> 130 passed; -k named 6 -> 6 passed,
+      124 deselected; test_legacy_tui_still_reloads also PASSED by name. Captures
+      (cast+mp4+pane/evidence txt): /pm-captures/scenarios/21/{01-fixed-cli-refusal,02-legacy-reload,03-prefix-cli-kills-legacy-tui,04-pytest-repro}.
+      Mechanics for the next run: (a) tmux here is 3.2a, which rejects `set-hook -gw
+      window-resized`, so every TUI pane shows a stray "invalid option: window-resized"
+      line -- pre-existing container noise, not this PR; (b) agg is NOT installed;
+      the aarch64 v1.9.0 release binary works (this run used /scratch/bin/agg); (c)
+      the working recorder is a separate `tmux new-session` running `asciinema rec
+      -c "tmux attach -t $S"` at 200x50, driving with `tmux select-window` + `send-keys`
+      into the driver pane, and pipe-pane on both panes for transcripts; (d) the driver
+      pane must be created with `-c $TEST_DIR` and have PYTHONPATH/PATH exported by
+      send-keys, since the pane does NOT inherit the harness shell env; (e) a legacy
+      TUI pane that is killed by SIGUSR2 leaves an empty pipe-pane transcript -- put
+      the board evidence in the cast, not transcript.log.'
+    created_at: '2026-10-28T16:00:03Z'
+    last_edited: '2026-10-28T16:00:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
