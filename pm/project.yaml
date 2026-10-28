@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-27T23:31:38.377992+00:00'
+  updated_at: '2026-10-28T01:21:38.587582+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36722,6 +36722,33 @@ prs:
       re-reads the ~2 MB project.yaml every 2 s during backoff. (2026-10-27)'
     created_at: '2026-10-27T23:31:38Z'
     last_edited: '2026-10-27T23:31:38Z'
+  - id: note-dd660c6
+    text: 'QA S8 (HOLD on a retry landing at a workspace-trust prompt) NEEDS_WORK
+      fixed in b531c86b. Story 1 passed fully on the live surface: attempt 1 died
+      in the podman shim run (container), attempt 2 launched the claude stand-in ->
+      trust dialog for /tmp, 10 s grace -> "⏸ HOLD (1 iteration)" naming the prompt
+      with NO Artifact line (retry line carries the attempt-1 artifact); review window
+      stayed live; pm autostart status --json = state failed / phase review / reason
+      "review held at a permission prompt: …" / verdict HOLD / retryable false / artifact
+      "" / attempts 2; runs popup = FAILED review — review held at a permission prompt;
+      after 95 s past the 60 s cooldown no third attempt, no re-arm, status unchanged.
+      Story 2 recovery replaced the held window and ran to fake PASS (no LAUNCH_FAILED,
+      no fabricated verdict, PR advanced to QA pre-fix). Gap: the scenario expects
+      the TUI log to show "Killed existing review window ''review-<pr>''" but it never
+      appears on the loop path — the replacement happens in the launch child (pm pr
+      review --fresh), whose stdout _launch_review_window discards on success (pre-existing
+      on master). Fix (b531c86b): mirror the "Killed existing review window" / "Switched
+      to existing review window" click.echo notices into the debug log in cli/pr.py,
+      so pm log show now contains the exact line (verified post-fix: "01:16:16 INFO
+      [cli] Killed existing review window ''review-pr-95325c4''"). Log-only, behaviour
+      unchanged; targeted suites 159 + 118 passed. Residual/non-blocking: the kill
+      line logs just after "Review loop started" (the child performs the replacement),
+      not before it as the scenario listed; the post-fix recovery used a manual loop
+      (auto-start off to avoid a stale armed target), so the auto-start review->QA
+      transition was verified in the pre-fix auto-start run (runs[0].status == "qa").
+      Captures: /pm-captures/scenarios/8/{story1-hold,story2-recovery (pre-fix),post-fix}.'
+    created_at: '2026-10-28T01:21:38Z'
+    last_edited: '2026-10-28T01:21:38Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
