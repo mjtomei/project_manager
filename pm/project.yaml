@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T08:39:03.483338+00:00'
+  updated_at: '2026-10-28T08:56:13.339486+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37437,6 +37437,36 @@ prs:
       id/text/created_at.'
     created_at: '2026-10-28T08:39:03Z'
     last_edited: '2026-10-28T08:39:03Z'
+  - id: note-24f6b52
+    text: 'QA scenario 33 PASS (2026-10-28) at 753f466a — no code change. All four
+      triples held live on a throwaway project (/tmp/pm-qa33-BqVe): (1) a no-op `pm
+      pr edit` save is a true no-op — CLI and TUI both print "No changes detected.",
+      `pm pr show` is identical, and a `diff` of pm/project.yaml before/after is empty,
+      so the ASCII apostrophe / `--` / markdown heading / em dash in the title+description
+      are not laundered; (2) editing one template bullet re-creates only that note
+      (new id + fresh created_at) while `second -- note`, the multi-line `alpha\nbeta`
+      note, `note-suffixed`, `note-empty` and a hand-written scalar member stay byte-identical
+      — no `alpha`/`beta`/`note` fragment notes; (3) `pm pr note add/edit/delete`
+      on a PR whose depends_on is a bare string and whose notes hold a scalar member
+      each exit 0 with the right id and lose no write, `pm pr show` prints no `Depends
+      on:` line while project.yaml keeps both hand edits, and a bad id exits 1 with
+      "not found" + "Available notes:" and no traceback; (4) adding identical note
+      text twice yields distinct ids (note-9ea1ae0 then note-9ea1ae0e) and deleting
+      the first leaves the second unchanged. Captures under /pm-captures/scenarios/33/
+      (cli-noop-save, tui-edit-noop, cli-edit-note, cli-notes-malformed, cli-duplicate-note).
+      HARNESS FACTS for the next run: (a) the TUI `edit` action opens the pr-edit
+      pane in the session GROUPED session ($S~1), which has its own env copy, so `tmux
+      setenv -t "$S" EDITOR …` does NOT reach it — the pane runs pm pr edit with no
+      editor and closes instantly; use `tmux setenv -g EDITOR …` (or set it on $S~1
+      too). (b) Reset a story fixture between takes by restoring a saved copy of pm/project.yaml
+      (chmod u+w, cp, chmod 444) rather than re-running pm commands — ids are derived
+      from titles/text so they come back identical. (c) CLI casts with `set -x` run
+      in ~3 s and render as an unreadable 5-frame flash; insert `sleep 1.6`/`sleep
+      2.2` between steps (script -qec "stty rows 40 cols 110; asciinema rec …") for
+      a watchable mp4. (d) agg is not installed: fetch agg-aarch64-unknown-linux-gnu
+      v1.9.0 to /home/pm/bin.'
+    created_at: '2026-10-28T08:56:13Z'
+    last_edited: '2026-10-28T08:56:13Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
