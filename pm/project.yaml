@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T13:53:22.933272+00:00'
+  updated_at: '2026-10-28T14:13:33.195652+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32655,6 +32655,48 @@ prs:
       work stays dropped. (2026-10-28)'
     created_at: '2026-10-28T13:53:22Z'
     last_edited: '2026-10-28T13:53:22Z'
+  - id: note-44ce038
+    text: 'Review loop 419c i14: three leftovers in the kept recipe scope, all the
+      PR own class (a failure message pointing at evidence that does not exist, a
+      step acting on a handle it does not have), plus the same guard one variable
+      over. (1) Both recipes saved the failing pane through a dump_pane() function
+      defined back in the first capture block — but the stop step is pasted ON ITS
+      OWN whenever the scenario needs interactive driving (step 3 is the driving;
+      the recipe own RECORDER_STOP_TIMEOUT note already says workers paste steps separately).
+      Verified live in this container (real tmux 3.2a + asciinema 2.1.0): the CLI
+      step-4 block in a fresh shell printed "bash: dump_pane: command not found" and
+      the timeout message still claimed "the pane is saved in .../recorder-pane.log"
+      while no file was written; post-fix the same block exits 1 with the pane saved
+      (30 bytes of the blank pane a quiet command draws). Both recipes now write the
+      capture-pane redirection out at each failure site instead of calling a function.
+      (2) tmux step 5 used $TARGET from step 1 with no guard, and `tmux has-session
+      -t ""` SUCCEEDS (verified against real tmux 3.2a, with and without a live session)
+      — so pasted alone, the legitimate "the scenario ended the pm session" finish
+      was reported as "recorder exited while the TUI was still running — the cast
+      is incomplete" (reproduced in the execution harness), and `pipe-pane -t ":0.0"`
+      returned 0 while targeting whatever pane tmux picks as current instead of the
+      target pane. Step 5 now re-derives TARGET=${TARGET:-$(pm session name)} (verified:
+      prints the computed name from cwd with no session present) and refuses an empty
+      one with a message naming the fix. (3) Same class one variable over: the web-UI
+      driver guard checked only CAPDIR while its own prose says both variables come
+      from step 1, and driver.mjs falls back to `process.env.APP_URL || "http://localhost:8000"`
+      — with APP_URL unset the block drove whatever answers on port 8000, exactly
+      the wrong-app capture the step-1 busy-port pre-check exists to prevent; the
+      guard now names both. Tests: 5 new, all failing against the pre-fix recipes
+      (checked by pointing the test module at the previous recipe files): the stop
+      block is run ALONE for both recipes (stub mode stuck — the pane it names must
+      exist and there must be no "command not found"), the tmux both-gone finish must
+      pass with $TARGET unset (the stub has-session now models real tmux, where an
+      empty target succeeds — that modelling gap is why this went unnoticed), the
+      step must refuse when `pm session name` prints nothing, and the driver block
+      must stop with APP_URL unset. File 85 pass (3 runs); related suites 175 pass;
+      full suite 3938 passed, 1 skipped, 2 deselected (test_merge_publish/test_signoff_integration
+      excluded — push proxy rejects pushes to master; the two known baselines test_git_ops::TestPullRebase::test_keeps_unpushed_merge
+      and test_hook_events::test_installer_writes_standalone_receiver deselected;
+      the 12 markdown tests pass once the markdown dep is installed, which it now
+      is). No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T14:13:33Z'
+    last_edited: '2026-10-28T14:13:33Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
