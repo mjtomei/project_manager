@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T08:07:33.740729+00:00'
+  updated_at: '2026-10-28T08:39:57.199669+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14063,6 +14063,20 @@ prs:
       4110 passed, 1 skipped (/pm-captures/review-c02f-i4/full-suite.log).'
     created_at: '2026-10-28T08:07:33Z'
     last_edited: '2026-10-28T08:07:33Z'
+  - id: note-f87e7a6
+    text: 'Review i5: `--keep-github` message now says the GitHub PR is "unchanged"
+      (never "open"); `--remove` dependent warning now says the dependents reference
+      the removed record instead of implying a closed status blocks them. Closed status
+      is now durable inside the sync apply too: `sync_from_github(save_state=True)`
+      and the TUI `startup_github_sync` apply skip a status update when the fresh
+      entry is already closed (a discovered merge still finalizes), closing the race
+      where a `pm pr close` landing during the GitHub round-trip was overwritten.
+      Tests: test_remove_warns_dependents_reference_the_removed_record, test_sync_from_github_does_not_reopen_a_concurrently_closed_pr,
+      test_tui_startup_github_sync_keeps_a_concurrently_closed_pr, plus keep-github
+      message assertions. Full suite 4100 passed, 1 skipped; the 12 markdown + 1 hook
+      failures are env-only (missing markdown package; PM_HOST_HOME set) — see /pm-captures/review-c02f-i5/full-suite.log.'
+    created_at: '2026-10-28T08:39:57Z'
+    last_edited: '2026-10-28T08:39:57Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

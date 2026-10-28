@@ -397,6 +397,26 @@ def test_tui_startup_github_sync_records_integrity_when_status_already_merged(
     assert len(integrity_notes(sync_github)) == 1
 
 
+def test_tui_startup_github_sync_keeps_a_concurrently_closed_pr(sync_github):
+    """The startup sync applies updates computed from a stale snapshot; a
+    `closed` status written meanwhile is terminal and must survive
+    (pr-62ad13d)."""
+    def _set(status: str) -> None:
+        def _apply(d):
+            store.get_pr(d, PR)["status"] = status
+        store.locked_update(sync_github.pm_dir, _apply)
+
+    # The worker's copy says in_progress; GitHub OPEN + ready computes
+    # in_review, so without the guard the apply would overwrite `closed`.
+    _set("in_progress")
+    app = _FakeApp(sync_github.pm_dir)
+    _set("closed")
+
+    asyncio.run(tui_sync.startup_github_sync(app))
+
+    assert pr_entry(sync_github)["status"] == "closed"
+
+
 # --- CLI pm pr sync --------------------------------------------------------
 
 def test_cli_pr_sync_records_integrity(sync_github):

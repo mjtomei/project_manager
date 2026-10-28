@@ -309,6 +309,12 @@ async def startup_github_sync(app) -> None:
                     new_status = updates.get(pr["id"])
                     if not new_status:
                         continue
+                    if pr.get("status") == "closed" and new_status != "merged":
+                        # The updates were computed from this worker's stale
+                        # copy; a concurrent `pm pr close` is terminal and must
+                        # not be overwritten (pr-62ad13d).  A merge discovered
+                        # on GitHub still finalizes normally.
+                        continue
                     if pr.get("status") != new_status:
                         if new_status == "merged":
                             newly_merged.add(pr["id"])

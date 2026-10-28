@@ -3520,13 +3520,16 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
-    elif gh_pr_number and old_status == "merged":
+    elif remove and gh_pr_number and old_status == "merged":
         # The --remove path only deletes the registry record; the GitHub PR is
         # merged (so it cannot be closed) and is not "open" either.
         click.echo(f"GitHub PR #{gh_pr_number} is already merged; leaving it "
                    f"as is.")
     elif gh_pr_number and keep_github:
-        click.echo(f"Leaving GitHub PR #{gh_pr_number} open (--keep-github).")
+        # Its GitHub state is not necessarily OPEN (the PR may have been
+        # closed or merged on GitHub), so promise "unchanged", not "open".
+        click.echo(f"Leaving GitHub PR #{gh_pr_number} unchanged "
+                   f"(--keep-github).")
 
     # Record the closure (or drop the entry with --remove) under the lock.
     # Workdir, branch and every file in the workdir stay untouched — cleanup
@@ -3596,6 +3599,8 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
 
     # A closed PR blocks its dependents forever (only `merged` satisfies a
     # dependency): name them so the block is visible, but never rewrite them.
+    # With --remove the dependency reference now names a record that no longer
+    # exists — say so, rather than implying a `closed` status is the blocker.
     dependents = [
         p for p in (updated.get("prs") or [])
         if pr_id in (p.get("depends_on") or [])
@@ -3605,9 +3610,14 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
         names = ", ".join(
             f"{_pr_display_id(p)} ({p.get('title', '???')})"
             for p in dependents)
-        click.echo(
-            f"Warning: {len(dependents)} dependent PR(s) remain blocked by "
-            f"{display_id}: {names}", err=True)
+        if remove:
+            click.echo(
+                f"Warning: {len(dependents)} dependent PR(s) depend on the "
+                f"removed {display_id} and stay blocked: {names}", err=True)
+        else:
+            click.echo(
+                f"Warning: {len(dependents)} dependent PR(s) remain blocked "
+                f"by {display_id}: {names}", err=True)
 
     trigger_tui_refresh()
 

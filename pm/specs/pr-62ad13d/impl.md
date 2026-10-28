@@ -88,6 +88,9 @@ Add `--remove` to `pm pr close`:
   contains the closed id and whose own status is not `merged`/`closed`.
 - Print a warning (stderr) naming them, e.g.
   `Warning: 2 dependent PR(s) remain blocked by #163: pr-002 (B), pr-003 (C)`.
+  With `--remove` the warning instead says the dependents depend on the
+  *removed* record (their `depends_on` now names a PR that does not exist), so
+  the message must not imply a `closed` status is what blocks them.
 - Do not change dependent statuses, do not add the closed id to any "merged"
   set, do not remove it from `depends_on`.
 - `graph.ready_prs` (`pm_core/graph.py:40`) only treats *merged* dependencies
@@ -118,6 +121,13 @@ Add `--remove` to `pm pr close`:
   `--keep-github` (or when the `gh` call failed), losing the historical record.
 - Mirror the existing `qa`/`sign_off` preservation: when GitHub reports OPEN
   and the local status is `closed`, skip the PR (keep `closed`).
+- The same rule must hold inside the locked apply, not only against the
+  pre-lock snapshot: `sync_from_github` computes `status_updates` before taking
+  the store lock, so a `pm pr close` landing during the GitHub round-trip would
+  otherwise be overwritten. Both the `save_state` apply in `sync_from_github`
+  and the TUI's `startup_github_sync` apply skip a status update when the fresh
+  entry is already `closed` (a discovered `merged` still finalizes — GitHub is
+  authoritative about a merge).
 - `pr_sync.sync_prs` (TUI/`pm pr sync`) already ignores non-active statuses;
   unchanged.
 
@@ -175,6 +185,15 @@ workdirs are touched.
     that names a different PR.
 19. `--remove` on a `merged` PR names the merged GitHub PR instead of
     claiming it was left "open" (it is neither closed nor open).
+20. `--keep-github` reports the GitHub PR as "unchanged", never as "open"
+    (its GitHub state may be closed or merged).
+21. `--remove` dependent warning says the dependents reference the removed
+    record; their status/`depends_on` are untouched and `ready_prs` stays
+    empty.
+22. Sync race (R9): `status_updates` computed from a stale snapshot do not
+    overwrite a `closed` status written before the lock, in both
+    `sync_from_github(save_state=True)` and the TUI `startup_github_sync`
+    apply.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -203,8 +222,9 @@ be rewritten to assert retention.
   re-adding the same PR.  The duplicate message therefore names the closed
   status and points at `pm pr edit <id> --status pending` (the deliberate
   reopen path) rather than leaving the add silently unfulfilled.
-- **No new destructive fallback.** The only filesystem operations in the close
-  path after this change are reads (`Path.exists` for the message).
+- **No new destructive fallback.** The close path performs no filesystem
+  writes at all — the workdir is not even stat'ed any more; the "Kept:" line
+  prints the retained references verbatim.
 - **Concurrency/ordering.** The `gh` call stays outside the store lock
   (`store.locked_update` must not be held across network calls).
 - **Merge/spec gates untouched.** Close never writes sign-off or merge fields;
@@ -276,7 +296,10 @@ No **[UNRESOLVED]** ambiguities.
   `pr_start` and `pr_merge` closed guards, and a closed-duplicate hint in
   `pr_add` (retained closed entries now match its duplicate check).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
-- `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN.
+- `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN, at
+  snapshot time and again inside the locked apply.
+- `pm_core/tui/sync.py` — the startup GitHub sync's apply applies the same
+  closed-is-terminal guard.
 - `pm_core/gh_ops.py` — docstring note only (no signature change).
 - `pm_core/cli/__init__.py` — help line.
 - `pm/qa/regression/command-dedup.md`, `pm/qa/regression/multi-window-registry.md`

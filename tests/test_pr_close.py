@@ -264,6 +264,10 @@ def test_keep_github_leaves_github_untouched(tmp_path):
     assert result.exit_code == 0, result.output
     assert _close_calls(backend) == []
     assert backend.prs[pr.number].state == "OPEN"
+    assert (f"Leaving GitHub PR #{pr.number} unchanged (--keep-github)."
+            in result.output)
+    # Never promise "open": the GitHub PR may be closed or merged there.
+    assert "open (--keep-github)" not in result.output
     assert _load_entry(project["pm_dir"])["status"] == "closed"
 
 
@@ -484,6 +488,24 @@ def test_dependents_are_warned_but_not_unblocked(tmp_path):
     assert "pr-001" not in [p["id"] for p in graph.ready_prs(data["prs"])]
 
 
+def test_remove_warns_dependents_reference_the_removed_record(tmp_path):
+    """With --remove the dependency names a record that no longer exists;
+    the warning must not imply a `closed` status is the blocker."""
+    project = _make_project(tmp_path)
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code == 0, result.output
+    assert "depend on the removed" in result.output
+    assert "remain blocked by" not in result.output
+    data = store.load(project["pm_dir"])
+    dependent = store.get_pr(data, "pr-002")
+    assert dependent["status"] == "pending"
+    assert dependent["depends_on"] == ["pr-001"]
+    assert [p["id"] for p in graph.ready_prs(data["prs"])] == []
+
+
 def test_closed_pr_cannot_be_started(tmp_path):
     project = _make_project(tmp_path)
     with _fake_gh() as backend:
@@ -636,6 +658,32 @@ def test_sync_from_github_does_not_reopen_closed_pr(tmp_path):
     assert result.synced is True
     assert "pr-001" not in result.status_updates
     assert store.get_pr(store.load(project["pm_dir"]), "pr-001")["status"] == "closed"
+
+
+def test_sync_from_github_does_not_reopen_a_concurrently_closed_pr(tmp_path):
+    """sync-github computes its updates from a pre-lock snapshot; a close
+    landing during the GitHub round-trip must not be overwritten (R9)."""
+    project = _make_project(tmp_path, status="in_progress",
+                            with_dependent=False)
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="OPEN")
+        data = store.load(project["pm_dir"])
+        data["prs"][0]["gh_pr_number"] = pr.number
+        store.save(data, project["pm_dir"])
+        # The snapshot the sync starts from says in_progress (GitHub OPEN +
+        # ready would move it to in_review)...
+        stale = store.load(project["pm_dir"])
+
+        # ...and `pm pr close` lands before the sync takes the store lock.
+        def _mark_closed(d):
+            store.get_pr(d, "pr-001")["status"] = "closed"
+        store.locked_update(project["pm_dir"], _mark_closed)
+
+        result = pr_sync.sync_from_github(project["pm_dir"], data=stale)
+
+    assert result.synced is True
+    assert store.get_pr(store.load(project["pm_dir"]),
+                        "pr-001")["status"] == "closed"
 
 
 def test_sync_from_github_still_closes_open_prs(tmp_path):

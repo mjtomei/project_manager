@@ -412,6 +412,12 @@ def sync_from_github(
                 new_status = status_updates.get(pr["id"])
                 if not new_status:
                     continue
+                if pr.get("status") == "closed" and new_status != "merged":
+                    # A concurrent `pm pr close` won the race with this sync:
+                    # the status_updates were computed from the pre-lock
+                    # snapshot, and a closed record is terminal (pr-62ad13d).
+                    # A merge discovered on GitHub still finalizes normally.
+                    continue
                 if pr.get("status") != new_status:
                     pr["status"] = new_status
                     _record_status_timestamp(pr, new_status)
