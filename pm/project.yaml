@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T18:06:12.122506+00:00'
+  updated_at: '2026-10-28T18:35:56.203370+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36968,6 +36968,39 @@ prs:
       re-run).'
     created_at: '2026-10-28T18:06:12Z'
     last_edited: '2026-10-28T18:06:12Z'
+  - id: note-d4a1384
+    text: 'review baa8 i3 (fix + handoff, 94dbf681). Found and fixed a real false-wait
+      the PR still allowed: a local slash command (/model, /cost) typed in the review
+      pane is echoed into the transcript as a type:"user" record. is_human_prompt_record
+      already rejected it as an answer, but _user_record_is_non_task treated it as
+      a task boundary, so find_verdict_turn stopped at the echo. A PASS/NEEDS_WORK
+      follow-up followed by an echo therefore read as "no verdict": _wait_for_follow_up_verdict
+      took the prose-question branch, re-armed `waiting / review INPUT_REQUIRED (iteration
+      N)` for a wait nobody was asked for, and — because Claude was idle and no further
+      idle_prompt came — blocked forever (reproduced: find_verdict_turn returns None
+      with assistant NEEDS_WORK then <command-name>/model</command-name>). Fix: _LOCAL_COMMAND_PREFIXES
+      moved into _NON_TASK_TEXT_PREFIXES so the answer predicate and the task-scoped
+      verdict scan agree exactly as R4 claims, and the now-redundant check in is_human_prompt_record
+      is dropped. Regressions: test_local_command_echo_is_transparent, test_new_task_after_a_local_command_echo_supersedes
+      (guard: a real task after an echo still supersedes), test_follow_up_verdict_survives_a_local_slash_command
+      (times out pre-fix: the resumed waiter never records the verdict and never launches
+      iteration 3); test_agrees_with_the_shared_task_boundary_predicate now covers
+      the echoes. Spec R4 + an edge-case bullet and QA E8 updated. Verification: full
+      suite 4127 passed, 1 skipped, 0 failed (/pm-captures/review-a80bde5-baa8-i3/full-suite.log);
+      project.yaml 509 PRs, no id lost or duplicated vs origin/master, store.load(validate=True)
+      OK. Remaining, NOT a code change: the QA S16 story-4 marker Then (⏸1 never renders
+      before the adopt log line; ⟳1 during the check) is a stale-frame artifact —
+      consume_breadcrumb mount blocks the UI event loop, so the pre-restart frame
+      stays on screen and no post-mount paint can precede the adopt check; the committed
+      qa.md R7 already asks only that the pane/question survive and status show the
+      wait, and the status/runtime-state path never reports a pre-adopt wait (input_required=false,
+      reason `review resuming (iteration N)`). Recommend the QA concretizer generate
+      that Then from qa.md R7 as written rather than requiring a paint ordering the
+      mount cannot provide. No other defects found in the wait-state logic: _wait_for_follow_up_verdict,
+      HumanResponseWatch, _await_input_resolution and the adopt gate were re-read
+      end to end.'
+    created_at: '2026-10-28T18:35:56Z'
+    last_edited: '2026-10-28T18:35:56Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
