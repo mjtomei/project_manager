@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T17:06:21.641317+00:00'
+  updated_at: '2026-10-28T17:16:39.264240+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36878,6 +36878,39 @@ prs:
       with pane-stamped.jsonl, samples.log, adopt.log). Verdict for this run: INPUT_REQUIRED.'
     created_at: '2026-10-28T17:06:21Z'
     last_edited: '2026-10-28T17:06:21Z'
+  - id: note-bb354d9
+    text: 'QA S15 re-evaluation (the earlier PASS was flagged; corrected to NEEDS_WORK,
+      fix pushed). Story 2 Then genuinely failed: after a breadcrumb restart during
+      an unanswered INPUT_REQUIRED wait the row read "review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running)" with input_required=false / follow_up=true for
+      the sub-second adopt check (sampled at 16:25:05.139 between waiting samples).
+      That is the residual documented in impl.md, but it is a false wait-state row
+      and the scenario forbids it. FIXED in 5b86f467: ReviewLoopState._adopting_wait
+      is set by run_review_loop_sync while a resumed loop checks whether its recorded
+      wait has a live pane and cleared when the decision is made; review_progress_input
+      reports resuming=true / follow_up=false while set, and _review_reason renders
+      "review resuming (iteration N)". Runtime before/after on the fixed code: the
+      same restart window samples "running | review resuming (iteration 1) | {input_required:false,
+      follow_up:false}" and the restart->answer window has 158 waiting + 1 resuming
+      + 0 follow-up-running samples, then settles waiting with the same window/panes.
+      Regression tests test_adopting_wait_is_not_reported_as_an_answered_follow_up
+      and test_restart_adopt_check_never_reads_as_follow_up_running fail pre-fix,
+      pass post-fix. Re-ran the whole scenario on the fixed code: story 3b now injects
+      the tool_use/tool_result pair (output "50 passed/yes/PASS/INPUT_REQUIRED") during
+      the answered 8 s prompt-hold (the pair suppresses prompt idles until the turn
+      ends, like a real working turn) — 20/20 running samples stayed running/follow_up:true,
+      the tool output was not recorded as a verdict, and the turn ended PASS; stories
+      1, 3a, 4, 5 hold. Evidence /pm-captures/scenarios/15/pre-fix/ and /post-fix/.
+      Full suite 4042 passed, 1 skipped, 43 failed + 36 errors = the documented git-env
+      families (git_ops 1, hook_events 1, signoff_integration 22, merge_publish 19+17,
+      sync_merge_integrity 19 errors), none in the touched files. Harness note: the
+      notice frame-trigger evidence channel is content-deduped by frame_capture and
+      the frame buffer resets on a TUI re-exec, so a per-question notice trigger can
+      be absent on a byte-identical screen (same notice line + same spinner glyph);
+      the status row and the follow-up verdict=/relaunch log lines are the primary
+      evidence.'
+    created_at: '2026-10-28T17:16:39Z'
+    last_edited: '2026-10-28T17:16:39Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
