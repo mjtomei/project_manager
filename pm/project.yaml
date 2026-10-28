@@ -37733,7 +37733,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T09:46:51.796585+00:00'
+  updated_at: '2026-10-28T09:51:37.088062+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -38654,6 +38654,33 @@ prs:
       artifact. Captures: /pm-captures/scenarios/26/{story1,story2} (cast+mp4+manifest+evidence).'
     created_at: '2026-10-28T09:46:51Z'
     last_edited: '2026-10-28T09:46:51Z'
+  - id: note-c29501c
+    text: 'QA S27 (breadcrumb restart mid-episode) PASS on 521430b4 (integrated tree).
+      S1: `pm tui restart --breadcrumb` landed ~1s into the 5s backoff after iteration
+      2 attempt 1 failed; log shows `Review loop resumed for pr-3f5e474 at iteration
+      2 loop=1680` with the same id as `Review loop started ... loop=1680`; in-flight
+      `pm autostart status --json` = one run, iteration 2, running true, attempts
+      1, artifact = the attempt-1 log (exists; identical to the path in the pre-restart
+      TUI notice); the breadcrumb saved `next_retry_at` 09:43:50.126 and attempt 2
+      relaunched at 09:43:50 = the ORIGINAL deadline (not restart+5s); no `Auto-start:
+      review loop`/`Auto-start: retrying review launch` after `consume_breadcrumb:
+      restoring targets=`; exactly one attempt-2 notice; after repair attempt 2 PASS
+      -> `✓ PASS (2 iterations)`, one run, one review window. S2: manual loop (own
+      manual-<hex> dir) in its 10s backoff, dir replaced by a stray file + restart
+      -> `Cannot create transcript dir ... [Errno 17] File exists` and `consume_breadcrumb:
+      could not resume the review loop ...; dropping the restored state so the scheduler
+      can restart it`, no `Review loop resumed`; scheduler started fresh loop=ccfe
+      in the intact autostart-<pr>-<hex> run dir; target kept [wait-for-merge] and
+      read `running/review review #1 — review iteration 1`; `✓ PASS (1 iteration)`;
+      `pm tui view` returned in 0.08s. Observation (non-blocking, scenario-text nit
+      only): during a live retry `.review.verdict` is `NEEDS_WORK` (the last completed
+      review verdict) and the row carries `(last NEEDS_WORK)`; LAUNCH_FAILED is set
+      only on retry exhaustion by design (review_progress_input reads latest_verdict),
+      so the scenario parenthetical "JSON verdict is still LAUNCH_FAILED while the
+      retry runs" does not match — the hard requirements (iteration 2/running/attempts>=1/artifact)
+      all hold. Evidence: /pm-captures/scenarios/27/{story1-resume-in-place,story2-failed-resume}.'
+    created_at: '2026-10-28T09:51:37Z'
+    last_edited: '2026-10-28T09:51:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
