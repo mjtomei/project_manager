@@ -28262,7 +28262,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T13:59:05.152331+00:00'
-  updated_at: '2026-10-24T20:40:46.945776+00:00'
+  updated_at: '2026-10-28T04:03:27.711208+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -28331,6 +28331,23 @@ prs:
       and re-reviews wastefully when nothing changed.)'
     created_at: '2026-06-11T16:31:03Z'
     last_edited: '2026-06-11T16:31:03Z'
+  - id: note-74db116
+    text: 'Case to cover (from pr-b19db15; the user chose the watcher over prompt/helper
+      code, 2026-10-28): a worker blocked inside one shell command that never returns
+      although its work is done. Seen 3 times: #229 QA round 2 S10, `until ! pgrep
+      -f "dl-agg/agg|ffmpeg -loglevel"` matched its own shell after both renders finished
+      (~8 min stall); #229 review round 3 i1, `until ! pgrep -f "pytest ..."` matched
+      itself after the suite finished; #249 S74, a bare `wait` blocked on a deliberately
+      persistent reaper child after the finite snapshot finished. Each needed the
+      shepherd to step in. The watcher should notice a pane stuck on one foreground
+      command with no progress, check whether the awaited work actually finished (no
+      renderer/test process left, output present and valid, or a suite summary printed),
+      terminate only the waiting shell (not the job and not the session), and tell
+      the worker to continue and re-verify its own result. A killed wait is never
+      a pass. In QA containers PID 1 does not reap (pr-2111fa0), so judge liveness
+      by process state (Z = finished), not kill -0.'
+    created_at: '2026-10-28T04:03:27Z'
+    last_edited: '2026-10-28T04:03:27Z'
 - id: pr-8015c1d
   plan: plan-regression
   title: Re-run sign-off in place on an already-merged PR (deferred)
@@ -31078,7 +31095,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-27T19:41:54.693867+00:00'
+  updated_at: '2026-10-28T04:03:26.461127+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31307,6 +31324,30 @@ prs:
       s).'
     created_at: '2026-10-27T19:41:54Z'
     last_edited: '2026-10-27T19:41:54Z'
+  - id: note-93f1418
+    text: 'Sign-off 2026-10-28 → SIGNOFF_IMPL: scope reduction decided by the user.
+      Stalled waits are agent behavior that may fade as models improve; the watcher
+      (pr-ff9b728) will catch them, so this PR must not add code or prompt text for
+      them. DROP: pm/qa/artifacts/wait-for-job.sh and the helper tests in tests/test_qa_artifact_wait_for_job.py;
+      prompt_gen._background_jobs_block and all 3 injections (impl, review, QA child);
+      the QA-child RECIPE_DIR/helper paragraph; the *.sh copy in qa_loop._install_artifact_files;
+      the verifier freshness paragraph plus the stale wording in the FLAGGED bullet
+      and "present and fresh" in the VERIFIED bullet (no observed false PASS; avoid
+      prompt bloat); the "Shared helpers" section of qa_library.md; recipe text about
+      pgrep/bare wait/the helper. Recipes render directly in the foreground as on
+      master (the i5 `|| true` fix only mattered inside the helper `set -e` script,
+      so drop it too). KEEP, as real recipe bugs any model hits: mkdir -p the capture
+      dir before recording (asciinema exits 0 writing nothing when it is missing,
+      i11); rm -f a stale cast before recording (i12); the recorder readiness wait
+      before send-keys; stop by ending the recorded command (exit, not Ctrl-C) with
+      a bounded wait on tmux has-session plus test -s on the cast (i12); the cli no-TTY
+      scaffold cast-path fix (i9); the bounded `until tmux ls` and web-ui `until curl`
+      readiness polls with the per-attempt curl bound and server cleanup (i4/i7).
+      Keep only slim tests asserting the kept recipe fixes and update pm/specs/pr-b19db15/impl.md
+      to the reduced scope. QA S14/S18/S20 already show these recipe fixes working;
+      re-QA should re-verify them against the reduced diff.'
+    created_at: '2026-10-28T04:03:26Z'
+    last_edited: '2026-10-28T04:03:26Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
