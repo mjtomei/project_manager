@@ -1616,8 +1616,8 @@ def _review_base_gate(root, pr_entry: dict, *, review_iteration: int,
     proceeds — sign-off still performs the authoritative check.
     """
     from pm_core import base_check
-    stage = (base_check.STAGE_REVIEW_ITERATION if review_iteration
-             else base_check.STAGE_REVIEW)
+    stage = (base_check.STAGE_REVIEW_ITERATION
+             if (review_iteration or 0) > 1 else base_check.STAGE_REVIEW)
     try:
         res = base_check.gate(
             root, pr_entry["id"], stage,
@@ -4214,6 +4214,9 @@ def pr_qa_run_bg(pr_id: str):
     # still pending is not flipped to qa on the way to an early return.
     from pm_core import base_check
     if base_check.has_open_return(pr_entry):
+        # Close a raced in_review->qa transition as the other gates do: the
+        # completion handoff only polls in_progress PRs.
+        base_check.ensure_impl_status(root, pr_id)
         _log.info("pr_qa_run_bg: %s has an open base return; skipping QA",
                   pr_id)
         return

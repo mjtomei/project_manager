@@ -9,6 +9,7 @@ after a genuine rework.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from pm_core import base_check, store
@@ -236,6 +237,77 @@ def test_resume_returned_loop_starts_a_review_loop(tmp_path):
         review_loop_ui._resume_returned_loop(app, "pr-001")
     start.assert_called_once()
     assert start.call_args.args[1] == "pr-001"
+
+
+def test_resume_returned_loop_does_not_double_start(tmp_path):
+    """A loop that already owns the PR must not be started twice.
+
+    ``_start_loop`` has no running-loop guard of its own (its other callers
+    check first), so a user ``d`` that won the race in the same tick would
+    leave two reviewer writers on one PR.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(status="in_progress")
+    app = _app(tmp_path, [pr])
+    app._review_loops["pr-001"] = SimpleNamespace(running=True)
+    with patch("pm_core.tui.pr_view.run_command") as run_cmd, \
+         patch.object(review_loop_ui, "_start_loop") as start:
+        review_loop_ui._resume_returned_loop(app, "pr-001")
+    start.assert_not_called()
+    run_cmd.assert_not_called()
+
+
+def test_completion_tick_handles_a_missing_workdir(tmp_path):
+    """No workdir must not reach the git helpers with an empty cwd.
+
+    ``subprocess.run(cwd="")`` raises, and this tick runs inside the shared
+    poll timer: an exception there would break QA/sign-off polling too.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return())
+    pr.pop("workdir")
+    app = _app(tmp_path, [pr])
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
+    ok, why, _resume = review_loop_ui._base_completion_tick(
+        app, "pr-001", pr, _tracker(old))
+    assert not ok
+    assert "workdir" in why
+
+
+# --- raced status repair in the schedulers --------------------------------
+
+def test_auto_start_review_loops_repairs_a_raced_in_review_status(tmp_path):
+    """Skipping must not leave the rework stranded in in_review.
+
+    The base-return completion handoff only polls in_progress PRs, so an
+    in_review PR whose return is open would otherwise get neither a reviewer
+    nor a completion check.
+    """
+    from pm_core.tui import auto_start
+
+    app = _app(tmp_path, [_pr(status="in_review", base_return=_return())])
+    app._auto_start = True
+    app._auto_start_all = True
+    with patch("pm_core.tui.review_loop_ui._start_loop") as start:
+        auto_start._auto_start_review_loops(app)
+    start.assert_not_called()
+    stored = store.get_pr(store.load(app._root), "pr-001")
+    assert stored["status"] == "in_progress"
+
+
+def test_auto_start_qa_loops_repairs_a_raced_qa_status(tmp_path):
+    from pm_core.tui import auto_start
+
+    app = _app(tmp_path, [_pr(status="qa", base_return=_return())])
+    app._auto_start = True
+    app._auto_start_all = True
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as start:
+        auto_start._auto_start_qa_loops(app)
+    start.assert_not_called()
+    stored = store.get_pr(store.load(app._root), "pr-001")
+    assert stored["status"] == "in_progress"
 
 
 def test_start_loop_continues_iteration_numbering(tmp_path):

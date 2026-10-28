@@ -194,8 +194,19 @@ def _stamp(pr: dict, status: str) -> None:
     pr["updated_at"] = now
     if status == "in_progress" and not pr.get("started_at"):
         pr["started_at"] = now
-    elif status == "in_review":
-        pr["reviewed_at"] = now
+
+
+def _int_or(value, default: int) -> int:
+    """*value* as an int, or *default* when it is missing or malformed.
+
+    A hand-edited/corrupt ``project.yaml`` must not make the return raise
+    inside the locked update: the gate would then report "the PR left the
+    phase" instead of returning it to implementation.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 # --- return record helpers -------------------------------------------------
@@ -345,12 +356,12 @@ def return_to_impl(root: Path, pr_id: str, record: dict, stage: str,
         prev = pr.get("base_return") or {}
         same_base = (prev.get("base_sha") == record.get("base_sha")
                      and prev.get("verdict"))
-        attempt = (int(prev.get("attempt") or 0) + 1) if same_base else 1
+        attempt = (_int_or(prev.get("attempt"), 0) + 1) if same_base else 1
         if existing is not None:
             old_pair = (existing.get("head"), existing.get("base_sha"))
             if old_pair == pair or not supersede:
                 return
-            attempt = int(existing.get("attempt") or 1) + 1
+            attempt = _int_or(existing.get("attempt"), 1) + 1
         needs_human = attempt > MAX_RETURNS_PER_BASE
         rec = _new_return(record, stage, iteration, attempt,
                           resume_loop=resume_loop)

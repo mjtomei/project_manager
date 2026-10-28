@@ -886,6 +886,12 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         # the base before any reviewer runs.
         from pm_core import base_check
         if base_check.has_open_return(pr):
+            # A raced status (a stale callback wrote in_review after the
+            # return landed) would strand the rework: the completion handoff
+            # only polls in_progress PRs.  Repair it here, as _start_loop and
+            # the CLI gates do, or the PR sits in in_review with no reviewer
+            # and no handoff.
+            base_check.ensure_impl_status(app._root, pr_id)
             _log.debug("auto_start: %s base rework pending, no review loop",
                        pr_id)
             continue
@@ -987,6 +993,10 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # implementation has reconciled the base.
         from pm_core import base_check
         if base_check.has_open_return(pr):
+            # Same raced-status repair as _auto_start_review_loops: a PR
+            # left in qa would never be seen by the in_progress-only
+            # completion handoff.
+            base_check.ensure_impl_status(app._root, pr_id)
             _log.debug("auto_start: %s base rework pending, no QA loop", pr_id)
             continue
         _log.info("auto_start: starting QA loop for %s", pr_id)

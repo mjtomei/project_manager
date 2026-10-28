@@ -895,7 +895,12 @@ class TestBaseGate:
         assert transcript.parent == tdir
 
     def test_qa_run_bg_does_not_flip_status_for_an_open_return(self, runner, tmp_path):
-        """The base-return guard runs before the in_review->qa transition."""
+        """The base-return guard runs before the in_review->qa transition.
+
+        A raced ``in_review`` status is repaired to ``in_progress`` (the
+        completion handoff only polls that status) instead of being flipped
+        to ``qa``.
+        """
         pr = _pr("in_review", workdir="/wd", base_return=_base_return())
         data = _data_with(pr)
         with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
@@ -906,5 +911,5 @@ class TestBaseGate:
             result = runner.invoke(pr_qa_run_bg, ["pr-001"])
         assert result.exit_code == 0, result.output
         run.assert_not_called()
-        update.assert_not_called()                 # status not flipped to qa
-        assert pr["status"] == "in_review"
+        update.assert_called_once()                # the raced-status repair
+        assert pr["status"] == "in_progress"       # never qa

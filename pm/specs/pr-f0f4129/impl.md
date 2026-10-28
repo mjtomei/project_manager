@@ -167,15 +167,20 @@ already drops it because the status is no longer `qa`.
   branch refuses to advance a PR whose base return is still open (repairing
   a raced `in_progress`→`qa` transition) instead of trusting a stale
   `qa_status.json`, so a previous QA PASS cannot hand the PR to sign-off
-  beside the rework.
-- **R13 — TUI coverage.** `_start_loop` and `_auto_start_review_loops` refuse
-  to start a review while a base return is open (the refusal repairs a raced
-  `in_review` status back to `in_progress` — the handoff only polls
-  `in_progress`, so leaving it would strand the rework); `start_qa` /
-  `_auto_start_qa_loops` / `qa-run-bg` refuse to start QA likewise;
+  beside the rework. `pr qa-run-bg` refuses before its `in_review`→`qa`
+  transition and repairs a raced status on that first guard too (its second,
+  post-transition check is unreachable once the first fires).
+- **R13 — TUI coverage.** `_start_loop`, `_auto_start_review_loops` and
+  `_auto_start_qa_loops` refuse to start a writer while a base return is open
+  (the refusal repairs a raced `in_review`/`qa` status back to `in_progress`
+  — the handoff only polls `in_progress`, so leaving it would strand the
+  rework); `start_qa` / `start_or_stop_qa_loop` refuse to start QA likewise;
   `_poll_impl_idle` evaluates `impl_completion` in a **thread worker**
   (fetch must not block the TUI event loop), logs a wait reason once, and
-  advances only on a genuine completion. `review_loop` maps exit code 3 to
+  advances only on a genuine completion. `_base_completion_tick` never
+  reaches the git helpers with an empty cwd (they raise, inside the shared
+  poll timer). `_resume_returned_loop` does not start a second loop when one
+  is already running for the PR. `review_loop` maps exit code 3 to
   `VERDICT_BASE_CONFLICT` and stops the loop without recording an iteration;
   the icon/log path treats it as a clean completion (not ERROR).
 - **R14 — Inspection.** `pm pr show` prints a `## Base integration return`
@@ -295,6 +300,9 @@ No unresolved ambiguities.
 8. repeated conflicts on new heads → capped at `MAX_RETURNS_PER_BASE`,
    `needs_human`, no launch.
 9. `format_return` renders the pair/paths/instructions only while open.
+10. the `pm pr review` choke point: exit 3 with no status write and no
+    review window; a clean base still launches the reviewer.
+11. a malformed `attempt` in `base_return` still records the return.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
@@ -306,14 +314,18 @@ status `in_progress`, no QA window/planner; clean → unchanged flow.
 `tests/test_pr_auto_sequence.py` additions: NEEDS_WORK with conflict → no
 review launch, `base_conflict` line; in_progress idle with an open unchanged
 return → `running: implementation (...)`; resolved → `advanced: in_review`;
-awaiting impl → relaunch catch-up.
+awaiting impl → relaunch catch-up; `qa-run-bg` repairs a raced status and
+never flips it to `qa`.
 
 `tests/test_pr.py` / prompt tests: `--no-window` still transitions without a
 launch; the impl/review/QA prompts include the return block.
 
-TUI: `_start_loop`/`start_qa` refuse with an open return; `_poll_impl_idle`
-does not advance on a background-test idle (settle/pair/dirty) and does
-advance after a genuine commit; `poll_qa_state` drops a returned run.
+TUI: `_start_loop`/`start_qa`/`_auto_start_review_loops`/
+`_auto_start_qa_loops` refuse with an open return (repairing a raced
+status); `_poll_impl_idle` does not advance on a background-test idle
+(settle/pair/dirty) and does advance after a genuine commit; a missing
+workdir never reaches the git helpers; `_resume_returned_loop` never starts
+a second loop; `poll_qa_state` drops a returned run.
 
 ## 6. Out of scope
 

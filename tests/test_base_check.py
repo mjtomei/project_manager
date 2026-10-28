@@ -527,6 +527,27 @@ def test_stale_review_launch_is_refused_while_return_open(w):
     assert res.decision == base_check.WAIT
 
 
+def test_malformed_attempt_still_records_the_return(w):
+    """A corrupt ``attempt`` must not turn the return into a silent no-op.
+
+    ``return_to_impl`` raises inside the locked update when it cannot read
+    the counter, and the gate then reports "the PR left the phase" instead
+    of handing it to implementation — a hand-edited project.yaml would leave
+    the PR in review with an unreconcilable base.
+    """
+    set_pr(w, base_return={"verdict": base_check.VERDICT_BASE_CONFLICT,
+                           "head": "old", "base_sha": "old-base",
+                           "attempt": "not-a-number",
+                           "ts": "2026-01-01T00:00:00+00:00",
+                           "resolved_at": "2026-01-01T00:00:00+00:00"})
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")) as launch:
+        res = gate(w)
+    assert res.decision == base_check.CONFLICT, res.reason
+    assert res.returned
+    launch.assert_called_once()
+    assert pr(w)["base_return"]["attempt"] == 1
+
+
 # --- prompt block ----------------------------------------------------------
 
 def test_format_return_only_while_open(w):
@@ -553,6 +574,50 @@ def test_show_prints_the_base_return(w):
     assert "## Base integration return" in result.output
     assert "BASE_CONFLICT" in result.output
     assert "shared.txt" in result.output
+
+
+# --- the `pm pr review` choke point ---------------------------------------
+
+def test_pr_review_exits_3_without_writing_the_status(w):
+    """The CLI choke point: a conflict never starts the reviewer.
+
+    ``pm pr review`` must not write ``in_review`` or open a review window on
+    a conflicting base — exit 3 is the contract ``review_loop`` maps to
+    ``VERDICT_BASE_CONFLICT``.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch("pm_core.base_check.launch_impl", return_value=(True, "")) as launch, \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(
+            pr_mod.pr, ["review", "--review-iteration", "2", PR])
+    assert result.exit_code == 3, result.output
+    assert "base_conflict" in result.output
+    window.assert_not_called()
+    launch.assert_called_once()
+    p = pr(w)
+    assert p["status"] == "in_progress"
+    ret = p["base_return"]
+    assert ret["stage"] == base_check.STAGE_REVIEW_ITERATION
+    assert ret["iteration"] == 2
+    assert ret["conflicts"] == ["shared.txt"]
+
+
+def test_pr_review_clean_base_launches_the_reviewer(w):
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    git(w.repo, "reset", "-q", "--hard", "HEAD~1")
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", PR])
+    assert result.exit_code == 0, result.output
+    window.assert_called_once()
+    assert pr(w)["status"] == "in_review"
 
 
 # --- QA loop wiring --------------------------------------------------------

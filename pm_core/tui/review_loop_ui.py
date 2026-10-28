@@ -1258,10 +1258,15 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     if time.time() - idle_since < base_check.IDLE_SETTLE_SECONDS:
         return False, "letting the implementation settle", False
     workdir = pr.get("workdir")
-    op = base_check.git_op_in_progress(workdir or "")
+    if not workdir:
+        # The git helpers run with this as their cwd; an empty one raises
+        # rather than reporting "no workdir", and this tick runs inside the
+        # shared poll timer.
+        return False, "no PR workdir", False
+    op = base_check.git_op_in_progress(workdir)
     if op:
         return False, f"{op} still in progress", False
-    if base_check.tracked_dirty(workdir or ""):
+    if base_check.tracked_dirty(workdir):
         return False, "uncommitted edits remain", False
 
     checks[pr_id] = {"in_flight": True, "started": now, "episode": episode}
@@ -1326,6 +1331,12 @@ def _resume_returned_loop(app, pr_id: str) -> None:
     if not pr or pr.get("status") != "in_progress":
         return
     if base_check.has_open_return(pr):
+        return
+    # A concurrent start (the user's ``d``, a scheduler pass) may already own
+    # the PR: a second loop would be a second reviewer writer on one PR.
+    loop = app._review_loops.get(pr_id)
+    if loop and loop.running:
+        _log.info("resume_returned_loop: %s already has a running loop", pr_id)
         return
     app.log_message(f"Base rework complete for {pr_id} — resuming review loop")
     pr_view.run_command(app, f"pr review --no-window {pr_id}")
