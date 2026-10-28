@@ -23,7 +23,10 @@ hits, regardless of how it waits for a background job:
   raisable (`RECORDER_STOP_TIMEOUT`) so a legitimately long one-shot command
   is not killed at the deadline, and a tmux recorder that is already gone by
   the detach (or that dies in the gap before the detach key is sent) fails
-  the run instead of passing on a truncated cast;
+  the run instead of passing on a truncated cast. A non-empty cast is not
+  proof of a finished recording — an asciinema killed mid-recording leaves a
+  header-only cast — so the CLI scaffold has the pane's shell record
+  asciinema's own exit status and fails on a missing or non-zero one;
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, the pm-session poll waits on
   the computed session rather than any ``pm-`` session (which would also
@@ -494,6 +497,7 @@ class TestRecipes:
                 .replace("<capture-dir>", str(tmp_path))
                 .replace("<short-name>", "run")
                 .replace("<command-to-record>", escaped))
+        (tmp_path / "run").mkdir()   # the pane command writes its status here
 
         bindir = tmp_path / "bin"
         bindir.mkdir()
@@ -526,6 +530,80 @@ class TestRecipes:
         """
         block = _scaffold_block(_recipe_text("cli-recording.md"))
         assert "<capture-dir>/<short-name>/recording.cast" in block
+
+    def test_cli_scaffold_checks_asciinemas_own_exit_status(self):
+        """A non-empty cast does not prove the recorder finished.
+
+        An asciinema killed mid-recording leaves a cast holding only its
+        header, and ``test -s`` passes on it — reproduced live: a 60 s
+        one-shot recording whose asciinema was SIGKILLed after 1 s made the
+        previous scaffold print success on a 117-byte cast. asciinema's own
+        exit status is the handle, so the pane's shell has to record it after
+        asciinema returns and step 4 has to fail on a missing or non-zero
+        one. The file the pane command writes and the file step 4 reads have
+        to be the same one, and it has to be cleared with the stale cast.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        write = re.search(r"^[^#\n]*echo \\\$\? > (\S+)", block, re.M)
+        assert write, (
+            "cli-recording: the pane command does not record asciinema's "
+            "exit status, so a killed recorder passes on its header-only cast")
+        status_path = write.group(1).rstrip('"')
+        read = re.search(
+            r"^status=\$\(cat (\S+) 2>/dev/null\) \|\| \{$", block, re.M)
+        assert read, (
+            "cli-recording: step 4 does not read the recorder's exit status")
+        assert read.group(1) == status_path, (
+            "cli-recording: step 4 reads " + read.group(1) + " but the pane "
+            "command writes " + status_path)
+        assert '[ "$status" = 0 ]' in block, (
+            "cli-recording: a non-zero recorder status is not treated as a "
+            "failed recording")
+        assert "incomplete" in block, (
+            "cli-recording: the status failure does not say the cast is "
+            "incomplete")
+        stale = block[block.index("rm -f "):block.index("new-session -d")]
+        assert "recorder.status" in stale, (
+            "cli-recording: an earlier run's recorder status survives, so a "
+            "torn-down recorder can pass the status check")
+
+    def test_cli_scaffold_records_the_recorders_exit_status(self, tmp_path):
+        """The status echo has to reach the *pane's* shell, and land on disk.
+
+        The pane command is an argument to ``tmux new-session``, which tmux
+        runs with ``sh -c``, so the status echo has to survive this shell's
+        own double-quote expansion (``\\$?``) and then be expanded by the
+        pane's shell. Run the recipe's own statement against a stub tmux and
+        then run the captured pane command with a stub ``asciinema`` that
+        exits 7: the status file has to hold 7.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        (tmp_path / "run").mkdir()
+        stmt_start = block.index("tmux -L scaffold new-session")
+        stmt = (block[stmt_start:block.index("\n\n", stmt_start)]
+                .replace("<capture-dir>", str(tmp_path))
+                .replace("<short-name>", "run")
+                .replace("<command-to-record>", "true"))
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        tmux_argv = tmp_path / "tmux-argv"
+        _stub_tool(bindir, "tmux",
+                   f'printf "%s\\n" "$@" > "{tmux_argv}"\n')
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+        r = subprocess.run(["bash", "-c", stmt], env=env,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        recorder_cmd = tmux_argv.read_text().splitlines()[-1]
+        assert "$?" in recorder_cmd, (
+            "cli-recording: the recorder command's `$?` was expanded by this "
+            "shell, so the pane would record an earlier command's status "
+            f"(got {recorder_cmd!r})")
+        _stub_tool(bindir, "asciinema", "exit 7\n")
+        subprocess.run(["sh", "-c", recorder_cmd], env=env,
+                       capture_output=True, text=True)
+        assert (tmp_path / "run" / "recorder.status").read_text().strip() == "7", (
+            "cli-recording: asciinema's exit status does not reach the file "
+            "step 4 reads")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -707,6 +785,36 @@ def _run_driver_block(capdir, global_dir):
     env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1")
     return subprocess.run(["bash"], input=block, env=env,
                           capture_output=True, text=True, timeout=120)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_block_refuses_an_unset_capdir(tmp_path):
+    """``cd ""`` silently stays put, so the link lands in the worker's cwd.
+
+    Verified: with ``CAPDIR`` unset, ``cd "$CAPDIR"`` returns 0 and leaves the
+    shell where it was, so the block creates ``node_modules`` — a link to the
+    image's global install — in that directory (the PR workdir, say), the
+    resolution check then passes on that stray link, and the driver fails
+    with a bare "Cannot find module …/driver.mjs". The finalize step refuses
+    an unset ``CAPDIR`` for the same reason; the driver block has to as well.
+    """
+    global_dir = _fake_playwright(tmp_path / "global")
+    block = _web_ui_driver_block().replace("/usr/lib/node_modules",
+                                           str(global_dir))
+    work = tmp_path / "cwd"
+    work.mkdir()
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CAPDIR", "APP_URL")}
+    r = subprocess.run(["bash"], input=block, env=env, cwd=work,
+                       capture_output=True, text=True, timeout=120)
+
+    assert r.returncode != 0, "the driver block ran with no CAPDIR"
+    assert "CAPDIR" in r.stderr, r.stderr
+    assert "playwright ok" not in r.stdout, (
+        "the block passed its resolution check on a link it created in the "
+        "wrong directory: " + r.stdout)
+    assert not os.path.lexists(work / "node_modules"), (
+        "the block created a node_modules link in the worker's cwd")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
@@ -969,9 +1077,18 @@ case "$sub" in
             ( sleep 0.02; rm -f "$STATE/$s" ) & ;;
         *)
             printf '{"version": 2}\n' > "$STUB_CAST"
-            printf 'TUI drawn\n' > "$STATE/pane" ;;
+            printf 'TUI drawn\n' > "$STATE/pane"
+            if [ -n "$STUB_STATUS_FILE" ]; then
+                case "$STUB_MODE" in
+                  nostatus)  : ;;
+                  badstatus) printf '137\n' > "$STUB_STATUS_FILE" ;;
+                  *)         printf '0\n' > "$STUB_STATUS_FILE" ;;
+                esac
+            fi ;;
       esac
-      [ "$STUB_MODE" = oneshot ] && ( sleep 0.3; rm -f "$STATE/$s" ) &
+      case "$STUB_MODE" in
+        oneshot|badstatus|nostatus) ( sleep 0.3; rm -f "$STATE/$s" ) & ;;
+      esac
       exit 0 ;;
 esac
 exit 0
@@ -1019,6 +1136,11 @@ def _run_capture_block(name, mode, tmp_path, target=False):
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_STATE=str(state), STUB_MODE=mode,
                STUB_CAST=str(capture / sub / "recording.cast"))
+    if "recorder.status" in raw:
+        # The CLI scaffold's pane command records asciinema's own exit status;
+        # the stub cannot run the pane command, so it writes the status the
+        # recipe's step 4 reads.
+        env["STUB_STATUS_FILE"] = str(capture / sub / "recorder.status")
     r = subprocess.run(["bash"], input=block, env=env,
                        capture_output=True, text=True, timeout=120)
     return r, capture / sub / "recording.cast"
@@ -1045,6 +1167,41 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, "a recorder that never ran was reported as success"
         assert "asciinema wrote no cast" in r.stderr, r.stderr
         assert not cast.exists()
+
+    def test_cli_recorder_killed_mid_recording_fails(self, tmp_path):
+        """A killed recorder leaves a non-empty cast; `test -s` cannot tell.
+
+        Reproduced live: a one-shot recording whose asciinema was SIGKILLed
+        1 s into a 60 s command left a 117-byte cast (header only) and the
+        previous scaffold reported success. asciinema's own exit status is
+        the only handle the CLI pane has — the tmux recipe has the target
+        session as its witness, this one does not — so a non-zero status has
+        to fail the run even though the cast looks fine.
+        """
+        r, cast = _run_capture_block("cli-recording.md", "badstatus", tmp_path)
+        assert cast.stat().st_size > 0, (
+            "the fixture did not reproduce the false-success precondition "
+            "(a non-empty cast from a killed recorder)")
+        assert r.returncode != 0, (
+            "a recorder that was killed mid-recording was reported as a "
+            "successful recording")
+        assert "incomplete" in r.stderr, r.stderr
+        assert "137" in r.stderr, (
+            "the failure does not say how the recorder ended: " + r.stderr)
+
+    def test_cli_missing_recorder_status_fails(self, tmp_path):
+        """No status file means the pane died before asciinema returned.
+
+        The pane's shell writes the status after asciinema exits, so a file
+        that was never written means the pane (or the whole server) was torn
+        down underneath a live recorder — the recording did not finish, and
+        the header-only cast must not be reported as one.
+        """
+        r, cast = _run_capture_block("cli-recording.md", "nostatus", tmp_path)
+        assert cast.stat().st_size > 0, "the fixture left no cast to misread"
+        assert r.returncode != 0, (
+            "a recording with no completion signal was reported as a success")
+        assert "incomplete" in r.stderr, r.stderr
 
     def test_tmux_recording_completes(self, tmp_path):
         r, cast = _run_capture_block(

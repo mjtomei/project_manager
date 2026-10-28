@@ -84,6 +84,11 @@ foreground render block,
   bound still records (the scaffold's readiness wait is on the cast file, not
   pane content), and one that runs longer than the default stop bound records
   when `RECORDER_STOP_TIMEOUT` is raised;
+- a recorder killed mid-recording (asciinema killed while the pane lives, or
+  the pane/server torn down) fails with the "cast is incomplete" message
+  instead of reporting success on its header-only cast — `test -s` alone
+  cannot tell — and a stale `recorder.status` from an earlier run is cleared
+  with the earlier cast, so it cannot make a torn-down recorder look finished;
 - `recording.mp4` is freshly written, non-empty, and `ffprobe` reports
   `codec_name=h264`;
 - `manifest.md` exists and its `## Files` section lists the produced files.
@@ -112,7 +117,8 @@ session, stop the recorder, and render the cast,
 **Then** it exits within the stated deadline with an actionable message and
 cleans up (kills the recorder/session) instead of hanging or passing on the
 wrong session; and
-**Given** a cast, transcript, or recorder session left by an earlier run,
+**Given** a cast, transcript, recorder status, or recorder session left by an
+earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort with "recording already exists"
 or "duplicate session", the readiness wait does not pass on the previous

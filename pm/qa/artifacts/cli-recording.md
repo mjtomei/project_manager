@@ -32,11 +32,12 @@ substitutes the actual captures directory for `<capture-dir>`):
 ## Capture
 
 Before any of the forms below, create the capture directory and clear an
-earlier run's cast:
+earlier run's cast and recorder status:
 
 ```
 mkdir -p <capture-dir>/<short-name>
-rm -f <capture-dir>/<short-name>/recording.cast
+rm -f <capture-dir>/<short-name>/recording.cast \
+      <capture-dir>/<short-name>/recorder.status
 ```
 
 `asciinema rec` reports "asciicast saved" and exits 0 even when the
@@ -48,7 +49,9 @@ still produce a fresh-looking video of the *previous* run. The no-TTY
 scaffold repeats both steps, and also clears a `rec` session an earlier run
 left behind: a leftover one makes `new-session` fail with "duplicate
 session: rec" and the readiness wait would then pass on the previous run's
-recorder.
+recorder. `recorder.status` holds this run's recorder exit status (step 4 of
+the no-TTY scaffold); a leftover one would let a recorder that was torn down
+before it finished pass that check.
 
 ### One command, end-to-end
 
@@ -106,12 +109,18 @@ where the CLI runs.
 #    Pasting the double-quoted form unescaped ends the outer string, so
 #    asciinema gets a broken command, exits, and step 4 reports "asciinema
 #    wrote no cast".
+#    The pane command is `asciinema …; echo \$? > …/recorder.status`: the
+#    shell that owns the pane records asciinema's *own* exit status once it
+#    returns, which step 4 needs to tell a finished recording from a
+#    recorder that was killed. `\$?` is escaped so the pane's shell expands
+#    it, not this one.
 tmux -L scaffold kill-session -t rec 2>/dev/null || true
 mkdir -p <capture-dir>/<short-name>
-rm -f <capture-dir>/<short-name>/recording.cast
+rm -f <capture-dir>/<short-name>/recording.cast \
+      <capture-dir>/<short-name>/recorder.status
 tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
-        -c '<command-to-record>'"
+        -c '<command-to-record>'; echo \$? > <capture-dir>/<short-name>/recorder.status"
 
 # 2. Wait (bounded) for the recorder to start before any keys go in:
 #    keystrokes sent before asciinema has attached to the pane are silently
@@ -146,8 +155,10 @@ done
 
 # 4. Wait (bounded) for asciinema to exit — the pane *is* the recording, so
 #    the session ending is the completion signal — then confirm the cast is
-#    there and non-empty. For a one-shot command that legitimately runs
-#    longer than the default bound, raise RECORDER_STOP_TIMEOUT (seconds):
+#    there and non-empty *and* that asciinema itself exited 0 (a killed
+#    recorder leaves a header-only cast). For a one-shot command that
+#    legitimately runs longer than the default bound, raise
+#    RECORDER_STOP_TIMEOUT (seconds):
 #    prefix this block with RECORDER_STOP_TIMEOUT=120 (the variable does not
 #    survive a separate shell invocation, so set it in the same call). The
 #    bound is a hang detector, not a time limit on the recorded work, and
@@ -168,6 +179,27 @@ done
 test -s <capture-dir>/<short-name>/recording.cast || {
     echo "asciinema wrote no cast — check the pane output" >&2
     tmux -L scaffold kill-server 2>/dev/null   # do not leave `rec` behind
+    exit 1
+}
+# A non-empty cast is not proof the recording finished: an asciinema that
+# was killed mid-recording leaves a cast holding only its header. Its own
+# exit status is the handle. It is 0 when the recording ran to completion —
+# the *recorded* command's status is not propagated, so a recording of a
+# command that exits non-zero is still a finished recording — and non-zero
+# when asciinema refused to start or was killed, in which case the cast
+# stops wherever it stopped. A missing status file means the pane was torn
+# down before asciinema returned, which is the same failure.
+status=$(cat <capture-dir>/<short-name>/recorder.status 2>/dev/null) || {
+    echo "recorder status is missing — the pane was torn down before" \
+        "asciinema exited, so the cast is incomplete, not a finished" \
+        "recording" >&2
+    tmux -L scaffold kill-server 2>/dev/null
+    exit 1
+}
+[ "$status" = 0 ] || {
+    echo "asciinema exited $status — the cast is incomplete, not a finished" \
+        "recording; check the pane output" >&2
+    tmux -L scaffold kill-server 2>/dev/null
     exit 1
 }
 tmux -L scaffold kill-server 2>/dev/null || true   # cleanup

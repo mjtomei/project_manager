@@ -112,6 +112,13 @@ Save the skeleton below as `driver.mjs` in the capture directory, then run
 it with the capture dir and base URL in the environment:
 
 ```bash
+# Both variables come from step 1; a fresh shell has neither, and
+# `cd ""` silently stays put — the link below would then be created in
+# whatever directory the worker happens to be in (e.g. the PR workdir), the
+# resolution check would pass on *that* link, and the driver would fail with
+# a bare "Cannot find module …/driver.mjs". Stop instead, as the finalize
+# step does.
+: "${CAPDIR:?CAPDIR is unset — set the placeholders from step 1 first}"
 cd "$CAPDIR"                                 # where driver.mjs lives
 # The driver is an ES module, and Node's ES-module resolver ignores
 # NODE_PATH, so with only the image's global Playwright a bare

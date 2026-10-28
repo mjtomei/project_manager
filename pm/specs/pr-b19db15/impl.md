@@ -127,6 +127,20 @@ R4. **Stop by ending the recorded command, then wait on the recorder's real
    exits at once on the gone session and `test -s` passes on the truncated
    cast — the same false success through a smaller window. The failed detach
    is therefore a failure with the same "cast is incomplete" message.
+   `test -s` is not proof the *CLI* recording finished either: the tmux pane
+   has the target session as an independent witness, the CLI pane has none, so
+   an asciinema killed mid-recording leaves a header-only cast that passes
+   (reproduced live: SIGKILL 1 s into a 60 s one-shot left a 117-byte cast and
+   the previous scaffold printed success). The pane's shell therefore records
+   asciinema's *own* exit status (`…; echo \$? > …/recorder.status` — the `\$`
+   survives this shell's double-quote expansion and is expanded by the pane's
+   shell), step 4 fails on a missing status file (the pane was torn down
+   before asciinema returned) or a non-zero one, and step 0 removes a stale
+   status file with the stale cast. asciinema's status is 0 whenever the
+   recording ran to completion — the *recorded* command's status is not
+   propagated (verified: `-c 'exit 3'`, and a recorded command killed by a
+   signal, both exit 0) — so recording a failing command is still a valid
+   recording, while an asciinema killed by a signal exits 128+N.
 
 R5. **CLI scaffold writes the cast where the render reads it.** The no-TTY
    scaffold uses `<capture-dir>/<short-name>/recording.cast`, matching every
@@ -179,15 +193,23 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    drawn TUI, a tmux recorder that is already gone before the detach while
    the target session still exists failing instead of passing on a truncated
    cast, a detach that itself fails because the recorder vanished in that
-   gap failing the same way, and the recorder readiness wait carrying its own
+   gap failing the same way, the recorder readiness wait carrying its own
    deadline (the pm-session poll's `deadline` would otherwise satisfy a
-   looser assertion).
+   looser assertion), and the CLI recorder-status handle: the file the pane
+   command writes is the file step 4 reads, a stale one is cleared with the
+   stale cast, `$?` survives the scaffold's own quoting (the statement is run
+   through a stub `tmux` and the captured pane command through a stub
+   `asciinema` that exits 7, so the status file has to hold 7), and the
+   web-UI driver block refuses an unset `CAPDIR` instead of creating a
+   `node_modules` link in the worker's cwd.
    The capture flow is also *executed*, not only matched as text
    (`TestCaptureFlowExecution`): each recipe's fenced capture block runs
    against stub `tmux`/`pm` that drive a session table, so the readiness and
    stop logic is exercised. Cases: CLI completes; a recorder that never
    writes a cast fails at its bound; a recorder that dies without a cast
-   fails; tmux completes (and prints no tmux error while stopping the pipe);
+   fails; a CLI recorder killed mid-recording fails on its status although
+   its cast is non-empty; a CLI recording with no status file fails; tmux
+   completes (and prints no tmux error while stopping the pipe);
    a recorder that exits before drawing fails; a failed attach that drew its
    error text fails; a recorder that died mid-scenario fails on its
    truncated cast; a detach that fails because the recorder vanished in the
@@ -195,8 +217,8 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    itself passes.
    Each of those fails when its fix is reverted (checked by mutation: dropping
    the settle re-check, the mid-scenario branch, the detach-failure branch,
-   the CLI cast check, and the `2>/dev/null` on the pipe stop each fail
-   exactly one case).
+   the CLI cast check, the CLI status check, and the `2>/dev/null` on the
+   pipe stop each fail exactly one case).
    The render/finalize assertions cover both recording recipes (a failed
    render leaves no mp4/gif and exits non-zero with its message) and the
    web-UI recipe (the pre-driver cleanup drops the previous run's webm, mp4,
@@ -309,6 +331,14 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
      running step 3 in a fresh shell had no `CAPDIR`: the `rm -f` aimed at
      `/recording.mp4` and ffmpeg at `/recording.webm`. The step now stops with
      `: "${CAPDIR:?…}"` before either.
+   - The web-UI *driver* block (step 2) had the same hole, one step earlier
+     and with a filesystem side effect: `cd "$CAPDIR"` with `CAPDIR` unset
+     returns 0 and silently stays in the worker's cwd (verified), so the
+     conditional link created `node_modules -> /usr/lib/node_modules` *there*
+     (the PR workdir, say), the resolution check printed "playwright ok" on
+     that stray link, and the run then died with a bare "Cannot find module
+     …/driver.mjs" instead of naming the missing variable. It now stops with
+     `: "${CAPDIR:?…}"` first, as the finalize step does.
 
 ## Non-goals
 
@@ -322,8 +352,8 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
 | File | Change |
 |---|---|
 | `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver block refuses an unset `CAPDIR` too (it would otherwise link `node_modules` in the worker's cwd); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -333,9 +363,11 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
 1. Run `tests/test_qa_artifact_recording_recipes.py` — all pass (including
    the execution tests: a failed render with stub `agg`/`ffprobe`/`ffmpeg`
    leaves no mp4/gif and exits non-zero, the scaffold's documented
-   escaped command form reaches asciinema's `-c` intact, and the capture
-   flow runs end to end against a stub `tmux`/`pm` for its success and
-   failure paths).
+   escaped command form reaches asciinema's `-c` intact, the CLI scaffold's
+   status echo survives its own quoting and lands asciinema's status on
+   disk, a killed/missing recorder fails although the cast is non-empty, and
+   the capture flow runs end to end against a stub `tmux`/`pm` for its
+   success and failure paths).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -353,3 +385,14 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
   original bug report, not something this PR now fixes.
 - The earlier `impl/post-fix/render-wait/` capture demonstrated the dropped
   `wait-for-job.sh` helper and no longer describes this diff.
+- Review loop 419c i10 verified the CLI status handle live in this container
+  (real tmux 3.2a + asciinema 2.1.0, the recipe's own fenced block):
+  one-shot success → rc 0, `recorder.status` = 0; asciinema SIGKILLed 1 s
+  into a 60 s one-shot with the pane shell left alive → status 137, "asciinema
+  exited 137 — the cast is incomplete" rc 1 (the pre-fix block printed
+  success on the same 117-byte cast); pane torn down with a *stale* status
+  file and stale cast pre-seeded → both cleared, "recorder status is
+  missing" rc 1; interactive `-c bash` driven with `exit` → rc 0, status 0,
+  cast holds the driven command. asciinema's status was checked to be 0 for
+  `-c 'exit 3'` and for a recorded command killed by a signal, so a failing
+  recorded command is not mistaken for a failed recording.
