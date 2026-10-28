@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T07:30:52.745508+00:00'
+  updated_at: '2026-10-28T07:51:02.490527+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15026,6 +15026,29 @@ prs:
       stop, kept IR container reaped after window close.'
     created_at: '2026-10-28T07:30:52Z'
     last_edited: '2026-10-28T07:30:52Z'
+  - id: note-7ec30d8
+    text: 'QA S82 (S78 rerun, tested b2dd37d6; real rootless Podman 3.4.4, unmodified
+      build-base, fake agents; evidence /pm-captures/scenarios/82/manifest.md): NEEDS_WORK,
+      two fixes pushed with failing-first tests, full sanitized suite 4321 passed/2
+      skipped. (1) c5d0e0ba: after pm tui restart --breadcrumb the mount always logged
+      trigger=initial, because save_breadcrumb deletes the marker before the re-exec
+      (pre-existing, 0383eea7). The trigger now travels in PM_TUI_RESTART_TRIGGER,
+      popped by auto_start.mount_trigger(). (2) b6338490: the finalize skip after
+      a stop was only in the debug log; the TUI "QA complete" line now carries [finalize:
+      skipped — run was stopped]. Held live: A run2 first container ~5.6 s after z
+      t (run1 ~6.6 s), no run-start removals of run-1 containers; B supersede reconcile[qa-run-start]
+      removed 4 in ~5 s; fresh B run s11-s20; zz t kept exactly s12/s14 INPUT_REQUIRED,
+      s15-s20 never launched, A PASS [finalize: FINALIZE_DONE]; end of story 1 = 6
+      kept; nogit review shows git: command not found, partial removed, C shared proxy
+      kept, clean retry; merge pane-exit/manual reap, startup pass removed 2; final
+      3 with same IDs, keyrings only for the live 3, all hashes unchanged, B/C push
+      probes ok; 0 sampler rows after release. Then-wording conflicts for the next
+      spec refresh: (a) same-number A/B containers cannot coexist under this When
+      (A2 s11-s14 are released before B fresh starts, and B s15-s20 never launch);
+      only windows and dirs coexist. (b) pm pr review prints "Opened review window",
+      not "Launched …". (c) podman run needs --uts host; status has no proxy lines.'
+    created_at: '2026-10-28T07:51:02Z'
+    last_edited: '2026-10-28T07:51:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
