@@ -196,7 +196,16 @@ def read_pidfile(path: Path) -> TuiPidfile | None:
 def _proc_stat_fields(pid: int) -> list[str] | None:
     """Fields of ``/proc/<pid>/stat`` after the parenthesised comm."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
+        # ``comm`` — the parenthesised process name — is 16 bytes chosen
+        # by the process itself and may hold non-UTF-8 bytes; a recycled
+        # PID is exactly the case where the file names an arbitrary
+        # unrelated process.  A strict decode would raise
+        # ``UnicodeDecodeError`` out of ``proc_starttime``/``is_zombie``
+        # and therefore out of the startup claim, the picker and
+        # autostart, so decode with replacement: only the state char and
+        # the numeric fields after the final ``)`` are used, and those
+        # are always ASCII.
+        stat = Path(f"/proc/{pid}/stat").read_text(errors="replace")
     except OSError:
         return None
     _, sep, rest = stat.rpartition(")")

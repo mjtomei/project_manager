@@ -917,7 +917,14 @@ def _load_resume_file(qa_workdir: str | Path) -> dict | None:
 def _proc_stat_fields(pid: int) -> list[str] | None:
     """Fields of ``/proc/<pid>/stat`` from field 3 (state) on, or None."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
+        # ``errors="replace"``: ``comm`` is 16 process-controlled bytes
+        # and may not be valid UTF-8 — the recorded owner's PID can have
+        # been recycled by an unrelated process, which is exactly what
+        # the start-time check below is looking for.  Only the numeric
+        # fields are used, so a garbled comm is harmless, but a strict
+        # decode would raise ``UnicodeDecodeError`` out of the TUI's
+        # resume path instead of reporting "not our owner".
+        stat = Path(f"/proc/{pid}/stat").read_text(errors="replace")
         return stat.rsplit(")", 1)[1].split()
     except (OSError, IndexError):
         return None

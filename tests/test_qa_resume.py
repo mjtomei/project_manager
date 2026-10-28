@@ -291,6 +291,45 @@ def test_owner_pid_reused_by_unrelated_process_is_not_owner():
         other.wait()
 
 
+def test_non_utf8_comm_on_recycled_pid_does_not_raise(monkeypatch):
+    """``/proc/<pid>/stat`` carries 16 process-controlled bytes.
+
+    A recycled PID can belong to a process whose ``comm`` is not valid
+    UTF-8; a strict ``read_text`` used to raise ``UnicodeDecodeError``
+    out of ``resume_owned_elsewhere`` — i.e. out of the TUI's startup
+    resume path — instead of reporting "not our owner".
+    """
+    import subprocess
+    from pathlib import Path as _Path
+
+    other = subprocess.Popen(["sleep", "30"])
+    real_path = _Path
+    stat = b"1234 (\xff\xfe\x80bad) " + " ".join(
+        ["S"] + ["1"] * 18 + ["98765"]).encode()
+
+    class _FakePath:
+        def __init__(self, raw):
+            self._raw = str(raw)
+
+        def read_text(self, encoding=None, errors=None):
+            if self._raw.endswith("/stat"):
+                # Refuse invalid bytes unless the caller asked for
+                # replacement (the pre-fix behaviour was strict).
+                return stat.decode("utf-8", errors or "strict")
+            return real_path(self._raw).read_text()
+
+    monkeypatch.setattr(qa_loop, "Path", _FakePath)
+    try:
+        # The recorded start time does not match the (fake) live one, so
+        # the PID reads as reused — a boolean, never an exception.
+        assert qa_loop.resume_owned_elsewhere(
+            {"owner_pid": other.pid, "owner_start": "1"}) is False
+        assert qa_loop._proc_start_time(other.pid) == "98765"
+    finally:
+        other.kill()
+        other.wait()
+
+
 def _run_cli_qa_driver(tmp_path, run_side_effect):
     """Invoke the detached ``pm pr qa-run-bg`` driver with run_qa_sync faked."""
     from click.testing import CliRunner

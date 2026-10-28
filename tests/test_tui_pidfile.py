@@ -876,6 +876,98 @@ class TestIdentity:
             "process is not running")
 
 
+class TestNonUtf8ProcStat:
+    """A recycled PID may belong to a process with a non-UTF-8 ``comm``.
+
+    ``/proc/<pid>/stat`` carries the 16-byte process name chosen by the
+    process itself, so a strict ``read_text`` raises
+    ``UnicodeDecodeError`` — which escaped ``proc_starttime`` /
+    ``is_zombie`` and therefore the startup claim (``pm _tui`` crashed
+    with a traceback instead of taking the stale pidfile over), the
+    picker and autostart (tracebacks instead of a message).  Same class
+    as the undecodable-pidfile case in E3: identity checks must never
+    raise.
+    """
+
+    @staticmethod
+    def _stat_bytes(state="S", starttime=98765):
+        # state (field 3) then fields 4..21, with starttime at field 22
+        # (index 19 after the comm).
+        fields = [state] + ["1"] * 18 + [str(starttime)]
+        return b"1234 (\xff\xfe\x80bad) " + " ".join(fields).encode()
+
+    @staticmethod
+    def _fake_procfs(monkeypatch, stat):
+        real_path = Path
+
+        class _FakePath:
+            def __init__(self, raw):
+                self._raw = str(raw)
+
+            def read_text(self, encoding=None, errors=None):
+                if self._raw.endswith("/stat"):
+                    # Model the real strict-decode failure of the pre-fix
+                    # implementation: refuse invalid bytes unless the
+                    # caller asked for replacement.
+                    return stat.decode("utf-8", errors or "strict")
+                return real_path(self._raw).read_text()
+
+            def read_bytes(self):
+                if self._raw.endswith("/stat"):
+                    return stat
+                return real_path(self._raw).read_bytes()
+
+        monkeypatch.setattr(tpf, "Path", _FakePath)
+
+    def test_proc_starttime_and_zombie_survive_non_utf8_comm(
+            self, monkeypatch):
+        self._fake_procfs(monkeypatch, self._stat_bytes())
+        assert tpf.proc_starttime(1234) == 98765
+        assert tpf.is_zombie(1234) is False
+        self._fake_procfs(monkeypatch, self._stat_bytes(state="Z"))
+        assert tpf.is_zombie(1234) is True
+
+    def test_identity_problem_reports_a_reason_instead_of_raising(
+            self, monkeypatch):
+        self._fake_procfs(monkeypatch, self._stat_bytes())
+        # Our own live PID: liveness passes, the (fake) start time matches
+        # the descriptor, so the check falls through to the real cmdline —
+        # which is pytest, not a TUI.  A reason, never an exception.
+        desc = tpf.TuiPidfile(
+            pid=os.getpid(), caps=frozenset({tpf.CAP_RELOAD}),
+            starttime=98765)
+        assert tpf.identity_problem(desc) == (
+            "pid belongs to a different program")
+
+    def test_claim_takes_over_a_pidfile_naming_a_non_utf8_process(
+            self, tmp_path, monkeypatch):
+        """pm _tui must take the stale file over, not crash at startup."""
+        path = tmp_path / "tui-pm-test.pid"
+        _write_json(path, 1234, [tpf.CAP_RELOAD], starttime=1)
+        self._fake_procfs(monkeypatch, self._stat_bytes())
+        # pid 1234 is alive for the claim's purposes (monkeypatched
+        # liveness below); its start time does not match the descriptor,
+        # so it is stale and may be taken over.
+        monkeypatch.setattr(tpf, "pid_alive", lambda pid: True)
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        try:
+            assert tpf.read_pidfile(path).pid == os.getpid()
+        finally:
+            claim.release()
+
+    def test_submit_tui_command_reports_stale_instead_of_raising(
+            self, ipc_paths, monkeypatch):
+        pidfile, queue = ipc_paths
+        _write_json(pidfile, os.getpid(), [tpf.CAP_RELOAD, tpf.CAP_COMMAND],
+                    starttime=98765)
+        self._fake_procfs(monkeypatch, self._stat_bytes())
+        result = helpers.submit_tui_command(SESSION, "pr list")
+        assert result.ok is False
+        assert result.reason == "stale_pidfile"
+        assert not pidfile.exists()
+        assert not queue.exists()
+
+
 # ---------------------------------------------------------------------------
 # Signal guards + app wiring
 

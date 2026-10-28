@@ -282,6 +282,22 @@ E15. **TUI entry-point names.** The cmdline marker accepts an exact `_tui`
     cannot make callers classify a live TUI as "a different program" and
     delete its pidfile. Matching is per-element, never a substring of the
     joined command line.
+E16. **The target process's own `/proc` entry can be non-UTF-8.**
+    `/proc/<pid>/stat` carries `comm` — 16 bytes the process chooses
+    itself — and a recycled PID is precisely the case where the file
+    names an arbitrary unrelated process. A strict `read_text` raises
+    `UnicodeDecodeError`, which escaped `proc_starttime` / `is_zombie`
+    and therefore the *startup claim* (`pm _tui` crashed with a
+    traceback instead of taking the stale pidfile over, and every retry
+    did the same), `submit_tui_command` (the picker and `pm autostart`
+    tracebacked instead of reporting `stale_pidfile`) and
+    `autostart._resolve_owner`. Same class as the undecodable-pidfile
+    case in E3: identity checks must never raise. `_proc_stat_fields`
+    now decodes with `errors="replace"` (only the state char and the
+    numeric fields after the final `)`, both ASCII, are used). The
+    identical latent bug in `pm_core/qa_loop.py::_proc_stat_fields`
+    (the QA resume snapshot's recorded owner PID) is fixed the same way
+    — see the PR note for that incidental fix.
 
 ## Tests
 
@@ -399,6 +415,14 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     input. (Pre-fix these raised out of the startup claim, the picker,
     and autostart — the same class of crash E3 already closed for
     undecodable bytes.)
+29. a recycled PID whose `/proc/<pid>/stat` `comm` is not valid UTF-8
+    (E16): `proc_starttime` / `is_zombie` / `identity_problem` return
+    values instead of raising, `claim_tui_pidfile` takes the stale file
+    over (so `pm _tui` starts), and `submit_tui_command` reports
+    `stale_pidfile` and removes it; the QA resume path
+    (`qa_loop.resume_owned_elsewhere` / `_proc_start_time`) likewise
+    reports "not our owner" instead of raising. All five tests were
+    verified to fail against the pre-fix strict decode.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;
