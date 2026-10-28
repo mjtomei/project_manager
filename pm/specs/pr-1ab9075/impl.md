@@ -180,6 +180,13 @@ are unchanged apart from per-scenario grace.
   the hook timestamp, trust watch and verdict-reminder timer of the dead
   session are cleared, so the new worker is not gated by the old session's
   grace or reminder interval.
+- Failure classification is per attempt: a `create` retry clears the
+  attempt's window/container/pane/session/transcript pointer before it
+  re-launches, and the `create` check is skipped when the previous attempt's
+  worker actually started (transcript materialised).  A worker that ran is
+  therefore always an `exec`/`exit` failure and is relaunched in place —
+  never re-cloned, which would delete its commits (R9).  Covered by
+  `test_started_worker_without_session_keeps_clone`.
 - A successful start clears the stale launch-failure `verdict_reason` so the
   eventual transcript verdict isn't shown with an old launch error.
 - A `create` retry re-runs `_prepare_scenario`, which clears
@@ -243,7 +250,8 @@ loop owns the run.
 ## 4. Edge cases
 
 - E1. Stop while a scenario is in backoff → loop exits on the next tick, no
-  relaunch (existing `test_stop_during_backoff_does_not_relaunch` intent).
+  relaunch (existing `test_stop_during_backoff_does_not_relaunch` intent,
+  now `test_stop_during_backoff_returns_on_next_tick`).
 - E2. Stop while a background launch thread is mid-concretize → the thread
   bails before splitting the worker pane.
 - E3. Resume with a pane id from the old controller that is dead and a

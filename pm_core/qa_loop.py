@@ -2924,6 +2924,11 @@ def _poll_tmux_verdicts(
         scenario.container_name = None
         scenario.pane_id = None
         scenario.session_id = None
+        # Drop the previous attempt's transcript pointer too: the "did a
+        # worker start?" check must describe THIS attempt, or a stale
+        # pointer would classify a creation failure as an ``exit`` and skip
+        # the full relaunch it needs.
+        scenario.transcript_path = None
         launch = (_launch_scenarios_in_containers if use_containers
                   else _launch_scenarios_in_tmux)
         launch(state, data, pr_data, session, repo_root, workdir_path,
@@ -3258,9 +3263,12 @@ def _poll_tmux_verdicts(
 
             # No worker pane was ever created for this attempt (workdir,
             # container, window or split failure — possibly before any
-            # pane existed at all).
+            # pane existed at all).  A worker that did start is an ``exit``
+            # failure instead: relaunching keeps its clone and commits,
+            # while a create retry re-clones them away.
             if not scenario.window_name or (
-                    not scenario.pane_id and not scenario.session_id):
+                    not scenario.pane_id and not scenario.session_id
+                    and not _worker_has_started(scenario)):
                 _record_failure(scenario, "create", (
                     state.scenario_verdict_reasons.get(idx)
                     or _CREATE_CAUSE))

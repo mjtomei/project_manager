@@ -358,6 +358,36 @@ def test_exec_and_exit_failures_are_distinguished(tmp_path):
     assert not state.scenario_verdicts
 
 
+def test_started_worker_without_session_keeps_clone(tmp_path):
+    """A worker that ran (its transcript exists) but has no live pane and no
+    resolvable session id is an ``exit`` failure: it is relaunched in place,
+    never re-cloned by a ``create`` retry (which would delete its commits)."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="t", focus="f", window_name="w1",
+                    transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+
+    def on_tick(clock):
+        if state.launch_retries:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    full_launches: list = []
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+        patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+              side_effect=lambda *a, **kw: full_launches.append(a)),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert state.launch_retries[1]["kind"] == "exit"
+    assert "mid-run" in state.launch_retries[1]["cause"]
+    assert full_launches == []
+
+
 def test_container_exit_mid_run_names_diagnosed_cause(tmp_path):
     """A started container worker that dies mid-run (the #236 fork storm)
     is an ``exit`` failure, but still carries the probed runtime cause."""
@@ -786,6 +816,23 @@ def test_retry_delays_are_bounded():
     assert delays == [5, 10, 20, 40, 80, 160]
     assert _retry_delay(30) == _SCENARIO_RETRY_MAX_DELAY
     assert sum(delays) < 10 * 60
+
+
+def test_launch_failure_reason_labels_each_kind():
+    """The terminal INPUT_REQUIRED reason names the failure kind so it is not
+    read as an agent asking for human judgment."""
+    from pm_core.qa_loop import _launch_failure_reason
+    for kind, label in (("create", "worker could not be created"),
+                        ("exec", "worker exited before Claude started"),
+                        ("exit", "worker exited before any verdict")):
+        reason = _launch_failure_reason(
+            {"kind": kind, "attempts": _SCENARIO_MAX_RETRIES, "cause": "boom"})
+        assert reason == (f"{label} (runtime failure, not an agent verdict); "
+                          f"gave up after {_SCENARIO_MAX_RETRIES} relaunch "
+                          f"attempt(s): boom")
+    # A record with no cause still says so instead of trailing off.
+    assert _launch_failure_reason({"kind": "exec", "attempts": 1}).endswith(
+        ": no cause recorded")
 
 
 def test_classify_runtime_error():
