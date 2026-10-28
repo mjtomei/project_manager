@@ -31389,7 +31389,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-28T13:28:59.032042+00:00'
+  updated_at: '2026-10-28T15:11:50.452758+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -31437,6 +31437,23 @@ prs:
       was still alive. Captures: /pm-captures/scenarios/4/. (2026-10-28T13:35:00Z)'
     created_at: '2026-10-28T13:28:58Z'
     last_edited: '2026-10-28T13:28:58Z'
+  - id: note-d898e98
+    text: 'QA scenario 6 (host mode, no container) PASS 3/3 stories at c9f8fd9d: (1)
+      repeated worker-window kills -> row `launch retry n/6` (1/6..6/6) with the plain
+      pane-death cause `pane died at startup; no runtime cause found — next attempt
+      at HH:MM:SS` (no container name, no restart advice), `Progress: 2/3 scenarios
+      complete (1 relaunching)`, siblings PASS+verified while the row still retried;
+      (2) one kill -> single `launch retry 1/6` (next attempt +5 s, no s3 window),
+      relaunch creates exactly one same-named window, new worker PASSes, `QA complete:
+      PASS [finalize: FINALIZE_DONE]`; (3) `hold: 0` workers -> all three verdicts
+      `PASS (worker pane gone; collected from its transcript)`, verified, no launch-retry/relaunch,
+      overall PASS. Captures /pm-captures/scenarios/6/. Incidental pre-existing bug
+      filed as pr-084e9a3: stopping QA (`zz t`) while PASS verifications are in flight
+      flags them ("verifier pane disappeared"), the flag follow-up then send-keys
+      a pane that vanished 1 s later and the QA thread crashes (verdict ERROR) instead
+      of stopping cleanly — not exercised by this PR''s scope. (2026-10-28T15:12:00Z)'
+    created_at: '2026-10-28T15:11:50Z'
+    last_edited: '2026-10-28T15:11:50Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
@@ -31491,6 +31508,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-22T17:19:46.224920+00:00'
   updated_at: '2026-10-22T17:19:46.224920+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-084e9a3
+  plan: bugs
+  title: 'Bug: stopping QA while verdict verification is in flight crashes the QA
+    thread and records ERROR'
+  branch: pm/pr-084e9a3-bug-stopping-qa-while-verdict-verification-is-in-f
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py _poll_tmux_verdicts, verification-flag
+    follow-up path (~line 3203-3208). Repro (host mode, fake-claude, 3 scenarios):
+    start QA with `t`; once all three PASS verdicts are verifying (verifier panes
+    created), press `zz t` to stop the loop. poll_for_verdict stop_check makes each
+    verification return None, which _verify_single_scenario reports as "verifier pane
+    disappeared" -> Verification FLAGGED -> the follow-up path runs send_keys(pane_id,
+    followup) then send_keys(pane_id, "") 1 s later; the target pane (concretizer/worker
+    left in the scenario window) can exit in between, so the second send-keys raises
+    subprocess.CalledProcessError and the whole QA background thread crashes ("QA
+    background thread crashed for <pr>", verdict ERROR, "QA thread crashed") instead
+    of a clean stop. Observed 2026-10-28 on pr-1ab9075 QA scenario 6: 14:48:59 stop,
+    14:48:59 "Verification: pane disappeared for scenario 7/8/9", 14:49:00 "Verification
+    FLAGGED scenario 7", 14:49:01 ERROR QA background thread crashed at tmux send-keys
+    -t %37 "" Enter. Expected: a stop while verifying settles cleanly (no follow-up
+    messaging, no crash).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T15:11:27.651194+00:00'
+  updated_at: '2026-10-28T15:11:27.651194+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
