@@ -805,6 +805,15 @@ def _lease_keepalive(state: ReviewLoopState) -> Callable[[], bool]:
                     state.pr_id, "review-loop", _lease_owner(state),
                     REVIEW_LAUNCH_CLAIM_TTL, state="running",
                     iteration=state.iteration, loop_id=state.loop_id)
+                if state.stop_requested:
+                    # A stop landed *while* we were claiming: the stop check
+                    # above ran before the superseding loop set
+                    # ``stop_requested`` and released this lease, so the
+                    # claim just re-took it.  Hand it straight back instead of
+                    # holding it until the TTL — otherwise the new loop's
+                    # bounded claim wait expires into a non-retryable
+                    # LAUNCH_FAILED and the target is re-stranded.
+                    _release_lease(state)
             except Exception:
                 _log.debug("review_loop: lease refresh failed", exc_info=True)
         return False

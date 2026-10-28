@@ -20,7 +20,10 @@ Schema (v1)::
           "started_at": "2026-05-03T18:00:00Z",
           "updated_at": "2026-05-03T18:01:23Z",
           "iteration": 3,
-          "loop_id": "abcd1234"
+          "loop_id": "abcd1234",
+          "launch_attempt": 1,
+          "lease": {"owner": "loop:abcd1234",
+                    "at": "2026-05-03T18:01:23Z"}
         },
         "start": {
           "state": "running",
@@ -29,6 +32,13 @@ Schema (v1)::
         }
       }
     }
+
+The optional ``lease`` records which driver owns a serialized launch for
+the action: ``owner`` is an opaque string (the native review loop uses
+``loop:<loop_id>``) and ``at`` the last claim time, so another driver can
+tell a live owner from one whose process died.  It is written by
+:func:`_locked_action_mutate` rather than :func:`set_action_state`:
+claiming needs a compare-and-set that the plain field merge cannot express.
 
 Valid ``state`` values:
 

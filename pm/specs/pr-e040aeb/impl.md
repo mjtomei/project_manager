@@ -1091,3 +1091,66 @@ at its top without recording an outcome, so the previous episode's
 `pm autostart status` says "needs attention" for a loop the user stopped.
 The same top-of-loop break on a fresh loop mirrors `state="done"`; both are
 pre-existing "what does a stopped-before-iteration loop report" questions.
+
+## Review iteration 2 (1fc4) — refinements
+
+1. **A resume that cannot start no longer strands the target (correctness
+   fix).** `consume_breadcrumb` restores the saved loop into
+   `app._review_loops` *before* calling `_start_loop`, and `_start_loop`
+   bails (returning False, with its own message) when the PR is missing, tmux
+   is unavailable, the PR has no workdir, or the transcript dir cannot be
+   created.  The restore path ignored that result: it announced "Review loop
+   resumed for <pr>" anyway and left a **non-running** loop entry behind —
+   and `_auto_start_review_loops` skips a PR whose entry is non-running and
+   not a retryable launch failure, so the PR was stranded until a manual
+   `review-loop start`: the exact symptom this PR exists to remove, reached
+   through a failed resume instead of a failed launch.  The resume now logs
+   honestly and drops the restored entry so the scheduler pass can start a
+   fresh loop; a starter that *raises* (e.g. a missing project root) is
+   treated the same way, so it cannot take the TUI mount down either — the
+   same rule the auto-start re-arm path already follows.  Covered by
+   `tests/test_breadcrumb_review_loop.py::TestConsumeBreadcrumbReviewLoops::
+   test_a_resume_that_cannot_start_drops_the_phantom_loop` (fails pre-fix:
+   the entry survives and the "resumed" notice is logged) and
+   `test_a_raising_resume_is_treated_like_a_refusal` (pre-fix the exception
+   escapes `consume_breadcrumb`).
+2. **A stopping loop cannot re-take the launch lease while claiming
+   (correctness fix — re-stranded target).** `_lease_keepalive._check` looked
+   at `stop_requested` *before* claiming, and the claim is not atomic with
+   that check: the supersede paths (`z d` / `zz d`) set `stop_requested` and
+   release the old lease, so a claim already in flight re-took the lease the
+   replacement needs.  The new loop's bounded claim wait then expires into a
+   non-retryable `LAUNCH_FAILED` ("owned by another loop") — the same
+   re-stranding iteration 3 of 0688 closed inside `_claim_launch`, which the
+   keepalive path did not share.  The keepalive now hands the lease straight
+   back (`_release_lease`) when a stop landed during the claim.  Covered by
+   `test_lease_keepalive_releases_a_lease_claimed_after_a_stop` (fails
+   pre-fix: the lease stays owned by the stopping loop).
+3. **The launch lease is documented.** `runtime_state` documents its on-disk
+   schema in the module docstring; the `lease` field and the
+   `_locked_action_mutate` writer were undocumented, so a reader of the
+   module (or a future writer) had no description of the one-owner claim.
+
+Not changed (documented residuals, unchanged from iteration 1 unless noted):
+`review_loop.py` is ~1550 lines; two lease mechanisms coexist
+(`signoff.claim_return_launch` in project.yaml vs
+`runtime_state.claim_action_lease`); discovery still adopts a transcript
+verdict without requiring an idle hook event (rationale in iteration 9 of
+385e); `other_owner` stand-down surfaces as a non-retryable `LAUNCH_FAILED`
+after the bounded claim wait; the `runtime_state` mirror of a re-armed loop
+keeps the previous episode's `verdict`/`attempts` until the next iteration
+mirrors a new verdict — correction to iteration 1's wording: neither the
+runs popup nor `pm autostart status` reads that mirror for a review loop
+(the popup uses `collect_status_inputs`, i.e. live `review_progress_input`,
+and the CLI status is answered by the TUI), so the staleness is only visible
+to a reader of `~/.pm/runtime/<pr>.json` itself; a merge restart during the
+post-exhaustion re-arm *cooldown* does not persist the loop
+(`save_breadcrumb` only saves running loops), so auto-start starts a fresh
+loop for the PR instead of continuing the episode — the review still runs
+and no verdict is fabricated; `_interruptible_sleep` re-reads and
+re-validates the ~2 MB `project.yaml` every 2 s during a backoff; a stop
+that lands inside `_launch_review_window`'s `subprocess.run` (up to 120 s)
+is not noticed until the child returns, so a superseded loop can create a
+review window the replacement then replaces — the old loop's lease is
+already released and it bows out at its next checkpoint, so the new loop is
+unaffected.

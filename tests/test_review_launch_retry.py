@@ -1265,6 +1265,34 @@ def test_lease_keepalive_claims_on_the_first_check(monkeypatch):
     assert claims, "the adopt path must claim the launch lease immediately"
 
 
+def test_lease_keepalive_releases_a_lease_claimed_after_a_stop(monkeypatch):
+    """A stop landing *during* the keepalive's claim must hand the lease back.
+
+    The stop check runs before the claim; the superseding loop sets
+    ``stop_requested`` and releases this loop's lease in between, so the
+    claim re-takes a lease nobody wants.  Holding it until the TTL makes the
+    new loop's bounded claim wait expire into a non-retryable
+    LAUNCH_FAILED — the re-stranded target this fix exists for.
+    """
+    from pm_core import runtime_state as rs
+    state = ReviewLoopState(pr_id="pr-stop-lease")
+    real_claim = rs.claim_action_lease
+
+    def claim_then_stop(*a, **k):
+        ok = real_claim(*a, **k)
+        # The UI supersede path: stop_requested first, then the release of
+        # the old lease (already done here, since the claim just wrote it).
+        state.stop_requested = True
+        return ok
+
+    monkeypatch.setattr("pm_core.runtime_state.claim_action_lease",
+                        claim_then_stop)
+    check = review_loop._lease_keepalive(state)
+    assert check() is False
+    assert rs.get_action_lease("pr-stop-lease", "review-loop", 180) is None, (
+        "a stopping loop must not keep the lease it just re-took")
+
+
 def test_review_loop_owns_launch_only_for_loop_leases():
     from pm_core import runtime_state as rs
     assert review_loop.review_loop_owns_launch("pr-own") == ""

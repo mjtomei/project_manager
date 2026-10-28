@@ -370,11 +370,34 @@ async def consume_breadcrumb(app) -> None:
                     # adopted INPUT_REQUIRED follow-up (and finalize)
                     # would look in the wrong place.
                     tdir = rstate._transcript_dir or get_transcript_dir(app)
-                    _start_loop(
-                        app, pr_id, pr,
-                        transcript_dir=str(tdir),
-                        resume_state=rstate,
-                    )
+                    try:
+                        started = _start_loop(
+                            app, pr_id, pr,
+                            transcript_dir=str(tdir),
+                            resume_state=rstate,
+                        )
+                    except Exception:
+                        # A raising starter must not take the TUI mount down
+                        # either; treat it like a refusal (the re-arm path
+                        # does the same).
+                        _log.exception(
+                            "consume_breadcrumb: resuming the review loop for "
+                            "%s raised", pr_id)
+                        started = False
+                    if not started:
+                        # The loop could not be started (missing workdir, no
+                        # tmux, unusable transcript dir); _start_loop already
+                        # said why.  Drop the restored entry: a non-running
+                        # loop entry makes `_auto_start_review_loops` skip this
+                        # PR forever, so keeping it would strand the target
+                        # this resume exists to keep alive.  Dropping it lets
+                        # the scheduler pass below start a fresh loop.
+                        app._review_loops.pop(pr_id, None)
+                        _log.warning(
+                            "consume_breadcrumb: could not resume the review "
+                            "loop for %s; dropping the restored state so the "
+                            "scheduler can restart it", pr_id)
+                        continue
                     msg = (f"Review loop resumed for {pr_id} "
                            f"at iteration {rstate.iteration}")
                     _log.info("consume_breadcrumb: %s", msg)

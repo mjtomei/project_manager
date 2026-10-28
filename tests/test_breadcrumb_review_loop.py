@@ -416,6 +416,101 @@ class TestConsumeBreadcrumbReviewLoops:
         # But _start_loop should NOT have been called (PR not in_review)
         mock_start.assert_not_called()
 
+    def test_a_resume_that_cannot_start_drops_the_phantom_loop(self, tmp_path):
+        """A resume that ``_start_loop`` refuses (missing workdir, no tmux,
+        unusable transcript dir) must not leave the restored entry behind.
+
+        ``_auto_start_review_loops`` skips a PR whose entry is non-running
+        and not a retryable launch failure, so a phantom entry would strand
+        the target exactly like the failed launch this PR recovers — and the
+        TUI must not announce a resume that did not happen.
+        """
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 1,
+                    "loop_id": "ab12",
+                    "_transcript_dir": str(tmp_path),
+                    "history": [],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        app = _make_app(
+            auto_start=True, root=tmp_path,
+            prs=[{"id": "pr-001", "status": "in_review",
+                  "workdir": str(tmp_path)}],
+        )
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tmux.in_tmux", return_value=True), \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   return_value=False):
+            mock_store.get_pr.return_value = app._data["prs"][0]
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert "pr-001" not in app._review_loops
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert not any("Review loop resumed" in m for m in msgs), (
+            "the TUI must not claim a resume that did not happen")
+
+        # With the phantom entry gone, the scheduler pass can start a loop.
+        from pm_core.tui import auto_start
+        started: list[str] = []
+        with patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=lambda _a, pid, _p, **kw: started.append(pid)
+                   or True), \
+             patch("pm_core.tmux.in_tmux", return_value=True):
+            auto_start._auto_start_review_loops(app, app._data["prs"])
+        assert started == ["pr-001"]
+
+    def test_a_raising_resume_is_treated_like_a_refusal(self, tmp_path):
+        """A starter that raises (e.g. a missing project root) must not take
+        the TUI mount down, and must not leave the phantom entry either."""
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 1,
+                    "loop_id": "ab12",
+                    "_transcript_dir": str(tmp_path),
+                    "history": [],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        app = _make_app(
+            auto_start=True, root=tmp_path,
+            prs=[{"id": "pr-001", "status": "in_review",
+                  "workdir": str(tmp_path)}],
+        )
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tmux.in_tmux", return_value=True), \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=RuntimeError("no project root")):
+            mock_store.get_pr.return_value = app._data["prs"][0]
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert "pr-001" not in app._review_loops
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert not any("Review loop resumed" in m for m in msgs)
+
     def test_no_review_loops_key_is_fine(self, tmp_path):
         """Breadcrumb without review_loops key should work (backward compat)."""
         breadcrumb_data = {"target": "pr-001", "run_id": "run-123"}
