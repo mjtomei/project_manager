@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-16e45ba
+  active_pr: pr-bab46cf
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -38556,6 +38556,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-bab46cf
+  plan: bugs
+  title: 'Bug: pm/transcripts run dirs and their archive/ entries grow without bound
+    (no retention or cleanup)'
+  branch: pm/pr-bab46cf-bug-pm-transcripts-run-dirs-and-their-archive-entr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/claude_launcher.py (TRANSCRIPT_ARCHIVE_DIR / archive_transcript)
+    and pm/transcripts/<autostart-run>/ generally. Every auto-start enablement creates
+    a new run dir, and since pr-9ee4d64 every superseded attempt is preserved as an
+    immutable <run>/archive/<stem>.<session-id>.jsonl entry plus per-loop review-<pr>-<loop_id>-i<N>.jsonl
+    files. Nothing ever prunes them: there is no retention policy, no size cap and
+    no pm CLI command to remove old run dirs, so a long-lived project accumulates
+    one archive entry per impl/review/sign-off/merge session per run forever. Repro:
+    run auto-start for a few days with sign-off returns, then du -sh pm/transcripts;
+    each archived session is a full copy of the Claude JSONL. Suggested: a retention
+    setting (keep last N runs / M days) enforced when a new run dir is created, plus
+    a pm command to list/prune transcripts.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T16:31:28.497958+00:00'
+  updated_at: '2026-10-28T16:31:28.497958+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
