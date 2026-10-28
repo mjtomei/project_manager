@@ -158,6 +158,10 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         elif verdict:
             color = _VERDICT_COLORS.get(verdict, _DIM)
             verdict_display = f"{color}{verdict}{_RESET}"
+            if sc.get("waiting_for_input"):
+                # The worker asked for input; the loop is still watching its
+                # pane for a follow-up verdict after the user answers.
+                verdict_display += f"{_DIM} (waiting){_RESET}"
         else:
             verdict_display = f"{_DIM}pending{_RESET}"
 

@@ -9168,9 +9168,9 @@ prs:
   plan: plan-qa
   title: Resume QA scenario polling after INPUT_REQUIRED with follow-up verdict loop
   branch: pm/pr-2c67d50-resume-qa-scenario-polling-after-input-required-wi
-  status: pending
+  status: in_progress
   depends_on: []
-  description: When a QA scenario pane emits INPUT_REQUIRED, instead of finalizing
+  description: 'When a QA scenario pane emits INPUT_REQUIRED, instead of finalizing
     that verdict and dropping the scenario from pending, keep polling the scenario
     pane for a follow-up verdict (excluding INPUT_REQUIRED) until the user responds
     and Claude emits a new verdict. Mirrors the existing behavior in review_loop.py
@@ -9178,12 +9178,52 @@ prs:
     QA loop polls multiple scenarios concurrently, so the follow-up polling needs
     to work within that model — likely by moving the scenario to a waiting_for_input
     set and continuing to poll it with INPUT_REQUIRED excluded from accepted verdicts.
+
+
+    ## User-approved scope clarification (2026-10-28)
+
+
+    Implement this as the small standalone INPUT_REQUIRED continuation change. The
+    broader pr-0b14f2c scenario editing/regression-authoring feature is deferred and
+    is not a dependency.
+
+
+    - Cover both a waiting scenario in a live parallel QA run and a whole QA run that
+    already finalized as INPUT_REQUIRED. After the user resolves the blocker in its
+    original worker, collect that attempt''s subsequent result and resume the appropriate
+    native pipeline. #267 QA fb7eecdb7ab986be / note-8ee427c is the concrete completed-run
+    reproduction.
+
+    - Persist enough run/attempt/session identity and follow-up state to recover after
+    a TUI/controller restart. Do not consume stale output from superseded attempts,
+    duplicate workers, repeated INPUT_REQUIRED, or unrelated panes. Preserve evidence
+    and all explicit user holds.
+
+    - A single waiting scenario must not make the whole run WAITING while other runnable
+    work proceeds. When no runnable work remains, expose the genuine input wait. Do
+    not invent answers or waive acceptance criteria.
+
+    - A later PASS still requires normal independent verification and finalization.
+    A later NEEDS_WORK or new source changes must return through review. Never promote
+    a new source head using approval from the old head. Preserve the manual merge
+    gate.
+
+    - Reconcile the worker/refiner prompt blocks that currently say decisions are
+    permanently final, so supported INPUT_REQUIRED continuation is accurately described
+    while other verdict finality remains intact.
+
+    - Exercise user reply before and after whole-run finalization, restart/adoption
+    while waiting, new source changes, repeated INPUT_REQUIRED, superseded attempts,
+    and parallel scenario progress. Broader add/replace/rerun UI and regression authoring
+    remain out of scope.
+
+    '
   agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/271
+  gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-05-23T03:45:16.575668+00:00'
-  started_at: null
+  updated_at: '2026-10-28T05:21:09.739340+00:00'
+  started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
   notes:
@@ -9207,6 +9247,34 @@ prs:
       in qa_loop._build_concretization_prompt.'
     created_at: '2026-05-23T03:45:16Z'
     last_edited: '2026-05-23T03:45:16Z'
+  - id: note-8ee427c
+    text: 'Observed again on #267 QA fb7eecdb7ab986be, 2026-10-28: S7 emitted INPUT_REQUIRED;
+      entire run finalized and QA was recorded INPUT_REQUIRED at 02:03 UTC. User answered
+      in original worker at 04:33 and requested uniform CLI ok field. Same worker
+      committed cfd01f0b / handoff279dc21e and emitted NEEDS_WORK; retained finalizer
+      also emitted NEEDS_WORK, but autostart still reports waiting on original INPUT_REQUIRED.
+      Current collector drops terminal scenario from pending and TUI drops completed-run
+      tracking, so later worker/finalizer output is not consumed. Concrete reproduction
+      for this existing follow-up polling feature and overlapping pr-0b14f2c (manual
+      re-detect/reaggregation). Any resumption must honor new code review, original
+      evidence, superseded attempts and user holds; no verdict or approval may be
+      manufactured.'
+    created_at: '2026-10-28T04:56:24Z'
+    last_edited: '2026-10-28T04:56:24Z'
+  - id: note-698dded
+    text: User explicitly authorized starting pr-2c67d50 on2026-10-28 and agreed to
+      the narrow completed-held-run/restart coverage. pr-0b14f2c remains deferred;
+      do not fold its scenario editing/regression authoring into this PR. DeepSeek1017/high
+      primary/helpers, explicit work Opus5.5/high signoff, manual wait_for_merge,
+      spec review OFF. Preserve existing user decisions, source, evidence and drafts.
+    created_at: '2026-10-28T05:16:54.801905+00:00'
+    last_edited: '2026-10-28T05:16:54.801905+00:00'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-df1aa3f
   plan: null
   title: 'fix: rename tmux session after git init in guide to restore pm session access'

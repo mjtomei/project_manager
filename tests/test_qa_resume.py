@@ -30,6 +30,7 @@ from pm_core.qa_loop import (
     QALoopState,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
+    VERDICT_INPUT_REQUIRED,
     _write_resume_file,
     _load_resume_file,
     build_resume_state,
@@ -328,6 +329,104 @@ def test_resume_skips_run_owned_by_live_process(tmp_path):
         qa_loop_ui._resume_incomplete_qa(app)
     resume_bg.assert_called_once()
     assert "pr-001" in app._qa_loops
+
+
+def _seed_held_run(home, *, completion_processed=False, pr_id="pr-001"):
+    """Seed a held INPUT_REQUIRED run: finalized, still watching scenario 1."""
+    qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-loop1"
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    state = _make_state(qa_dir)
+    state.pr_id = pr_id
+    state.scenario_verdicts = {1: VERDICT_INPUT_REQUIRED, 2: VERDICT_PASS}
+    state.scenario_verdict_reasons = {1: "need a decision"}
+    state.scenario_verdict_sources = {1: {
+        "pr_id": pr_id, "loop_id": "abc123", "scenario": 1,
+        "session_id": "sess-1", "turn_id": "turn-1",
+        "timestamp": "2026-05-13T14:00:00.000Z",
+    }}
+    state.verified_scenarios = {2}
+    state.waiting_for_input = {1}
+    state.waiting_input_sources = {1: {
+        "pr_id": pr_id, "loop_id": "abc123", "scenario": 1,
+        "session_id": "sess-1", "transcript_path": "/wd/transcript-s1.jsonl",
+        "turn_id": "turn-1", "timestamp": "2026-05-13T14:00:00.000Z",
+        "line_index": 3, "head": "old-head", "reason": "need a decision",
+    }}
+    state.held = True
+    state.completion_processed = completion_processed
+    state.latest_verdict = VERDICT_INPUT_REQUIRED
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    status = {
+        "pr_id": pr_id,
+        "scenarios": [{"index": 1, "title": "Login flow",
+                       "verdict": VERDICT_INPUT_REQUIRED,
+                       "window_name": "qa-pr1-s1", "waiting_for_input": True}],
+        "overall": VERDICT_INPUT_REQUIRED,
+        "error": "",
+        "waiting_for_input": [1],
+    }
+    (qa_dir / "qa_status.json").write_text(json.dumps(status))
+    return qa_dir
+
+
+def test_resume_held_run_keeps_watching(tmp_path):
+    """A held run is re-adopted, not processed-and-dropped, and its snapshot
+    is kept so a follow-up that landed during downtime is collected."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=False)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    on_complete.assert_not_called()
+    state = app._qa_loops["pr-001"]
+    assert state.held is True
+    assert state.waiting_for_input == {1}
+    # Unprocessed completion → the normal poll path will note it once.
+    assert state._ui_complete_notified is False
+    assert _resume_file_path(qa_dir).is_file()
+
+
+def test_resume_held_run_already_processed_does_not_renote(tmp_path):
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=True)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    on_complete.assert_not_called()
+    assert app._qa_loops["pr-001"]._ui_complete_notified is True
+    assert _resume_file_path(qa_dir).is_file()
+
+
+def test_poll_qa_state_held_notes_once_and_keeps_state(tmp_path):
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=False)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    app._qa_loops = {"pr-001": state}
+    app._qa_resume_poll_counter = 1
+
+    with patch.object(qa_loop_ui, "_resume_incomplete_qa"):
+        qa_loop_ui.poll_qa_state(app)
+        qa_loop_ui.poll_qa_state(app)
+
+    # The held run stays tracked (so a follow-up can reopen it) and its
+    # snapshot is kept for restart adoption.
+    assert app._qa_loops.get("pr-001") is state
+    assert _resume_file_path(qa_dir).is_file()
+    persisted = json.loads(_resume_file_path(qa_dir).read_text())
+    assert persisted["completion_processed"] is True
+    # Exactly one QA note for the held result, not one per poll tick.
+    data = store.load(app._root)
+    notes = store.get_pr(data, "pr-001").get("notes") or []
+    qa_notes = [n for n in notes if n["text"].startswith("QA INPUT_REQUIRED")]
+    assert len(qa_notes) == 1
 
 
 def test_owner_pid_reused_by_unrelated_process_is_not_owner():
