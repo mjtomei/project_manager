@@ -2862,9 +2862,12 @@ class TestValidateSharedProxyMount:
         """A pre-merge container keeps its tokenless mount: report it instead of
         silently re-pointing its git wrapper at a different directory."""
         legacy = push_proxy_mod._legacy_shared_sock_dir_path("tag", "pr-1")
-        with pytest.raises(push_proxy_mod.ContainerError,
-                           match="before workdir-keyed proxies; remove the container"):
-            self._validate(self._inspect(legacy))
+        info = {**self._inspect(legacy), "Name": "/pm-tag-impl-pr-1"}
+        with patch("pm_core.container._get_runtime", return_value="podman"), \
+                pytest.raises(push_proxy_mod.ContainerError,
+                              match="before workdir-keyed proxies.*"
+                                    r"'podman rm -f pm-tag-impl-pr-1'"):
+            self._validate(info)
 
     def test_refuses_another_sessions_container(self):
         from pm_core import container as cm
@@ -2874,3 +2877,60 @@ class TestValidateSharedProxyMount:
                                    cm.LABEL_PR: "pr-1"})
         with pytest.raises(push_proxy_mod.ContainerError, match="different session/PR"):
             self._validate(info)
+
+
+class TestMountedByBatchesInspect:
+    """A release checks a socket dir against all of the PR's other containers
+    under the PR proxy lock: one batched inspect, not one per container."""
+
+    def _row(self, source):
+        return {"Mounts": [{"Destination": push_proxy_mod._CONTAINER_SOCKET_DIR,
+                            "Source": source}]}
+
+    def _result(self, rc=0, rows=None, stderr=""):
+        return subprocess.CompletedProcess(
+            [], rc, stdout=json.dumps(rows) if rows is not None else "",
+            stderr=stderr)
+
+    def test_one_inspect_for_every_user(self, tmp_path):
+        mine, other = str(tmp_path / "mine"), str(tmp_path / "other")
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            return self._result(rows=[self._row(other), self._row(mine),
+                                      self._row(other)])
+
+        with patch("pm_core.container._run_runtime", side_effect=run), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=AssertionError("per-name inspect")):
+            assert push_proxy_mod._mounted_by(mine, {"a", "b", "c"}) is True
+            assert push_proxy_mod._mounted_by(str(tmp_path / "x"),
+                                              {"a", "b", "c"}) is False
+        assert calls == [("inspect", "a", "b", "c")] * 2
+
+    def test_failed_batch_falls_back_per_name(self, tmp_path):
+        """A container removed since the inventory fails the batch; per-name
+        inspection tells that absence apart from a runtime failure."""
+        mine = str(tmp_path / "mine")
+        infos = {"a": None, "b": self._row(mine)}
+        with patch("pm_core.container._run_runtime",
+                   return_value=self._result(rc=125, stderr="no such container a")), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=lambda name: infos[name]):
+            assert push_proxy_mod._mounted_by(mine, {"a", "b"}) is True
+
+    def test_incomplete_batch_falls_back_per_name(self, tmp_path):
+        mine = str(tmp_path / "mine")
+        with patch("pm_core.container._run_runtime",
+                   return_value=self._result(rows=[self._row(mine)])), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=push_proxy_mod.ContainerError("down")):
+            assert push_proxy_mod._mounted_by(mine, {"a", "b"}) is None
+
+    def test_batch_timeout_is_unknown(self, tmp_path):
+        with patch("pm_core.container._run_runtime",
+                   side_effect=subprocess.TimeoutExpired("podman", 30)), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=AssertionError("per-name inspect")):
+            assert push_proxy_mod._mounted_by(str(tmp_path), {"a", "b"}) is None

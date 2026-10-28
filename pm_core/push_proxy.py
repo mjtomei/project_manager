@@ -2013,23 +2013,63 @@ PROXY_UNAVAILABLE = "unavailable"  # runtime inventory unreadable: retry later
 PROXY_UNDETERMINED = "undetermined"  # not evaluated: busy lock / foreign owner
 
 
+def _mounts_socket_dir(info: dict, real: str) -> bool:
+    return any(mount.get("Destination") == _CONTAINER_SOCKET_DIR
+               and os.path.realpath(mount.get("Source", "")) == real
+               for mount in info.get("Mounts") or [])
+
+
+def _inspect_batch(names: list[str]) -> list[dict] | None:
+    """Inspect every one of *names* in a single runtime call.
+
+    Returns None when the batch cannot be trusted (one of them vanished
+    since the inventory, a malformed or incomplete answer); the caller then
+    falls back to one inspect per name, which tells absence from failure.
+    A timeout is raised: retrying name by name would only wait longer.
+    """
+    from pm_core import container as cm
+    try:
+        result = cm._run_runtime("inspect", *names, check=False, timeout=30)
+        if result.returncode != 0:
+            return None
+        rows = json.loads(result.stdout)
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(rows, list) or len(rows) != len(names)
+            or not all(isinstance(row, dict) for row in rows)):
+        return None
+    return rows
+
+
 def _mounted_by(sock_dir: str, names: set[str]) -> bool | None:
-    """Whether any of *names* bind-mounts *sock_dir*; None when unknown."""
+    """Whether any of *names* bind-mounts *sock_dir*; None when unknown.
+
+    Each workdir (every QA scenario clone) has its own socket directory, so
+    a release typically checks a directory nobody mounts against all of the
+    PR's other containers.  That runs under the PR's proxy lock, which
+    launches and the other releases wait on: one batched inspect instead of
+    one per container keeps a large run-end release from queueing the lock
+    past its timeout.
+    """
     real = os.path.realpath(sock_dir)
-    for name in sorted(names):
-        try:
-            info = _proxy_container_info(name)
-        except ContainerError:
-            return None
-        if info is None:
-            continue  # removed since the inventory: not a user
-        try:
-            for mount in info.get("Mounts") or []:
-                if (mount.get("Destination") == _CONTAINER_SOCKET_DIR
-                        and os.path.realpath(mount.get("Source", "")) == real):
-                    return True
-        except (AttributeError, TypeError):
-            return None
+    ordered = sorted(names)
+    try:
+        rows = _inspect_batch(ordered) if len(ordered) > 1 else None
+        if rows is not None:
+            return any(_mounts_socket_dir(info, real) for info in rows)
+        for name in ordered:
+            try:
+                info = _proxy_container_info(name)
+            except ContainerError:
+                return None
+            if info is None:
+                continue  # removed since the inventory: not a user
+            if _mounts_socket_dir(info, real):
+                return True
+    except subprocess.TimeoutExpired:
+        return None
+    except (AttributeError, TypeError):
+        return None
     return False
 
 
@@ -2206,9 +2246,12 @@ def validate_shared_proxy_mount(name: str, session_tag: str, pr_id: str,
                   if m.get("Destination") == _CONTAINER_SOCKET_DIR]
         if len(mounts) == 1 and os.path.realpath(mounts[0].get("Source", "")) == \
                 os.path.realpath(_legacy_shared_sock_dir_path(session_tag, pr_id)):
+            # *name* is the immutable id; give the user a runnable command.
+            current = str(info.get("Name") or name).lstrip("/")
             raise ValueError("it mounts a push proxy directory from before "
-                             "workdir-keyed proxies; remove the container so "
-                             "the next launch recreates it")
+                             "workdir-keyed proxies; once no session uses it, "
+                             f"remove it ('{cm._get_runtime()} rm -f {current}') "
+                             "so the next launch recreates it")
         if len(mounts) != 1 or os.path.realpath(mounts[0].get("Source", "")) != expected:
             raise ValueError("shared socket directory is missing or belongs to another allocation")
     except (ValueError, TypeError, AttributeError) as exc:
