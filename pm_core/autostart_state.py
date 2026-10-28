@@ -41,6 +41,14 @@ POLICIES = (POLICY_STOP, POLICY_AUTO, POLICY_WAIT)
 # implementation turn before one fresh review starts.
 # See ``pm_core.tui.autostart_fresh``.
 FRESH_KEY = "fresh_autostart"
+
+# Verdict the fresh reset writes to the discarded attempt's ``runtime_state``
+# records.  It means "this run was superseded, not a result": readers must
+# treat it as no verdict (``auto_start.recorded_qa_verdict``).  Lives here so
+# the writer (``autostart_fresh``) and the reader (``auto_start``) share one
+# constant.  The review-loop record also carries a fresh ``loop_id``, which
+# is what makes ``review_loop_ui._is_active_loop`` reject late callbacks.
+SUPERSEDED = "SUPERSEDED"
 # The command-line flag selecting each policy (CLI + command bar).
 POLICY_FLAGS = {POLICY_STOP: "--stop-before-merge",
                 POLICY_AUTO: "--auto-merge",

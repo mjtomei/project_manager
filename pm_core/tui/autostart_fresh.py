@@ -35,8 +35,8 @@ from pathlib import Path
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import (
-    FRESH_KEY, POLICY_STOP, TERMINAL_STATUSES, fresh_awaiting, fresh_marker,
-    now_iso,
+    FRESH_KEY, POLICY_STOP, SUPERSEDED, TERMINAL_STATUSES, fresh_awaiting,
+    fresh_marker, now_iso,
 )
 
 _log = configure_logger("pm.tui.autostart_fresh")
@@ -44,11 +44,6 @@ _log = configure_logger("pm.tui.autostart_fresh")
 # Statuses a fresh request may rewind.  ``in_progress`` is handled
 # separately (idempotent while an attempt is already waiting).
 _LATER_STAGES = ("in_review", "qa", "sign_off")
-
-# Terminal verdict written to the old attempt's runtime_state records.  It
-# replaces a finished loop/QA verdict so nothing adopts it as current work,
-# while ``previous_verdict`` keeps the historical value.
-SUPERSEDED = "SUPERSEDED"
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +85,11 @@ def _validate(app, pr: dict) -> dict | None:
                            f"(fresh autostart returns a reviewed PR to "
                            f"implementation after feedback)"}
     if status not in _LATER_STAGES:
+        # Derive the list so the message cannot drift from ``_LATER_STAGES``.
+        stages = " / ".join(_LATER_STAGES)
         return {"error": "not_later_stage",
                 "message": f"{pr_id} is {status}; fresh autostart applies to "
-                           f"in_review / qa / sign_off PRs"}
+                           f"{stages} PRs"}
     if _merge_in_progress(app, pr_id):
         return {"error": "merge_in_progress",
                 "message": f"{pr_id} has a merge in flight; finish or resolve "
@@ -230,7 +227,6 @@ def retire_in_memory(app, pr: dict) -> None:
     ``runtime_state`` sentinels with a fresh ``loop_id`` so late callbacks
     from the old threads bow out (``review_loop_ui._is_active_loop``).
     """
-    from pm_core import runtime_state as _rs
     pr_id = pr["id"]
     now = now_iso()
     tracker = getattr(app, "_pane_idle_tracker", None)
@@ -284,29 +280,35 @@ def retire_in_memory(app, pr: dict) -> None:
     (getattr(app, "_pending_merge_prs", None) or set()).discard(pr_id)
     (getattr(app, "_merge_input_required_prs", None) or set()).discard(pr_id)
 
+    # ``review-loop`` also gets a fresh ``loop_id``: that is the value
+    # ``_is_active_loop`` compares, so a late callback from the old thread
+    # bows out instead of clobbering the successor's entry.
+    _retire_runtime_action(pr_id, "review-loop", loop, now, fence_loop=True)
+    _retire_runtime_action(pr_id, "qa", qa, now)
+
+
+def _retire_runtime_action(pr_id: str, action: str, state_obj, now: str,
+                           *, fence_loop: bool = False) -> None:
+    """Replace a finished action's runtime record with a SUPERSEDED sentinel.
+
+    The sentinel makes ``recorded_qa_verdict`` (and the review-loop mirrors)
+    treat the discarded run as "no result", while ``previous_verdict`` keeps
+    the historical value.  Best-effort: a failure must not abort the reset.
+    """
+    from pm_core import runtime_state as _rs
     try:
-        prev = _rs.get_action_state(pr_id, "review-loop") or {}
-        if loop is not None or prev:
-            _rs.set_action_state(
-                pr_id, "review-loop", "done", verdict=SUPERSEDED,
-                loop_id=secrets.token_hex(4),
-                previous_verdict=prev.get("verdict")
-                or getattr(loop, "latest_verdict", "") or "",
-                superseded_at=now)
+        prev = _rs.get_action_state(pr_id, action) or {}
+        if state_obj is None and not prev:
+            return
+        fence = {"loop_id": secrets.token_hex(4)} if fence_loop else {}
+        _rs.set_action_state(
+            pr_id, action, "done", verdict=SUPERSEDED,
+            previous_verdict=prev.get("verdict")
+            or getattr(state_obj, "latest_verdict", "") or "",
+            superseded_at=now, **fence)
     except Exception:
-        _log.debug("autostart_fresh: review-loop sentinel failed for %s",
-                   pr_id, exc_info=True)
-    try:
-        prev = _rs.get_action_state(pr_id, "qa") or {}
-        if qa is not None or prev:
-            _rs.set_action_state(
-                pr_id, "qa", "done", verdict=SUPERSEDED,
-                previous_verdict=prev.get("verdict")
-                or getattr(qa, "latest_verdict", "") or "",
-                superseded_at=now)
-    except Exception:
-        _log.debug("autostart_fresh: qa sentinel failed for %s",
-                   pr_id, exc_info=True)
+        _log.debug("autostart_fresh: %s sentinel failed for %s",
+                   action, pr_id, exc_info=True)
 
 
 def _kill_review_window(app, pr: dict) -> None:

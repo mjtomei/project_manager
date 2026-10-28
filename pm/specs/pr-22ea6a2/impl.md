@@ -811,3 +811,27 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   write succeeded (a failed write must not make memory claim a consumed
   handoff).  Pinned by
   ``test_consume_handoff_also_updates_the_in_memory_row``.
+
+## Review-iteration notes (4a2b i1)
+
+* **The duplicate retirement sentinels now share one helper** —
+  ``retire_in_memory`` wrote the review-loop and QA ``SUPERSEDED``
+  ``runtime_state`` records as two near-identical blocks (differing only in
+  the ``loop_id`` fence the review loop needs).  Both now go through
+  ``_retire_runtime_action(pr_id, action, state_obj, now, fence_loop=...)``;
+  no behaviour change (the existing sentinel tests, including the
+  ``loop_id`` fence and the "SUPERSEDED is not a QA verdict" cases, still
+  pass unchanged).
+* **The ``not_later_stage`` message derives its stage list** — it hard-coded
+  "in_review / qa / sign_off" next to ``_LATER_STAGES``, so adding a later
+  stage would have left the rejection message lying.  It is now built from
+  ``_LATER_STAGES``.
+* **``SUPERSEDED`` is one shared constant** — the writer
+  (``autostart_fresh``) and the only reader that keys on the *verdict*
+  (``auto_start.recorded_qa_verdict``) each carried their own copy of the
+  literal, so renaming the sentinel would have silently disabled the
+  "a discarded run is not a QA result" fence.  It now lives in
+  ``autostart_state`` (next to ``FRESH_KEY``), which both modules already
+  import; ``autostart_fresh.SUPERSEDED`` still resolves to it.
+* No functional change to the fresh flow.  Full suite: 3924 passed, 1
+  skipped, 0 failures (223 s).
