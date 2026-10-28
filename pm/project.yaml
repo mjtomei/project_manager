@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T03:50:56.025931+00:00'
+  updated_at: '2026-10-28T05:09:43.975717+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11511,6 +11511,28 @@ prs:
       tests). Captures /pm-captures/scenarios/88.'
     created_at: '2026-10-28T03:50:55Z'
     last_edited: '2026-10-28T03:50:55Z'
+  - id: note-dbe1f71
+    text: 'QA S83 (2026-10-28, 17e68cc3, nested rootless podman, fake-claude): INPUT_REQUIRED
+      on one Then, no code change. Reviewer decision: while an admitted queued head
+      launches (synchronous clone+create+refiner ~16 s), the scenarios behind it read
+      dim `queued` "(2 queued)", then return to waiting_memory+IR suffix at the next
+      refusal (a094ece6 design, spec A2: waiting_memory only after the head is refused).
+      The S83 Then says s4/s5 "stay waiting_memory". Either amend the Then/A2 or carry
+      the last waiting_memory reason through the launch (cap-held rows must still
+      read queued). Every other Then held live: run A (2/3 admitted, magenta rows,
+      1 key moving s3->s4->s5, 15-16 s retries, IR holds memory, NW removal->launch
+      at next retry, verified PASS kept Up to "Verification passed" then removal->launch),
+      cap-held queued/no key, +10 raise launched exactly one (s9 refused 1 s after
+      the launch returned), E1 exact single-container text + 0/3 + 3 keys, zz t during
+      verify -> INPUT_REQUIRED with stopped-during-verification reason, no launches
+      after. Harness: (1) shared-host "used" drifts +-5G in minutes, so the 10G X+21
+      window (2 fit / 3 not) broke both ways across runs; the clean run A was the
+      12G variant (seed 90x12288, target ~X+28). (2) nested memory.peak is the outer
+      pm-dev cgroup: running agg/ffmpeg in the QA container raised it to 23G, and
+      every later removal recorded 21968 MB (projection 21.5G). Render casts only
+      after the runs, or seed 90 samples + history-size 100. Captures /pm-captures/scenarios/83.'
+    created_at: '2026-10-28T05:09:43Z'
+    last_edited: '2026-10-28T05:09:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
