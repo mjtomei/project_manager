@@ -791,13 +791,15 @@ class TestBaseGate:
              patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
              patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
              patch("pm_core.cli.pr._check_impl_idle", return_value=(True, False)), \
+             patch("pm_core.cli.pr._impl_idle_since", return_value=123.0), \
              patch("pm_core.base_check.impl_completion",
                    return_value=base_check.CompletionResult(
-                       False, "uncommitted edits remain")), \
+                       False, "uncommitted edits remain")) as check, \
              patch("pm_core.cli.pr.pr_review") as mock_review:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
         assert "running: implementation (uncommitted edits remain)" in result.output
+        assert check.call_args.kwargs["idle_since"] == 123.0
         mock_review.assert_not_called()
 
     def test_idle_with_completed_rework_advances(self, runner):

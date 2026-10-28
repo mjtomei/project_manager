@@ -3701,6 +3701,32 @@ def _check_impl_idle(session: str, pr_entry: dict, tdir: Path) -> tuple[bool, bo
     return tracker.is_idle(pr_id), tracker.is_gone(pr_id)
 
 
+def _impl_idle_since(session: str, pr_entry: dict, tdir: Path) -> float | None:
+    """When the impl pane last went idle (None when it is not idle).
+
+    Used by the base-return completion handoff to require a settle window: an
+    idle turn is not finished work while a background test/edit may still be
+    running.  Kept separate from :func:`_check_impl_idle` so its patch point
+    (and two-value contract) is unchanged.
+    """
+    from pm_core.pane_idle import PaneIdleTracker
+
+    pr_id = pr_entry["id"]
+    pane_id = _impl_window_pane(session, pr_entry)
+    if not pane_id:
+        return None
+    transcript = tdir / f"impl-{pr_id}.jsonl"
+    if not transcript.exists():
+        return None
+    tracker = PaneIdleTracker()
+    try:
+        tracker.register(pr_id, pane_id, str(transcript))
+    except ValueError:
+        return None
+    tracker.poll(pr_id)
+    return tracker.idle_since(pr_id)
+
+
 def _older_than(path: Path | None, iso_ts: str | None) -> bool:
     """Whether *path* was last written before the ISO timestamp *iso_ts*."""
     from pm_core.signoff import parse_ts
@@ -3860,8 +3886,10 @@ def pr_auto_sequence(pr_id: str):
             # advances once the conflict is actually reconciled (or the
             # pair moved).  Background tests/edits keep the tree dirty and
             # the pair unchanged, so they do not qualify.
+            idle_since = _impl_idle_since(pm_session, pr_entry, tdir)
             done = base_check.impl_completion(
-                root, pr_id, pr_entry, transcript_dir=tdir)
+                root, pr_id, pr_entry, idle_since=idle_since,
+                transcript_dir=tdir)
             if not done.complete:
                 click.echo(f"running: implementation ({done.reason})")
                 return
