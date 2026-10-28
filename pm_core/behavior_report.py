@@ -131,8 +131,8 @@ def extract_signoff_meta(report_path: Path) -> dict[str, str]:
     return out
 
 
-def _qa_run_binding(pr_id: str, report_path: Path,
-                    captures_root_dir: Path) -> tuple[str, str, bool]:
+def _report_qa_run_binding(pr_id: str, report_path: Path,
+                           captures_root_dir: Path) -> tuple[str, str, bool]:
     """``(run the report reviewed, the PR's current run, stale?)``.
 
     A report is *stale* when it names a run other than the PR's current
@@ -165,7 +165,7 @@ def gather_dashboard_rows(data: dict,
         report_path = captures_root_dir / pr_id / "report.html"
         if report_path.is_file():
             verdict = _extract_verdict(report_path)
-            qa_run, qa_current_run, qa_run_stale = _qa_run_binding(
+            qa_run, qa_current_run, qa_run_stale = _report_qa_run_binding(
                 pr_id, report_path, captures_root_dir)
             try:
                 mtime = report_path.stat().st_mtime

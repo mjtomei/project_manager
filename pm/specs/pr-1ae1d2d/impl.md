@@ -126,12 +126,14 @@ manifest still resolves).
   `_persist_scenario_verdicts` (which also publishes the final membership),
   with final verdicts and `overall` (`state.latest_verdict`).
 - **Early exits that produce no scenarios** (planner trust-blocked, QA spec
-  missing): an empty-membership manifest still records that this run owns
-  nothing, so an older run's directories cannot pass as its coverage.
-  `_sync_captures_evidence` therefore takes a `scenarios` override and those
-  exits pass `[]` — a run that planned but never launched a scenario must
-  not list its plan as membership (the audit would otherwise report each
-  planned scenario as "manifest member whose evidence is missing").
+  missing, planner handoff failed): an empty-membership manifest still
+  records that this run owns nothing, so an older run's directories cannot
+  pass as its coverage.  `_sync_captures_evidence` therefore takes a
+  `scenarios` override and those exits pass `[]` — a run that planned but
+  never launched a scenario must not list its plan as membership (the audit
+  would otherwise report each planned scenario as "manifest member whose
+  evidence is missing").  Every exit after a plan was accepted but before
+  any launch follows this rule, not just the first two.
 
 `$CAP/integration.json` (`pm_core/integration.py:399`) is untouched.
 
@@ -200,7 +202,10 @@ listing arbitrary directories.
   - states that membership is the manifest's scenarios, "not whatever
     directories exist under `$CAP/scenarios/`";
   - when no manifest exists (legacy), says so in one line so the session knows
-    membership is not run-bound.
+    membership is not run-bound.  That line only promises "the scenarios
+    listed below" when a per-scenario listing really follows the head: on the
+    no-`qa_status.json` path there is none, so the wording says the evidence
+    cannot be enumerated instead of pointing at an absent listing.
 - The evidence checklist (`:924-926`) gains, under the `CAP=…` bullet:
   - `$CAP/qa_manifest.json` — "the authoritative record of which QA run and
     which scenarios own this PR's evidence";
@@ -259,6 +264,12 @@ is introduced for pre-existing reports.
 - `merge_gate_refusal` refuses a mismatched report run and allows a missing
   tag;
 - `pm qa evidence` output lists members and anomalies.
+- `paths.captures_dir` / `paths.captures_root` reader mode (`create=False`):
+  an existing dir is returned, a missing one is not created;
+- the sign-off head refers to "the scenarios listed below" only when a
+  listing really follows it;
+- `run_qa_sync` records an empty membership at every post-planning early exit
+  (QA spec missing, planner handoff failed).
 
 ## 2. Implicit requirements
 

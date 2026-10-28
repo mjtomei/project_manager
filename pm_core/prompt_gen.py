@@ -638,8 +638,8 @@ def _qa_scenarios_pointer() -> str:
     return f"read {_QA_SCENARIOS_READER}"
 
 
-def _qa_run_binding(pr_id: str, status: dict,
-                    status_path) -> list[str]:
+def _qa_run_binding(pr_id: str, status: dict, status_path,
+                    listing_expected: bool = True) -> list[str]:
     """Lines binding this QA listing to the run that produced the evidence.
 
     The report's scenario membership must come from a real QA run, not from
@@ -650,6 +650,11 @@ def _qa_run_binding(pr_id: str, status: dict,
     here we name it, the run id, and any disagreement with the live
     ``qa_status.json`` so the sign-off session can see the evidence is stale
     before it writes the report.
+
+    *listing_expected* says whether a per-scenario listing follows this head
+    in the prompt.  Without a readable ``qa_status.json`` there is none, so
+    the legacy-evidence line must not tell the session to cite "the scenarios
+    listed below" — there would be nothing below it.
     """
     from pm_core import captures
     from pm_core.paths import captures_dir
@@ -672,11 +677,19 @@ def _qa_run_binding(pr_id: str, status: dict,
     if run_id:
         lines.append(f"QA run: `{run_id}`")
     if manifest is None:
-        lines.append(
-            "Scenario membership is **not run-bound**: no "
-            "`$CAP/qa_manifest.json` for this PR. Treat every "
-            "`$CAP/scenarios/<n>/` directory as unverified provenance and "
-            "cite only the scenarios listed below.")
+        if listing_expected:
+            lines.append(
+                "Scenario membership is **not run-bound**: no "
+                "`$CAP/qa_manifest.json` for this PR. Treat every "
+                "`$CAP/scenarios/<n>/` directory as unverified provenance and "
+                "cite only the scenarios listed below.")
+        else:
+            lines.append(
+                "Scenario membership is **not run-bound**: no "
+                "`$CAP/qa_manifest.json` for this PR, and no QA listing to "
+                "enumerate it. Treat every `$CAP/scenarios/<n>/` directory as "
+                "unverified provenance: say the evidence cannot be enumerated "
+                "rather than inferring coverage from directories.")
         return lines
     if status_run and status_run != manifest_run:
         lines.append(
@@ -722,9 +735,12 @@ def _qa_head_without_status(note: str, pr_id: str,
 
     The live status file is the *listing*; the run binding comes from the
     captures manifest, which outlives the QA workdir, so name it anyway.
+    There is no listing to follow this head, so the binding must not refer to
+    one.
     """
     lines = [note]
-    lines.extend(_qa_run_binding(pr_id, {}, status_path))
+    lines.extend(_qa_run_binding(pr_id, {}, status_path,
+                                 listing_expected=False))
     return ("\n" + "\n".join(lines) + "\n", "")
 
 
@@ -761,6 +777,10 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         return _qa_head_without_status(
             "_qa_status.json unreadable — read the captures dir directly._",
             pr_id, latest)
+    scenarios = data.get("scenarios") or []
+    if isinstance(scenarios, dict):
+        scenarios = list(scenarios.values())
+    valid = [s for s in scenarios if isinstance(s, dict)]
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is
@@ -771,12 +791,11 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         # sign-off session cannot read.
         err = " ".join(str(data["error"]).split())
         head_lines.append(f"QA error: {err}")
-    head_lines.extend(_qa_run_binding(pr_id, data, latest))
+    # A status file with no scenario entries yields no listing either, so the
+    # run binding must not point at one that will not follow.
+    head_lines.extend(_qa_run_binding(pr_id, data, latest,
+                                      listing_expected=bool(valid)))
     head = "\n" + "\n".join(head_lines) + "\n"
-    scenarios = data.get("scenarios") or []
-    if isinstance(scenarios, dict):
-        scenarios = list(scenarios.values())
-    valid = [s for s in scenarios if isinstance(s, dict)]
     if not valid:
         return (head, "")
     truncated = False

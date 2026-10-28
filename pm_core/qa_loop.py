@@ -1949,6 +1949,11 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str,
     except Exception:
         _log.warning("Could not resolve captures dir for pr=%s",
                      state.pr_id, exc_info=True)
+    else:
+        if base is None:
+            _log.warning("captures_dir unavailable for pr=%s — scenario "
+                         "records and the run manifest were not written",
+                         state.pr_id)
 
     for s in state.scenarios:
         verdict = state.scenario_verdicts.get(s.index, "")
@@ -1990,9 +1995,9 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str,
 def _manifest_scenarios(state: "QALoopState") -> list[dict]:
     """This run's authoritative scenario membership, for the run manifest.
 
-    Membership is the launched scenarios — not the verdicts — so a run that
-    dies before a verdict still owns (and fails to demonstrate) its
-    scenarios.  Scenario 0 is the interactive window, not coverage.
+    Membership is the run's scenarios — not the verdicts — so a run that
+    dies before a verdict still owns (and fails to demonstrate) the scenarios
+    it was going to run.  Scenario 0 is the interactive window, not coverage.
     """
     return [
         {
@@ -4203,6 +4208,10 @@ def run_qa_sync(
                 "scenario workers, so no scenarios were launched.\n\n"
                 f"{exc}"
             )
+            # Planned but launched nothing, so this run owns no evidence —
+            # same rule as the other pre-execution exits (pr-1ae1d2d).
+            _sync_captures_evidence(state, overall=state.latest_verdict,
+                                    scenarios=[])
             _notify()
             state.running = False
             return state

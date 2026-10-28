@@ -402,6 +402,26 @@ class TestRunQaSyncEvidenceBinding:
         assert any(call.kwargs.get("scenarios") == []
                    for call in sync.call_args_list)
 
+    def test_handoff_failure_records_empty_membership(self, tmp_path,
+                                                      monkeypatch):
+        """A plan whose committed work cannot be published launches nothing,
+        so this run owns no evidence either — the same binding as the other
+        pre-execution exits, not the plan it never ran (pr-1ae1d2d)."""
+        sync = MagicMock()
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", FULL_PLAN)],
+            extra_patches=(
+                patch("pm_core.qa_loop._get_qa_spec", return_value="spec"),
+                patch("pm_core.qa_loop._publish_planner_head",
+                      side_effect=qa_loop.PlannerHandoffError("diverged: x")),
+                patch("pm_core.qa_loop._sync_captures_evidence", sync),
+            ))
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert any(call.kwargs.get("scenarios") == []
+                   for call in sync.call_args_list)
+
 
 class TestQAPlanProblem:
     def test_complete_plan_ok(self):

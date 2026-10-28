@@ -73,6 +73,48 @@ def _dash_data():
 
 
 # ---------------------------------------------------------------------------
+# Reader mode (create=False)
+# ---------------------------------------------------------------------------
+
+def _reader_paths(tmp_path, monkeypatch):
+    """Isolate ``pm_core.paths`` resolution from the real ``~/.pm`` tree."""
+    from pm_core import paths
+    home = tmp_path / "home"
+    monkeypatch.setattr(paths, "sessions_dir", lambda: home / "sessions")
+    # No container mount, so only the host path can match.
+    monkeypatch.setattr(paths, "CONTAINER_CAPTURES_MOUNT",
+                        str(tmp_path / "no-mount"))
+    monkeypatch.delenv(paths.CAPTURES_PR_ENV, raising=False)
+    return paths, home / "sessions" / "t" / "captures"
+
+
+def test_captures_dir_reader_returns_an_existing_dir_without_creating(
+        tmp_path, monkeypatch):
+    """The prompt builders and `pm qa evidence` resolve with create=False:
+    they must see an existing captures dir and never conjure one."""
+    paths, root = _reader_paths(tmp_path, monkeypatch)
+    existing = root / "pr-x"
+    existing.mkdir(parents=True)
+    assert paths.captures_dir("pr-x", session_tag="t",
+                              create=False) == existing
+    assert paths.captures_dir("pr-y", session_tag="t", create=False) is None
+    assert not (root / "pr-y").exists()
+
+
+def test_captures_root_reader_returns_only_an_existing_root(
+        tmp_path, monkeypatch):
+    """The merge gate checks the root with create=False; a gate must not
+    create a captures tree as a side effect."""
+    paths, root = _reader_paths(tmp_path, monkeypatch)
+    assert paths.captures_root(session_tag="t", create=False) is None
+    assert not root.exists()
+    root.mkdir(parents=True)
+    assert paths.captures_root(session_tag="t", create=False) == root
+    # Writer mode is unchanged.
+    assert paths.captures_root(session_tag="t") == root
+
+
+# ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
 
@@ -565,6 +607,51 @@ def test_signoff_qa_block_says_membership_unbound_without_manifest(
     monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: None)
     head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
     assert "not run-bound" in head
+
+
+def test_signoff_qa_block_points_at_the_listing_when_there_is_one(
+        tmp_path, monkeypatch):
+    """The legacy-evidence line says "listed below" only when the
+    per-scenario listing really does follow the head."""
+    from pm_core import paths, prompt_gen
+    status = _status_file(tmp_path, "run1")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: None)
+    head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+    assert listing  # the enumeration follows the head
+    assert "listed below" in head
+
+
+def test_signoff_qa_block_promises_no_listing_without_status_or_manifest(
+        tmp_path, monkeypatch):
+    """With neither a status file nor a manifest nothing is enumerated below
+    the head, so it must not tell the session to cite "the scenarios listed
+    below" — there would be nothing there."""
+    from pm_core import paths, prompt_gen
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: None)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: None)
+    head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+    assert listing == ""
+    assert "not run-bound" in head
+    assert "listed below" not in head
+
+
+def test_signoff_qa_block_promises_no_listing_when_the_status_has_none(
+        tmp_path, monkeypatch):
+    """A readable status file with no scenario entries yields no listing
+    either, so the legacy-evidence line must not promise one."""
+    from pm_core import paths, prompt_gen
+    status = tmp_path / "qa_status.json"
+    status.write_text(json.dumps({
+        "pr_id": "pr-x", "run_id": "run1", "overall": "INPUT_REQUIRED",
+        "scenarios": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: None)
+    head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+    assert listing == ""
+    assert "not run-bound" in head
+    assert "listed below" not in head
 
 
 def test_signoff_qa_block_binds_the_run_without_a_status_file(tmp_path,
