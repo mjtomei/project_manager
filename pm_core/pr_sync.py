@@ -16,7 +16,7 @@ from pm_core import store, git_ops, graph, gh_ops, merge_integrity
 from pm_core.backend import get_backend
 from pm_core.cli.helpers import _record_status_timestamp, _resolve_repo_dir
 from pm_core.paths import configure_logger
-from pm_core.pr_utils import usable_prs
+from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 _log = configure_logger("pm.pr_sync")
 
@@ -422,7 +422,7 @@ def sync_from_github(
                 new_status = status_updates.get(pr["id"])
                 if not new_status:
                     continue
-                if pr.get("status") in ("merged", "closed") \
+                if pr.get("status") in TERMINAL_PR_STATES \
                         and new_status != "merged":
                     # A concurrent status write won the race with this sync:
                     # the status_updates were computed from the pre-lock

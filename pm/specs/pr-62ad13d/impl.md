@@ -226,6 +226,13 @@ workdirs are touched.
     `test_sync_from_github_does_not_close_a_merged_pr`,
     `test_sync_from_github_keeps_a_concurrently_merged_pr`, and
     `test_tui_startup_github_sync_keeps_a_concurrently_merged_pr`.
+26. Close touches nothing else (review c02f i9): every other PR record,
+    `plans`, and every `project` setting except `active_pr` survive verbatim —
+    covered by `test_default_close_leaves_unrelated_records_and_settings_alone`.
+    The `merged`/`closed` pair is a single named constant
+    (`pr_utils.TERMINAL_PR_STATES`) used by the new guards in `pr.py`,
+    `pr_sync.py` and `tui/sync.py`, and by the `pm pr list --open` filter, so
+    "terminal" cannot drift between the sync paths.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -332,6 +339,8 @@ No **[UNRESOLVED]** ambiguities.
   `pr_start` and `pr_merge` closed guards, and a closed-duplicate hint in
   `pr_add` (retained closed entries now match its duplicate check).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
+- `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
+  shared by the sync guards and the `pm pr list --open` filter).
 - `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN, at
   snapshot time and again inside the locked apply.
 - `pm_core/tui/sync.py` — the startup GitHub sync's apply applies the same

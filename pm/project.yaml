@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T10:03:19.186740+00:00'
+  updated_at: '2026-10-28T10:45:33.213936+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14113,6 +14113,19 @@ prs:
       (/pm-captures/review-c02f-i8/full-suite.log).'
     created_at: '2026-10-28T10:03:19Z'
     last_edited: '2026-10-28T10:03:19Z'
+  - id: note-d6d1345
+    text: 'Review i9: (1) added pr_utils.TERMINAL_PR_STATES so the merged/closed pair
+      has one definition — used by the new sync guards (pr_sync.sync_from_github apply,
+      tui startup sync apply), the active_pr reassignment, the dependents scan, and
+      the pm pr list --open filter. (2) --remove help now says it deletes the registry
+      entry *instead of* recording the closure (it was "Also delete", which misdescribed
+      the code); still documents registry-only. (3) New test test_default_close_leaves_unrelated_records_and_settings_alone
+      pins the "preserve unrelated records/settings" requirement (other PR entry,
+      project settings except active_pr, plans). (4) Two repeat-close assertions compared
+      updated_at with >=, which is a tautology; now > (ISO-8601, same offset). Spec
+      synced (R11 item 26, §5 pr_utils.py). Full suite 4123 passed, 1 skipped (/pm-captures/review-c02f-i9/full-suite.log).'
+    created_at: '2026-10-28T10:45:33Z'
+    last_edited: '2026-10-28T10:45:33Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

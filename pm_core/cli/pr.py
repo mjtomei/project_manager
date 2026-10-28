@@ -18,7 +18,7 @@ import click
 import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
-from pm_core.pr_utils import VALID_PR_STATES, usable_prs
+from pm_core.pr_utils import TERMINAL_PR_STATES, VALID_PR_STATES, usable_prs
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -521,7 +521,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         return
 
     if open_only:
-        prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+        prs = [p for p in prs if p.get("status") not in TERMINAL_PR_STATES]
     if filter_status:
         prs = [p for p in prs if p.get("status") == filter_status]
     if filter_plan:
@@ -3457,8 +3457,9 @@ def pr_note_delete(pr_id: str, note_id: str):
 @click.option("--keep-branch", is_flag=True,
               help="Deprecated no-op: close never deletes branches")
 @click.option("--remove", is_flag=True, default=False,
-              help="Also delete the registry entry (branch and workdir are "
-                   "kept; the GitHub PR is still closed unless --keep-github)")
+              help="Delete the registry entry instead of recording the "
+                   "closure. Registry-only: the branch and workdir are kept, "
+                   "and the GitHub PR is still closed unless --keep-github")
 def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
              remove: bool):
     """Close a PR without destroying its history.
@@ -3573,7 +3574,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
         if data.get("project", {}).get("active_pr") == pr_id:
             remaining = [
                 p for p in usable_prs(data.get("prs"))
-                if (p.get("status") or "pending") not in ("merged", "closed")
+                if (p.get("status") or "pending") not in TERMINAL_PR_STATES
             ]
             data["project"]["active_pr"] = (
                 remaining[0]["id"] if remaining else None)
@@ -3616,7 +3617,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     dependents = [
         p for p in usable_prs(updated.get("prs"))
         if pr_id in (p.get("depends_on") or [])
-        and (p.get("status") or "pending") not in ("merged", "closed")
+        and (p.get("status") or "pending") not in TERMINAL_PR_STATES
     ]
     if dependents:
         names = ", ".join(

@@ -174,6 +174,26 @@ def test_default_close_retains_entry_and_lifecycle_fields(tmp_path):
     assert after["workdir"] == before["workdir"]
 
 
+def test_default_close_leaves_unrelated_records_and_settings_alone(tmp_path):
+    """Close rewrites one PR's status and (at most) active_pr — every other
+    record, plan, and project setting survives verbatim."""
+    project = _make_project(tmp_path)
+    before = store.load(project["pm_dir"])
+    other_before = store.get_pr(before, "pr-002")
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    after = store.load(project["pm_dir"])
+    # Unrelated PR record untouched (status, deps, title, timestamps).
+    assert store.get_pr(after, "pr-002") == other_before
+    # Project settings survive; only the active pointer may move.
+    strip_active = lambda d: {k: v for k, v in d.items() if k != "active_pr"}
+    assert strip_active(after["project"]) == strip_active(before["project"])
+    assert after.get("plans") == before.get("plans")
+
+
 def test_default_close_moves_active_pr_off_the_closed_entry(tmp_path):
     """A retained closed entry never stays active (A2): later id-less
     commands must not resolve a terminal record."""
@@ -329,7 +349,9 @@ def test_repeat_close_is_idempotent(tmp_path):
     # The first closure time is history; a repeat close only touches
     # updated_at (it re-attempts the GitHub close so a failed one can retry).
     assert entry["closed_at"] == first_entry["closed_at"]
-    assert entry["updated_at"] >= first_entry["updated_at"]
+    # ISO-8601 strings with the same UTC offset sort chronologically, so this
+    # is a real "the record was touched" check, not a >= tautology.
+    assert entry["updated_at"] > first_entry["updated_at"]
     assert _snapshot(project["workdir"]) == wd_before
 
 
@@ -351,7 +373,7 @@ def test_repeat_close_does_not_invent_a_closure_time(tmp_path):
     assert after["status"] == "closed"
     assert "closed_at" not in after
     # updated_at still moves: the record was touched, not rewritten.
-    assert after["updated_at"] >= before["updated_at"]
+    assert after["updated_at"] > before["updated_at"]
     assert _snapshot(project["workdir"]) == wd_before
 
 

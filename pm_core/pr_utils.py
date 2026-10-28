@@ -6,6 +6,14 @@ PRStatus = Literal["pending", "in_progress", "in_review", "qa", "sign_off", "mer
 
 VALID_PR_STATES = {"pending", "in_progress", "in_review", "qa", "sign_off", "merged", "closed"}
 
+# Statuses that end a PR's lifecycle.  A ``merged``/``closed`` record is
+# history: it is never moved back to an active status by a GitHub sync (a
+# merge *discovered* on GitHub still finalizes), never auto-started, and it
+# never satisfies a dependent's ``depends_on`` (only ``merged`` does).
+# ``pm pr close`` retains the entry (pr-62ad13d), so the distinction between
+# "closed on GitHub" and "closed locally" no longer exists.
+TERMINAL_PR_STATES = ("merged", "closed")
+
 
 def usable_prs(prs) -> list[dict]:
     """Return the PR entries that carry a usable, non-empty string ``id``.
