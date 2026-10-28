@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T06:11:27.596219+00:00'
+  updated_at: '2026-10-28T06:13:18.315192+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11637,6 +11637,23 @@ prs:
       /pm-captures/scenarios/97.'
     created_at: '2026-10-28T06:11:27Z'
     last_edited: '2026-10-28T06:11:27Z'
+  - id: note-448a435
+    text: 'QA S94 (2026-10-28, b64c5951, nested rootless podman 3.4.4, fake-claude):
+      all 5 stories PASS live, no code change (= S84). Restart: same PID 1126, 8 keys/ids/enqueued_at
+      kept, 0 stale removals, t focuses only, raise launched P3 s1 only. 180 s lock:
+      84 h/l probes max 0.042 s, t focuses, zz t stops, busy reason reached P3 pane
+      151.7 s after restart (0 ctr, 0 acquired during hold), Adopted 4 in the release
+      second, P3 ids kept, P4 entries gone, E1 back. SIGKILL (Zsl+) + 60 s lock +
+      pm session: new PID 57968 adopted all 8 in the release second, no pid-dead removal;
+      raise launched P3 first scenario only. Stale acquired (default-projection 6g):
+      Removing stale ~2 s after restart, growth 19.5G->14.8G, no reserved term after
+      restart (the old instance showed "+ 6G reserved" in the ~10 s between podman
+      rm and the restart), no new s6 ctr/entry. Workdir-missing abort: reason + ERROR,
+      P4 keys gone ~2 s, second restart skips P4, z t after restore makes 4 new entries.
+      Harness: configure fake-claude BEFORE the first pm pr start (else the real claude
+      launches). Captures /pm-captures/scenarios/94.'
+    created_at: '2026-10-28T06:13:18Z'
+    last_edited: '2026-10-28T06:13:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
