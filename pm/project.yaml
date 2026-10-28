@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T08:51:59.388344+00:00'
+  updated_at: '2026-10-28T09:16:19.402974+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15406,6 +15406,62 @@ prs:
       message changed this iteration, so the i3/i6 QA expectations still hold.'
     created_at: '2026-10-28T08:51:59Z'
     last_edited: '2026-10-28T08:51:59Z'
+  - id: note-d37fe83
+    text: 'Review loop 44be i4 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range/non-UTF-8/empty-argv
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found one real defect of the class E18 already covers ("an identity
+      check must never misclassify"), in the other direction: an EMPTY /proc/<pid>/cmdline
+      is not only a kernel thread/zombie, it is also what the kernel serves for the
+      few hundred microseconds inside execve before the new argv is installed — and
+      restart_app re-execs the TUI IN PLACE, keeping its PID. So E18s "empty argv
+      is positive evidence of a non-TUI" misclassified a live, restarting TUI as a
+      foreign process. Measured the window empirically: a process that os.execv()s
+      itself in a loop, polled from a watcher, served a zero-length cmdline 883 times
+      in 6 s with durations 0.23-3.57 ms (median 0.39 ms), and comm already showed
+      the new binary during the window. Consequences of believing it: (a) _validate_tui_owner
+      deleted the LIVE TUIs pidfile and reported "not available (pid belongs to a
+      different program); restart the TUI" for any caller that fired during a Ctrl+R
+      / merge restart (the queued command is then never submitted); (b) worse, claim_tui_pidfile
+      from a second TUI in that window treated the restarting TUI as stale and took
+      the session over — the restarting TUI then sees a live sibling, refuses to start,
+      and its pane dies, breaking the single-TUI guarantee (A2/R4). Fixed by re-polling
+      an empty read for a bounded grace before believing it: identity_problem now
+      goes through a new _settled_cmdline() (100 ms budget, 10 ms steps) instead of
+      reading proc_cmdline directly; proc_cmdline stays a pure read. A non-empty argv
+      and None ("cannot tell") return immediately, so the ordinary path is unchanged,
+      and a kernel threads argv never fills in, so E18s protection is kept (the grace
+      only costs a bounded wait on a rare path). 4 new tests in tests/test_tui_pidfile.py::TestExecWindow:
+      identity_problem survives an empty-then-TUI argv; claim_tui_pidfile raises the
+      conflict instead of stealing a mid-exec TUIs pidfile; submit_tui_command succeeds
+      and leaves the pidfile in place; and a permanently empty argv is still rejected
+      after the grace (passes both ways by design — it pins that the grace does not
+      weaken E18). The first three were verified to fail against a direct proc_cmdline
+      read. Spec impl.md E19 + test item 39 added. Full suite: 3930 passed, 1 skipped
+      (pytest 8.4.2; env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace,
+      markdown in the venv). Pushed 4a264e99. Non-blocking observations left as-is:
+      (a) submit_tui_commands post-append stale message says "(process disappeared)"
+      for the zombie/reused cases too — accurate enough (the action is "restart the
+      TUI") and left alone to keep the QA-validated message surface stable; (b) the
+      startup-refusal message is printed to the pane, but the real pm session has
+      no remain-on-exit, so the pane vanishes and the text lives only in the pm log;
+      (c) helpers.trigger_tui_command is production-dead (kept as the documented bool
+      API; pm/plans/refactor-migration-map.md keeps it as cross-process IPC); (d)
+      autostart._resolve_owner keeps its own liveness+zombie check (spec I1), reports
+      a mid-claim empty pidfile as "stale pidfile" rather than "starting up", and
+      does not remove a dead-pid pidfile (QA refined around that); (e) _atomic_write
+      can leave a hidden .<pidfile>.<pid>.tmp if SIGKILLed mid-publish; (f) a legacy
+      numeric pidfile has no starttime, so its identity rests on the cmdline marker
+      alone; (g) unlink_if_unchanged re-reads then unlinks non-atomically (inherent
+      to a path-based pidfile); (h) owned_by_other treats a non-empty unparseable
+      pidfile as "not owned by another", so a successor caught mid-_write_all could
+      lose the shared queue (unreachable in practice: a single os.write of a ~120-byte
+      descriptor is atomic w.r.t. readers); (i) qa_loop._proc_stat_fields/_proc_start_time
+      still duplicate tui_pidfile equivalents — consolidating is an out-of-scope refactor.
+      No user-visible message changed this iteration, so the i3/i6 QA expectations
+      still hold.'
+    created_at: '2026-10-28T09:16:19Z'
+    last_edited: '2026-10-28T09:16:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
