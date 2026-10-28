@@ -144,8 +144,13 @@ _WAKEUP_TEXT_PREFIXES = (
     "# Autonomous loop tick",
     "<task-notification>",
 )
+# Claude Code echoes local slash commands (``/model``, ``/cost`` …) into the
+# transcript as ``type:"user"`` records.  They are not prompts — the human
+# asked Claude nothing — so they neither answer a question nor start a task.
+_LOCAL_COMMAND_PREFIXES = ("<command-name>", "<command-message>",
+                           "<local-command-stdout>", "<local-command-stderr>")
 # Dynamic / loop.md loop ticks and the autonomous-loop sentinels.
-_NON_TASK_TEXT_PREFIXES = _WAKEUP_TEXT_PREFIXES + (
+_NON_TASK_TEXT_PREFIXES = _WAKEUP_TEXT_PREFIXES + _LOCAL_COMMAND_PREFIXES + (
     # Harness marker written when the user hits Esc / stops the turn
     # (``[Request interrupted by user]`` and the ``for tool use`` variant).
     # It is not a new task: the user asked for nothing, so a verdict emitted
@@ -236,9 +241,9 @@ def _user_record_is_non_task(rec: dict) -> bool:
     """True when a user record does not start a new task.
 
     Non-task records are transparent to the backward verdict scan:
-    system-injected wakeups/notifications and the loop's own nudges.  Any
-    other user text (the initial prompt, a retry, verifier feedback, a new
-    user task) is a task boundary.
+    system-injected wakeups/notifications, local slash-command echoes and
+    the loop's own nudges.  Any other user text (the initial prompt, a
+    retry, verifier feedback, a new user task) is a task boundary.
     """
     if _is_tool_result_record(rec):
         return True
@@ -522,12 +527,6 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     return "\n".join(chunks)
 
 
-# Claude Code echoes local slash commands (``/model``, ``/cost`` …) into the
-# transcript as user records; they are not answers to the assistant.
-_LOCAL_COMMAND_PREFIXES = ("<command-name>", "<command-message>",
-                           "<local-command-stdout>", "<local-command-stderr>")
-
-
 def is_human_prompt_record(rec: object) -> bool:
     """True when a parsed JSONL record is a prompt the human submitted.
 
@@ -567,10 +566,7 @@ def is_human_prompt_record(rec: object) -> bool:
             # it falls through and is rejected as a non-task record (never
             # clear a wait nobody answered).
             return True
-    if _user_record_is_non_task(rec):
-        return False
-    text = _unwrap_system_reminder(_record_text(rec)) or ""
-    return not text.startswith(_LOCAL_COMMAND_PREFIXES)
+    return not _user_record_is_non_task(rec)
 
 
 def is_wakeup_record(rec: object) -> bool:

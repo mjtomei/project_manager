@@ -83,21 +83,24 @@ R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     (stripped; a record that is *only* reminders is not a prompt),
     `<task-notification>`, `/loop` and autonomous-loop ticks, scheduled prompt
     firings, the `[Request interrupted by user…]` marker, qa_loop's verdict
-    nudge, and compact summaries.  A record whose only content is an
-    empty/whitespace text block carries no prompt and does not count, while
-    content with no text at all — a pasted image — still does.  Tool results
-    and assistant output never count, so arbitrary tool output is never
-    treated as an answer, and a harness notice can never clear a wait nobody
-    answered.  (Hardened in review
+    nudge, local slash-command echoes, and compact summaries.  A record whose
+    only content is an empty/whitespace text block carries no prompt and does
+    not count, while content with no text at all — a pasted image — still
+    does.  Tool results and assistant output never count, so arbitrary tool
+    output is never treated as an answer, and a harness notice can never
+    clear a wait nobody answered.  (Hardened in review
     i1: these record shapes are real — master's `_user_record_is_non_task` and
     its scenario replays show them — and counting one as an answer is the same
     false-state class this PR fixes.)  The predicate is *built on*
     `_user_record_is_non_task` (integration, pr-a80bde5 SIGNOFF_IMPL) so the
     answer predicate and the task-scoped verdict scan can never disagree about
-    which records are transparent; `isMeta` stays an explicit check because the
-    shared predicate treats a Stop-hook record as a task boundary, and a Stop
-    hook is harness input, not a human answer.  Detection is driven by the
-    transcript and hook events, with no timer.
+    which records are transparent; local slash-command echoes live in that
+    shared predicate too (review baa8 i3), because otherwise an echo landing
+    after the follow-up verdict stopped the verdict scan, the waiter read "no
+    verdict", and re-armed a wait nobody was asked.  `isMeta` stays an
+    explicit check because the shared predicate treats a Stop-hook record as
+    a task boundary, and a Stop hook is harness input, not a human answer.
+    Detection is driven by the transcript and hook events, with no timer.
 
 R5. **Repeated genuine INPUT_REQUIRED stays visible.**  When an idle follow-up
     turn ends INPUT_REQUIRED *after* a human response, the loop records it
@@ -217,6 +220,15 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   won't idle again, so the resumed waiter starts from the current idle event
   (not "newer than now") and accepts it when it is newer than the answer.
   (Added in review.)
+- A local slash command typed in the review pane (`/model`, `/cost`, …) is
+  echoed into the transcript as a `type:"user"` record.  It is not a human
+  answer *and* not a task boundary: it neither clears the wait nor stops the
+  task-scoped verdict scan.  Before it joined the shared predicate, an echo
+  after the follow-up verdict made `find_verdict_turn` return None, so the
+  waiter re-armed a wait nobody was asked (and blocked forever with no further
+  idle event).  (Added in review baa8 i3; regressions
+  `test_local_command_echo_is_transparent`,
+  `test_follow_up_verdict_survives_a_local_slash_command`.)
 - A verdict already in the transcript when the wait starts is returned
   immediately, before blocking on a hook event.  The resume path must not
   depend on the event file still holding an `idle_prompt` — it can hold

@@ -480,6 +480,40 @@ def test_user_interruption_is_transparent(tmp_path: Path) -> None:
         assert extract_verdict_from_transcript(p, VERDICTS) == "PASS", marker
 
 
+def test_local_command_echo_is_transparent(tmp_path: Path) -> None:
+    """A local slash command (``/model``, ``/cost``) is echoed into the
+    transcript as a ``type:"user"`` record.  It is not a task: a verdict
+    emitted before it still stands.
+
+    Without this the echo stopped the backward scan, so a PASS/NEEDS_WORK
+    follow-up followed by the human running a slash command read as "no
+    verdict" — the review waiter re-armed a wait nobody was asked.
+    """
+    for echo in ("<command-name>/model</command-name>\n"
+                 "<command-message>model</command-message>\n"
+                 "<command-args></command-args>",
+                 "<local-command-stdout>$0.12</local-command-stdout>",
+                 "<local-command-stderr>boom</local-command-stderr>"):
+        p = _write(tmp_path, [
+            _user_line("go"),
+            _assistant_line("Reason: done\nPASS"),
+            _user_line(echo),
+        ])
+        assert extract_verdict_from_transcript(p, VERDICTS) == "PASS", echo
+
+
+def test_new_task_after_a_local_command_echo_supersedes(tmp_path: Path) -> None:
+    """Transparency for a slash-command echo must not leak past a real task."""
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: done\nPASS"),
+        _user_line("<command-name>/model</command-name>"),
+        _user_line("Now also check the finalize pane."),
+        _assistant_line("Working on the finalize pane; no verdict yet."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
 def test_new_task_after_a_user_interruption_supersedes(tmp_path: Path) -> None:
     """Transparency for the interruption must not leak past a real task."""
     p = _write(tmp_path, [

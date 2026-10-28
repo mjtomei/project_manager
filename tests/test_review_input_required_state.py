@@ -257,6 +257,8 @@ class TestHumanPromptRecord:
             "# /loop tick\ncontinue",
             "[Request interrupted by user]",
             "Reminder: your verdict must appear alone on its line",
+            "<command-name>/model</command-name>",
+            "<local-command-stdout>$0.12</local-command-stdout>",
         ):
             rec = {"type": "user", "message": {"content": text}}
             assert _user_record_is_non_task(rec), text
@@ -879,6 +881,45 @@ class TestRestartAdoption:
         t, mock, p = _start(state, tdir, {3: it3})
         try:
             _until(lambda: 3 in panes, what="iteration 3 after gap verdict")
+            assert state.history[1].verdict == "NEEDS_WORK"
+            assert state.input_required is False
+            release3.set()
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            release3.set()
+            state.stop_requested = True
+            p.stop()
+
+    def test_follow_up_verdict_survives_a_local_slash_command(self, env):
+        """A local slash-command echo (``/model``, ``/cost``) after the
+        verdict is not a task: the follow-up verdict is still read from the
+        transcript.
+
+        Pre-fix the echo stopped the task-scoped scan, so the waiter saw no
+        verdict, re-armed a wait nobody was asked and (with no further idle
+        event) blocked forever — the false-wait class this loop prevents.
+        """
+        tdir, _ = env
+        pane2 = Pane(tdir, 2)
+        pane2.verdict("INPUT_REQUIRED")
+        pane2.user("option B")
+        pane2.say("Fixed it.\n\n**NEEDS_WORK**")  # no idle: the event is gone
+        pane2.harness("<command-name>/model</command-name>\n"
+                      "<command-message>model</command-message>")
+        hook_events.event_path(pane2.sid).unlink()
+        release3 = threading.Event()
+        panes = {}
+
+        def it3():
+            panes[3] = Pane(tdir, 3)
+            release3.wait(10)
+            return panes[3].verdict("PASS")
+
+        state = _restored(tdir, 2, ["NEEDS_WORK", "INPUT_REQUIRED"])
+        t, mock, p = _start(state, tdir, {3: it3})
+        try:
+            _until(lambda: 3 in panes, what="iteration 3 after the echo")
             assert state.history[1].verdict == "NEEDS_WORK"
             assert state.input_required is False
             release3.set()
