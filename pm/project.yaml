@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T04:21:02.028324+00:00'
+  updated_at: '2026-10-28T04:54:22.488277+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32218,6 +32218,26 @@ prs:
       remains the original bug report.'
     created_at: '2026-10-28T04:21:01Z'
     last_edited: '2026-10-28T04:21:01Z'
+  - id: note-db9c5a1
+    text: 'Review loop 872e i1: two leftovers in the kept recipe scope, both the same
+      class as the bug this PR is about (a wait matching the wrong thing). (1) The
+      tmux recipe pm-session readiness poll was `tmux ls | grep ''^pm-''`, which also
+      matches `pm-recorder` (the session the recipe itself creates) and any other
+      project pm session, so the wait passes before the target exists and the bounded
+      failure path never fires; it now polls `tmux has-session -t "$TARGET"` with
+      an empty-target guard (`tmux has-session -t ''''` succeeds). Verified live with
+      a decoy pm-recorder: old poll matches instantly, new poll waits for the target
+      and times out with its message. (2) The tmux transcript is appended (`cat >>`),
+      so a stale transcript.log mixes two runs; it is now removed with the stale cast
+      in a new step 0, and the capture-dir mkdir moved into the runnable block (as
+      in cli-recording). Also: the cli scaffold now kills its server when the cast
+      check fails, so a retry does not hit "duplicate session: rec". Tests: capture-dir
+      creation asserted in the block, plus new stale-transcript and poll-handle assertions
+      (all fail against the pre-fix recipes); file 18 pass, related suites 193 pass,
+      full suite 3893 passed with only the known env-only failures. No change to wait/kill
+      semantics elsewhere; no pm_core/ change.'
+    created_at: '2026-10-28T04:54:22Z'
+    last_edited: '2026-10-28T04:54:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
