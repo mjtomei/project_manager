@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T01:33:57.980698+00:00'
+  updated_at: '2026-10-28T02:53:27.797389+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36809,6 +36809,45 @@ prs:
       env failures). Captures: /pm-captures/scenarios/9/{pre-fix,post-fix,story5-tests,evidence}.'
     created_at: '2026-10-28T01:33:57Z'
     last_edited: '2026-10-28T01:33:57Z'
+  - id: note-bb9fffa
+    text: 'Review 1fc4 i2 (fixes applied): two stranded-target paths found and closed.
+      (1) `consume_breadcrumb` restores the saved loop into `app._review_loops` and
+      then calls `_start_loop`, which returns False when it cannot start (missing
+      workdir, no tmux, unusable transcript dir). The resume path ignored that result:
+      it announced "Review loop resumed …" anyway and left a NON-RUNNING loop entry,
+      and `_auto_start_review_loops` skips a PR whose entry is non-running and not
+      a retryable launch failure — so the PR was stranded until a manual `review-loop
+      start`, the exact symptom this PR removes, reached through a failed resume instead
+      of a failed launch. The resume now logs honestly and drops the restored entry
+      so the scheduler pass can start a fresh loop; a starter that raises (e.g. a
+      missing project root) is treated the same way so it cannot take the TUI mount
+      down. (2) `_lease_keepalive._check` checked `stop_requested` before claiming,
+      but the supersede paths (`z d` / `zz d`) set `stop_requested` and release the
+      old lease in between, so a claim already in flight re-took the lease the replacement
+      needs; the new loop bounded claim wait then expired into a non-retryable LAUNCH_FAILED.
+      The keepalive now hands the lease straight back (`_release_lease`) when a stop
+      landed during the claim — the same guard iteration 3 of 0688 added inside `_claim_launch`.
+      (3) `runtime_state` schema docstring now documents the `lease` field and its
+      `_locked_action_mutate` writer. Tests: `test_a_resume_that_cannot_start_drops_the_phantom_loop`,
+      `test_a_raising_resume_is_treated_like_a_refusal`, `test_lease_keepalive_releases_a_lease_claimed_after_a_stop`
+      (all fail pre-fix for the reason they cover); targeted review/autostart/breadcrumb
+      suites 370 passed. Full suite 3832 passed, 1 skipped; the 55 failed + 17 errors
+      are the base tree pre-existing signoff/merge/git + markdown-module + hook-installer
+      env failures (same file set as the documented baseline). Spec records iteration
+      2 and corrects the iteration-1 residual wording: neither the runs popup nor
+      `pm autostart status` reads the runtime_state mirror for a review loop (the
+      popup uses `collect_status_inputs`, i.e. live `review_progress_input`; the CLI
+      status is answered by the TUI), so a re-armed loop stale mirror fields are only
+      visible to a reader of `~/.pm/runtime/<pr>.json` itself. Residual (non-blocking,
+      documented): review_loop.py ~1550 lines; two lease mechanisms coexist; discovery
+      adopts a transcript verdict without requiring an idle hook event; other_owner
+      stand-down is a non-retryable LAUNCH_FAILED; a merge restart during the post-exhaustion
+      re-arm cooldown does not persist the loop (fresh loop instead, no fabricated
+      verdict); `_interruptible_sleep` re-reads the ~2 MB project.yaml every 2 s during
+      a backoff; a stop landing inside the launch child subprocess is not noticed
+      until it returns (old loop bows out at its next checkpoint, lease already released).'
+    created_at: '2026-10-28T02:53:27Z'
+    last_edited: '2026-10-28T02:53:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
