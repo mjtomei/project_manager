@@ -686,9 +686,32 @@ def test_remove_merged_is_registry_only(tmp_path):
     assert _load_entry(project["pm_dir"]) is None
     assert _close_calls(backend) == []
     assert project["workdir"].is_dir()
-    # The GitHub PR is merged, so it is neither closed nor reported "open".
-    assert f"GitHub PR #{pr.number} is already merged" in result.output
+    # No gh call is made (a merged GitHub PR cannot be closed).  The message
+    # reports the LOCAL record — the GitHub PR is never called "open", and is
+    # not claimed to be merged either: a hand-set status or a local-backend
+    # merge can leave it open, and no gh call verified it.
+    assert (f"GitHub PR #{pr.number} left unchanged (the PR is recorded as "
+            f"merged)." in result.output)
     assert "Leaving GitHub PR" not in result.output
+    assert "open" not in result.output.lower()
+
+
+def test_remove_merged_with_keep_github_reports_unchanged(tmp_path):
+    """--keep-github wins over the merged wording: it always means "leave the
+    GitHub PR alone", whatever the local status is."""
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="MERGED")
+        project = _make_project(tmp_path, status="merged",
+                                gh_pr_number=pr.number)
+        result = _run_close(project["pm_dir"], "pr-001", "--remove",
+                            "--keep-github")
+
+    assert result.exit_code == 0, result.output
+    assert _load_entry(project["pm_dir"]) is None
+    assert _close_calls(backend) == []
+    assert (f"Leaving GitHub PR #{pr.number} unchanged (--keep-github)."
+            in result.output)
+    assert "recorded as merged" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -734,6 +757,31 @@ def test_sync_from_github_does_not_reopen_a_concurrently_closed_pr(tmp_path):
     assert result.synced is True
     assert store.get_pr(store.load(project["pm_dir"]),
                         "pr-001")["status"] == "closed"
+
+
+def test_sync_from_github_finalizes_a_merge_over_a_closed_record(tmp_path):
+    """The closed-is-terminal guard is narrow: a merge discovered on GitHub is
+    authoritative and still finalizes (a PR closed just as GitHub merged it
+    ends up merged, not closed)."""
+    project = _make_project(tmp_path, status="in_progress",
+                            with_dependent=False)
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="MERGED")
+        data = store.load(project["pm_dir"])
+        data["prs"][0]["gh_pr_number"] = pr.number
+        store.save(data, project["pm_dir"])
+        stale = store.load(project["pm_dir"])
+
+        # `pm pr close` lands before the sync takes the store lock.
+        def _mark_closed(d):
+            store.get_pr(d, "pr-001")["status"] = "closed"
+        store.locked_update(project["pm_dir"], _mark_closed)
+
+        result = pr_sync.sync_from_github(project["pm_dir"], data=stale)
+
+    assert result.status_updates.get("pr-001") == "merged"
+    assert store.get_pr(store.load(project["pm_dir"]),
+                        "pr-001")["status"] == "merged"
 
 
 def test_sync_from_github_still_closes_open_prs(tmp_path):

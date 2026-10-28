@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T09:06:09.661500+00:00'
+  updated_at: '2026-10-28T09:32:32.172675+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14088,6 +14088,19 @@ prs:
       KeyError on pr-77c4f91.'
     created_at: '2026-10-28T09:06:09Z'
     last_edited: '2026-10-28T09:06:09Z'
+  - id: note-d6c87e5
+    text: 'Review i7: `pm pr close --remove` on a merged PR no longer asserts a GitHub
+      state it never checked. It now says the GitHub PR is "left unchanged (the PR
+      is recorded as merged)" — the local status can be hand-set or come from a local-backend
+      merge, leaving the GitHub PR open — and `--keep-github` now takes precedence
+      over the status-specific wording. Added tests: keep-github wins on a merged
+      --remove; a merge discovered on GitHub still finalizes over a concurrently closed
+      record (the closed-is-terminal guard merged exception). Spec synced (R5 --remove
+      wording, A1 precedence, R11 items 19/20/22, §5 file list). Full suite 4116 passed,
+      1 skipped; the single hook-installer failure is env-only (PM_HOST_HOME set —
+      passes with it unset).'
+    created_at: '2026-10-28T09:32:32Z'
+    last_edited: '2026-10-28T09:32:32Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

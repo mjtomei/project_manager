@@ -3504,7 +3504,12 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     # passed (the `--keep-branch` flag is a compatibility no-op).  A merged
     # GitHub PR cannot be closed, so the --remove path skips the call.
     gh_pr_number = pr_entry.get("gh_pr_number")
-    if gh_pr_number and not keep_github and old_status != "merged":
+    if gh_pr_number and keep_github:
+        # Its GitHub state is not necessarily OPEN (the PR may have been
+        # closed or merged on GitHub), so promise "unchanged", not "open".
+        click.echo(f"Leaving GitHub PR #{gh_pr_number} unchanged "
+                   f"(--keep-github).")
+    elif gh_pr_number and old_status != "merged":
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
             from pm_core import gh_ops
@@ -3520,16 +3525,14 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
-    elif remove and gh_pr_number and old_status == "merged":
-        # The --remove path only deletes the registry record; the GitHub PR is
-        # merged (so it cannot be closed) and is not "open" either.
-        click.echo(f"GitHub PR #{gh_pr_number} is already merged; leaving it "
-                   f"as is.")
-    elif gh_pr_number and keep_github:
-        # Its GitHub state is not necessarily OPEN (the PR may have been
-        # closed or merged on GitHub), so promise "unchanged", not "open".
-        click.echo(f"Leaving GitHub PR #{gh_pr_number} unchanged "
-                   f"(--keep-github).")
+    elif gh_pr_number:
+        # Reached only by `--remove` of a PR recorded as merged (a plain close
+        # of one is refused above): a merged GitHub PR cannot be closed, so no
+        # gh call is made.  Only the LOCAL record is known to be merged — a
+        # hand-set status, or a local-backend merge, can leave the GitHub PR
+        # open — so report the local fact and never call the PR "open".
+        click.echo(f"GitHub PR #{gh_pr_number} left unchanged (the PR is "
+                   f"recorded as merged).")
 
     # Record the closure (or drop the entry with --remove) under the lock.
     # Workdir, branch and every file in the workdir stay untouched — cleanup

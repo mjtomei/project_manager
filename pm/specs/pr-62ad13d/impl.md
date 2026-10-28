@@ -65,8 +65,10 @@ must not kill tmux windows/containers either (that is `--resources`).
 
 Add `--remove` to `pm pr close`:
 
-- Behaviour: run the normal close (GitHub close per `--keep-github`, status set
-  in the registry), then delete the registry entry only.
+- Behaviour: close the GitHub PR according to `--keep-github` (skipped when the
+  local status is `merged`), then delete the registry entry *instead of*
+  recording the closure — no `status`/`closed_at` write on a record that no
+  longer exists.
 - Never deletes the branch, the workdir, or any file; never the default; never
   implied by another flag.
 - When the PR is already `merged`, `--remove` skips the GitHub call (nothing to
@@ -183,17 +185,21 @@ workdirs are touched.
 18. `active_pr` (A2): a default close moves it off the now-closed entry to the
     first remaining non-terminal PR, and closing a PR never moves a pointer
     that names a different PR.
-19. `--remove` on a `merged` PR names the merged GitHub PR instead of
-    claiming it was left "open" (it is neither closed nor open).
+19. `--remove` on a `merged` PR leaves the GitHub PR alone (a merged GitHub PR
+    cannot be closed) and reports the *local* record — "left unchanged (the PR
+    is recorded as merged)" — instead of claiming it was left "open", and
+    without asserting a GitHub state no call verified.
 20. `--keep-github` reports the GitHub PR as "unchanged", never as "open"
-    (its GitHub state may be closed or merged).
+    (its GitHub state may be closed or merged), and wins over the merged
+    wording on `--remove` (review c02f i7).
 21. `--remove` dependent warning says the dependents reference the removed
     record; their status/`depends_on` are untouched and `ready_prs` stays
     empty.
 22. Sync race (R9): `status_updates` computed from a stale snapshot do not
     overwrite a `closed` status written before the lock, in both
     `sync_from_github(save_state=True)` and the TUI `startup_github_sync`
-    apply.
+    apply — while a merge discovered on GitHub still finalizes over the
+    concurrently closed record (review c02f i7).
 23. Malformed dependent (review c02f i6): a hand-edited `prs` entry with no
     `id` whose `depends_on` names the closed PR must not crash the dependent
     warning — it runs *after* the status write, so a `KeyError: 'id'` there
@@ -242,7 +248,9 @@ be rewritten to assert retention.
   registry-only *for local resources*. The GitHub PR is still closed according
   to `--keep-github` (so `pm pr close --remove` reproduces the old
   "close GitHub + forget the entry" flow, minus branch/workdir deletion).
-  Documented in help text.
+  `--keep-github` takes precedence over every status-specific message: it
+  always means "leave the GitHub PR alone" (a merged record cannot be closed,
+  so the call is skipped either way). Documented in help text.
 - **A2 — What happens to `project.active_pr` on default close?** Resolved: if
   it pointed at the closed PR, reassign to the first remaining non-terminal PR,
   else `None` (mirrors the old reassignment, without ever selecting a
@@ -310,8 +318,9 @@ No **[UNRESOLVED]** ambiguities.
 - `pm_core/cli/__init__.py` — help line.
 - `pm/qa/regression/command-dedup.md`, `pm/qa/regression/multi-window-registry.md`
   — cleanup steps use `--remove`.
-- `tests/test_pr_close.py` (new) and `tests/test_pr_enhancements.py`
-  (`TestGitHubCloseResilience` rewrite).
+- `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`
+  (`TestGitHubCloseResilience` rewrite), and `tests/test_sync_merge_integrity.py`
+  (TUI startup-sync closed race).
 
 ## 6. Out of scope
 
