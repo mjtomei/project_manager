@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T09:13:10.970282+00:00'
+  updated_at: '2026-10-28T09:17:02.217420+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36085,6 +36085,56 @@ prs:
       the tech tree. (2026-10-28T09:15:00Z)'
     created_at: '2026-10-28T09:13:10Z'
     last_edited: '2026-10-28T09:13:10Z'
+  - id: note-fde818d
+    text: 'scenario 13 refiner: verifying autostart fresh surfaces'
+    created_at: '2026-10-28T08:34:04Z'
+    last_edited: '2026-10-28T08:34:04Z'
+  - id: note-fb810f3
+    text: 'Scenario 13 (unrelated targets / multi-PR fresh / simultaneous actors)
+      refined and empirically verified on this branch. Fixture facts: export PYTHONPATH=/workspace
+      in every shell AND run ''tmux set-environment -g PYTHONPATH /workspace'' after
+      ''pm session'' — otherwise CLI/TUI in the test dir load /opt/pm-src master,
+      which has no ''autostart fresh''. Write the fake-claude config with the tmux
+      server HOME. ''pm pr start'' requires the PR committed on the base branch; starting
+      impl for an in_review PR leaves the status in_review. The fresh handoff reads
+      the impl transcript, so model the in-flight feedback turn by appending a user
+      JSONL record, and the completed turn with an assistant record (stop_reason end_turn).
+      Verified: multi-PR ''fresh'' keeps an existing target''s auto-merge and defaults
+      a new one to stop-before-merge; a wait-for-merge target holds its PREREQUISITES
+      (C is W''s dependency, shown as ''[wait-for-merge <- W]'' in ''pm autostart
+      status'', not in ''list''); two simultaneous fresh requests (CLI+CLI and CLI+''z
+      a'') give one reset + one ''already waiting'' with attempt incremented once;
+      a repeat with --auto-merge keeps attempt/requested_at and only moves the recorded
+      policy, and a plain ''pm tui restart'' re-adds the fresh-waiting PR with that
+      policy (source resume). Plain non-fresh targets are dropped by a plain restart.'
+    created_at: '2026-10-28T08:50:25Z'
+    last_edited: '2026-10-28T08:50:25Z'
+  - id: note-7c6b629
+    text: 'QA scenario 13 (unrelated targets / multi-PR fresh / simultaneous actors):
+      PASS on HEAD 26cf1c85, no code change. Four stories, each in a fresh fixture
+      with fake-claude (review delay 300s): (1) A fresh + unrelated wait-for-merge
+      target W (W depends on C): A review #1 exactly once, attempt 1 / stop_before_merge;
+      W stayed review #1 with its own window; C stayed held (held_by [W], policy wait_for_merge,
+      running/implementation). (2) pm autostart fresh A B printed one line per PR;
+      A kept auto_merge, B became stop_before_merge, unrelated target T was byte-identical
+      in list --json and status --json (no fresh marker) before/after, one target
+      + one run row per PR; both got exactly one review #1. (3) Two simultaneous CLI
+      fresh requests released on a shared ns deadline: one fresh, one "already waiting",
+      attempt 0->1, single requested_at, one row each; CLI racing `pm tui send za`
+      with P selected: CLI won, TUI log showed "Auto-start: <P> already waiting for
+      its implementation turn", attempt 0->1, one review. (4) Repeat fresh with --auto-merge
+      / --stop-before-merge / --auto-merge: each "already waiting", attempt 1 and
+      requested_at fixed, only fresh_autostart.policy moved (visible in list, status
+      --json targets[].policy and the a runs popup); after pm tui restart W was re-added
+      policy auto_merge source resume with the same single waiting attempt, and the
+      completed turn started exactly one review with attempt still 1. Fixture notes:
+      a PR needs a live impl pane (a workdir) before auto-start can start its review;
+      T had to be re-added once after its pane existed to trigger a scheduler pass;
+      C had to be started manually with --transcript so a user record could keep it
+      in implementation. Captures: /pm-captures/scenarios/13/{01-dependency-isolation,02-multipr-local,03a-concurrent-cli,03b-concurrent-cli-chord,04-policy-repeat-restart}
+      (cast+mp4+transcript+manifests).'
+    created_at: '2026-10-28T09:17:02Z'
+    last_edited: '2026-10-28T09:17:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
