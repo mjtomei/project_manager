@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T02:03:58.621629+00:00'
+  updated_at: '2026-10-28T02:57:42.758837+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11413,6 +11413,19 @@ prs:
       loop start loses its scrollback (A7 covers only non-fresh). Captures /pm-captures/scenarios/78.'
     created_at: '2026-10-28T02:03:58Z'
     last_edited: '2026-10-28T02:03:58Z'
+  - id: note-a71f896
+    text: 'QA S81 (2026-10-28, 17e68cc3, nested rootless podman 3.4.4): all 4 stories
+      PASS live, no code change (= S73). 22 valid / 9 invalid set messages and rc
+      matched (-1g without -- is Click rc=2); initial/unset/48g status lines (Host
+      free reserve 18G = 15% of 119.7G); cgroup-less helper -> unmeasurable refusal
+      rc=1, Blocked line, recovery launch (809M + 1.2G growth) clears it; damaged
+      queue/blocked/stats -> 3x status rc=0, queue rewritten empty on B launch, growth
+      1.2G (2g proj), Dropping malformed warnings, 0 tracebacks; TUI kill -9 -> Zs
+      defunct, 3 status runs no Queue depth and prune nothing, pm pr start C prunes
+      both entries (one line each). Cosmetic: reserve 0g renders "(reserve 1M)" in
+      Host free. Captures /pm-captures/scenarios/81.'
+    created_at: '2026-10-28T02:57:42Z'
+    last_edited: '2026-10-28T02:57:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
