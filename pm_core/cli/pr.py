@@ -4196,19 +4196,25 @@ def _launch_qa_detached(root: Path, pr_id: str,
     own only after setting up, and a TUI auto-start pass in that gap would
     start a second loop.
     """
-    _check_qa_launch(root, pr_id)
-    from pm_core.qa_loop import write_launch_record
+    from pm_core.qa_loop import drop_launch_record, write_launch_record
     loop_id = loop_id or secrets.token_hex(8)
-    write_launch_record(pr_id, loop_id, os.getpid())
     cmd = [sys.executable, "-m", "pm_core.wrapper",
            "pr", "qa-run-bg", pr_id, "--loop-id", loop_id]
-    # start_new_session detaches from the parent process group so the
-    # caller can exit while QA continues.
-    proc = subprocess.Popen(
-        cmd, cwd=str(root), start_new_session=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        _check_qa_launch(root, pr_id)
+        write_launch_record(pr_id, loop_id, os.getpid())
+        # start_new_session detaches from the parent process group so the
+        # caller can exit while QA continues.
+        proc = subprocess.Popen(
+            cmd, cwd=str(root), start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+    except BaseException:
+        # No driver: a record naming this exiting tick would read as a
+        # run starting (_qa_run_starting) until the claim expiry.
+        drop_launch_record(pr_id, loop_id)
+        raise
     write_launch_record(pr_id, loop_id, proc.pid)
 
 

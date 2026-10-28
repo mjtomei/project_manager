@@ -518,7 +518,8 @@ def _refresh_tech_tree(app) -> None:
 def _pending_auto_qa(app) -> dict:
     """PR id -> ``(stage, reason)`` of a review → QA hand-off waiting for
     project.yaml: stage "transition" (in_review → qa not written yet) or
-    "launch" (status is qa, the QA run did not start)."""
+    "launch" (status is qa, the QA run did not start); or stage "driven":
+    status is qa and another process drives a QA run of the PR."""
     pending = getattr(app, "_pending_auto_qa", None)
     if not isinstance(pending, dict):
         pending = {}
@@ -552,8 +553,9 @@ def _start_qa_after_review(app, pr_id: str) -> None:
         _log.info("auto_qa: pending QA hand-off for %s dropped (no longer "
                   "self-driving or in auto-start scope)", pr_id)
         return
-    if entry is not None and entry[0] == "launch":
-        result = _launch_qa_after_review(app, pr_id)
+    if entry is not None and entry[0] in ("launch", "driven"):
+        result = _launch_qa_after_review(
+            app, pr_id, after_driver=entry[0] == "driven")
     else:
         result = _maybe_start_qa(app, pr_id)
     if result is None:
@@ -563,6 +565,13 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     if pending.get(pr_id) != result:
         pending[pr_id] = result
         stage, reason = result
+        if stage == "driven":
+            _log.info("auto_qa: %s review passed; QA starts once %s ends",
+                      pr_id, reason)
+            app.log_message(escape(
+                f"Review PASS for {pr_id} — QA starts once {reason} ends"),
+                sticky=10)
+            return
         locked = reason == store.LOCK_BUSY_REASON
         _log.warning("auto_qa: %s review passed; QA %s waits until "
                      "project.yaml %s: %s", pr_id,
@@ -577,11 +586,15 @@ def _start_qa_after_review(app, pr_id: str) -> None:
             f"{reason}"), sticky=10)
 
 
-def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
+def _launch_qa_after_review(app, pr_id: str, *,
+                            after_driver: bool = False) -> tuple | None:
     """Start QA for a PR the hand-off already moved to qa.
 
-    ``("launch", reason)`` while project.yaml cannot be loaded, else None
-    (started, or no longer needed: the PR left qa or QA already runs).
+    ``("launch", reason)`` while project.yaml cannot be loaded,
+    ``("driven", reason)`` while another process drives a QA run of the
+    PR, else None (started, or no longer needed: the PR left qa or QA
+    already runs).  *after_driver*: such a run was seen earlier; a verdict
+    it recorded is this hand-off's QA result, not a reason to run QA again.
     """
     from pm_core.tui import qa_loop_ui
     try:
@@ -597,21 +610,29 @@ def _launch_qa_after_review(app, pr_id: str) -> tuple | None:
         return None
     # Another process drives a run of it (a ``pm qa run`` the user started,
     # a ``qa-run-bg`` driver): starting here would kill its windows as
-    # stale.  Auto-start takes the PR over once that run is over (S111).
+    # stale.  The hand-off stays pending and starts QA once that run is
+    # over (S111), also under zz t, which auto-start's re-check skips.
     # A start would have replaced an earlier run's recorded verdict, which
     # now reads as this review's QA result: the catch-up hand-off took a
-    # PASS from before the review to sign-off.  Drop it.
+    # PASS from before the review to sign-off.  Drop it, but not the live
+    # driver's own [running] entry and panes.
+    from pm_core import runtime_state as _rs
     from pm_core.qa_loop import run_driven_elsewhere
+    try:
+        qa_state = (_rs.get_action_state(pr_id, "qa") or {}).get("state")
+    except Exception:
+        qa_state = None
     if run_driven_elsewhere(pr_id):
-        _log.info("auto_qa: %s QA run is driven by another process, "
-                  "not starting", pr_id)
-        try:
-            from pm_core import runtime_state as _rs
-            _rs.set_action_state(pr_id, "qa", None)
-        except Exception:
-            _log.debug("runtime_state qa clear failed", exc_info=True)
-        from pm_core.tui import auto_start as _auto_start
-        _auto_start._recheck_after_driver(app)
+        if qa_state == "done":
+            try:
+                _rs.set_action_state(pr_id, "qa", None)
+            except Exception:
+                _log.debug("runtime_state qa clear failed", exc_info=True)
+        return ("driven", "the QA run another process drives")
+    if after_driver and qa_state == "done":
+        # That driver finished QA and recorded its verdict.
+        _log.info("auto_qa: %s QA run driven elsewhere ended with a "
+                  "verdict; not starting another", pr_id)
         return None
     if qa_loop_ui.start_qa(app, pr_id, lock_timeout=store.NO_WAIT) is False:
         try:

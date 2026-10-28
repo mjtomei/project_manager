@@ -906,6 +906,27 @@ class TestQaLaunchRecord:
             child.wait()
         assert not run_driven_elsewhere("pr-001")
 
+    @pytest.mark.parametrize("failing", ["check", "spawn"])
+    def test_launch_drops_its_record_when_no_driver_spawns(self, records,
+                                                           failing):
+        """A record naming the exiting tick would read as a run starting
+        (``_qa_run_starting``) until the launch claim expired."""
+        import click
+        from pm_core.cli import pr as pr_cli
+        from pm_core.qa_loop import write_launch_record
+        # The review-PASS tick wrote one before moving the PR to qa.
+        write_launch_record("pr-001", "abc", 1)
+        err = (click.ClickException("bad provider") if failing == "check"
+               else OSError("no exec"))
+        with patch.object(pr_cli, "_check_qa_launch",
+                          side_effect=err if failing == "check" else None), \
+             patch.object(pr_cli.subprocess, "Popen",
+                          side_effect=err if failing == "spawn" else None):
+            with pytest.raises(type(err)):
+                pr_cli._launch_qa_detached(Path("/tmp/x"), "pr-001",
+                                           loop_id="abc")
+        assert not (records / "pr-001-abc").exists()
+
     def test_driver_record_replaces_the_launch_record_only(self, records):
         import json, os
         from pm_core import qa_loop

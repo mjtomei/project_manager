@@ -377,20 +377,73 @@ class TestRunDrivenElsewhereRecheck:
 
     def test_review_pass_hand_off_leaves_the_run_alone(self, tmp_path,
                                                         driver):
-        from pm_core.tui import auto_start
         from pm_core.tui.review_loop_ui import _maybe_start_qa
         from pm_core import runtime_state
         app = self._app(tmp_path, "in_review")
         # An earlier QA run's PASS, from before this review.
         runtime_state.set_action_state("pr-001", "qa", "done", verdict="PASS")
         with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
-            assert _maybe_start_qa(app, "pr-001") is None
+            assert _maybe_start_qa(app, "pr-001")[0] == "driven"
         mock_start.assert_not_called()
         # It must not read as this review's QA result (sign-off catch-up).
         assert runtime_state.get_action_state("pr-001", "qa") == {}
         assert store.get_pr(store.load(app._root), "pr-001")["status"] == "qa"
-        assert app.set_timer.call_args.args[0] == \
-            auto_start.DRIVER_RECHECK_SECONDS
+
+    def _hand_off(self, app):
+        from pm_core.tui.review_loop_ui import (
+            _pending_auto_qa, _start_qa_after_review)
+        _start_qa_after_review(app, "pr-001")
+        return _pending_auto_qa(app)
+
+    def test_hand_off_keeps_a_live_drivers_running_entry(self, tmp_path,
+                                                         driver):
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        panes = {"s1": {"pane_id": "%1", "session_id": "x"}}
+        runtime_state.set_action_state("pr-001", "qa", "running",
+                                       panes=panes)
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+        mock_start.assert_not_called()
+        assert pending["pr-001"][0] == "driven"
+        rec = runtime_state.get_action_state("pr-001", "qa")
+        assert rec["state"] == "running" and rec["panes"] == panes
+
+    def test_zz_t_hand_off_starts_qa_once_the_cli_run_ends(self, tmp_path,
+                                                           driver):
+        """Auto-start off: only the pending hand-off can start full QA
+        after a ``pm qa run`` (no PR verdict) ends."""
+        app = self._app(tmp_path, "in_review")
+        app._auto_start = False
+        app._self_driving_qa = {"pr-001": {"required_passes": 1}}
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+            self._hand_off(app)  # a poll tick while the run lives
+            mock_start.assert_not_called()
+            assert pending["pr-001"][0] == "driven"
+            driver.kill()
+            driver.wait()
+            self._hand_off(app)
+        mock_start.assert_called_once()
+        assert "pr-001" not in pending
+
+    def test_hand_off_takes_the_drivers_verdict_as_its_qa(self, tmp_path,
+                                                          driver):
+        from pm_core import runtime_state
+        app = self._app(tmp_path, "in_review")
+        with patch("pm_core.tui.qa_loop_ui.start_qa") as mock_start:
+            pending = self._hand_off(app)
+            assert pending["pr-001"][0] == "driven"
+            # The qa-run-bg driver finishes and records its verdict.
+            runtime_state.set_action_state("pr-001", "qa", "done",
+                                           verdict="PASS")
+            driver.kill()
+            driver.wait()
+            self._hand_off(app)
+        mock_start.assert_not_called()
+        assert "pr-001" not in pending
+        assert runtime_state.get_action_state("pr-001", "qa")["verdict"] \
+            == "PASS"
 
 
 # ---------------------------------------------------------------------------
