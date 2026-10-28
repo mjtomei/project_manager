@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T14:05:49.656201+00:00'
+  updated_at: '2026-10-28T15:14:07.851781+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15616,6 +15616,28 @@ prs:
       line after the hold.'
     created_at: '2026-10-28T14:05:49Z'
     last_edited: '2026-10-28T14:05:49Z'
+  - id: note-dc54170
+    text: 'QA S90 (6672efdc, real rootless Podman 3.4.4, fake agents; evidence /pm-captures/scenarios/90/manifest.md):
+      NEEDS_WORK, 3 fixes pushed (full suite 5104 passed). (1) 51a3f8ea: two QA runs
+      in one TUI raced for the last slot. A dequeued s8 at 8 running; B, 2 s later
+      and before A s8 existed, also saw 8 and launched, so the runtime held 10 = L+1
+      for 86 s with no floor launch. Launch sizing and the reservation of the names
+      about to be created now run under one in-process admission lock, and headroom
+      counts reserved names the inventory lacks. The post-fix check (8 s podman-run
+      delay, 2 runs) peaked at L with 0 in-flight overlaps. (2) bc6cc349: _blind_launches
+      reset on resume, so a breadcrumb restart right after the outage floor worker
+      settled made a second floor launch (L2+2). A resumed poll now starts as if the
+      floor launch was made; the post-fix rerun peaked at L2+1. (3) 49c90ce2: the
+      renamed setup-timeout error said "(finish setup)" and dropped "within 30s".
+      Master 89e3c501 baseline: 5 QA leftovers after each run, and the incident reproduced
+      (timed out, then the retry reused 094daee9bf43 and the stub showed ONBOARDING).
+      HEAD: 0 leftovers, classified error, fresh retry configured. OPEN Then-wording:
+      after pm pr merge no reconcile[startup] line appears, because the startup pass
+      is skipped (silently, by design) while the merge''s detached reap --pr holds
+      reaper.lock, and passes are silent when they remove nothing. B''s run 1 finished
+      PASS before step 4, so B was re-run with z t.'
+    created_at: '2026-10-28T15:14:07Z'
+    last_edited: '2026-10-28T15:14:07Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
