@@ -15069,6 +15069,51 @@ prs:
       s sampler.'
     created_at: '2026-10-28T07:53:47Z'
     last_edited: '2026-10-28T07:53:47Z'
+  - id: note-c4b88dc
+    text: 'S80 refine (HEAD b2dd37d6, code 6cb6149c; trace, not run): S77 drivers
+      at /pm-captures/scenarios/77/drivers still fit, but /scratch/s77 is gone, so
+      retarget R/C and the hardcoded debug log name repo-17232364.log. Then-wording
+      traps: (1) unviewed PASS workers are released by the PER-POLL release as each
+      settles (reason qa-run-end); the run-end line can be "removed 0, kept 2 … (kept
+      sV viewed, sI INPUT_REQUIRED)" in scenario order, so count earlier removal lines
+      plus a kept-naming run-end line as the partial release. (2) The deferral names
+      kept workers only in the debug line "released containers: container cleanup
+      unavailable: … (kept …)"; the TUI QA complete line carries "[container cleanup
+      deferred: … — retry with pm container reap]". (3) The retry runs on the 15/30/60
+      s slots after the deferral, so "within seconds of clear" needs the 60 s fault
+      to end just before a slot. Re-running pm fake-claude config set resets the fake
+      cursor, so it counts as the fresh script for story 2. The second run needs z
+      t.'
+    created_at: '2026-10-28T06:04:50Z'
+    last_edited: '2026-10-28T06:04:50Z'
+  - id: note-373c320
+    text: 'QA S80 PASS (b2dd37d6 = code 6cb6149c; real rootless Podman 3.4.4, unmodified
+      build-base, fake agents, S77 drivers retargeted; evidence /pm-captures/scenarios/80/manifest.md).
+      S1 (IR s5, V s2): verify-pass disabled logged, no finalize skip, QA complete
+      INPUT_REQUIRED [finalize: FINALIZE_DONE]; per-poll removals of s1/s3/s4/s6;
+      run end "removed 0, kept 2 (kept s2 viewed, s5 INPUT_REQUIRED)"; dry-run keep
+      2 live panes; reap removed both + proxy; status clean. S2 (IR s12, V1 s7, V2
+      s10, L s11, 60 s fault): deferred "(kept s7 viewed, s10 viewed, s12 INPUT_REQUIRED)";
+      15 s retry inside fault already dropped s7; first slot after clear (+30.6 s)
+      removed s7+s11, kept s10/s12, "deferred container release retried"; no periodic/manual
+      pass, TUI PID constant, snapshots identical. Fixture note: the debug log is
+      ~/.pm/debug/<tag>.log where tag already starts with repo-.'
+    created_at: '2026-10-28T06:28:24Z'
+    last_edited: '2026-10-28T06:28:24Z'
+  - id: note-8428ec4
+    text: 'QA S80 follow-up (re-evaluation): added cli-recording.md captures. Reran
+      both stories in the same fixture with every pm container command recorded under
+      asciinema in a window of the session: /pm-captures/scenarios/80/rerun/cli/01..05
+      (cast+mp4+manifest). Rerun held again: dry-run keep 2 live panes rc 0; reap
+      removed both + proxy; status 3 min after the retry shows Last cleanup (qa-run-end)
+      removed 2, kept 2 with no failure sections; deferred retry 5 s after the clear
+      removed V1+L and kept V2+IR. Timing note: when V2 settles one poll after L during
+      the fault, the V2 per-poll line reads "container cleanup unavailable … (kept
+      sV2 viewed)" because that poll re-attempts L outstanding release (faulted ps).
+      The line is accurate; it is not the Then wording "none (kept sV2 viewed)", which
+      needs V2 and L to settle in the same poll.'
+    created_at: '2026-10-28T06:49:24Z'
+    last_edited: '2026-10-28T06:49:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
