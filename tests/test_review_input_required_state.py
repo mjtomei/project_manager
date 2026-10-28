@@ -73,6 +73,11 @@ class Pane:
         time.sleep(0.01)
         self._rec({"type": "user", "message": {"role": "user", "content": text}})
 
+    def harness(self, text: str) -> None:
+        """The harness injects a ``type: "user"`` record (not a human)."""
+        time.sleep(0.01)
+        self._rec({"type": "user", "message": {"role": "user", "content": text}})
+
     def say(self, text: str) -> None:
         self._rec({"type": "assistant", "message": {
             "role": "assistant", "content": [{"type": "text", "text": text}]}})
@@ -179,6 +184,32 @@ class TestHumanPromptRecord:
     def test_assistant_is_not_an_answer(self):
         assert not is_human_prompt_record(
             {"type": "assistant", "message": {"content": "yes"}})
+
+    def test_harness_records_are_not_answers(self):
+        """Claude Code and pm's own loops write ``type: "user"`` records that
+        are not human input.  Counting one would clear a wait nobody
+        answered."""
+        for text in (
+            "<system-reminder>\nThe user opened the file a.py.\n</system-reminder>",
+            "<system-reminder>\nNotice one.\n</system-reminder>\n"
+            "<system-reminder>\nNotice two.\n</system-reminder>",
+            "<task-notification>\n<task-id>t1</task-id>\n</task-notification>",
+            "# /loop tick\ncontinue",
+            "# Autonomous loop check",
+            "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]",
+            "[Request interrupted by user]",
+            "[Request interrupted by user for tool use]",
+            "Reminder: your verdict must appear alone on its line",
+            "<<autonomous-loop>>",
+            "   ",
+        ):
+            assert not is_human_prompt_record(
+                {"type": "user", "message": {"content": text}}), text
+
+    def test_prompt_with_appended_reminder_is_an_answer(self):
+        """A real answer carrying a reminder is still the human's answer."""
+        assert is_human_prompt_record({"type": "user", "message": {"content": (
+            "use option A\n\n<system-reminder>ide notice</system-reminder>")}})
 
 
 class TestHumanResponseWatch:
@@ -342,6 +373,43 @@ class TestLiveFlow:
             _until(lambda: state.input_required, what="prose question waits")
             panes[1].user("yes, both")
             _until(lambda: not state.input_required)
+            panes[1].verdict("PASS")
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_harness_record_does_not_answer_the_question(self, env):
+        """A system reminder / task notification / loop tick is a
+        ``type: "user"`` record but not a human answer: the wait must stay."""
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        t, mock, p = _start(state, tdir, {1: it1})
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            for text in (
+                "<system-reminder>\nThe user opened the file a.py.\n"
+                "</system-reminder>",
+                "<task-notification>\n<task-id>t1</task-id>\n</task-notification>",
+                "# /loop tick\ncontinue",
+                "[Request interrupted by user]",
+            ):
+                panes[1].harness(text)
+            time.sleep(0.3)
+            assert state.input_required, "harness record cleared the wait"
+            assert _status(state)[:2] == (
+                "waiting", "review INPUT_REQUIRED (iteration 1)")
+            assert mock.call_count == 1
+
+            panes[1].user("option A")
+            _until(lambda: not state.input_required, what="real answer clears")
             panes[1].verdict("PASS")
             t.join(5)
             assert state.latest_verdict == "PASS"

@@ -71,10 +71,17 @@ R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
 R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     with `"type":"user"` whose `message.content` is a string or contains a
     non-`tool_result` block, and which is not `isMeta`, `isSidechain`,
-    `isCompactSummary`, or a local slash-command echo (`<command-name>`,
-    `<local-command-stdout>`).  Tool results and assistant output never count, so
-    arbitrary tool output is never treated as an answer.  Detection is driven by the
-    transcript and hook events, with no timer.
+    `isCompactSummary`, a local slash-command echo (`<command-name>`,
+    `<local-command-stdout>`), or a harness-generated record — `<system-reminder>`
+    blocks (stripped; a record that is *only* reminders is not a prompt),
+    `<task-notification>`, `/loop` and autonomous-loop ticks, scheduled prompt
+    firings, the `[Request interrupted by user…]` marker, and qa_loop's verdict
+    nudge.  Tool results and assistant output never count, so arbitrary tool
+    output is never treated as an answer, and a harness notice can never clear a
+    wait nobody answered.  (Hardened in review i1: these record shapes are real —
+    master's `_user_record_is_non_task` and its scenario replays show them —
+    and counting one as an answer is the same false-state class this PR fixes.)
+    Detection is driven by the transcript and hook events, with no timer.
 
 R5. **Repeated genuine INPUT_REQUIRED stays visible.**  When an idle follow-up
     turn ends INPUT_REQUIRED *after* a human response, the loop records it
@@ -158,3 +165,9 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   (Added in review i3.)
 - Transcript symlink slug mismatch: the response watch resolves the path with the
   same session-id fallback as `_read_transcript_text`.
+- Master overlap (added in review i1): current `origin/master` already grew
+  `verdict_transcript.find_verdict_turn` / `_user_record_is_non_task` (task-scoped
+  verdict scan + "is this a real human prompt" predicate) while this branch was
+  based on an older master.  The Python files still auto-merge, but at sign-off
+  the local `is_human_prompt_record` non-task list and the latest-turn verdict
+  reads should be reconciled onto those helpers rather than kept in parallel.
