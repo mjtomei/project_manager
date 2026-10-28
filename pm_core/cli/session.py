@@ -721,12 +721,15 @@ def session_list():
         click.echo("No pm sessions found.")
         return
 
-    click.echo(f"{'SESSION':<40} {'CLIENTS':>7}  SOCKET")
+    # Session names are repo-name + hash, so they can be long; size the
+    # column to the data instead of truncating/misaligning.
+    width = max(len("SESSION"), *(len(r["name"]) for r in rows))
+    click.echo(f"{'SESSION':<{width}} {'CLIENTS':>7}  SOCKET")
     for row in rows:
         sock = row["socket"] or "(default server)"
         if row.get("shared"):
             sock += "  (shared)"
-        click.echo(f"{row['name']:<40} {row['attached']:>7}  {sock}")
+        click.echo(f"{row['name']:<{width}} {row['attached']:>7}  {sock}")
 
 
 @session.command("kill")

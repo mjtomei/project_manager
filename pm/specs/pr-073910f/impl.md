@@ -405,3 +405,33 @@ New tests: `find_session_server` (private wins / explicit default / missing
 / non-pm names never map to a pm socket), `pm session kill` targeting the
 private socket, the legacy default socket, and the not-found stale-socket
 cleanup, plus the `_find_tui_pane` env-restoration case.
+
+## Review iteration (2026-10-28, review-loop b972 i4)
+
+Verification pass over the whole change set plus test-coverage gaps; no
+requirement changes.
+
+1. **The grouped-session detach path had no integration coverage.**  The
+   existing disposable-server test attaches its client to the *base*
+   session, but `pm session` always attaches to a grouped session
+   (`base~N`), so the production shape (TUI pane in the base session,
+   client attached to `~1`) was only covered by a mock.  New
+   `test_detach_targets_client_of_grouped_session` builds a real
+   base + `~1` pair on a disposable socket, attaches a real client to
+   `~1`, and asserts `detach_current_client()` removes that client while
+   leaving both sessions alive.  Verified manually first; it passes.
+2. **`pm session --print-connect`, `pm session list` and the TUI connect
+   screen had no tests** (R3.1 / R3.3 / implicit requirement).  Added
+   `TestPrintConnect` (private socket command vs. legacy plain attach),
+   `TestSessionListCommand` (header, private row, `(default server)`,
+   `(shared)` marker, empty listing) and `TestShowConnect` (socket
+   command, legacy plain attach, no-session message).
+3. **`pm session list` column width is computed from the data** instead of
+   a fixed 40 columns, so long session names no longer misalign the
+   client count and socket.
+4. Removed a dead `try/except (OSError, ValueError)` around a `Path`
+   comparison in `socket_path_from_tmux_env` (a `$TMUX` value cannot
+   contain a NUL byte) and corrected the `ConnectScreen` docstring, which
+   still said "for shared sessions".
+
+Full suite: 4139 passed / 1 skipped.

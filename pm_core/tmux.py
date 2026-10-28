@@ -51,10 +51,7 @@ def socket_path_from_tmux_env(environ: dict | None = None) -> str | None:
     if not path:
         return None
     from pm_core.paths import SHARED_SOCKET_DIR
-    try:
-        if Path(path).parent != SHARED_SOCKET_DIR:
-            return None
-    except (OSError, ValueError):
+    if Path(path).parent != SHARED_SOCKET_DIR:
         return None
     return path
 

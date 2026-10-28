@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-28T22:56:39.224457+00:00'
+  updated_at: '2026-10-28T23:41:33.810431+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4471,6 +4471,32 @@ prs:
       by design. (2026-10-28T23:00:00Z)'
     created_at: '2026-10-28T22:56:39Z'
     last_edited: '2026-10-28T22:56:39Z'
+  - id: note-49fe6f3
+    text: 'Review loop b972 i4 (no requirement changes; full suite 4139 passed / 1
+      skipped). Verification pass over the whole change set plus the test gaps it
+      left: (1) the grouped-session detach path had no integration coverage — the
+      existing disposable-server test attaches its client to the base session, but
+      pm session always attaches to base~N, so the production shape was mock-only;
+      new test_detach_targets_client_of_grouped_session builds a real base + ~1 pair,
+      attaches a real client to ~1 and asserts detach_current_client() removes it
+      while both sessions stay alive (verified manually on a disposable socket first).
+      (2) pm session --print-connect, pm session list and the TUI connect screen had
+      no tests; added TestPrintConnect (private socket command vs legacy plain attach),
+      TestSessionListCommand (header, private row, (default server), (shared) marker,
+      empty listing) and TestShowConnect (socket command, legacy plain attach, no-session
+      message). (3) pm session list sizes its name column from the data instead of
+      a fixed 40. (4) removed a dead try/except around a Path comparison in socket_path_from_tmux_env
+      and corrected the ConnectScreen docstring, which still said "for shared sessions".
+      Residual non-blocking notes for signoff/QA: pane IDs (%N) are no longer globally
+      unique now that each session has its own server, but every consumer resolves
+      a pane together with its session and PM_TMUX_SOCKET (verified for pm tui send/view,
+      _find_tui_pane, qa_status, pane_registry); detach_current_client() step 4 still
+      falls back to detach-client -s <session> when the pane window is not what any
+      client views — per spec ambiguity 5, and unreachable from Ctrl-Q in practice
+      since quit_app is bound only in the main TUI; the /tmp/pm-sessions literal remains
+      duplicated in wrapper._mark_tmux_socket and qa_status._tmux_argv by design.'
+    created_at: '2026-10-28T23:41:33Z'
+    last_edited: '2026-10-28T23:41:33Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

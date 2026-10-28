@@ -98,7 +98,7 @@ class MergeLockScreen(ModalScreen):
 
 
 class ConnectScreen(ModalScreen):
-    """Modal popup showing the tmux connect command for shared sessions."""
+    """Modal popup showing the tmux connect command for this pm session."""
 
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),

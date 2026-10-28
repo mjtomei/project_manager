@@ -711,6 +711,120 @@ class TestTuiQuitRestart:
 
 
 # ---------------------------------------------------------------------------
+# CLI: `pm session --print-connect`
+# ---------------------------------------------------------------------------
+
+class TestPrintConnect:
+    def _invoke(self, monkeypatch, tmp_path, hosting):
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod, "_resolve_start_session_name",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: hosting)
+        return CliRunner().invoke(session_mod.session, ["--print-connect"])
+
+    def test_private_session_prints_socket_command(self, monkeypatch,
+                                                   tmp_path):
+        sock = str(tmp_path / "pm-repo-abc")
+        result = self._invoke(monkeypatch, tmp_path, (sock, True))
+
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == f"tmux -S {sock} attach"
+
+    def test_legacy_session_prints_plain_attach(self, monkeypatch, tmp_path):
+        default = str(paths.default_socket_path())
+        result = self._invoke(monkeypatch, tmp_path, (default, False))
+
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "tmux attach -t pm-repo-abc"
+
+
+# ---------------------------------------------------------------------------
+# CLI: `pm session list`
+# ---------------------------------------------------------------------------
+
+class TestSessionListCommand:
+    def _invoke(self, monkeypatch, rows):
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod, "list_pm_sessions",
+                            lambda: rows)
+        return CliRunner().invoke(session_mod.session, ["list"])
+
+    def test_renders_private_legacy_and_shared_rows(self, monkeypatch):
+        result = self._invoke(monkeypatch, [
+            {"name": "pm-a", "socket": "/tmp/pm-sessions/pm-a",
+             "attached": 2, "shared": False},
+            {"name": "pm-legacy", "socket": None, "attached": 1,
+             "shared": False},
+            {"name": "pm-shared", "socket": "/tmp/pm-sessions/pm-shared",
+             "attached": 0, "shared": True},
+        ])
+
+        assert result.exit_code == 0, result.output
+        lines = result.output.splitlines()
+        assert lines[0].split() == ["SESSION", "CLIENTS", "SOCKET"]
+        assert "/tmp/pm-sessions/pm-a" in lines[1]
+        assert "(default server)" in lines[2]
+        assert "(shared)" in lines[3]
+
+    def test_empty_listing(self, monkeypatch):
+        result = self._invoke(monkeypatch, [])
+
+        assert result.exit_code == 0, result.output
+        assert "No pm sessions found." in result.output
+
+
+# ---------------------------------------------------------------------------
+# TUI: the connect screen names this session's server
+# ---------------------------------------------------------------------------
+
+class TestShowConnect:
+    def test_private_session_shows_socket_command(self, monkeypatch):
+        from pm_core.tui import pane_ops
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        app = MagicMock()
+        app._session_name = "pm-x"
+
+        pane_ops.show_connect(app)
+
+        screen = app.push_screen.call_args[0][0]
+        assert screen._command == "tmux -S /tmp/pm-sessions/pm-x attach"
+
+    def test_legacy_session_shows_plain_attach(self, monkeypatch, tmp_path):
+        from pm_core.tui import pane_ops
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(pane_ops.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        app = MagicMock()
+        app._session_name = "pm-x"
+
+        pane_ops.show_connect(app)
+
+        screen = app.push_screen.call_args[0][0]
+        assert screen._command == "tmux attach -t pm-x"
+
+    def test_no_session_reports_instead_of_a_command(self, monkeypatch):
+        from pm_core.tui import pane_ops
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        app = MagicMock()
+        app._session_name = None
+
+        pane_ops.show_connect(app)
+
+        app.push_screen.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Integration: disposable servers
 # ---------------------------------------------------------------------------
 
@@ -838,6 +952,40 @@ class TestServerIsolationIntegration:
         finally:
             _close(proc_a, sock_a)
             _close(proc_b, sock_b)
+
+    def test_detach_targets_client_of_grouped_session(self, short_sock_dir,
+                                                      monkeypatch):
+        """The production shape: TUI in the base session, client on ``~1``.
+
+        ``pm session`` always attaches to a grouped session, so the client
+        the TUI must detach is attached to ``base~N``, not to the base
+        session the TUI pane belongs to.
+        """
+        if not subprocess.run(["which", "script"],
+                              capture_output=True).returncode == 0:
+            pytest.skip("`script` not available for attaching a client")
+
+        sock = short_sock_dir / "g.sock"
+        base = _make_server(sock, "pm-iso-g")
+        r = _tmux(sock, "new-session", "-d", "-t", base, "-s", f"{base}~1")
+        assert r.returncode == 0, r.stderr
+        proc, _ = _attach_client(sock, f"{base}~1")
+        try:
+            pane = _tmux_out(sock, "list-panes", "-t", base,
+                             "-F", "#{pane_id}").split()[0]
+            monkeypatch.setenv("PM_TMUX_SOCKET", str(sock))
+            monkeypatch.setenv("TMUX_PANE", pane)
+
+            assert tmux.detach_current_client() is True
+
+            # The grouped client is gone; both sessions still exist.
+            assert _tmux(sock, "list-clients", "-F", "#{client_tty}"
+                         ).stdout.strip() == ""
+            assert _tmux(sock, "has-session", "-t", base).returncode == 0
+            assert _tmux(sock, "has-session",
+                         "-t", f"{base}~1").returncode == 0
+        finally:
+            _close(proc, sock)
 
     def test_hooks_are_per_server(self, short_sock_dir):
         sock_a = short_sock_dir / "a.sock"
