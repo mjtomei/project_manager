@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T13:41:59.088961+00:00'
+  updated_at: '2026-10-28T13:43:44.046086+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16780,6 +16780,46 @@ prs:
       No production defect found; no code changed.'
     created_at: '2026-10-28T13:41:59Z'
     last_edited: '2026-10-28T13:41:59Z'
+  - id: note-c734b85
+    text: 'QA scenario 18 (capability gaps / foreign processes / corrupt pidfiles)
+      PASS 2026-10-28 on merged build 3b00af91 — all six stories matched their exact
+      wording, no traceback anywhere, and no process was harmed. Captures: /pm-captures/scenarios/18/story{1..6}-*.
+      (1) caps:["sigusr1"] -> autostart add exits 2 "does not advertise the command-queue
+      capability; restart the TUI (Ctrl+R) to use it.", queue 0 bytes, TUI/pidfile
+      untouched; pm pr add "Reload probe" still exits 0 and the board reloaded in
+      the same second (log "action: reload (state only)", frames 3 PRs) with no keypress.
+      (2) caps:[] -> autostart list exits 2 "has not advertised its signal handlers
+      yet; if it is still starting up, try again in a moment, otherwise restart the
+      TUI (Ctrl+R).", pidfile kept (149 bytes, caps:[]), TUI alive; restoring both
+      caps -> exit 0 "Auto-start: off / No auto-start targets.". (3) foreign `sleep
+      300` descriptor with no starttime -> reload path creates the PR (exit 0) and
+      removes the stale pidfile; command-queue path exits 2 "is not available (pid
+      belongs to a different program); restart the TUI." and also removes it; sleep
+      never signalled; then startup claim took the foreign descriptor over (new TUI
+      3171, both caps) with no traceback. (4) four junk shapes (binary \xff\xfe\0garbage,
+      " \n\t", 99999999999999999999999999, "banana") through the real picker -> each
+      shows "The TUI pidfile for session <S> is unreadable; restart the TUI." and
+      the file is removed; a fresh pm session then took a binary junk file over (pid
+      3602). (5) zero-length pidfile -> picker shows "has not finished starting up;
+      try again in a moment, otherwise restart the TUI (Ctrl+R)." and KEEPS the 0-byte
+      file; a fresh pm session claimed it (pid 3910) and pm autostart list then exits
+      0. (6) run as uid 1000; pidfile naming a root-owned `python3 ... pm _tui` ->
+      picker shows "Could not signal the TUI for session <S> (permission denied).",
+      pidfile kept, root process untouched. Supporting: pytest -q tests/test_tui_pidfile.py
+      -> 130 passed. Mechanics for the next run: (a) the reload path resolves its
+      target from the tmux context, so CLI commands MUST run in a window of the pm
+      session — running them on a separate tmux socket (or the harness shell) silently
+      skips the reload and looks like a failure; (b) the numbered picker fallback
+      needs `t` then Enter to submit and a further Enter to dismiss "Press q/Esc/Enter
+      to close...", so a driver loop must pace three sends per variant; (c) after
+      a kill -9 of the TUI, `pm session` reuses the dead window slot and the TUI pane
+      gets a new %id — resolve it with `pm tui view` (header "Pane: %N") rather than
+      assuming $S:0; (d) capture-pane on a window that has never been active returns
+      blank in tmux 3.2a — select-window first; (e) agg is not preinstalled: the raw
+      aarch64 v1.9.0 release binary works (installed to /usr/local/bin/agg); (f) the
+      venv needs `pip install "pytest<9"` to run the PR tests.'
+    created_at: '2026-10-28T13:43:43Z'
+    last_edited: '2026-10-28T13:43:43Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
