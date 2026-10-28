@@ -34791,11 +34791,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T16:09:51.542797+00:00'
-  updated_at: '2026-10-22T16:09:51.542797+00:00'
+  updated_at: '2026-10-28T08:38:31.390723+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-bdf9ea2
+    text: 'QA S121 (pr-592e4bd, 2026-10-28): same root cause from a non-repo cwd.
+      `cd /tmp && pm session home` inside any pm view (pm-<tag>~1, or a grouped view
+      such as myview) prints "Home window: pm-home (provider: pr-list)" rc 0, but
+      the new pm-home pane starts in /tmp (pane_start_command `python3 -m pm_core.home_window.pr_list
+      --session pm-<tag>`, pane_current_path /tmp) and shows only "pm pr list (home):
+      error loading project: No project.yaml found". Resolving the session pm_root
+      for the window cwd would fix both. Captures: /pm-captures/scenarios/121/post-fix/s4/pm-home-pane.txt.'
+    created_at: '2026-10-28T08:38:31Z'
+    last_edited: '2026-10-28T08:38:31Z'
 - id: pr-8700be3
   plan: improvements
   title: Improve autostart status readability with compact text and highlighted human
@@ -35051,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T07:47:14.699840+00:00'
+  updated_at: '2026-10-28T08:41:23.371648+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38777,6 +38787,38 @@ prs:
       advanced: qa after CONT.'
     created_at: '2026-10-28T06:38:30Z'
     last_edited: '2026-10-28T06:38:30Z'
+  - id: note-b3afceb
+    text: 'S121 refine (2026-10-28, HEAD 9a9633b4): C-b P / C-b M from a client on
+      a grouped view NOT named <base>~N (e.g. tmux new-session -t pm-<tag> -s myview)
+      prints "Not a pm session." on a fresh HEAD session: _popup-picker/_popup-cmd
+      check ~/.pm/pane-registry/<view>.json (base_session_name only strips ~N); 91b259bd
+      fixed the TUI + _get_current_pm_session but not the popup registry check. S118
+      post-fix pickers only worked because the pre-fix TUI had written v118.json.
+      pm session home from a myview pane in /tmp is a clean CLI discriminator (HEAD
+      rc0, dd00f754 "Not inside a pm tmux session." rc1).'
+    created_at: '2026-10-28T08:07:08Z'
+    last_edited: '2026-10-28T08:07:08Z'
+  - id: note-d2c70e2
+    text: 'QA S121 (2026-10-28, host, all fake-claude, HEAD 9a9633b4 vs control dd00f754
+      vs post-fix, real outer clients c1=~1 c2=myview c3=~2; captures /pm-captures/scenarios/121,
+      REPORT.md, 9 mp4): CODE CHANGE 89d914a0 + c1027cd6 need normal re-review. 91b259bd
+      held live: restart from myview keeps tui-pm-<tag>.pid, autostart add/remove
+      rc 0 (control: tui-myview.pid, owner_timeout rc 2), pm session home from a myview
+      /tmp shell rc 0 (control rc 1), ticks/pm qa run from view panes record session_tag
+      <tag>. Gaps fixed: (1) _popup-picker/_popup-cmd used the view name for the registry
+      and root: myview C-b P in qa-<pr> read the PR clone project.yaml (status pending);
+      "Not a pm session." did not show only because the after-split-window hook (_pane-opened
+      "#{session_name}") had written a stray pane-registry/myview.json and skipped
+      the pm registry. New pane_registry.pm_session_name resolves via session_group
+      for popups, _pane-opened, _window-resized. (2) TUI-mount sweep cleared the qa
+      running entry of a run a qa-run-bg driver drives; [working] lost until verdict
+      (also control, S118); now kept when run_driven_elsewhere. (3) attached_group_active_windows
+      matched only base/base~N: no ● for myview; now matches session_group. Not reachable
+      as specced: autostart moved B to sign_off on its tick QA PASS, so no auto_start
+      QA check for B ran during the pm qa run (line seen for A and for B tick run).
+      Incidental: pm session home from /tmp makes a broken pm-home (note on pr-3f52b15).'
+    created_at: '2026-10-28T08:41:23Z'
+    last_edited: '2026-10-28T08:41:23Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
