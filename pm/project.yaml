@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T09:05:47.360457+00:00'
+  updated_at: '2026-10-28T09:15:01.326693+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37486,6 +37486,26 @@ prs:
       leaves the file untouched, and prints no `Integration check failed:` line.'
     created_at: '2026-10-28T09:05:47Z'
     last_edited: '2026-10-28T09:05:47Z'
+  - id: note-2fbbd3c
+    text: 'QA S35 (apply guards / dirty workdir / carried base assessment): PASS at
+      67abef57, no code change. All five stories held live on throwaway local-backend
+      projects. Harness facts for the next run: (1) `pm pr signoff <pr>` is gated
+      on tmux_mod.in_tmux(), so it MUST be run from the project''s tmux `qa` pane
+      — from the agent''s own shell it prints "Sign-off window requires tmux." and
+      never opens a window. (2) asciinema can be run directly in that qa pane (it
+      has a TTY), which keeps pm''s tmux requirement satisfied; no separate -L scaffold
+      needed. (3) agg is not installed: download https://github.com/asciinema/agg/releases/download/v1.4.3/agg-aarch64-unknown-linux-gnu
+      — it is a bare ELF, not a tarball — and chmod +x. (4) Prompt capture works with
+      `pm fake-claude config clear --tag <tag>` plus a `sleep 120` claude stub on
+      BOTH the tmux server (-g) and session PATH; pm''s real wrapper writes pm/prompts/pm_prompt_*.txt
+      before exec''ing the stub. (5) Inside a qa pane `pm qa captures-path` resolves
+      under a BASH_ENV-redirected HOME (a scratchpad path), not the session''s real
+      captures dir — writes and reads stay consistent within the pane, so report.html
+      still works. (6) Story 5 needs a CLEAN base: skip the base-record/branch-record
+      divergence, else the check reports a resolved conflict instead of "merges cleanly".
+      Captures: /pm-captures/scenarios/35/.'
+    created_at: '2026-10-28T09:15:01Z'
+    last_edited: '2026-10-28T09:15:01Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
