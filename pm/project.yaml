@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T00:26:49.294289+00:00'
+  updated_at: '2026-10-28T03:01:52.498953+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37277,6 +37277,38 @@ prs:
       is set in this sandbox; the test passes with it unset).'
     created_at: '2026-10-28T00:26:49Z'
     last_edited: '2026-10-28T00:26:49Z'
+  - id: note-ae41dc7
+    text: 'review-loop 4440 i1: fixed a duplicate note id in `pm pr note add`/`note
+      edit` (the id is derived from the text, so adding the same text twice — or editing
+      a note to a sibling''s text — reused the id; the new resolver refuses a project.yaml
+      with a repeated id, so pm''s own note command could make a metadata conflict
+      unresolvable; ids are now generated inside the locked update from the fresh
+      note list, and the editor watcher seeds its id set from every stored note).
+      Also `pm pr show` now prints the base the approval was bound to (`Approved base:
+      <branch>@<sha>`) beside the approved head, so the decision is auditable without
+      hand-parsing project.yaml. Spec R9 updated.'
+    created_at: '2026-10-28T02:33:40Z'
+    last_edited: '2026-10-28T02:33:40Z'
+  - id: note-35541ab
+    text: 'review-loop 4440 i1 (source fixes): (1) `prepare` no longer records the
+      loser stale `resolved` check when a lost HEAD race re-checks a *non-mergeable*
+      revision — it records the revision the branch now has (a new conflict outside
+      project.yaml, or a failed check), unless that revision already has a stored
+      record (a concurrent apply winner, which a transient failure must not overwrite).
+      (2) `_prepare_bounce` only sets `resolution.applied_merge_sha` when the resolution
+      was not already applied: a CLEAN record carrying an earlier applied resolution
+      (a newer base merged by a bounce) keeps the merge that actually applied it,
+      so `resolved_from` and the recorded merge agree (the digest is unchanged too).
+      (3) `_merge_bookkeeping_ts` requires two real strings (a `null`/unset timestamp
+      and a malformed mapping/list keep the normal conflict rule) and the bookkeeping/UI-cursor
+      rules now run before the structural mapping/list merges, so a malformed mapping
+      is refused instead of deep-merged. (4) `approval_justification_problem` refuses
+      a report whose `pm-signoff-base` names another base (when the tag is present)
+      — a reuse statement about the old base is not evidence for the new one; the
+      manual record path already checked it, the driver and merge gate now agree.
+      5 new tests, each failing on the pre-fix code.'
+    created_at: '2026-10-28T03:01:52Z'
+    last_edited: '2026-10-28T03:01:52Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

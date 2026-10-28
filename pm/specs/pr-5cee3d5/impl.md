@@ -59,9 +59,13 @@ theirs_text)`:
   change `updated_at` to different values on the real #250 note-add path. The
   resolver takes the later value for `created_at`, `updated_at`,
   `last_edited`, `started_at`, `reviewed_at`, `signed_off_at` and `merged_at`
-  (non-string values keep the normal conflict rule) and the preservation
-  check does not count the earlier timestamp as a lost change. Every other
-  field still conflicts when both sides changed it differently.
+  (non-string values — including a `null`/unset timestamp and a malformed
+  mapping/list — keep the normal conflict rule) and the preservation check
+  does not count the earlier timestamp as a lost change. Every other field
+  still conflicts when both sides changed it differently. The bookkeeping and
+  UI-cursor rules are settled *before* the structural mapping/list merges, so
+  a malformed mapping is refused like any other non-string value instead of
+  being deep-merged field by field.
 - **pm's own UI cursor is not a field conflict either.**
   `project.active_pr` is the TUI's selected PR: `pm_core.tui` persists it
   through the coalescing write queue on *every cursor move*, so any branch pm
@@ -257,9 +261,16 @@ published. So the sign-off launch
    HEAD race (`HEAD_MOVED`/`HEAD_MOVED_APPLYING`), `prepare` re-checks the
    revision the branch now has (against the same base) and records that
    instead, so the loser never writes its stale `resolved` check over the
-   winner's applied one. `_record_check` additionally refuses, inside the
-   locked read-modify-write, to write a check computed before HEAD moved when
-   the stored record already describes the branch's current revision
+   winner's applied one. A non-mergeable fresh result (a new conflict outside
+   `project.yaml`, or a failed check) is recorded too: it describes the
+   revision the branch actually has, whereas the loser's stale `resolved`
+   check describes a revision that no longer exists. The exception is a
+   revision that already has a stored record (a concurrent apply's): a
+   transient failure of the loser must not overwrite it — the fall-through
+   then drops the stale record in `_record_check`. `_record_check`
+   additionally refuses, inside the locked read-modify-write, to write a
+   check computed before HEAD moved when the stored record already describes
+   the branch's current revision
    (`_check_is_stale`, which resolves HEAD from the same fallback checkout as
    `_carry_forward`, so the container case is covered too) — the loser's
    record is then dropped, not written.
@@ -289,10 +300,16 @@ bounce is the first successful apply (sign-off launch could
 not touch a dirty workdir), the applied record is persisted on the PR
 (`up_to_date` at the merge commit, resolution bound) so a later check carries
 the provenance forward instead of dropping it — and with it the explicit
-reuse requirement. That write yields only to a concurrent record of a
-different revision, except for a bare up-to-date check of the merge it just
-made: that check describes the same revision but cannot know about the apply
-(it carried from a record without `applied_merge_sha`), so letting it stand
+reuse requirement. Only the merge that actually applied the resolution is
+named as `resolution.applied_merge_sha`: a `CLEAN` record can carry an
+earlier applied resolution (`_carry_forward`), and this bounce's merge only
+brought in the newer base, so rewriting the pointer would make
+`resolved_from` (the pre-apply head/base) and the recorded merge disagree
+everywhere the applied merge is shown. That write yields only to a concurrent
+record of a different revision, except for a bare up-to-date check of the
+merge it just made: that check describes the same revision but cannot know
+about the apply (it carried from a record without `applied_merge_sha`), so
+letting it stand
 would silently drop the provenance. The return record (`build_return_record`,
 `format_signoff_return`) adds the resolution summary, `applied_merge_sha`,
 the original `resolved_from` revisions and the base's `base_behavior_error`
@@ -328,7 +345,10 @@ merged base commits as PR changes.
 - `prior_signoff` (previous record's sha/verdict/ts, if any),
 - `required_return_stage` (the verdict mapped to its stage),
 - agent-declared reuse from `report.html` meta tags (only trusted when the
-  report's `pm-signoff-head` matches the reviewed head):
+  report's `pm-signoff-head` matches the reviewed head, and — when the report
+  names one — its `pm-signoff-base` matches the check's base revision: a
+  statement made about another base is not evidence for this decision, and
+  the base's behaviour-relevant changes may differ):
   `pm-signoff-evidence` (`stage@sha,…`), `pm-signoff-evidence-reason`,
   `pm-signoff-checks`, `pm-signoff-candidate`.
 The block's `candidate_tree`/`resolved_from` come from the bound check or,
@@ -808,7 +828,23 @@ tests):
     round-trip (a right quote came back as a left one) into the stored notes.
     The notes merge dedupes by a *string* id only, so a
     hand-edited non-hashable id (a list/mapping) reads as unkeyed instead of
-    raising `TypeError` out of `merged.get`.
+    raising `TypeError` out of `merged.get`.  The note commands keep the ids
+    they write unique: `pm pr note add` / `edit` generate the id inside the
+    locked update from the *fresh* note list (an id derived from the text
+    alone would repeat when the same text is added twice, or when a note is
+    edited to a sibling's text), because a repeated id is exactly the
+    ambiguity the resolver refuses and `pm pr note edit` / `delete` can only
+    address one of the two notes.
+15. Race and provenance honesty: a lost apply race whose re-check at the
+    branch's current revision is *not* mergeable (a new conflict outside
+    `project.yaml`, a failed check) records that revision instead of the
+    loser's stale `resolved` check, while a record that already describes the
+    current revision (a concurrent apply's) is left alone; a clean bounce that
+    carries an earlier applied resolution keeps that resolution's
+    `applied_merge_sha` (it did not apply it) and its digest; a `null`
+    bookkeeping timestamp, a mapping-valued one, and a report whose
+    `pm-signoff-base` names another base are all refusals, not silent side
+    selections.
 
 ## Implicit requirements
 

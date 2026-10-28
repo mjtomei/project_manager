@@ -286,13 +286,15 @@ def _bookkeeping_ts(path: str) -> bool:
 
 
 def _merge_bookkeeping_ts(ours, theirs):
-    """The merged value of a bookkeeping timestamp, or ``_MISSING``."""
-    if not all(v is None or isinstance(v, str) for v in (ours, theirs)):
+    """The merged value of a bookkeeping timestamp, or ``_MISSING``.
+
+    Only two real timestamps merge (to the later one).  ``None`` is pm's own
+    "unset" value and anything else is malformed hand-edited state: the spec
+    keeps the normal conflict rule for a non-string value, so a null-vs-edit
+    (or a mapping/list) must not be silently resolved to one side.
+    """
+    if not (isinstance(ours, str) and isinstance(theirs, str)):
         return _MISSING
-    if ours is None:
-        return theirs
-    if theirs is None:
-        return ours
     return max(ours, theirs)      # ISO-8601 strings sort chronologically
 
 
@@ -450,6 +452,19 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
         return theirs, []
     if base is not _MISSING and theirs == base:
         return ours, []
+    # Bookkeeping timestamps and pm's UI cursor are scalar by nature, so they
+    # are settled before the structural merges: a malformed mapping/list value
+    # must be refused (or replaced) like any other non-string value, not
+    # deep-merged field by field.
+    if _bookkeeping_ts(path):
+        value = _merge_bookkeeping_ts(ours, theirs)
+        if value is not _MISSING:
+            return value, []
+        return None, [f"{path or '<root>'}: changed differently on both sides"]
+    if path in _UI_STATE_PATHS:
+        # Both sides moved pm's own UI cursor (see ``_UI_STATE_PATHS``): the
+        # new base's value is the shared state.
+        return theirs, []
     if isinstance(ours, dict) and isinstance(theirs, dict):
         if base is _MISSING:
             return None, [f"{path or '<root>'}: added on both sides with "
@@ -465,14 +480,6 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
         # The preservation check below proves neither side lost an entry.
         return _merge_id_list([] if base is _MISSING else base, ours, theirs,
                               path, actions)
-    if _bookkeeping_ts(path):
-        value = _merge_bookkeeping_ts(ours, theirs)
-        if value is not _MISSING:
-            return value, []
-    if path in _UI_STATE_PATHS:
-        # Both sides moved pm's own UI cursor (see ``_UI_STATE_PATHS``): the
-        # new base's value is the shared state.
-        return theirs, []
     return None, [f"{path or '<root>'}: changed differently on both sides"]
 
 
@@ -2115,11 +2122,22 @@ def prepare(root: Path, pr_id: str, *, data: dict | None = None) -> dict:
             if pr_now is not None:
                 current = run_check(fresh, pr_now, root,
                                     base_sha=record.get("base_sha"))
-                if (current.get("status") in MERGEABLE
-                        and current.get("head") != record.get("head")):
+                stored = _mapping(pr_now.get("integration"))
+                now_head = revision_of(current.get("head"))
+                # Record the revision the branch now has — including a
+                # non-mergeable result (a new conflict, a failed check): it is
+                # honest, and the loser's stale ``resolved`` check describes a
+                # revision that no longer exists (``_check_is_stale`` cannot
+                # drop it, because the stored record is that stale one).  A
+                # record that already describes this revision is the winner's:
+                # a transient failure of the loser must not overwrite it (the
+                # fall-through drops the stale record in ``_record_check``).
+                if now_head and now_head != record.get("head") and (
+                        current.get("status") in MERGEABLE
+                        or stored.get("head") != now_head):
                     _log.info("sign-off %s: HEAD moved during apply; recorded "
                               "%s at %s", pr_id, current.get("status"),
-                              (current.get("head") or "")[:8])
+                              now_head[:8])
                     return _record_check(root, pr_id, current)
         return _record_check(root, pr_id, record)
     previous = record

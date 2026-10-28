@@ -557,6 +557,18 @@ def approval_justification_problem(pr_id: str, integration: dict | None,
     if not head or not head.startswith(meta_head):
         return (f"report.html reviewed HEAD {meta_head[:12]}, but sign-off "
                 f"reviewed {(head or '?')[:12]}")
+    # The report names the base it assessed.  A statement made about another
+    # base is not evidence for this decision: the base moved, and its
+    # behaviour-relevant changes may differ.  A report that omits the tag is
+    # left to the head rule above (the manual record path requires it
+    # outright); one that carries an unusable or different value is refused.
+    meta_base = (meta.get("base") or "").strip()
+    check_base = integ.revision_of(rec.get("base_sha")) or ""
+    if meta_base and check_base:
+        if len(meta_base) < 7 or not check_base.startswith(meta_base):
+            return (f"report.html assessed base {meta_base[:12] or '?'}, but "
+                    f"the integration check is against "
+                    f"{(check_base or '?')[:12]}")
     if resolution:
         candidate = integ.revision_of(rec.get("candidate_tree")) or ""
         if not candidate:
@@ -1744,14 +1756,23 @@ def _prepare_bounce(root: Path, pr_id: str, verdict: str, hop: str,
             rec = dict(rec)
             resolution = dict(_resolution_of(rec))
             if resolution:
-                resolution["applied_merge_sha"] = merge_sha
-                # The record this bounce applied may be a fresh (unapplied)
-                # RESOLVED check, which carries no resolved_from yet; the next
-                # stage must still see the revisions the resolution combined.
-                resolution.setdefault("resolved_from", {
-                    "head": sha, "base_sha": rec.get("base_sha"),
-                    "merge_base": rec.get("merge_base"),
-                    "status": rec.get("status")})
+                if not integ.revision_of(resolution.get("applied_merge_sha")):
+                    # Only the merge that actually applied the resolution may
+                    # be named as such.  A ``CLEAN`` record can carry an
+                    # earlier applied resolution (``_carry_forward``); this
+                    # bounce's merge only brought in the newer base, so
+                    # rewriting the pointer would claim the resolution was
+                    # applied by it and make ``resolved_from`` (the pre-apply
+                    # head/base) and the recorded merge disagree.
+                    resolution["applied_merge_sha"] = merge_sha
+                    # The record this bounce applied may be a fresh (unapplied)
+                    # RESOLVED check, which carries no resolved_from yet; the
+                    # next stage must still see the revisions the resolution
+                    # combined.
+                    resolution.setdefault("resolved_from", {
+                        "head": sha, "base_sha": rec.get("base_sha"),
+                        "merge_base": rec.get("merge_base"),
+                        "status": rec.get("status")})
                 rec["resolution"] = resolution
             pr = dict(pr, integration=rec)
             if resolution:

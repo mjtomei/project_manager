@@ -571,6 +571,26 @@ def test_clean_base_behavior_change_requires_justification(w):
     assert signoff.merge_gate_refusal(pr_entry(w), head, "master") is None
 
 
+def test_a_reuse_statement_for_another_base_is_not_evidence(w):
+    """The statement must be about the base the approval binds to.
+
+    A report left over from an earlier base names that base; its evidence
+    statement says nothing about the behaviour-relevant changes the new base
+    brings, so it cannot justify a MERGE of the new candidate.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    # The report's reuse statement was written for another base revision.
+    write_report(w, rec, base="0" * 40)
+    problem = signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"])
+    assert problem and "base" in problem
+    # The report written for this base is still accepted.
+    write_report(w, rec)
+    assert signoff.approval_justification_problem(
+        PR, pr_entry(w)["integration"], rec["head"]) is None
+
+
 def test_a_targeted_checks_statement_satisfies_the_reuse_requirement(w):
     """The report may state targeted checks instead of reused evidence.
 
@@ -1145,6 +1165,42 @@ def test_prepare_records_the_recheck_once_with_the_resolution(w, monkeypatch):
     assert calls[-1]["resolution_digest"] == rec["resolution_digest"]
 
 
+def test_a_lost_apply_race_records_the_revision_the_branch_now_has(
+        w, monkeypatch):
+    """A concurrent commit that conflicts must not leave a stale ``resolved``.
+
+    The apply loses the HEAD race (``HEAD_MOVED``) and the revision the branch
+    now has does not merge cleanly: recording the loser's stale ``resolved``
+    check would describe a revision that no longer exists (``_check_is_stale``
+    cannot drop it, because the stored record *is* that stale one).  The fresh,
+    non-mergeable check is recorded instead.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    (w.base_pm / "shared.txt").write_text("base\n")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    base_sha = git(w.repo, "rev-parse", "HEAD")
+
+    def _concurrent_apply(root, pr_id, record=None, *, data=None):
+        # A concurrent commit lands on the branch between the check and the
+        # apply, and it conflicts with the base outside project.yaml.
+        commit(w.wd, "pm/shared.txt", "branch\n", "concurrent work")
+        return None, integration.HEAD_MOVED
+
+    monkeypatch.setattr(integration, "apply_integration", _concurrent_apply)
+    rec = integration.prepare(w.pm_dir, PR)
+    now_head = git(w.wd, "rev-parse", "HEAD")
+    assert rec["status"] == integration.CONFLICT, rec
+    assert rec["head"] == now_head
+    assert rec["base_sha"] == base_sha
+    stored = pr_entry(w)["integration"]
+    assert stored["status"] == integration.CONFLICT
+    assert stored["head"] == now_head
+
+
 def test_carry_forward_uses_the_checkout_the_check_used(w, monkeypatch):
     """A check from the current checkout (recorded workdir not visible) keeps
     the applied resolution instead of silently dropping its provenance."""
@@ -1683,6 +1739,43 @@ def test_base_range_starts_at_the_applied_base_after_a_newer_base_is_merged(w):
     assert "(1 file(s))" in text
 
 
+def test_a_clean_bounce_keeps_the_merge_that_applied_the_resolution(w):
+    """A later clean base merge does not claim it applied the resolution.
+
+    The ``CLEAN`` record carries the earlier applied resolution
+    (``_carry_forward``); the bounce's merge only brought in the newer base.
+    Rewriting ``applied_merge_sha`` would make ``resolved_from`` (the
+    pre-apply head/base) and the recorded merge disagree, and every surface
+    that names the applied merge would point at a merge the resolution is not
+    part of.
+    """
+    rec = _metadata_conflict(w)
+    applied = rec["resolution"]["applied_merge_sha"]
+    commit(w.repo, "base_only.txt", "base\n", "base moves ahead")
+    clean = integration.check_integration(w.pm_dir, PR)
+    assert clean["status"] == integration.CLEAN
+    # The clean record still names the merge that applied the resolution.
+    assert clean["resolution"]["applied_merge_sha"] == applied
+    digest = clean["resolution_digest"]
+
+    transcript = signoff.signoff_transcript(w.tdir, PR)
+    signoff.stamp_signoff_launch(transcript, clean["head"], clean["base_sha"])
+    res = signoff.step_signoff(
+        w.pm_dir, pr_entry(w), session="s", tdir=w.tdir,
+        read_verdict=lambda t, p: SIGNOFF_REVIEW,
+        window_pane=lambda s, p: "%1", retire=lambda *a: None)
+    assert res.hop == "review", res
+
+    stored = pr_entry(w)["integration"]
+    assert stored["head"] != applied          # the bounce merged the new base
+    assert stored["resolution"]["applied_merge_sha"] == applied
+    assert stored["resolution_digest"] == digest
+    assert integration.is_ancestor(w.wd, applied, stored["head"])
+    ret = pr_entry(w)["signoff_return"]
+    assert ret["applied"]["merge_sha"] == stored["head"]
+    assert ret["integration"]["resolution"]["applied_merge_sha"] == applied
+
+
 def test_the_post_apply_record_keeps_the_base_overlap_and_file_count(w):
     """The re-check after the apply sees no base diff — the prompt still shows
     which files both sides changed and how many the base touched.
@@ -2163,6 +2256,10 @@ def test_pr_show_prints_the_recorded_signoff_evidence(w):
     assert "## Sign-off" in r.output
     assert f"Verdict: {SIGNOFF_MERGE} (manual, " in r.output
     assert f"Approved head: {rec['head'][:12]}" in r.output
+    # The base the approval was bound to (the verdict binds to that candidate),
+    # not the current check's base.
+    assert (f"Approved base: {rec['base_branch']}@{rec['base_sha'][:12]}"
+            in r.output)
     assert f"Candidate tree: {rec['candidate_tree'][:12]}" in r.output
     # pm does not invent a review revision it cannot confirm.
     assert "pm does not record the revision the review ran on" in r.output
@@ -2190,8 +2287,8 @@ def test_pr_show_prints_the_recorded_signoff_evidence(w):
     assert "Verdict: SIGNOFF_MERGE" in r.output
     # The malformed members contribute nothing (the integration section above
     # still prints its own candidate tree, so it is not in this list).
-    for absent in ("Approved head", "Reused evidence", "Reuse reason",
-                   "Required return stage", "Prior sign-off"):
+    for absent in ("Approved head", "Approved base", "Reused evidence",
+                   "Reuse reason", "Required return stage", "Prior sign-off"):
         assert absent not in r.output
 
 
@@ -3587,6 +3684,37 @@ def test_a_non_string_bookkeeping_value_keeps_the_conflict_rule():
     base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-01'\n"
     ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {bad: 1}\n"
     theirs = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-03'\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("updated_at" in c for c in details["conflicts"])
+
+
+def test_a_null_bookkeeping_timestamp_is_not_silently_replaced():
+    """A branch that unset a timestamp did not agree to the other side's edit.
+
+    ``None`` is pm's own "unset" value, not a timestamp: taking the other
+    side's value would drop the branch's change without saying so, and the
+    spec keeps the normal conflict rule for a non-string value.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-01'\n"
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at:\n"
+    theirs = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: '2026-01-03'\n"
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("updated_at" in c for c in details["conflicts"])
+
+
+def test_a_mapping_valued_bookkeeping_field_is_refused_not_deep_merged():
+    """A malformed mapping is refused before the structural merge runs.
+
+    ``_merge_value`` settles the bookkeeping/UI fields before the dict/list
+    merges, so two branches' malformed mappings are not merged field by field
+    into a value neither side wrote.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {a: 0}\n"
+    ours = "project:\n  name: p\nprs:\n- id: pr-1\n  updated_at: {a: 1}\n"
+    theirs = ("project:\n  name: p\nprs:\n- id: pr-1\n"
+              "  updated_at: {a: 0, b: 2}\n")
     merged, details = integration.resolve_project_yaml(base, ours, theirs)
     assert merged is None
     assert any("updated_at" in c for c in details["conflicts"])

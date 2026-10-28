@@ -267,7 +267,12 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             for n in current_notes:
                 old_by_text.setdefault(_note_text(n), []).append(n)
             new_notes = []
-            existing_note_ids: set[str] = set()
+            # Every id already stored is a key (``pm pr note edit/delete``
+            # look notes up by id, and the integration resolver refuses a
+            # repeated one), including the members the template could not
+            # show — a note added here must not reuse any of them.
+            existing_note_ids: set[str] = {
+                i for i in (_note_id(n) for n in stored_notes) if i}
             for text in parsed["note_texts"]:
                 if text in old_by_text and old_by_text[text]:
                     reused = old_by_text[text].pop(0)
@@ -714,6 +719,19 @@ def _signoff_evidence_lines(record) -> list[str]:
     sha = integration.revision_of(rec.get("sha"))
     if sha:
         lines.append(f"Approved head: {sha[:12]}")
+    # The base the approval was bound to: the verdict binds to the exact
+    # candidate the check computed against that base (``BINDING_KEYS``), and a
+    # person assessing the decision needs it beside the head.  The current
+    # ``## Integration`` record may be a later check of another base, so it
+    # cannot stand in for the approved one.
+    bound = rec.get("integration")
+    bound = bound if isinstance(bound, dict) else {}
+    bound_base = integration.revision_of(bound.get("base_sha"))
+    if bound_base:
+        bound_branch = bound.get("base_branch")
+        bound_branch = bound_branch if isinstance(bound_branch, str) \
+            and bound_branch else "base"
+        lines.append(f"Approved base: {bound_branch}@{bound_base[:12]}")
 
     evidence = rec.get("evidence")
     evidence = evidence if isinstance(evidence, dict) else {}
@@ -3694,9 +3712,16 @@ def pr_note_add(pr_id: str, text: str):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
-    note_id = store.generate_note_id(pr_id, text)
+    # The id is derived from the text, so adding the same text twice would
+    # reuse the id.  Two notes with one id are ambiguous: `pm pr note
+    # edit/delete` look a note up by id and can only touch one of them, and
+    # the integration resolver refuses a project.yaml with duplicate ids (so
+    # the PR could never have a metadata conflict resolved).  Generate the id
+    # from the *fresh* note list inside the locked update, so a concurrent add
+    # of the same text cannot collide either.
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    note = {"id": note_id, "text": text, "created_at": created_at, "last_edited": created_at}
+    note = {"id": store.generate_note_id(pr_id, text), "text": text,
+            "created_at": created_at, "last_edited": created_at}
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
@@ -3705,12 +3730,14 @@ def pr_note_add(pr_id: str, text: str):
         # ``_notes_of`` returns the stored list when it is one (so malformed
         # members are preserved) and a fresh list when the value is a scalar.
         notes = _notes_of(pr)
+        note["id"] = store.generate_note_id(
+            pr_id, text, {i for i in (_note_id(n) for n in notes) if i})
         notes.append(note)
         pr["notes"] = notes
         _record_status_timestamp(pr)
 
     store.locked_update(root, apply)
-    click.echo(f"Added note {note_id} to {_pr_display_id(pr_entry)}")
+    click.echo(f"Added note {note['id']} to {_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
 
@@ -3743,22 +3770,34 @@ def pr_note_edit(pr_id: str, note_id: str, text: str):
                            err=True)
         raise SystemExit(1)
 
-    new_id = store.generate_note_id(pr_id, text)
+    # The new id is derived from the new text: editing a note to text another
+    # note already has would otherwise give both the same id — the ambiguity
+    # `pm pr note edit/delete` cannot resolve and the integration resolver
+    # refuses.  Generate it inside the locked update from the fresh notes,
+    # excluding the edited note itself (so re-saving its own text keeps its
+    # id).
+    new_id = {"id": store.generate_note_id(pr_id, text)}
 
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
-        for n in _notes_of(pr):
+        notes = _notes_of(pr)
+        others = {i for i in (_note_id(n) for n in notes)
+                  if i and i != note_id}
+        fresh_id = store.generate_note_id(pr_id, text, others)
+        for n in notes:
             if _note_id(n) == note_id:
-                n["id"] = new_id
+                n["id"] = fresh_id
                 n["text"] = text
                 n["last_edited"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                new_id["id"] = fresh_id
                 break
         _record_status_timestamp(pr)
 
     store.locked_update(root, apply)
-    click.echo(f"Updated note {note_id} → {new_id} on {_pr_display_id(pr_entry)}")
+    click.echo(f"Updated note {note_id} → {new_id['id']} on "
+               f"{_pr_display_id(pr_entry)}")
     trigger_tui_refresh()
 
 

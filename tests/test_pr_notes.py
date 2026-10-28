@@ -132,6 +132,29 @@ class TestPrNoteAdd:
         result = runner.invoke(cli, ["-C", str(root), "pr", "note", "add", "pr-999", "text"])
         assert result.exit_code != 0
 
+    def test_adding_the_same_text_twice_gets_unique_ids(self, tmp_path):
+        """Note ids are keys, so adding one text twice must not reuse an id.
+
+        ``pm pr note edit/delete`` look a note up by id (only one of the two
+        would ever be touched), and the integration resolver refuses a
+        project.yaml that repeats an id — pm's own note command must not
+        create the ambiguity that makes a metadata conflict unresolvable.
+        """
+        from pm_core import integration
+
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        for _ in range(2):
+            result = runner.invoke(
+                cli, ["-C", str(root), "pr", "note", "add", "pr-001",
+                      "same text"])
+            assert result.exit_code == 0, result.output
+        data = store.load(root)
+        notes = store.get_pr(data, "pr-001")["notes"]
+        assert [n["text"] for n in notes] == ["same text", "same text"]
+        assert notes[0]["id"] != notes[1]["id"]
+        assert integration._duplicate_id_problems(data, "PR branch") == []
+
 
 class TestPrNoteList:
     def test_list_empty(self, tmp_path):
@@ -287,6 +310,49 @@ class TestPrNoteEdit:
         assert pr["notes"][0]["id"] == "note-abc1234"
         assert pr["notes"][0]["text"] == "Keep this"
         assert pr["notes"][1]["text"] == "Edited text"
+
+    def test_editing_to_another_notes_text_gets_a_unique_id(self, tmp_path):
+        """Editing must not give the note an id another note already has.
+
+        The id is derived from the text, so editing a note to text a sibling
+        already carries would otherwise duplicate that id — the ambiguity the
+        integration resolver refuses (and that ``pm pr note edit/delete``
+        cannot address).
+        """
+        from pm_core import integration
+
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        for text in ("first text", "second text"):
+            assert runner.invoke(
+                cli, ["-C", str(root), "pr", "note", "add", "pr-001", text]
+            ).exit_code == 0
+        data = store.load(root)
+        notes = store.get_pr(data, "pr-001")["notes"]
+        second_id = notes[1]["id"]
+        result = runner.invoke(
+            cli, ["-C", str(root), "pr", "note", "edit", "pr-001",
+                  second_id, "first text"])
+        assert result.exit_code == 0, result.output
+        data = store.load(root)
+        notes = store.get_pr(data, "pr-001")["notes"]
+        assert [n["text"] for n in notes] == ["first text", "first text"]
+        assert notes[0]["id"] != notes[1]["id"]
+        assert integration._duplicate_id_problems(data, "PR branch") == []
+
+    def test_re_editing_its_own_text_keeps_its_id(self, tmp_path):
+        """A no-op text edit keeps the id (the note is not "another" note)."""
+        root = _make_state(tmp_path)
+        runner = CliRunner()
+        runner.invoke(cli, ["-C", str(root), "pr", "note", "add", "pr-001",
+                            "steady text"])
+        note_id = store.get_pr(store.load(root), "pr-001")["notes"][0]["id"]
+        result = runner.invoke(
+            cli, ["-C", str(root), "pr", "note", "edit", "pr-001", note_id,
+                  "steady text"])
+        assert result.exit_code == 0, result.output
+        notes = store.get_pr(store.load(root), "pr-001")["notes"]
+        assert [n["id"] for n in notes] == [note_id]
 
 
 class TestPrNoteDelete:
