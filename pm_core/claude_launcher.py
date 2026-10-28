@@ -544,9 +544,17 @@ class WorkspacePromptWatch:
                           "approved workdir %s (keys=%s)", self.pane_id,
                           target, keys)
                 prepare_workspace(target)
-                for key in keys:
-                    tmux_mod.send_keys_literal(self.pane_id, key)
-                    time.sleep(0.2)
+                try:
+                    for key in keys:
+                        tmux_mod.send_keys_literal(self.pane_id, key)
+                        time.sleep(0.2)
+                except subprocess.CalledProcessError as e:
+                    # The pane exited after its capture: the caller's own
+                    # liveness handling owns that outcome, so a refused key
+                    # must not end the caller's poll loop.
+                    _log.warning("workspace trust: pane %s refused accept "
+                                 "keys: %s", self.pane_id,
+                                 tmux_mod.launch_error_detail(e))
                 return None
         waited = now - self._first_seen
         if waited >= self.grace:

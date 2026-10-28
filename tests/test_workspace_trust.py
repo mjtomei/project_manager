@@ -382,6 +382,22 @@ class TestPromptWatch:
             assert w.check(force=True) is None
             assert not w.visible
 
+    def test_refused_accept_key_does_not_raise(self, home):
+        """A pane exiting between capture and accept keys refuses send-keys;
+        that must not raise out of the caller's poll loop."""
+        import subprocess
+        wd = _pm_workdir(home)
+        pane = _FakePane(TRUST_SCREEN.format(path=wd))
+
+        def gone(pane_id, key):
+            raise subprocess.CalledProcessError(
+                1, ["tmux"], stderr=b"can't find pane: %1")
+
+        with patch("pm_core.tmux.capture_pane", pane.capture), \
+             patch("pm_core.tmux.send_keys_literal", gone), \
+             patch("pm_core.claude_launcher.time.sleep"):
+            assert WorkspacePromptWatch("%1", str(wd), grace=0).check() is None
+
     def test_accept_budget_is_shared_by_watches_on_one_pane(self, home):
         """Two watches on one pane (QA loop + TUI idle tracker) must not
         each spend their own budget: at most two accepts per pane."""

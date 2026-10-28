@@ -3393,12 +3393,23 @@ def _poll_tmux_verdicts(
                             "or INPUT_REQUIRED with no other text. Please output "
                             "your verdict now if you have reached a conclusion."
                         )
-                        tmux_mod.send_keys(pane_id, reminder)
-                        _last_reminder_sent[scenario.index] = now
-                        _log.info(
-                            "Sent verdict-format reminder to scenario %d",
-                            scenario.index,
-                        )
+                        # Best effort: a pane that exited after its liveness
+                        # check refuses the nudge, and the next tick's dead
+                        # pane handling takes over instead of the error
+                        # ending the whole QA run.
+                        try:
+                            tmux_mod.send_keys(pane_id, reminder)
+                        except subprocess.CalledProcessError as e:
+                            _log.warning(
+                                "Verdict-format reminder to scenario %d "
+                                "refused: %s", scenario.index,
+                                tmux_mod.launch_error_detail(e))
+                        else:
+                            _last_reminder_sent[scenario.index] = now
+                            _log.info(
+                                "Sent verdict-format reminder to scenario %d",
+                                scenario.index,
+                            )
 
                 if verdict:
                     state.scenario_verdicts[scenario.index] = verdict

@@ -2062,6 +2062,49 @@ class TestPollTmuxVerdictsForkFailure:
         assert state.scenario_verdicts[1] == VERDICT_PASS
         assert 1 in state.verified_scenarios
 
+    def test_refused_reminder_does_not_end_run(self, tmp_path):
+        """The verdict-format nudge is best effort: a pane that exited after
+        its liveness check refuses it, and the run keeps polling."""
+        import itertools
+        import subprocess
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        stamps = itertools.count(10 ** 10)
+
+        def read_event(sid):
+            return {"event_type": "idle_prompt", "timestamp": next(stamps),
+                    "session_id": sid}
+
+        refused = []
+
+        def send_keys(pane, keys):
+            refused.append(keys)
+            raise subprocess.CalledProcessError(
+                1, ["tmux"], stderr=b"can't find pane: %41")
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", side_effect=read_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   side_effect=[None, "NEEDS_WORK"]), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=1), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        assert refused and refused[0].startswith("Reminder:")
+        assert state.scenario_verdicts[1] == "NEEDS_WORK"
+
     def test_other_errors_still_raise(self, tmp_path):
         def pane_exists(pane):
             raise FileNotFoundError(errno.ENOENT, "tmux")
