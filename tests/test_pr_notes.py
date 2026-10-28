@@ -1119,6 +1119,41 @@ class TestPrNoteWritePaths:
         assert after["title"] == "Don't break the -- dash"
         assert after["description"] == 'Uses a - b and "quotes".'
 
+    def test_a_noop_editor_save_keeps_markdown_headings_in_the_description(
+            self, tmp_path):
+        """A ``#`` line in the description is content, not a template comment.
+
+        The template renders the description below a "everything below this
+        line" header, and PR descriptions routinely carry markdown headings
+        (``## Goal``).  The parser skipped every line starting with ``#``
+        *before* it looked at the description section, so a no-op save dropped
+        every heading and rewrote the description — silent data loss on the
+        editor the reconciliation runs from.
+        """
+        root = _make_state(tmp_path)
+        description = (
+            "## Goal\n"
+            "Ship the fix.\n"
+            "\n"
+            "## Notes\n"
+            "Nothing special.\n"
+        )
+        data = store.load(root)
+        store.get_pr(data, "pr-001")["description"] = description
+        store.save(data, root)
+
+        def fake_editor(template, on_save):
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        after = store.get_pr(store.load(root), "pr-001")
+        assert after["description"] == description
+
     def test_a_real_note_edit_keeps_the_untouched_notes(self, tmp_path):
         """Adding one note must not rebuild every other note.
 

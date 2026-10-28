@@ -871,7 +871,16 @@ tests):
     the stored text made every save look like an edit — a no-op save rewrote
     the title/description with the laundered text, and any real note edit
     dropped every untouched note and re-created it with a new id, a fresh
-    `created_at` and the laundered text.
+    `created_at` and the laundered text.  The description body is the text
+    *after* the template's "everything below this line" header, so a line in
+    it that starts with `#` is content, not a comment: PR descriptions
+    routinely carry markdown headings (`## Goal`), and treating them as
+    template comments dropped every heading from the stored description on a
+    save that did not touch it (the same "a no-op save is a true no-op"
+    contract).  The parser therefore consumes every line after the description
+    header verbatim; the template's own comment lines all precede it, and its
+    instruction line is phrased without the header's "below" so it cannot be
+    mistaken for the header.
     The notes merge dedupes by a *string* id only, so a
     hand-edited non-hashable id (a list/mapping) reads as unkeyed instead of
     raising `TypeError` out of `merged.get`.  The note commands keep the ids

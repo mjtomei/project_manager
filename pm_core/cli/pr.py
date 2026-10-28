@@ -168,6 +168,16 @@ def _parse_pr_edit_raw(raw: str) -> dict:
     deps_str = None
 
     for line in raw.splitlines():
+        if in_desc:
+            # Everything after the description header is the description —
+            # including a line that starts with ``#``.  A PR description very
+            # often carries markdown headings (``## Goal``), and the
+            # template's own comment lines all precede this header.  Treating
+            # them as comments dropped every heading from the stored
+            # description on a save that did not touch it (the template's
+            # "everything below this line" contract).
+            desc_lines.append(line)
+            continue
         if line.startswith("#"):
             if "description" in line.lower() and "below" in line.lower():
                 in_desc = True
@@ -175,9 +185,7 @@ def _parse_pr_edit_raw(raw: str) -> dict:
             elif "notes" in line.lower():
                 in_notes = True
             continue
-        if in_desc:
-            desc_lines.append(line)
-        elif in_notes:
+        if in_notes:
             text = _note_bullet_text(line)
             if text is not None:
                 note_lines.append(text)
@@ -504,7 +512,11 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
 
         template = (
             f"# Editing {pr_id}\n"
-            f"# Lines starting with # are ignored.\n"
+            # The description body is kept verbatim (see
+            # ``_parse_pr_edit_raw``): a ``#`` line there is a markdown
+            # heading, not a comment.  Phrase this without "below" so it
+            # cannot be mistaken for the description header.
+            f"# Lines above the description starting with # are ignored.\n"
             f"# Changes are saved each time you write the file.\n"
             f"\n"
             f"title: {orig_title}\n"
