@@ -349,6 +349,13 @@ def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
     calls = []
 
     def fake_run(cmd, **_kw):
+        # Only the launch child counts: ``rl.subprocess`` *is* the global
+        # ``subprocess`` module, so the episode-start pane snapshot's ambient
+        # ``tmux display-message`` probe would otherwise consume the "first
+        # call fails" slot — the loop would succeed on its first real launch
+        # and this test would pass without ever exercising a retry.
+        if "--review-loop" not in cmd:
+            return MagicMock(returncode=0, stdout="", stderr="")
         calls.append(cmd)
         if len(calls) == 1:
             return MagicMock(returncode=1, stdout="",

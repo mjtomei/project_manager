@@ -37733,7 +37733,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T07:04:36.777672+00:00'
+  updated_at: '2026-10-28T07:24:55.968702+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -38555,6 +38555,46 @@ prs:
       env failure). Spec updated with the integration section and verification.'
     created_at: '2026-10-28T07:04:36Z'
     last_edited: '2026-10-28T07:04:36Z'
+  - id: note-9b098e0
+    text: 'Review c945 i1 (integration verified; one guard added): the merge (7541411f,
+      master@89e3c501) is verified — project.yaml is a correct 508-entry union (pr-e040aeb
+      identical to this branch, every master-only entry identical to master, only
+      differences are this branch own cross-PR notes), review_loop.py keeps master
+      find_verdict_turn inside the shared _verdict_output_if_present, the auto-merged
+      auto_start.py/review_loop_ui.py keep both sides (targets_from_breadcrumb migration
+      + resume-before-scheduler ordering; master _maybe_auto_merge hold text), and
+      no _stop_before_merge/POLICY_STOP references remain. Gap closed: the merged
+      verdict-reader fix had no helper-level test (master tests cover find_verdict_turn,
+      not the review-loop reader), so test_review_launch_retry.py::test_verdict_reader_survives_a_later_wakeup_postscript
+      now pins it — verdict turn + /loop wakeup tick + postscript returns the verdict
+      text and parse_review_verdict yields PASS; with the pre-merge read_latest_assistant_text
+      reader it returns the postscript and fabricates NEEDS_WORK (verified directly,
+      so the test fails on the pre-merge helper). Tests: test_review_launch_retry.py
+      102 passed; targeted review/breadcrumb/verdict suites 235 passed; full suite
+      env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace -> 4188 passed,
+      1 skipped (the integration run 1 failure is the documented PM_HOST_HOME hook-installer
+      env trap). Non-blocking residuals unchanged (review_loop.py ~1550 lines; two
+      lease mechanisms; discovery adopts a transcript verdict without an idle hook
+      event; other_owner stand-down is a non-retryable LAUNCH_FAILED; runtime_state
+      mirror keeps a re-armed loop previous episode verdict/attempts; a merge restart
+      during the post-exhaustion cooldown starts a fresh loop; _interruptible_sleep
+      re-reads project.yaml every 2s).'
+    created_at: '2026-10-28T07:20:32Z'
+    last_edited: '2026-10-28T07:20:32Z'
+  - id: note-515308c
+    text: 'Review c945 i1 (second finding, test-quality): tests/test_review_loop.py::test_failed_launch_is_retried_not_terminal
+      was passing WITHOUT exercising a retry. It patches the process-wide subprocess.run
+      and fails the first call, but since 385e i10 the episode start snapshots the
+      live review window via _live_review_pane_session -> tmux display-message, so
+      that ambient probe consumed the "first call fails" slot; the first real launch
+      returned rc=0 and created the transcript, the test saw 2 calls + PASS, and it
+      would pass on a tree with no retry at all (it only failed pre-fix because the
+      snapshot did not exist then). Fixed by counting only --review-loop launches,
+      matching the QA-fixed test_old_window_then_container_failure_retries_the_same_command.
+      Verified: 1 ambient probe, 2 launch attempts (attempt 1 fails, attempt 2 succeeds),
+      verdict PASS, iteration 1. test_review_loop.py 63 passed.'
+    created_at: '2026-10-28T07:24:55Z'
+    last_edited: '2026-10-28T07:24:55Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

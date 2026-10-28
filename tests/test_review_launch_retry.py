@@ -1133,6 +1133,40 @@ def test_discovery_reports_a_landed_verdict(tmp_path, monkeypatch):
     assert "PASS" in (disc.output or "")
 
 
+def test_verdict_reader_survives_a_later_wakeup_postscript(tmp_path):
+    """pr-8efa789: the verdict turn's text wins over a later ``/loop`` wakeup.
+
+    ``_verdict_output_if_present`` is the single verdict reader behind
+    discovery, the retry adopt path and the restart handoff, so the merge
+    moved master's ``find_verdict_turn`` fix into it.  The old
+    latest-assistant-text read returned the wakeup postscript instead, which
+    ``parse_review_verdict`` turns into a fabricated NEEDS_WORK.
+    """
+    def rec(kind: str, text: str, meta: bool = False) -> str:
+        r = {"type": kind,
+             "message": {"role": kind,
+                         "content": [{"type": "text", "text": text}]}}
+        if meta:
+            r["isMeta"] = True
+        return json.dumps(r)
+
+    transcript = tmp_path / "review-pr-001-i1.jsonl"
+    transcript.write_text("\n".join([
+        rec("user", "Review the PR."),
+        rec("assistant", "All good.\n\nPASS"),
+        rec("user", "# Autonomous loop tick (dynamic pacing)\n\nRun the "
+                    "autonomous check using the loop instructions.",
+            meta=True),
+        rec("assistant", "Verdict already submitted; nothing else to do."),
+    ]) + "\n")
+
+    out = review_loop._verdict_output_if_present(str(transcript))
+    assert out is not None
+    assert "PASS" in out
+    assert "nothing else to do" not in out
+    assert review_loop.parse_review_verdict(out) == VERDICT_PASS
+
+
 def test_discovery_ignores_a_transcript_this_loop_never_launched(tmp_path,
                                                                  monkeypatch):
     """The transcript dir outlives a loop, so a symlink can be a previous

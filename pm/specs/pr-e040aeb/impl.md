@@ -1203,3 +1203,46 @@ Verification of the integration: targeted suites
 fails identically on a clean 89e3c501 worktree (documented pre-existing
 hook-installer env failure; the installer writes to the real `~/.pm`, not the
 test's tmp HOME).
+
+### Review iteration 1 (c945) — integration verification and guard
+
+1. **The merged verdict reader is pinned by a test.** The merge's only
+   semantic resolution — moving master's `find_verdict_turn` fix into
+   `_verdict_output_if_present` — had no test at the helper level (master's
+   tests cover `find_verdict_turn` itself, not the review-loop reader). A
+   future refactor could drop it silently and re-introduce a fabricated
+   verdict on every adopt/retry path.
+   `tests/test_review_launch_retry.py::test_verdict_reader_survives_a_later_wakeup_postscript`
+   builds the real shape (verdict turn, `/loop` wakeup tick, postscript) and
+   asserts the reader returns the verdict turn's text and that
+   `parse_review_verdict` yields `PASS`. With the pre-merge reader
+   (`read_latest_assistant_text`), the reader returns the postscript and
+   `parse_review_verdict` fabricates `NEEDS_WORK` — verified directly, so the
+   test fails on the pre-merge helper.
+2. **Full-suite result for this tree is clean** when the suite is run the way
+   the review recipe specifies: `env -u PM_HOST_HOME PATH=/usr/bin:/bin
+   PYTHONPATH=/workspace python -m pytest` → 4188 passed, 1 skipped. The
+   `test_installer_writes_standalone_receiver` failure the integration run
+   saw is the documented `PM_HOST_HOME` env trap, not a regression.
+3. Integration re-verified: `pm/project.yaml` union (508 unique ids, no
+   duplicates, `pr-e040aeb` identical to this branch, every master-only entry
+   identical to master, only differences from master are this branch's own
+   cross-PR notes); `pm_core/review_loop.py` keeps master's reader and the
+   branch's `_poll_adopted_review`/`_landed_verdict` structure; the auto-merged
+   files keep both sides (master's `_maybe_auto_merge` hold text and
+   `targets_from_breadcrumb` migration, this branch's resume-before-scheduler
+   ordering and retry breadcrumb fields); no `_stop_before_merge`/`POLICY_STOP`
+   references remain.
+4. **`test_failed_launch_is_retried_not_terminal` was passing without a
+   retry (test-quality fix).** The test patched the process-wide
+   `subprocess.run` and failed the *first* call. Since iteration 10 (385e)
+   the episode start snapshots the live review window with an ambient
+   `tmux display-message` (`_live_review_pane_session`), so that probe
+   consumed the "first call fails" slot: the loop's first real launch
+   returned rc=0 and created the transcript, the test saw two calls and
+   `PASS`, and it would have passed on a tree with no retry at all. This is
+   the same trap QA found and fixed in
+   `test_old_window_then_container_failure_retries_the_same_command`; the
+   fix here only counts `--review-loop` launches. Verified: one ambient
+   probe, two launch attempts (attempt 1 fails, attempt 2 succeeds), same
+   iteration.
