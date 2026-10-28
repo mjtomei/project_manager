@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T09:55:13.478586+00:00'
+  updated_at: '2026-10-28T10:15:10.735515+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32430,6 +32430,27 @@ prs:
       work stays dropped.'
     created_at: '2026-10-28T09:55:13Z'
     last_edited: '2026-10-28T09:55:13Z'
+  - id: note-08c8f9b
+    text: 'Review loop 419c i7: one leftover in the kept recipe scope, reproduced
+      in the QA image. The web-UI recipe driver could not start at all: driver.mjs
+      is an ES module and the image installs Playwright *globally* under /usr/lib/node_modules,
+      advertised through NODE_PATH, which Node ES-module resolver ignores — so `node
+      driver.mjs` died at once with "ERR_MODULE_NOT_FOUND: Cannot find package playwright"
+      and the worker produced no capture (no video, trace or screenshots). The recipe
+      even said the image "ships" it. Fixed: the run block now links the global install
+      as a node_modules beside the driver, checks the import (`node -e "import(playwright)…"`),
+      and only then runs the driver; Tooling explains why the image alone is not enough,
+      and driver.mjs is listed in the manifest example. New test test_web_ui_driver_resolves_playwright_beside_it
+      drives the recipe own block against a fake global install — the bare import
+      only resolves through the link, so a missing or misdirected link fails with
+      the image error (mutation-checked both ways). Evidence: /pm-captures/review-419c-i7/
+      (probe.sh, probe.log: pre-fix rc 1 ERR_MODULE_NOT_FOUND; post-fix rc 0, Chromium
+      drove a page; wrong-link mutant rc 1). impl.md R9 + R7/Files and qa.md R4/edge
+      case updated. File 41 pass (3 runs); related suites 216 pass. Full suite 3896
+      passed, 1 skipped, 92 deselected (test_merge_publish/test_signoff_integration
+      — push proxy). (2026-10-28T10:20:00Z)'
+    created_at: '2026-10-28T10:15:10Z'
+    last_edited: '2026-10-28T10:15:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
