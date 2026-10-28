@@ -2409,8 +2409,9 @@ case "$sub" in
       s=$(val -t "$@")
       [ -z "$s" ] && exit 0
       [ -f "$STATE/$s" ] && exit 0 || exit 1 ;;
-  kill-session) rm -f "$STATE/$(val -t "$@")"; exit 0 ;;
-  kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder"; exit 0 ;;
+  kill-session) s=$(val -t "$@"); rm -f "$STATE/$s" "$STATE/claim.$s"; exit 0 ;;
+  kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder" "$STATE/claim.rec" \
+                     "$STATE/claim.pm-recorder"; exit 0 ;;
   pipe-pane)
       s=$(val -t "$@")
       if [ ! -f "$STATE/${s%%:*}" ]; then
@@ -2525,9 +2526,12 @@ case "$1 $2" in
           fi
       fi
       case "$STUB_MODE" in
-        midadied) rm -f "$STATE/pm-recorder" ;;
+        midadied) rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" ;;
         midboth|midbothbad)
-            rm -f "$STATE/pm-recorder" "$STATE/pm-test" ;;
+            # A session ending takes its session options (the capture-dir
+            # claim) with it, as real tmux does.
+            rm -f "$STATE/pm-recorder" "$STATE/claim.pm-recorder" \
+                  "$STATE/pm-test" "$STATE/claim.pm-test" ;;
       esac
       exit 0 ;;
 esac
@@ -2812,15 +2816,52 @@ class TestCaptureFlowExecution:
         Step 2 records the capture directory in a session option, so the
         guard survives the separate pastes that follow. ``nostart`` fails the
         recorder start *after* step 2, which is the earliest point the claim
-        can be observed.
+        can be observed — the stub records the claim it saw when the pipe was
+        attached, because the failure path below releases the claim again.
         """
         r, _cast = _run_block(
             _scaffold_block(_recipe_text("tmux-screen-recording.md")),
             "nostart", tmp_path, target=True)
         assert r.returncode != 0, r.stderr
+        seen = tmp_path / "state" / "pipeclaim"
+        assert seen.read_text().strip() == str(tmp_path / "cap"), (
+            "step 2 did not claim the capture directory before attaching the "
+            "pipe")
+
+    @pytest.mark.parametrize("mode", [
+        "nostart",      # step 3 could not create the recorder session
+        "norec",        # the recorder never drew
+        "dies",         # the recorder exited before drawing
+        "failedattach",  # the attach drew its own error and exited
+        "stuck",        # the recorder never exited at the stop bound
+        "notranscript",  # the pipe wrote nothing
+        "midadied",     # the recorder died mid-scenario
+        "detachfail",   # the recorder vanished before the detach key
+        "midbothbad",   # killed recorder, target session gone too
+    ])
+    def test_a_failed_run_releases_its_capture_dir_claim(self, mode, tmp_path):
+        """A claim must not outlive a *failed* run either.
+
+        The claim lives on the pm session, which usually survives a failed
+        capture (the recorder and the pipe do not). Left behind, it refuses
+        the next attempt in that session — into another capture directory —
+        with "already being recorded into …", a collision that does not
+        exist; and a *different* session recording that directory is refused
+        as if this run were still going. Every failure path after the claim
+        is taken therefore releases it, like the pipe-attach failure and the
+        successful finish do. A run killed outright (SIGKILL) leaves a claim
+        no path can release, which is why both refusal messages name the
+        manual clear.
+        """
+        r, _cast = _run_capture_block(
+            "tmux-screen-recording.md", mode, tmp_path, target=True)
+        assert r.returncode != 0, (
+            f"{mode}: the fixture was expected to fail the run")
         claim = tmp_path / "state" / "claim.pm-test"
-        assert claim.exists(), "step 2 did not claim the capture directory"
-        assert claim.read_text().strip() == str(tmp_path / "cap")
+        assert not claim.exists(), (
+            f"{mode}: the failed run left its capture-dir claim on the "
+            "session, so the next attempt in this session is refused by a "
+            "capture that is no longer running")
 
     def test_step_two_claims_before_it_attaches_the_pipe(self, tmp_path):
         """The claim has to be taken *before* the pipe it is meant to guard.
@@ -2876,6 +2917,27 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, "a shared capture dir was recorded twice"
         assert "is already being recorded by pm session pm-other" in r.stderr, (
             r.stderr)
+
+    def test_the_shared_dir_refusal_names_the_clear_that_works(self, tmp_path):
+        """The refusal must offer a remedy for a claim that is already stale.
+
+        A run killed outright (SIGKILL) leaves its claim behind — no failure
+        path can run — and that claim refuses a *different* session recording
+        the same directory. "End that capture" is then impossible advice: the
+        capture already ended. The message has to name the command that clears
+        the claim, on the session that holds it, like the same-session refusal
+        does.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True,
+            state_files={"pm-other": "",
+                         "claim.pm-other": str(tmp_path / "cap")})
+        assert r.returncode != 0, r.stderr
+        assert "tmux set-option -u -t pm-other @pm_capture_dir" in r.stderr, (
+            "the shared-directory refusal does not say how to clear a stale "
+            "claim, so a worker whose predecessor was killed has no remedy "
+            "that works: " + r.stderr)
 
     def test_a_finished_run_releases_its_capture_dir_claim(self, tmp_path):
         """A claim must not outlive the run that made it.
@@ -3082,6 +3144,35 @@ class TestCaptureFlowExecution:
             "the driving step sent more keys after a send had failed, so the "
             "scenario was driven against a dead or different TUI: "
             + repr(sends))
+
+    def test_a_failed_send_tears_the_run_down(self, tmp_path):
+        """The failed send ends the run, so it must not leave it recording.
+
+        A failed ``pm tui send`` does not prove the pm session is gone: the
+        pane is looked up in the pane registry, so a stale entry fails the
+        send while the session — and with it the transcript pipe and the
+        recorder, which follows the session — keeps running. Left alone, the
+        recorder writes into a capture directory the worker is about to clear
+        and re-record, and the claim on the session makes the next attempt
+        look like a collision. The failure path saves the pane it destroys,
+        tears the recorder down, stops the pipe and releases the claim, like
+        every other failure path in this recipe.
+        """
+        r, cast = _run_block(
+            _driving_block(), "sendfail", tmp_path, target=True,
+            sessions=("pm-recorder",),
+            state_files={"pane": "TUI drawn\n",
+                         "claim.pm-test": str(tmp_path / "cap")})
+        assert r.returncode != 0, r.stderr
+        assert "pm tui send failed" in r.stderr, r.stderr
+        state = tmp_path / "state"
+        assert not (state / "pm-recorder").exists(), (
+            "the failed send left the recorder running into the capture dir")
+        assert not (state / "claim.pm-test").exists(), (
+            "the failed send left the capture-dir claim on the session")
+        log = cast.parent / "recorder-pane.log"
+        assert log.exists() and "TUI drawn" in log.read_text(), (
+            "the failure tore the recorder pane down without saving it")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_stop_block_pasted_alone_saves_the_pane(self, name, tmp_path):

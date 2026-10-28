@@ -68,12 +68,16 @@ changes `pm_core/`.
 The original failures (self-matching `pgrep -f` waits, a bare `wait` blocked
 on a persistent reaper) are **not** fixed here; see `impl.md`.
 
-**Scenario mapping for re-QA.** Keep the three recipe scenarios from the
-previous round — S14 (CLI capture + render, stale dir, no-TTY form), S18
-(tmux TUI capture, bounded readiness/stop), S20 (web-UI readiness bound +
-cleanup) — and re-verify them against the reduced diff. Retire S15, S16, S17,
-and S19: they exercised the dropped helper, the shared prompt guidance, and
-the QA-loop helper install, none of which exist in this PR any more.
+**Scenario mapping for re-QA.** The reduced diff was re-verified as S21 (CLI
+capture + render, stale dir, no-TTY form, failure modes), S22 (recording
+failure modes), S23 (tmux TUI capture, bounded readiness/stop), S24 (dead
+recorders, failed drives, colliding runs — it found the collision the claim
+fixes, and its post-fix captures cover the fix), S25 (web-UI start and
+readiness) and S26 (web-UI driver + finalize). Re-run those against the
+current PR head. The older S14/S18/S20 covered the same recipe ground before
+the reduction; S15, S16, S17 and S19 exercised the dropped helper, the shared
+prompt guidance and the QA-loop helper install, none of which exist in this
+PR any more.
 
 ## Setup (cross-cutting)
 
@@ -159,7 +163,11 @@ session, stop the recorder, and render the cast,
   the driving step's example sends are checked, so the block stops with
   "pm tui send failed … re-run the capture" instead of running on (the CLI
   scaffold says the same about a failed `send-keys`, which its step 4 cannot
-  see because asciinema exits 0 either way); and driving from a
+  see because asciinema exits 0 either way); that failure path also tears the
+  run down — the pane is saved in `recorder-pane.log`, the recorder session
+  is killed, the pipe is stopped and the claim released — because a stale
+  pane-registry entry fails the send while the session, its pipe and the
+  recorder live on; and driving from a
   fresh shell re-derives `$TARGET` (an empty one is refused), so the keys
   cannot auto-detect and drive a different TUI than the one recorded;
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files; a
@@ -415,7 +423,12 @@ run's video in the capture directory.
   Step 2 claims the capture directory in a `@pm_capture_dir` session option
   *before* attaching the pipe, and refuses a session recording a different
   directory, or a directory another live pm session is recording; step 5
-  releases the claim. Both
+  releases the claim, and so does every failure path after it is taken (a
+  failed run must not make the next attempt look like a collision). A run
+  killed outright leaves a claim no path can release, so both refusal
+  messages name the manual clear (`tmux set-option -u -t <session>
+  @pm_capture_dir`) — "end that capture" alone is impossible advice for a
+  claim whose capture already ended. Both
   collisions now fail loudly on at least one side instead of passing. A raw
   `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
   record it as a limitation, not a pass.

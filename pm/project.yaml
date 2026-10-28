@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T22:30:00.325952+00:00'
+  updated_at: '2026-10-28T23:38:29.296842+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33262,6 +33262,39 @@ prs:
       worth checking only if iOS decode issues surface.'
     created_at: '2026-10-28T21:45:04Z'
     last_edited: '2026-10-28T21:45:04Z'
+  - id: note-4989eaf
+    text: 'Review loop 9265 i2: two leftovers in the kept recipe scope, both the PR
+      own class (state a failed run leaves behind, and a refusal whose remedy cannot
+      work). (1) Every tmux failure path after the R24 claim was taken left the claim
+      set on the pm session, which normally survives the failure: only the pipe-attach
+      failure released it, and step 5 released it on success. The next attempt in
+      that session, into another capture directory, was then refused as a collision
+      that does not exist, and a different session recording the same directory was
+      refused as if the run were still going. All eleven failure paths (step 3 new-session/readiness/settle,
+      step 5 nine) now release it after stopping the pipe. Step 4 failed send was
+      the one path that also left the recorder and the pipe running: pm tui send looks
+      the pane up in the pane registry, so a stale entry fails the send while the
+      session, pipe and attach client live on. Its guard is now a send_failed() (defined
+      in the same self-contained paste) that saves the recorder pane (naming it in
+      the message), kills the recorder, stops the pipe and releases the claim. (2)
+      The cross-session refusal said "end that capture, or use another capture directory"
+      — impossible advice for a claim left by a run killed outright (SIGKILL runs
+      no failure path); it now names the manual clear for the holding session. Verified
+      live (real tmux 3.4 on a private default-config server, real asciinema 2.4.0,
+      stub pm): pre-fix a readiness failure left @pm_capture_dir set, and a failed
+      send left the recorder session + pipe + claim; post-fix the option is gone,
+      the pane is saved in recorder-pane.log, #{pane_pipe}=0, the session is gone,
+      and the refusal names tmux set-option -u -t pm-other @pm_capture_dir and takes
+      no claim of its own; the nominal flow still ends rc 0 with a cast, transcript
+      and status 0 and the claim released. Tests: 9 release cases (8 fail against
+      HEAD; midbothbad passes both ways because a session death takes its options,
+      which the stub now models), a failed-send teardown case and a refusal-message
+      case — 147 pass; related suites 188 pass; full suite 4002 passed, 1 skipped,
+      92 deselected. Evidence: captures/pr-b19db15/review-9265-i2/ (probe.log, recipe-pre/post,
+      scripts/). impl.md R25 + R6/Files/verification/evidence and qa.md updated. No
+      pm_core/ change.'
+    created_at: '2026-10-28T23:38:29Z'
+    last_edited: '2026-10-28T23:38:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -33274,7 +33307,7 @@ prs:
     qa_finalize: provider:deepseek-flash
     qa_interactive: provider:deepseek-flash
     merge: provider:deepseek-flash
-    signoff: provider:claude-work
+    signoff: provider:claude-work-xhigh-249
 - id: pr-edc256b
   plan: bugs
   title: 'Bug: TUI status bar omits WCH after starting a watcher (w s) until the next
