@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T10:40:15.424356+00:00'
+  updated_at: '2026-10-28T12:11:05.639129+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15482,6 +15482,27 @@ prs:
       there is one prefix-matching helper.'
     created_at: '2026-10-27T17:57:59Z'
     last_edited: '2026-10-27T17:57:59Z'
+  - id: note-ea47e47
+    text: 'IMPL merge (2026-10-28, work/claude-opus-5-5): master@89e3c501 merged as
+      7bca6ee2 (pushed; origin/master unchanged since). One push-proxy ownership model
+      (spec impl.md A9): master pr-748e708 workdir-keyed dirs/proxy.json/start lock/discovery
+      links/tmp hardening + this PR owner.json runtime-domain, locked runtime-user
+      release in any process (users actual mounts decide when a PR has several dirs),
+      captured unshared releases. Behaviour changes vs master: a released shared dir
+      is removed (not kept until teardown); stop_session_proxies releases only dirs
+      with no runtime users; failed fresh start removes the dir it created; PushProxyError
+      is a ContainerError and fresh-start proxy failures are kind=proxy launch errors.
+      Ported: abbreviated-flag guard via _long_option_match, NO_HOOKS on proxy git,
+      provider env (-e NAME) through identity-bound exec/release + QA panes, pr-8efa789
+      verdict sources in this PR verification flow. Reconciled paused reviewer 050ed5f1
+      edits (exec -e NAME ownership parsing, classified proxy errors, test fixtures).
+      Full suite 5078 passed / 3 skipped, evidence /pm-captures/impl-merge-master-89e3c501/.
+      Limitations: pre-merge containers mounting the old tokenless (session,PR) proxy
+      dir are refused on reuse with a remove-to-recreate message (cleanup still releases
+      those dirs); no live Podman rerun yet — sign-off asked for proxy (S14/S25/S39),
+      launch/setup (S27) and final acceptance (S84/S85) reruns on the integrated code.'
+    created_at: '2026-10-28T12:11:05Z'
+    last_edited: '2026-10-28T12:11:05Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
