@@ -278,6 +278,19 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   clears `input_required` and launches the next iteration rather than failing
   the wait and ending KILLED.  (Guard added in 581d i2; regression added in
   3bf4 i1: `test_restart_wait_with_no_recoverable_session_clears`.)
+- A running review loop's transcript symlink must never be finalized.
+  `pm autostart remove` of the last target (or any auto-start disable) runs
+  `auto_start._finalize_all_transcripts`, which replaces the run dir's
+  symlinks with frozen copies.  The loop polls that path for the follow-up
+  verdict (and for the next iteration's), so freezing it strands the loop:
+  the copy has no verdict turn, the next idle reads as a new prose question
+  and a `waiting / review INPUT_REQUIRED (iteration N)` wait nobody was asked
+  is re-armed (QA scenario 17 story 4 — the answer's PASS never landed).
+  `_finalize_all_transcripts` therefore keeps every `review-<pr>-` symlink
+  for a PR whose loop is still `running`; the loop finalizes its own
+  transcripts on completion (`review_loop_ui._on_complete_from_thread`).
+  (Incidental fix 07340d38; regressions in
+  `tests/test_autostart_disable_transcripts.py`.)
 - Master overlap (review i1, **resolved at integration**): current
   `origin/master` grew `verdict_transcript.find_verdict_turn` /
   `_user_record_is_non_task` (task-scoped verdict scan + "is this a real human

@@ -603,8 +603,15 @@ def _record_epoch(rec: dict) -> float | None:
 
 def _assistant_text_has_verdict(line: str, verdict: str) -> bool:
     """True when an assistant record's *text* blocks carry *verdict* on its
-    own line (tool_use inputs such as ``grep INPUT_REQUIRED`` don't count)."""
-    from pm_core.loop_shared import match_verdict
+    own line (tool_use inputs such as ``grep INPUT_REQUIRED`` don't count).
+
+    Uses the same line predicate as :func:`find_verdict_turn`, so the
+    response watch anchors on exactly the turn the verdict scan returns —
+    the two can never disagree about which assistant record is the
+    question.  (A second copy of the predicate here is the same duplication
+    that let the waiter and the scan drift apart before the sign-off
+    integration.)
+    """
     try:
         rec = json.loads(line)
     except json.JSONDecodeError:
@@ -612,15 +619,14 @@ def _assistant_text_has_verdict(line: str, verdict: str) -> bool:
     msg = rec.get("message") if isinstance(rec, dict) else None
     content = msg.get("content") if isinstance(msg, dict) else None
     if isinstance(content, str):
-        content = [{"type": "text", "text": content}]
+        return _text_line_is_verdict(content, verdict)
     if not isinstance(content, list):
         return False
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "text":
-            for text_line in str(block.get("text") or "").splitlines():
-                if match_verdict(text_line, (verdict,)):
-                    return True
-    return False
+    return any(
+        isinstance(block, dict) and block.get("type") == "text"
+        and _text_line_is_verdict(str(block.get("text") or ""), verdict)
+        for block in content
+    )
 
 
 class HumanResponseWatch:
