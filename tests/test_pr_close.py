@@ -174,6 +174,36 @@ def test_default_close_retains_entry_and_lifecycle_fields(tmp_path):
     assert after["workdir"] == before["workdir"]
 
 
+def test_default_close_moves_active_pr_off_the_closed_entry(tmp_path):
+    """A retained closed entry never stays active (A2): later id-less
+    commands must not resolve a terminal record."""
+    project = _make_project(tmp_path)
+    assert store.load(project["pm_dir"])["project"]["active_pr"] == "pr-001"
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    data = store.load(project["pm_dir"])
+    assert data["project"]["active_pr"] == "pr-002"
+    # The closed entry itself survives — it just is not the active PR.
+    assert store.get_pr(data, "pr-001")["status"] == "closed"
+
+
+def test_default_close_leaves_a_foreign_active_pr_alone(tmp_path):
+    """Closing one PR must not move an active pointer that names another."""
+    project = _make_project(tmp_path)
+    data = store.load(project["pm_dir"])
+    data["project"]["active_pr"] = "pr-002"
+    store.save(data, project["pm_dir"])
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    assert store.load(project["pm_dir"])["project"]["active_pr"] == "pr-002"
+
+
 def test_close_closes_github_pr_without_delete_branch(tmp_path):
     with _fake_gh() as backend:
         pr = backend.add_pr(head="pm/pr-001")
@@ -584,6 +614,9 @@ def test_remove_merged_is_registry_only(tmp_path):
     assert _load_entry(project["pm_dir"]) is None
     assert _close_calls(backend) == []
     assert project["workdir"].is_dir()
+    # The GitHub PR is merged, so it is neither closed nor reported "open".
+    assert f"GitHub PR #{pr.number} is already merged" in result.output
+    assert "Leaving GitHub PR" not in result.output
 
 
 # ---------------------------------------------------------------------------

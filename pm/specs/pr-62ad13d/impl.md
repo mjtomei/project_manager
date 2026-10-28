@@ -170,6 +170,11 @@ workdirs are touched.
 17. `pm pr add` of a title+description that matches a retained `closed` entry:
     the duplicate message names the closed status and the reopen command
     (`pm pr edit <id> --status pending`).
+18. `active_pr` (A2): a default close moves it off the now-closed entry to the
+    first remaining non-terminal PR, and closing a PR never moves a pointer
+    that names a different PR.
+19. `--remove` on a `merged` PR names the merged GitHub PR instead of
+    claiming it was left "open" (it is neither closed nor open).
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must

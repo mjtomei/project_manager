@@ -3520,6 +3520,11 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+    elif gh_pr_number and old_status == "merged":
+        # The --remove path only deletes the registry record; the GitHub PR is
+        # merged (so it cannot be closed) and is not "open" either.
+        click.echo(f"GitHub PR #{gh_pr_number} is already merged; leaving it "
+                   f"as is.")
     elif gh_pr_number and keep_github:
         click.echo(f"Leaving GitHub PR #{gh_pr_number} open (--keep-github).")
 
