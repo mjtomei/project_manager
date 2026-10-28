@@ -112,12 +112,25 @@ class WatcherManager:
             return watcher.state if watcher else None
 
     def find_by_type(self, watcher_type: str) -> BaseWatcher | None:
-        """Find the first watcher with the given type."""
+        """Find a watcher of the given type, preferring a running one.
+
+        Finished watchers stay registered so the UI can report their last
+        verdict, so the oldest match can be a dead instance from an earlier
+        run.  Callers use this to decide whether to start or stop a watcher
+        (``ws``), so a live instance must win — otherwise the toggle starts
+        a second watcher over the running one and the two fight over the
+        single watcher window.
+        """
         with self._lock:
+            fallback: BaseWatcher | None = None
             for watcher in self._watchers.values():
-                if watcher.WATCHER_TYPE == watcher_type:
+                if watcher.WATCHER_TYPE != watcher_type:
+                    continue
+                if watcher.state.running:
                     return watcher
-            return None
+                if fallback is None:
+                    fallback = watcher
+            return fallback
 
     def find_state_by_type(self, watcher_type: str) -> WatcherState | None:
         """Find the first watcher state with the given type."""

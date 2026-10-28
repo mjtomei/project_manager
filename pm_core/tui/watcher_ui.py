@@ -316,7 +316,12 @@ def poll_watcher_state(app) -> None:
                 f"({s.iteration} iteration{'s' if s.iteration != 1 else ''})"
             )
             if s.latest_verdict in ("ERROR", VERDICT_NO_VERDICT) and s.latest_summary:
-                err_text = s.latest_summary[:300]
+                # The summary is arbitrary text (exception messages, agent
+                # output) and this message is Rich markup: an unescaped
+                # ``watcher[auto-start]:`` loses the qualifier to the tag
+                # parser, both on the log line and in the command log.
+                from rich.markup import escape as _escape
+                err_text = _escape(s.latest_summary[:300])
                 msg += f"\n  Error: {err_text}"
                 from pm_core.paths import command_log_file
                 msg += f"\n  See log: {command_log_file()}"

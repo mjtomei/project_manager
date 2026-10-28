@@ -295,6 +295,30 @@ class TestWatcherManager:
         assert found is w
         assert mgr.find_by_type("nonexistent") is None
 
+    def test_find_by_type_prefers_a_running_watcher(self):
+        """A finished instance stays registered; it must not shadow a live one.
+
+        ``ws`` decides start-vs-stop from this lookup.  When the oldest
+        ``auto-start`` instance had already finished, the toggle saw
+        ``running=False`` and started a *second* watcher over the running
+        one — both then fought over the single ``watcher`` window and the
+        new one was reported KILLED.
+        """
+        from pm_core.watcher_manager import WatcherManager
+        mgr = WatcherManager()
+        finished = self._make_watcher("auto-start")
+        live = self._make_watcher("auto-start")
+        mgr.register(finished)
+        mgr.register(live)
+        live.state.running = True
+
+        assert mgr.find_by_type("auto-start") is live
+        assert mgr.find_state_by_type("auto-start") is live.state
+
+        # With nothing running the first (most recent history) still wins.
+        live.state.running = False
+        assert mgr.find_by_type("auto-start") is finished
+
     def test_unregister(self):
         from pm_core.watcher_manager import WatcherManager
         mgr = WatcherManager()
@@ -637,3 +661,54 @@ class TestWatcherRegistry:
     def test_unknown_type_returns_none(self):
         from pm_core.watchers import get_watcher_class
         assert get_watcher_class("nonexistent") is None
+
+
+# --- TUI stop-reporting tests ---
+
+class TestNoVerdictStopLine:
+    """The NO_VERDICT stop line must survive Rich markup parsing."""
+
+    def _run(self, summary: str, verdict: str = "NO_VERDICT") -> str:
+        from unittest.mock import MagicMock
+        from rich.text import Text
+        from pm_core.tui import watcher_ui
+
+        state = WatcherState(watcher_id="auto-start-1")
+        state.iteration = 1
+        state.running = False
+        state.latest_verdict = verdict
+        state.latest_summary = summary
+
+        watcher = MagicMock()
+        watcher.DISPLAY_NAME = "Auto-Start Watcher"
+        watcher.state = state
+
+        manager = MagicMock()
+        manager.list_watchers.return_value = [{"id": "auto-start-1"}]
+        manager.get_watcher.return_value = watcher
+
+        app = MagicMock()
+        app._watcher_manager = manager
+
+        watcher_ui.poll_watcher_state(app)
+        msg = app.log_message.call_args[0][0]
+        # What the log line and the ``L`` pane's command log actually show.
+        return Text.from_markup(msg).plain
+
+    def test_no_verdict_summary_keeps_its_brackets(self):
+        """``watcher[auto-start]:`` is text, not a Rich style tag.
+
+        The summary comes from VerdictRecoveryExhausted and names the
+        watcher type in brackets; unescaped, the tag parser ate
+        ``[auto-start]`` and the TUI/`L` line read ``Error: watcher:``.
+        """
+        plain = self._run(
+            "watcher[auto-start]: session abc produced no expected outcome "
+            "(READY / INPUT_REQUIRED): recovery made no progress."
+        )
+        assert "watcher[auto-start]: session abc" in plain
+        assert "! NO_VERDICT" in plain
+
+    def test_error_summary_is_escaped_too(self):
+        plain = self._run("boom [red]not markup[/red]", verdict="ERROR")
+        assert "boom [red]not markup[/red]" in plain
