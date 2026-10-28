@@ -373,8 +373,11 @@ merged base commits as PR changes.
   is recorded as unreadable/absent, never raised — a non-string
   `planner_head` is no revision, so the block and the prompt do not slice it,
   and a non-list `planner_code_changes` carries a `planner_code_changes_error`
-  marker; no host path is recorded — the block travels to master in the
-  tracked project.yaml, where a per-host absolute path is dead weight),
+  marker — a *present* `null` included: `qa_loop` always writes the key as a
+  list, so a null is hand-edited state pm cannot read as "no changes", while
+  an *absent* key is the documented "not recorded" shape the review-revision
+  inference may use; no host path is recorded — the block travels to master
+  in the tracked project.yaml, where a per-host absolute path is dead weight),
 - `prior_signoff` (previous record's sha/verdict/ts, if any),
 - `required_return_stage` (the verdict mapped to its stage),
 - agent-declared reuse from `report.html` meta tags (only trusted when the
@@ -791,7 +794,16 @@ tests):
     of rendering the malformed value. The same rule holds for an `unresolved`
     entry's `path`: the prompt, the return text, `pm pr show` and `integrate`
     name `project.yaml` rather than print the hand-edited value as the file
-    pm attempted. An unhashable
+    pm attempted.  An `unresolved` entry's `conflicts` follows the same
+    "a reader must not print a value the record does not hold" rule: an entry
+    with a missing, `null` or empty value cannot name what pm failed to
+    reconcile, so every surface (the router's coercion message, the sign-off
+    prompt, the return text and both CLI listings) renders the R9-14 phrase
+    (`unresolved conflicts recorded without details`) through the shared
+    `integration.resolution_conflicts_text` instead of the literal `None`.
+    The absent `target_repo` / `base_branch` / `head` in the prompt block and
+    the return text's `Reason:`/hop/status render their `?` /
+    "not recorded" placeholders the same way. An unhashable
     `base_behavior_changes` member is carried, not dropped: the carry-forward
     de-duplicates order-preservingly and skips only the de-duplication for a
     value `dict.fromkeys` would have raised on (which took every integration
@@ -839,6 +851,11 @@ tests):
     `compact` (and so out of every recorded check, inside the store lock),
     `summary` / `pm pr show`, and the `paths_total` guard `_apply_resolution`
     runs before it touches the workdir. `_as_int` catches it with the rest.
+    `_same` reads two `nan` values as the *same* value (YAML parses `.nan` to
+    `float('nan')`, which is unequal to itself): an identical hand-edited
+    `.nan` on both sides is not a change, and treating it as one refused the
+    whole document — including the independent record additions the feature
+    exists to merge.  A *different* value is still a conflict.
     The sign-off launch stamp is
     another: `prepare` can return the *stored* record when a concurrent apply
     won, so `stamp_signoff_launch` receives a hand-editable `base_sha`; a
@@ -985,7 +1002,15 @@ tests):
     the stored text made every save look like an edit — a no-op save rewrote
     the title/description with the laundered text, and any real note edit
     dropped every untouched note and re-created it with a new id, a fresh
-    `created_at` and the laundered text.  The description body is the text
+    `created_at` and the laundered text.  The comparison must use the same
+    form the template *shows*: the template renders the stored title through
+    `str`, so coercing a hand-edited non-string title to `""` before
+    comparing made a no-op save look like an edit and rewrite the value as a
+    string (an int became `'20261026'`, a mapping its laundered repr) — and,
+    because the template holds the title on one line, it truncated a
+    multi-line title to its first line.  The comparison therefore uses the
+    rendered text form (and, for a multi-line title, the rendered first line
+    the template shows).  The description body is the text
     *after* the template's "everything below this line" header, so a line in
     it that starts with `#` is content, not a comment: PR descriptions
     routinely carry markdown headings (`## Goal`), and treating them as

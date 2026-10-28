@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-852dde2
+  active_pr: pr-85701f1
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T21:40:36.616189+00:00'
+  updated_at: '2026-10-28T22:54:17.251858+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39699,9 +39699,57 @@ prs:
       failed once under heavy machine load and passes in isolation (flaky, unrelated).'
     created_at: '2026-10-28T21:40:36Z'
     last_edited: '2026-10-28T21:40:36Z'
+  - id: note-9f5da38
+    text: 'review-loop 4f1e i4: two independent reviewers (one over signoff.py/prompt_gen.py/merge_integrity.py/spec_gen.py,
+      one over cli/pr.py plus every integration reader) plus my own probes found four
+      residual defects, all fixed (5cd7415c, ba641255) with a test that fails on the
+      pre-fix code (verified by stashing the source). (1) `run_check` base_sha reaches
+      it from hand-editable state — `prepare` post-apply re-check and its lost-race
+      re-check pass `previous.get("base_sha")`, and `prepare` can be handed the *stored*
+      record when a concurrent apply won — and the value was passed straight to `git
+      merge-base` and sliced into the log line, so one hand-edited base_sha (int,
+      mapping, list, boolean) raised TypeError out of a check that promises a `status:
+      error` record; it now reads as absent and the ordinary fetch runs. (2) `pm pr
+      edit` no-op save rewrote a hand-edited non-string `title` (the template renders
+      it through `str` while `_apply_pr_edit` coerced the stored value to "") and
+      truncated a multi-line title to its first line; the comparison now uses the
+      rendered text form (and a multi-line title first line), so a no-op save is a
+      true no-op. (3) An `unresolved` entry with no usable `conflicts` rendered the
+      literal None on five surfaces (the router coercion message "could not resolve
+      the metadata conflict safely (None)", the sign-off prompt, the return text,
+      `pm pr show`, `integrate`); they now share `integration.resolution_conflicts_text`
+      and say "unresolved conflicts recorded without details", and the same rule covers
+      the absent target_repo/base_branch/head in the prompt block and the return text
+      Reason:/hop/status (the "?" / "not recorded" placeholders). (4) An identical
+      hand-edited `.nan` on both sides was a false conflict (nan != nan), refusing
+      the whole document including the independent record additions; `_same` reads
+      two NaNs as the same value while a different value is still a conflict. Also:
+      a *present* `planner_code_changes: null` in qa_resume.json is now malformed
+      evidence (marker, no inferred review revision) — qa_loop always writes the key
+      as a list — while an *absent* key stays the documented inference trigger. Noted,
+      not fixed (filed as pr-85701f1): `pm pr spec-approve` still raises ValueError
+      out of generate_spec for a hand-edited spec_pending.phase. Noted, by design
+      per R2: a read-only `pm pr signoff integrate` rewrites $CAP/<pr>/integration-resolution.diff,
+      which a recorded record diff_path may name — the authoritative diff stays in
+      integration.json. Independent checks this iteration, all clean: ~900 shallow
+      malformed-value combinations per PR field across 19 prompt/gate/reader entry
+      points and 4000 randomized deep-malformed PR documents; the same sweep over
+      nested resolution members and over valid-approval + malformed-live-record gate
+      combinations; ~30k random malformed nested records through the integration readers;
+      2500 malformed `pm pr show` and 2000 `pm pr signoff integrate` invocations and
+      600 randomized no-op editor saves (no exceptions, no lost state); a 1500-trial
+      resolver fuzz with an independently written preservation checker plus a 15,625-triple
+      malformed-document sweep (0 exceptions; every resolved document passes store
+      own validation); a 132-permutation check that a field changed differently on
+      both sides is never resolved and a deletion-vs-edit always is; the resolver
+      round-trips the real 2 MB project.yaml byte-identically (0.89 s); and a live
+      read-only `pm pr signoff integrate pr-5cee3d5` = up to date with master@89e3c501.
+      Specs updated (impl R6/R9-14, qa edge cases). Full suite: 4371 passed, 1 skipped.'
+    created_at: '2026-10-28T22:54:17Z'
+    last_edited: '2026-10-28T22:54:17Z'
   model: provider:deepseek-flash
   session_models:
-    signoff: provider:claude-work
+    signoff: provider:claude-work-xhigh-249
     impl: provider:deepseek-flash
     review: provider:deepseek-flash
     qa: provider:deepseek-flash
@@ -41175,3 +41223,34 @@ prs:
       used by all of these — the same shape as `graph.deps_of`.'
     created_at: '2026-10-28T20:59:39Z'
     last_edited: '2026-10-28T20:59:39Z'
+- id: pr-85701f1
+  plan: bugs
+  title: 'Bug: pm pr spec-approve raises ValueError for a hand-edited spec_pending.phase'
+  branch: pm/pr-85701f1-bug-pm-pr-spec-approve-raises-valueerror-for-a-han
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/spec_gen.py reject_spec reads pr["spec_pending"]["phase"]
+    with a truthiness check only, then hands it to generate_spec, whose `if phase
+    not in PHASES: raise ValueError(...)` escapes the command as a traceback.
+
+
+    Repro: hand-edit a PR''s `spec_pending.phase` in pm/project.yaml to `[x]` (or
+    `5`, `{a: 1}`, `true`), then run `pm pr spec-approve <pr>` and reject the spec
+    (or call spec_gen.reject_spec directly). Observed: `ValueError: Invalid phase:
+    [1]. Must be one of (''impl'', ''qa'')` propagates out of the Click command. Expected:
+    project.yaml is hand-editable state — a phase that is not one of PHASES should
+    read as absent (no pending spec to regenerate) or be refused readably, and the
+    caller must not then print "Spec regenerated".
+
+
+    Same hand-edited-state contract as pr-5cee3d5 / pr-2478bf4 / pr-852dde2 (remaining
+    general CLI-surface readers).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T22:53:50.213428+00:00'
+  updated_at: '2026-10-28T22:53:50.213428+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

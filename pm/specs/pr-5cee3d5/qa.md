@@ -571,6 +571,37 @@ WHEN sign-off launches (`pm pr signoff`, or `pm pr signoff integrate --apply`).
 THEN the re-check names the base it actually fetched (the ordinary fetch runs)
 and records its real status — never a `TypeError` out of the check.
 
+GIVEN a PR whose `title` was hand-edited to a non-string (an int, a mapping, a
+list, a boolean) or to text spanning two lines.
+WHEN the user opens it in the edit template and saves without changing
+anything.
+THEN the stored title is unchanged (not rewritten as a string, not truncated
+to its first line), the command reports no changes, and a save that *does*
+edit the title still applies the new value.
+
+GIVEN an `integration.resolution.unresolved` entry whose `conflicts` is
+missing, `null` or an empty list.
+WHEN the user runs `pm pr signoff integrate`, `pm pr show`, launches sign-off,
+or a verdict is coerced to `SIGNOFF_IMPL`.
+THEN every surface names the entry's file and says "unresolved conflicts
+recorded without details" — never the literal `None` — and the sign-off
+prompt's target/head lines show `?` for an absent value rather than `None`.
+
+GIVEN `pm/project.yaml` carrying an unquoted `.nan` (which YAML parses to
+`float('nan')`) on a record the PR branch and the new base both leave
+untouched, alongside independent record additions on each side.
+WHEN the integration check resolves the metadata conflict.
+THEN the document resolves and both sides' additions survive (an identical
+`.nan` is not a change); a `.nan` changed to a different value is still a
+conflict.
+
+GIVEN `qa_resume.json` whose `planner_code_changes` is a *present* `null`
+(pm always writes the key as a list).
+WHEN a sign-off verdict is recorded.
+THEN the evidence block carries the `planner_code_changes_error` marker and no
+review revision is inferred — while an *absent* key still allows the
+documented inference.
+
 ## Edge cases (Given / When / Then)
 
 - GIVEN a hand-edited non-string verdict and a clean integration check. WHEN the
