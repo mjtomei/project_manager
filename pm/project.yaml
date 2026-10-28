@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e0f54ca
+  active_pr: pr-4caa36a
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -38800,6 +38800,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4caa36a
+  plan: bugs
+  title: 'Bug: a local slash-command echo after a verdict hides that verdict from
+    the task-scoped scan (loop keeps waiting)'
+  branch: pm/pr-4caa36a-bug-a-local-slash-command-echo-after-a-verdict-hid
+  status: pending
+  depends_on: []
+  description: 'pm_core/verdict_transcript.py `_user_record_is_non_task`. Claude Code
+    echoes local slash commands (/cost, /model, ...) into the transcript as `type:"user"`
+    records (`<command-name>`, `<local-command-stdout>`); `is_human_prompt_record`
+    correctly excludes them as answers, but the shared task-boundary predicate does
+    not classify them as non-task, so `find_verdict_turn` stops at the echo and returns
+    None for a verdict that sits before it. Repro (harness in tests/test_review_input_required_state.py):
+    review loop waiting on INPUT_REQUIRED -> human answers -> assistant emits PASS
+    -> a user record `{"type":"user","message":{"content":"<command-name>/cost</command-name>\n<local-command-stdout>$0.42</local-command-stdout>"}}`
+    lands before the poller scans -> idle_prompt. `_wait_for_follow_up_verdict` then
+    sees verdict=None and takes the "idle after the answer without a verdict" branch:
+    input_required flips back to true, status reads `waiting / review INPUT_REQUIRED
+    (iteration N)` with latest_verdict still INPUT_REQUIRED, and the PASS is lost
+    until Claude speaks again (local commands do not end a turn, so no new idle comes).
+    Window is the verdict turn''s idle to the waiter''s next poll (~2 s); the same
+    task scoping backs loop_shared.wait_for_follow_up_verdict (QA/watcher) and auto-sequence,
+    so the impact is not review-loop-only. Not fixed in pr-a80bde5 because a blanket
+    "<command-name> = non-task" rule is unsafe: a custom slash command (.claude/commands/*.md)
+    is also written with <command-name> but expands into a real new task, and crossing
+    it could resurrect a stale verdict (a false PASS). Needs a rule that distinguishes
+    CLI-handled commands from custom ones (e.g. local-command stdout/stderr and no
+    expanded prompt text), verified against real transcripts.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T11:05:47.288848+00:00'
+  updated_at: '2026-10-28T11:05:47.288848+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
