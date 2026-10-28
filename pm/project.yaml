@@ -36451,7 +36451,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-22T17:46:12.660339+00:00'
+  updated_at: '2026-10-28T15:57:32.865016+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36467,6 +36467,41 @@ prs:
       preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
+  - id: note-ae7cf29
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
+
+
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
+
+
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
+
+
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
+    created_at: '2026-10-28T15:57:32Z'
+    last_edited: '2026-10-28T15:57:32Z'
 - id: pr-891fd39
   plan: plan-doc-eval
   title: Reader-model generation with interleaved reader annotations
@@ -38473,3 +38508,72 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-db3bf10
+  plan: bugs
+  title: 'Bug: a sign-off REQA deferred behind a live pm qa run is lost on TUI restart
+    with auto-start off'
+  branch: pm/pr-db3bf10-bug-a-sign-off-reqa-deferred-behind-a-live-pm-qa-r
+  status: in_progress
+  depends_on: []
+  description: 'pm_core/tui/review_loop_ui.py defer_reqa_start (pr-592e4bd c9ce4f6a,
+    S117) keeps the owed REQA start only in memory (app._pending_auto_qa + app._reqa_waiting).
+    Repro: auto-start off; a PR in sign_off; user runs `pm qa run <instr> --pr <id>`;
+    sign-off records SIGNOFF_REQA, TUI logs "QA starts once the QA run another process
+    drives ends"; pm tui restart before the pm qa run exits. After it exits the PR
+    stays at qa with awaiting: qa on disk and nothing starts QA (only auto_start.check_and_start
+    honours awaiting: qa, and only with auto-start on). Same in-memory limitation
+    as the review->QA "driven" pending entry. Workaround: press t. Fix idea: on mount,
+    re-arm a pending REQA start for PRs at qa whose return record still says awaiting:
+    qa and run_driven_elsewhere() holds.
+
+
+    User-authorized scope transfer from #249 QA S127 on2026-10-28 (note-dcc04c0; scope
+    decision note-da2d795). The original scenario already verified exactly one driver/routed
+    full rerun, routing, live CLI protection, grouped-view [working] and no duplicate
+    verifier/finalizer. The remaining expectation required the restarted TUI to report
+    driven/defer, but plain restart intentionally turns autostart off. User explicitly
+    prefers deferring restart/resume work to this existing bug and starting it separately.
+
+
+    Cover durable owed REQA recovery independently of the global autostart switch:
+    restart after a SIGNOFF_REQA is deferred behind a live pm qa run; also a restarted
+    TUI observing the persisted awaiting:qa return that a background tick writes while
+    the CLI is still running. Once the live owner finishes, reconcile the owed full
+    QA exactly once. Do not turn global autostart on, restore arbitrary targets, start
+    unrelated PRs, or treat a bare qa status as authorization. Use the persisted return/attempt
+    identity, distinguish explicit cancellation and completed/superseded work, and
+    preserve source/dirty files/transcripts/recordings/drafts. Repeated restarts,
+    concurrent TUI/background ticks and grouped clients must not lose or duplicate
+    the handoff. If the S127 log assertion itself is overspecified, revise it to the
+    observable single-owner/single-rerun contract rather than requiring a cosmetic
+    log.
+
+
+    Source and retained evidence: #249 notes note-dcc04c0 and note-32a12ee; /home/matt/.pm/sessions/project_manager-5b29c418/captures/pr-592e4bd/scenarios/127/README.md
+    and the S127 scripts/recordings; QA5e24fa13d2e08300, originalSID59943f2f-fcfe-47d5-8f8d-e6f7481c6844.
+    Prior finished-window replacement decision is separate. Preserve historical INPUT_REQUIRED
+    as history; do not manufacture QA verdicts or widen #249 acceptance.
+
+
+    Begin from current configured base, inspect current implementation before changing
+    it, and keep any fix from #249 that the durable handoff needs. The broader startup
+    snapshot bug pr-3201ea8 and hard-kill review adoption pr-5d66709 are distinct;
+    this start authorizes only this PR. Use DeepSeek Flash1017/high for implementation/review/QA/helpers
+    and work Opus5.5/high for signoff. wait_for_merge, spec review OFF; no PR merge
+    or force push.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/276
+  gh_pr_number: 276
+  created_at: '2026-10-28T07:54:43.422053+00:00'
+  updated_at: '2026-10-28T15:04:26.926200+00:00'
+  started_at: '2026-10-28T15:04:26.926200+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-db3bf10-bug-a-sign-off-reqa-deferred-behind--76c89d06

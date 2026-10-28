@@ -494,6 +494,50 @@ def test_reqa_route_restarts_tui_qa(world_factory):
     assert w.merges() == []
 
 
+def test_reqa_route_waits_for_a_run_driven_elsewhere(world_factory):
+    """A ``pm qa run`` of the PR is live when sign-off says REQA (S117): a
+    start now would retire its windows as stale and run QA twice.  The owed
+    start stays on disk (``awaiting: qa``) and runs once that run ends —
+    also with auto-start off, which is what a plain restart leaves."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=True,
+               create=True), \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer") as timer:
+        _poll(app)
+        assert app.pr()["status"] == "qa"
+        sq.assert_not_called()
+        timer.assert_called_once_with(app)      # the retry tick is armed
+        assert app.pr()["signoff_return"]["awaiting"] == "qa"
+        assert any("QA starts once" in m and PR in m for m in app.logs)
+
+        # The live run ends: the owed start happens once, and only once.
+        app._auto_start = False                 # what a plain restart leaves
+        app._auto_start_targets = {}
+        with patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=False, create=True):
+            qa_loop_ui.reconcile_owed_reqa(app)
+            qa_loop_ui.reconcile_owed_reqa(app)
+    sq.assert_called_once_with(app, PR)
+
+
+def test_reqa_route_claims_the_launch_before_starting(world_factory):
+    """The hop is one of several drivers of the same obligation (a TUI tick,
+    another TUI, an auto-sequence tick): it claims the launch, so only one of
+    them starts the run."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False,
+               create=True):
+        _poll(app)
+    sq.assert_called_once_with(app, PR)
+    assert app.pr()["signoff_return"]["launch_claim"]["hop"] == "qa"
+
+
 def test_review_route_restarts_review_loop(world_factory):
     app, w = world_factory(wait=True)
     _qa_pass(app)

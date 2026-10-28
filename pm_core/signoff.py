@@ -774,20 +774,27 @@ RETURN_LAUNCH_CLAIM_SECONDS = 180
 _CLAIMED_RETURN_HOPS = ("impl", "review")
 
 
-def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
+def claim_return_launch(root: Path, pr_id: str, hop: str,
+                        require_status: str | None = None) -> bool:
     """Take the launch of the routed *hop*'s fresh session (one winner).
 
     Several drivers act on ``awaiting`` (the TUI routing a verdict or
     catching up after a restart, every ``pm pr auto-sequence`` tick).  The
     impl and review relaunches are ``--fresh`` — each kills the window it
     finds — so two concurrent launchers kill each other's session and leave
-    duplicates behind.  The first caller records a claim
+    duplicates behind.  A QA return's relaunch starts a whole loop (windows,
+    verifier, finalizer), so it needs the same single-owner gate.  The first
+    caller records a claim
     and launches; later callers see it and leave the launch alone.  The
     driver that performs the hop holds the claim from the transition on
     (:func:`build_return_record`), so only catch-up paths (restart, an
     ``awaiting`` tick) call this.
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
+
+    *require_status* additionally requires the PR to still be in that
+    status, in the same locked update: a return that an out-of-band
+    transition superseded must not be launched off a stale read.
     """
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
@@ -797,6 +804,9 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
         pr = store.get_pr(data, pr_id)
         rec = (pr or {}).get("signoff_return")
         if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+            return
+        if require_status is not None \
+                and (pr or {}).get("status") != require_status:
             return
         claim = rec.get("launch_claim") or {}
         try:

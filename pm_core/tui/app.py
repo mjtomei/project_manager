@@ -526,6 +526,15 @@ class ProjectManagerApp(App):
         # sync) to after the first frame.
         self._load_state()
         self._update_orientation()
+        # A sign-off REQA whose QA start was deferred behind a live run — or
+        # whose TUI died before starting it — is owed only on disk.  Re-arm
+        # it here: the obligation must not depend on the auto-start switch
+        # (a plain restart turns auto-start off).
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.arm_owed_reqa(self)
+        except Exception:
+            _log.debug("owed REQA arm on mount failed", exc_info=True)
         # Start the coalescing write queue now that the project root is known.
         # TUI mutations enqueue here instead of writing to disk inline.
         #

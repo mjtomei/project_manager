@@ -3848,6 +3848,19 @@ def pr_auto_sequence(pr_id: str):
             if qa_win:
                 click.echo("running: qa")
                 return
+            # Same race, before the window exists: a run another live
+            # process drives (a user's ``pm qa run``, another TUI) is not
+            # ours to duplicate (S117).
+            from pm_core.qa_loop import run_driven_elsewhere
+            if run_driven_elsewhere(pr_id):
+                click.echo("running: qa (driven elsewhere)")
+                return
+            # A sign-off REQA's re-run is owed: only one driver may take it.
+            from pm_core.signoff import claim_return_launch, return_awaiting
+            if return_awaiting(pr_entry) == "qa" and not claim_return_launch(
+                    root, pr_id, "qa", require_status="qa"):
+                click.echo("running: qa (launch claimed)")
+                return
             _launch_qa_detached(root, pr_id)
             click.echo("running: qa (launched)")
             return
@@ -3897,6 +3910,22 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: sign_off_blocked")
             return
         if hop == "qa":
+            # A ``pm qa run`` of this PR may be live (the user's own
+            # re-verification): a detached run now would retire its windows
+            # as stale and run QA twice (S117).  The return record keeps
+            # ``awaiting: qa``, so the next tick — or the TUI's reconciler —
+            # starts the owed run once that one ends.
+            from pm_core.qa_loop import run_driven_elsewhere
+            if run_driven_elsewhere(pr_id):
+                click.echo("sign_off: re-qa deferred: a QA run is in flight")
+                return
+            # One owner across ticks and TUIs: the hop's driver claims the
+            # launch before spawning it (the detached driver clears the
+            # claim with ``awaiting`` as its run starts).
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(root, pr_id, "qa", require_status="qa"):
+                click.echo("running: qa (launch claimed)")
+                return
             _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")
             return

@@ -326,8 +326,17 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             _rs.set_action_state(pr_id, "qa", None)
         except Exception:
             _log.debug("runtime_state qa clear failed", exc_info=True)
+        from pm_core.qa_loop import run_driven_elsewhere
         from pm_core.tui import qa_loop_ui
-        qa_loop_ui.start_qa(app, pr_id)
+        if run_driven_elsewhere(pr_id):
+            # A ``pm qa run`` of this PR is live: a new loop's planning
+            # retires its windows as stale and runs QA a second time (S117).
+            # The return record keeps ``awaiting: qa`` on disk, so the owed
+            # start survives this process; arm the poll tick that starts it
+            # once that run ends (also with auto-start off).
+            qa_loop_ui.arm_owed_reqa(app)
+        else:
+            qa_loop_ui.start_owed_reqa(app, pr_id)
     elif hop == "review":
         app.log_message(
             f"Sign-off routed {pr_id} back to review (SIGNOFF_REVIEW)")

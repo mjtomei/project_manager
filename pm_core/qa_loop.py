@@ -974,6 +974,63 @@ def resume_owned_elsewhere(resume_data: dict) -> bool:
     return True
 
 
+# --- Run records: which process drives a QA run ---------------------------
+# A ``qa_resume.json`` snapshot only appears once the execution poll begins
+# (after planning and scenario launch), so it cannot answer "is a run of this
+# PR in flight right now?" at the start of a run.  The run record is written
+# first, names its driver, and is kept after the run ends: a dead owner is
+# simply not a driver (``resume_owned_elsewhere`` guards pid reuse).
+
+_RUN_RECORD = "qa_run.json"
+
+
+def write_run_record(state: QALoopState) -> None:
+    """Name this process as the driver of *state*'s run in its QA workdir.
+
+    Best-effort, like the resume snapshot: a missing record only means other
+    drivers cannot see this run early.
+    """
+    if not state.qa_workdir:
+        return
+    data = {"pr_id": state.pr_id, "loop_id": state.loop_id,
+            "session_tag": state.session_tag, "started_at": time.time(),
+            "owner_pid": os.getpid(),
+            "owner_start": _proc_start_time(os.getpid())}
+    path = Path(state.qa_workdir) / _RUN_RECORD
+    try:
+        tmp = path.with_name(_RUN_RECORD + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+    except OSError:
+        _log.warning("QA: could not write the run record %s", path,
+                     exc_info=True)
+
+
+def read_run_record(qa_workdir: str | Path) -> dict | None:
+    """The QA run record of *qa_workdir*, or None when absent/unreadable."""
+    try:
+        data = json.loads((Path(qa_workdir) / _RUN_RECORD).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def run_driven_elsewhere(pr_id: str) -> bool:
+    """True when another live process drives a QA run of *pr_id*.
+
+    Covers a user's ``pm qa run``, a ``pm pr auto-sequence`` QA child and a
+    run of another TUI.  A TUI must not start its own loop over one: the new
+    loop retires the driver's ``qa-<pr>`` / ``qa-<pr>-sN`` windows as stale
+    and runs QA a second time, verifier and finalizer included (S117).
+    """
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
+        rec = read_run_record(rec_path.parent)
+        if rec and rec.get("pr_id") == pr_id and resume_owned_elsewhere(rec):
+            return True
+    return False
+
+
 def clear_resume_file(qa_workdir: str | Path) -> None:
     """Remove the resume snapshot once a completed run has been processed."""
     try:
@@ -3798,6 +3855,11 @@ def run_qa_sync(
         qa_wd = create_qa_workdir(state.pr_id, state.loop_id)
         state.qa_workdir = str(qa_wd)
 
+    # Name this process as the run's driver before any window is created, so
+    # another TUI's scheduler can see the run from its first seconds
+    # (run_driven_elsewhere) instead of only once the resume snapshot lands.
+    write_run_record(state)
+
     # Status file path (inside QA workdir)
     status_path = Path(state.qa_workdir) / "qa_status.json"
 
@@ -4448,6 +4510,9 @@ def resume_qa_sync(
     _log.info("Resuming QA for %s: %d scenario(s), %d queued",
               state.pr_id, len(state.scenarios), len(queued_scenarios))
     state.latest_output = "Resuming QA after restart..."
+    # The resumed run has a new driver (this process): a stale record naming
+    # the dead one would leave other TUIs thinking the run is up for grabs.
+    write_run_record(state)
     _notify()
 
     return _execute_and_finalize(

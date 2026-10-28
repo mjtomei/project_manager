@@ -204,6 +204,135 @@ def _ensure_poll_timer(app) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Owed sign-off REQA: a durable start, independent of the auto-start switch
+# ---------------------------------------------------------------------------
+# A SIGNOFF_REQA bounce leaves ``signoff_return.awaiting == "qa"`` on a PR
+# that is back at ``qa``: an owed *full* QA run.  The obligation is on disk,
+# so it must not live only in one TUI's memory (a restart with auto-start off
+# lost it and the PR sat at ``qa`` until someone pressed ``t``), and it must
+# not be started over a run another live process drives (S117: the new loop
+# retires that run's windows as stale and runs QA twice).
+
+def _is_owed_reqa(pr: dict | None) -> bool:
+    """Whether *pr* still owes the full QA run a sign-off REQA asked for.
+
+    Only an **open** return record awaiting ``qa`` on a PR still at ``qa``
+    qualifies — a bare ``qa`` status, a cleared/resolved return or a PR that
+    moved on is not authorization.
+    """
+    from pm_core.signoff import open_return, return_awaiting
+    if not pr or pr.get("status") != "qa":
+        return False
+    if return_awaiting(pr) != "qa":
+        return False
+    return open_return(pr) is not None
+
+
+def owed_reqa_prs(app, prs: list[dict] | None = None) -> list[dict]:
+    """The PRs whose open sign-off return still owes its QA run."""
+    if prs is None:
+        prs = (getattr(app, "_data", None) or {}).get("prs") or []
+    return [pr for pr in prs if _is_owed_reqa(pr)]
+
+
+def _owed_reqa_on_disk(app, pr_id: str) -> bool:
+    """Whether the PR's return record on disk still owes its QA run."""
+    if not getattr(app, "_root", None):
+        return False
+    try:
+        return _is_owed_reqa(store.get_pr(store.load(app._root), pr_id))
+    except (store.ProjectYamlParseError, OSError):
+        return False
+
+
+def _owed_reqa_deferrals(app) -> dict:
+    """``{pr_id: return-record ts}`` of deferrals already reported."""
+    d = getattr(app, "_owed_reqa_deferrals", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._owed_reqa_deferrals = d
+    return d
+
+
+def start_owed_reqa(app, pr_id: str) -> bool:
+    """Start the full QA a sign-off REQA owes, once across every driver.
+
+    This TUI's poll tick, a restart, another TUI and ``pm pr auto-sequence``
+    can all act on the same obligation; a second loop over the first retires
+    its windows and duplicates verifier/finalizer panes.  The on-disk launch
+    claim picks one winner, and ``start_qa`` clears ``awaiting`` (and the
+    claim) as the run actually starts.
+    """
+    from pm_core.qa_loop import run_driven_elsewhere
+    from pm_core.signoff import claim_return_launch
+
+    if not getattr(app, "_root", None) or pr_id in app._qa_loops:
+        return False
+    if run_driven_elsewhere(pr_id):
+        return False
+    if not claim_return_launch(app._root, pr_id, "qa", require_status="qa"):
+        _log.info("owed REQA: %s launch claimed elsewhere or no longer owed",
+                  pr_id)
+        return False
+    _log.info("owed REQA: starting the QA run for %s", pr_id)
+    start_qa(app, pr_id)
+    return True
+
+
+def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
+    """Start the QA runs the project still owes a sign-off REQA.
+
+    Runs from the shared poll tick and at mount, and is deliberately *not*
+    gated by ``auto_start.is_enabled``/``in_scope``: a manual sign-off owes
+    its re-run, and the obligation has to survive a restart with auto-start
+    off.  A run another live process drives is waited out — the record keeps
+    the obligation, so the next tick starts it when that run ends.
+    """
+    from pm_core.qa_loop import run_driven_elsewhere
+
+    owed = owed_reqa_prs(app, prs)
+    if not owed:
+        return
+    deferrals = _owed_reqa_deferrals(app)
+    for pr in owed:
+        pr_id = pr["id"]
+        if pr_id in app._qa_loops:
+            deferrals.pop(pr_id, None)
+            continue
+        ts = (pr.get("signoff_return") or {}).get("ts")
+        if run_driven_elsewhere(pr_id):
+            if deferrals.get(pr_id) != ts:
+                deferrals[pr_id] = ts
+                reason = "the QA run another process drives"
+                _log.info("owed REQA: %s waits for %s", pr_id, reason)
+                app.log_message(escape(
+                    f"Sign-off REQA for {pr_id} — QA starts once {reason} ends"),
+                    sticky=10)
+            continue
+        deferrals.pop(pr_id, None)
+        start_owed_reqa(app, pr_id)
+
+
+def arm_owed_reqa(app) -> None:
+    """Mount/routing hook: make sure an owed REQA is not left to memory.
+
+    Reconciles once (reading project.yaml only when the in-memory state shows
+    nothing owed) and arms the poll timer so the obligation is retried even
+    when auto-start is off and no loop is running to keep the tick alive.
+    """
+    prs = (getattr(app, "_data", None) or {}).get("prs") or []
+    if not owed_reqa_prs(app, prs) and getattr(app, "_root", None):
+        try:
+            prs = store.load(app._root).get("prs") or []
+        except (store.ProjectYamlParseError, OSError):
+            return
+    if not owed_reqa_prs(app, prs):
+        return
+    _ensure_poll_timer(app)
+    reconcile_owed_reqa(app, prs)
+
+
+# ---------------------------------------------------------------------------
 # z t — fresh start
 # ---------------------------------------------------------------------------
 
@@ -401,6 +530,9 @@ def poll_qa_state(app) -> None:
     app._qa_resume_poll_counter = getattr(app, "_qa_resume_poll_counter", 0)
     if app._qa_resume_poll_counter % 5 == 0:
         _resume_incomplete_qa(app)
+        # After the resume scan, so a run it just adopted is visible in
+        # _qa_loops and the owed start waits for it instead of racing it.
+        reconcile_owed_reqa(app)
     app._qa_resume_poll_counter += 1
 
 
@@ -593,7 +725,17 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         else:
             # Legacy path — sign-off hand-off only when auto-start is active
             from pm_core.tui import auto_start as _auto_start
-            if _auto_start.in_scope(app, pr_id):
+            if _owed_reqa_on_disk(app, pr_id):
+                # A run that was already in flight when sign-off sent the PR
+                # back verified the code the router judged, not the rework.
+                # Handing the PR to sign-off on its PASS would supersede the
+                # full re-run the bounce owes (the owed run clears
+                # ``awaiting`` as it starts, so this only ever catches a
+                # pre-return run).
+                app.log_message(
+                    f"[green]QA PASS[/] for {pr_id} — the owed sign-off "
+                    "re-run has not run yet")
+            elif _auto_start.in_scope(app, pr_id):
                 app.log_message(
                     f"[green bold]QA PASS[/] for {pr_id} — handing off to sign-off")
                 _trigger_signoff(app, pr_id)
