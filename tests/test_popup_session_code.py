@@ -8,10 +8,12 @@ workdir's — while the same command typed in a shell in that workdir
 still cwd-walks to the workdir's pm_core.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 import pm_core
@@ -110,17 +112,36 @@ def test_popup_config_uses_base_session_not_workdir(tmp_path, monkeypatch, capfd
     import json
 
     home, _ = _setup(tmp_path, monkeypatch)
-    monkeypatch.setenv("TMUX", "isolated-test-server,1,0")
-    config = {"_all": {}, "impl": {"display_bullet": "SESSION-IMPL "}}
-    (home / ".pm" / "sessions" / TAG / "fake-claude").write_text(json.dumps(config))
+    # get_session_name trusts $PM_POPUP_SESSION only while that session
+    # exists, and the popup runs its command in a child process, so the
+    # sessions must really exist: use a throwaway tmux server.
+    import shutil
+    import tempfile
+    if not shutil.which("tmux"):
+        pytest.skip("tmux not installed")
+    sock_dir = tempfile.mkdtemp(prefix="pm-s19-")
+    sock = os.path.join(sock_dir, "s")
+    monkeypatch.setenv("PM_TMUX_SOCKET", sock)
+    monkeypatch.setenv("TMUX", f"{sock},1,0")
+    subprocess.run(["tmux", "-S", sock, "new-session", "-d", "-s", SESSION],
+                   check=True)
+    try:
+        subprocess.run(["tmux", "-S", sock, "new-session", "-d", "-t", SESSION,
+                        "-s", f"{SESSION}~s19b"], check=True)
+        config = {"_all": {}, "impl": {"display_bullet": "SESSION-IMPL "}}
+        (home / ".pm" / "sessions" / TAG / "fake-claude").write_text(json.dumps(config))
 
-    for session in (SESSION, f"{SESSION}~s19b"):
-        result = CliRunner().invoke(popup_cmd_cmd, [session],
-                                    input="fake-claude config show\n")
-        assert result.exit_code == 0, result.output
-        out = capfd.readouterr()
-        assert '"display_bullet": "SESSION-IMPL "' in out.out
-        assert "No fake-claude config" not in out.out
+        for session in (SESSION, f"{SESSION}~s19b"):
+            result = CliRunner().invoke(popup_cmd_cmd, [session],
+                                        input="fake-claude config show\n")
+            assert result.exit_code == 0, result.output
+            out = capfd.readouterr()
+            assert '"display_bullet": "SESSION-IMPL "' in out.out
+            assert "No fake-claude config" not in out.out
+    finally:
+        subprocess.run(["tmux", "-S", sock, "kill-server"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        shutil.rmtree(sock_dir, ignore_errors=True)
 
 
 def test_direct_shell_invocation_still_cwd_walks(tmp_path, monkeypatch):

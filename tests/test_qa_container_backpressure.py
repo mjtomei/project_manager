@@ -8,6 +8,16 @@ import pytest
 from pm_core import container_reaper, hook_events, qa_loop, tmux
 
 
+
+def _as_hit(fn):
+    """Adapt a verdict-string stub to ``find_verdict_turn`` (pr-8efa789)."""
+    from pm_core.verdict_transcript import VerdictHit
+
+    def hit(*args):
+        verdict = fn(*args)
+        return VerdictHit(verdict, verdict) if verdict else None
+    return hit
+
 @pytest.mark.parametrize("verify", [False, True])
 @pytest.mark.parametrize("failed_second", [False, True])
 def test_queue_releases_completed_containers_before_next_launch(
@@ -81,9 +91,8 @@ def test_queue_releases_completed_containers_before_next_launch(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript", lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[1:],
@@ -175,10 +184,8 @@ def test_poll_reclamps_container_headroom_before_a_queued_launch(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[1:],
@@ -285,10 +292,8 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[1:],
@@ -418,11 +423,9 @@ def test_failed_settled_release_is_retried_so_the_batch_grows_back(
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
     monkeypatch.setattr(
-        qa_loop, "extract_verdict_from_transcript",
-        lambda path, *a: verdict_for.get(int(Path(path).stem[1:])))
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+        qa_loop, "find_verdict_turn",
+        _as_hit(lambda path, *a: verdict_for.get(int(Path(path).stem[1:]))))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[2:],
@@ -508,11 +511,9 @@ def test_outage_admits_one_floor_launch_not_one_per_settled_worker(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript",
-                        lambda path, *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn",
+                        _as_hit(lambda path, *a: "PASS"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[4:],
@@ -576,11 +577,9 @@ def test_outage_counts_containers_kept_for_a_human_as_held(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript",
-                        lambda path, *a: "INPUT_REQUIRED")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn",
+                        _as_hit(lambda path, *a: "INPUT_REQUIRED"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[1:],
@@ -689,11 +688,9 @@ def test_poll_defers_a_queued_launch_behind_a_retained_container(
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
     monkeypatch.setattr(
-        qa_loop, "extract_verdict_from_transcript",
-        lambda path, *a: "INPUT_REQUIRED" if Path(path).stem == "s1" else None)
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+        qa_loop, "find_verdict_turn",
+        _as_hit(lambda path, *a: "INPUT_REQUIRED" if Path(path).stem == "s1" else None))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-c", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=state.scenarios[1:],
@@ -746,10 +743,8 @@ def test_queued_scenarios_stay_queued_on_the_dashboard_during_launches(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
     state.scenarios[0].window_name = "qa-s1"
     state.scenarios[0].pane_id = "%1"
     state.scenarios[0].session_id = "sid-1"

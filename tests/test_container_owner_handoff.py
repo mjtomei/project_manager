@@ -114,7 +114,8 @@ def test_readiness_runtime_failure_preserves_container(monkeypatch):
 def test_proxy_sweep_requires_matching_runtime_domain(monkeypatch, current, owner, allowed):
     monkeypatch.setattr(pp, "runtime_domain", lambda: current)
     monkeypatch.setattr(pp, "list_shared_proxies", lambda: [
-        {"session_tag":"tag", "pr_id":"pr-aaaa", "runtime_domain":owner}])
+        {"session_tag":"tag", "pr_id":"pr-aaaa", "token": None, "sock_dir": "/tmp/unused",
+         "sock_path": "/tmp/unused/push.sock", "link": None, "runtime_domain":owner}])
     release = MagicMock(return_value=pp.PROXY_RELEASED)
     monkeypatch.setattr(pp, "release_proxy_decision", release)
     released, enumerated = reaper._release_unused_proxies(reaper.Scope(), {})
@@ -155,6 +156,12 @@ def test_known_foreign_proxy_domain_is_preserved(monkeypatch, tmp_path, operatio
         with pytest.raises(cm.ContainerError, match="runtime"):
             pp.start_push_proxy(NAME, "/w", "branch", session_tag="tag", pr_id="pr-aaaa")
     else:
+        # Release acts only on listed directories; list this one (whose
+        # owner record names the foreign domain) so the domain check decides.
+        monkeypatch.setattr(pp, "list_shared_proxies", lambda: [
+            {"session_tag": "tag", "pr_id": "pr-aaaa", "token": None,
+             "sock_dir": str(tmp_path), "sock_path": str(tmp_path / "push.sock"),
+             "link": None, "runtime_domain": {"runtime": "docker", "daemon_id": "a"}}])
         assert pp.release_proxy_if_unused("tag", "pr-aaaa") is False
     killed.assert_not_called()
 

@@ -58,7 +58,7 @@ def test_renamed_reuse_repairs_actual_mounted_socket(monkeypatch, tmp_path):
                         subprocess.CompletedProcess(args, 0, _inspection(renamed, directory), ""))
     started = []
     monkeypatch.setattr(push_proxy, "_start_proxy_subprocess",
-                        lambda path, *args: started.append(path))
+                        lambda path, *args: started.append(path) or True)
     monkeypatch.setattr(push_proxy, "proxy_is_alive", lambda path: path in started)
     assert cm._ensure_reusable(renamed, tmp_path, "branch", session_tag=None, pr_id=None) == "cid"
     assert started == [str(socket)]

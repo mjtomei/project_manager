@@ -9,14 +9,22 @@ from pm_core import container as cm, container_reaper as reaper, push_proxy
 from pm_core.cli import cli
 
 
+def _entry(directory, domain=None):
+    """A ``list_shared_proxies`` row for *directory* (tag/pr-aaaa, legacy)."""
+    return {"session_tag": "tag", "pr_id": "pr-aaaa", "token": None,
+            "sock_dir": str(directory), "sock_path": str(directory / "push.sock"),
+            "link": None, "runtime_domain": domain}
+
+
 def test_failed_socket_removal_keeps_owner_record(monkeypatch, tmp_path):
-    directory = tmp_path / "proxy"
+    directory = tmp_path / "pm-push-proxy-tag-pr-aaaa"
     directory.mkdir()
     owner = directory / "owner.json"
     owner.write_text(json.dumps({"runtime_domain": reaper._runtime_domain()}))
     socket = directory / "push.sock"
     socket.touch()
-    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(directory))
+    monkeypatch.setattr(push_proxy, "list_shared_proxies",
+                        lambda: [_entry(directory, reaper._runtime_domain())])
     monkeypatch.setattr(cm, "containers_for_pr", lambda *a: set())
     kill = Mock(side_effect=PermissionError("socket unlink denied"))
     monkeypatch.setattr(push_proxy, "_kill_proxy_socket", kill)
@@ -25,19 +33,19 @@ def test_failed_socket_removal_keeps_owner_record(monkeypatch, tmp_path):
         push_proxy.release_proxy_if_unused("tag", "pr-aaaa")
     assert owner.exists(), "failed cleanup must remain discoverable in its runtime domain"
     assert socket.exists()
-    kill.side_effect = lambda path: socket.unlink()
+    kill.side_effect = lambda path, **kw: socket.unlink() or True
     assert push_proxy.release_proxy_if_unused("tag", "pr-aaaa")
     assert not owner.exists()
 
 
-def test_proxy_sweep_failure_is_reported_persisted_and_retried(monkeypatch):
+def test_proxy_sweep_failure_is_reported_persisted_and_retried(monkeypatch, tmp_path):
     domain = reaper._runtime_domain()
     monkeypatch.setattr(reaper, "list_containers", lambda: [])
     monkeypatch.setattr(cm, "running_container_count", lambda: 0)
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(push_proxy, "runtime_domain", lambda: domain)
     monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
-        {"session_tag": "tag", "pr_id": "pr-aaaa", "runtime_domain": domain}])
+        _entry(tmp_path / "proxy", domain)])
     release = Mock(side_effect=PermissionError("socket unlink denied"))
     monkeypatch.setattr(push_proxy, "release_proxy_decision", release)
     args = ["container", "reap", "--session", "tag"]
@@ -55,16 +63,16 @@ def test_proxy_sweep_failure_is_reported_persisted_and_retried(monkeypatch):
     assert not reaper.pending_failures()
 
 
-def test_unknown_proxy_inventory_is_a_visible_retryable_failure(monkeypatch):
+def test_unknown_proxy_inventory_is_a_visible_retryable_failure(monkeypatch, tmp_path):
     domain = reaper._runtime_domain()
     monkeypatch.setattr(reaper, "list_containers", lambda: [])
     monkeypatch.setattr(cm, "running_container_count", lambda: 0)
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(push_proxy, "runtime_domain", lambda: domain)
     monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
-        {"session_tag": "tag", "pr_id": "pr-aaaa", "runtime_domain": domain}])
+        _entry(tmp_path / "proxy", domain)])
     monkeypatch.setattr(push_proxy, "release_proxy_decision",
-                        lambda *a: push_proxy.PROXY_UNAVAILABLE)
+                        lambda *a, **k: push_proxy.PROXY_UNAVAILABLE)
     result = CliRunner().invoke(cli, ["container", "reap"])
     assert result.exit_code == 1, result.output
     assert "proxy" in result.output and "inventory" in result.output
@@ -84,18 +92,18 @@ def test_in_use_proxy_resolves_an_earlier_transient_failure(monkeypatch, tmp_pat
     monkeypatch.setattr(cm, "running_container_count", lambda: 0)
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(push_proxy, "runtime_domain", lambda: domain)
-    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(sock_dir))
+    monkeypatch.setattr(push_proxy, "_legacy_shared_sock_dir_path", lambda *a: str(sock_dir))
     monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
-        {"session_tag": "tag", "pr_id": "pr-aaaa", "runtime_domain": domain}])
+        _entry(tmp_path / "proxy", domain)])
     monkeypatch.setattr(push_proxy, "release_proxy_decision",
-                        lambda *a: push_proxy.PROXY_UNAVAILABLE)
+                        lambda *a, **k: push_proxy.PROXY_UNAVAILABLE)
     result = CliRunner().invoke(cli, ["container", "reap"])
     assert result.exit_code == 1, result.output
     assert reaper.pending_failures()
 
     # Inventory is reachable again and the proxy is legitimately in use.
     monkeypatch.setattr(push_proxy, "release_proxy_decision",
-                        lambda *a: push_proxy.PROXY_IN_USE)
+                        lambda *a, **k: push_proxy.PROXY_IN_USE)
     result = CliRunner().invoke(cli, ["container", "reap"])
     assert result.exit_code == 0, result.output
     assert not reaper.pending_failures()
@@ -115,16 +123,16 @@ def test_undetermined_proxy_keeps_an_earlier_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(cm, "running_container_count", lambda: 0)
     monkeypatch.setattr(cm, "keyring_summary", lambda: "")
     monkeypatch.setattr(push_proxy, "runtime_domain", lambda: domain)
-    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(sock_dir))
+    monkeypatch.setattr(push_proxy, "_legacy_shared_sock_dir_path", lambda *a: str(sock_dir))
     monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
-        {"session_tag": "tag", "pr_id": "pr-aaaa", "runtime_domain": domain}])
+        _entry(tmp_path / "proxy", domain)])
     monkeypatch.setattr(push_proxy, "release_proxy_decision",
-                        lambda *a: push_proxy.PROXY_UNAVAILABLE)
+                        lambda *a, **k: push_proxy.PROXY_UNAVAILABLE)
     assert CliRunner().invoke(cli, ["container", "reap"]).exit_code == 1
     assert reaper.pending_failures()
 
     monkeypatch.setattr(push_proxy, "release_proxy_decision",
-                        lambda *a: push_proxy.PROXY_UNDETERMINED)
+                        lambda *a, **k: push_proxy.PROXY_UNDETERMINED)
     result = CliRunner().invoke(cli, ["container", "reap"])
     assert result.exit_code == 0, result.output
     assert reaper.pending_failures(), "a busy lock must not clear the failure"
@@ -173,11 +181,12 @@ def test_a_kept_proxy_generation_is_not_reported(tmp_path):
 
 
 def test_shared_proxy_release_with_its_container_is_reported(monkeypatch, tmp_path):
-    directory = tmp_path / "proxy"
+    directory = tmp_path / "pm-push-proxy-tag-pr-aaaa"
     directory.mkdir()
     (directory / "owner.json").write_text(json.dumps({"runtime_domain": reaper._runtime_domain()}))
     (directory / "push.sock").touch()
-    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(directory))
+    monkeypatch.setattr(push_proxy, "list_shared_proxies",
+                        lambda: [_entry(directory, reaper._runtime_domain())])
     monkeypatch.setattr(cm, "containers_for_pr", lambda *a: set())
     stopped = _collect_stopped(lambda: push_proxy.release_proxy_if_unused("tag", "pr-aaaa"))
     assert stopped == [str(directory)]

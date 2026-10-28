@@ -11,10 +11,22 @@ import pytest
 from pm_core import push_proxy
 
 
+def _proxy_path(tmp_path):
+    """A socket in a ``pm-push-proxy-*`` directory.
+
+    ``_kill_proxy_socket`` refuses to touch anything that is not a proxy
+    socket directory (``/tmp`` is world-writable), so the fixture must look
+    like one.
+    """
+    directory = tmp_path / f"{push_proxy._SOCKET_DIR_PREFIX}fixture"
+    directory.mkdir(exist_ok=True)
+    return str(directory / "push.sock")
+
+
 def test_renamed_cleanup_preserves_already_published_proxy(monkeypatch, tmp_path):
     from pm_core import container as cm
 
-    path = str(tmp_path / "push.sock")
+    path = _proxy_path(tmp_path)
     replacement = push_proxy.PushProxy(path, str(tmp_path), "branch")
     replacement.start()
     try:
@@ -35,7 +47,7 @@ def test_renamed_cleanup_preserves_already_published_proxy(monkeypatch, tmp_path
 
 
 def test_old_proxy_stop_preserves_replacement_socket(tmp_path):
-    path = str(tmp_path / "push.sock")
+    path = _proxy_path(tmp_path)
     old = push_proxy.PushProxy(path, str(tmp_path), "branch")
     replacement = push_proxy.PushProxy(path, str(tmp_path), "branch")
     old.start()
@@ -51,7 +63,7 @@ def test_old_proxy_stop_preserves_replacement_socket(tmp_path):
 
 @pytest.mark.parametrize("shutdown", ["replacement", "late-signal"])
 def test_daemon_process_exits_without_unlinking_replacement(tmp_path, shutdown):
-    path = str(tmp_path / "push.sock")
+    path = _proxy_path(tmp_path)
     proc = subprocess.Popen(
         [sys.executable, "-m", "pm_core.push_proxy", path, str(tmp_path), "branch"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -90,6 +102,7 @@ def test_daemon_installs_signal_handlers_before_socket_readiness(monkeypatch, tm
     def start(self):
         assert signal.SIGTERM in handlers and signal.SIGINT in handlers
         handlers[signal.SIGTERM]()  # cancellation at the readiness boundary
+        return True  # published (start() returns False only when not bound)
     # Execute the real entrypoint while replacing only its server publication.
     source = Path(push_proxy.__file__).read_text()
     _, entrypoint = source.split('if __name__ == "__main__":', 1)
@@ -113,8 +126,15 @@ def test_unready_proxy_child_is_terminated_and_reaped(monkeypatch, tmp_path, int
     monkeypatch.setattr(push_proxy, "proxy_is_alive", lambda path: False)
     monkeypatch.setattr(time, "sleep", Mock(
         side_effect=KeyboardInterrupt if interrupted else None))
-    with pytest.raises(KeyboardInterrupt if interrupted else ContainerError):
-        push_proxy._start_proxy_subprocess(str(tmp_path / "push.sock"), str(tmp_path), "branch")
+    # A readiness failure is reported (False) for the caller to raise as a
+    # PushProxyError naming the socket; an interruption propagates.  Either
+    # way the child is reaped first.
+    if interrupted:
+        with pytest.raises(KeyboardInterrupt):
+            push_proxy._start_proxy_subprocess(str(tmp_path / "push.sock"), str(tmp_path), "branch")
+    else:
+        assert push_proxy._start_proxy_subprocess(
+            str(tmp_path / "push.sock"), str(tmp_path), "branch") is False
     proc.terminate.assert_called_once()
     proc.kill.assert_called_once()
     assert proc.wait.call_count == 2
@@ -137,8 +157,8 @@ def test_delayed_real_proxy_process_cannot_publish_after_timeout(monkeypatch, tm
     monkeypatch.setattr(time, "sleep", lambda _: None)
     path = tmp_path / "push.sock"
     try:
-        with pytest.raises(ContainerError, match="did not become ready"):
-            push_proxy._start_proxy_subprocess(str(path), str(tmp_path), "branch")
+        assert push_proxy._start_proxy_subprocess(
+            str(path), str(tmp_path), "branch") is False
         assert children[0].poll() is not None
         assert not path.exists()
     finally:
@@ -149,15 +169,20 @@ def test_delayed_real_proxy_process_cannot_publish_after_timeout(monkeypatch, tm
 
 
 def test_old_server_notices_replacement_without_missing_path(tmp_path):
-    path = str(tmp_path / "push.sock")
+    path = _proxy_path(tmp_path)
     old = push_proxy.PushProxy(path, str(tmp_path), "branch")
     replacement = push_proxy.PushProxy(path, str(tmp_path), "branch")
     old.start()
     try:
         # Keep accept blocked while replacement appears, so the old server
-        # never observes a missing pathname between its polling iterations.
-        old._server_socket.settimeout(0.05)
-        replacement.start()
+        # never observes a missing pathname between its polling iterations:
+        # the pathname is unlinked and rebound within one blocked accept (a
+        # daemon never binds over a *live* socket, so the old one must go
+        # first).
+        old._server_socket.settimeout(1.0)
+        time.sleep(0.1)  # let the serve loop enter its blocked accept
+        Path(path).unlink()
+        assert replacement.start()
         old._thread.join(timeout=3)
         assert not old._thread.is_alive()
         assert push_proxy.proxy_is_alive(path)
@@ -207,7 +232,6 @@ def test_start_clears_a_directory_at_the_socket_path(tmp_path):
 
 def test_failed_daemon_start_fails_fast(monkeypatch, tmp_path):
     """A child that already exited cannot publish; do not wait out the window."""
-    from pm_core.container import ContainerError
 
     class Exited:
         pid = 123
@@ -224,9 +248,8 @@ def test_failed_daemon_start_fails_fast(monkeypatch, tmp_path):
 
     monkeypatch.setattr(push_proxy.subprocess, "Popen", lambda *a, **k: Exited())
     started = time.monotonic()
-    with pytest.raises(ContainerError, match="exited"):
-        push_proxy._start_proxy_subprocess(str(tmp_path / "push.sock"),
-                                           str(tmp_path), "branch")
+    assert push_proxy._start_proxy_subprocess(str(tmp_path / "push.sock"),
+                                              str(tmp_path), "branch") is False
     assert time.monotonic() - started < 2.0
 
 

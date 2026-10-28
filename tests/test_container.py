@@ -804,6 +804,34 @@ class TestContainerReuse:
         assert "inspect" in calls
         assert "run" not in calls
 
+    @patch("pm_core.container.container_is_running", return_value=True)
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.push_proxy.validate_shared_proxy_mount")
+    @patch("pm_core.container._run_runtime")
+    def test_reuse_keys_the_shared_proxy_by_workdir(
+            self, mock_docker, mock_validate, mock_start, mock_alive,
+            mock_running, _mock_runtime, monkeypatch):
+        """Reuse validates the mount for *this* workdir's proxy directory and
+        always goes through ``start_push_proxy``, which reuses a live daemon
+        (after its domain/workdir checks) or respawns a dead one in place —
+        the restart-safe lookup needs workdir/session/pr, not the registry.
+        """
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="abc123deadbeef\n")
+
+        create_container(name="pm-test", config=ContainerConfig(),
+                         workdir=Path("/w"), allowed_push_branch="pm/pr-1",
+                         session_tag="tag", pr_id="pr-1")
+
+        mock_validate.assert_called_once_with("abc123deadbeef", "tag", "pr-1", "/w")
+        mock_start.assert_called_once_with(
+            "pm-test", "/w", "pm/pr-1", session_tag="tag", pr_id="pr-1")
+        mock_alive.assert_called_once_with(
+            "/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.container_is_running", return_value=False)
     @patch("pm_core.container.remove_container")
@@ -1320,6 +1348,31 @@ class TestCreateContainerPushProxy:
         assert call_kwargs["proxy_socket_path"] == "/tmp/pm-push-proxy-x/push.sock"
 
     @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-x/push.sock")
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_surfaces_push_proxy_failure(self, mock_enabled, mock_config,
+                                              mock_create, mock_exec,
+                                              mock_sock, _mock_running,
+                                              _mock_runtime):
+        """A proxy failure must name the proxy, not blame the runtime."""
+        from pm_core.push_proxy import PushProxyError
+
+        mock_create.side_effect = PushProxyError(
+            "push proxy did not become ready at /tmp/x/push.sock "
+            "(workdir=/w, branch=pm/pr-123)")
+        from pm_core.container import ContainerLaunchError
+        with pytest.raises(ContainerLaunchError,
+                           match="could not start its push proxy") as exc:
+            wrap_claude_cmd("claude", "/w", label="impl",
+                            allowed_push_branch="pm/pr-123")
+        assert exc.value.kind == "proxy"
+        assert "did not become ready" in str(exc.value)
+
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
            return_value="/tmp/pm-push-proxy-repo-abc-pr-1/push.sock")
     @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
     @patch("pm_core.container.create_container", return_value="cid")
@@ -1370,3 +1423,43 @@ def test_exit_release_survives_deleted_pane_cwd(tmp_path, monkeypatch):
     recorded = calls.read_text().splitlines()
     assert recorded, "release never reached the runtime"
     assert all(line.split("|", 1)[0] == "/" for line in recorded)
+
+
+# ---------------------------------------------------------------------------
+# provider env transport through exec (pr-84ebabf)
+# ---------------------------------------------------------------------------
+
+CANARY = "canary-84ebabf-do-not-use"
+
+
+class TestBuildExecCmdProviderEnv:
+    """Provider secrets reach the container by name, never by value.
+
+    ``podman/docker exec -e NAME`` reads the value from the runtime client's
+    environment, which the tmux pane carries (its command sources a private
+    env file before running the runtime).
+    """
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_env_passed_by_name_not_value(self, mock_runtime):
+        cmd = build_exec_cmd("my-container", "claude 'hi'",
+                             env={"ANTHROPIC_API_KEY": CANARY})
+        assert "-e ANTHROPIC_API_KEY" in cmd
+        assert CANARY not in cmd
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_no_env_no_flags(self, mock_runtime):
+        cmd = build_exec_cmd("my-container", "claude 'hi'")
+        assert "-e ANTHROPIC_API_KEY" not in cmd
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid123")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_forwards_env_to_exec(self, mock_enabled, mock_cfg,
+                                       mock_create, mock_exec):
+        wrap_claude_cmd("claude 'hi'", "/workdir", label="impl",
+                        env={"ANTHROPIC_API_KEY": CANARY})
+        assert mock_exec.call_args.kwargs["env"] == {
+            "ANTHROPIC_API_KEY": CANARY}

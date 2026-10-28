@@ -118,7 +118,7 @@ def test_reuse_pins_setup_recovery_and_mount_inspection(monkeypatch, tmp_path, p
     elif phase == "restart":
         restart.assert_called_once_with(NAME, container_id=CID)
     elif phase == "shared":
-        validate.assert_called_once_with(CID, "tag", "pr-aaaa")
+        validate.assert_called_once_with(CID, "tag", "pr-aaaa", str(tmp_path))
     else:
         repair.assert_called_once_with(CID, str(tmp_path), "topic")
 
@@ -347,3 +347,19 @@ def test_stopped_preclean_uses_identity_captured_before_state(monkeypatch, tmp_p
         remove.assert_called_once_with(NAME, container_id=CID)
     else:
         remove.assert_not_called()
+
+
+def test_fresh_proxy_start_failure_is_a_classified_launch_error(fresh, monkeypatch, tmp_path):
+    """A push-proxy start failure on a fresh launch names the proxy (kind
+    ``proxy``) like the reuse path, instead of a bare ContainerError that
+    wrap_claude_cmd would re-label and launchers could not classify."""
+    monkeypatch.setattr(push_proxy, "start_push_proxy", Mock(side_effect=push_proxy.PushProxyError(
+        "push proxy did not become ready at /tmp/x/push.sock")))
+    monkeypatch.setattr(cm, "discard_container", Mock())
+    with pytest.raises(cm.ContainerLaunchError, match="could not start its push proxy") as exc:
+        cm._create_fresh(NAME, cm.ContainerConfig(), tmp_path,
+                         extra_ro_mounts=None, extra_rw_mounts=None,
+                         allowed_push_branch="topic", session_tag=None, pr_id=None,
+                         labels={cm.LABEL_ATTEMPT: "attempt"})
+    assert exc.value.kind == "proxy"
+    assert "did not become ready" in str(exc.value)

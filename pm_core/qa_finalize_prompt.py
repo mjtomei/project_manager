@@ -12,6 +12,33 @@ window. It runs a short Claude session whose job is:
 Outputs a short structured report so the user sees what happened.
 """
 
+from pm_core.prompt_bounds import PLAN_LIST_BUDGET, bounded_join
+
+# Cap the per-scenario worktree listing so a large QA run cannot blow the
+# finalize prompt's argv budget.  The count cap alone does not bound the
+# listing — the lines carry worktree paths, whose length is bounded only by
+# PATH_MAX, so 40 of them can still exceed the limit (the same cap-times-item-
+# size defect the PR/plan/sibling listings had) — hence the shared byte budget
+# as well.
+_SCENARIO_LINES_MAX = 40
+
+
+def _scenarios_pointer(pr_id: str) -> str:
+    """Where to read the scenarios an abbreviated listing left out.
+
+    The QA run's ``qa_status.json`` lists every scenario and
+    ``qa_resume.json`` beside it carries each worktree path, so the
+    resolved status file (or the run directory when no run exists yet) is
+    the on-demand source the omission marker names.
+    """
+    from pm_core.paths import latest_qa_status_path, workdirs_base
+    latest = latest_qa_status_path(pr_id)
+    if latest is not None:
+        return (f"read `{latest}` for every scenario "
+                f"(qa_resume.json beside it lists each worktree)")
+    return (f"the QA run's qa_status.json / qa_resume.json under "
+            f"{workdirs_base() / 'qa' / (pr_id + '-*')} list every scenario")
+
 
 def build_qa_finalize_prompt(
     *,
@@ -29,9 +56,14 @@ def build_qa_finalize_prompt(
     can be ``None``.
     """
     if scenario_worktrees:
-        scenario_lines = "\n".join(
-            f"- Scenario {idx}: verdict={verdict or '?'}, worktree={path or '(none)'}"
-            for idx, verdict, path in scenario_worktrees
+        scenario_lines = bounded_join(
+            scenario_worktrees,
+            lambda t: (f"- Scenario {t[0]}: verdict={t[1] or '?'}, "
+                       f"worktree={t[2] or '(none)'}"),
+            max_items=_SCENARIO_LINES_MAX,
+            max_bytes=PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more scenarios; {_scenarios_pointer(pr_id)})"),
         )
     else:
         scenario_lines = "- (no scenarios ran)"

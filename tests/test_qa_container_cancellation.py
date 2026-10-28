@@ -7,6 +7,16 @@ import pytest
 from pm_core import container, container_reaper, qa_loop, tmux
 
 
+
+def _as_hit(fn):
+    """Adapt a verdict-string stub to ``find_verdict_turn`` (pr-8efa789)."""
+    from pm_core.verdict_transcript import VerdictHit
+
+    def hit(*args):
+        verdict = fn(*args)
+        return VerdictHit(verdict, verdict) if verdict else None
+    return hit
+
 @pytest.mark.parametrize("stage", [
     "clone", "create", "concretizer-command", "concretize", "reject", "worker-command",
 ])
@@ -221,9 +231,8 @@ def test_stop_during_pass_verification_neither_flags_nor_messages_worker(
     monkeypatch.setattr(tmux, "send_keys", send_keys)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript", lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=[], concurrency_cap=0,

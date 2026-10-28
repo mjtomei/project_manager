@@ -794,6 +794,19 @@ def _runtime_owner_target(command: str) -> str:
             if re.fullmatch(r"[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?", user):
                 index += 1
                 continue
+        # PM passes provider environment by name only (``-e NAME``; the
+        # runtime reads the value from its own environment), so every PM exec
+        # carries these. A bare variable name cannot contain spaces;
+        # ``NAME=value`` can, once ps flattens argv, and stays conservative.
+        if verb == "exec" and (word in {"-e", "--env"} or word.startswith("--env=")):
+            if "=" in word:
+                var = word.split("=", 1)[1]
+            else:
+                index += 1
+                var = words[index] if index < len(words) else ""
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", var):
+                index += 1
+                continue
         return command
     if index < len(words) and re.fullmatch(r"/?[A-Za-z0-9][A-Za-z0-9_.-]*", words[index]):
         return words[index]  # Everything after this is the in-container command.
@@ -1331,14 +1344,15 @@ def _proxy_failure_actionable(key: str) -> bool:
         stem = target[len("unshared "):]
         return (container_mod.container_state_dir() / "proxy-releases"
                 / f"{stem}.json").exists()
-    if "/" not in target:
-        return True
-    tag, pr_id = target.split("/", 1)
-    if not tag or not pr_id:
+    parts = target.split("/")
+    if len(parts) not in (2, 3) or not all(parts):
         return True
     from pm_core import push_proxy
     try:
-        return os.path.exists(push_proxy._shared_sock_dir_path(tag, pr_id))
+        if len(parts) == 3:
+            return os.path.exists(push_proxy._shared_sock_dir_path(*parts))
+        # A key from before workdir-keyed proxies names the PR's legacy dir.
+        return os.path.exists(push_proxy._legacy_shared_sock_dir_path(*parts))
     except (OSError, ValueError):
         return True
 
@@ -1372,10 +1386,10 @@ def _release_unused_proxies(scope: Scope, failures: dict[str, str],
             continue
         if scope.pr_id and prox["pr_id"] != scope.pr_id:
             continue
-        key = f"{prox['session_tag']}/{prox['pr_id']}"
+        key = push_proxy.proxy_key(prox)
         try:
             decision = push_proxy.release_proxy_decision(
-                prox["session_tag"], prox["pr_id"])
+                prox["session_tag"], prox["pr_id"], sock_dir=prox["sock_dir"])
             if decision == push_proxy.PROXY_RELEASED:
                 released.append(key)
             elif decision == push_proxy.PROXY_UNAVAILABLE:

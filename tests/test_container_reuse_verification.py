@@ -368,7 +368,7 @@ def test_proxy_probe_timeout_names_the_container(monkeypatch, tmp_path):
     monkeypatch.setattr(reaper, "live_owner_panes", lambda *a: [])
     monkeypatch.setattr(cm, "_renew_launch", Mock())
 
-    def validate(target, session_tag, pr_id):
+    def validate(target, session_tag, pr_id, workdir):
         try:
             raise subprocess.TimeoutExpired(["podman", "inspect"], 10)
         except subprocess.TimeoutExpired as exc:

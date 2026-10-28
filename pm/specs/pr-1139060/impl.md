@@ -185,10 +185,16 @@ operations do not take PM's launch lock.
 - **Merge**: `pr_cleanup.cleanup_pr_containers` covers every kind for the PR
   (the shared label-first inventory, including renamed allocations), and CLI `_finalize_merge` launches a detached
   PR-scoped reap after killing windows (the merge is not blocked).
-- **Push proxies**: a shared `(session_tag, pr_id)` proxy is stopped only
+- **Push proxies**: shared proxies are keyed per `(session_tag, pr_id,
+  workdir_token)` (master pr-748e708, adopted at the 89e3c501 merge — see
+  A9): implementation/review/sign-off on the PR workdir share one socket
+  directory, each QA scenario clone gets its own. A shared socket directory
+  is stopped only
   when the runtime reports **no container** (any state) labeled/named for
-  that tag+PR (using the reaper's label-first inventory, with legacy name
-  fallback), checked under a per-proxy fcntl lock; `create_container` holds
+  that tag+PR still using it (using the reaper's label-first inventory, with legacy name
+  fallback; when the PR has several directories, the users' actual
+  `/run/pm-push-proxy` mounts decide), checked under a per-PR fcntl lock and
+  the directory's start lock; `create_container` holds
   that lock from proxy start until `run` returns so a concurrent release
   cannot stop a proxy a new container is about to mount. Host-side git runs
   with repository hooks disabled (`core.hooksPath=/dev/null`): the workdir is
@@ -717,6 +723,25 @@ container cleared it and kept its files.  Running state is not health.
   the run defers the queued launch instead of exceeding the limit, and keeps
   the retained containers. Replaces the earlier rule that the cap bounded
   only the launch batch, not deliberately kept containers.
+
+- A9 *Push-proxy ownership model after merging master@89e3c501* — master
+  (pr-748e708) redesigned shared proxies as workdir-keyed directories with a
+  `proxy.json` sidecar (workdir/branch, written by the daemon), a per-directory
+  start lock next to the directory, long-name discovery links and /tmp
+  hardening (planted links, foreign owners, squatted names), but released
+  them by in-process reference counts and kept the directory until session
+  teardown. One model is kept: master's keying, sidecar, start lock, conflict
+  refusal and hardening, plus this PR's ownership: `owner.json` with runtime
+  domain written before the daemon starts, release only after a locked
+  runtime-user check (any pm process), durable captured unshared releases, the
+  socket lifecycle lock and generation-checked unlinks. Released directories
+  are removed with their discovery link and start lock. A pre-merge container
+  that mounts the old tokenless `(session_tag, pr_id)` directory is not
+  silently re-pointed: reuse reports it and asks for removal so the next
+  launch recreates it; cleanup still finds and releases those directories.
+  `PushProxyError` is a `ContainerError`, so launch/cleanup classification
+  covers proxy failures. Session teardown releases only directories whose
+  runtime inventory shows no users (no unconditional sweep).
 
 ## 4. Edge cases
 

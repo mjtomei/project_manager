@@ -30,6 +30,10 @@ from typing import Callable, Collection
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
+from pm_core.prompt_bounds import (
+    ARTIFACT_PATHS_MAX as _ARTIFACT_PATHS_MAX,
+    bounded_join, bounded_lines,
+)
 from pm_core.spec_gen import get_spec as _get_qa_spec
 from pm_core.loop_shared import (
     find_claude_pane,
@@ -38,8 +42,9 @@ from pm_core.loop_shared import (
     VERDICT_TAIL_LINES,
 )
 from pm_core.verdict_transcript import (
+    extract_reason_from_text,
     extract_verdict_from_transcript,
-    extract_verdict_reason_from_transcript,
+    find_verdict_turn,
     read_latest_assistant_text,
 )
 from pm_core.claude_launcher import WorkspaceTrustBlocked
@@ -210,6 +215,13 @@ class QALoopState:
     # colorizes correctly in the scenarios pane; the reason renders
     # alongside it when present.
     scenario_verdict_reasons: dict[int, str] = field(default_factory=dict)
+    # Identity of the transcript turn that produced each recorded verdict:
+    # {"pr_id", "loop_id", "scenario", "session_id", "turn_id",
+    # "timestamp"}.  Scoping to (PR, run, scenario, attempt/session) means a
+    # verdict restored from a resume snapshot is trusted only when it still
+    # belongs to the current attempt — a historical PASS is never
+    # resurrected and its verification is never inherited (pr-8efa789).
+    scenario_verdict_sources: dict[int, dict] = field(default_factory=dict)
     latest_verdict: str = ""
     latest_output: str = ""
     # Result of the post-QA finalize pane: "FINALIZE_DONE",
@@ -241,6 +253,10 @@ class QALoopState:
     # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
     # change gets reviewed before sign-off.
     planner_code_changes: list[str] = field(default_factory=list)
+    # Select the new qa-<pr> window on first-time creation.  Only
+    # user-initiated starts (t / z t / zz t) set this; scheduler-driven
+    # starts leave attached clients where they are.
+    focus_on_create: bool = False
     # Error message for status display (e.g. missing spec, no scenarios)
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
@@ -773,6 +789,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     finalize_session_id = str(_uuid.uuid4())
     _finalize_resolution = _resolve_qa_model(pr_data, project_data,
                                              session_type="qa_finalize")
+    finalize_env: dict[str, str] = {}
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
@@ -781,12 +798,13 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
         effort=_finalize_resolution.effort,
         session_type="qa_finalize",
         session_tag=state.session_tag,
+        env_out=finalize_env,
     )
 
     try:
         finalize_pane = tmux_mod.split_pane_at(
             anchor_pane, "v", finalize_cmd, background=True,
-            cwd=workdir_path,
+            cwd=workdir_path, env=finalize_env,
         )
     except Exception:
         _log.exception("split_pane_at failed for finalize pane")
@@ -993,6 +1011,9 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "scenario_verdict_reasons": {
             str(k): v for k, v in state.scenario_verdict_reasons.items()
         },
+        "scenario_verdict_sources": {
+            str(k): v for k, v in state.scenario_verdict_sources.items()
+        },
         "verified_scenarios": sorted(state.verified_scenarios),
         "verify_pass_enabled": state.verify_pass_enabled,
         "planner_head": state.planner_head,
@@ -1096,6 +1117,41 @@ def resume_order(resume_data: dict) -> tuple[float, int]:
     return started, max(indices, default=0)
 
 
+def _drop_foreign_verdicts(state: QALoopState) -> None:
+    """Drop restored verdicts whose recorded source is not this attempt.
+
+    A verdict is scoped to (pr_id, loop_id, scenario index, session_id).
+    When a resumed snapshot's session id no longer matches the scenario's
+    current session (e.g. the worker was relaunched), the verdict belongs
+    to a superseded attempt: discard it and its verification so the new
+    attempt is polled from scratch.  Snapshots written before sources
+    existed carry no source and are trusted unchanged.
+    """
+    if not state.scenario_verdict_sources:
+        return
+    by_index = {s.index: s for s in state.scenarios}
+    for idx in list(state.scenario_verdicts):
+        src = state.scenario_verdict_sources.get(idx)
+        if not src:
+            continue
+        scenario = by_index.get(idx)
+        if scenario is None:
+            continue
+        if (str(src.get("pr_id") or "") != state.pr_id
+                or str(src.get("loop_id") or "") != state.loop_id
+                or src.get("scenario") != idx
+                or str(src.get("session_id") or "")
+                != (scenario.session_id or "")):
+            _log.info(
+                "Resume: dropping stale %s verdict for scenario %d "
+                "(source identity changed)",
+                state.scenario_verdicts.get(idx), idx)
+            state.scenario_verdicts.pop(idx, None)
+            state.scenario_verdict_reasons.pop(idx, None)
+            state.scenario_verdict_sources.pop(idx, None)
+            state.verified_scenarios.discard(idx)
+
+
 def build_resume_state(resume_data: dict) -> QALoopState:
     """Reconstruct a QALoopState from a qa_resume.json snapshot.
 
@@ -1120,9 +1176,15 @@ def build_resume_state(resume_data: dict) -> QALoopState:
         int(k): v
         for k, v in (resume_data.get("scenario_verdict_reasons") or {}).items()
     }
+    state.scenario_verdict_sources = {
+        int(k): v
+        for k, v in (resume_data.get("scenario_verdict_sources") or {}).items()
+        if isinstance(v, dict)
+    }
     state.verified_scenarios = set(resume_data.get("verified_scenarios") or [])
     # Absent in older snapshots: the resumed poll then reads the setting.
     state.verify_pass_enabled = resume_data.get("verify_pass_enabled")
+    _drop_foreign_verdicts(state)
     state.finalize_verdict = resume_data.get("finalize_verdict")
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
@@ -1641,10 +1703,18 @@ def _build_concretization_prompt(scenario: QAScenario, pr_branch: str,
                                   base_branch: str,
                                   instruction_content: str | None = None,
                                   pr_id: str | None = None) -> str:
-    """Build a prompt that verifies and refines scenario steps against code."""
+    """Build a prompt that verifies and refines scenario steps against code.
+
+    The instruction file is inlined whole: it is instruction text, so it is
+    never truncated.  A prompt too large for one argv entry is delivered by
+    the launcher's file-backed bootstrap instead.
+    """
     this_pr = pr_id or "<pr-id>"
     instruction_section = ""
     if instruction_content:
+        # The instruction file is inlined whole and never truncated; an
+        # over-limit prompt is delivered by the launcher's file-backed
+        # bootstrap instead.
         instruction_section = f"""
 ## Instruction File
 
@@ -1654,6 +1724,10 @@ does not need to read the file separately.
 
 {instruction_content}
 """
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
     return f"""You are refining the test steps for QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario
@@ -1661,7 +1735,7 @@ does not need to read the file separately.
 **Focus**: {scenario.focus}
 
 **Planned steps**:
-{scenario.steps}
+{steps_text}
 {instruction_section}
 ## Your Task
 
@@ -1759,8 +1833,13 @@ def _build_concretize_cmd(
     write_dir: str | None = None,
     session_id: str | None = None,
     session_tag: str | None = None,
+    env_out: dict[str, str] | None = None,
 ) -> str:
-    """Build the shell command for the concretization step."""
+    """Build the shell command for the concretization step.
+
+    *env_out* receives the provider environment variables; the caller must
+    pass them to the tmux pane (``env=``) so they never enter the command.
+    """
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
@@ -1768,9 +1847,10 @@ def _build_concretize_cmd(
     base_branch = project_data.get("project", {}).get("base_branch", "master")
     pr_branch = pr_data.get("branch", "")
 
-    prompt = _build_concretization_prompt(scenario, pr_branch, base_branch,
-                                          instruction_content=instruction_content,
-                                          pr_id=pr_data.get("id"))
+    prompt = _build_concretization_prompt(
+        scenario, pr_branch, base_branch,
+        instruction_content=instruction_content,
+        pr_id=pr_data.get("id"))
     claude_cmd = build_claude_shell_cmd(
         prompt=prompt,
         model=resolution.model, provider=resolution.provider,
@@ -1781,6 +1861,7 @@ def _build_concretize_cmd(
         # though it shares model resolution with qa_scenario.
         session_type="qa_concretize",
         session_tag=session_tag,
+        env_out=env_out,
     )
 
     if container_name:
@@ -1788,7 +1869,7 @@ def _build_concretize_cmd(
         return container_mod.build_exec_cmd(
             container_name, claude_cmd, cleanup=False,
             container_id=scenario.container_id,
-            generation=scenario.container_generation)
+            generation=scenario.container_generation, env=env_out)
     return claude_cmd
 
 
@@ -1928,17 +2009,20 @@ def _launch_scenario_0(
     )
 
     scenario_cwd = str(clone_path) if repo_root else workdir_path
+    scenario_env: dict[str, str] = {}
     final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
         cwd=scenario_cwd,
         session_type="qa_scenario",
-        session_tag=state.session_tag)
+        session_tag=state.session_tag,
+        env_out=scenario_env)
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
         pane_id = tmux_mod.new_window_get_pane(session, win_name, final_cmd,
-                                               cwd=scenario_cwd, switch=False)
+                                               cwd=scenario_cwd, switch=False,
+                                               env=scenario_env)
         scenario.window_name = win_name
         scenario.pane_id = pane_id
     except Exception:
@@ -2162,7 +2246,9 @@ def _launch_scenarios_in_tmux(
         if repo_root:
             _setup_clone_override(clone_path)
 
-        # Read instruction content before installing (sets absolute path on scenario)
+        # Read instruction content before installing (sets absolute path on
+        # scenario).  The concretizer inlines the file whole, so this is the
+        # only copy it needs.
         instruction_content: str | None = None
         if pm_root and scenario.instruction_path:
             src = pm_root / "qa" / scenario.instruction_path
@@ -2188,17 +2274,18 @@ def _launch_scenarios_in_tmux(
 
         import uuid as _uuid
         scenario.concretize_session_id = str(_uuid.uuid4())
+        concretize_env: dict[str, str] = {}
         try:
             concretize_cmd = _build_concretize_cmd(
                 scenario, pr_data, data, cwd=scenario_cwd,
                 instruction_content=instruction_content,
                 session_id=scenario.concretize_session_id,
-                session_tag=state.session_tag)
+                session_tag=state.session_tag, env_out=concretize_env)
             if state.stop_requested:
                 return
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
-                cwd=scenario_cwd, switch=False)
+                cwd=scenario_cwd, switch=False, env=concretize_env)
             if not concretize_pane:
                 raise RuntimeError(f"no pane returned for '{win_name}'")
         except Exception as exc:
@@ -2275,15 +2362,17 @@ def _launch_scenarios_in_tmux(
             if refined_steps:
                 scenario.steps = refined_steps
 
+            scenario_env: dict[str, str] = {}
             child_cmd, pane_cwd = _build_scenario_run_cmd(
                 scenario, state, data, transcript, _qa_resolution,
                 session=session, workdir_path=workdir_path,
+                env_out=scenario_env,
             )
             if state.stop_requested:
                 return
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", child_cmd, background=True,
-                cwd=pane_cwd)
+                cwd=pane_cwd, env=scenario_env)
             if not scenario_pane:
                 raise RuntimeError(f"no worker pane returned for '{win_name}'")
             scenario.window_name = win_name
@@ -2402,7 +2491,9 @@ def _launch_scenarios_in_containers(
         if state.stop_requested:
             return
 
-        # Read instruction content from source before installing
+        # Read instruction content from source before installing.  The
+        # concretizer inlines the file whole, so this is the only copy it
+        # needs.
         instruction_content: str | None = None
         if pm_root and scenario.instruction_path:
             src = pm_root / "qa" / scenario.instruction_path
@@ -2470,18 +2561,19 @@ def _launch_scenarios_in_containers(
 
         import uuid as _uuid
         scenario.concretize_session_id = str(_uuid.uuid4())
+        concretize_env: dict[str, str] = {}
         try:
             concretize_cmd = _build_concretize_cmd(
                 scenario, pr_data, data, cwd=container_workdir,
                 container_name=cname, instruction_content=instruction_content,
                 write_dir=str(clone_path),
                 session_id=scenario.concretize_session_id,
-                session_tag=state.session_tag)
+                session_tag=state.session_tag, env_out=concretize_env)
             if state.stop_requested:
                 return
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
-                cwd=workdir_path, switch=False)
+                cwd=workdir_path, switch=False, env=concretize_env)
             if not concretize_pane:
                 raise RuntimeError(f"no pane returned for '{win_name}'")
         except Exception as exc:
@@ -2564,15 +2656,17 @@ def _launch_scenarios_in_containers(
             if refined_steps:
                 scenario.steps = refined_steps
 
+            scenario_env: dict[str, str] = {}
             exec_cmd, pane_cwd = _build_scenario_run_cmd(
                 scenario, state, data, transcript, _qa_resolution,
                 session=None, workdir_path=workdir_path,
+                env_out=scenario_env,
             )
             if state.stop_requested:
                 return
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", exec_cmd, background=True,
-                cwd=pane_cwd)
+                cwd=pane_cwd, env=scenario_env)
             if not scenario_pane:
                 raise RuntimeError(f"no worker pane returned for '{win_name}'")
             scenario.window_name = win_name
@@ -2651,6 +2745,7 @@ def _build_scenario_run_cmd(
     *,
     session: str | None,
     workdir_path: str,
+    env_out: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Build the shell command that launches a scenario's claude pane.
 
@@ -2705,13 +2800,14 @@ def _build_scenario_run_cmd(
         transcript=transcript, cwd=wd_in, write_dir=host_clone,
         session_type="qa_scenario",
         session_tag=state.session_tag,
+        env_out=env_out,
     )
 
     if use_containers:
         run_cmd = container_mod.build_exec_cmd(
             scenario.container_name, claude_cmd, cleanup=False,
             container_id=scenario.container_id,
-            generation=scenario.container_generation)
+            generation=scenario.container_generation, env=env_out)
     else:
         run_cmd = claude_cmd
 
@@ -2795,15 +2891,18 @@ def _relaunch_scenario_window(
         return False
 
     try:
+        scenario_env: dict[str, str] = {}
         run_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
             session=None if (use_containers and scenario.container_name) else session,
             workdir_path=workdir_path,
+            env_out=scenario_env,
         )
         if state.stop_requested:
             return False
         pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
-                                               cwd=pane_cwd, switch=False)
+                                               cwd=pane_cwd, switch=False,
+                                               env=scenario_env)
         if not pane_id:
             raise RuntimeError(f"no worker pane returned for '{win_name}'")
 
@@ -3266,6 +3365,11 @@ def _poll_tmux_verdicts(
                         _log.warning("Scenario %d failed verification %d times — "
                                      "marking NEEDS_WORK", scenario_idx, fails)
                         state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                        # This verdict comes from verification, not from the
+                        # worker's turn: drop the recorded source so the resume
+                        # identity check cannot attribute it to a stale attempt
+                        # (see _drop_foreign_verdicts).
+                        state.scenario_verdict_sources.pop(scenario_idx, None)
                         state.scenario_verdict_reasons[scenario_idx] = (
                             f"failed verification: {reason}"
                         )
@@ -3295,6 +3399,10 @@ def _poll_tmux_verdicts(
                             # re-trigger verification on the same (still PASS)
                             # transcript turn.
                             state.scenario_verdicts.pop(scenario_idx, None)
+                            # The follow-up is a new attempt at this scenario's
+                            # verdict: forget the old turn identity so the
+                            # re-evaluation's verdict is recorded afresh.
+                            state.scenario_verdict_sources.pop(scenario_idx, None)
                             if scenario_idx in state.verified_scenarios:
                                 _log.warning("Scenario %d was in verified_scenarios "
                                              "when flagged — clearing defensively",
@@ -3313,6 +3421,9 @@ def _poll_tmux_verdicts(
                                          "window gone, marking INPUT_REQUIRED",
                                          scenario_idx)
                             state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                            # Loop-derived verdict, not the worker's turn —
+                            # drop the PASS source (see _drop_foreign_verdicts).
+                            state.scenario_verdict_sources.pop(scenario_idx, None)
                             state.scenario_verdict_reasons[scenario_idx] = (
                                 "window gone during PASS verification before a "
                                 "re-checked verdict could be recorded"
@@ -3386,6 +3497,8 @@ def _poll_tmux_verdicts(
                     if (not _is_launch_failure(state, scenario.index)
                             or scenario.index in state.scenario_verdicts):
                         state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                        # Loop-derived, not the worker's turn.
+                        state.scenario_verdict_sources.pop(scenario.index, None)
                         state.scenario_verdict_reasons.setdefault(
                             scenario.index,
                             f"worker exited before any verdict; no recovery after "
@@ -3453,10 +3566,12 @@ def _poll_tmux_verdicts(
 
                 # Read verdict straight from the JSONL transcript.  The hook
                 # event is the turn-boundary gate; the transcript is the
-                # source of truth for what the agent actually said.
-                verdict = extract_verdict_from_transcript(
-                    scenario.transcript_path, ALL_VERDICTS,
-                )
+                # source of truth for what the agent actually said.  A verdict
+                # emitted before a trailing /loop wakeup or Monitor postscript
+                # is still found (pr-8efa789); a genuine new task, retry or
+                # verifier follow-up remains a boundary and supersedes it.
+                hit = find_verdict_turn(scenario.transcript_path, ALL_VERDICTS)
+                verdict = hit.verdict if hit else None
 
                 # Idle-reminder: when the agent emits idle_prompt without a
                 # verdict, nudge once per _reminder_timeout window.
@@ -3489,11 +3604,24 @@ def _poll_tmux_verdicts(
                                 scenario.index,
                             )
 
-                if verdict:
+                if hit is not None:
                     state.scenario_verdicts[scenario.index] = verdict
-                    reason = extract_verdict_reason_from_transcript(
-                        scenario.transcript_path,
-                    )
+                    # Record which attempt/turn produced the verdict so a
+                    # resumed run never trusts a verdict from a superseded
+                    # attempt (see _drop_foreign_verdicts).
+                    state.scenario_verdict_sources[scenario.index] = {
+                        "pr_id": state.pr_id,
+                        "loop_id": state.loop_id,
+                        "scenario": scenario.index,
+                        "session_id": scenario.session_id or "",
+                        "turn_id": hit.turn_id,
+                        "timestamp": hit.timestamp,
+                    }
+                    # Read the reason from the very turn the verdict came from
+                    # (hit.text) rather than re-scanning the transcript: a
+                    # re-scan could land on a newer wakeup turn appended in
+                    # between and report a different turn's reason.
+                    reason = extract_reason_from_text(hit.text)
                     if reason:
                         state.scenario_verdict_reasons[scenario.index] = reason
                     pending.discard(scenario.index)
@@ -3578,6 +3706,10 @@ def _poll_tmux_verdicts(
 # Maximum pane output lines to include in the verification prompt.
 # Large outputs are truncated to keep the prompt manageable.
 _VERIFICATION_MAX_PANE_LINES = 500
+# Byte cap for the inlined pane output.  The line bound alone does not bound
+# the prompt: transcripts carry long lines, so 500 of them can still exceed
+# the argv limit (and one enormous line defeats the line count entirely).
+_VERIFICATION_MAX_PANE_BYTES = 60_000
 
 
 def _build_verification_prompt(scenario: QAScenario, verdict: str,
@@ -3614,18 +3746,16 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
             f"Read that file to review the scenario output.{format_hint}"
         )
     else:
-        text = pane_output or ""
-        lines = text.splitlines()
-        if len(lines) > _VERIFICATION_MAX_PANE_LINES:
-            # Keep both head and tail so the verifier sees setup AND verdict
-            head_lines = _VERIFICATION_MAX_PANE_LINES // 4
-            tail_lines = _VERIFICATION_MAX_PANE_LINES - head_lines
-            omitted = len(lines) - head_lines - tail_lines
-            text = (
-                "\n".join(lines[:head_lines])
-                + f"\n\n[... {omitted} lines omitted ...]\n\n"
-                + "\n".join(lines[-tail_lines:])
-            )
+        # Head/tail truncation so the verifier sees setup AND verdict; the
+        # byte cap keeps long transcript lines from defeating the line bound,
+        # and the marker points at the transcript for the full output.
+        text = bounded_lines(
+            pane_output or "",
+            max_lines=_VERIFICATION_MAX_PANE_LINES,
+            max_bytes=_VERIFICATION_MAX_PANE_BYTES,
+            pointer="the full scenario transcript on disk",
+            label="scenario output",
+        )
         output_section = (
             f"The scenario produced the verdict: **{verdict}**\n\n"
             f"Here is the full output from the scenario session:\n\n"
@@ -3642,7 +3772,12 @@ def _build_verification_prompt(scenario: QAScenario, verdict: str,
     artifact_check_block = ""
     artifact_judgment_bullet = ""
     if artifact_names:
-        recipe_bullets = "\n".join(f"- {n}" for n in artifact_names)
+        recipe_bullets = bounded_join(
+            artifact_names, lambda n: f"- {n}",
+            max_items=_ARTIFACT_PATHS_MAX,
+            omitted_note=lambda n: (
+                f"- ... (+{n} more recipes; run `pm qa list` to see the library)"),
+        )
         where = captures_scenario_dir or (
             "the per-scenario captures directory the scenario worker was given")
         artifact_check_block = f"""
@@ -3681,6 +3816,11 @@ the artifact with no explanation are **not** valid reasons.
     # the judgment step shifts to Step 4.
     judgment_step_no = 4 if artifact_names else 3
 
+    # Scenario steps are the guidelines the session works from, so they are
+    # inlined whole and never truncated; an over-limit prompt is delivered by
+    # the launcher's file-backed bootstrap instead.
+    steps_text = scenario.steps or ""
+
     return f"""You are verifying the output of QA scenario {scenario.index}: "{scenario.title}"
 
 ## Scenario Definition
@@ -3688,7 +3828,7 @@ the artifact with no explanation are **not** valid reasons.
 **Focus**: {scenario.focus}
 
 **Steps**:
-{scenario.steps}
+{steps_text}
 
 ## Scenario Output
 
@@ -3879,6 +4019,7 @@ def _verify_single_scenario(
             return False, "no verification cwd", None
         import uuid as _uuid
         verify_session_id = str(_uuid.uuid4())
+        verify_env: dict[str, str] = {}
         verify_cmd = build_claude_shell_cmd(
             prompt=prompt,
             model=resolution.model, provider=resolution.provider,
@@ -3886,10 +4027,12 @@ def _verify_single_scenario(
             cwd=verify_cwd, session_id=verify_session_id,
             session_type="qa_verification",
             session_tag=session_tag,
+            env_out=verify_env,
         )
         try:
             verify_pane = tmux_mod.split_pane_at(
-                scenario_pane, "v", verify_cmd, background=True, cwd=verify_cwd,
+                scenario_pane, "v", verify_cmd, background=True,
+                cwd=verify_cwd, env=verify_env,
             )
         except Exception:
             _log.warning("Verification: split_pane_at failed for scenario %d",
@@ -3955,6 +4098,13 @@ def _verify_single_scenario(
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
+        # Snapshot the last verdict *before* prompting: the verifier can
+        # answer during the send/settle below, and a waiter that scanned at
+        # call time would then mistake that answer for the verdict that
+        # prompted the wait and block for a second one (pr-8efa789).
+        _prior = find_verdict_turn(
+            scenario.verifier_transcript, _VERIFICATION_VERDICTS)
+        baseline_line = _prior.line_index if _prior else -1
         tmux_mod.send_keys(scenario.verifier_pane_id, msg)
         for _ in range(2):
             time.sleep(1)
@@ -3968,6 +4118,7 @@ def _verify_single_scenario(
                 verdicts=_VERIFICATION_VERDICTS,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                baseline_line=baseline_line,
             )
         except Exception:
             _log.warning("Verification: follow-up polling failed for scenario %d",
@@ -4003,9 +4154,64 @@ def _verify_single_scenario(
 # Core orchestration
 # ---------------------------------------------------------------------------
 
+# Placeholder command for the main pane of a QA window that has no planner
+# (execution-only `pm qa run`, or a run restarted after its window was killed).
+# It must stay alive: the pane anchors the status-pane split and the
+# qa-planner registry entry, and a command that exits takes the window with it.
+_QA_MAIN_PANE_CMD = "echo 'QA execution'; exec sleep infinity"
+
+
+def _ensure_qa_main_pane(session: str, window_name: str,
+                         workdir_path: str | None) -> str | None:
+    """Return the QA window's main pane, creating the window when it is gone.
+
+    Execution-only runs (no planner pane) and windows recreated after the
+    previous one was killed land here. The main pane anchors the status-pane
+    split and the qa-planner registry entry, so the window has to outlive the
+    pane lookup: a bare ``echo`` exits at once (there is no remain-on-exit),
+    the window vanished before its pane could be found, and the run ended with
+    no QA window, no status pane and no registration.
+    """
+    from pm_core import tmux as tmux_mod
+
+    win = tmux_mod.find_window_by_name(session, window_name)
+    if win:
+        panes = tmux_mod.get_pane_indices(session, win["index"])
+        return panes[0][0] if panes else None
+    return tmux_mod.new_window_get_pane(
+        session, window_name, _QA_MAIN_PANE_CMD, cwd=workdir_path,
+        switch=False,
+    )
+
+
+def _register_qa_planner(session: str, planner_pane: str) -> None:
+    """Register the main pane once, without making layout failures fatal to QA."""
+    from pm_core import tmux as tmux_mod, pane_layout, pane_registry
+
+    try:
+        qa_win_id = tmux_mod.pane_window_id(planner_pane)
+        if not qa_win_id:
+            return
+        # Registration only reconciles the window it writes, so panes of a QA
+        # window killed between runs (the execution-only restart path) would
+        # linger under their old @id. Drop those entries as we register.
+        pane_registry.prune_dead_windows(session)
+        data = pane_registry.load_registry(session)
+        panes = pane_registry.get_window_data(data, qa_win_id)["panes"]
+        if not any(p["id"] == planner_pane for p in panes):
+            pane_layout.register_and_rebalance(session, qa_win_id, [
+                (planner_pane, "qa-planner", "planner"),
+            ])
+    except Exception:
+        _log.exception("Failed to register QA planner pane")
+
+
 def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
     """Split the qa_status.py dashboard next to the planner pane."""
     from pm_core import tmux as tmux_mod, pane_layout
+    # Execution-only runs and recreated windows have not registered a planner;
+    # also retry a failed early registration without duplicating an existing one.
+    _register_qa_planner(session, planner_pane)
     try:
         # Use the script path directly (avoids PYTHONPATH issues)
         _qa_status_script = Path(__file__).parent / "qa_status.py"
@@ -4016,11 +4222,10 @@ def _add_status_pane(session: str, planner_pane: str, status_path) -> None:
             planner_pane, "h", status_cmd, background=True,
         )
 
-        # Register both panes and rebalance the main window only
+        # Keep the main pane ahead of the newly registered status pane.
         qa_win_id = tmux_mod.pane_window_id(planner_pane)
         if qa_win_id:
             pane_layout.register_and_rebalance(session, qa_win_id, [
-                (planner_pane, "qa-planner", "planner"),
                 (status_pane, "qa-status", status_cmd),
             ])
     except Exception:
@@ -4144,13 +4349,15 @@ def run_qa_sync(
         )
         import uuid as _uuid
         planner_session_id = str(_uuid.uuid4())
+        planner_env: dict[str, str] = {}
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
             cwd=workdir_path,
             session_id=planner_session_id,
             session_type="qa_planning",
-            session_tag=state.session_tag)
+            session_tag=state.session_tag,
+            env_out=planner_env)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -4209,7 +4416,7 @@ def run_qa_sync(
         # Create QA window with planner pane (switch=False; we handle
         # session switching explicitly below to preserve focus)
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path,
-                            switch=False)
+                            switch=False, env=planner_env)
         time.sleep(2)  # let tmux register the new window
 
         # Post-creation guard: a concurrent out-of-band merge can land DURING
@@ -4229,10 +4436,12 @@ def run_qa_sync(
         if sessions_on_qa:
             tmux_mod.switch_sessions_to_window(
                 sessions_on_qa, session, window_name)
-        elif not existing_win:
-            # First-time creation — select the window so user sees it,
-            # unless the popup spinner was dismissed (q/Esc) and the
-            # user explicitly asked to keep focus where they were.
+        elif not existing_win and state.focus_on_create:
+            # First-time creation of a user-initiated run — select the
+            # window so user sees it, unless the popup spinner was
+            # dismissed (q/Esc) and the user explicitly asked to keep
+            # focus where they were.  Background starts skip this (and
+            # leave the suppress flag for the user start it belongs to).
             from pm_core import runtime_state as _rs
             if not _rs.consume_suppress_switch(state.pr_id, "qa"):
                 tmux_mod.select_window(session, window_name)
@@ -4246,6 +4455,11 @@ def run_qa_sync(
             state.latest_verdict = "ERROR"
             state.latest_output = "Could not find planner pane"
             return state
+
+        # Identify the live planner before waiting for its result. Pane
+        # actions and registry readers must not see an unowned QA window
+        # throughout a potentially long planning phase.
+        _register_qa_planner(session, planner_pane)
 
         # Poll until the planner produces a QA Plan or exits.
         # Each fresh idle_prompt event triggers one read of the planner's
@@ -4536,16 +4750,7 @@ def run_qa_sync(
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
     # Ensure the main QA window exists (has the planner pane)
-    win = tmux_mod.find_window_by_name(session, window_name)
-    planner_pane = None
-    if not win:
-        planner_pane = tmux_mod.new_window_get_pane(
-            session, window_name, "echo 'QA execution'", cwd=workdir_path,
-            switch=False,
-        )
-    else:
-        panes = tmux_mod.get_pane_indices(session, win["index"])
-        planner_pane = panes[0][0] if panes else None
+    planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
 
     # Write initial status file and add the status pane before launching
     # scenarios — scenario launch blocks until all concretizers finish, so
@@ -4802,6 +5007,8 @@ def _finalize_scenarios(
     if state.stop_requested:
         for idx in _unverified_passes(state):
             state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
+            # Loop-derived, not the worker's turn (see _drop_foreign_verdicts).
+            state.scenario_verdict_sources.pop(idx, None)
             state.scenario_verdict_reasons.setdefault(
                 idx, "PASS was not verified before the run was stopped")
     verdicts = list(state.scenario_verdicts.values())
@@ -5155,7 +5362,15 @@ def start_qa_background(
         _retry_deferred_release(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-{state.pr_id}")
-    t.start()
+    # Publish the accepted launch before the worker can block on model/state
+    # loading.  Otherwise the TUI's first poll can stop its timer while this
+    # run has no workdir and still looks idle.
+    state.running = True
+    try:
+        t.start()
+    except Exception:
+        state.running = False
+        raise
     return t
 
 

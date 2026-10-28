@@ -56,7 +56,7 @@ def test_debug_launch_failure_discards_captured_allocation(debug_context, monkey
                             MagicMock(side_effect=container.ContainerError("generation unavailable")))
     elif stage == "foreground":
         monkeypatch.setattr(qa_cli.os, "chdir", lambda *a: None)
-        monkeypatch.setattr(qa_cli.os, "execvp",
+        monkeypatch.setattr(qa_cli.os, "execvpe",
                             MagicMock(side_effect=OSError("bash unavailable")))
     args = ["qa", "debug", "fixture", "--branch", "test"]
     if stage == "foreground":
@@ -108,7 +108,7 @@ def test_foreground_debug_outside_tmux_uses_project_session(debug_context, tmp_p
     monkeypatch.setattr(container, "build_exec_cmd", command)
     monkeypatch.setattr(qa_cli.os, "chdir", lambda path: None)
     # Successful exec never returns, so SystemExit models process replacement.
-    monkeypatch.setattr(qa_cli.os, "execvp", MagicMock(side_effect=SystemExit(0)))
+    monkeypatch.setattr(qa_cli.os, "execvpe", MagicMock(side_effect=SystemExit(0)))
     window = MagicMock()
     monkeypatch.setattr(tmux, "new_window_get_pane", window)
     result = CliRunner().invoke(cli, ["qa", "debug", "fixture", "--branch", "test", "--foreground"])
@@ -154,7 +154,7 @@ def test_debug_unavailable_runtime_never_falls_back_to_host(debug_context, tmp_p
     monkeypatch.setattr(tmux, "new_window_get_pane", window)
     monkeypatch.setattr(qa_cli.os, "chdir", lambda path: None)
     execute = MagicMock(side_effect=SystemExit(0))
-    monkeypatch.setattr(qa_cli.os, "execvp", execute)
+    monkeypatch.setattr(qa_cli.os, "execvpe", execute)
     args = ["qa", "debug", "fixture", "--branch", "test"]
     if foreground:
         args.append("--foreground")

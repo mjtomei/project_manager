@@ -1130,8 +1130,8 @@ def test_tmux_guide_launch_goes_through_trust_boundary(home, tmp_path,
     monkeypatch.setattr(guide_cli.guide_mod, "build_assist_prompt",
                         lambda *a, **k: "assist")
     execs = []
-    monkeypatch.setattr(guide_cli.os, "execvp",
-                        lambda f, args: execs.append(args))
+    monkeypatch.setattr(guide_cli.os, "execvpe",
+                        lambda f, args, env: execs.append(args))
 
     monkeypatch.chdir(proj)
     guide_cli._run_guide()

@@ -7,6 +7,16 @@ import pytest
 from pm_core import claude_launcher, container, prompt_gen, qa_loop
 
 
+
+def _as_hit(fn):
+    """Adapt a verdict-string stub to ``find_verdict_turn`` (pr-8efa789)."""
+    from pm_core.verdict_transcript import VerdictHit
+
+    def hit(*args):
+        verdict = fn(*args)
+        return VerdictHit(verdict, verdict) if verdict else None
+    return hit
+
 @pytest.fixture
 def finalize_context(tmp_path, monkeypatch):
     state = qa_loop.QALoopState(pr_id="pr-aaaa")
@@ -100,7 +110,7 @@ def test_qa_exec_uses_captured_allocation_identity(tmp_path, monkeypatch, role):
                                         session=None, workdir_path=str(tmp_path))
     build.assert_called_once_with(scenario.container_name, "worker", cleanup=False,
                                   container_id="allocated-id",
-                                  generation="allocated-generation")
+                                  generation="allocated-generation", env=None)
 
 
 @pytest.mark.parametrize("stage", ["poll", "status", "snapshot"])
@@ -389,10 +399,8 @@ def test_settled_verdict_is_persisted_before_its_container_is_released(
     monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
     monkeypatch.setattr(hook_events, "read_event",
                         lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
-    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript", lambda *a: "PASS")
-    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
-                        lambda *a: None)
-
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
     qa_loop._poll_tmux_verdicts(
         state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
         lambda: None, queued_scenarios=[], concurrency_cap=1,

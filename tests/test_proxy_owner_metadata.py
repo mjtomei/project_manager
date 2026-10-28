@@ -13,18 +13,37 @@ from pm_core import container, container_reaper, push_proxy
 def test_invalid_owner_preserves_proxy(tmp_path, monkeypatch, contents):
     owner = tmp_path / "owner.json"
     owner.write_text(contents)
-    monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(tmp_path))
+    # The directory is found by name only: its owner record cannot be read,
+    # so it is never listed as a releasable shared proxy.
+    monkeypatch.setattr(push_proxy, "_pr_dir_candidates", lambda *a: [str(tmp_path)])
     monkeypatch.setattr(container, "containers_for_pr", lambda *a: set())
     remove = Mock()
     monkeypatch.setattr(push_proxy, "_kill_proxy_socket", remove)
     assert not push_proxy._owner_domain_matches(str(tmp_path))
+    assert push_proxy.list_shared_proxies() == []
     assert not push_proxy.release_proxy_if_unused("tag", "pr-aaaa")
+    assert (push_proxy.release_proxy_decision("tag", "pr-aaaa")
+            == push_proxy.PROXY_UNDETERMINED)
     remove.assert_not_called()
     assert owner.read_text() == contents
 
 
 def test_unreadable_owner_is_not_legacy(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "read_text", Mock(side_effect=PermissionError("denied")))
+    owner = tmp_path / "owner.json"
+    owner.write_text("{}")
+    owner.chmod(0)
+    try:
+        assert not push_proxy._owner_domain_matches(str(tmp_path))
+    finally:
+        owner.chmod(0o600)
+
+
+def test_symlinked_owner_is_not_followed(tmp_path):
+    """The socket directory is container-writable: a planted link is invalid."""
+    target = tmp_path / "elsewhere.json"
+    target.write_text(json.dumps({"runtime_domain": None}))
+    (tmp_path / "owner.json").symlink_to(target)
+    assert push_proxy._read_owner(str(tmp_path)) == ("invalid", None)
     assert not push_proxy._owner_domain_matches(str(tmp_path))
 
 

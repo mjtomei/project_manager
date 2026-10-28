@@ -7,7 +7,7 @@ PID limits; reuse of half-set-up containers; QA run-end release.
 import subprocess
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -520,19 +520,23 @@ class TestReaperOwnership:
         assert slow in out.failures and slow in reaper.pending_failures()
 
     @pytest.mark.parametrize("present", [False, True])
+    @pytest.mark.parametrize("target, helper", [
+        # Workdir-keyed proxies (tag/PR/token) and pre-keying ones (tag/PR).
+        ("tag/pr-aaaa/0123456789abcdef", "_shared_sock_dir_path"),
+        ("tag/pr-aaaa", "_legacy_shared_sock_dir_path"),
+    ])
     def test_full_pass_retires_only_vanished_proxy_failures(
-            self, fake_env, tmp_path, monkeypatch, present):
+            self, fake_env, tmp_path, monkeypatch, present, target, helper):
         """A proxy that no longer exists cannot be retried; keep real ones."""
         from pm_core import push_proxy
-        key = "push proxy tag/pr-aaaa"
+        key = f"push proxy {target}"
         reaper._record(reaper.Outcome(failures={key: "runtime inventory unavailable"}),
                        Scope(), "manual")
         assert key in reaper.pending_failures()
         proxy_dir = tmp_path / "proxy"
         if present:
             proxy_dir.mkdir()
-        monkeypatch.setattr(push_proxy, "_shared_sock_dir_path",
-                            lambda tag, pr: str(proxy_dir))
+        monkeypatch.setattr(push_proxy, helper, lambda *parts: str(proxy_dir))
         out = reaper.reconcile(reason="manual")
         assert not out.error
         assert (key in reaper.pending_failures()) is present
@@ -1143,30 +1147,50 @@ class TestProxyRelease:
             cm.remove_container("pm-repo-ab12-review-pr-aaaa")
         stopped.assert_not_called()
 
-    def test_kept_while_any_container_uses_it(self, monkeypatch):
+    @pytest.fixture
+    def listed_proxy(self, monkeypatch, tmp_path):
+        """One shared socket directory for t/pr-1, isolated from real /tmp.
+
+        Release only acts on directories ``list_shared_proxies`` reports, so
+        these tests must not depend on whatever happens to be in /tmp.
+        """
+        from pm_core import push_proxy
+        sock_dir = tmp_path / f"{push_proxy._SOCKET_DIR_PREFIX}t-pr-1-{'0' * 16}"
+        sock_dir.mkdir()
+        entry = {"session_tag": "t", "pr_id": "pr-1", "token": "0" * 16,
+                 "sock_dir": str(sock_dir), "sock_path": str(sock_dir / "push.sock"),
+                 "link": None, "runtime_domain": None}
+        monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [entry])
+        killed = []
+        monkeypatch.setattr(push_proxy, "_kill_proxy_socket",
+                            lambda path, **kw: killed.append(path) or True)
+        return killed
+
+    def test_kept_while_any_container_uses_it(self, monkeypatch, listed_proxy):
         from pm_core import push_proxy
         monkeypatch.setattr(cm, "containers_for_pr",
                             lambda tag, pr: {"pm-t-impl-pr-1"})
-        killed = []
-        monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
         assert push_proxy.release_proxy_if_unused("t", "pr-1") is False
-        assert killed == []
+        assert listed_proxy == []
 
-    def test_stopped_when_runtime_reports_none(self, monkeypatch):
+    def test_stopped_when_runtime_reports_none(self, monkeypatch, listed_proxy):
         from pm_core import push_proxy
         monkeypatch.setattr(cm, "containers_for_pr", lambda tag, pr: set())
-        killed = []
-        monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
-        push_proxy.release_proxy_if_unused("t", "pr-1")
-        assert len(killed) == 1
+        assert push_proxy.release_proxy_if_unused("t", "pr-1") is True
+        assert len(listed_proxy) == 1
 
-    def test_unknown_runtime_does_nothing(self, monkeypatch):
+    def test_unknown_runtime_does_nothing(self, monkeypatch, listed_proxy):
         from pm_core import push_proxy
         monkeypatch.setattr(cm, "containers_for_pr", lambda tag, pr: None)
-        killed = []
-        monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
         assert push_proxy.release_proxy_if_unused("t", "pr-1") is None
-        assert killed == []
+        assert listed_proxy == []
+
+    def test_no_listed_directory_is_already_released(self, monkeypatch):
+        from pm_core import push_proxy
+        monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [])
+        monkeypatch.setattr(cm, "containers_for_pr",
+                            Mock(side_effect=AssertionError("no inventory needed")))
+        assert push_proxy.release_proxy_if_unused("t", "pr-1") is True
 
     def test_local_shared_proxy_kept_when_runtime_unknown(self, monkeypatch):
         from pm_core import push_proxy as pp
@@ -1192,7 +1216,8 @@ class TestProxyRelease:
         sock_dir.mkdir()
         (sock_dir / "push.sock").write_text("")
         killed = []
-        monkeypatch.setattr(push_proxy, "_kill_proxy_socket", killed.append)
+        monkeypatch.setattr(push_proxy, "_kill_proxy_socket",
+                            lambda path, **kw: killed.append(path) or True)
         push_proxy.stop_push_proxy(name)
         assert killed == [str(sock_dir / "push.sock")]
 
@@ -1224,14 +1249,18 @@ class TestProxyRelease:
         import shutil
         from pm_core import push_proxy
         hx = secrets.token_hex(4)
-        real = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}{hx}hashed")
-        link = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}longtag{hx}-pr-{hx}")
+        # Long enough to have been hashed: the link's only legitimate target
+        # is the hash of its own name (anything else is a planted link).
+        tag = f"longtag{hx}" + "x" * 80
+        real = Path(push_proxy._legacy_shared_sock_dir_path(tag, f"pr-{hx}"))
+        link = Path(f"/tmp/{push_proxy._SOCKET_DIR_PREFIX}{tag}-pr-{hx}")
+        assert real != link
         try:
             real.mkdir()
             link.symlink_to(real)
-            found = [(p["session_tag"], p["pr_id"])
+            found = [(p["session_tag"], p["pr_id"], p["token"], p["link"])
                      for p in push_proxy.list_shared_proxies()]
-            assert found.count((f"longtag{hx}", f"pr-{hx}")) == 1
+            assert found.count((tag, f"pr-{hx}", None, str(link))) == 1
         finally:
             link.unlink(missing_ok=True)
             shutil.rmtree(real, ignore_errors=True)
@@ -1241,12 +1270,16 @@ class TestProxyRelease:
         sock_dir = tmp_path / "proxy"
         sock_dir.mkdir()
         (sock_dir / "push.sock").write_text("")
-        monkeypatch.setattr(push_proxy, "_shared_sock_dir", lambda t, p: str(sock_dir))
+        # Both: the start lock is taken on the computed path before the
+        # directory is (re)created, and neither may touch the real /tmp.
+        monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(sock_dir))
+        monkeypatch.setattr(push_proxy, "_shared_sock_dir", lambda *a: str(sock_dir))
         monkeypatch.setattr(push_proxy, "proxy_is_alive", lambda s: True)
         push_proxy.start_push_proxy("pm-t-impl-pr-1", "/w", "b",
                                     session_tag="t", pr_id="pr-1")
         assert not (sock_dir / push_proxy._OWNER_FILE).exists()
-        push_proxy._proxy_refs.pop(push_proxy._shared_proxy_key("t", "pr-1"), None)
+        push_proxy._proxy_refs.pop(push_proxy._shared_proxy_key(
+            "t", "pr-1", push_proxy._workdir_token("/w")), None)
         push_proxy._container_to_proxy_key.pop("pm-t-impl-pr-1", None)
 
     def test_foreign_shared_container_leaves_private_paths_alone(self, monkeypatch, tmp_path):

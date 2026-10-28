@@ -12,13 +12,26 @@ from pm_core import store, notes
 from pm_core.plans.parser import parse_plan_prs
 from pm_core.plans import review as review_mod
 from pm_core.claude_launcher import find_claude, launch_claude, clear_session
+from pm_core.prompt_bounds import (
+    PLAN_LIST_BUDGET, PLAN_LIST_MAX, PROMPT_ARG_LIMIT, bounded_join,
+)
 from pm_core.prompt_gen import tui_section
 
 # claude receives a session's prompt as a single argv entry.  Linux caps a
 # single argument at MAX_ARG_STRLEN (128 KiB / 131072 bytes, including the
 # terminating NUL); exceeding it makes execve fail with E2BIG.  Stay well
 # under that so prompts that inline per-PR detail degrade gracefully.
-_PROMPT_ARG_LIMIT = 120_000
+_PROMPT_ARG_LIMIT = PROMPT_ARG_LIMIT
+
+# Cap collection listings so cross-plan / existing-PR context cannot grow
+# without bound.  The markers point at commands that read the full detail.
+_PLAN_LIST_MAX = PLAN_LIST_MAX
+# A count cap alone does not bound a listing whose lines carry user-authored
+# titles; this bounds the product.  Real listings here run 0.4-14.5 KB.
+_PLAN_LIST_BUDGET = PLAN_LIST_BUDGET
+# One-line PR summaries inline the description; truncate it so 40 large
+# descriptions (11 KB each in this project) cannot blow the prompt budget.
+_PLAN_DESC_CHARS = 300
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
@@ -190,10 +203,16 @@ def plan_breakdown(plan_id: str | None, initial_prs: str | None, fresh: bool):
     existing_prs = data.get("prs") or []
     existing_context = ""
     if existing_prs:
-        existing_context = "\nExisting PRs in this project:\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}]"
-            + (f" (depends on: {', '.join(pr.get('depends_on') or [])})" if pr.get("depends_on") else "")
-            for pr in existing_prs
+        def _existing_line(pr: dict) -> str:
+            deps = pr.get("depends_on") or []
+            dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}]{dep_str}")
+        existing_context = "\nExisting PRs in this project:\n" + bounded_join(
+            existing_prs, _existing_line, max_items=_PLAN_LIST_MAX,
+            max_bytes=_PLAN_LIST_BUDGET,
+            omitted_note=lambda n: (
+                f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
         )
 
     initial_context = ""
@@ -297,27 +316,22 @@ def plan_review(plan_id: str | None, fresh: bool):
         workdir_str = f"\n    workdir: {workdir}" if workdir else ""
         return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{dep_str}{gh_str}{branch_str}{workdir_str}{desc_str}{tests_str}{files_str}"
 
-    def _format_pr_brief(pr):
-        """One-line PR summary — no description/tests/files inlined.
-
-        Used as a fallback when inlining full detail for every PR would push
-        the prompt past the argv size limit.
-        """
-        deps = pr.get("depends_on") or []
-        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        status = pr.get("status", "pending")
-        gh_num = pr.get("gh_pr_number")
-        gh_str = f" PR #{gh_num}" if gh_num else ""
-        return f"  {pr['id']}: {pr.get('title', '???')} [{status}]{gh_str}{dep_str}"
-
     pr_list = "\n".join(_format_pr(pr) for pr in plan_prs) if plan_prs else "(no PRs linked to this plan)"
 
     other_prs_context = ""
     if other_prs:
-        other_prs_context = "\nPRs from other plans (for cross-plan reference):\n" + "\n".join(
-            f"  {pr['id']}: {pr.get('title', '???')} [{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})"
-            for pr in other_prs
-        ) + "\n"
+        def _other_plan_line(pr: dict) -> str:
+            return (f"  {pr['id']}: {pr.get('title', '???')} "
+                    f"[{pr.get('status', '?')}] (plan: {pr.get('plan', '?')})")
+        other_prs_context = (
+            "\nPRs from other plans (for cross-plan reference):\n"
+            + bounded_join(
+                other_prs, _other_plan_line, max_items=_PLAN_LIST_MAX,
+                max_bytes=_PLAN_LIST_BUDGET,
+                omitted_note=lambda n: (
+                    f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+            )
+            + "\n")
 
     notes_block = notes.notes_section(root)
 
@@ -383,19 +397,14 @@ sessions reading either side find the connection.
 After fixing, summarize what was changed.
 {tui_section(_pm_sess) if (_pm_sess := _get_pm_session()) else ""}{notes_block}"""
 
-        # Inline full per-PR detail by default, but if doing so pushes the
-        # prompt past the argv size limit (large plans), fall back to a brief
-        # one-line listing and let the session pull detail with `pm pr show`.
+        # Every PR's description, tests and files are inlined whole: they are
+        # the material this review works from, so they are never truncated
+        # (spec §31 — only PR notes and pure enumerations are bounded).  A
+        # plan large enough to push the prompt over one argv entry is delivered
+        # by the launcher's file-backed bootstrap, which carries the complete
+        # prompt; the session then reviews the real descriptions rather than
+        # fetching each one with `pm pr show`.
         prompt = _post_load_prompt(pr_list, "")
-        if len(prompt.encode()) > _PROMPT_ARG_LIMIT:
-            brief = "\n".join(_format_pr_brief(pr) for pr in plan_prs)
-            note = (
-                "\n(This plan has too many PRs to inline each description here. "
-                "The list above is abbreviated — run `pm pr show <id>` to read "
-                "the full description, tests, and files of any PR before "
-                "reviewing it.)\n"
-            )
-            prompt = _post_load_prompt(brief, note)
     else:
         # Pre-load: no PRs in project.yaml yet — review the plan file's PR section
         prompt = f"""\
@@ -487,24 +496,54 @@ def plan_deps():
         click.echo("No PRs. Add PRs first with: pm pr add <title>", err=True)
         raise SystemExit(1)
 
-    pr_lines = []
-    for p in prs:
+    # Display ids of the PRs whose description this builder abbreviates.  The
+    # note below describes the lines the session actually reads, so it must be
+    # driven by the *kept* lines, not by whether any formatter call truncated:
+    # ``bounded_join`` formats the first item past the byte budget before
+    # breaking, so the only cut description can belong to a PR the listing
+    # dropped, and a plain flag would claim the kept descriptions are previews
+    # when every one of them is complete.
+    truncated_ids: list[str] = []
+
+    def _dep_pr_line(p: dict) -> str:
         deps = p.get("depends_on") or []
         dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-        desc = p.get("description", "")
+        desc = " ".join((p.get("description") or "").split())
+        display_id = _pr_display_id(p)
+        if len(desc) > _PLAN_DESC_CHARS:
+            desc = desc[:_PLAN_DESC_CHARS].rstrip() + "…"
+            truncated_ids.append(display_id)
         desc_str = f" — {desc}" if desc else ""
-        pr_lines.append(f"  {_pr_display_id(p)}: {p.get('title', '???')} [{p.get('status', '?')}]{dep_str}{desc_str}")
+        return (f"  {display_id}: {p.get('title', '???')} "
+                f"[{p.get('status', '?')}]{dep_str}{desc_str}")
 
-    pr_list_str = "\n".join(pr_lines)
+    pr_list_str = bounded_join(
+        prs, _dep_pr_line, max_items=_PLAN_LIST_MAX,
+        max_bytes=_PLAN_LIST_BUDGET,
+        omitted_note=lambda n: (
+            f"  ... (+{n} more; run `pm pr list` to see all PRs)"),
+    )
+    # Every kept line starts with its PR's unique display id, so the kept set
+    # is exactly the ids that prefix a line of the joined listing.
+    kept_ids = {line.split(": ", 1)[0] for line in pr_list_str.split("\n")}
+    if any(f"  {display_id}" in kept_ids for display_id in truncated_ids):
+        pr_list_str += (
+            "\n  (Descriptions above are abbreviated to fit the prompt size "
+            "limit — run `pm pr show <id>` for a PR's full description.)")
 
-    # Include plan context if available
+    # Include plan context if available.  Plan files are planning documents
+    # the session works from, so they are inlined whole and never truncated;
+    # a prompt too large for one argv entry is delivered by the launcher's
+    # file-backed bootstrap instead (see pm_core.prompt_bounds).
     plan_context = ""
-    plans = data.get("plans") or []
-    for plan_entry in plans:
+    for plan_entry in (data.get("plans") or []):
         plan_path = root / plan_entry["file"]
-        if plan_path.exists():
-            plan_context += f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
-            plan_context += plan_path.read_text() + "\n"
+        if not plan_path.exists():
+            continue
+        plan_context += (
+            f"\nPlan: {plan_entry['name']} ({plan_entry['id']})\n"
+            + plan_path.read_text() + "\n"
+        )
 
     notes_block = notes.notes_section(root)
 
@@ -694,6 +733,9 @@ def _run_fix_command(step_name: str, review_path_str: str):
         if pp.exists():
             context_parts.append(f"Plan {p['id']} ({p['name']}):\n{pp.read_text()}")
 
+    # Every plan file is inlined whole: plan files are the documents this
+    # session works from, so they are never truncated.  A prompt too large for
+    # one argv entry is delivered by the launcher's file-backed bootstrap.
     original_context = "\n".join(context_parts) if context_parts else "No plan files found."
     prompt = review_mod.build_fix_prompt(step_name, original_context, parsed["findings"])
 

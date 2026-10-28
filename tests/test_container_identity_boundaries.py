@@ -119,7 +119,8 @@ def test_session_proxy_cleanup_rechecks_runtime_users(monkeypatch, tmp_path, use
     (directory / "owner.json").write_text(json.dumps({"runtime_domain": domain}))
     monkeypatch.setattr(push_proxy, "_shared_sock_dir_path", lambda *a: str(directory))
     monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
-        {"session_tag": tag, "pr_id": pr, "sock_path": str(socket), "runtime_domain": domain}])
+        {"session_tag": tag, "pr_id": pr, "token": None, "sock_dir": str(directory),
+         "sock_path": str(socket), "link": None, "runtime_domain": domain}])
     monkeypatch.setattr(cm, "containers_for_pr", lambda *a: users)
     # The old implementation's destructive glob sees the exact same fixture.
     monkeypatch.setattr("glob.glob", lambda _: [str(socket)])
@@ -135,7 +136,8 @@ def test_session_proxy_cleanup_preserves_unknown_or_foreign_domain(monkeypatch, 
     socket = directory / "push.sock"
     socket.touch()
     monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
-        {"session_tag": "review-i12", "pr_id": "pr-1234", "sock_path": str(socket),
+        {"session_tag": "review-i12", "pr_id": "pr-1234", "token": None,
+         "sock_dir": str(directory), "sock_path": str(socket), "link": None,
          "runtime_domain": domain}])
     monkeypatch.setattr("glob.glob", lambda _: [str(socket)])
     release = Mock(return_value=True)

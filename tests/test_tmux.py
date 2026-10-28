@@ -1,13 +1,19 @@
 """Tests for pm_core.tmux — tmux helper functions."""
 
 import os
+import shlex
+import subprocess
+import time
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from pm_core.tmux import (
     has_tmux,
     in_tmux,
     session_exists,
     create_session,
+    new_window,
     new_window_get_pane,
     split_pane,
     split_pane_background,
@@ -31,13 +37,47 @@ from pm_core.tmux import (
     list_grouped_sessions,
     find_unattached_grouped_session,
     sessions_on_window,
-    attached_active_window,
+    attached_group_active_windows,
 )
 
 
 # ---------------------------------------------------------------------------
 # has_tmux / in_tmux
 # ---------------------------------------------------------------------------
+
+class TestAttachedGroupActiveWindows:
+    @patch("pm_core.tmux._run")
+    def test_single_query_filters_group_and_attachment(self, run):
+        run.return_value = MagicMock(returncode=0, stdout=(
+            "1|@1|base\n2|@2|base~1\n0|@3|base~2\n"
+            "1|@4|other\n1|@5|base-extra\n"
+            "|@6|base~3\n1||base~4\nmalformed\n"
+            "1|@7|base~5|with|pipes\n"))
+        assert attached_group_active_windows("base", socket_path="/socket") == {
+            "base": "@1", "base~1": "@2", "base~5|with|pipes": "@7"}
+        run.assert_called_once()
+        cmd = run.call_args.args[0]
+        assert "list-sessions" in cmd
+        assert "#{session_attached}|#{window_id}|#{session_name}" in cmd
+        assert cmd[cmd.index("-S") + 1] == "/socket"
+
+    @patch("pm_core.tmux._run")
+    def test_separator_is_printable_so_c_locale_cannot_break_it(self, run):
+        # tmux rewrites control characters (e.g. a tab) in format output to
+        # "_" when the server runs under LC_ALL=C, so a tab-separated query
+        # silently parsed as zero fields.  The separator must be printable.
+        run.return_value = MagicMock(returncode=0, stdout="1|@1|base\n")
+        assert attached_group_active_windows("base") == {"base": "@1"}
+        fmt = next(a for a in run.call_args.args[0] if "session_name" in a)
+        assert "\t" not in fmt
+        assert "|" in fmt
+
+    @patch("pm_core.tmux._run")
+    def test_error_returns_empty_map(self, run):
+        run.return_value = MagicMock(returncode=1, stdout="")
+        assert attached_group_active_windows("base") == {}
+        run.assert_called_once()
+
 
 class TestHasTmux:
     @patch("shutil.which", return_value="/usr/bin/tmux")
@@ -362,6 +402,39 @@ class TestGetSessionName:
         assert "-t" not in cmd
         assert result == "sess"
 
+    @patch("pm_core.tmux.subprocess.run")
+    def test_popup_session_env_without_tmux_pane(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        env = os.environ.copy()
+        env.pop("TMUX_PANE", None)
+        env["PM_POPUP_SESSION"] = "proj~7"
+        with patch.dict(os.environ, env, clear=True):
+            result = get_session_name()
+        assert result == "proj~7"
+        cmd = mock_run.call_args[0][0]
+        assert "has-session" in cmd and "=proj~7" in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_popup_session_env_ignored_once_session_is_gone(self, mock_run):
+        """An inherited PM_POPUP_SESSION naming a dead session falls back
+        to the current client instead of returning a stale name."""
+        mock_run.side_effect = [MagicMock(returncode=1, stdout=""),
+                                MagicMock(returncode=0, stdout="proj~2\n")]
+        env = os.environ.copy()
+        env.pop("TMUX_PANE", None)
+        env["PM_POPUP_SESSION"] = "proj~7"
+        with patch.dict(os.environ, env, clear=True):
+            result = get_session_name()
+        assert result == "proj~2"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_tmux_pane_beats_popup_session_env(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="myproj\n")
+        with patch.dict(os.environ, {"TMUX_PANE": "%5",
+                                     "PM_POPUP_SESSION": "proj~7"}):
+            result = get_session_name()
+        assert result == "myproj"
+
 
 # ---------------------------------------------------------------------------
 # current_or_base_session
@@ -603,31 +676,156 @@ class TestSessionsOnWindow:
         assert sessions_on_window("proj", "@1") == []
 
 
-class TestAttachedActiveWindow:
-    @patch("pm_core.tmux.subprocess.run")
-    def test_attached_returns_window_id(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="1 @5\n")
-        assert attached_active_window("proj~1") == "@5"
+# ---------------------------------------------------------------------------
+# provider env transport (pr-84ebabf)
+# ---------------------------------------------------------------------------
+
+CANARY = "canary-84ebabf-do-not-use"
+
+
+def _pane_cmd(argv):
+    """The shell command handed to tmux (always the last argv entry)."""
+    return argv[-1]
+
+
+class TestProviderEnvTransport:
+    """Provider secrets travel in a private env file, never in the command.
+
+    The command string is logged and kept by tmux as
+    ``#{pane_start_command}``; ``tmux -e NAME`` cannot be used because tmux
+    3.2 resolves a bare name from the server/session environment, not the
+    client's, and silently drops it for new-window/split-window.
+    """
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_unattached_returns_none(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="0 @5\n")
-        assert attached_active_window("proj") is None
+    def test_split_pane_sources_env_file(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
+        split_pane("sess", "h", "claude", env={"ANTHROPIC_API_KEY": CANARY})
+        argv = mock_run.call_args[0][0]
+        assert CANARY not in " ".join(argv)
+        assert "-e" not in argv
+        assert "env" not in mock_run.call_args.kwargs
+        cmd = _pane_cmd(argv)
+        assert cmd.startswith("sh -c ")
+        assert "set -a; . " in cmd and "rm -f " in cmd
+        assert "claude" in cmd
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_error_returns_none(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="")
-        assert attached_active_window("proj") is None
+    def test_split_pane_at_sources_env_file(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%6\n")
+        split_pane_at("%1", "v", "claude", env={"OPENAI_API_KEY": CANARY})
+        argv = mock_run.call_args[0][0]
+        assert CANARY not in " ".join(argv)
+        assert "-e" not in argv
+        assert _pane_cmd(argv).startswith("sh -c ")
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_malformed_output_returns_none(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
-        assert attached_active_window("proj") is None
+    def test_create_session_sources_env_file(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        create_session("proj", "/tmp", "claude",
+                       env={"ANTHROPIC_API_KEY": CANARY})
+        argv = mock_run.call_args[0][0]
+        assert CANARY not in " ".join(argv)
+        assert "-e" not in argv
+        assert _pane_cmd(argv).startswith("sh -c ")
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_queries_attached_and_window_id(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="2 @1\n")
-        attached_active_window("proj~3")
-        cmd = mock_run.call_args[0][0]
-        assert "#{session_attached} #{window_id}" in cmd
-        assert "proj~3" in cmd
+    def test_leading_cd_stays_outside_the_wrapper(self, mock_run):
+        """pane_transcript_path parses the cd prefix at the start."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="%5\n")
+        split_pane("sess", "h", "cd '/work/dir' && claude 'hi'",
+                   env={"ANTHROPIC_API_KEY": CANARY})
+        cmd = _pane_cmd(mock_run.call_args[0][0])
+        assert cmd.startswith("cd '/work/dir' && sh -c ")
+        assert CANARY not in cmd
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_no_env_adds_no_flags(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="%7\n")
+        split_pane("sess", "v", "claude")
+        argv = mock_run.call_args[0][0]
+        assert "-e" not in argv
+        assert "env" not in mock_run.call_args.kwargs
+        assert _pane_cmd(argv) == "claude"
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_failed_tmux_removes_the_env_file(self, mock_run, tmp_path,
+                                              monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        mock_run.side_effect = subprocess.CalledProcessError(1, "tmux")
+        with pytest.raises(subprocess.CalledProcessError):
+            split_pane("sess", "h", "claude",
+                       env={"ANTHROPIC_API_KEY": CANARY})
+        assert list((tmp_path / ".pm" / "run").glob("env-*.sh")) == []
+
+
+@pytest.mark.skipif(not has_tmux(), reason="tmux not installed")
+class TestProviderEnvReachesRealPane:
+    """End-to-end: the value must actually land in the pane's environment.
+
+    This is the regression test for the original ``-e NAME`` transport: the
+    unit tests above only checked the argv, so a silently-dropped variable
+    (tmux 3.2 new-window/split-window) passed while provider launches ran
+    unauthenticated.
+    """
+
+    def _server(self, tmp_path, monkeypatch):
+        sock = tmp_path / "tmux.sock"
+        monkeypatch.setenv("PM_TMUX_SOCKET", str(sock))
+        create_session("envtest", str(tmp_path), "sleep 120",
+                       socket_path=str(sock))
+        return sock
+
+    def _wait_for(self, path, timeout=5.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if path.exists() and path.read_text().strip():
+                return path.read_text().strip()
+            time.sleep(0.05)
+        return None
+
+    def _kill(self, sock):
+        subprocess.run(["tmux", "-S", str(sock), "kill-server"],
+                       capture_output=True)
+
+    def test_new_window_pane_gets_value_and_start_command_stays_clean(
+            self, tmp_path, monkeypatch):
+        sock = self._server(tmp_path, monkeypatch)
+        out = tmp_path / "new-window-out"
+        try:
+            new_window(
+                "envtest", "w2",
+                f"printenv ANTHROPIC_API_KEY > {shlex.quote(str(out))}; sleep 120",
+                str(tmp_path), switch=False,
+                env={"ANTHROPIC_API_KEY": CANARY})
+            assert self._wait_for(out) == CANARY
+            start_cmd = subprocess.run(
+                ["tmux", "-S", str(sock), "list-panes", "-t", "envtest:w2",
+                 "-F", "#{pane_start_command}"],
+                capture_output=True, text=True, check=True).stdout
+            # Non-vacuous: the wrapper is there, and the value is not.
+            assert "sh -c" in start_cmd
+            assert CANARY not in start_cmd
+        finally:
+            self._kill(sock)
+
+    def test_split_pane_pane_gets_value_and_start_command_stays_clean(
+            self, tmp_path, monkeypatch):
+        sock = self._server(tmp_path, monkeypatch)
+        out = tmp_path / "split-out"
+        try:
+            split_pane(
+                "envtest", "v",
+                f"printenv ANTHROPIC_API_KEY > {shlex.quote(str(out))}; sleep 120",
+                env={"ANTHROPIC_API_KEY": CANARY})
+            assert self._wait_for(out) == CANARY
+            start_cmd = subprocess.run(
+                ["tmux", "-S", str(sock), "list-panes", "-t", "envtest",
+                 "-F", "#{pane_start_command}"],
+                capture_output=True, text=True, check=True).stdout
+            # Non-vacuous: the wrapper is there, and the value is not.
+            assert "sh -c" in start_cmd
+            assert CANARY not in start_cmd
+        finally:
+            self._kill(sock)
+

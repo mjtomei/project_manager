@@ -43,6 +43,10 @@ def test_inventory_includes_renamed_managed_proxy_user(monkeypatch):
     assert cm.containers_for_pr("tag", "pr-aaaa") == {legacy, renamed}
     monkeypatch.setattr(cm, "proxy_lock", lambda *args, **kwargs: contextlib.nullcontext(True))
     monkeypatch.setattr(push_proxy, "_owner_domain_matches", lambda *args: True)
+    monkeypatch.setattr(push_proxy, "list_shared_proxies", lambda: [
+        {"session_tag": "tag", "pr_id": "pr-aaaa", "token": None,
+         "sock_dir": "/tmp/unused", "sock_path": "/tmp/unused/push.sock",
+         "link": None, "runtime_domain": None}])
     stop = Mock()
     monkeypatch.setattr(push_proxy, "_kill_proxy_socket", stop)
     assert push_proxy.release_proxy_if_unused("tag", "pr-aaaa", exclude={legacy}) is False

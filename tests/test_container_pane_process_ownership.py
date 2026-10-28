@@ -110,6 +110,8 @@ def test_diagnostic_commands_do_not_claim_ownership(monkeypatch, tmp_path, comma
     f"podman exec --interactive --tty -- {NAME} sh",
     f"docker attach --no-stdin {CID}",
     f"podman --root /private/store exec -it {NAME} sh",
+    f"podman exec -it -e ANTHROPIC_BASE_URL {CID} bash -c claude",
+    f"docker exec -it -u pm -e ANTHROPIC_BASE_URL {CID[:12]} bash -c claude",
 ])
 def test_runtime_clients_still_own_from_diagnostic_pane(monkeypatch, tmp_path, command):
     info = _snapshot(monkeypatch, tmp_path, "0:%7:pm-project-a:100:bash\n",
@@ -122,8 +124,11 @@ def test_runtime_clients_still_own_from_diagnostic_pane(monkeypatch, tmp_path, c
     "podman exec", "podman exec -it", "podman exec --interactive --tty --",
     "docker container exec -it -u pm", "docker exec --user=1000:1000",
     "docker attach --no-stdin",
+    # build_exec_cmd(env=...) passes provider variables by name.
+    "podman exec -it -e ANTHROPIC_BASE_URL -e PM_ROUTE_BASE_URL",
+    "docker exec -it -u pm --env ANTHROPIC_BASE_URL --env=CLAUDE_CODE_X",
 ])
-@pytest.mark.parametrize("target", [NAME, CID])
+@pytest.mark.parametrize("target", [NAME, CID, CID[:1], CID[:12]])
 def test_runtime_payload_does_not_claim_another_container(monkeypatch, tmp_path, client, target):
     info = _snapshot(monkeypatch, tmp_path, "0:%7:pm-project-a:100:bash\n",
                      f"100 1 Ss bash\n101 100 S {client} other sh -c echo {target}\n")
@@ -132,7 +137,8 @@ def test_runtime_payload_does_not_claim_another_container(monkeypatch, tmp_path,
     assert reaper._owner_panes(info, reaper._PaneCache()) == (["%7"], False)
 
 
-@pytest.mark.parametrize("options", ["--workdir /path with spaces", "--unknown value"])
+@pytest.mark.parametrize("options", ["--workdir /path with spaces", "--unknown value",
+                                     "-e FOO=value with spaces", "--env=FOO=x y"])
 def test_ambiguous_exec_options_preserve_possible_owner(monkeypatch, tmp_path, options):
     info = _snapshot(monkeypatch, tmp_path, "0:%7:pm-project-a:100:bash\n",
                      f"100 1 Ss bash\n101 100 S podman exec {options} {NAME} sh\n")
