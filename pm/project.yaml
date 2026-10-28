@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T07:51:02.490527+00:00'
+  updated_at: '2026-10-28T07:53:47.960985+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15049,6 +15049,26 @@ prs:
       not "Launched …". (c) podman run needs --uts host; status has no proxy lines.'
     created_at: '2026-10-28T07:51:02Z'
     last_edited: '2026-10-28T07:51:02Z'
+  - id: note-6474e15
+    text: 'QA S79 PASS (b2dd37d6, code 6cb6149c; real rootless Podman 3.4.4, 2 PM
+      processes, fake agents, no NEEDS_WORK in any fake; evidence /pm-captures/scenarios/79/manifest.md).
+      No code change. S1 re-driven once from its Given: the S74 dash-watch.sh captured
+      the qa-<pr> window active pane (the planner), not pane .1 (QA Status), so the
+      first attempt had no held-dashboard frame. That attempt also had 2 C launches
+      with a 2 s pre-sample of 5. The shim proved these were sampler races: the other
+      PM process rm-ed a container <2 s before C launched, C own inventory read came
+      after the rm and saw 4, and the post-launch sample was 5. In the accepted run
+      every C pre-sample was 4, peak 6, no 7. S2: floor launch after all 4 settled,
+      37x6/53x5 during the outage, rm 1.8 s after the clear, removed 3 kept 1, grow-back,
+      hashes ALL MATCH, nav 76/76. S3: refill 3.4 s after the reap, nothing above
+      5. Recorded: the cleanup-deferred suffix is per release batch (s24 PASS line
+      lacks it, s22 same batch has it). Non-injected rc=125 ERROR lines are absence
+      probes (pr-fa5bb86) plus one real podman ps -a race during a concurrent rm,
+      which PM retried. Fixture tips: dash-watch must target qa-<pr>.1; a 2 s pre-sample
+      Then can race cross-process releases, so pair it with shim ordering or a 0.25
+      s sampler.'
+    created_at: '2026-10-28T07:53:47Z'
+    last_edited: '2026-10-28T07:53:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
