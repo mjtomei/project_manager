@@ -234,13 +234,16 @@ workdirs are touched.
     (`pr_utils.TERMINAL_PR_STATES`) used by the new guards in `pr.py`,
     `pr_sync.py` and `tui/sync.py`, and by the `pm pr list --open` filter, so
     "terminal" cannot drift between the sync paths.
-27. One terminal definition, everywhere (review c02f i10): the pre-existing
-    duplicates of the pair now derive from `pr_utils.TERMINAL_PR_STATES` too —
+27. One terminal definition, everywhere (review c02f i10/i11): the
+    pre-existing duplicates of the pair now derive from
+    `pr_utils.TERMINAL_PR_STATES` too —
     `autostart_state.TERMINAL_STATUSES` (aliased; the scheduler/CLI/popup
-    importers keep their name) and `cli/session.py`'s `_TERMINAL_STATUSES`
-    (a set copy).  The two remaining literal checks in `pr.py`
-    (`pr_review`, `pr_qa_run_bg`) use the constant as well, so no path can
-    disagree about which statuses are terminal.
+    importers keep their name), `cli/session.py`'s `_TERMINAL_STATUSES`
+    (a set copy), `qa_loop.py`'s four "abort QA against a terminal PR" guards,
+    `home_window/pr_list.py`'s open-only filter, and the `qa`/`sign_off`
+    preservation tuple in `pr_sync.sync_from_github`.  The two remaining
+    literal checks in `pr.py` (`pr_review`, `pr_qa_run_bg`) use the constant
+    as well, so no path can disagree about which statuses are terminal.
 28. Cleanup after close (review c02f i10): `pm pr cleanup <id>` is the
     explicit workdir-removal step `pm pr close` points at, and `closed` is now
     its normal input — it no longer prints the "status is 'closed' (not
@@ -367,8 +370,9 @@ No **[UNRESOLVED]** ambiguities.
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
-- `pm_core/autostart_state.py`, `pm_core/cli/session.py` — the pre-existing
-  terminal-status duplicates alias the `pr_utils` constant (review c02f i10).
+- `pm_core/autostart_state.py`, `pm_core/cli/session.py`, `pm_core/qa_loop.py`,
+  `pm_core/home_window/pr_list.py` — the pre-existing terminal-status
+  duplicates derive from the `pr_utils` constant (review c02f i10/i11).
 - `pm_core/cli/pr.py` — `pr_cleanup`'s "not merged" warning set also accepts
   `closed`, so following close's help to the explicit cleanup is not flagged
   as unexpected (review c02f i10).

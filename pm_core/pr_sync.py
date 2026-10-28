@@ -381,7 +381,7 @@ def sync_from_github(
                 # `gh pr close` failed) is still closed locally.  "merged": the
                 # merge landed outside GitHub, and rewriting it would erase the
                 # merge evidence and re-block its dependents.
-                if old_status in ("qa", "sign_off", "closed", "merged"):
+                if old_status in ("qa", "sign_off", *TERMINAL_PR_STATES):
                     continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:

@@ -29,6 +29,7 @@ from typing import Callable
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
+from pm_core.pr_utils import TERMINAL_PR_STATES
 from pm_core.prompt_bounds import (
     ARTIFACT_PATHS_MAX as _ARTIFACT_PATHS_MAX,
     bounded_join, bounded_lines,
@@ -3776,7 +3777,7 @@ def run_qa_sync(
     # sync marking the PR merged) can land concurrently with the sign_off->qa
     # bounce that spawned this driver.  Never open a qa-<id> window or run a QA
     # loop against an already-merged/closed PR.
-    if (live_pr.get("status") or "") in ("merged", "closed"):
+    if (live_pr.get("status") or "") in TERMINAL_PR_STATES:
         _log.info("QA aborted: %s is %s; not running QA against a "
                   "merged/closed PR", pr_id, live_pr.get("status"))
         state.running = False
@@ -3871,7 +3872,7 @@ def run_qa_sync(
         # status checks but the merge landed before the window appeared —
         # never leave a qa-<id> window/loop running against a merged PR.
         _live = store.get_pr(store.load(pm_root), pr_id) or {}
-        if (_live.get("status") or "") in ("merged", "closed"):
+        if (_live.get("status") or "") in TERMINAL_PR_STATES:
             _log.info("QA aborted before window creation: %s is %s",
                       pr_id, _live.get("status"))
             state.running = False
@@ -3909,7 +3910,7 @@ def run_qa_sync(
         # closed in the meantime, tear the just-created window(s) back down so
         # no QA window/loop is left running against the merged PR.
         _live = store.get_pr(store.load(pm_root), pr_id) or {}
-        if (_live.get("status") or "") in ("merged", "closed"):
+        if (_live.get("status") or "") in TERMINAL_PR_STATES:
             _log.info("QA aborted after window creation: %s is %s; tearing "
                       "down qa window", pr_id, _live.get("status"))
             _cleanup_stale_scenario_windows(session, pr_data)
@@ -3991,7 +3992,7 @@ def run_qa_sync(
             # tear the QA window down so it isn't left running against a now-
             # merged PR.
             _live = store.get_pr(store.load(pm_root), pr_id) or {}
-            if (_live.get("status") or "") in ("merged", "closed"):
+            if (_live.get("status") or "") in TERMINAL_PR_STATES:
                 _log.info("QA aborted mid-planning: %s is %s; tearing down "
                           "qa window", pr_id, _live.get("status"))
                 _cleanup_stale_scenario_windows(session, pr_data)
