@@ -26269,6 +26269,56 @@ prs:
       ✓ PASS / QA PASS with per-PR window isolation.'
     created_at: '2026-10-28T10:11:07Z'
     last_edited: '2026-10-28T10:11:07Z'
+  - id: note-71c88d1
+    text: 'QA scenario 23 (pane death during recovery) — PASS. Host-mode, fake Claude,
+      3 scenarios / qa-max-scenarios 2 (verdict-recovery-settle 5 s, reminder 0, response-timeout
+      3600, qa-verify-pass on).
+
+
+      Story 1 (worker pane death, pr-397f32a): killed qa-<pr>-s2 at deferral 9/10
+      while s1/s2 idled without a verdict. Log: "Scenario 2 window died — retry 1/10
+      (backoff 5s)" at 09:48:10, then "Relaunched scenario 2 in window qa-<pr>-s2"
+      at 09:48:15. New worker pane %10 (old %8 gone from list-panes -a) and a new
+      transcript session 5d2c98e7… (old 8bac35e5…). The relaunched worker restarted
+      its own budget (deferral 1/10 for session 5d2c98e7…, first line at +50 s, i.e.
+      past its own 30 s grace) and was retired 101 s after relaunch — comparable to
+      s1''s 115 s window — so it was not retired on the next tick. Every retirement
+      reason named its own session+pane: s1 c55f76db/%9 (untouched throughout the
+      kill), s2 5d2c98e7/%10, s3 f14d3734/%12. Queued s3 launched the moment s1 freed
+      a slot. The run ended on its own in 3 m 51 s with all three rows INPUT_REQUIRED
+      + a reason line and Overall INPUT_REQUIRED, TUI "QA INPUT_REQUIRED … paused
+      for human input", PR still in qa. A later zt logged "Killing stale QA window
+      qa-<pr>[-s0/-s1/-s2/-s3]" and recreated every window with new pane ids (%14/%15/%16/%17/%18);
+      every pre-zt pane id (%3 %4 %5 %6 %8 %9 %10 %11 %12 %13) was absent afterwards;
+      zzt stopped the extra run cleanly (STOPPED, no note).
+
+
+      Story 2 (planner death, pr-8beeff5, fresh project): planner configured to never
+      emit QA_PLAN; qa-<pr> killed 20 s into planning. The run ended 5 s later with
+      exactly one "qa-planner: recovery request could not be delivered", then "Planner
+      pane exited", "Planner produced no scenarios", "QA finalize: skipped … no scenarios
+      ran" and "QA INPUT_REQUIRED … paused for human input". No qa-<pr>-s1 window,
+      dead planner pane %37 gone, recreated qa-<pr>.0 is the plain "QA execution"
+      pane, dashboard ERROR block "No parseable scenarios found in planner output.",
+      qa_status.json overall INPUT_REQUIRED, PR still qa. Healthy restart (fake _all
+      + QA_PLAN, then zt) killed the stale windows, logged "QA planning phase" / "QA
+      plan parsed: 1 scenario(s)", and the run went PASS -> VERIFIED -> FINALIZE_DONE
+      with dashboard Overall: PASS and "QA PASS … press i to sign off".
+
+
+      Observations (pre-existing, not defects): (1) the dashboard reason line is width-truncated
+      (qa_status._truncate, dashboard pane 100 cols), so a 36-char session id pushes
+      the trailing "Pane %N" off-screen; the stored verdict_reason and the debug log
+      both carry the pane id. (2) A killed scenario window stays in the pane registry
+      until the next launch calls prune_dead_windows ("removed [@3..@8]"); harmless
+      here because registration is window-scoped and the relaunched pane registered
+      under its own window.
+
+
+      Captures: /pm-captures/scenarios/23/{story1-pane-death,story1-dashboard,story2-planner-death}/
+      (cast + mp4 + transcript + evidence). No code changes were needed.'
+    created_at: '2026-10-28T10:09:48Z'
+    last_edited: '2026-10-28T10:09:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
