@@ -168,6 +168,94 @@ def _failing_append_open(real_open, *, concurrent=None):
     return fake_open
 
 
+def _flush_failing_append_open(real_open, *, short=5):
+    """An ``open`` stand-in that fails at the *raw* layer, after bytes land.
+
+    ``_failing_append_open`` raises out of ``write`` before any byte
+    reaches Python's buffer, so it never exercises a buffered writer's
+    flush — the path a full disk actually takes.  Here the kernel accepts
+    ``short`` bytes and then reports ENOSPC forever, and ``buffering`` is
+    honoured the way the builtin does, so the same fake models both the
+    old buffered append and the unbuffered one.  With a buffered writer
+    the failure surfaces from ``flush``/``close`` and the writer *keeps*
+    the unwritten remainder, which makes a ``truncate`` rollback re-raise
+    from its own flush instead of cutting the partial line off.
+    """
+    import io
+
+    class _RawShort:
+        def __init__(self, real):
+            self._real = real
+            self._accepting = True
+
+        def write(self, data):
+            if self._accepting:
+                self._accepting = False
+                return self._real.write(bytes(data[:short]))
+            raise OSError(28, "No space left on device")
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._real.close()
+            return False
+
+    def fake_open(path, mode="r", *args, **kwargs):
+        if mode != "ab":
+            return real_open(path, mode, *args, **kwargs)
+        raw = _RawShort(real_open(path, "ab", buffering=0))
+        if kwargs.get("buffering", -1) == 0:
+            return raw
+        return io.BufferedWriter(raw, 8192)
+
+    return fake_open
+
+
+def _short_then_ok_append_open(real_open, *, short=5):
+    """An ``open`` stand-in whose first raw write is short, then succeeds.
+
+    A raw write is allowed to return fewer bytes than asked; the append
+    must finish the line rather than report a failure that would leave
+    the command unqueued (and, worse, half-written).
+    """
+    import io
+
+    class _RawShortThenOk:
+        def __init__(self, real):
+            self._real = real
+            self._calls = 0
+
+        def write(self, data):
+            self._calls += 1
+            if self._calls == 1:
+                return self._real.write(bytes(data[:short]))
+            return self._real.write(bytes(data))
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._real.close()
+            return False
+
+    def fake_open(path, mode="r", *args, **kwargs):
+        if mode != "ab":
+            return real_open(path, mode, *args, **kwargs)
+        raw = _RawShortThenOk(real_open(path, "ab", buffering=0))
+        if kwargs.get("buffering", -1) == 0:
+            return raw
+        return io.BufferedWriter(raw, 8192)
+
+    return fake_open
+
+
 # ---------------------------------------------------------------------------
 # Parsing
 
@@ -905,6 +993,52 @@ class TestSubmitCommand:
                                       b"review-loop pr-2\n"), (
             "the concurrent caller's line must survive our rollback")
         assert tui.poll() is None  # never signaled
+
+    def test_flush_failure_still_cuts_the_partial_line(
+            self, ipc_paths, start_fake_tui, monkeypatch):
+        """A full disk fails the *flush*, not ``write`` — roll back anyway.
+
+        ``_failing_append_open`` raises out of ``write`` before any byte
+        is buffered, so it never reached the path a real short write
+        takes.  Here the kernel accepts five bytes and then reports
+        ENOSPC, so a buffered append fails from ``flush`` and keeps the
+        unwritten remainder in its buffer: ``truncate`` then re-raises
+        from its own flush and the half-line survives (verified: the
+        queue ended up holding ``b'pr qa fresh pr-9\\nrevie'``).  The
+        append must be unbuffered so the rollback is a plain
+        ``ftruncate``.
+        """
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        queue.write_bytes(b"pr qa fresh pr-9\n")
+        before = queue.read_bytes()
+
+        monkeypatch.setattr(
+            helpers, "open",
+            _flush_failing_append_open(open), raising=False)
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert res.reason == "queue_error"
+        assert queue.read_bytes() == before, "partial line must be removed"
+        assert pidfile.exists()
+        assert tui.poll() is None  # never signaled
+
+    def test_short_write_is_finished(self, ipc_paths, start_fake_tui,
+                                     monkeypatch):
+        """A short raw write must be completed, not reported as failure."""
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+
+        monkeypatch.setattr(
+            helpers, "open",
+            _short_then_ok_append_open(open), raising=False)
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is True
+        assert queue.read_bytes() == b"review-loop pr-1\n"
 
     def test_empty_pidfile_is_starting_not_stale(self, ipc_paths):
         """A peer mid-claim must keep its file: deleting it reopens the race.

@@ -116,9 +116,11 @@ def _parse_uint(value) -> int | None:
 
     Accepts an ``int`` or a decimal string; everything else (``bool``,
     ``float``, ``None``, a non-numeric string) is rejected rather than
-    coerced.  ``str.isdecimal`` — not ``str.isdigit`` — is the gate: it
-    is true for ``"²"``, which ``int()`` then refuses, and a corrupt
-    pidfile must never raise out of the parser.
+    coerced.  The gate is ``str.isdecimal``, not ``str.isdigit``: the
+    latter is true for ``"²"`` (superscript two) while ``int()`` refuses
+    it, and a corrupt pidfile must never raise out of the parser.  The
+    ``int()`` call can still raise — Python limits how many digits it
+    will convert — so it is guarded too.
     """
     if isinstance(value, bool):
         return None
@@ -128,7 +130,7 @@ def _parse_uint(value) -> int | None:
             return None
         try:
             value = int(text)
-        except ValueError:  # non-decimal digits int() still refuses
+        except ValueError:  # absurdly long digit strings (int() limit)
             return None
     if not isinstance(value, int) or value < 0:
         return None

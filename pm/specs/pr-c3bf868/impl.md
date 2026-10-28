@@ -114,14 +114,19 @@ I3. The command queue file must exist before caps are published (a caller
     concurrent caller appending after ours cannot pin our failed command
     into the queue; every other line is kept byte-for-byte.
 
-    The append is flushed to the kernel *inside* that `flock`: the drain
-    reads and truncates the queue under the same lock, so a line still
-    sitting in Python's write buffer at `LOCK_UN` would land in the file
-    after a concurrent drain truncated it — silently dropping a command
-    the caller was told was queued, with a healthy TUI so the spinner's
-    owner check never aborts it. (Same reasoning, and the same
-    `f.flush()`-before-`LOCK_UN` idiom, as `runtime_state.py`'s
-    read-modify-write.)
+    The append reaches the kernel *inside* that `flock`: the drain reads
+    and truncates the queue under the same lock, so a line still sitting
+    in Python's write buffer at `LOCK_UN` would land in the file after a
+    concurrent drain truncated it — silently dropping a command the
+    caller was told was queued, with a healthy TUI so the spinner's owner
+    check never aborts it. The append is therefore *unbuffered*
+    (`open(queue, "ab", buffering=0)`), which makes that structural
+    rather than a `flush()`-before-`LOCK_UN` obligation. Unbuffered is
+    also what makes the partial-write rollback below work: when a
+    buffered writer's flush fails CPython keeps the unwritten remainder
+    in its buffer, so a `truncate` rollback re-raises from its own flush
+    and leaves the half-line behind (and a later `close` would re-append
+    the remainder). With a raw file the rollback is a plain `ftruncate`.
 
     One command is exactly one line on both sides of that protocol: the
     writer (`_queue_line`) replaces every character `str.splitlines`
@@ -137,9 +142,11 @@ I3. The command queue file must exist before caps are published (a caller
     A *partial* line is rolled back too: `_unqueue_line` matches whole
     lines, so it cannot take back a short write (ENOSPC / quota, which
     the kernel is allowed to do) and a later drain would run a truncated
-    command the caller was told was not applied. The append records the
-    file's end and truncates back to it when the write/flush raises —
-    under the same lock, best effort, since the write itself just failed.
+    command the caller was told was not applied. A short raw write that
+    the kernel lets us finish is completed (the same loop
+    `tui_pidfile._write_all` uses for the descriptor); a write that
+    fails records the file's end and truncates back to it — under the
+    same lock, best effort, since the write itself just failed.
     That end must be read *under* the `flock` (`os.fstat(f.fileno()).st_size`),
     not from `f.tell()`: append mode pins the stream position at
     `open()` time, so a line another caller appends between our open and
@@ -540,7 +547,8 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     spy on `fcntl.flock` records the queue's bytes at `LOCK_UN`, and the
     test asserts they already contain the command. Verified to fail
     before the `f.flush()` (`b''` at `LOCK_UN`; the line only appeared
-    when the `with` block closed the file afterwards).
+    when the `with` block closed the file afterwards). With the unbuffered
+    append this now holds structurally.
 35. a short write to the queue (I3) leaves no partial line: a fake `open`
     writes five bytes of the command and then raises `ENOSPC`, and the
     test asserts the queue still holds exactly its pre-append bytes.
@@ -553,6 +561,17 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     rollback. Verified to fail when the target comes from `f.tell()`
     (captured at open): the concurrent caller's line was truncated away,
     so a command it was told was queued would never be applied.
+37. the realistic short write — bytes accepted, *then* `ENOSPC` (I3): a
+    fake `open` honours `buffering` the way the builtin does and wraps a
+    raw layer that accepts five bytes and then fails forever, so a
+    buffered append fails from `flush`/`close` (not from `write`) and
+    keeps the unwritten remainder. The test asserts the queue still
+    holds exactly its pre-append bytes. Verified to fail against the
+    buffered append: `truncate` re-raised from its own flush and the file
+    kept `b'pr qa fresh pr-9\nrevie'`. This is why the append is
+    unbuffered.
+38. a short raw write that then succeeds (I3) is completed by the append
+    loop rather than reported as a failure, so the whole line lands.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

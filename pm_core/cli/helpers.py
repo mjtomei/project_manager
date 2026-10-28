@@ -820,7 +820,21 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
         # UTF-8 target (it compares bytes), and a caller whose locale is
         # not UTF-8 can neither garble the command nor defeat the
         # rollback below.
-        with open(queue, "ab") as f:
+        #
+        # *Unbuffered* append, for two reasons.  (1) The line must be on
+        # disk while the flock is held: the TUI's drain reads and
+        # truncates the queue under the same lock, so bytes still sitting
+        # in Python's buffer at LOCK_UN would land in the file *after* a
+        # drain truncated it — the command would be silently dropped and
+        # the caller would spin on "queued…" forever with a perfectly
+        # healthy TUI (so the spinner's owner check would never abort
+        # it).  (2) A buffered writer cannot be rolled back: when a flush
+        # fails CPython keeps the unwritten remainder in its buffer, so
+        # ``truncate`` re-raises from its own flush and the partial line
+        # survives (a later ``close`` would even re-append the
+        # remainder).  With a raw file the rollback is a plain
+        # ``ftruncate``.
+        with open(queue, "ab", buffering=0) as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 # The rollback target must be the file's end *as of the
@@ -832,28 +846,26 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
                 # drain shrank the file, extend it with NULs).  ``st_size``
                 # under the flock is the authoritative end.
                 start = os.fstat(f.fileno()).st_size
+                view = memoryview(line.encode("utf-8"))
                 try:
-                    f.write(line.encode("utf-8"))
-                    # Flush to the kernel *before* releasing the lock: the
-                    # TUI's drain reads and truncates the queue under this
-                    # same flock, so bytes still sitting in Python's buffer
-                    # at LOCK_UN would land in the file *after* a drain
-                    # truncated it — the command would be silently dropped
-                    # and the caller would spin on "queued…" forever with a
-                    # perfectly healthy TUI (so the spinner's owner check
-                    # would never abort it).
-                    f.flush()
+                    # A raw write may be short (ENOSPC, quota); finish the
+                    # line if the kernel lets us, the same way
+                    # ``tui_pidfile._write_all`` does for the descriptor.
+                    while view:
+                        written = f.write(view)
+                        if not written:
+                            raise OSError(f"short write to {queue}")
+                        view = view[written:]
                 except OSError:
-                    # A short write (ENOSPC, quota) can leave *part* of the
-                    # line behind.  ``_unqueue_line`` matches whole lines
-                    # only, so it could not take that back — cut the
+                    # A failed (possibly partial) write can leave *part*
+                    # of the line behind.  ``_unqueue_line`` matches whole
+                    # lines only, so it could not take that back — cut the
                     # partial bytes off here, under the same lock, or a
                     # later drain would run a truncated command the caller
                     # was told was not applied.  Best effort: the write
                     # itself just failed, so this may fail too.
                     try:
                         f.truncate(start)
-                        f.flush()
                     except OSError:
                         pass
                     raise
