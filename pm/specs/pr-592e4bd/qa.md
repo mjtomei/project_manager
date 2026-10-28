@@ -1037,10 +1037,23 @@ S13, S14, S22, S101.
     to sign-off. When the driver records a verdict (even if a tick lands
     between the verdict write and the driver's exit), that verdict is
     the hand-off's QA result: no second full QA, one sign-off hand-off.
-  - Not covered: the TUI sign-off REQA hop calls `start_qa` without a
-    live-driver check. The judged run is finished at that hop. The
-    forty-first pass probes it (S117) and files a finding if a live
-    `pm qa run` loses its windows.
+  - The TUI sign-off REQA hop (S117 c9ce4f6a). When a run is driven
+    elsewhere (a live `pm qa run`), the hop clears the judged run's qa
+    entry and does not start QA. It shows the sticky line "Sign-off REQA
+    for <pr> — QA starts once the QA run another process drives ends".
+    That pending start is owed whether auto-start is on, off or no longer
+    covers the PR. It is retried each poll tick and starts one full QA
+    once the CLI run ends. The CLI run's windows are kept, and its
+    one-instruction verdict is never taken as the re-run's result. If
+    project.yaml is busy when the start fires, it waits for the lock and
+    is not dropped. Known gap, filed and not in scope: pr-db3bf10. The
+    pending start lives only in memory, so a TUI restart while it waits
+    loses it. `awaiting: qa` stays on disk, and `t` (or auto-start)
+    starts the re-run.
+  - A `pm qa run` started before a sign-off REQA is not the re-run's
+    driver. An auto-sequence tick of that PR must not take its
+    `qa_status.json` as the re-run's verdict, and must not start a
+    second loop over it. The forty-second pass probes this (S120).
 
 ### Generic providers and per-PR configuration (2026-10-27; impl.md R10–R13)
 - **RQ48** (R10, 87fd093f) Generic router provider. Given a router
@@ -2395,6 +2408,50 @@ S13, S14, S22, S101.
       sign-offs. The router is down at the QA launch and comes back.
       `pm tui restart` mid-QA adopts the run, with the PR in `qa`.
       Routing, bridge mount and stub logs are as in RQ52/R9.
+    Results (run e89777aef44ccd93, every scenario mp4):
+    - S116 PASS, no code change.
+    - S117 NEEDS_WORK. Stories 1, 2, 3 and 5 held. Story 4 found that
+      the TUI sign-off REQA hop killed a live `pm qa run`'s windows.
+      Fixed in c9ce4f6a (pr-ed2ebe9, closed).
+    - S118 NEEDS_WORK. A grouped view session whose name is not
+      `<base>~N` gave the restarted TUI that name, so CLI→TUI commands
+      timed out with `owner_timeout`. Picker popups opened there lost the
+      run badges. Fixed in 91b259bd. Every routing Then held after the
+      fix.
+    - Review 6092 i1 PASS (HEAD bc93ffb6). It filed pr-db3bf10 (the
+      deferred REQA start is lost on a TUI restart).
+  - Forty-second pass (S119+), delta-only, QA42 planner 2026-10-28, HEAD
+    bc93ffb6. Product changes since run e89777aef44ccd93 are c9ce4f6a
+    (the REQA hop defers over a run driven elsewhere, RQ56) and 91b259bd
+    (TUI session name and `_get_current_pm_session` resolve a grouped view
+    through `#{session_group}`). Each ran live only in its finding's
+    scenario, right after the fix. Every scenario publishes
+    `recording.mp4`. Controls, run beside HEAD: 91b259bd (pre-c9ce4f6a)
+    for S119/S120, and dd00f754 (pre-91b259bd) for S121. A PASS must show
+    the control failing where the fix applies. Harness:
+    `/pm-captures/scenarios/117/scripts`, `/pm-captures/scenarios/116/scripts`
+    and `/pm-captures/scenarios/118/scripts`. Keep `PM_CAPTURES_PR`
+    exported. Not to redo: S103–S118.
+    - S119: host, fake-claude, TUI sign-off REQA over a live `pm qa run`.
+      Auto-start on, off, and with the target removed mid-wait. The CLI
+      run ends with PASS, with NEEDS_WORK, and interrupted with no
+      verdict. Also: the user presses `t` while the start is deferred,
+      project.yaml is busy when the deferred start fires, and two PRs are
+      deferred at once. pr-db3bf10 is checked only for its documented
+      recovery (`t` after a restart).
+    - S120: host, fake-claude, RQ56 concurrency around a REQA that met a
+      live `pm qa run`. Auto-sequence ticks run during the wait. One
+      variant has a TUI-launched sign-off and one a tick-launched
+      sign-off with no TUI. Probe: does a tick take the CLI run's
+      `qa_status.json` as the re-run's verdict, or launch `qa-run-bg`
+      over the CLI run? A finding goes to RQ56, or to a bug PR if master
+      does the same.
+    - S121: host, fake-claude, a user's own grouped view of the pm
+      session (any name not `<base>~N`), beside the base client and a
+      `~N` view. Cover `pm tui restart` from each client, CLI→TUI
+      commands, picker popups from PR windows (badges), ticks and
+      `pm qa run` from view panes (runtime records under `pm-<tag>`),
+      and non-pm and ungrouped sessions as controls.
 
 ## 3. Edge cases
 
