@@ -347,6 +347,49 @@ def test_close_noops_when_entry_removed_concurrently(tmp_path):
     assert project["workdir"].is_dir()
 
 
+def test_remove_noops_when_entry_removed_concurrently(tmp_path):
+    """A concurrent `--remove` must not make this one claim it removed a
+    record that was already gone (and must not raise)."""
+    project = _make_project(tmp_path)
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        data["prs"] = [p for p in data["prs"] if p["id"] != "pr-001"]
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+            result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code == 0, result.output
+    assert "removed concurrently" in result.output
+    assert "nothing to remove" in result.output
+    assert "Removed registry entry" not in result.output
+    assert _load_entry(project["pm_dir"]) is None
+    assert project["workdir"].is_dir()
+
+
+def test_add_hints_when_a_closed_record_is_the_duplicate(tmp_path):
+    """Retained closed entries now match `pr add`'s duplicate check; the
+    message must say how to reuse the record instead of silently refusing."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    entry = _load_entry(project["pm_dir"])
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, [
+            "add", entry["title"], "--description", entry["description"]])
+
+    assert result.exit_code == 0, result.output
+    assert "already exists" in result.output
+    assert "It is closed" in result.output
+    assert f"pm pr edit {entry['id']} --status pending" in result.output
+
+
 # ---------------------------------------------------------------------------
 # explicit registry-only removal
 # ---------------------------------------------------------------------------

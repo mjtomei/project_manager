@@ -166,7 +166,10 @@ workdirs are touched.
 15. `pm pr merge <closed> --propagation-only`: recovery still runs (R8
     ordering).
 16. Concurrent `--remove` between load and lock: exit 0, entry stays gone, no
-    exception.
+    exception, and the command does not claim it removed the record.
+17. `pm pr add` of a title+description that matches a retained `closed` entry:
+    the duplicate message names the closed status and the reopen command
+    (`pm pr edit <id> --status pending`).
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -187,6 +190,14 @@ be rewritten to assert retention.
   `store` does not validate per-field keys, so `closed_at` is safe.
 - **Output stability.** Messages must not claim removal unless `--remove` is
   used; scripts/tests that grepped the old `Removed pr-001` line are updated.
+  A concurrent removal is reported as "removed concurrently" for both the
+  close and `--remove` paths — never as "Removed registry entry" when another
+  process already did it.
+- **Retained closed entries are duplicates.** `pm pr add` matches
+  title+description against every entry, so a closed record now blocks
+  re-adding the same PR.  The duplicate message therefore names the closed
+  status and points at `pm pr edit <id> --status pending` (the deliberate
+  reopen path) rather than leaving the add silently unfulfilled.
 - **No new destructive fallback.** The only filesystem operations in the close
   path after this change are reads (`Path.exists` for the message).
 - **Concurrency/ordering.** The `gh` call stays outside the store lock
@@ -230,8 +241,10 @@ No **[UNRESOLVED]** ambiguities.
 ## 4. Edge cases
 
 - **Entry vanishes between load and update** (concurrent `--remove`): the
-  `apply` closure no-ops; command still exits 0 with the earlier summary
-  (covered by `test_close_noops_when_entry_removed_concurrently`).
+  `apply` closure no-ops and sets `missing_at_lock`; the command exits 0 with
+  a "removed concurrently; nothing to close/remove" message (covered by
+  `test_close_noops_when_entry_removed_concurrently` and
+  `test_remove_noops_when_entry_removed_concurrently`).
 - **`gh` unavailable / unauthenticated**: `SystemExit` swallowed as today →
   warning, status still `closed`, nothing deleted.
 - **GitHub says the PR is already closed/merged**: fake/real `gh` may exit
@@ -255,7 +268,8 @@ No **[UNRESOLVED]** ambiguities.
 ## 5. Files to change
 
 - `pm_core/cli/pr.py` — `pr_close` rewrite (`--remove`, warnings, messages),
-  `pr_start` and `pr_merge` closed guards.
+  `pr_start` and `pr_merge` closed guards, and a closed-duplicate hint in
+  `pr_add` (retained closed entries now match its duplicate check).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
 - `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN.
 - `pm_core/gh_ops.py` — docstring note only (no signature change).

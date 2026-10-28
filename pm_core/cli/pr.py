@@ -299,6 +299,13 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     branch = entry["branch"]
     if result.get("duplicate"):
         click.echo(f"PR already exists: {_pr_display_id(entry)}: {title}")
+        if entry.get("status") == "closed":
+            # `pm pr close` retains the entry (pr-62ad13d), so a closed
+            # record now matches this duplicate check.  Say how to reuse it
+            # rather than leaving the add silently unfulfilled.
+            click.echo(f"  It is closed; reopen it with "
+                       f"'pm pr edit {entry['id']} --status pending' to reuse "
+                       f"it, or use a different title.")
     else:
         click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
         click.echo(f"  branch: {branch}")
@@ -3520,12 +3527,15 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     # Workdir, branch and every file in the workdir stay untouched — cleanup
     # is a separate, explicit operation (`pm pr cleanup`, `--resources`).
     merged_concurrently = False
+    missing_at_lock = False
 
     def apply(data):
-        nonlocal merged_concurrently
+        nonlocal merged_concurrently, missing_at_lock
         pr = store.get_pr(data, pr_id)
         if not pr:
-            return  # removed concurrently — nothing left to close
+            # Removed concurrently — nothing left to close or remove.
+            missing_at_lock = True
+            return
         if remove:
             data["prs"] = [p for p in (data.get("prs") or [])
                            if p.get("id") != pr_id]
@@ -3558,10 +3568,11 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
         click.echo(merged_refusal, err=True)
         raise SystemExit(1)
 
-    if not remove and store.get_pr(updated, pr_id) is None:
+    if missing_at_lock:
         # Another process removed the entry between our load and the lock.
-        click.echo(f"PR {pr_id} was removed concurrently; nothing to close.",
-                   err=True)
+        click.echo(
+            f"PR {pr_id} was removed concurrently; nothing to "
+            f"{'remove' if remove else 'close'}.", err=True)
         trigger_tui_refresh()
         return
 
