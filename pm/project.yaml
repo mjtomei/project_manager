@@ -31389,7 +31389,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-28T15:11:50.452758+00:00'
+  updated_at: '2026-10-28T15:16:42.274765+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -31454,6 +31454,31 @@ prs:
       of stopping cleanly — not exercised by this PR''s scope. (2026-10-28T15:12:00Z)'
     created_at: '2026-10-28T15:11:50Z'
     last_edited: '2026-10-28T15:11:50Z'
+  - id: note-4df67c9
+    text: 'QA scenario 9 (restart during a create-kind backoff), real podman, no code
+      change — INPUT_REQUIRED for one Then that conflicts with spec-correct behaviour.
+      Everything substantive held: attempts=5/retry_at=15:04:27 preserved across an
+      in-place `pm tui restart` (dashboard 6/6 unchanged, siblings PASS, verified
+      [1,3], no verification re-run); TUI killed before T, failure rule removed, overdue
+      retry fired on the first resumed tick (mount 15:04:46 -> relaunch 15:04:52);
+      re-clone dropped ATTEMPT-MARKER; exactly one ...-s2 container (7e2431fd808d)
+      and one qa-<PR>-s2 window; instruction re-installed with INSTRUCTION-MARKER-424242;
+      fresh transcript-s2 ending PASS; QA complete: PASS (finalize=FINALIZE_DONE).
+      The failing Then: worker prompt.md has no "Test setup instructions are available
+      at: /scratch/qa-instructions/restart-check.md" block. Both launch paths clear
+      scenario.instruction_path ("Steps will be inlined by concretizer - worker does
+      not need the file ref"), so prompt_gen.generate_qa_child_prompt''s instruction_block
+      is unreachable for QA children, and tests/test_qa_launch_retry.py::test_create_retry_reinstalls_scenario_instruction
+      asserts exactly that. The instruction content goes to the concretizer via _build_concretization_prompt(instruction_content=...)
+      instead, which is where the retry re-installs it (live: copy logged at relaunch).
+      Decide whether to delete that dead block or keep the ref on the worker. Wording
+      notes: dashboard N/6 is the relaunch index while qa_resume attempts = N-1 (scenario
+      text had it inverted); backoff is 5/10/20/40/80/160 s so the 6th relaunch is
+      ~4.5 min after the first failure; the resume line is "Resuming QA for <PR> after
+      restart..." not "[tui.qa_loop_ui] Resuming incomplete QA from disk". Captures
+      /pm-captures/scenarios/9/.'
+    created_at: '2026-10-28T15:16:42Z'
+    last_edited: '2026-10-28T15:16:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
