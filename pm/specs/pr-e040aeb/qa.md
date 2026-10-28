@@ -290,3 +290,44 @@ them on the live surfaces, not just in tests:
    non-retryable stand-down (documented residual), not to adopt the first
    loop's review. Scenarios assert the first loop is unharmed; the second TUI's
    own message is recorded as evidence, not asserted as a pass condition.
+
+## Post-QA fixes to verify (1fc4 i1–i2, after the second QA run)
+
+The second QA pass (scenarios 7–11) produced these fixes; scenarios must verify
+them on the live surfaces, not just in tests:
+
+1. **Child stderr is escaped before it enters a Rich-markup log line.** The TUI
+   retry notice and the failed-completion notice interpolate the launch child's
+   own stderr into a Rich-markup log line. A bracketed token (`[podman]`) was
+   swallowed and an unbalanced tag (`[/tmp/pm-review]`) raised `MarkupError`,
+   which `log_message` drops — so the concise error silently vanished exactly
+   when the child's text was interesting. Both notices now escape the stderr
+   and the artifact path; the text must render verbatim and the artifact must
+   keep the exact stderr.
+2. **A resume that cannot start must not strand the target.** After a
+   breadcrumb restart, `consume_breadcrumb` restores the saved loop and calls
+   `_start_loop`, which returns False when it cannot start (missing workdir, no
+   tmux, unusable transcript dir). The resume used to announce "Review loop
+   resumed …" anyway and leave a non-running loop entry, and
+   `_auto_start_review_loops` skips a PR whose entry is non-running and not a
+   retryable launch failure — the stranded target this PR removes, reached
+   through a failed resume. The resume now logs honestly, drops the restored
+   entry so the scheduler starts a fresh loop, and treats a raising starter the
+   same way (it must not take the TUI mount down).
+3. **A lease claimed after a stop is handed straight back.** The lease
+   keepalive checked `stop_requested` before claiming but the claim is not
+   atomic with that check; a supersede (`z d` / `zz d`) landing in between let
+   the old loop re-take the lease the replacement needs, and the new loop's
+   bounded claim wait expired into a non-retryable `LAUNCH_FAILED`. The
+   keepalive now releases the lease when a stop landed during the claim.
+
+New regression tests (fail on the pre-fix tree):
+`tests/test_breadcrumb_review_loop.py::test_a_resume_that_cannot_start_drops_the_phantom_loop`,
+`tests/test_breadcrumb_review_loop.py::test_a_raising_resume_is_treated_like_a_refusal`,
+`tests/test_review_launch_retry.py::test_lease_keepalive_releases_a_lease_claimed_after_a_stop`,
+`tests/test_review_launch_retry.py::test_retry_notice_shows_bracketed_child_stderr_verbatim`,
+`tests/test_review_launch_retry.py::test_launch_failed_notice_shows_an_unbalanced_tag_in_stderr`.
+
+Also re-verify on the live surface the earlier `f076 i1` item 2: a TUI restart
+mid-retry must not re-announce a retry notice the user already saw
+(`_ui_notified_retry` round-trips through the breadcrumb).
