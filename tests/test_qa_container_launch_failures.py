@@ -400,3 +400,27 @@ def test_run_end_logs_containers_it_keeps(scenario_state, monkeypatch):
     release.assert_not_called()
     assert any("released containers: none (kept s1 INPUT_REQUIRED)" in m
                for m in _logged(log))
+
+
+def test_partial_run_end_release_logs_viewed_container_it_keeps(scenario_state, monkeypatch):
+    """A release that removes some workers still names the viewed one it kept."""
+    from pm_core import container_reaper
+
+    state, scenario = scenario_state
+    scenario.pane_id = "%5"
+    other = qa_loop.QAScenario(
+        index=2, title="s2", focus="", worktree_path=scenario.worktree_path,
+        container_name="pm-t-qa-pr-aaaa-L-s2", window_name="qa-pr-aaaa-s2")
+    other.pane_id = "%6"
+    state.scenarios.append(other)
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: {"@5"})
+    monkeypatch.setattr(tmux, "pane_window_id", lambda pane: {"%5": "@5", "%6": "@6"}[pane])
+    release = MagicMock(return_value=container_reaper.Outcome())
+    monkeypatch.setattr(container_reaper, "release_containers", release)
+    log = MagicMock()
+    monkeypatch.setattr(qa_loop, "_log", log)
+
+    assert qa_loop._release_scenario_containers(state, "pm-t") is False
+    assert release.call_args.args[0] == ["pm-t-qa-pr-aaaa-L-s2"]
+    line = [m for m in _logged(log) if "released containers:" in m]
+    assert line and line[0].endswith("(kept s1 viewed)")

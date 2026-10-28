@@ -4898,8 +4898,11 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
     outcome = container_reaper.release_containers(
         names, reason="qa-run-end", owner_release=True,
         expected_ids=identities, expected_generations=generations)
-    _log.info("QA %s/%s released containers: %s", state.pr_id,
-              state.loop_id, outcome.summary())
+    # Name what the release left behind too: a partial release that removed
+    # some workers must still say which viewed / INPUT_REQUIRED ones it kept.
+    _log.info("QA %s/%s released containers: %s%s", state.pr_id,
+              state.loop_id, outcome.summary(),
+              f" (kept {', '.join(kept)})" if kept else "")
     if outcome.skipped:
         # Another reconcile held the reaper lock past the wait.  Their live
         # panes would keep them "owned" from the reconciler's point of view,
