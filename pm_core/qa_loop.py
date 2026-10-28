@@ -2701,6 +2701,9 @@ def _poll_tmux_verdicts(
     _entry_id_map: dict[int, str] = dict(entry_id_map or {})
     _pending_entry_ids: set[str] = set(pending_entry_ids or set())
     _mem_wait_reason = mem_wait_reason
+    # The refusal the rows behind a launching head still wait on, kept
+    # across back-to-back admissions (no refusal in between: QA S99).
+    _carried_mem_reason = ""
     _last_mem_attempt = mem_attempt_at
     _last_keepalive = 0.0
     # When each scenario's verdict was accepted (stop-on-idle keeps a
@@ -2871,13 +2874,14 @@ def _poll_tmux_verdicts(
 
         Returns True when a scenario was taken off the queue.
         """
-        nonlocal _mem_wait_reason
+        nonlocal _mem_wait_reason, _carried_mem_reason
         if not _launch_queue:
-            _mem_wait_reason = ""
+            _mem_wait_reason = _carried_mem_reason = ""
             return False
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
         if concurrency_cap > 0 and active >= concurrency_cap:
+            _carried_mem_reason = ""  # the rows now wait on the cap
             return False
         if use_containers:
             # Admit one scenario at a time: this function launches one.
@@ -2888,7 +2892,7 @@ def _poll_tmux_verdicts(
                               _launch_queue[0].index, reason)
                 _mem_wait_reason = reason
                 return False
-        last_mem_reason = _mem_wait_reason
+        last_mem_reason = _mem_wait_reason or _carried_mem_reason
         _mem_wait_reason = ""
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
@@ -2907,9 +2911,13 @@ def _poll_tmux_verdicts(
         # Scenarios that were waiting for memory still are while this one
         # launches (nothing has freed memory for them), unless this launch
         # fills the last concurrency slot: then they wait on the cap and
-        # read queued (QA S83).
+        # read queued (QA S83).  A head admitted right after the previous
+        # launch, with no refusal in between, still carries the last
+        # refusal (QA S99).
+        _carried_mem_reason = ""
         if last_mem_reason and _launch_queue and (
                 concurrency_cap <= 0 or active + 1 < concurrency_cap):
+            _carried_mem_reason = last_mem_reason
             waiting = {sc.index for sc in _launch_queue}
             status_extra["memory_waiting_scenarios"] = waiting
             status_extra["verdict_reasons"] = {

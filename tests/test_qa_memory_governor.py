@@ -372,6 +372,25 @@ class TestQueuedAdmission:
             assert extra["verdict_reasons"] == {
                 i: "waiting for memory: earlier refusal" for i in waiting}
 
+    def test_back_to_back_admission_keeps_memory_waiting_rows(
+            self, tmp_path):
+        """Regression (QA S99): a head admitted right after the previous
+        launch, with no refusal in between, showed the rows behind it as
+        "queued" during its launch.  They keep the last refusal reason."""
+        queued = [_scenario(i, launched=False) for i in (2, 3, 4)]
+        state = _state(list(queued))
+        with _governor(target_g=100):
+            _drive(tmp_path, state, queued=queued, max_sleeps=2,
+                   mem_wait_reason="earlier refusal", mem_attempt_at=0.0)
+        assert len(_drive.launch_status) == 3
+        for n, waiting in enumerate(({3, 4}, {4})):
+            _, extra = _drive.launch_status[n]
+            assert extra.get("memory_waiting_scenarios") == waiting
+            assert extra["verdict_reasons"] == {
+                i: "waiting for memory: earlier refusal" for i in waiting}
+        # The last launch leaves nobody behind it.
+        assert "memory_waiting_scenarios" not in _drive.launch_status[2][1]
+
     def test_run_qa_sync_initial_launch_keeps_queued_on_status(self):
         """The initial batch launch writes the whole run, with the queued
         and memory-waiting scenarios (run_qa_sync wiring)."""
