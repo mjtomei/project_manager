@@ -680,7 +680,20 @@ tests):
     entry must not silently drop the behaviour-change summary). A field
     changed to scalars of *different kinds* on the two sides (`true` vs `1`,
     `1` vs `1.0`) is a conflict, not "unchanged": `==` conflates them, and
-    with it the branch's change was silently replaced by the base's.
+    with it the branch's change was silently replaced by the base's. Mapping
+    *keys* follow the same rule: `{1: x}` and `{True: x}` compare equal in
+    Python, so a side that changed a key's scalar kind looked "unchanged"
+    (the other side's change won silently, and the preservation check — which
+    compared the same way — agreed), and two sides changing one key to
+    different kinds was a real conflict resolved by side selection. A mapping
+    cannot hold both kinds, so a key whose kind differs between the merge
+    base, the PR branch and the new base is refused (`_key_kind_clashes`),
+    never merged; `_same` compares keys by
+    kind too, so a one-sided kind change is still taken as that side's change.
+    A *recursive* document (a YAML alias referring back to itself, which
+    `yaml.load` builds and `yaml.dump` round-trips) is refused with a readable
+    conflict instead of letting `RecursionError` escape the resolver's
+    `(None, details)` contract.
 13. Apply/merge guards: a re-resolution whose blob differs from the recorded
     one is refused and the workdir left untouched (a hand-edited non-string
     `blob` reads as absent rather than raising out of the unattended apply);
@@ -943,7 +956,15 @@ tests):
     the merge recovery path (`pm pr merge --propagation-only`, which runs
     before the gate), `spec_gen.get_spec` (every prompt builder inlines the
     specs through it) and the spec generator's subprocess cwd, while a string
-    workdir still supplies the workdir copy of a spec.  The same holds for the
+    workdir still supplies the workdir copy of a spec.  A *string* path that
+    is not a **directory** is not a checkout either: the guards originally
+    tested `Path(...).exists()`, so a regular file left where the workdir was
+    passed them and every git read ran with a file as the cwd, raising
+    `NotADirectoryError` out of `signoff.head_sha` (`pm pr merge`, `pm pr
+    signoff record`, the driver tick), `_ensure_workdir`, the sign-off and
+    review launch guards, `pm_core.pr_sync`'s workdir/check-dir selection and
+    the `pm pr list --workdirs` / `pm pr prune` / `pm pr done` readers.  Every
+    workdir predicate is `is_dir()`.  The same holds for the
     top-level `project` mapping: a `project` that is not a mapping (or a
     `base_branch`/`repo` that is not a string — both are passed to git as
     arguments) is no configuration, so `integration.target_for` and

@@ -354,26 +354,41 @@ def resolve_project_yaml(base_text: str | None, ours_text: str | None,
         return None, {"error": "project.yaml is not a mapping on one side"}
     if base is not _MISSING and not isinstance(base, dict):
         return None, {"error": "project.yaml base is not a mapping"}
-    ambiguous = (_duplicate_id_problems(ours, "PR branch")
-                 + _duplicate_id_problems(theirs, "new base")
-                 + (_duplicate_id_problems(base, "merge base")
-                    if base is not _MISSING else []))
-    if ambiguous:
-        return None, {"conflicts": ambiguous}
+    # Every walk below is recursive, and a YAML anchor can make a hand-edited
+    # document self-referential (``project: &p {self: *p}``), which
+    # ``yaml.load`` builds happily.  ``RecursionError`` is not a "conflict", so
+    # it used to escape this function's ``(None, details)`` contract; the two
+    # callers catch it, but a malformed document must read as a refusal here,
+    # the same way every other malformed value does.
+    try:
+        ambiguous = (_duplicate_id_problems(ours, "PR branch")
+                     + _duplicate_id_problems(theirs, "new base")
+                     + (_duplicate_id_problems(base, "merge base")
+                        if base is not _MISSING else []))
+        if ambiguous:
+            return None, {"conflicts": ambiguous}
 
-    actions: dict = {}
-    merged, conflicts = _merge_value(base, ours, theirs, "", actions)
-    if conflicts:
-        return None, {"conflicts": conflicts, "actions": actions}
-    problems = (_preservation_problems(base, ours, merged, "PR branch")
-                + _preservation_problems(base, theirs, merged, "new base"))
-    problems += _shape_problems(merged)
-    if problems:
-        return None, {"conflicts": problems, "actions": actions}
+        actions: dict = {}
+        merged, conflicts = _merge_value(base, ours, theirs, "", actions)
+        if conflicts:
+            return None, {"conflicts": conflicts, "actions": actions}
+        problems = (_preservation_problems(base, ours, merged, "PR branch")
+                    + _preservation_problems(base, theirs, merged, "new base"))
+        problems += _shape_problems(merged)
+        if problems:
+            return None, {"conflicts": problems, "actions": actions}
+    except RecursionError:
+        return None, {"conflicts": [
+            "project.yaml: the document is recursive (a YAML alias refers "
+            "back to itself); it cannot be merged by record id"]}
     try:
         return _dump_project_yaml(merged), {"actions": actions}
     except (yaml.YAMLError, ValueError) as e:
         return None, {"error": f"cannot serialize project.yaml: {e}"}
+    except RecursionError:
+        return None, {"conflicts": [
+            "project.yaml: the merged document is recursive (a YAML alias "
+            "refers back to itself)"]}
 
 
 def _yaml_load(text: str):
@@ -479,12 +494,22 @@ def _same(a, b) -> bool:
     resolver must treat a change of scalar *kind* as a change.
 
     Containers compare structurally under the same rule, so a nested
-    ``true``/``1`` pair cannot hide inside a record either.  Two ``nan``
-    values are the same value (``nan != nan`` would otherwise make a
-    hand-edited ``.nan`` — identical on both sides — refuse the document).
+    ``true``/``1`` pair cannot hide inside a record either.  Mapping *keys*
+    need the same rule as values: ``{1: x}`` and ``{True: x}`` compare equal
+    in Python, so a side that changed a key's scalar kind looked "unchanged"
+    and the other side's change won silently.  Two ``nan`` values are the same
+    value (``nan != nan`` would otherwise make a hand-edited ``.nan`` —
+    identical on both sides — refuse the document).
     """
     if isinstance(a, dict) and isinstance(b, dict):
-        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+        if len(a) != len(b):
+            return False
+        other = {(type(k).__name__, k): v for k, v in b.items()}
+        for key, value in a.items():
+            slot = (type(key).__name__, key)
+            if slot not in other or not _same(value, other[slot]):
+                return False
+        return True
     if isinstance(a, list) and isinstance(b, list):
         return len(a) == len(b) and all(
             _same(x, y) for x, y in zip(a, b))
@@ -497,6 +522,28 @@ def _same(a, b) -> bool:
         # both sides") even though neither side changed anything.
         return b != b
     return a == b
+
+
+def _key_kind_clashes(*docs: dict) -> list:
+    """Keys whose YAML scalar *kind* differs between the documents.
+
+    ``1``, ``true`` and ``1.0`` are three different YAML scalars that compare
+    equal in Python, and a mapping cannot hold more than one of them, so
+    ``key in other`` conflates them: a side that changed a key from ``1`` to
+    ``true`` looked "unchanged on the PR branch" (and the preservation check,
+    which compares the same way, agreed), and a real conflict between ``true``
+    and ``1.0`` was silently resolved to one side.  ``_same`` compares mapping
+    *values* strictly for exactly this reason; keys need the same rule, and
+    the merge cannot represent both kinds in one mapping, so the ambiguity is
+    a refusal — never a side selection.
+    """
+    kinds: dict = {}
+    for doc in docs:
+        for key in doc:
+            # ``==``-keyed on purpose: that is what conflates ``1``/``true``
+            # here, and it is how the collision is detected.
+            kinds.setdefault(key, set()).add(type(key).__name__)
+    return [key for key, names in kinds.items() if len(names) > 1]
 
 
 def _merge_value(base, ours, theirs, path: str, actions: dict):
@@ -547,6 +594,15 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
 def _merge_dict(base: dict, ours: dict, theirs: dict, path: str, actions: dict):
     out: dict = {}
     conflicts: list[str] = []
+    # ``key in other`` conflates ``1``/``true``/``1.0``, so a key whose scalar
+    # kind differs between the documents would be merged as if it were one key
+    # — silently keeping one side's kind.  Refuse instead (see
+    # ``_key_kind_clashes``); a well-formed document has string keys only, so
+    # this never fires for pm's own writes.
+    clashes = _key_kind_clashes(base, ours, theirs)
+    if clashes:
+        return None, [f"{path or '<root>'}: mapping key {clashes[0]!r} changed "
+                      "scalar kind between the sides (ambiguous)"]
     keys: list = list(base)
     keys += [k for k in ours if k not in keys]
     keys += [k for k in theirs if k not in keys]

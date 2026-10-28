@@ -742,7 +742,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         out.append(format_pr_line(p, active_pr=active_pr, with_timestamp=timestamps))
         if workdirs:
             wd = p.get("workdir")
-            if wd and Path(wd).exists():
+            if wd and Path(wd).is_dir():
                 dirty = _workdir_is_dirty(Path(wd))
                 dirty_str = " (dirty)" if dirty else " (clean)"
                 out.append(f"      workdir: {wd}{dirty_str}")
@@ -1375,7 +1375,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pr_entry.get("status") == "in_progress":
         # If already in_progress, reuse existing workdir if available
         existing_workdir = pr_entry.get("workdir")
-        if existing_workdir and Path(existing_workdir).exists():
+        if existing_workdir and Path(existing_workdir).is_dir():
             click.echo(f"PR {pr_id} is already in_progress, reusing existing workdir.")
             workdir = existing_workdir  # Set workdir so it gets used below
         else:
@@ -1467,7 +1467,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     else:
         # Check if we already have a workdir for this PR
         existing_workdir = pr_entry.get("workdir")
-        if existing_workdir and Path(existing_workdir).exists():
+        if existing_workdir and Path(existing_workdir).is_dir():
             work_path = Path(existing_workdir)
         else:
             # Need to clone first, then figure out the final path
@@ -1769,7 +1769,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         return
 
     workdir = pr_entry.get("workdir")
-    if not workdir or not Path(workdir).exists():
+    if not workdir or not Path(workdir).is_dir():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
@@ -2114,7 +2114,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     backend_name = data["project"].get("backend", "vanilla")
     gh_pr_number = pr_entry.get("gh_pr_number")
     workdir = pr_entry.get("workdir")
-    if workdir and not Path(workdir).exists():
+    if workdir and not Path(workdir).is_dir():
         workdir = _ensure_workdir(data, pr_entry, root)
 
     if backend_name == "github" and gh_pr_number and workdir:
@@ -2562,7 +2562,7 @@ def _launch_merge_window(data: dict, pr_entry: dict, error_output: str,
     if not workdir:
         click.echo(f"Merge window: no workdir for {pr_entry['id']}.")
         return
-    if not Path(workdir).exists():
+    if not Path(workdir).is_dir():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:
@@ -3155,7 +3155,7 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
     # which runs before the merge gate), so it reads as absent and the
     # revision is resolved from the main repo instead.
     workdir = workdir if isinstance(workdir, str) and workdir else None
-    if not workdir or not Path(workdir).exists():
+    if not workdir or not Path(workdir).is_dir():
         workdir = None
     # The PR's revision: the workdir HEAD, else the branch in the main repo.
     head = _ref(workdir, "HEAD") if workdir else (
@@ -3453,7 +3453,7 @@ def pr_sync():
         # the sign-off surfaces follow.
         wd = pr_entry.get("workdir")
         wd = wd if isinstance(wd, str) and wd else None
-        check_dir = wd if (wd and Path(wd).exists()) else target_workdir
+        check_dir = wd if (wd and Path(wd).is_dir()) else target_workdir
 
         if backend.is_merged(str(check_dir), branch, base_branch):
             merged_ids.add(pr_entry["id"])
@@ -3814,7 +3814,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             nonlocal pruned
             for p in data.get("prs") or []:
                 wd = p.get("workdir")
-                if wd and not Path(wd).exists():
+                if wd and not Path(wd).is_dir():
                     click.echo(f"  {p['id']}: cleared missing workdir {wd}")
                     p["workdir"] = None
                     pruned += 1
@@ -4096,7 +4096,7 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
     # Remove workdir if exists (filesystem op, safe outside lock)
     workdir = pr_entry.get("workdir")
-    if workdir and Path(workdir).exists():
+    if workdir and Path(workdir).is_dir():
         shutil.rmtree(workdir)
         click.echo(f"Removed workdir: {workdir}")
 

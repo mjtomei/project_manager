@@ -130,7 +130,7 @@ def find_workdir(data: dict) -> Optional[str]:
     for p in prs:
         wd = p.get("workdir")
         wd = wd if isinstance(wd, str) and wd else None
-        if wd and Path(wd).exists() and git_ops.is_git_repo(wd):
+        if wd and Path(wd).is_dir() and git_ops.is_git_repo(wd):
             return wd
 
     # Fall back to workdirs base directory
@@ -244,7 +244,7 @@ def sync_prs(
             # before the per-PR ``try``), so it reads as absent.
             wd = pr_entry.get("workdir")
             wd = wd if isinstance(wd, str) and wd else None
-            check_dir = wd if (wd and Path(wd).exists()) else target_workdir
+            check_dir = wd if (wd and Path(wd).is_dir()) else target_workdir
 
             try:
                 if backend.is_merged(str(check_dir), branch, base_branch):
@@ -410,7 +410,7 @@ def sync_from_github(
                     # silently skip the check.
                     wd = pr_entry.get("workdir")
                     wd = wd if isinstance(wd, str) and wd else None
-                    check_dir = (wd if (wd and Path(wd).exists())
+                    check_dir = (wd if (wd and Path(wd).is_dir())
                                  else find_workdir(data))
                     if not check_dir:
                         check_dir = str(_resolve_repo_dir(root, data))

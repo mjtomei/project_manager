@@ -141,10 +141,12 @@ def head_sha(workdir: str | None) -> str | None:
     string is not a checkout (``Path(5)`` raises ``TypeError``), so it reads
     as absent — every caller passes ``pr["workdir"]`` straight in (the driver
     tick, the TUI's auto-merge, ``pm pr signoff``), and one malformed value
-    must not take those down.
+    must not take those down.  One that is not a *directory* (a regular file
+    left where the workdir was) is not a checkout either: running git with it
+    as the cwd raises ``NotADirectoryError``, so it reads as absent too.
     """
     if not isinstance(workdir, str) or not workdir \
-            or not Path(workdir).exists():
+            or not Path(workdir).is_dir():
         return None
     from pm_core import git_ops
     r = git_ops.run_git("rev-parse", "HEAD", cwd=workdir, check=False)
@@ -912,7 +914,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
     # provisioning path as a missing one.
     workdir = pr_entry.get("workdir")
     workdir = workdir if isinstance(workdir, str) else None
-    if not workdir or not Path(workdir).exists():
+    if not workdir or not Path(workdir).is_dir():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)
         if not workdir:

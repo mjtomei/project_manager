@@ -380,6 +380,30 @@ class TestEnsureWorkdir:
             data = {"project": {"name": "test"}}
             assert _ensure_workdir(data, pr_entry, tmp_path) is None
 
+    def test_a_workdir_that_is_a_file_is_not_a_checkout(self, tmp_path):
+        """A *string* path that is a regular file is not a checkout either.
+
+        The non-string guard above does not help here, and ``Path.exists()``
+        passed: every git read then ran with a file as the cwd and raised
+        ``NotADirectoryError`` — out of ``signoff.head_sha`` (``pm pr merge``,
+        ``pm pr signoff record``, the driver tick) and out of provisioning.
+        The predicate every reader uses is "is a directory".
+        """
+        from pm_core import signoff
+
+        f = tmp_path / "workdir-is-now-a-file"
+        f.write_text("not a checkout\n")
+        assert f.exists() and not f.is_dir()
+
+        # ``head_sha`` is the shared reader behind the merge gate, the manual
+        # verdict record and the sign-off driver tick: absent, not a crash.
+        assert signoff.head_sha(str(f)) is None
+        # Provisioning re-clones instead of returning the file as a workdir
+        # (no branch here, so it declines).
+        assert _ensure_workdir({"project": {"name": "test"}},
+                               {"id": "pr-001", "workdir": str(f)},
+                               tmp_path) is None
+
 
 # ---------------------------------------------------------------------------
 # `pm pr list --timestamps` reads hand-edited timestamps safely

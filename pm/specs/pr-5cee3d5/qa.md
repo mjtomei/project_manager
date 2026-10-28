@@ -620,6 +620,25 @@ documented inference.
   record with a deterministic digest and exits without raising `RecursionError`
   out of `compact` or the digest comparison; a *shared* alias that is not a
   cycle still expands normally.
+- GIVEN a `pm/project.yaml` whose merge base has `project: {1: a}` and one
+  side changes that key's scalar kind (`true: a`, or `1.0: a`). WHEN the
+  integration check resolves a metadata conflict. THEN a one-sided kind change
+  is taken (that side wins), and both sides changing the same key to
+  *different* kinds is refused as ambiguous ("changed scalar kind") — never
+  silently resolved to one side. The same document with string keys is
+  unaffected.
+- GIVEN a conflicted `pm/project.yaml` that is *recursive* (a YAML alias
+  referring back to itself, e.g. `project: &p {self: *p}`). WHEN the
+  integration check runs. THEN the resolution is refused with a readable
+  "the document is recursive" conflict (never a `RecursionError` traceback),
+  and the sign-off launch reports the check instead of crashing.
+- GIVEN a PR whose `workdir` is a *string path to a regular file* (a stale
+  workdir replaced by a file), on a PR in `sign_off` with a recorded
+  `SIGNOFF_MERGE`. WHEN the user runs `pm pr merge`, `pm pr signoff record`,
+  `pm pr signoff`, or the driver ticks. THEN the workdir reads as absent (a
+  refusal / re-provision), exits without a `NotADirectoryError`, and
+  `pm pr list --workdirs`, `pm pr cleanup --prune` and `pm pr done` do not
+  raise either.
 - GIVEN `report.html` names a `pm-signoff-base` other than the base the
   recorded integration check assessed, while `pm-signoff-head` matches. WHEN
   the user runs `pm pr signoff record`. THEN the recorded `## Sign-off`

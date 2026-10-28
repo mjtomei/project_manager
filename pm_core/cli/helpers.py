@@ -740,10 +740,12 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     # Hand-edited state: a ``workdir`` that is not a path string is not a
     # checkout (``Path(5)`` raised ``TypeError`` here, which every window
     # launch — start / review / sign-off — calls on the way to provisioning),
-    # so it reads as absent and is re-provisioned like a missing one.
+    # so it reads as absent and is re-provisioned like a missing one.  Nor is
+    # a *regular file* left where the workdir was: git with it as the cwd
+    # raises ``NotADirectoryError``, so it is re-provisioned too.
     workdir = pr_entry.get("workdir")
     workdir = workdir if isinstance(workdir, str) and workdir else None
-    if workdir and Path(workdir).exists():
+    if workdir and Path(workdir).is_dir():
         return workdir
 
     pr_id = pr_entry.get("id")
@@ -764,7 +766,7 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
             fresh_wd = None
         # Same hand-edited-state rule as the recorded value above.
         fresh_wd = fresh_wd if isinstance(fresh_wd, str) and fresh_wd else None
-        if fresh_wd and Path(fresh_wd).exists():
+        if fresh_wd and Path(fresh_wd).is_dir():
             pr_entry["workdir"] = fresh_wd
             return fresh_wd
         return _clone_workdir(data, pr_entry, root)

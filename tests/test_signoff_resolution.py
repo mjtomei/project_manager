@@ -1626,6 +1626,79 @@ prs:
         {"a": {"x": 1}, "b": {"x": 1}}
 
 
+def test_a_mapping_key_that_changes_scalar_kind_is_not_silently_resolved():
+    """``1``, ``true`` and ``1.0`` are three YAML scalars but one Python key.
+
+    ``==`` conflates them, so ``key in other`` made a side that changed a
+    key's *kind* look "unchanged" — the other side's change won silently, and
+    the preservation check (comparing the same way) agreed.  A mapping cannot
+    hold both kinds, so the merge cannot represent the combination: it is a
+    refusal, never a side selection.
+    """
+    # ``1 == True == 1.0`` in Python, so compare the key's *kind*: a plain
+    # ``==`` assertion would pass for any of the three.
+    def kinds(doc):
+        return [(type(k).__name__, k) for k in doc["project"]]
+
+    # One side changed the key's kind; the unchanged side must not win.
+    merged, detail = integration.resolve_project_yaml(
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  1: a\nprs: []\n",       # PR branch unchanged
+        "project:\n  name: p\n  true: a\nprs: []\n")   # new base changed it
+    assert merged is not None, detail
+    assert kinds(yaml.safe_load(merged)) == [("str", "name"), ("bool", True)], \
+        kinds(yaml.safe_load(merged))
+
+    # Both sides changed the same key to *different* kinds: a real conflict.
+    merged, detail = integration.resolve_project_yaml(
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  true: a\nprs: []\n",
+        "project:\n  name: p\n  1.0: a\nprs: []\n")
+    assert merged is None, merged
+    assert "changed scalar kind" in detail["conflicts"][0], detail
+
+    # A key changed on one side only is still a one-sided change (the kind
+    # rule must not turn it into a conflict), in both directions.
+    for ours_key, theirs_key, expected in (("1", "1.0", ("float", 1.0)),
+                                          ("true", "1", ("bool", True))):
+        merged, detail = integration.resolve_project_yaml(
+            "project:\n  name: p\n  1: a\nprs: []\n",
+            f"project:\n  name: p\n  {ours_key}: a\nprs: []\n",
+            f"project:\n  name: p\n  {theirs_key}: a\nprs: []\n")
+        assert merged is not None, (ours_key, theirs_key, detail)
+        assert kinds(yaml.safe_load(merged)) == [("str", "name"), expected], \
+            kinds(yaml.safe_load(merged))
+
+    # The guard is narrow: the same kind on every side still merges, and a
+    # string-keyed document (what pm writes) is untouched.
+    merged, detail = integration.resolve_project_yaml(
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  1: a\nprs: []\n",
+        "project:\n  name: p\n  1: a\nprs: []\n")
+    assert merged is not None, detail
+    assert not integration._same({1: "a"}, {True: "a"})
+    assert integration._same({"a": 1}, {"a": 1})
+
+
+def test_a_recursive_document_is_refused_not_raised():
+    """A YAML alias cycle is a malformed document, not an exception.
+
+    ``yaml.load`` builds ``project: &p {self: *p}`` happily, and the resolver
+    walks the document recursively.  ``RecursionError`` is not a "conflict",
+    so it escaped ``(None, details)`` — the callers catch it, but the function
+    promises a refusal.
+    """
+    cyclic = "project: &p\n  name: p\n  self: *p\nprs: []\n"
+    merged, detail = integration.resolve_project_yaml(cyclic, cyclic, cyclic)
+    assert merged is None
+    assert "recursive" in (detail.get("conflicts") or [""])[0]
+    # A cycle on one side only is refused the same way (it is not mergeable).
+    clean = "project:\n  name: p\nprs: []\n"
+    merged, detail = integration.resolve_project_yaml(clean, cyclic, clean)
+    assert merged is None
+    assert "recursive" in (detail.get("conflicts") or [""])[0]
+
+
 def test_a_truncated_path_list_records_its_total_and_apply_refuses_it(w):
     """``compact`` bounds ``paths``; an apply from the stored record refuses.
 
