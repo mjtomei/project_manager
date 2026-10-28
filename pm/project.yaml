@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-28T21:01:53.558355+00:00'
+  updated_at: '2026-10-28T21:46:34.457190+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4404,6 +4404,27 @@ prs:
       at pm/specs/pr-073910f/session_start_smoke.py).'
     created_at: '2026-10-28T21:01:53Z'
     last_edited: '2026-10-28T21:02:28Z'
+  - id: note-05d8388
+    text: 'Review loop b972 i1 (commit 89aa5c9e) fixed two substantive gaps; full
+      suite 4120 passed / 1 skipped. (1) "Default server" was not actually reached
+      from inside a pm pane: the tmux binary follows $TMUX when no -S is given, so
+      session_exists(use_env=False), list_pm_sessions and pm session kill legacy branch
+      addressed the current private server (pm session list duplicated it as "(default
+      server)"; legacy detection/kill and pm tui -s <legacy> from another pm session
+      could hit the wrong server). Fixed with paths.default_socket_path() passed as
+      -S. (2) _get_pm_session() now selects the hosting server for the cwd-derived
+      session, so pm meta / pm container build / pm session home / pm pr start|review|merge
+      / home_window.refresh_home find private sessions when run outside tmux. Also:
+      pm session list marks shared sockets; two test_shared_sessions assertions no
+      longer depend on an ambient PM_TMUX_SOCKET. Remaining non-blocking notes for
+      signoff/QA: private-socket ownership (uid) check exists only on pm session,
+      not on pm tui/kill paths (multi-user socket squatting, low severity); _find_tui_pane
+      now returns the session name even when the session is gone, so pm qa regression
+      -s <stale> proceeds instead of erroring (intentional for history/frames); /tmp/pm-sessions
+      literal is duplicated in wrapper._mark_tmux_socket and qa_status._tmux_argv
+      (documented, avoids importing pm_core early).'
+    created_at: '2026-10-28T21:46:34Z'
+    last_edited: '2026-10-28T21:46:34Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
