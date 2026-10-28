@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T02:29:34.054515+00:00'
+  updated_at: '2026-10-28T03:28:24.781863+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38509,6 +38509,23 @@ prs:
       tmux -L server.'
     created_at: '2026-10-28T02:29:33Z'
     last_edited: '2026-10-28T02:29:33Z'
+  - id: note-5c41886
+    text: 'QA S110 (2026-10-28, RQ47 a, host, all fake-claude, HEAD 9a2dacaa vs control
+      1f90deb6; captures /pm-captures/scenarios/110, REPORT.md, every story mp4):
+      PASS, no code change. cd617253 held live. Plain terminal (A), -C and PM_PROJECT
+      from PR workdirs (B, B2) and non-pm tmux session scratch (C, with a sign-off
+      REVIEW return): review_relaunched once, advanced: qa once, only running: qa,
+      sign_off once, one qa-run-bg at a time, all windows and runtime records in pm-<tag>,
+      no pm-<workdir tag> session/dir, picker [working] -> [done PASS], autostart
+      add says "driven by another process". Scratch client focus unchanged. Control:
+      "Review window requires tmux" every plain tick, then "No pm session found" +
+      done ERROR + running: qa (launched) every tick. Harness: fake impl writes no
+      pm/specs/<pr>/qa.md, so commit one in each workdir or QA stops INPUT_REQUIRED
+      in 4 s; pm push + git merge before pr start. Incidental (pre-existing): spec-gate
+      stop leaves qa_status overall "" so auto-sequence prints running: qa forever,
+      filed pr-35449b0. No /pm-captures leaks (only concurrent 111-115 changed).'
+    created_at: '2026-10-28T03:28:24Z'
+    last_edited: '2026-10-28T03:28:24Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -41174,6 +41191,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T16:55:27.512054+00:00'
   updated_at: '2026-10-27T16:55:27.512054+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-35449b0
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence prints "running: qa" forever after a QA run stops
+    on the missing-spec gate'
+  branch: pm/pr-35449b0-bug-pm-pr-auto-sequence-prints-running-qa-forever-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py spec gate (~4750, "QA spec missing ...
+    planner did not generate spec in Step 0") sets latest_verdict INPUT_REQUIRED and
+    returns, but qa_status.json keeps overall "" (scenario 0 "interactive" only);
+    pm_core/cli/pr.py auto-sequence qa branch (~4010-4074) treats overall None/""
+    with a live qa-<pr> window as a live run. Repro (QA S110, /pm-captures/scenarios/110/s1-nospec,
+    host, fake-claude, pm 9a2dacaa; same code on origin/master): a PR in_review whose
+    workdir has no pm/specs/<pr>/qa.md; `pm pr auto-sequence <pr>` every 15 s from
+    a plain terminal -> review_relaunched, advanced: qa; the driver logs the missing-spec
+    warning 4 s later and ~/.pm/runtime/pm-<tag>/<pr>.json becomes done INPUT_REQUIRED
+    (picker shows [done INPUT_REQUIRED]), yet every later tick prints `running: qa`
+    and auto-sequence never pauses. Expected: the gate writes its INPUT_REQUIRED to
+    qa_status.json, so the tick prints paused: input_required (qa).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:26:59.313415+00:00'
+  updated_at: '2026-10-28T03:26:59.313415+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
