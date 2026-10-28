@@ -14680,6 +14680,21 @@ prs:
       live: periodic ran at 00:53:52 right after the held manual pass. Evidence /pm-captures/scenarios/57/{pre-fix,post-fix}.'
     created_at: '2026-10-28T00:54:40Z'
     last_edited: '2026-10-28T00:54:40Z'
+  - id: note-224dc41
+    text: 'QA S54 (a696fa52, real rootless Podman 3.4.4 + 3 real tmux clients, fake
+      agents): story1 popups isolated per client, which=projA/projB pm_core with wrapper
+      session_tag lines, a2/b2 labels pm.project_root=$SBX/projA/pm and projB/pm (S45
+      fix holds), picker counter is (2/3) not (2/2) only because the Given stale a3/b4
+      windows count; story2 A preview/apply scoped (stopped push proxy line present,
+      3 s kill-to-cleanup, no periodic pass), A inventory saw held b3, cB2 preview
+      showed b3 launch in progress, b3 kept ACK id. Incidental fix 700b0157: _host_git_identity
+      read only --global so build-base baked EMPTY GIT_AUTHOR_*/GIT_COMMITTER_* env
+      (identity only in /etc/gitconfig) and every container commit failed "empty ident
+      name"; now falls back to --system. Verified via rebuilt image + real pm pr start
+      commit/push. Probe note: fresh PR branches have no upstream, use git push origin
+      HEAD. Evidence /pm-captures/scenarios/54/manifest.md'
+    created_at: '2026-10-27T23:45:24Z'
+    last_edited: '2026-10-27T23:45:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
