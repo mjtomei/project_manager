@@ -26075,6 +26075,18 @@ prs:
       hang) remains subsumed by this PR i2.'
     created_at: '2026-10-28T04:06:17Z'
     last_edited: '2026-10-28T04:06:17Z'
+  - id: note-f8b3443
+    text: 'QA S16 refiner note (HEAD 25d2b5a7): steps verified against the code. Execution-stop
+      and auto-start-hold stories match the stopped_clean aggregation and QA_HOLD_VERDICTS.
+      Finalize-stop story: _run_qa_finalize_pane suppresses ''[finalize: NO_VERDICT]''
+      on a user stop, but when every scenario PASSed the run still aggregates to PASS
+      (latest_verdict=PASS, finalize_verdict=None), so the TUI logs ''QA complete:
+      PASS''/''QA PASS'' and records a ''QA PASS: …'' note. R10 and this scenario''s
+      focus require a terminal STOPPED teardown with no QA note, so an observed PASS+note
+      in that story is a requirement mismatch, not a harness artifact. (Fixed in 4effd362:
+      a finalize-phase stop now ends STOPPED with no note.)'
+    created_at: '2026-10-28T05:40:46Z'
+    last_edited: '2026-10-28T06:16:00Z'
   - id: note-78bfa40
     text: 'QA scenario 19 PASS (self-driving QA loop start / PASS hand-off / no-plan
       pause). Captures: /pm-captures/scenarios/19/{story1-loop-pass,story2-no-plan-pause,story3-recovery-pass}
