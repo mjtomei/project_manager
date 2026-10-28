@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T05:42:34.907246+00:00'
+  updated_at: '2026-10-28T06:18:07.406774+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36870,6 +36870,29 @@ prs:
       = NEEDS_WORK, B slot 1 = PASS).'
     created_at: '2026-10-28T05:42:34Z'
     last_edited: '2026-10-28T05:42:34Z'
+  - id: note-7e975c0
+    text: 'QA scenario 19 (launch-failure reporting end to end) PASS on 67a75a7c —
+      all four stories verified live: (1) auto-start iteration 1 NEEDS_WORK -> iteration
+      2 attempt 1 dies with "Image ''[podman]'' not found in podman. ...", the TUI
+      renders "Review launch retry for pr-51aebc9 (attempt 2; attempt 1 failed: ...)"
+      with the [podman] token intact, the user repairs the host in the 5 s backoff,
+      attempt 2 launches a fresh window and PASSes (i1+i2 jsonl only, PR -> qa); (2)
+      manual loop with image "[/tmp/pm-review]" renders both attempt-2/3 notices verbatim
+      plus "↻ LAUNCH_FAILED (1 iteration)", 3 artifacts with the exact 134-char stderr,
+      no verdict, PR stays in_review; (3) exhausted auto-start re-arms visibly ("Auto-start:
+      retrying review launch" sticky ~2.6 s, then "Review loop resumed ... (hidden
+      by sticky message)"), status reads "review iteration 1" with no "(last LAUNCH_FAILED)",
+      --json runs[0].state=running / review.running=true / iteration=1 / targets[0].state=running,
+      and a new attempt-2 line lands after the re-arm; (4) repro test passes here
+      and fails on origin/master with assert 1 == 2; 188 targeted tests pass. Harness
+      facts for the next run: `pm log grep` has NO -q flag (a `while ! pm log grep
+      -q ...` repair watcher spins forever and silently lets the episode exhaust —
+      use `grep -aq` on ~/.pm/debug/<session>.log instead), and `pm autostart status`
+      without -s resolves via the cwd of the invoking shell, so it silently reports
+      another pm session when several are alive on one tmux server (always pass -s).
+      Evidence: /pm-captures/scenarios/19/{story1-repair-mid-backoff,story2-manual-loop-markup,story3-rearm,story4-tests}.'
+    created_at: '2026-10-28T06:18:07Z'
+    last_edited: '2026-10-28T06:18:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
