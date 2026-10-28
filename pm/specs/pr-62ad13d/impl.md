@@ -194,6 +194,12 @@ workdirs are touched.
     overwrite a `closed` status written before the lock, in both
     `sync_from_github(save_state=True)` and the TUI `startup_github_sync`
     apply.
+23. Malformed dependent (review c02f i6): a hand-edited `prs` entry with no
+    `id` whose `depends_on` names the closed PR must not crash the dependent
+    warning — it runs *after* the status write, so a `KeyError: 'id'` there
+    would turn a persisted close into a traceback.  The scan iterates
+    `usable_prs`, like every other id-indexing loop.  Covered for both the
+    default close and `--remove`.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must

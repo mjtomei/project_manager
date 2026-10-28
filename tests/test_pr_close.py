@@ -506,6 +506,56 @@ def test_remove_warns_dependents_reference_the_removed_record(tmp_path):
     assert [p["id"] for p in graph.ready_prs(data["prs"])] == []
 
 
+def test_malformed_dependent_entry_does_not_break_close(tmp_path):
+    """A hand-edited registry entry without an ``id`` that depends on the
+    closed PR must not crash the dependent warning.
+
+    The warning runs *after* the status write, so a ``KeyError: 'id'`` here
+    would turn a successful close into a traceback (and a non-zero exit) even
+    though the closure was already persisted.  Everything that indexes PRs by
+    id skips such entries via ``usable_prs``; the dependents scan must too.
+    """
+    project = _make_project(tmp_path, with_dependent=False)
+    data = store.load(project["pm_dir"])
+    # No "id": exactly the partial shape a hand-edited project.yaml can hold.
+    data["prs"].append({"title": "hand edited", "status": "pending",
+                        "depends_on": ["pr-001"]})
+    store.save(data, project["pm_dir"])
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None, result.exception
+    # store.get_pr is not id-less tolerant (pr-77c4f91), so read the entry
+    # without indexing the malformed neighbour.
+    entries = [p for p in store.load(project["pm_dir"])["prs"]
+               if p.get("id") == "pr-001"]
+    assert [p["status"] for p in entries] == ["closed"]
+    # The malformed entry is neither rewritten nor reported as a dependent.
+    assert "hand edited" not in result.output
+
+
+def test_malformed_dependent_entry_does_not_break_remove(tmp_path):
+    """Same guard on the --remove path (its warning formats the same names)."""
+    project = _make_project(tmp_path, with_dependent=False)
+    data = store.load(project["pm_dir"])
+    data["prs"].append({"title": "hand edited", "status": "pending",
+                        "depends_on": ["pr-001"]})
+    store.save(data, project["pm_dir"])
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None, result.exception
+    ids = [p.get("id") for p in store.load(project["pm_dir"])["prs"]]
+    assert "pr-001" not in ids
+    assert "hand edited" not in result.output
+
+
 def test_closed_pr_cannot_be_started(tmp_path):
     project = _make_project(tmp_path)
     with _fake_gh() as backend:

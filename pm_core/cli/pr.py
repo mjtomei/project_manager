@@ -3463,15 +3463,15 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
              remove: bool):
     """Close a PR without destroying its history.
 
-    Sets the PR's status to ``closed`` and keeps its registry entry — title,
+    Sets the PR's status to "closed" and keeps its registry entry — title,
     description, notes, dependencies, branch, and workdir reference.  The
     GitHub PR is closed when one exists (unless --keep-github); no branch,
     workdir, file, or capture is ever deleted by this command.
 
-    Cleanup stays separate: ``pm pr cleanup`` removes a workdir, and
-    ``--remove`` deletes a mistaken registry entry (local branch and workdir
-    are kept; the GitHub PR is still closed unless --keep-github).  A merged
-    PR cannot be closed without --remove, so merge history is never rewritten.
+    Cleanup stays separate: "pm pr cleanup" removes a workdir, and --remove
+    deletes a mistaken registry entry (local branch and workdir are kept; the
+    GitHub PR is still closed unless --keep-github).  A merged PR cannot be
+    closed without --remove, so merge history is never rewritten.
 
     If PR_ID is omitted, uses the active PR.
     """
@@ -3601,8 +3601,12 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     # dependency): name them so the block is visible, but never rewrite them.
     # With --remove the dependency reference now names a record that no longer
     # exists — say so, rather than implying a `closed` status is the blocker.
+    # Iterate usable entries only: this runs *after* the status write, so a
+    # hand-edited `project.yaml` entry without an ``id`` (which the rest of the
+    # codebase skips via ``usable_prs``) must not turn a successful close into
+    # a traceback.
     dependents = [
-        p for p in (updated.get("prs") or [])
+        p for p in usable_prs(updated.get("prs"))
         if pr_id in (p.get("depends_on") or [])
         and (p.get("status") or "pending") not in ("merged", "closed")
     ]

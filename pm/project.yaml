@@ -37689,11 +37689,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
-  updated_at: '2026-10-27T01:30:16.482567+00:00'
+  updated_at: '2026-10-28T08:58:17.839283+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-7a9e33b
+    text: 'Related location from pr-62ad13d review (c02f i6): pm_core/store.py:613
+      `get_pr` also indexes `pr["id"]` directly, so a PR entry without a usable id
+      makes it raise KeyError. `pm pr close` calls `store.get_pr` inside its locked
+      apply, so an id-less entry preceding the target aborts the close before the
+      status write. Add `store.get_pr`/`get_plan` to the fix surface (skip non-dict/id-less
+      entries, as usable_prs does). The close command itself now uses usable_prs for
+      its dependent scan; the store helper is the remaining gap.'
+    created_at: '2026-10-28T08:58:17Z'
+    last_edited: '2026-10-28T08:58:17Z'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy
