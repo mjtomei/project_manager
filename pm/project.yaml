@@ -31545,6 +31545,21 @@ prs:
       Stories 1-4 unchanged and still PASS.'
     created_at: '2026-10-28T08:59:09Z'
     last_edited: '2026-10-28T08:59:09Z'
+  - id: note-a4f5681
+    text: 'Scenario 5 refinement (concretizer): the two drivable failure paths are
+      (a) stop via TUI z d — status ends paused/review "review loop stopped (last
+      INPUT_REQUIRED)", review.input_required=false, marker ⟳N⏸; and (b) review-window
+      death via tmux kill-window — status failed/review "review loop ended KILLED",
+      marker ⟳N☠. Kill the whole review window, not Ctrl+C in the Claude pane: the
+      diff pane keeps the window alive and the loop first-pane liveness check still
+      passes, so the wait would persist. The draft third story (follow-up wait raises
+      out → failed/error state) was dropped: no user action makes the wait raise (wait_for_event,
+      HumanResponseWatch.poll and the tmux lookups swallow errors), and if it did
+      raise, run_review_loop_sync finally clears input_required/running but leaves
+      latest_verdict=INPUT_REQUIRED, so status would read paused (last INPUT_REQUIRED),
+      not failed.'
+    created_at: '2026-10-28T07:54:07Z'
+    last_edited: '2026-10-28T07:54:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
