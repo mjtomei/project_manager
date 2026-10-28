@@ -34557,7 +34557,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-22T01:38:54.583871+00:00'
+  updated_at: '2026-10-27T21:45:52.566741+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34570,6 +34570,125 @@ prs:
       PR pr-bbac94b detected as merged"). Evidence /pm-captures/scenarios/13/when5-plain-merge-pr5/tui-sync-finalized-pr5.log.'
     created_at: '2026-10-22T01:38:54Z'
     last_edited: '2026-10-22T01:38:54Z'
+  - id: note-1c62905
+    text: 'Impl session (2026-10-27): fix implemented + pushed addf8b40. Sync-detected
+      GitHub merges (TUI background do_normal_sync -> pr_sync.sync_prs, TUI startup
+      -> sync_from_github, and CLI `pm pr sync`) now verify against the bound SIGNOFF_MERGE
+      via shared pm_core/merge_integrity.py (extracted from cli/pr.py::_verify_github_merge).
+      A mismatch records merge_integrity + one note (same text/shape as pm pr merge)
+      and shows a held TUI log line; an unverifiable merge is logged and finalized
+      unchanged. TUI worker thread still does reads only; evidence applied in the
+      main thread locked_update. Evidence: /pm-captures/impl/pre-fix (repro: merged,
+      no integrity/note), /pm-captures/impl/post-fix (integrity+note on both TUI paths;
+      approved-merge control clean), /pm-captures/impl/test-evidence/full-suite.log
+      (3832 passed, 1 skipped; pytest 8.4.2). New tests: tests/test_sync_merge_integrity.py
+      (9). Ready for review; the base pm TUI session is not reachable from this container,
+      so review was not launched here.'
+    created_at: '2026-10-27T20:04:42Z'
+    last_edited: '2026-10-27T20:04:42Z'
+  - id: note-e5a6965
+    text: 'Review loop c703 i1 (2026-10-27): reviewed addf8b40 — fix is correct and
+      complete for all three sync paths; pre/post captures under /pm-captures/impl
+      are convincing and the new tests fail on pre-fix code for the right reason.
+      Pushed c8171867 with review fixes: verify_detected_merge now never raises (single
+      guard; pr_sync + `pm pr sync` call sites simplified), _recover_completed_merge
+      reuses merge_integrity.approved_candidate, `pm pr sync-github` prints the same
+      WARNING as `pm pr sync`, git_detail/_log_merge_integrity dedupe, and 4 added
+      tests (no-approval, legacy unbound approval, verification crash still finalizes,
+      sync-github output). Full suite 3836 passed, 1 skipped (pytest 8.4.2) — log
+      at /pm-captures/review-c703-i1/full-suite.log. Not changed / for QA: the TUI
+      sync thread now runs integration.fetch_base (git fetch into a workdir, serialized
+      by integration.pm-integration.lock, up to 300 s wait) per detected merge.'
+    created_at: '2026-10-27T20:27:27Z'
+    last_edited: '2026-10-27T20:27:27Z'
+  - id: note-7353e31
+    text: 'Review loop c703 i2 (2026-10-27): reviewed c8171867 and pushed 92f073da.
+      The i1 fix holds: all three sync paths (TUI background do_normal_sync, TUI startup
+      sync_from_github, CLI pm pr sync / sync-github) verify against the bound SIGNOFF_MERGE,
+      record merge_integrity + one note, and never let a failed check stop merge detection.
+      i2 changes: (1) merge_integrity.apply_to_pr(pr, verification) takes the MergeVerification
+      and no-ops for None/ok/error, replacing the repeated `verified is not None and
+      verified.problem` guard at five call sites; (2) git_detail moved to pm_core/git_ops.py
+      (generic git-output formatter, used by the publish path too); (3) the "no merge
+      commit of the approved head" problem now names the PR (sync log lines lack pm
+      pr merge''s "GitHub PR #N merged." context); (4) pm pr sync no longer stashes
+      could-not-verify results it never applied; (5) named _INTEGRITY_HOLD_SECONDS.
+      Tests added: workdir-gone fallback verifies against the project repo (records
+      the general "did not publish the signed-off candidate" because the project repo
+      lacks the PR head object for is_ancestor), save_state=False worker writes nothing,
+      and pm pr sync''s could-not-verify branch warns without recording. Full suite
+      3838 passed, 1 skipped (pytest 8.4.2). Still for QA (unchanged from i1): the
+      TUI sync worker thread runs integration.fetch_base once per detected merge of
+      a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock with
+      a 300 s bound, so a merge detected while another integration check holds that
+      lock delays the background sync (status bar stays "pulling"); PRs without a
+      bound approval never fetch.'
+    created_at: '2026-10-27T20:53:45Z'
+    last_edited: '2026-10-27T20:53:45Z'
+  - id: note-ac730c2
+    text: 'Review loop c703 i3 (2026-10-27): reviewed f0891fe5 and pushed 7c761cf8.
+      The i2 fix holds: all three sync paths verify sync-detected merges against the
+      bound SIGNOFF_MERGE, record merge_integrity + one note, and a failed check never
+      stops merge detection; the pre/post captures under /pm-captures/impl remain
+      convincing. i3 changes (no verifier behavior change): (1) the three inline `getattr(result,
+      "merge_integrity", None) or {}` copies in pm_core/tui/sync.py became one `_result_integrity`
+      helper — the default is required because tests/test_log_message_force.py stubs
+      the sync result with a SimpleNamespace that lacks the attribute (dropping the
+      getattr broke 2 tests; full suite caught it); (2) `pm pr sync-github`''s could-not-verify
+      warning now names the PR like `pm pr sync` and the log line; (3) the TUI tests
+      now assert the warning is logged force=True with hold=_INTEGRITY_HOLD_SECONDS
+      (spec R3''s held line was previously untested); (4) new test for sync_prs''s
+      workdir-gone fallback (verification runs in the workdir sync detected from,
+      with the project repo pulled so a real mismatch is named). Full suite 3839 passed,
+      1 skipped (pytest 8.4.2) — /pm-captures/review-c703-i3/full-suite.log. Still
+      for QA (unchanged): the TUI sync worker thread runs integration.fetch_base once
+      per detected merge of a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock
+      with a 300 s bound, so a merge detected while another integration check holds
+      that lock delays the background sync (status bar stays "pulling"); PRs without
+      a bound approval never fetch. Known limitation (inherited from pr-ac10f03, deliberate):
+      when the PR workdir is gone and the fallback fetch source (a local project repo)
+      is stale and does not show the merge, the verifier records the general "did
+      not publish the signed-off candidate" problem rather than "could not verify"
+      — correct for a GitHub-URL repo, possible noise for a local mirror. (2026-10-27T21:20:00Z)'
+    created_at: '2026-10-27T21:18:11Z'
+    last_edited: '2026-10-27T21:18:11Z'
+  - id: note-fb11b36
+    text: 'Review loop d49c i1 (2026-10-27): reviewed 1237f48d (i3 state) and pushed
+      13ece19c. i3 holds: all three sync paths verify detected merges against the
+      bound SIGNOFF_MERGE via pm_core/merge_integrity.py, record merge_integrity +
+      one note, never let a failed check stop merge detection; pre/post captures under
+      /pm-captures/impl remain convincing and the new tests still fail on pre-fix
+      code for the right reason. i1 change (one verifier-neutral fix): the startup/sync-github
+      callbacks (tui/sync.py::apply_github and pr_sync.sync_from_github::apply) applied
+      the verification only when the fresh state still showed a different status.
+      The sync verifies from its own possibly-stale copy, so a concurrent writer can
+      finalize the status first, leaving the log line but no persistent record. Both
+      now apply the evidence whenever the sync new status is merged (idempotent; note
+      dedupe), matching spec R3 and the other two sync paths. Tests added: failing-then-passing
+      race tests for both callbacks (verified they fail pre-fix: KeyError merge_integrity)
+      and a pm pr sync approved-merge control (no record/note/WARNING). Full suite
+      3842 passed, 1 skipped (pytest 8.4.2) — /pm-captures/review-d49c-i1/full-suite.log.
+      Still for QA (unchanged): the TUI sync worker thread runs integration.fetch_base
+      once per detected merge of a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock
+      with a 300 s bound; PRs without a bound approval never fetch.'
+    created_at: '2026-10-27T21:45:52Z'
+    last_edited: '2026-10-27T21:45:52Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-0368986
   plan: bugs
   title: 'Bug: prompts tell sessions to run ''pm pr show'', which does not exist'
