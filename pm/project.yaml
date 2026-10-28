@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T10:20:24.538023+00:00'
+  updated_at: '2026-10-28T11:48:23.443775+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39185,6 +39185,40 @@ prs:
       unchanged since 35693308).'
     created_at: '2026-10-28T10:20:24Z'
     last_edited: '2026-10-28T10:20:24Z'
+  - id: note-15e34c0
+    text: 'QA scenario 42 (TUI after the base merge: sign-off launch + discovered
+      bad merge) PASS at 72dd782a — no code change. Both triples held live. Story
+      1 (local-backend, branch and master each appended a PR record, base also changed
+      pyproject.toml): the read-only `pm pr signoff integrate` printed the full resolved-by-record
+      output (head 6c6feb44, base b307d2ee, added from PR pr-8e34a79, added from base
+      pr-ca0a4e1, delta path, `base behaviour: pyproject.toml changed on the base`);
+      pressing `i` on the highlighted row logged `Opened sign-off window signoff-pr-4e747f5`,
+      created window @5 with pane `fake-claude --verdict SIGNOFF_MERGE` (registry
+      role signoff-claude) and no Error: line; `pm pr show` then reported up_to_date,
+      Base sha b307d2ee (== master == pre-check base), both added records, Applied
+      merge b928fa94, Resolution delta integration-resolution.diff; the delta listed
+      only the pm/project.yaml record resolution (plus the documented active_pr cursor
+      rule); workdir HEAD == b928fa94, clean, HEAD:pm/project.yaml holds both ids.
+      Story 2 (fake-github): the `r` refresh logged the full `Merge integrity: GitHub
+      merged pr-48c1b4a at d48de7f3f3cd, not the approved head b38d9d1b7549 (its branch
+      had commits that were not signed off); merge b9e6b000c581 on master`, the row
+      went ✓ merged, window #1 was killed and its pane-registry entry pruned, pm/project.yaml
+      recorded merge_integrity {problem, merge_sha}, and exactly one note appeared
+      (note-e2ba782); a second `r` added none. HARNESS FACTS for the next run: (1)
+      the fake-github seed creates feat-x FROM masters tip, so the integration check
+      reports `up to date with master@…` rather than the scenarios `merges cleanly`
+      — harmless, the approval still binds to head+base. (2) `pm session` on this
+      tree opens an Assist/guide pane in the main window that runs the REAL claude
+      binary and sits at its trust prompt (not covered by fake-claude `_all`); it
+      splits the TUI pane in half, so record at 200x50 and expect a 99-col TUI pane
+      (the merge-integrity line clips — the full text is in ~/.pm/debug/<tag>.log).
+      (3) Recorder must be a separate session attaching `env -u TMUX -u TMUX_PANE
+      tmux attach -t <S>~1:0`, else the attach is refused and the cast follows pms
+      window switches away from the TUI. (4) Killing the merged PRs window makes pm
+      create a `pm-home` window first (switch=False) and then select it, so the session
+      survives; that window is not in the pane registry. (5) Captures at /pm-captures/scenarios/42/{01-tui-signoff,02-cli-verify,03-tui-sync}.'
+    created_at: '2026-10-28T11:48:23Z'
+    last_edited: '2026-10-28T11:48:23Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
