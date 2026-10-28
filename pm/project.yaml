@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-5d53171
+  active_pr: pr-2ed93e5
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T18:08:02.564739+00:00'
+  updated_at: '2026-10-28T18:47:36.150546+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9408,6 +9408,30 @@ prs:
       test_signoff_integration/test_merge_publish git+network cases).'
     created_at: '2026-10-28T18:08:02Z'
     last_edited: '2026-10-28T18:08:02Z'
+  - id: note-9b089df
+    text: 'Review 6c8e i1: no production-logic defects found in the hold/reopen state
+      machine; three small consistency fixes plus one doc correction, and one out-of-scope
+      bug filed. (1) autostart_state build_status now includes qa["held"] in the runs[]
+      entry (it mirrored every other qa_progress_input field, including "recorded",
+      but dropped the new flag, so `pm autostart status --json` lost the distinction
+      the derived reason carries in prose; _derive itself always saw it). (2) start_qa
+      now prefers "QA already running" over "waiting for input": the hold reopen publishes
+      running=True before clearing held, so a run actively collecting could briefly
+      report as waiting. (3) tests: corrected a stale docstring that still said "answer
+      in the QA window", added test_qa_run_reopened_from_a_hold_reports_running and
+      a runs[]-held assertion. (4) Spec R3 adoption bullet corrected — it still claimed
+      a held snapshot with completion_processed=False is processed by the normal poll_qa_state
+      path; §15 established adoption records it itself. (5) Filed pr-2ed93e5 (bugs):
+      the TUI auto-start scheduler can launch a duplicate QA driver over a live detached
+      `pm pr qa` driver and its stale-window cleanup kills the qa-<id>-s* panes the
+      live driver polls — including the worker pane a held scenario user is answering
+      in. Pre-existing for any detached run; this PR widens the window from minutes
+      to unbounded. Left out of this PR deliberately (needs a coherent "detached run
+      in progress" status report). Full suite: 4039 passed, 1 skipped with test_merge_publish/test_signoff_integration
+      excluded; the 19 test_sync_merge_integrity errors are the review container push-proxy
+      restriction (git push rejected for any branch but this PR branch), not a regression.'
+    created_at: '2026-10-28T18:47:36Z'
+    last_edited: '2026-10-28T18:47:36Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
@@ -38715,6 +38739,51 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T17:42:52.746109+00:00'
   updated_at: '2026-10-28T17:42:52.746109+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2ed93e5
+  plan: bugs
+  title: 'Bug: TUI auto-start can launch a duplicate QA driver over a live detached
+    one, killing the worker panes it is polling'
+  branch: pm/pr-2ed93e5-bug-tui-auto-start-can-launch-a-duplicate-qa-drive
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/auto_start.py::_auto_start_qa_loops.
+
+
+    A detached QA driver (pm pr qa / pm pr auto-sequence child) is not tracked in
+    app._qa_loops, so the guard `if qa_loop and (qa_loop.running or qa_loop.latest_verdict):
+    continue` does not see it, and recorded_qa_verdict() reads runtime_state which
+    the driver never writes. Every auto-start scheduler pass therefore starts a second
+    QA run for the PR. That run calls _cleanup_stale_scenario_windows(), which kills
+    the qa-<id>-s* windows and the qa-<id> main window the live driver is polling
+    — including the scenario worker pane a user is answering an INPUT_REQUIRED blocker
+    in.
+
+
+    Repro: PR in qa status, auto-start enabled and the PR in scope, a `pm pr qa <id>`
+    driver running; trigger any scheduler pass (check_and_start). A duplicate driver
+    starts and the original scenario panes disappear.
+
+
+    Fix shape: pm pr auto-sequence already gained this guard (qa_run_owned_elsewhere
+    on the resume snapshot next to the latest qa_status.json, via pm_core.paths.latest_qa_status_path).
+    Apply the same ownership check in _auto_start_qa_loops, and report the detached
+    run in collect_status_inputs (running + done/total/held from the status file)
+    so the row does not fall back to "queued"/"QA starts on next scheduler pass" forever.
+
+
+    Impact/severity: pre-existing for any detached run (minutes-long window); pr-2c67d50
+    makes it much more likely because a held INPUT_REQUIRED run stays open until the
+    user answers (no timeout), so an auto-start pass during a hold destroys the panes
+    the hold is watching.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T18:47:05.052959+00:00'
+  updated_at: '2026-10-28T18:47:05.052959+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

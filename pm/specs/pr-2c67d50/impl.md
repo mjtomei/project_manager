@@ -109,12 +109,16 @@ entry with no recoverable session is dropped as terminal `INPUT_REQUIRED`
 - Snapshot with `overall` and **not held** → existing behaviour (process
   completion, clear snapshot).
 - Snapshot that is held (or still incomplete) → `build_resume_state`,
-  `state._ui_complete_notified = state.completion_processed`, keep the
-  snapshot, track the state in `app._qa_loops`, and re-spawn
+  keep the snapshot, track the state in `app._qa_loops`, and re-spawn
   `resume_qa_background`. A held run that was never processed
-  (`completion_processed=False`) is processed by the normal
-  `poll_qa_state` completion path; one already processed is not
-  re-noted.
+  (`completion_processed=False`) is recorded **on adoption** (the same
+  `_on_qa_complete` + `mark_completion_processed` the live path runs when
+  it publishes the held result): the re-spawned watcher publishes
+  `running=True` immediately, so `poll_qa_state` can never observe the
+  held completion and the note would otherwise be lost whenever no
+  follow-up ever arrives (see §15). One already processed is not
+  re-noted. Either way `state._ui_complete_notified` is set, so the
+  re-spawned watcher's own completion does not duplicate it.
 
 `qa_loop_ui.poll_qa_state`:
 
@@ -703,3 +707,36 @@ covered by tests in `tests/test_qa_input_required.py` /
   `[idle]`/`[wait]` from the live scenario panes for TUI-driven runs; only a
   detached `pm pr qa` driver's own `[working]` mirror stays stale.  Left as
   documented rather than widening this PR into runtime_state semantics.
+
+## 21. Implementation notes (review loop 6c8e, iteration 1)
+
+- **Spec correction: R3's adoption bullet.** R3 still said a held snapshot
+  with `completion_processed=False` is "processed by the normal
+  `poll_qa_state` completion path". §15 established that it cannot be (the
+  re-spawned watcher publishes `running=True` immediately) and that adoption
+  records the result itself; R3 now says so.
+- **The run entry keeps `held`.** `autostart_state`'s `runs[]` entry mirrors
+  `qa_progress_input` field by field, including `recorded`, but dropped the
+  new `held` flag — so `pm autostart status --json` lost the distinction the
+  derived `reason` carries in prose.  `_derive` itself always saw it (it
+  reads the raw `qa_loops` input), so this was output-only.
+  Covered by an assertion in `test_qa_held_run_points_at_the_worker_pane`.
+- **`start_qa` prefers "already running" over "waiting for input".** The
+  hold's reopen publishes `running=True` *before* clearing `held` (see §8),
+  so a run that is actively collecting can briefly have both flags set;
+  pressing `t` then reported the run as waiting for input.  `running` now
+  wins.  Covered by `test_qa_run_reopened_from_a_hold_reports_running`.
+- **Filed a follow-up bug, not fixed here: the TUI auto-start scheduler can
+  launch a duplicate QA driver over a live detached one.**
+  `_auto_start_qa_loops` skips a PR whose tracked state is `running` or has a
+  `latest_verdict`, but a detached `pm pr qa` driver is not in
+  `_qa_loops` at all, so auto-start starts a second run whose
+  `_cleanup_stale_scenario_windows` kills the `qa-<id>-s*` panes the live
+  driver is polling — including the worker pane in which a held scenario's
+  user is answering the blocker.  `pm pr auto-sequence` gained exactly this
+  guard in §15; the TUI scheduler still lacks it, and the unbounded
+  INPUT_REQUIRED hold widens the window from minutes to arbitrarily long.  Out of this PR's scope (the
+  user narrowed it to the standalone continuation change) and it needs a
+  coherent "a detached run is in progress" status report to avoid replacing
+  one misleading row with another, so it is filed as its own bug PR rather
+  than widened into this one.  Pre-existing for any detached run.

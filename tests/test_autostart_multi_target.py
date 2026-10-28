@@ -761,6 +761,8 @@ class TestBuildStatus:
                                          "held": True}}), "a")
         assert r["state"] == "waiting"
         assert "scenario worker pane" in r["reason"]
+        # The run entry keeps the flag as well as the derived reason.
+        assert r["qa"]["held"] is True
 
     def test_qa_input_required_without_a_watcher_keeps_the_dashboard_hint(self):
         r = _run(_status([_pr("a", status="qa")], ["a"],

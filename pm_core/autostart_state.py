@@ -625,6 +625,12 @@ def build_status(inp: dict) -> dict:
                 "done": qa.get("done") or 0,
                 "counts": dict(qa.get("counts") or {}),
                 "running": bool(qa.get("running")),
+                # Still watching a scenario worker pane for an
+                # INPUT_REQUIRED follow-up (pr-2c67d50).  Reported alongside
+                # the derived ``reason`` so the JSON run entry does not lose
+                # the distinction a consumer would otherwise have to parse
+                # out of the text.
+                "held": bool(qa.get("held")),
                 "verdict": qa.get("verdict") or "",
                 "error": qa.get("error") or "",
                 "recorded": bool(qa.get("recorded")),

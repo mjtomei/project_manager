@@ -143,13 +143,16 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
             # an auto-start/setup confirmation is holding the log line —
             # this lands in the gap where the scheduler's "targets +="
             # confirmation is still sticky (QA s22).
-            if existing.held:
+            # ``running`` wins over ``held``: the hold's reopen publishes
+            # running=True before clearing held, so a run that is actively
+            # collecting must not be described as waiting for input.
+            if existing.running:
+                app.log_message(f"QA already running for {pr_id}", force=True)
+            else:
                 app.log_message(
                     f"QA for {pr_id} is waiting for input — answer in its "
                     "scenario worker pane; the loop is still watching",
                     force=True)
-            else:
-                app.log_message(f"QA already running for {pr_id}", force=True)
             return
 
     # A sign-off REQA return is now being re-verified.
