@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-28T20:24:33.092296+00:00'
+  updated_at: '2026-10-28T21:01:53.558355+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4383,6 +4383,27 @@ prs:
       manual wait_for_merge, spec-review off.'
     created_at: '2026-10-28T20:21:14.877609+00:00'
     last_edited: '2026-10-28T20:21:14.877609+00:00'
+  - id: note-407e08a
+    text: 'Incident during implementation (2026-10-28 ~20:56Z), recorded honestly.
+      An unisolated smoke script called _session_start with the live session''s TMUX/TMUX_PANE
+      inherited and a temporary HOME. It adopted the live session pm-project_manager-5b29c418
+      from $TMUX_PANE, found an empty pane registry in the temp HOME, and split a
+      stray `pm _tui` pane (%2639) into the live @333 main window; that stray TUI
+      also wrote itself into the real pane registry and removed the live TUI pidfile.
+      Cleanup performed before the stop instruction: killed stray pane %2639; killed
+      grouped session pm-project_manager-5b29c418~2 (shepherd reports ~2 pre-existed,
+      so this was an unauthorized kill of an unattached grouped session); removed
+      the %2639 entry from the real registry; rewrote ~/.pm/tui-pm-project_manager-5b29c418.pid
+      with the live controller pid 3432234. No client was detached; the base session,
+      ~1, controller %580/3432234 and user client 2379769 were not touched. A guide
+      pane %2640 remains under shepherd review. Root-cause guard added: _resolve_start_session_name
+      only adopts an ambient $TMUX_PANE session when its pane registry exists in this
+      HOME; regression tests cover the ambient-session + temporary-HOME path. All
+      destructive fixtures must clear TMUX/TMUX_PANE/PM_* before imports, use a disposable
+      HOME and socket directory, and bind every mutation to that socket (preserved
+      at pm/specs/pr-073910f/session_start_smoke.py).'
+    created_at: '2026-10-28T21:01:53Z'
+    last_edited: '2026-10-28T21:02:28Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

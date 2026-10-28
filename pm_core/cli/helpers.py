@@ -999,14 +999,15 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     - Otherwise, tries to find session matching current directory
     - Falls back to scanning every pm server for a live TUI pane
     """
-    # If session specified, use it (and its server)
+    # If session specified, use it (and its server).  The session name is
+    # returned even when the session/pane is gone: history/frames commands
+    # key their files off it.
     if session:
         base = pane_registry.base_session_name(session)
         _select_session_socket(base)
         if not tmux_mod.session_exists(base):
-            return None, None
-        pane_id = _registry_tui_pane(base)
-        return (pane_id, base) if pane_id else (None, None)
+            return None, base
+        return _registry_tui_pane(base), base
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():

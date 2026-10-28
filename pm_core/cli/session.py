@@ -221,6 +221,28 @@ def _schedule_rebalance(session_name: str) -> None:
     _log.info("scheduled background rebalance for %d window(s)", len(window_ids))
 
 
+def _resolve_start_session_name() -> str:
+    """Return the pm session name ``pm session`` should attach/create.
+
+    Prefers the ambient tmux session so workdir clones and meta workdirs
+    (whose git-root hash differs from the session hosting them) attach to
+    the right session.
+
+    The ambient session is only adopted when **this HOME knows it** — its
+    pane registry exists.  Without that check, a process running under a
+    different HOME (tests, tooling, a temporary sandbox) that inherits
+    ``$TMUX``/``$TMUX_PANE`` would adopt a foreign session, see an empty
+    registry, conclude the TUI is missing, and respawn a TUI into the
+    live session.  That is exactly how a smoke test once disturbed the
+    user's live controller.  Falling back to the cwd-derived name instead
+    makes such a process create its own (isolated) session.
+    """
+    ambient = _get_current_pm_session()
+    if ambient and pane_registry.registry_path(ambient).exists():
+        return ambient
+    return _get_session_name_for_cwd()
+
+
 def _pick_existing_session(candidates: list[str]) -> str:
     """Return the first candidate session that is actually running.
 
@@ -374,8 +396,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
             raise SystemExit(1)
     else:
         # Prefer the actual tmux session if we're already inside one (e.g. meta
-        # workdirs whose git-root hash differs from the session they belong to).
-        session_name = _get_current_pm_session() or _get_session_name_for_cwd()
+        # workdirs whose git-root hash differs from the session they belong to),
+        # but never adopt a foreign session from a different HOME.
+        session_name = _resolve_start_session_name()
 
     # Every pm session gets its own tmux server.  Derive the socket from the
     # final session name (not from the cwd) so workdir clones and --dir joins

@@ -730,18 +730,23 @@ def launch_plan_activated(app, plan_id: str) -> None:
 def show_connect(app) -> None:
     """Show the tmux connect command for this session's server."""
     socket_path = os.environ.get("PM_TMUX_SOCKET")
-    if not socket_path:
-        session = getattr(app, "_session_name", None)
-        if session:
-            from pm_core.paths import session_socket_path
-            socket_path = str(
-                session_socket_path(session.removeprefix("pm-")))
+    session = getattr(app, "_session_name", None)
+    if not socket_path and session:
+        # Legacy (pre-isolation) session: no socket env, and its private
+        # socket does not exist yet.  Only offer -S for a live private one.
+        from pm_core.paths import session_socket_path
+        candidate = str(session_socket_path(session.removeprefix("pm-")))
+        if tmux_mod.session_exists(session, socket_path=candidate):
+            socket_path = candidate
     if socket_path:
         command = f"tmux -S {socket_path} attach"
-        app.push_screen(ConnectScreen(command))
+    elif session:
+        command = f"tmux attach -t {session}"
     else:
         app.log_message("Not in a pm session")
         app.clear_log_message_later(2)
+        return
+    app.push_screen(ConnectScreen(command))
 
 
 def quit_app(app) -> None:

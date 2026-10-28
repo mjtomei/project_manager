@@ -347,6 +347,75 @@ class TestResolveSessionSocket:
 
 
 # ---------------------------------------------------------------------------
+# Regression: ambient $TMUX_PANE + a different HOME must not adopt a session
+#
+# A smoke test once inherited the live session's TMUX/TMUX_PANE while running
+# under a temporary HOME.  The empty pane registry made `pm session` think the
+# live TUI was missing, so it split a stray TUI pane into the live session's
+# main window.  `_resolve_start_session_name` must only trust an ambient
+# session that this HOME knows about.
+# ---------------------------------------------------------------------------
+
+class TestStartSessionName:
+    def test_foreign_ambient_session_without_registry_is_ignored(
+            self, monkeypatch, tmp_path):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-live")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-fresh")
+        monkeypatch.setattr(session_mod.pane_registry, "registry_path",
+                            lambda name: tmp_path / f"{name}.json")
+
+        # Temporary HOME: no registry for the inherited session.
+        assert session_mod._resolve_start_session_name() == "pm-fresh"
+
+    def test_ambient_session_with_registry_is_adopted(
+            self, monkeypatch, tmp_path):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-live")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-fresh")
+        monkeypatch.setattr(session_mod.pane_registry, "registry_path",
+                            lambda name: tmp_path / f"{name}.json")
+        (tmp_path / "pm-live.json").write_text("{}")
+
+        assert session_mod._resolve_start_session_name() == "pm-live"
+
+
+# ---------------------------------------------------------------------------
+# TUI quit/restart use no server-wide tmux operations
+# ---------------------------------------------------------------------------
+
+class TestTuiQuitRestart:
+    @patch("pm_core.tui.pane_ops.tmux_mod.detach_current_client",
+           return_value=True)
+    @patch("pm_core.tui.pane_ops.tmux_mod.in_tmux", return_value=True)
+    def test_quit_detaches_precisely(self, _in_tmux, detach):
+        from pm_core.tui import pane_ops
+
+        app = MagicMock()
+        pane_ops.quit_app(app)
+        detach.assert_called_once_with()
+        app.exit.assert_not_called()
+
+    @patch("pm_core.tui.pane_ops.os.execvp")
+    @patch("pm_core.tui.pane_ops.tmux_mod.detach_current_client")
+    @patch("pm_core.tui.pane_ops.tmux_mod.kill_session")
+    def test_restart_touches_no_tmux_sessions(self, kill, detach, _execvp):
+        from pm_core.tui import pane_ops
+
+        app = MagicMock()
+        app._write_queue = None
+        pane_ops.restart_app(app)
+        detach.assert_not_called()
+        kill.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Integration: disposable servers
 # ---------------------------------------------------------------------------
 

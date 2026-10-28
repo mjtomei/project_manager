@@ -70,14 +70,14 @@ sessions today).
 1. `pm session` (attach) uses the deterministic socket for the target tag; no
    ambient-state guessing. `--print-connect` prints `tmux -S <socket> attach`
    for private sessions too (not only shared ones).
-2. `pm session kill` targets the same socket, kills grouped sessions then the
-   base, unlinks the socket file (tmux leaves it behind after `kill-server` /
-   last-session exit — verified), and also cleans up a legacy default-server
-   session with the same name if present.  Session selection tries the
-   cwd-derived name first and the ambient session second, choosing the first
-   that is actually running — so a workdir clone kills the session hosting it,
-   while a different project's ambient session is never preferred over the
-   cwd's live one.
+2. `pm session kill` targets the server that hosts the session (private
+   socket preferred, legacy default server as fallback), kills grouped
+   sessions then the base, and unlinks the socket file (tmux leaves it behind
+   after `kill-server` / last-session exit — verified).  Session selection
+   tries the cwd-derived name first and the ambient session second, choosing
+   the first that is actually running — so a workdir clone kills the session
+   hosting it, while a different project's ambient session is never preferred
+   over the cwd's live one.
 3. New `pm session list` enumerates pm sessions across **all** pm servers:
    every `pm-*` socket in `/tmp/pm-sessions/` plus the default server
    (legacy). It reports base session name, socket, attached client count,
@@ -128,6 +128,17 @@ New `tmux_mod.detach_current_client()`:
 
 This keeps a multi-client attach within one pm session working and, combined
 with the private server, cannot reach another pm session.
+
+### R5b — Never adopt an ambient session this HOME does not know
+
+`_session_start()` must resolve the target name through
+`_resolve_start_session_name()`: it uses the ambient `$TMUX_PANE` session
+only when that session's pane registry exists in the **current** HOME.
+Otherwise it falls back to the cwd-derived name.  Without this guard, a
+process running under a different HOME (tests, tooling, a temporary sandbox)
+that inherits `$TMUX`/`$TMUX_PANE` adopts a foreign session, sees an empty
+registry, concludes the TUI is missing, and respawns a TUI into the live
+session.  Regression tests cover both branches.
 
 ### R6 — Rollout safety (existing live sessions)
 
@@ -239,6 +250,31 @@ No **[UNRESOLVED]** ambiguities.
   sessions and still grant `server-access` on the private/shared socket.
 - Non-git directory: session name falls back to `pm-<dir>-00000000`; the tag
   is taken from that name, so a deterministic socket still exists.
+
+## Incident during implementation (recorded honestly)
+
+While validating `_session_start`, an unisolated smoke script inherited the
+live session's `TMUX`/`TMUX_PANE` and ran under a temporary HOME.  It adopted
+the live session `pm-project_manager-5b29c418`, found an empty pane registry
+(temp HOME), and split a stray `pm _tui` pane (`%2639`) into the live `@333`
+main window; the stray TUI also wrote itself into the real pane registry and
+removed the live TUI pidfile.
+
+Before the stop instruction, cleanup killed the stray pane, killed grouped
+session `pm-project_manager-5b29c418~2` (the shepherd reports `~2` pre-existed,
+so this was an unauthorized kill of an unattached grouped session), removed
+the `%2639` registry entry, and rewrote the live pidfile with controller pid
+3432234.  No client was detached; the base session, `~1`, controller
+`%580`/3432234 and user client 2379769 were not touched.  A guide pane
+`%2640` remains under shepherd review.  All further live-session actions
+stopped on instruction.
+
+R5b is the root-cause guard.  Every destructive fixture must clear
+`TMUX`, `TMUX_PANE`, `PM_TMUX_SOCKET`, `PM_SHARE_MODE`, `PM_IN_TMUX_SESSION`
+and `PM_PROJECT` **before importing pm_core**, use a disposable HOME and
+socket directory, and bind every mutation to that socket.  The preserved
+smoke script is preserved at `pm/specs/pr-073910f/session_start_smoke.py`,
+was rewritten accordingly, and passes without touching the live server.
 
 ## Acceptance
 
