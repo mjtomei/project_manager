@@ -789,6 +789,24 @@ SHARED_SOCKET_DIR = Path("/tmp/pm-sessions")
 _SOCKET_PATH_MAX = 100
 
 
+def default_socket_path() -> Path:
+    """Return the socket path of the user's default tmux server.
+
+    tmux puts its default server at ``$TMUX_TMPDIR`` (or ``/tmp``)
+    ``/tmux-<uid>/default``.  Addressing it explicitly is what "the default
+    server" has to mean for pm: the tmux *binary* prefers the socket named
+    by ``$TMUX`` whenever no ``-S`` is given, and inside a pm pane that
+    names the session's private server instead.  Legacy pre-isolation pm
+    sessions are the ones still living on this server.
+
+    A user who starts tmux with ``-L <name>`` keeps the default server
+    unused; pm has no way to guess that name, so those sessions are simply
+    not found (the same as before this change).
+    """
+    base = os.environ.get("TMUX_TMPDIR") or "/tmp"
+    return Path(base) / f"tmux-{os.getuid()}" / "default"
+
+
 def session_socket_path(session_tag: str) -> Path:
     """Return the deterministic tmux server socket path for a pm session.
 

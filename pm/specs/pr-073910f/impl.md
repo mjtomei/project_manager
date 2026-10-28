@@ -90,6 +90,14 @@ sessions today).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
+6. `pm_core/cli/helpers.py::_get_pm_session()` also selects the server that
+   hosts the resolved session.  Commands that address a session by name
+   (`pm pr start`, `pm pr review`, `pm meta`, `pm container build`,
+   `pm session home`, `home_window.refresh_home`, …) resolve the session
+   outside tmux as well, where there is no ambient `PM_TMUX_SOCKET`/`$TMUX`;
+   without this they would query the default server and silently conclude a
+   live private session is gone.  The lookup is skipped when the process is
+   already inside a pm session, so the common in-pane path pays nothing.
 
 ### R4 — Explicit propagation to subprocesses, hooks and popups
 
@@ -104,6 +112,20 @@ sessions today).
 3. `_tmux_cmd()` gains a `use_env=False` switch so callers can explicitly
    address the **default** server (legacy detection, `pm session list`).
    `session_exists()` forwards it.
+   **`use_env=False` alone is not enough**: the tmux *binary* falls back to
+   the socket named by `$TMUX` whenever no `-S` is given (verified on tmux
+   3.4), so a process running inside a pm pane still reaches the private
+   server.  `pm_core/paths.py::default_socket_path()`
+   (`$TMUX_TMPDIR`/`/tmp` + `tmux-<uid>/default`) is therefore passed as
+   `-S` wherever the default server is meant: `session_exists(use_env=False)`,
+   `list_pm_sessions()`'s default-server pass, `session_kill`'s legacy
+   branch, and `helpers._use_tmux_socket(None)`.  Without this,
+   `pm session list` run from inside a pm pane listed the current private
+   server a second time as "(default server)", and legacy detection, legacy
+   kill and `pm tui -s <legacy>` from inside another pm session could
+   address the wrong server.  (A user who runs tmux with `-L <name>` keeps
+   the default server unused; those legacy sessions are not found — the
+   same as before this change.)
 4. Fix `pm_core/qa_status.py::_find_attached_session()` / `_switch_to_window()`
    to build tmux argv with `tmux_mod._tmux_cmd(...)` instead of bare `tmux`,
    so QA panes on a private server switch the right client.
@@ -292,3 +314,30 @@ was rewritten accordingly, and passes without touching the live server.
    `PM_TMUX_SOCKET` in panes, and `pm session list` shows it.
 4. A legacy default-server session is attached without being migrated or
    killed, with an explanatory note.
+
+## Review iteration (2026-10-28, review-loop b972 i1)
+
+Two gaps found reviewing the first implementation:
+
+1. **`use_env=False` did not reach the default server.** The tmux binary
+   honours `$TMUX` when no `-S` is given, so from inside a pm pane
+   `pm session list` listed the current private server a second time as
+   "(default server)", and legacy detection / `pm session kill`'s legacy
+   branch / `pm tui -s <legacy>` could address the wrong server.  Fixed by
+   adding `paths.default_socket_path()` and passing it as `-S` wherever the
+   default server is meant (`session_exists(use_env=False)`,
+   `list_pm_sessions()`, `session_kill`, `helpers._use_tmux_socket(None)`).
+   Regression tests added.  Also added the `shared` flag to
+   `list_pm_sessions()` rows / `pm session list` (R3.3).
+2. **Commands that address a session by name stopped finding private
+   sessions outside tmux.** `pm meta`, `pm container build`,
+   `pm session home`, `pm pr start`/`review`/`merge` and
+   `home_window.refresh_home` resolve the session through
+   `_get_pm_session()`; with no ambient `PM_TMUX_SOCKET`/`$TMUX` they
+   queried the default server and silently degraded.  `_get_pm_session()`
+   now selects the hosting server for the cwd-derived session (skipped
+   when already inside a pm session, so the in-pane path is unchanged).
+
+Also made two pre-existing `tests/test_shared_sessions.py` assertions
+independent of an ambient `PM_TMUX_SOCKET`: every pm pane now exports it,
+so those tests failed when run from inside a pm session.

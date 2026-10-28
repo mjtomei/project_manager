@@ -209,8 +209,11 @@ class TestRunShellLogged:
 # ---------------------------------------------------------------------------
 
 class TestTmuxCmd:
-    def test_basic_command(self):
+    def test_basic_command(self, monkeypatch):
         """Without socket, builds plain tmux command."""
+        # Every pm pane exports PM_TMUX_SOCKET, so tests run from one would
+        # otherwise see a -S flag here.
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         cmd = tmux._tmux_cmd("has-session", "-t", "mysess")
         assert cmd == ["tmux", "has-session", "-t", "mysess"]
 
@@ -759,7 +762,8 @@ class TestDetachClient:
     """Verify detach_client sends the correct tmux command."""
 
     @patch("pm_core.tmux.subprocess.run")
-    def test_detaches_by_tty(self, mock_run):
+    def test_detaches_by_tty(self, mock_run, monkeypatch):
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
         tmux.detach_client("/dev/pts/3")
         cmd = mock_run.call_args[0][0]
         assert cmd == ["tmux", "detach-client", "-t", "/dev/pts/3"]

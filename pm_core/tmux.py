@@ -17,8 +17,11 @@ def _tmux_cmd(*args: str, socket_path: str | None = None,
 
     If socket_path is given, uses it.  Otherwise, when *use_env* is true,
     checks PM_TMUX_SOCKET.  This ensures all tmux calls route to the
-    session's own server.  Pass ``use_env=False`` with no ``socket_path``
-    to address the default server explicitly (legacy detection, discovery).
+    session's own server.  ``use_env=False`` with no ``socket_path`` drops
+    that override, which is only half of "the default server": the tmux
+    *binary* still falls back to the socket named by ``$TMUX`` whenever no
+    ``-S`` is given, so callers that mean the user's default server pass
+    its socket explicitly (``paths.default_socket_path()``).
     """
     cmd = ["tmux"]
     sp = socket_path
@@ -153,11 +156,15 @@ def session_exists(name: str, socket_path: str | None = None,
 
     With ``socket_path=None, use_env=False`` this queries the default
     server explicitly, which is how legacy pre-isolation sessions are
-    detected.
+    detected.  The default server's socket is passed as ``-S`` because
+    tmux would otherwise follow ``$TMUX`` and reach the private server
+    this process happens to run on.
     """
+    if socket_path is None and not use_env:
+        from pm_core.paths import default_socket_path
+        socket_path = str(default_socket_path())
     result = _run(
-        _tmux_cmd("has-session", "-t", name, socket_path=socket_path,
-                  use_env=use_env),
+        _tmux_cmd("has-session", "-t", name, socket_path=socket_path),
     )
     return result.returncode == 0
 
@@ -1058,19 +1065,34 @@ def list_pm_sessions() -> list[dict]:
     collapsed into their base session; ``attached`` is the sum of clients
     across the group.  Unreadable/stale sockets are skipped.
 
-    Each row: ``{"name", "socket", "attached"}`` where ``socket`` is None
-    for sessions on the default server.
+    Each row: ``{"name", "socket", "attached", "shared"}`` where ``socket``
+    is None for sessions on the default server and ``shared`` is true when
+    the socket is group/world accessible (``--global``/``--group``
+    sessions chmod it; private servers are 0600).
     """
     from pm_core.paths import SHARED_SOCKET_DIR
+
+    def is_shared(sock: Path | None) -> bool:
+        if sock is None:
+            return False
+        try:
+            return bool(sock.stat().st_mode & 0o077)
+        except OSError:
+            return False
 
     rows: list[dict] = []
     seen: set[tuple[str | None, str]] = set()
 
-    def collect(socket_path: str | None, use_env: bool) -> None:
+    def collect(socket_path: str | None) -> None:
+        """Collect one server; ``socket_path=None`` means the default one."""
+        from pm_core.paths import default_socket_path
+        # Address the default server explicitly: tmux would otherwise
+        # follow $TMUX and list the private server this process runs on.
+        cmd_socket = socket_path or str(default_socket_path())
         result = _run(
             _tmux_cmd("list-sessions", "-F",
                       "#{session_name}|#{session_attached}",
-                      socket_path=socket_path, use_env=use_env),
+                      socket_path=cmd_socket),
             text=True,
         )
         if result.returncode != 0:
@@ -1083,13 +1105,14 @@ def list_pm_sessions() -> list[dict]:
             base = name.split("~", 1)[0]
             groups[base] = groups.get(base, 0) + (
                 int(attached) if attached.isdigit() else 0)
+        shared = is_shared(Path(socket_path) if socket_path else None)
         for base, attached in sorted(groups.items()):
             key = (socket_path, base)
             if key in seen:
                 continue
             seen.add(key)
             rows.append({"name": base, "socket": socket_path,
-                         "attached": attached})
+                         "attached": attached, "shared": shared})
 
     try:
         sockets = sorted(SHARED_SOCKET_DIR.glob("pm-*"))
@@ -1101,7 +1124,7 @@ def list_pm_sessions() -> list[dict]:
                 continue
         except OSError:
             continue
-        collect(str(sock), True)
+        collect(str(sock))
 
-    collect(None, False)
+    collect(None)
     return rows

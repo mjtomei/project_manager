@@ -934,30 +934,45 @@ def _get_current_pm_session() -> str | None:
 
 
 def _get_pm_session() -> str | None:
-    """Get the pm tmux session name if running inside one."""
+    """Get the pm tmux session name if running inside one.
+
+    Also selects the server that hosts the resolved session, because every
+    pm session runs on its own private socket: a command run outside tmux
+    (or from an unrelated tmux session) would otherwise address the default
+    server and conclude that a live session is gone.  Inside a pm session
+    the ambient ``PM_TMUX_SOCKET``/``$TMUX`` is already correct, so the
+    extra lookup is skipped there.
+    """
     if not tmux_mod.has_tmux():
         return None
-    return _get_current_pm_session() or _get_session_name_for_cwd()
+    current = _get_current_pm_session()
+    if current:
+        return current
+    session = _get_session_name_for_cwd()
+    _select_session_socket(session)
+    return session
 
 
 def _use_tmux_socket(socket_path: str | None) -> None:
     """Point subsequent ``tmux_mod`` calls at *socket_path*.
 
-    ``None`` means the default server (legacy pre-isolation sessions).
+    ``None`` means the user's default server, which is addressed by its
+    explicit path: tmux follows ``$TMUX`` when no ``-S`` is given, and from
+    inside a pm pane that names the session's private server instead.
     """
-    if socket_path:
-        os.environ["PM_TMUX_SOCKET"] = socket_path
-    else:
-        os.environ.pop("PM_TMUX_SOCKET", None)
+    if not socket_path:
+        from pm_core.paths import default_socket_path
+        socket_path = str(default_socket_path())
+    os.environ["PM_TMUX_SOCKET"] = socket_path
 
 
 def _select_session_socket(session_name: str) -> str | None:
     """Point ``PM_TMUX_SOCKET`` at the server hosting *session_name*.
 
     Prefers the session's dedicated private socket, falls back to the
-    legacy default server (clearing the env var).  Returns the selected
-    socket path, or None when the session is on the default server or was
-    not found.  Leaves the ambient setting untouched when not found.
+    legacy default server.  Returns the selected socket path, or None when
+    the session is on the default server or was not found (the ambient
+    setting is left untouched in the latter case).
     """
     from pm_core.paths import session_socket_path
 
@@ -969,6 +984,9 @@ def _select_session_socket(session_name: str) -> str | None:
         _use_tmux_socket(sock)
         return sock
     if tmux_mod.session_exists(base, use_env=False):
+        # Address the default server explicitly rather than clearing the
+        # override: tmux would follow $TMUX, which from inside another pm
+        # session names a different server.
         _use_tmux_socket(None)
         return None
     return None

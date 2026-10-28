@@ -120,11 +120,26 @@ class TestUseEnvFlag:
 
     @patch("pm_core.tmux.subprocess.run")
     def test_session_exists_forwards_use_env(self, mock_run):
+        """use_env=False must reach the real default server, not $TMUX."""
         mock_run.return_value = MagicMock(returncode=1)
-        with patch.dict(os.environ, {"PM_TMUX_SOCKET": "/tmp/pm-sessions/pm-x"}):
+        with patch.dict(os.environ, {"PM_TMUX_SOCKET": "/tmp/pm-sessions/pm-x",
+                                     "TMUX": "/tmp/pm-sessions/pm-x,1,0"}):
             tmux.session_exists("pm-x", use_env=False)
         cmd = mock_run.call_args[0][0]
-        assert "-S" not in cmd
+        assert cmd[:3] == ["tmux", "-S", str(paths.default_socket_path())]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_session_exists_keeps_ambient_socket_by_default(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch.dict(os.environ, {"PM_TMUX_SOCKET": "/tmp/pm-sessions/pm-x"}):
+            tmux.session_exists("pm-x")
+        cmd = mock_run.call_args[0][0]
+        assert cmd[:3] == ["tmux", "-S", "/tmp/pm-sessions/pm-x"]
+
+    def test_default_socket_path_is_uid_scoped(self):
+        p = paths.default_socket_path()
+        assert p.name == "default"
+        assert p.parent.name == f"tmux-{os.getuid()}"
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +230,12 @@ class TestListPmSessions:
             s.close()
 
         def fake_run(cmd, **kwargs):
-            if "-S" in cmd and str(sock) in cmd:
+            if str(sock) in cmd:
                 return MagicMock(returncode=0, stdout=(
                     "pm-repo-abc|0\n"
                     "pm-repo-abc~1|2\n"
                 ))
-            if "-S" not in cmd:
+            if str(paths.default_socket_path()) in cmd:
                 return MagicMock(returncode=0, stdout="pm-legacy-1|1\n")
             return MagicMock(returncode=1, stdout="")
 
@@ -242,6 +257,108 @@ class TestListPmSessions:
         mock_run.return_value = MagicMock(returncode=1, stdout="")
         with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
             assert tmux.list_pm_sessions() == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_marks_shared_sockets(self, mock_run, tmp_path):
+        """--global/--group chmod the socket; private servers stay 0600."""
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        for name, mode in (("pm-shared", 0o777), ("pm-private", 0o600)):
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                s.bind(str(sock_dir / name))
+            finally:
+                s.close()
+            (sock_dir / name).chmod(mode)
+
+        def fake_run(cmd, **kwargs):
+            if "-S" in cmd:
+                sock = Path(cmd[cmd.index("-S") + 1])
+                return MagicMock(returncode=0,
+                                 stdout=f"{sock.name}|0\n")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            rows = tmux.list_pm_sessions()
+
+        by_socket = {Path(r["socket"]).name: r["shared"]
+                     for r in rows if r["socket"]}
+        assert by_socket["pm-shared"] is True
+        assert by_socket["pm-private"] is False
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_default_server_row_ignores_tmux(self, mock_run, tmp_path,
+                                             monkeypatch):
+        """Run from inside a pm pane, the default row must still be default.
+
+        tmux honours $TMUX when no -S is given, which previously made the
+        "default server" row list the *current* private server instead.
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        monkeypatch.setenv("TMUX", "/tmp/pm-sessions/pm-x,1,0")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            tmux.list_pm_sessions()
+
+        default_calls = [c for c in mock_run.call_args_list
+                         if str(paths.default_socket_path()) in c[0][0]]
+        assert len(default_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# CLI: resolving a session *and* its server outside tmux
+# ---------------------------------------------------------------------------
+
+class TestGetPmSessionSelectsServer:
+    def test_private_socket_selected_outside_tmux(self, monkeypatch, tmp_path):
+        from pm_core.cli import helpers
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(helpers.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(helpers, "_get_current_pm_session", lambda: None)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-target")
+        monkeypatch.setattr(
+            helpers.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path == str(tmp_path / "pm-target"))
+
+        assert helpers._get_pm_session() == "pm-target"
+        assert os.environ["PM_TMUX_SOCKET"] == str(tmp_path / "pm-target")
+
+    def test_legacy_session_selects_default_server(self, monkeypatch, tmp_path):
+        from pm_core.cli import helpers
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/other")
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(helpers.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(helpers, "_get_current_pm_session", lambda: None)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-legacy")
+        monkeypatch.setattr(
+            helpers.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path is None and not use_env)
+
+        assert helpers._get_pm_session() == "pm-legacy"
+        assert os.environ["PM_TMUX_SOCKET"] == str(paths.default_socket_path())
+
+    def test_inside_pm_session_keeps_ambient_socket(self, monkeypatch):
+        """The common in-pane path must not pay an extra tmux lookup."""
+        from pm_core.cli import helpers
+
+        monkeypatch.setattr(helpers.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(helpers, "_get_current_pm_session",
+                            lambda: "pm-current")
+        monkeypatch.setattr(
+            helpers.tmux_mod, "session_exists",
+            lambda *a, **kw: pytest.fail("should not query tmux"))
+
+        assert helpers._get_pm_session() == "pm-current"
 
 
 # ---------------------------------------------------------------------------

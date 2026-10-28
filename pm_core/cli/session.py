@@ -718,6 +718,8 @@ def session_list():
     click.echo(f"{'SESSION':<40} {'CLIENTS':>7}  SOCKET")
     for row in rows:
         sock = row["socket"] or "(default server)"
+        if row.get("shared"):
+            sock += "  (shared)"
         click.echo(f"{row['name']:<40} {row['attached']:>7}  {sock}")
 
 
@@ -770,14 +772,15 @@ def session_kill(start_dir):
             tmux_mod.kill_session(g, socket_path=socket_path)
         tmux_mod.kill_session(session_name, socket_path=socket_path)
     else:
-        saved_socket = os.environ.pop("PM_TMUX_SOCKET", None)
-        try:
-            for g in tmux_mod.list_grouped_sessions(session_name):
-                tmux_mod.kill_session(g)
-            tmux_mod.kill_session(session_name)
-        finally:
-            if saved_socket is not None:
-                os.environ["PM_TMUX_SOCKET"] = saved_socket
+        # Address the default server explicitly: tmux follows $TMUX when no
+        # -S is given, which from inside another pm session names a
+        # different server.
+        from pm_core.paths import default_socket_path
+        legacy_socket = str(default_socket_path())
+        for g in tmux_mod.list_grouped_sessions(session_name,
+                                                socket_path=legacy_socket):
+            tmux_mod.kill_session(g, socket_path=legacy_socket)
+        tmux_mod.kill_session(session_name, socket_path=legacy_socket)
 
     pane_layout.set_force_mobile(session_name, False)
 
