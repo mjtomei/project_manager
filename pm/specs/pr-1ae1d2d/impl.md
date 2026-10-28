@@ -34,13 +34,13 @@ Why the current code allows this:
    land on an index whose directory still holds foreign files.
 
 **Relationship to #264 / pr-1e9c117 (do not duplicate).** That PR (commit
-`2739187c`; its `PM_CAPTURES_PR` ownership guard is now on `master` — see
-`paths.captures_dir`) makes `captures_dir` fail closed when
+`2739187c`, not yet merged) makes `captures_dir` fail closed when
 `PM_CAPTURES_PR` is absent/empty/mismatched, i.e. it *prevents* the nested
-write when the marker is missing. This PR does **not** touch that routing
-rule. It owns the complementary half: persisted evidence is self-identifying,
-scenario membership is authoritative, and foreign/orphan records are
-detectable and moved out of the scenario namespace. The two compose: routing
+write when the marker is missing. `master` still hands the mount to any PR
+when the marker is unset (`if mount.is_dir() and (not mount_pr or mount_pr
+== pr_id)`), so the incident's path is live until #264 lands. This PR does
+**not** touch that routing rule; it defends on the evidence side (the
+`_captures_root_is_ours` quarantine guard, below). The two compose: routing
 stops the write; provenance makes any write that still happens (older
 controllers without the marker, a marker that matches, a legacy pre-fix
 record) detectable and non-authoritative.

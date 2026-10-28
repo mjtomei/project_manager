@@ -451,6 +451,26 @@ def test_audit_names_a_member_without_a_record_as_a_member(tmp_path):
     assert not any("not bound to a QA run" in x for x in a.anomalies)
 
 
+def test_audit_flags_a_member_whose_dir_holds_a_foreign_record(tmp_path):
+    """A nested fixture that overwrites this run's index during the run leaves
+    a foreign record where a manifest member's evidence should be.  Reporting
+    only "foreign record" beside a membership list that claims the scenario
+    would hide the fact that this run's evidence is gone — the prior-run
+    branch already says "missing", and a foreign overwrite is the same loss."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    _scenario_dir(root, 1, {"index": 1, "pr_id": "pr-fixture",
+                            "run_id": "fixrun"})
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.dirs[1].state == captures.FOREIGN
+    assert any("manifest member" in x and "pr-fixture" in x
+               and "evidence for it is missing" in x
+               for x in a.anomalies)
+
+
 def test_audit_ignores_non_numeric_dirs(tmp_path):
     root = _root(tmp_path)
     (root / "scenarios" / captures.FOREIGN_DIR_NAME).mkdir(parents=True)

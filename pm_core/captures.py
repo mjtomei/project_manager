@@ -511,9 +511,19 @@ def audit(pr_captures_dir: Path | str | None, *,
                     f"recovered from {RUNS_DIR_NAME}/")
     for i, ev in sorted(dirs.items()):
         if ev.state == FOREIGN:
-            anomalies.append(
-                f"scenarios/{i}: foreign record (pr_id={ev.owner_pr}) — "
-                "not this PR's evidence")
+            if i in member_indices:
+                # The manifest says this run owns the scenario, but the only
+                # record on disk belongs to another PR (a nested fixture that
+                # overwrote this index during the run).  Its evidence is gone,
+                # not merely someone else's — same rule as a prior-run member.
+                anomalies.append(
+                    f"scenarios/{i}: manifest member whose directory holds a "
+                    f"foreign record (pr_id={ev.owner_pr}) — this run's "
+                    "evidence for it is missing")
+            else:
+                anomalies.append(
+                    f"scenarios/{i}: foreign record (pr_id={ev.owner_pr}) — "
+                    "not this PR's evidence")
         elif ev.state == UNOWNED:
             if i in member_indices:
                 # The manifest says this run owns the scenario, but nothing
