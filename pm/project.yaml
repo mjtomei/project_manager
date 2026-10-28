@@ -14561,7 +14561,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T03:01:24.609677+00:00'
+  updated_at: '2026-10-28T03:15:47.409941+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15463,6 +15463,28 @@ prs:
       tip, and read refs/remotes/origin/<branch> in a fresh clone, not refs/heads/<branch>.'
     created_at: '2026-10-28T03:01:24Z'
     last_edited: '2026-10-28T03:01:24Z'
+  - id: note-a473d00
+    text: 'QA S7 (2026-10-28, container mode, nested podman, real file:// upstream):
+      PASS. R3 reuse verified end-to-end: review and sign-off containers on the PR
+      workdir mount the SAME /run/pm-push-proxy dir as the impl container (proxy.json
+      workdir/allowed_branch/pid and the socket inode all unchanged; exactly one live
+      proxy dir for the PR workdir); closing review+sign-off leaves the shared proxy
+      serving and the impl push lands; reverse order (live QA proxy first, then pm
+      pr start) gives the impl a distinct workdir-keyed dir and leaves the QA proxy
+      pid/inode/mount untouched, with impl then QA pushes each landing on the branch
+      and neither moving the other clone ref. Harness caveats for a re-run: (1) `pm
+      qa run` aborts with INPUT_REQUIRED when the PR has no QA spec and `pm pr spec`
+      generates one via `claude -p` (not allowed here) - seed pm/specs/<pr>/qa.md
+      in the PR workdir instead; (2) with containers the QA scenario container is
+      created BEFORE concretization, so the fake qa_concretize 900 s delay keeps the
+      container live without blocking its appearance; (3) killing an impl window leaves
+      that workdir shared proxy dir+socket in /tmp until `pm session kill` (known
+      cross-process refcount residual, #241/pr-ac12b47), and the dual-remote push
+      target (/tmp/<base>/repo plus the file:// upstream) must both be reset if you
+      rewind a fixture branch between takes or the first push URL rejects non-fast-forward
+      and the container push exits 1. Captures: /pm-captures/scenarios/7/{story1-review-joins,story2-review-relaunch,story3-signoff-joins,story4-stop-review-signoff,story5-reverse-order}.'
+    created_at: '2026-10-28T03:15:47Z'
+    last_edited: '2026-10-28T03:15:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
