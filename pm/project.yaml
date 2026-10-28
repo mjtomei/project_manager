@@ -21482,11 +21482,160 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-05-13T14:15:50.184464+00:00'
+  updated_at: '2026-10-27T09:19:39.675237+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-163b8d7
+    text: 'Impl 2026-10-27 (commit 4f902f18): task-scoped verdict scan in pm_core/verdict_transcript.py.
+      extract_verdict_from_transcript now walks back across non-task user records
+      (isMeta loop ticks/autonomous checks, [SCHEDULED TASK - AUTOMATED FIRING ...]
+      /loop deliveries, Monitor <task-notification>, reminder-only/system-reminder-only
+      records, tool results) and stops at a genuine task boundary (initial prompt,
+      retry, verifier feedback, Stop-hook feedback). New find_verdict_turn returns
+      the verdict turn text + uuid/timestamp/line identity; the reason is read from
+      the verdict turn; poll_for_verdict / wait_for_follow_up_verdict / review_loop
+      adoption return the verdict-turn text so markers survive a postscript. qa_loop
+      records scenario_verdict_sources (pr_id/loop_id/scenario/session_id/turn_id)
+      in qa_resume.json and build_resume_state drops a verdict whose source no longer
+      matches the current attempt (no historical PASS resurrection, verification still
+      runs). Tests: tests/test_verdict_transcript.py replays the real scenario-44
+      /loop wakeup and #249 S71 Monitor postscript plus barrier/identity cases; tests/test_qa_loop.py
+      TestPollVerdictsAfterLoopWakeup; tests/test_qa_resume.py identity tests. Captures:
+      impl/pre-fix and impl/post-fix scenario44-replay (asciinema cast + mp4). Full
+      suite 3755 passed; pre-existing env failures only (test_hook_events standalone
+      receiver, 12 test_markdown_render missing markdown dep).'
+    created_at: '2026-10-27T04:50:36Z'
+    last_edited: '2026-10-27T04:50:36Z'
+  - id: note-a1cd0e9
+    text: 'Review i2 (68b5): (1) find_verdict_turn no longer resets the collected
+      turn text when it crosses a tool_result record — tool results belong to the
+      same assistant turn, so VerdictHit.text now really covers the whole turn (previously
+      text after a tool result inside the verdict turn was dropped, contradicting
+      the i1 contract); (2) qa_loop reads the reason from hit.text via new extract_reason_from_text
+      instead of re-scanning the transcript, removing a double full-file read and
+      the window where a wakeup turn appended between the two reads could supply a
+      different turn''s reason; (3) spec section 6 records the i1/i2 extensions (isCompactSummary
+      transparency, whole-turn hit.text, loop-derived verdicts carry no source, multi-reminder
+      records). Full suite 3774 passed, 1 pre-existing env failure (test_hook_events
+      standalone receiver). Log: /pm-captures/review-8efa789-i2/full-suite.log'
+    created_at: '2026-10-27T05:38:07Z'
+    last_edited: '2026-10-27T05:38:07Z'
+  - id: note-ecd5103
+    text: 'Review i3 (68b5): wait_for_follow_up_verdict now ignores the verdict that
+      prompted the call. Task-scoped scanning made the follow-up waiter (review_loop
+      / watcher_base INPUT_REQUIRED waits) re-return the stale INPUT_REQUIRED when
+      a /loop tick or Monitor postscript arrived before the human answered — the caller
+      then coerced it to NEEDS_WORK and ended the wait. The waiter snapshots the pre-call
+      verdict''s line_index and only accepts a hit at a later line (the transcript
+      is append-only); poll_for_verdict keeps the unguarded scan because it must return
+      a verdict emitted just before it is called. New test test_follow_up_verdict_ignores_the_verdict_that_prompted_it
+      (verified it fails without the guard). Also corrected the read_latest_assistant_text
+      docstring (verdict detection is raw-bytes, only the turn text depends on the
+      content schema) and recorded the behavior in spec section 6. Full suite 3762
+      passed, 1 skipped, 1 pre-existing env failure deselected (test_hook_events standalone
+      receiver).'
+    created_at: '2026-10-27T05:55:20Z'
+    last_edited: '2026-10-27T05:55:20Z'
+  - id: note-fad14b6
+    text: 'Review i4 (68b5): wait_for_follow_up_verdict takes an optional baseline_line,
+      snapshotted by _verify_single_scenario BEFORE it sends the re-verification prompt.
+      The i3 guard compared against a call-time scan, which is wrong for the only
+      caller that prompts the pane itself: qa_loop sends the follow-up, settles ~2s,
+      then waits, so an answer landing in that window was already in the transcript
+      and got rejected as "the verdict that prompted the call" — the waiter then blocked
+      until stop_check/pane death. Review/watcher waits keep the call-time scan (a
+      human answers a question the pane already asked). Tests: test_follow_up_verdict_honors_a_pre_prompt_baseline
+      (fails without the fix) and test_reverification_baselines_before_prompting_the_verifier.
+      Full suite 3706 passed; the 55 failures + 17 errors are identical on an origin/master
+      worktree (signoff_integration/merge_publish/git_ops env, 12 test_markdown_render
+      missing markdown dep, 1 test_hook_events standalone receiver). Spec section
+      6 updated. (2026-10-27T06:10:00Z)'
+    created_at: '2026-10-27T06:13:01Z'
+    last_edited: '2026-10-27T06:13:01Z'
+  - id: note-05d109c
+    text: 'Review i1 (5e61): the task-scoped scan matched verdict keywords against
+      the raw JSONL bytes, so a keyword appearing only inside a thinking block or
+      a tool_use input (a QA worker grepping the worktree for INPUT_REQUIRED, a file
+      the agent wrote) was reported as the verdict — find_verdict_turn returned VerdictHit(text=""),
+      making extract_verdict_from_transcript say INPUT_REQUIRED while the returned
+      turn text carried no verdict for parse_review_verdict / extract_between_markers
+      / reason parsing. find_verdict_turn now requires a text-bearing assistant record
+      and a hit additionally requires the keyword to occupy a whole line of the parsed
+      text (_text_line_is_verdict); markdown markers still tolerated and the raw-byte
+      boundary check is kept so acceptance does not widen. VerdictHit.text therefore
+      always contains the verdict. Tests: keyword only in a thinking block / in a
+      Grep tool_use input is not a verdict (both fail without the gate); hit.text
+      carries the verdict after a /loop wakeup. Corpus check over ~12.6k local transcripts:
+      21 false positives before, 0 after; the 4 remaining old-vs-new differences are
+      legitimate verdicts preserved across a wakeup. Full suite 3709 passed, 1 skipped;
+      55 failed + 17 errors identical to the master baseline. Log: /pm-captures/review-8efa789-5e61-i1/full-suite.log'
+    created_at: '2026-10-27T06:57:19Z'
+    last_edited: '2026-10-27T06:57:19Z'
+  - id: note-d836a9f
+    text: 'Review i2 (5e61): wait_for_follow_up_verdict now scans the transcript once
+      before entering the hook-event loop. The i4 baseline made an answer that landed
+      during qa_loop''s send/settle window acceptable but not observable: that answer''s
+      own idle_prompt fires before the waiter sets hook_baseline, and hook_events.wait_for_event
+      only returns events with timestamp > newer_than, so the waiter was never woken
+      by it and blocked until stop_check/pane death. The pre-wait scan uses the same
+      line_index > baseline_line guard, so it is a no-op for the human-answer callers
+      (review/watcher), whose baseline is the newest verdict at call time. test_follow_up_verdict_honors_a_pre_prompt_baseline
+      now writes no hook event at all (the real caller''s state) and fails without
+      the fix. Also documented _DEFAULT_REASON_VERDICTS (mirrors ALL_VERDICTS, kept
+      local to avoid the qa_loop import cycle) and recorded the behavior in spec section
+      6. Captures re-checked: /pm-captures/impl/{pre,post}-fix/scenario44-replay still
+      replay as documented (scenario 44 -> INPUT_REQUIRED, S71 -> PASS, control ->
+      PASS). Full suite 3709 passed, 1 skipped; the 55 failures + 17 errors are the
+      same env baseline as i4 (signoff_integration, merge_publish, git_ops, 12 test_markdown_render
+      missing markdown dep, 1 test_hook_events standalone receiver). Log: /pm-captures/review-8efa789-5e61-i2/full-suite-final.log'
+    created_at: '2026-10-27T07:28:29Z'
+    last_edited: '2026-10-27T07:28:29Z'
+  - id: note-d9b9477
+    text: 'Review i3 (5e61): (1) `[Request interrupted by user]` / `[Request interrupted
+      by user for tool use]` are now non-task records in `_NON_TASK_TEXT_PREFIXES`.
+      Claude Code writes them when the user hits Esc; treating them as a task boundary
+      made the task-scoped scan lose a verdict the pre-PR latest-turn scan still found.
+      Corpus sweep over ~33.5k local transcripts (old vs new extractor): 0 new false
+      positives, 5 genuine verdicts recovered across /loop + Monitor wakeups, and
+      the interruption variant was one of only two remaining old-vs-new drops. A follow-up
+      instruction typed after the interruption is a separate record and stays a barrier.
+      Tests: test_user_interruption_is_transparent (fails without the fix) and test_new_task_after_a_user_interruption_supersedes.
+      (2) Re-checked the `Stop hook feedback:` barrier and kept it — spec §6 now carries
+      the evidence: 193,105 of 193,107 occurrences in the corpus are hook_receiver.py
+      open failures, but the same receiver serves the idle_prompt hook, so when it
+      fails the QA loop gate never opens and nothing is polled; the barrier protects
+      the 1 genuine-instruction case. (3) Nits: dropped a dead `if hit is not None`
+      branch in _poll_tmux_verdicts, hoisted the lazy find_verdict_turn import in
+      _adopt_in_flight_review. Full suite 3711 passed, 1 skipped; 55 failed + 17 errors
+      identical to the master env baseline (signoff_integration/merge_publish/git_ops,
+      12 test_markdown_render missing markdown dep, 1 test_hook_events standalone
+      receiver). Log: /pm-captures/review-8efa789-5e61-i3-full-suite-final.log (2026-10-27T08:05:00Z)'
+    created_at: '2026-10-27T07:55:46Z'
+    last_edited: '2026-10-27T07:55:46Z'
+  - id: note-16ae068
+    text: 'QA S1 passed all four runtime stories (loop tick, Monitor notification,
+      new-task barrier, hidden keyword). Future-run note: qa_resume.json''s verified_scenarios
+      lags the final poll iteration, so a run whose last pending scenario is the only
+      one never shows its index live (pre-existing write cadence, identical write
+      sites on origin/master, unchanged by this PR); the TUI `PASS (verified)` log
+      line is authoritative. Captures: /pm-captures/scenarios/1.'
+    created_at: '2026-10-27T09:19:39Z'
+    last_edited: '2026-10-27T09:19:39Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-06a96fa
   plan: plan-regression
   title: QA scenarios reuse regression tests as their flow driver
@@ -25637,11 +25786,29 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-10-27T04:50:44.346668+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d8d9490
+    text: 'Coordination from pr-8efa789 (impl 4f902f18, pushed): verdict extraction
+      is now task-scoped, not latest-turn-only. It walks back across non-task wakeup
+      records (isMeta /loop ticks, [SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED
+      PROMPT] deliveries, Monitor <task-notification>, reminder-only records, tool
+      results) and stops at a genuine task boundary. A retry that re-sends the original
+      prompt into the same session is a plain user message, so it IS a boundary: the
+      earlier verdict is not resurrected while the retry runs, and the retry turn
+      verdict wins once emitted. If your missing/incorrectly-formatted-output retry
+      writes a distinct prompt (not a bare re-send), that still works as a boundary;
+      avoid sending the retry as an isMeta/system-reminder-only record, which would
+      be treated as transparent and could surface the pre-retry verdict. pr-8efa789
+      does not implement the wall-clock deadline / max-idles / surfacing behavior
+      — that stays with you. Latest full suite on pr-8efa789: 3755 passed (2 pre-existing
+      env failures: test_hook_events standalone receiver; test_markdown_render missing
+      markdown dep).'
+    created_at: '2026-10-27T04:50:44Z'
+    last_edited: '2026-10-27T04:50:44Z'
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff

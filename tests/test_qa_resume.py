@@ -36,6 +36,7 @@ from pm_core.qa_loop import (
     clear_resume_file,
     _resume_file_path,
 )
+from pm_core.verdict_transcript import VerdictHit
 from pm_core import store
 from pm_core.tui import qa_loop_ui
 
@@ -75,6 +76,14 @@ def _make_state(qa_workdir) -> QALoopState:
     )
     state.scenario_verdicts = {1: VERDICT_PASS}
     state.scenario_verdict_reasons = {1: "looks good"}
+    state.scenario_verdict_sources = {1: {
+        "pr_id": "pr-001",
+        "loop_id": "abc123",
+        "scenario": 1,
+        "session_id": "sess-1",
+        "turn_id": "turn-1",
+        "timestamp": "2026-05-13T14:00:00.000Z",
+    }}
     state.verified_scenarios = {1}
     state.finalize_verdict = "FINALIZE_DONE"
     return state
@@ -103,6 +112,7 @@ def test_resume_roundtrip(tmp_path):
     assert rebuilt.verified_scenarios == {1}
     assert rebuilt.scenario_verdicts == {1: VERDICT_PASS}
     assert rebuilt.scenario_verdict_reasons == {1: "looks good"}
+    assert rebuilt.scenario_verdict_sources[1]["turn_id"] == "turn-1"
 
     # Scenario runtime fields the orchestration loop depends on survive.
     s1 = next(s for s in rebuilt.scenarios if s.index == 1)
@@ -137,6 +147,54 @@ def test_clear_resume_file(tmp_path):
 
 def test_load_resume_file_missing(tmp_path):
     assert _load_resume_file(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# Verdict identity is scoped to PR / run / scenario / attempt
+# ---------------------------------------------------------------------------
+
+def _snapshot(tmp_path) -> dict:
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    loaded = _load_resume_file(tmp_path)
+    assert loaded is not None
+    return loaded
+
+
+def test_resume_drops_verdict_from_previous_session(tmp_path):
+    """A verdict recorded for an older worker session must not be trusted
+    after a relaunch: the new attempt is polled from scratch."""
+    loaded = _snapshot(tmp_path)
+    loaded["scenario_verdict_sources"]["1"]["session_id"] = "old-sess"
+    rebuilt = build_resume_state(loaded)
+    assert 1 not in rebuilt.scenario_verdicts
+    assert 1 not in rebuilt.scenario_verdict_reasons
+    assert 1 not in rebuilt.scenario_verdict_sources
+    assert 1 not in rebuilt.verified_scenarios
+
+
+def test_resume_drops_verdict_from_previous_run(tmp_path):
+    loaded = _snapshot(tmp_path)
+    loaded["scenario_verdict_sources"]["1"]["loop_id"] = "other-run"
+    rebuilt = build_resume_state(loaded)
+    assert 1 not in rebuilt.scenario_verdicts
+    assert 1 not in rebuilt.verified_scenarios
+
+
+def test_resume_drops_verdict_for_other_scenario(tmp_path):
+    loaded = _snapshot(tmp_path)
+    loaded["scenario_verdict_sources"]["1"]["scenario"] = 2
+    rebuilt = build_resume_state(loaded)
+    assert 1 not in rebuilt.scenario_verdicts
+
+
+def test_resume_keeps_legacy_verdict_without_source(tmp_path):
+    """Snapshots written before verdict sources existed stay trusted."""
+    loaded = _snapshot(tmp_path)
+    loaded.pop("scenario_verdict_sources")
+    rebuilt = build_resume_state(loaded)
+    assert rebuilt.scenario_verdicts == {1: VERDICT_PASS}
+    assert rebuilt.verified_scenarios == {1}
 
 
 # ---------------------------------------------------------------------------
@@ -510,8 +568,8 @@ def test_resumed_pass_skips_reverification(tmp_path):
          patch("pm_core.qa_loop.time.sleep"), \
          patch("pm_core.qa_loop.time.monotonic", side_effect=[0, 100]), \
          patch("pm_core.hook_events.read_event", return_value=fake_event), \
-         patch("pm_core.qa_loop.extract_verdict_from_transcript",
-               return_value="PASS"), \
+         patch("pm_core.qa_loop.find_verdict_turn",
+               return_value=VerdictHit("PASS", "PASS")), \
          patch("pm_core.tmux.pane_exists", return_value=True), \
          patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
          patch("pm_core.qa_loop._verify_single_scenario") as mock_verify:
