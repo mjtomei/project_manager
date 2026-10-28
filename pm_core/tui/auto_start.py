@@ -308,15 +308,27 @@ async def consume_breadcrumb(app) -> None:
         _log.warning("consume_breadcrumb: failed to read breadcrumb: %s", e)
         breadcrumb.unlink(missing_ok=True)
         return
+    if not isinstance(data, dict):
+        # Valid JSON but not a breadcrumb object (``[]``, ``null``, a bare
+        # string).  Every field below is read with ``.get``, so a corrupt
+        # file must be dropped here rather than raising out of the mount.
+        _log.warning("consume_breadcrumb: ignoring non-object breadcrumb "
+                     "(%s)", type(data).__name__)
+        breadcrumb.unlink(missing_ok=True)
+        return
 
     # The breadcrumb file is shared by every pm session under this PM home.
     # A breadcrumb written by a *different* session's restart belongs to that
     # session's next mount: consuming it here would apply another project's
     # targets (then drop them as "missing") and leave the owning session
-    # with nothing to restore.  Leave it in place for its owner.
+    # with nothing to restore.  Leave it in place for its owner.  A mount
+    # with no session name (``mine is None``) can never own a scoped
+    # breadcrumb, so it leaves those alone too.
     owner = data.get("session")
+    if isinstance(owner, str):
+        owner = owner.split("~")[0]
     mine = _app_session(app)
-    if owner and mine and owner != mine:
+    if owner and owner != mine:
         _log.info("consume_breadcrumb: leaving breadcrumb for session %s "
                   "(this session is %s)", owner, mine)
         return

@@ -754,6 +754,56 @@ class TestBreadcrumbSessionOwnership:
         assert "pr-legacy" in app._auto_start_targets
         assert not (tmp_path / "autostart-resume.json").exists()
 
+    def test_breadcrumb_left_for_owner_when_mount_has_no_session(self, tmp_path):
+        """A mount with no session name cannot own a scoped breadcrumb.
+
+        ``pm _tui`` run outside tmux (or a mount whose tmux lookup failed)
+        has ``_session_name is None``.  It used to consume *any* breadcrumb,
+        including one another session's restart had just written, dropping
+        that session's state.
+        """
+        self._write(tmp_path, {
+            "session": "pm-alpha", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = None
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        assert (tmp_path / "autostart-resume.json").exists()
+
+    def test_grouped_session_owner_matches_its_base(self, tmp_path):
+        """A ``~N`` suffix in the recorded owner still matches its base."""
+        self._write(tmp_path, {
+            "session": "pm-alpha~1", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-alpha"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert "pr-alpha" in app._auto_start_targets
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+    def test_non_object_breadcrumb_is_dropped(self, tmp_path):
+        """Valid JSON that is not an object must not crash the mount."""
+        (tmp_path / "autostart-resume.json").write_text("[]")
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        assert not (tmp_path / "autostart-resume.json").exists()
+
 
 class TestMergeRestartMarkerSessionScope:
     """The marker is one shared file; it must belong to one session.
@@ -848,6 +898,29 @@ class TestMergeRestartMarkerSessionScope:
             (tmp_path / "merge-restart").touch()  # what older CLIs wrote
             assert tui_pidfile.has_merge_restart_marker("pm-bravo") is True
             assert tui_pidfile.read_merge_restart_marker() == (True, None)
+            # A session-less caller may still consume an unscoped marker.
+            assert tui_pidfile.clear_merge_restart_marker(None) is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_scoped_marker_left_alone_by_session_less_caller(self, tmp_path):
+        """A caller with no session name cannot own a scoped marker.
+
+        ``pm _tui`` outside tmux (or a mount whose tmux lookup failed) has
+        no session, so it must not discard another session's restart
+        request — the cross-session hazard session scoping exists to close.
+        """
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            assert tui_pidfile.has_merge_restart_marker(None) is False
+            assert tui_pidfile.clear_merge_restart_marker(None) is False
+            assert auto_start.resolve_mount_trigger(None) == "initial"
+            assert (tmp_path / "merge-restart").exists()
+            # The owner still sees and consumes it.
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
 
     def test_save_breadcrumb_deletes_only_own_marker(self, tmp_path):
         from pm_core import tui_pidfile

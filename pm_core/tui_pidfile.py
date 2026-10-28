@@ -173,14 +173,20 @@ def write_merge_restart_marker(session: str | None) -> Path:
 def has_merge_restart_marker(session: str | None = None) -> bool:
     """Is there a marker this *session* should act on?
 
-    Unscoped markers apply to any session (legacy behaviour); a marker
-    naming another session belongs to that session's restart.
+    Unscoped markers apply to any session (legacy behaviour).  A marker
+    naming a session applies only to that session, and a caller with no
+    session name (``session is None`` — e.g. ``pm _tui`` run outside tmux,
+    or a mount whose tmux lookup failed) cannot be its owner: it must
+    leave the request for the session it names instead of consuming it on
+    someone else's behalf.
     """
     exists, owner = read_merge_restart_marker()
     if not exists:
         return False
-    if owner is None or session is None:
+    if owner is None:
         return True
+    if session is None:
+        return False
     return owner == session.split("~")[0]
 
 
@@ -188,7 +194,9 @@ def clear_merge_restart_marker(session: str | None = None) -> bool:
     """Remove the marker when it is unscoped or owned by *session*.
 
     Returns True when a marker was removed.  Another session's marker is
-    left in place for its own TUI to consume.  The unlink is conditional on
+    left in place for its own TUI to consume, and a caller with no session
+    name (``session is None``) removes only an unscoped (legacy) marker —
+    it cannot prove it owns a scoped one.  The unlink is conditional on
     the file still holding the bytes that were checked: a concurrent
     restart in another session can write *its* marker between the read and
     the unlink, and deleting that one would drop the state preservation it
@@ -204,7 +212,8 @@ def clear_merge_restart_marker(session: str | None = None) -> bool:
         # it with a readable marker keeps its own.
         return unlink_if_unchanged(path, None)
     owner = _marker_owner(raw)
-    if owner is not None and session is not None and owner != session.split("~")[0]:
+    if owner is not None and (session is None
+                              or owner != session.split("~")[0]):
         return False
     return unlink_if_unchanged(path, raw)
 

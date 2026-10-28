@@ -332,6 +332,31 @@ implementing and QA-ing it, and ship here (each has a PR note):
   `test_clear_does_not_remove_a_marker_rewritten_underneath`,
   `test_undecodable_marker_never_raises`; the last two verified to fail
   against the pre-fix implementation).
+- Session-less callers must not act on another session's restart state
+  (review-loop c0c9 i2). The session scoping above compared the marker's
+  owner only when the caller *had* a session name, so a caller with
+  `session is None` (`pm _tui` run outside tmux, or a mount whose tmux
+  lookup failed) treated a marker naming another session as its own and
+  deleted it — the same cross-session hazard the scoping exists to close,
+  in the one input shape it did not cover. `has_merge_restart_marker` /
+  `clear_merge_restart_marker` now treat a scoped marker as "not mine"
+  when the caller has no session (an *unscoped* legacy marker still
+  applies). `consume_breadcrumb` had the same gap (`if owner and mine and
+  owner != mine`), and now leaves a scoped breadcrumb for its owner
+  whenever the owner does not match — including a session-less mount —
+  and normalizes a `~N` suffix on the recorded owner. Separately,
+  `consume_breadcrumb` read `data.get("session")` without checking that
+  the parsed JSON is an object, so a corrupt-but-valid breadcrumb (`[]`,
+  `null`, a bare string) raised `AttributeError` out of the mount; it is
+  now dropped like any other unreadable breadcrumb (the same "corruption
+  must never crash the caller" rule the pidfile and marker follow). Tests
+  in `TestMergeRestartMarkerSessionScope` /
+  `TestBreadcrumbSessionOwnership`
+  (`test_scoped_marker_left_alone_by_session_less_caller`,
+  `test_breadcrumb_left_for_owner_when_mount_has_no_session`,
+  `test_grouped_session_owner_matches_its_base`,
+  `test_non_object_breadcrumb_is_dropped`; all four verified to fail
+  against the pre-fix implementation).
 
 ## Edge cases
 
