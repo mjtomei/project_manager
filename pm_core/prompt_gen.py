@@ -1429,7 +1429,12 @@ def generate_watcher_prompt(data: dict, session_name: str | None = None,
             where bugs.md and improvements.md live.
         auto_start_targets: The PRs auto-start is targeting. When set,
             the monitor should only intervene on PRs in the union of their
-            transitive dependency fan-ins.
+            transitive dependency fan-ins. An explicitly empty list (what
+            ``AutoStartWatcher`` passes when it owns no targets) is
+            fail-closed: the prompt forbids acting on any PR (observation
+            only) and says that restriction overrides the generic
+            fix-what-you-can sections. Omitting the argument keeps the
+            legacy unscoped prompt.
         auto_start_target: Legacy single-target alias for
             ``auto_start_targets``.
     """

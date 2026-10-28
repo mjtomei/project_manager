@@ -439,6 +439,35 @@ class TestConsumeFailClosed:
         assert _rejected_files(tmp_path) == []
         assert any("remains off" in m for m in app.logs)
 
+    def test_two_rejections_keep_distinct_evidence(self, tmp_path):
+        """Back-to-back rejections must not overwrite each other's bytes.
+
+        Both quarantines land in the same UTC second, so this exercises the
+        ``-N`` disambiguation in ``_quarantine_breadcrumb``: a collision
+        would either lose evidence or (worse) re-parse a stale file.
+        """
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "all_mode": True,
+            "targets": [{"pr_id": "pr-a"}], "run_id": "incident",
+        })
+        _consume(app, tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": True, "all_mode": False,
+            "targets": {"pr-a": {}}, "run_id": "incident",
+        })
+        _consume(app, tmp_path)
+
+        rejected = _rejected_files(tmp_path)
+        assert len(rejected) == 2, rejected
+        payloads = [json.loads(p.read_text()) for p in rejected]
+        # Both originals survive: the all-mode request and the mapping
+        # (incident) shape are each preserved verbatim.
+        assert any(p.get("all_mode") is True for p in payloads)
+        assert any(isinstance(p.get("targets"), dict) for p in payloads)
+        assert not (tmp_path / "autostart-resume.json").exists()
+        assert app._auto_start is False
+
     def test_valid_multi_target_restore_only_runs_closure(self, tmp_path):
         prs = [_pr("pr-dep", status="merged"), _pr("pr-a", deps=["pr-dep"]),
                _pr("pr-b"), _pr("pr-unrelated")]

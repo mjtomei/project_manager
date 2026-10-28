@@ -209,6 +209,13 @@ Rules, in order:
   work when autostart is off (the `test_restores_manual_loop_without_auto_start`
   path).
 - `pm autostart clear` / bare `autostart` still turn autostart OFF.
+- `pm autostart status --json` carries an additive `ok` field — `true` on
+  success, `false` (with `error`/`message`) on an owner-side failure —
+  matching `add`/`remove`/`clear`/`list`, so a captured status snapshot is
+  self-describing. The rest of the object is still the
+  `pm.autostart.status/1` document; this is an additive field (cf.
+  pr-e69afc4 "additive fields"; `pm/specs/pr-0b87a97/impl.md` R3 enumerates
+  the fields without `ok`). *(PR note: QA S7 incidental fix @cfd01f0b.)*
 
 ## Implicit requirements
 
@@ -327,6 +334,11 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
 11. A malformed review-loop history entry does not abort the restore, the
     loop-resume summary never paints over the rejection diagnostic, and an
     all-malformed `review_loops` file claims no resume.
+12. Two back-to-back rejections in the same UTC second preserve both
+    original files under distinct `-N` names (quarantine never overwrites
+    evidence).
+13. `pm autostart status --json` carries `ok: true` on success and
+    `ok: false` with `error`/`message` on an owner-side failure.
 
 Updated existing tests: remove `_auto_start_all` fields and all-mode
 assertions; replace targetless fixtures with explicit targets; update
