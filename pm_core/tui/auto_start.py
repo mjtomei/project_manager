@@ -1029,7 +1029,12 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
                 continue
             _log.info("auto_start: re-arming retryable review launch for %s "
                       "(episode %d)", pr_id, getattr(loop, "retry_episodes", 0) + 1)
-            app.log_message(f"Auto-start: retrying review launch for {pr_id}")
+            # Held like the "targets +=" confirmation: _start_loop logs
+            # "Review loop resumed …" in the same tick, so the single-line
+            # log would otherwise show only that later message — the re-arm
+            # announcement would be logged but never visible.
+            app.log_message(f"Auto-start: retrying review launch for {pr_id}",
+                            hold=CONFIRM_HOLD_SECONDS)
             # Cleared before the thread starts (it must not resume the
             # spent budget), restored if _start_loop bails so the failure
             # stays retryable instead of being silently disarmed.  This is

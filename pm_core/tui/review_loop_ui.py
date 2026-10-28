@@ -464,6 +464,20 @@ def _poll_loop_state(app) -> None:
         raise
 
 
+def _retry_backoff_pending(state) -> bool:
+    """Whether *state* is sleeping out a failed-launch retry backoff.
+
+    ``next_retry_at`` is set to a future timestamp when a failed launch
+    schedules its retry and cleared when an attempt succeeds or a new
+    episode starts, so a future value means the next attempt has not been
+    launched yet.
+    """
+    try:
+        return float(getattr(state, "next_retry_at", 0.0) or 0.0) > time.time()
+    except (TypeError, ValueError):
+        return False
+
+
 def _poll_loop_state_inner(app) -> None:
     """Inner implementation of poll loop state."""
     any_running = False
@@ -487,13 +501,24 @@ def _poll_loop_state_inner(app) -> None:
             # recorded error belongs to the attempt that just failed, not
             # to the one starting now, so it is labelled as the previous
             # failure rather than reading as this attempt's outcome.
+            #
+            # While the loop waits out a retry backoff, ``launch_attempts``
+            # still names the attempt that just failed and ``next_retry_at``
+            # is in the future; the upcoming attempt is ``attempts + 1``.
+            # Announce it then rather than waiting to observe the
+            # incremented counter: an attempt that starts and fails inside
+            # one poll tick (a container launch that dies in milliseconds)
+            # would otherwise never be announced — QA saw the final
+            # attempt-3 notice silently swallowed on every exhausted episode.
             attempts = int(getattr(state, "launch_attempts", 0) or 0)
             err = (getattr(state, "last_launch_error", "") or "").strip()
-            if attempts > 1 and err \
-                    and attempts != state._ui_notified_retry:
-                state._ui_notified_retry = attempts
+            upcoming = (attempts + 1 if _retry_backoff_pending(state)
+                        else attempts)
+            if upcoming > 1 and err \
+                    and upcoming != state._ui_notified_retry:
+                state._ui_notified_retry = upcoming
                 msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
-                       f"(attempt {attempts}; attempt {attempts - 1} failed: "
+                       f"(attempt {upcoming}; attempt {upcoming - 1} failed: "
                        f"{err[:200]})")
                 artifact = getattr(state, "last_launch_artifact", None)
                 if artifact:

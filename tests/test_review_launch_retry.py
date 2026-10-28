@@ -681,6 +681,14 @@ def test_old_window_then_container_failure_retries_the_same_command(tmp_path,
     cmds = []
 
     def fake_run(cmd, **_kw):
+        if "--review-loop" not in cmd:
+            # Not the launch under test.  Patching ``review_loop.subprocess.run``
+            # patches the process-wide ``subprocess.run``, so when pytest runs
+            # inside a tmux pane (TMUX set) the loop's ambient
+            # ``tmux display-message`` session-name lookup lands here too and
+            # used to consume the "first call fails" slot — making the test
+            # pass outside tmux and fail inside it.
+            return MagicMock(returncode=0, stdout="", stderr="")
         cmds.append(cmd)
         if len(cmds) == 1:
             return MagicMock(returncode=1, stdout="",
@@ -1580,6 +1588,29 @@ def test_auto_start_rearms_retryable_failure(tmp_path):
     assert state.retry_episodes == 1
 
 
+def test_auto_start_rearm_announcement_is_held(tmp_path):
+    """The re-arm announcement must survive the "Review loop resumed …"
+    message ``_start_loop`` logs in the same tick.
+
+    The log line holds one message, so without a hold the re-arm notice was
+    logged but never visible — QA scenario 9 saw only "Review loop resumed"
+    on the TUI's bottom line for every re-arm."""
+    from pm_core.tui import auto_start
+    state = ReviewLoopState(pr_id=PR, running=False,
+                            latest_verdict=VERDICT_LAUNCH_FAILED,
+                            launch_retryable=True, retry_ready_at=0,
+                            retry_episodes=0, iteration=1,
+                            _transcript_dir=str(tmp_path))
+    app = _auto_app(tmp_path, state)
+    with patch("pm_core.tui.review_loop_ui._start_loop"), \
+            patch("pm_core.tmux.in_tmux", return_value=True):
+        auto_start._auto_start_review_loops(app, app._data["prs"])
+    calls = [c for c in app.log_message.call_args_list
+             if "retrying review launch" in c.args[0]]
+    assert len(calls) == 1
+    assert calls[0].kwargs.get("hold", 0) >= auto_start.CONFIRM_HOLD_SECONDS
+
+
 def test_auto_start_rearm_clears_the_retry_notice_key(tmp_path):
     """The re-arm starts a new retry episode, whose attempts restart at 1.
     The per-episode notice key must be cleared, or its attempt 2 would look
@@ -1787,6 +1818,47 @@ def test_retry_notice_is_announced_again_in_a_later_iteration(tmp_path):
         review_loop_ui._poll_loop_state_inner(app)
     assert app.log_message.call_count == 2
     assert "second" in app.log_message.call_args[0][0]
+
+
+def test_retry_notice_announces_the_next_attempt_during_the_backoff(tmp_path):
+    """Each retry attempt must be announced even when it fails faster than a
+    poll tick.
+
+    While the loop sleeps out its backoff ``launch_attempts`` still names
+    the attempt that just failed and ``next_retry_at`` is in the future, so
+    the upcoming attempt is ``attempts + 1``.  Keying only on the
+    incremented counter silently swallowed the final attempt's notice on
+    every exhausted episode (QA scenario 9: the attempt-3 notice never
+    appeared because attempt 3 died in milliseconds)."""
+    from pm_core.tui import review_loop_ui
+    app = MagicMock()
+    state = ReviewLoopState(pr_id=PR, running=True, iteration=1,
+                            launch_attempts=2,
+                            last_launch_error="attempt 2 boom",
+                            next_retry_at=time.time() + 10)
+    app._review_loops = {PR: state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": []}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        # Backoff after attempt 2 failed: attempt 3 is announced now.
+        review_loop_ui._poll_loop_state_inner(app)
+        review_loop_ui._poll_loop_state_inner(app)
+        assert app.log_message.call_count == 1
+        msg = app.log_message.call_args[0][0]
+        assert "attempt 3" in msg
+        assert "attempt 2 failed" in msg
+        assert "attempt 2 boom" in msg
+        # Attempt 3 launches (backoff over) and dies inside the same tick:
+        # it must not be announced a second time.
+        state.launch_attempts = 3
+        state.next_retry_at = 0.0
+        review_loop_ui._poll_loop_state_inner(app)
+    assert app.log_message.call_count == 1
 
 
 def test_launch_failure_notice_does_not_promise_a_retry_outside_auto_start(
