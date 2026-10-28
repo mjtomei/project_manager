@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-5115af5
+  active_pr: pr-a4c4500
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T10:28:59.040883+00:00'
+  updated_at: '2026-10-28T10:40:15.424356+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14851,6 +14851,193 @@ prs:
       build-base; use setsid nohup.'
     created_at: '2026-10-28T02:46:54Z'
     last_edited: '2026-10-28T02:46:54Z'
+  - id: note-b89e71e
+    text: 'Review-loop f54b i6 (5498ed4a, incidental security follow-up to i5): every
+      ref update in the container-writable PR workdir fires the reference-transaction
+      hook (verified real git 2.34.1), so integration fetch_base (fetch + update-ref,
+      every sign-off routing pass) and _publish_local workdir update-refs still ran
+      container-authored code on the host. integration._git now always passes no_hooks=True;
+      _publish_local update-refs and _clone_workdir checkout pass it too. Two real-git
+      tests fail pre-fix. Full suite 4214 passed / 2 skipped / 1 test-fake failure
+      fixed (file rerun 48 passed); evidence /pm-captures/review-f54b-i6/. Config-key
+      escapes remain with pr-c558b14.'
+    created_at: '2026-10-27T18:00:28Z'
+    last_edited: '2026-10-27T18:00:28Z'
+  - id: note-10f5472
+    text: 'Review-loop f54b i7 (2f83b9eb, incidental security follow-up to i5/i6):
+      host `git status` in the container-writable PR workdir fires post-index-change
+      (status rewrites a stale index, the normal state after a container edit; verified
+      real git 2.34.1). `_workdir_is_dirty` (pr start, pr list --workdirs, pr cleanup)
+      now passes no_hooks=True; qa_loop._git_capture (planner hand-off status/fetch/push)
+      is always hookless like integration._git. Two real-git stale-index tests + updated
+      helper test fail pre-fix. Full suite 4205 passed / 2 skipped / 12 markdown_render
+      failures from missing venv dep (rerun 13 passed); evidence /pm-captures/review-f54b-i7/.
+      Config-key escapes remain with pr-c558b14.'
+    created_at: '2026-10-27T18:11:57Z'
+    last_edited: '2026-10-27T18:11:57Z'
+  - id: note-555d0c2
+    text: 'QA planning refresh at 8c5fad86 (after review loops d019/75b8/f54b): spec
+      qa.md commit a44a70dc adds R23 locale-independent/tolerant ownership, R24 container-authored
+      git hooks and abbreviated proxy options never execute on the host, R25 runnable
+      recovery guidance/truthful status; amends R2 (stopped run downgrades unverified
+      PASS, no finalize pane) and R15 (headroom re-clamp grows back). Fresh scenarios
+      34-48; locked S20-S33 unchanged. 34-35 rerun S21 (QA completion/supersede across
+      PRs with s1/s10; cancellation at each preparation stage); 36 reruns S20 launchers
+      on current head; 37 reruns crashed S23; 38 S24 story 1; 39 S25 stories 5/9;
+      40 hook isolation; 42 reconciliation incl. C locale; 43 S27 rerun; 44 S31 triple
+      4 + re-clamp; 45 S32 container overlap; 46-48 remain prerequisite-gated (pressure,
+      Docker, hour-aged locks). Planning only, no runtime PASS claimed.'
+    created_at: '2026-10-27T18:47:49Z'
+    last_edited: '2026-10-27T18:47:49Z'
+  - id: note-b98a128
+    text: 'Review-loop c2fc i1 (76081338): reviewed the QA-era fixes since f54b i10
+      (8c5fad86..4842eac7). One fix: b913a424 only discarded a superseded run snapshot
+      when a newer one coexisted; the superseded (stopped) run still rewrote its final
+      snapshot after fresh_start_qa popped it, so once the replacement finished and
+      cleared its own, a TUI restart recovered the stale stopped run as a completion
+      (duplicate note/transition; PR stays qa after PASS with auto-start off). QALoopState.superseded
+      is now set before stop by fresh_start_qa; finalization clears instead of rewriting;
+      a popped finished-but-unprocessed state has its snapshot cleared. Regression
+      tests fail pre-fix. Full suite 4260 passed/2 skipped (/pm-captures/review-c2fc-i1/full-suite.log).
+      Branch is 258 commits behind master; only pm/project.yaml conflicts (code merges
+      clean).'
+    created_at: '2026-10-27T22:33:22Z'
+    last_edited: '2026-10-27T22:33:22Z'
+  - id: note-57c4efd
+    text: 'Incidental fix 85f35730 (QA planning at 76081338): pm container status
+      listed a retained container under "Retained:" after cleanup had removed it (S36
+      observation; ID-bound markers are pruned only by the next full pass). Status
+      now filters displayed markers to allocations present in the inventory it already
+      takes; cleanup still honours every marker. Regression test fails pre-fix; full
+      suite 4261 passed / 2 skipped (run with TMUX unset; an inherited TMUX makes
+      test_fake_claude current-session test fail spuriously).'
+    created_at: '2026-10-27T23:19:52Z'
+    last_edited: '2026-10-27T23:19:52Z'
+  - id: note-1bff6b0
+    text: 'QA planning refresh at 76081338 (commit a696fa52): qa.md adds coverage
+      for the S34-S45 fixes plus c2fc i1 (supersede release/newest-snapshot/superseded
+      snapshot drop, stop during verification, dead-worker no concretizer adoption,
+      fork-EAGAIN poll tick, deferred-release retry/queued display, restart generation
+      tag, removed-launch PID advice, deleted-cwd EXIT release, popup project-root
+      labels and stopped-proxy reporting, status truthfulness) and resolves A16 (impl
+      pr start --fresh may verified-reuse the same healthy ID), A17 (S43 config hash
+      excludes PM trust seeding), A18 (removed fresh launch advice = retry), A19 (outage
+      peak may reach L+1, must recover to <=L). Fresh scenarios 49-57; locked 34-48
+      unchanged. S46/S47 not re-emitted (need provisioned VM/Docker host; still open,
+      not waived); hour-aged lock pruning folded into a 90-min soak (57); PID-1 orphan
+      reaping split into 56. Planning only, no runtime PASS claimed.'
+    created_at: '2026-10-27T23:19:53Z'
+    last_edited: '2026-10-27T23:19:53Z'
+  - id: note-7585b42
+    text: 'Review-loop 090d i1 (work/claude-opus-5-5): reviewed the 11 QA-era code
+      commits since c2fc i2 (85f35730..7257da86). Pushed ab2c3d56: (1) ae2c2520 fork-failure
+      handback re-counted a flagged verification (fails++ happened before _live_worker_pane
+      raised EAGAIN), exhausting the retry budget one attempt early -> count recorded
+      only after the result is handled, regression test fails pre-fix; (2) shared
+      container_reaper.inventory_has for the duplicated status display filter. Full
+      suite 4296 passed/2 skipped. Not changed, for the next pass: _retry_deferred_release
+      repeats the whole run-end release, so a window viewed at run end can be released
+      by a later retry once it is no longer viewed (consistent with "viewed at release
+      time"); a fork failure mid follow-up send could resend the follow-up once.'
+    created_at: '2026-10-28T01:11:48Z'
+    last_edited: '2026-10-28T01:11:48Z'
+  - id: note-a6a357e
+    text: 'Review-loop 090d i2 (work/claude-opus-5-5): reviewed ab2c3d56 (i1 fail-count
+      fix holds: every flagged branch records the count after handling; no early continue
+      skips it). Pushed 7e824be9: a fork failure on the follow-up extra Enters handed
+      the already-sent flag back and resent the follow-up; extra Enters are now best
+      effort (EAGAIN/ENOMEM only). Regression test fails pre-fix. Full suite 4297
+      passed / 2 skipped; log /pm-captures/review-090d-i2/full-suite.log. Left as-is:
+      _retry_deferred_release repeats the whole run-end release (viewed-at-release-time
+      semantics, consistent).'
+    created_at: '2026-10-28T01:20:12Z'
+    last_edited: '2026-10-28T01:20:12Z'
+  - id: note-45b1523
+    text: 'Review-loop 090d i3 (work/claude-opus-5-5): reviewed 7e824be9 (i2 extra-Enter
+      fix holds; send_keys is a single tmux command, so the follow-up text and its
+      Enter cannot be split by a fork failure). Pushed bf72c4fd, incidental/pre-existing
+      on master: the follow-up and extra Enters use check=True tmux calls, so a worker
+      pane exiting after its liveness check raised CalledProcessError (not the OSError
+      the poll hands back) and ended the whole QA run as ERROR. New _send_verification_followup:
+      refused follow-up -> existing window-gone INPUT_REQUIRED branch; refused extra
+      Enter is best effort. Two regression tests fail pre-fix. Full suite 4299 passed
+      / 2 skipped; log /pm-captures/review-090d-i3/full-suite.log.'
+    created_at: '2026-10-28T01:29:33Z'
+    last_edited: '2026-10-28T01:29:33Z'
+  - id: note-19e97c3
+    text: 'Review-loop 090d i4 (work/claude-opus-5-5): reviewed bf72c4fd (i3 follow-up
+      fix holds). Pushed afc151b5, incidental/pre-existing on master, same class as
+      i3: the QA poll verdict-format reminder and the shared WorkspacePromptWatch
+      trust-accept keys used check=True send-keys right after a liveness check, so
+      a pane exiting in between raised CalledProcessError and ended the QA run as
+      ERROR. Both best effort now (logged, next tick handles the dead pane; unsent
+      reminder not recorded). Two regression tests fail pre-fix. Full suite 4301 passed
+      / 2 skipped; log /pm-captures/review-090d-i4/full-suite.log.'
+    created_at: '2026-10-28T01:38:47Z'
+    last_edited: '2026-10-28T01:38:47Z'
+  - id: note-9c367c5
+    text: 'QA planning refresh at afc151b5 (spec commit 07b77965): qa.md records the
+      S49-S57 results and the fixes since 76081338 (fork-failure survival + run-end
+      release retry, pane exit at follow-up/reminder/trust-accept, relaunch never
+      adopts concretizer, retained counts toward container-max-running, removal-race
+      inventory retakes, proxy reported once, periodic waits for busy reaper lock,
+      system git identity). Resolutions 22 (viewed judged at deferred-release retry
+      time) and 23 (unverifiable null-domain release records are diagnostic only;
+      their accumulation filed as pr-a4c4500). Fresh scenarios 58-63; locked S1-S57
+      unchanged. Planning only, no runtime PASS claimed.'
+    created_at: '2026-10-28T01:51:16Z'
+    last_edited: '2026-10-28T01:51:16Z'
+  - id: note-0a52211
+    text: 'Review-loop ad53 i1 (work/claude-opus-5-5): reviewed the code commits since
+      090d i4 (60ccb95e, d3d1b4fc, fd9bbdb4, eac0ccdd, 70cd9492). One fix pushed as
+      1bc65b72: the 70cd9492 inventory-outage held count left out settled workers
+      a release deliberately kept (INPUT_REQUIRED, viewed). Those scenarios end up
+      in released_indices, so every INPUT_REQUIRED settlement during an outage admitted
+      another blind launch (L+2, L+3). _release_scenario_containers now returns kept
+      indices through kept_indices and the held count includes them. The regression
+      test fails pre-fix ([1,2,3,4] launched vs [1,2]). Full suite 4314 passed / 2
+      skipped.'
+    created_at: '2026-10-28T03:40:37Z'
+    last_edited: '2026-10-28T03:40:37Z'
+  - id: note-408d720
+    text: 'QA planning refresh at 1bc65b72 (spec commit fb37dc36): qa.md records the
+      S58-S63 results (S58/S63 PASS; S59-S62 held only after fixes 70cd9492, fd9bbdb4,
+      eac0ccdd, 60ccb95e, d3d1b4fc; ad53 i1 corrected 70cd9492 as 1bc65b72), adds
+      fixture lessons 22 and resolution 24, which answers the S59 open question note-c91b547:
+      the L+1 floor launch by a run holding nothing is allowed, and a run holding
+      a retained container never launches at or above L. Fresh scenarios 64-68 (64
+      outage with INPUT_REQUIRED settlements and retained headroom; 65 container trust
+      dialog and TUI restart during dead-worker backoff; 66 removal-race truthfulness;
+      67 partial run-end release naming kept workers plus deferred retry; 68 final-head
+      repeated-run acceptance). Locked S1-S63 unchanged. The QA ERROR of loop 088f8dc8
+      had no recorded cause and ran no scenario. Planning only, no runtime PASS claimed.'
+    created_at: '2026-10-28T03:54:23Z'
+    last_edited: '2026-10-28T03:54:23Z'
+  - id: note-93e26fd
+    text: 'QA planning (06d8aaa6, code head 1bc65b72): QA loop 42a07a34 locked S64-S68,
+      cloned their workdirs, and was superseded by loop c8dbe953 about 3 minutes later.
+      No worker launched, no verdict was produced and none of its containers was left
+      running. S64-S68 are locked but unexecuted, so fresh S69-S73 carry them forward
+      one-to-one (69=64 outage/retained headroom, 70=65 trust dialog plus restart
+      during retry backoff, 71=66 removal-race truthfulness, 72=67 partial/deferred
+      run-end release, 73=68 final-head acceptance). The deferred-retry log wording
+      is corrected to "deferred container release retried". No spec requirement changed,
+      and no runtime PASS is claimed.'
+    created_at: '2026-10-28T04:02:55Z'
+    last_edited: '2026-10-28T04:02:55Z'
+  - id: note-fbe1bc6
+    text: 'QA planning (fdb3c7d3, code head 1bc65b72): QA loop c8dbe953 locked S69-S73
+      and started their concretizers at 23:04 CDT. A breadcrumb restart of the host
+      TUI at 23:05:57 did not resume it, because qa_resume.json is written only after
+      launch (pr-3201ea8). Auto-start run 6086ab24 killed the s69-s73 windows and
+      removed their five containers. Run b49b38db superseded it at 23:09 before planning.
+      No worker launched, no verdict was produced and no container is left running.
+      Fresh S74-S78 carry S69-S73 forward one-to-one (74=69 outage/retained headroom,
+      75=70 trust dialog plus restart during retry backoff, 76=71 removal-race truthfulness,
+      77=72 partial/deferred run-end release, 78=73 final-head acceptance). No requirement
+      changed and no runtime PASS is claimed.'
+    created_at: '2026-10-28T04:14:14Z'
+    last_edited: '2026-10-28T04:14:14Z'
   - id: note-50cc747
     text: 'S77 refine: (1) one tmux client views one window, so ''second client views
       two windows'' needs two grouped viewers (<S>~8, <S>~9). (2) A TUI prlimit fault
@@ -15114,6 +15301,47 @@ prs:
       needs V2 and L to settle in the same poll.'
     created_at: '2026-10-28T06:49:24Z'
     last_edited: '2026-10-28T06:49:24Z'
+  - id: note-4afc89b
+    text: 'Incidental fix 6cb6149c (QA planning at c07609ee): the 7faf i2 qa-verify-pass
+      snapshot was not in qa_resume.json and the poll re-read the setting on every
+      start. A run started with verification off settles PASS as final and releases
+      its workers. If the user then turned verification on and restarted the TUI,
+      the resumed poll counted those PASSes as pending verification, found their panes
+      dead and relaunched the released workers. The snapshot is now taken once per
+      run, persisted and restored; older snapshots fall back to the setting. Regression
+      test fails pre-fix; full suite 4317 passed / 2 skipped (run with TMUX and TMUX_PANE
+      unset: an inherited TMUX_PANE fails test_popup_session_code spuriously).'
+    created_at: '2026-10-28T06:00:49Z'
+    last_edited: '2026-10-28T06:00:49Z'
+  - id: note-c4d6440
+    text: 'QA planning refresh at 6cb6149c (spec commit b2dd37d6): qa.md records the
+      S74-S78 results (S75/S76 PASS, not rerun; S77 held only after 1f6c0a5a; S74
+      and S78 INPUT_REQUIRED on Then wording only). Adds resolutions 25 (NEEDS_WORK
+      outranks INPUT_REQUIRED, so Thens must match the fake script), 26 (S78 renumbering,
+      cross-PR collision and kept-set end count), 27 (setup failures outside PM, such
+      as an image without git, need no PM command) and 28 (qa-verify-pass is per run,
+      including across a TUI restart); R2 amended; fixture lessons 23. Fresh S79-S82:
+      79 = S74 with a consistent C fake; 80 = S77 clean rerun with verification off
+      and finalize; 81 = new qa-verify-pass toggles across two concurrent runs, stop
+      and TUI restart (7faf, 6cb6149c); 82 = S78 final-head acceptance with corrected
+      Thens. Locked S1-S78 unchanged. Planning only, no runtime PASS claimed.'
+    created_at: '2026-10-28T06:00:50Z'
+    last_edited: '2026-10-28T06:00:50Z'
+  - id: note-e1f4241
+    text: 'QA planning refresh at b6338490 (spec commit 1afa1b32): qa.md records the
+      S79-S82 results (S79/S80 PASS, not rerun; S81 held only after 2c26ddad; S82
+      held product behaviour, fixed c5d0e0ba and b6338490, three Then wordings conflicted).
+      Adds the post-6cb6149c behaviour list (verdict persisted before per-poll release,
+      [finalize: skipped — run was stopped], trigger=merge_restart), R2/R18 amendments,
+      resolution 29 (cross-PR same-number asserted on windows/dirs/names, "Opened
+      review window", status has no proxy lines, run-end "removed 0" after per-poll
+      releases) and fixture lessons 24. Fresh S83-S85: 83 = S81 rerun (verify-pass
+      toggles across two runs, stop, deterministic restart-after-per-poll-release
+      race); 84 = S82 final-head acceptance with corrected Thens; 85 = restarts landing
+      after per-poll releases during an outage with kept/viewed workers and a headroom
+      clamp. Locked S1-S82 unchanged. Planning only, no runtime PASS claimed.'
+    created_at: '2026-10-28T08:07:38Z'
+    last_edited: '2026-10-28T08:07:38Z'
   - id: note-1829eaf
     text: 'S85 refine: (1) the S77/S80 podman shim fails every command except info,
       so podman run fails too and an outage floor launch would become "launch failed".
@@ -15192,19 +15420,37 @@ prs:
       the QA window; use z t.'
     created_at: '2026-10-28T10:28:58Z'
     last_edited: '2026-10-28T10:28:58Z'
-  model: provider:deepseek-flash
+  - id: note-26335a9
+    text: 'Sign-off 2026-10-28 → SIGNOFF_IMPL (head a70331c1, base master@89e3c501,
+      refreshed; report /pm-captures/report.html). Behaviour is well evidenced (final
+      QA S83-S85 PASS) but integration CONFLICTS in 11 files. Key semantic overlap:
+      master redesigned push proxies as workdir-keyed (pr-748e708: workdir token,
+      discovery symlinks, start locks, metadata sidecars) vs this PR owner.json/runtime-domain/inventory-based
+      release; pick ONE ownership model and port the other side guarantees. Also merge
+      this PR abbreviated --upload-pack guard (47dd0b07) with master pr-8cdbe60 abbreviated-push
+      rejection (1ef426a2), and reconcile captures fail-closed (pr-1e9c117), provider
+      env transport (pr-84ebabf, claude_launcher/tmux) and sync integrity (pr-2e06289,
+      tui/sync, integration.py). After merge, re-run proxy (S14/S25/S39-style), launch/setup
+      (S27-style) and final acceptance (S84/S85-shape) scenarios. Gaps to add if cheap:
+      master-vs-branch before/after repro of the original incident (no $CAP/impl/);
+      post-review code 6cb6149c/2c26ddad/c5d0e0ba/b6338490 not re-reviewed. Meta-QA:
+      nested fixture QA overwrote scenario.json/verdict.md headers for some early
+      numbers (S1,S3,S20,S22,S24,S25,S27); manifests are authoritative.'
+    created_at: '2026-10-28T10:40:15Z'
+    last_edited: '2026-10-28T10:40:15Z'
+  model: provider:claude-work
   session_models:
-    impl: provider:deepseek-flash
-    review: provider:deepseek-flash
-    qa: provider:deepseek-flash
-    qa_planning: provider:deepseek-flash
-    qa_scenario: provider:deepseek-flash
-    qa_concretize: provider:deepseek-flash
-    qa_verification: provider:deepseek-flash
-    qa_finalize: provider:deepseek-flash
-    qa_interactive: provider:deepseek-flash
+    impl: provider:claude-work
+    review: provider:claude-work
+    qa: provider:claude-work
+    qa_planning: provider:claude-work
+    qa_scenario: provider:claude-work
+    qa_concretize: provider:claude-work
+    qa_verification: provider:claude-work
+    qa_finalize: provider:claude-work
+    qa_interactive: provider:claude-work
     signoff: provider:claude-work
-    merge: provider:deepseek-flash
+    merge: provider:claude-work
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -31880,6 +32126,19 @@ prs:
       semantics for the workdir it forwards) without opening a new host-escape path.'
     created_at: '2026-10-27T19:46:58Z'
     last_edited: '2026-10-27T19:46:58Z'
+  model: provider:claude-work
+  session_models:
+    impl: provider:claude-work
+    review: provider:claude-work
+    qa: provider:claude-work
+    qa_planning: provider:claude-work
+    qa_scenario: provider:claude-work
+    qa_concretize: provider:claude-work
+    qa_verification: provider:claude-work
+    qa_finalize: provider:claude-work
+    qa_interactive: provider:claude-work
+    signoff: provider:claude-work
+    merge: provider:claude-work
 - id: pr-22c92ef
   plan: bugs
   title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
@@ -33033,11 +33292,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-22T17:19:43.945696+00:00'
+  updated_at: '2026-10-28T04:14:15.448481+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-4add0ea
+    text: 'More evidence (2026-10-27, pr-1139060): two consecutive QA runs were lost
+      at the concretization stage by TUI restart/auto-start. Run 42a07a34 was superseded
+      about 3 min after locking S64-S68. Run c8dbe953 had five concretizers running
+      (containers created 23:04 CDT) when a breadcrumb restart at 23:05:57 skipped
+      it, because no qa_resume.json exists before launch. Auto-start run 6086ab24
+      then killed the qa-#241-s69..s73 windows and removed their containers. That
+      start-of-run sweep took 61 s serially on the host code. Each loss locks the
+      scenarios unexecuted and forces a re-plan. Logs: ~/.pm/debug/pm-pr-592e4bd-*-5b29c418.log
+      lines 2259-2920; workdirs ~/.pm/workdirs/qa/pr-1139060-{42a07a34e4dcd15a,c8dbe9534e9b7b54,6086ab2425e8f118}.'
+    created_at: '2026-10-28T04:14:15Z'
+    last_edited: '2026-10-28T04:14:15Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
@@ -35385,6 +35656,33 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-6ca4185
+  plan: bugs
+  title: 'Bug: verifier pane exiting before a re-verification follow-up is recorded
+    as a FLAG ("verification thread crashed")'
+  branch: pm/pr-6ca4185-bug-verifier-pane-exiting-before-a-re-verification
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.py _verify_single_scenario re-verification branch:
+    pane_exists(verifier_pane_id) passes, then the verifier pane exits before tmux_mod.send_keys(scenario.verifier_pane_id,
+    msg) (check=True). CalledProcessError escapes to _run_verification, which records
+    (False, "verification thread crashed"); the poll treats that as a FLAG, sends
+    the worker a follow-up and drops its PASS, and repeated hits can exceed verify_max_retries
+    and mark the scenario NEEDS_WORK "failed verification: verification thread crashed"
+    — an infrastructure race turned into an agent verdict. Pre-existing on master.
+    Suggested fix: on CalledProcessError from the follow-up send (or its extra Enters),
+    clear verifier_pane_id/session/transcript and fall through to the fresh-verifier-pane
+    path instead of crashing. Found in pr-1139060 review-loop 090d i5 (same class
+    as 090d i3/i4 fixes bf72c4fd/afc151b5).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T01:41:57.803815+00:00'
+  updated_at: '2026-10-28T01:41:57.803815+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-fa5bb86
   plan: bugs
   title: 'Bug: successful container removal logs ERROR "container runtime failed (rc=125):
@@ -35410,6 +35708,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a4c4500
+  plan: bugs
+  title: 'Bug: unverifiable container release records accumulate in pm container status
+    forever'
+  branch: pm/pr-a4c4500-bug-unverifiable-container-release-records-accumul
+  status: pending
+  depends_on: []
+  description: 'pm_core/container_reaper.py _record_release writes domain_required
+    records with runtime_domain null when the runtime identity probe fails (e.g. podman
+    cannot fork during a QA run-end release, S49 T3 of pr-1139060). pending_failures()
+    lists them as "Unverifiable release records ... diagnostic only", and _prune_releases
+    skips every record whose domain does not match, so nothing ever removes them,
+    even after the allocation they name is long gone. Repro: make the run-end release
+    hit a runtime fork failure (RLIMIT_NPROC on the TUI), recover, let the run-end
+    deferral retry remove the containers, then run pm container status / pm container
+    reap repeatedly: the diagnostic lines stay indefinitely. Needs a decision on a
+    safe clearing path (e.g. drop once the captured 64-hex ID is proven absent from
+    a complete current-domain inventory and the record is older than N days, or a
+    pm container reap --forget-unverifiable action). Dropping a null-domain record
+    removes no cleanup authority (it never had any).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T01:50:37.562550+00:00'
+  updated_at: '2026-10-28T01:50:37.562550+00:00'
 - id: pr-d022825
   plan: bugs
   title: 'Bug: QA dead-worker retry backoff sleeps inline in the verdict poll loop,
