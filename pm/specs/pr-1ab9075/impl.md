@@ -137,7 +137,11 @@ R9. **Preserve evidence.**  Retries never delete a started worker's clone or
 container (`exec`/`exit` use relaunch).  Each relaunch re-points the
 transcript symlink to a new session; the previous session id is recorded in
 the retry record (`sessions`) so the earlier native transcript can still be
-found.  Completed verdicts are never touched by retry logic.
+found.  Completed verdicts are never touched by retry logic.  A relaunch
+first kills any leftover window with the scenario's name (a lingering
+concretizer pane can keep the old window alive), so a relaunch never leaves
+two same-named windows for name-based pane lookup / dashboard navigation to
+choose between.
 
 R10. **No verdict-criteria or verification change.**  Verdict extraction,
 idle-hook gating, verification, and aggregation in `_execute_and_finalize`

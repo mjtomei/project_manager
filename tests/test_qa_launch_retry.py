@@ -219,6 +219,32 @@ def test_relaunch_after_stop_creates_no_window():
     new_window.assert_not_called()
 
 
+def test_relaunch_kills_stale_same_named_window(tmp_path):
+    """A dead worker can leave its window behind (lingering concretizer
+    pane); the relaunch must not add a second window with the same name, or
+    name-based pane lookup and dashboard navigation become ambiguous."""
+    sc = QAScenario(index=1, title="t", focus="f", window_name="qa-pr-x-s1")
+    state = QALoopState(pr_id="pr-x")
+    state.qa_workdir = str(tmp_path)
+    killed = []
+    with patch("pm_core.tmux.list_windows", return_value=[
+            {"id": "@1", "index": "1", "name": "qa-pr-x-s1"},
+            {"id": "@2", "index": "2", "name": "other"},
+            {"id": "@3", "index": "3", "name": "qa-pr-x-s1"}]), \
+         patch("pm_core.home_window.park_if_on"), \
+         patch("pm_core.tmux.kill_window",
+               side_effect=lambda s, w: killed.append(w)), \
+         patch("pm_core.tmux.new_window_get_pane", return_value="%9"), \
+         patch("pm_core.tmux.pane_window_id", return_value=None), \
+         patch("pm_core.qa_loop._resolve_qa_model"), \
+         patch("pm_core.qa_loop._build_scenario_run_cmd",
+               return_value=("cmd", "/w")):
+        assert _relaunch_scenario_window(
+            sc, state, {}, {"id": "pr-x"}, "sess", "/w") is True
+    assert killed == ["@1", "@3"]
+    assert sc.pane_id == "%9"
+
+
 def test_launcher_skips_worker_split_after_stop(tmp_path):
     """A background launch whose concretizer finishes after a stop must not
     split a worker pane."""
@@ -410,6 +436,35 @@ def test_restart_preserves_results_and_retry_state(tmp_path):
     assert snap["launch_retries"]["1"]["attempts"] == _SCENARIO_MAX_RETRIES
 
 
+def test_resume_counts_inflight_launch_as_attempt(tmp_path):
+    """A launch that was in flight when the controller died is re-detected
+    from the panes on resume and spends one attempt, so a controller that
+    keeps dying mid-launch cannot retry forever."""
+    sc = QAScenario(index=1, title="t", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.launch_retries = {1: {"attempts": 2, "kind": "exec", "cause": "boom",
+                                "state": "launching", "retry_at": None,
+                                "sessions": []}}
+
+    def on_tick(clock):
+        if len(clock.sleeps) == 1:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False)]
+    _run(state, tmp_path, patches)
+
+    rec = state.launch_retries[1]
+    # Re-detected from the dead pane and rescheduled…
+    assert rec["state"] == "waiting"
+    assert rec["kind"] == "exec"
+    # …with the interrupted launch counted against the bounded budget.
+    assert rec["attempts"] == 3
+
+
 def test_queued_launch_runs_off_the_poll_thread(tmp_path):
     """A slow dequeued launch (concretizer still running) does not stall
     verdict collection for running scenarios."""
@@ -552,6 +607,17 @@ def test_status_shows_launch_retry_as_non_verdict(tmp_path):
     assert f"launch retry 2/{_SCENARIO_MAX_RETRIES}" in out
     assert "Progress: 1/2 scenarios complete" in out
     assert "1 relaunching" in out
+
+    # While the retry is actually launching, the attempt number is not
+    # bumped again and there is no "next attempt at" hint.
+    _write_status_file(path, "pr-x", [a, b], {2: VERDICT_PASS},
+                       launch_retries={1: {
+                           "attempts": 2, "state": "launching", "kind": "exec",
+                           "cause": "container process (PID) limit exhausted",
+                           "retry_at": None}})
+    s1 = json.loads(path.read_text())["scenarios"][0]
+    assert s1["verdict"] == f"(launch-retry:2/{_SCENARIO_MAX_RETRIES})"
+    assert "next attempt at" not in s1["verdict_reason"]
 
 
 def test_retry_delays_are_bounded():

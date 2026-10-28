@@ -884,8 +884,9 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     if not state.qa_workdir:
         return
     # Background launch / verification threads may add keys while we
-    # serialise; ``dict()`` copies atomically under the GIL, iterating the
-    # live dict would raise "changed size during iteration".
+    # serialise.  A shallow copy can miss a key inserted concurrently but
+    # never raises ("changed size during iteration" comes from the iterator
+    # protocol); the snapshot is rewritten every poll tick anyway.
     verdicts = dict(state.scenario_verdicts)
     reasons = dict(state.scenario_verdict_reasons)
     data = {
@@ -2562,6 +2563,28 @@ def _build_scenario_run_cmd(
 # Scenario retry helpers
 # ---------------------------------------------------------------------------
 
+def _kill_windows_named(session: str, name: str | None) -> None:
+    """Kill every tmux window called *name* (by id, so duplicates all go).
+
+    A dead worker can leave its window behind (e.g. a lingering concretizer
+    pane in the initial-launch window), and a relaunch then adds a second
+    window with the same name — which makes name-based pane lookup
+    (:func:`find_claude_pane`) and dashboard navigation ambiguous.
+    Best-effort: tmux errors are logged, never raised.
+    """
+    if not name:
+        return
+    from pm_core import tmux as tmux_mod
+    from pm_core import home_window
+    try:
+        for win in tmux_mod.list_windows(session):
+            if win["name"] == name:
+                home_window.park_if_on(session, win["id"])
+                tmux_mod.kill_window(session, win["id"])
+    except Exception:
+        _log.debug("Could not kill stale window %s", name, exc_info=True)
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -2589,6 +2612,11 @@ def _relaunch_scenario_window(
 
     win_name = _scenario_window_name(pr_data, scenario.index)
     use_containers = is_container_mode_enabled() and _runtime_available()
+
+    # A dead worker can leave its old window behind (e.g. a lingering
+    # concretizer pane); kill it so the relaunched window keeps a unique
+    # name for pane lookup and dashboard navigation.
+    _kill_windows_named(session, win_name)
 
     # New transcript for the relaunched session (old one is stale)
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
@@ -2743,8 +2771,11 @@ def _poll_tmux_verdicts(
     for rec in retries.values():
         if rec.get("state") == "launching":
             # The previous controller died mid-launch: re-detect from the
-            # scenario's panes on the first tick.
+            # scenario's panes on the first tick.  The attempt is spent —
+            # without this, a controller that keeps dying mid-launch would
+            # retry forever instead of exhausting the bounded budget.
             rec["state"] = "running"
+            rec["attempts"] = int(rec.get("attempts", 0)) + 1
 
     # Scenarios that never got a window (workdir, container or window
     # creation failed) are retried like any other launch failure.  Queued
@@ -2861,18 +2892,7 @@ def _poll_tmux_verdicts(
         # re-clones the scenario dir, and create_container would reuse a
         # running same-name container still mounting the deleted clone; a
         # leftover concretizer window would duplicate the window name.
-        if scenario.window_name:
-            # By id, and every match: an earlier relaunch can leave a
-            # second window with the same name.
-            try:
-                from pm_core import home_window
-                for win in tmux_mod.list_windows(session):
-                    if win["name"] == scenario.window_name:
-                        home_window.park_if_on(session, win["id"])
-                        tmux_mod.kill_window(session, win["id"])
-            except Exception:
-                _log.debug("Could not kill stale window for scenario %d",
-                           scenario.index, exc_info=True)
+        _kill_windows_named(session, scenario.window_name)
         if use_containers and scenario.container_name:
             try:
                 container_mod.remove_container(scenario.container_name)
