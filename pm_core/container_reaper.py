@@ -414,6 +414,24 @@ def pending_releases() -> dict[str, dict]:
         _current_release_records(), key=lambda item: item[1].get("at", 0))}
 
 
+def forget_releases_of_removed(cid: str) -> None:
+    """Drop pending owner releases of an allocation just proven gone by ID.
+
+    A pane's exit release that overlaps a replacing launch (review/sign-off
+    ``--fresh``) is deferred while the launcher holds the launch lock; the
+    launcher then removes that exact allocation. Its record names no
+    remaining work, but status would report "owner release pending" until
+    some later pass happened to prune it.
+    """
+    matches = [(path, rec) for path, rec in _release_records() if rec["id"] == cid]
+    if not cid or not matches:
+        return
+    domain = _runtime_domain()
+    for path, rec in matches:
+        if domain is not None and rec.get("runtime_domain") == domain:
+            _unlink_state_file(path, "owner release")
+
+
 def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
     infos = out.inventory if out.inventory is not None else [d.info for d in out.decisions]
     inventory = {info.name: info for info in infos}

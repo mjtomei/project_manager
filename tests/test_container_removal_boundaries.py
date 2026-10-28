@@ -142,3 +142,44 @@ def test_full_pass_prunes_confirmed_absent_release():
     reaper._record_release(NAME, CID, "epoch", "pane-exit")
     reaper._prune_releases(reaper.Outcome(), reaper.Scope(), time.time() + 1)
     assert reaper.pending_releases() == {}
+
+
+@pytest.mark.parametrize("verification", ["absent", "present"])
+def test_removal_completes_deferred_owner_release_of_that_id(monkeypatch, verification):
+    # S52: review/sign-off --fresh kills the old window first; its exit release
+    # is deferred behind the launcher's lock, then the launcher removes that
+    # exact allocation. Status must not keep reporting "owner release pending".
+    other = "c" * 64
+    reaper._record_release(NAME, CID, "epoch", "pane-exit")
+    reaper._record_release("pm-other-impl-pr-x", other, "epoch", "pane-exit")
+    monkeypatch.setattr(push_proxy, "capture_unshared_proxy", lambda target: None)
+    monkeypatch.setattr(push_proxy, "stop_push_proxy", MagicMock())
+    ticks = iter([0, 0, 11])
+    monkeypatch.setattr(cm.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(cm.time, "sleep", lambda seconds: None)
+
+    def runtime(*args, **kwargs):
+        if args[0] == "rm":
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if verification == "present":
+            return subprocess.CompletedProcess(args, 0, "[]", "")
+        return subprocess.CompletedProcess(args, 1, "", "no such container")
+
+    monkeypatch.setattr(cm, "_run_runtime", runtime)
+    if verification == "absent":
+        cm.remove_container(NAME, container_id=CID)
+        assert set(reaper.pending_releases()) == {"pm-other-impl-pr-x"}
+        assert NAME not in reaper.pending_failures()
+    else:
+        with pytest.raises(cm.ContainerError):
+            cm.remove_container(NAME, container_id=CID)
+        assert reaper.pending_releases()[NAME]["id"] == CID
+
+
+def test_removal_keeps_release_from_another_runtime_domain(monkeypatch):
+    reaper._record_release(NAME, CID, "epoch", "pane-exit")
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: {"runtime": "test", "id": "other-store"})
+    reaper.forget_releases_of_removed(CID)
+    monkeypatch.setattr(reaper, "_runtime_domain", lambda: None)
+    reaper.forget_releases_of_removed(CID)
+    assert [rec["id"] for _, rec in reaper._release_records()] == [CID]

@@ -2798,6 +2798,13 @@ def remove_container(name: str, *, container_id: str | None = None) -> bool:
     if not gone:
         _log.warning("remove_container: %s still present after 10 s%s", name, removal_error)
         raise ContainerError(f"container {name} still present after 10 s{removal_error}")
+    if container_id:
+        # A deferred owner release of this exact allocation is now complete.
+        from pm_core import container_reaper
+        try:
+            container_reaper.forget_releases_of_removed(container_id)
+        except Exception:
+            _log.debug("could not drop owner releases of %s", name, exc_info=True)
     # Release the push proxy only after the container is gone.  Failed
     # removal must leave the surviving container's push access intact.
     if proxy:
