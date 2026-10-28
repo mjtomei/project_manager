@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T20:55:47.540198+00:00'
+  updated_at: '2026-10-28T21:17:52.929733+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37198,6 +37198,46 @@ prs:
       live pane is the transcript same session.'
     created_at: '2026-10-28T20:55:47Z'
     last_edited: '2026-10-28T20:55:47Z'
+  - id: note-6116d81
+    text: 'review e386 i2 (fix + handoff, 5adb471b). Reviewed the integrated HEAD
+      4149e0e6 (+5d990958). Two false-wait windows in the wait state this PR owns,
+      both fixed and both covered by tests that fail pre-fix. (1) Adopt gate: when
+      the resumed wait was adoptable, run_review_loop_sync cleared _adopting_wait
+      and only then set input_required=True, with a _log.info (file I/O, GIL release)
+      between the two writes, so a status reader sampling there saw running + no wait
+      + the recorded INPUT_REQUIRED history and published "INPUT_REQUIRED answered;
+      follow-up running" for a question nobody had answered (the exact phantom _adopting_wait
+      exists to prevent; QA flagged this class at sub-second granularity in S15).
+      The wait is now published before the flag clears; when the wait is NOT adoptable
+      the flag stays set until the next iteration has taken over, because clearing
+      it first made the recorded INPUT_REQUIRED history read as an answered wait.
+      review_progress_input now reads the fields in the writer order (_adopting_wait,
+      then iteration, then input_required) so the inference cannot observe the transient.
+      Regression test_adopt_decision_never_reads_as_an_answered_follow_up samples
+      the published state at the adopt decision own log line (the widest point of
+      the window). (2) Turn ownership: HumanResponseWatch.wakeup_turn was overwritten
+      by every non-tool_result user record, so a system-reminder-only record or a
+      local-command echo landing between a /loop (or task-notification) wakeup record
+      and its idle cleared the wakeup classification; the idle then read as a prose
+      question and re-armed waiting / review INPUT_REQUIRED (iteration N) while the
+      reviewer was working (R3/E9 false-wait class). New verdict_transcript._opens_assistant_turn:
+      only records that open a turn (a wakeup or a genuine human task) change the
+      classification; transparent records are injected around a turn. The Esc interrupt
+      marker stays the human own turn (not a wakeup), preserving today re-arm behaviour
+      after an interrupt. Regressions test_wakeup_turn_survives_transparent_records(+_in_back_scan),
+      test_transparent_records_do_not_rearm_a_wakeup_turn, plus test_interrupt_marker_keeps_the_turn_the_humans
+      pinning the preserved case. Spec impl.md R3 + the wakeup/adopt edge cases and
+      qa.md R5c updated. Tests: review/verdict/breadcrumb/autostart files 201 passed;
+      broad suite excluding the documented git-env families 3995 passed, 1 skipped,
+      0 failed. Observations, not changed: _finalize_all_transcripts still freezes
+      a running auto-start *watcher* transcript before _disable requests its stop
+      (same class, watcher subsystem; its follow-up wait honours stop_check, so the
+      impact is transient, and pr-e0f54ca tracks the watcher wait); _adoptable_wait_transcript
+      still does not verify the live pane runs the transcript session (tracked by
+      pr-7e00786). QA gate unchanged: the outstanding S17 NEEDS_WORK is the false-wait
+      fixed in 07340d38 and needs a re-QA run, not code.'
+    created_at: '2026-10-28T21:17:52Z'
+    last_edited: '2026-10-28T21:17:52Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
