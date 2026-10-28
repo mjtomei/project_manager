@@ -31095,7 +31095,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T04:03:26.461127+00:00'
+  updated_at: '2026-10-28T04:06:07.828692+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31348,6 +31348,17 @@ prs:
       re-QA should re-verify them against the reduced diff.'
     created_at: '2026-10-28T04:03:26Z'
     last_edited: '2026-10-28T04:03:26Z'
+  - id: note-19af7c9
+    text: 'Sign-off re-run 2026-10-28 at dbc81176 → SIGNOFF_IMPL again: the code is
+      byte-identical to 25ef5a04, so none of the note-93f1418 reduction is implemented
+      yet (wait-for-job.sh, _background_jobs_block + 3 injections, RECIPE_DIR paragraph,
+      *.sh install, verifier freshness text, qa_library Shared helpers, and helper
+      recipe text are all still in the diff). Do the reduction exactly as note-93f1418
+      lists, rewrite impl.md, and merge master@424c9d02 (clean; after the reduction
+      the PR no longer touches qa_loop.py). For re-QA: keep S14/S18/S20 (recipe fixes)
+      and retire S15/S16/S17/S19 (they test dropped helper/prompt work) in pm/specs/pr-b19db15/qa.md.'
+    created_at: '2026-10-28T04:06:07Z'
+    last_edited: '2026-10-28T04:06:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
