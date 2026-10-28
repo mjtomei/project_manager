@@ -170,8 +170,9 @@ available in the run dir:
 ### `pm_core/claude_launcher.py`
 
 - Add `TRANSCRIPT_ARCHIVE_DIR = "archive"`.
-- Add `_session_id_from_target(target: Path) -> str | None` (path-only
-  variant of `session_id_from_transcript`).
+- Add `_session_id_of_path(target: Path) -> str | None` (path-only
+  variant of `session_id_from_transcript`; `session_id_from_transcript`
+  now delegates to it).
 - Add `archive_transcript(path) -> Path | None`:
   - missing → `None`;
   - compute archive name: `<stem>.<sid>.jsonl` for a symlink whose target
@@ -188,14 +189,15 @@ available in the run dir:
 - `finalize_transcript(path, *, session_id=None) -> bool`:
   - not a symlink → `False`;
   - `raw = os.readlink(path)`; `target = Path(raw)`;
-  - `sid = _session_id_from_target(target)`;
+  - `sid = _session_id_of_path(target)`;
   - `if session_id and sid and sid != session_id: return False`;
   - `if not target.exists(): return False`;
   - write/refresh the immutable archive entry (copy) via a shared helper
     (`_freeze_archive_copy`: copy beside the entry, then `os.replace`, so
     a crash can never leave the archive without a session copy);
   - re-read `os.readlink(path)`; if it != `raw`, return `False`;
-  - `unlink` + `shutil.copy2(target, path)` (existing behaviour);
+  - `shutil.copy2` to a unique temp beside the path, then `os.replace`
+    (atomic; a failed copy leaves the live link untouched);
   - return `True`.
 - Add `finalize_transcript_dir(directory, *, skip=None) -> int`: finalize
   every top-level `*.jsonl` symlink and every `archive/*.jsonl` symlink.
@@ -309,14 +311,19 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (22) in `tests/test_transcript_archive.py` covering:
+- New unit tests (26) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback,
-  legacy-iteration live/finalize handling, and the live-owner skips
-  (running review loop, running watcher, live step windows) for both bulk
-  sweeps.  One more
+  both pre-return sessions surviving two sign-off returns (R4),
+  legacy-iteration live/finalize handling, the no-hardlink archive
+  fallback, a dangling link and a failed copy left alone by finalize, and
+  the live-owner skips (running review loop, running watcher, live step
+  windows) for both bulk sweeps.  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
-  `tests/test_review_loop.py` because it drives `run_review_loop_sync`.
+  `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
+  `tests/test_breadcrumb_review_loop.py` gains an
+  `iteration_sessions` round-trip test and asserts int-keyed restoration
+  in the existing consume test.
   The archive tests that exercise a pre-fix behaviour fail on the pre-fix
   tree (`git show 3699f71a:pm_core/claude_launcher.py`); the tests that
   call helpers introduced here can only fail by import on that tree, which
@@ -362,6 +369,23 @@ Applied on top of the design above; keep them when editing the code.
   `review-<pr>-i<N>.jsonl` of every iteration with a recorded session id
   (ownership-checked), so an adopted legacy iteration is frozen and
   archived instead of lingering as a link.
+- `iteration_sessions` is persisted in the TUI breadcrumb (8602 i4) and
+  restored by `consume_breadcrumb`, so the 8602-i3 guarantees survive a
+  restart: a resumed loop still finalizes each iteration with its
+  ownership check, and an iteration adopted under the legacy name before
+  the restart is still frozen and archived on completion.
+- The no-hardlink archive fallback creates the entry exclusively
+  (`open(dest, "xb")`, 8602 i4) and only ever removes a partial copy of
+  its own making.  `shutil.copy2` would have overwritten a concurrent
+  entry, violating the "archives are never overwritten" invariant.
+- `finalize_transcript` freezes via a unique temp copy followed by
+  `os.replace` (8602 i4) instead of `unlink` + `copy2`: readers see
+  either the live symlink or the complete copy, a failed copy leaves the
+  link live, and no truncated canonical can be left behind.
+- `_transcript_stem` / `transcript_archive_dir` are shared by
+  `_archive_name`, `_find_identical_archive`, `archive_transcript`,
+  `_freeze_archive_copy` and `finalize_transcript_dir` (8602 i4) instead
+  of each re-deriving the stem / archive directory.
 
 ## Known limitations (accepted)
 

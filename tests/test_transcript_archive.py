@@ -178,6 +178,79 @@ def test_frozen_session_is_not_archived_twice(env):
     assert [p.name for p in adir.iterdir()] == [f"impl-pr-abc.{sid}.jsonl"]
 
 
+def test_two_sign_off_returns_keep_both_original_sessions(env):
+    """R4: across two returns every pre-return impl session survives in the
+    run archive while the canonical path always holds the live attempt."""
+    sid1 = _sid()
+    canon = env.run / "impl-pr-abc.jsonl"
+    _link(canon, _native(env.cwd, sid1, "ROUND 1 IMPL"))
+    assert cl.finalize_transcript(canon) is True  # round 1 impl finished
+
+    cl.build_claude_shell_cmd(prompt="rework 1", transcript=str(canon),
+                              cwd=str(env.cwd))  # return 1
+    sid2 = cl.session_id_from_transcript(canon)
+    Path(os.readlink(canon)).write_text(_record("ROUND 2 IMPL") + "\n")
+    assert cl.finalize_transcript(canon, session_id=sid2) is True
+
+    cl.build_claude_shell_cmd(prompt="rework 2", transcript=str(canon),
+                              cwd=str(env.cwd))  # return 2
+
+    adir = cl.transcript_archive_dir(canon)
+    assert "ROUND 1 IMPL" in (adir / f"impl-pr-abc.{sid1}.jsonl").read_text()
+    assert "ROUND 2 IMPL" in (adir / f"impl-pr-abc.{sid2}.jsonl").read_text()
+    # The canonical is the third (live) attempt, not an archived one.
+    assert canon.is_symlink()
+    assert cl.session_id_from_transcript(canon) not in (sid1, sid2)
+
+
+def test_archive_copy_fallback_never_clobbers(env, monkeypatch):
+    """The no-hardlink fallback copies the content and leaves no partial
+    entry behind."""
+    canon = env.run / "impl-pr-abc.jsonl"
+    canon.write_text(_record("FROZEN CONTENT") + "\n")
+
+    def _no_hardlinks(src, dst, *a, **k):
+        calls.append((src, dst))
+        raise OSError("hard links unsupported")
+
+    calls: list = []
+    monkeypatch.setattr(cl.os, "link", _no_hardlinks)
+    archived = cl.archive_transcript(canon)
+
+    assert calls, "the no-hardlink fallback was not exercised"
+    assert archived is not None and archived.is_file()
+    assert "FROZEN CONTENT" in archived.read_text()
+    assert not canon.exists()
+    # Nothing but the single entry (no leftover temp/partial file).
+    assert [p.name for p in archived.parent.iterdir()] == [archived.name]
+
+
+def test_finalize_dangling_link_is_left_alone(env):
+    """A link whose native JSONL is already gone is not replaced or removed."""
+    canon = env.run / "impl-pr-abc.jsonl"
+    canon.symlink_to(env.cwd / "missing" / f"{_sid()}.jsonl")
+
+    assert cl.finalize_transcript(canon) is False
+    assert canon.is_symlink()
+
+
+def test_finalize_keeps_the_link_when_the_copy_fails(env, monkeypatch):
+    """A failed freeze must leave the live link in place (no missing path,
+    no truncated copy) so the collector keeps reading appends."""
+    sid = _sid()
+    native = _native(env.cwd, sid, "VERDICT PASS")
+    canon = env.run / "review-pr-abc-i1.jsonl"
+    _link(canon, native)
+
+    def _boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cl.shutil, "copy2", _boom)
+    assert cl.finalize_transcript(canon) is False
+    assert canon.is_symlink()
+    assert "VERDICT PASS" in canon.read_text()
+
+
 # --- ownership-checked finalization --------------------------------------
 
 def test_finalize_with_wrong_session_leaves_link_live(env):

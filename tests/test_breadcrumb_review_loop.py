@@ -222,6 +222,28 @@ class TestSaveBreadcrumbReviewLoops:
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
         assert data["review_loops"]["pr-001"]["input_required"] is True
 
+    def test_iteration_sessions_round_trip(self, tmp_path):
+        """Per-iteration session ids survive a restart so a resumed loop's
+        completion still finalizes each transcript with its ownership check
+        (pr-9ee4d64).  JSON object keys are strings; the loop keys them by
+        the integer iteration number."""
+        sid = "11111111-1111-4111-8111-111111111111"
+        state = _make_running_state("pr-001", iteration=2)
+        state.iteration_sessions = {1: sid, 2: "22222222-2222-4222-8222-222222222222"}
+        app = _make_app(review_loops={"pr-001": state})
+        (tmp_path / "merge-restart").touch()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(app)
+
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert data["review_loops"]["pr-001"]["iteration_sessions"] == {
+            "1": sid,
+            "2": "22222222-2222-4222-8222-222222222222",
+        }
+
 
 # ---------------------------------------------------------------------------
 # consume_breadcrumb tests
@@ -241,6 +263,11 @@ class TestConsumeBreadcrumbReviewLoops:
                     "loop_id": "ab12",
                     "input_required": False,
                     "_transcript_dir": "/tmp/transcripts",
+                    "iteration_sessions": {
+                        "1": "11111111-1111-4111-8111-111111111111",
+                        "3": "33333333-3333-4333-8333-333333333333",
+                        "not-an-iteration": "44444444-4444-4444-8444-444444444444",
+                    },
                     "history": [
                         {"iteration": 1, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:00:00"},
                         {"iteration": 2, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:01:00"},
@@ -276,6 +303,11 @@ class TestConsumeBreadcrumbReviewLoops:
         assert rstate.latest_verdict == "NEEDS_WORK"
         assert rstate.loop_id == "ab12"
         assert len(rstate.history) == 3
+        # Session ids are keyed by int; an unparsable key is dropped, not fatal.
+        assert rstate.iteration_sessions == {
+            1: "11111111-1111-4111-8111-111111111111",
+            3: "33333333-3333-4333-8333-333333333333",
+        }
 
         # Check _start_loop was called with resume_state
         mock_start.assert_called_once()

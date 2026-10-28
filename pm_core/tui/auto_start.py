@@ -192,6 +192,13 @@ def save_breadcrumb(app) -> None:
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
+            # Session ids per iteration survive the restart so a resumed
+            # loop's completion still finalizes each transcript with its
+            # ownership check (pr-9ee4d64).  JSON keys are strings.
+            "iteration_sessions": {
+                str(k): v for k, v in
+                (getattr(rstate, "iteration_sessions", None) or {}).items()
+            },
             "history": [
                 {
                     "iteration": h.iteration,
@@ -295,6 +302,14 @@ async def consume_breadcrumb(app) -> None:
                     output="",  # not stored in breadcrumb
                     timestamp=h.get("timestamp", ""),
                 ))
+            # JSON object keys are strings; iteration_sessions is keyed by
+            # the integer iteration number.
+            for k, sid in (loop_data.get("iteration_sessions") or {}).items():
+                try:
+                    rstate.iteration_sessions[int(k)] = sid
+                except (TypeError, ValueError):
+                    _log.debug("consume_breadcrumb: bad iteration_sessions "
+                               "key %r for %s", k, pr_id)
             app._review_loops[pr_id] = rstate
         _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
 

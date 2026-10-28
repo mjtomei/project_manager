@@ -1124,8 +1124,14 @@ def _session_id_of_path(target: Path) -> str | None:
 
 
 def transcript_archive_dir(transcript_path: str | Path) -> Path:
-    """The archive directory that sits beside *transcript_path*."""
+    """The archive directory beside *transcript_path* (a transcript file)."""
     return Path(transcript_path).parent / TRANSCRIPT_ARCHIVE_DIR
+
+
+def _transcript_stem(transcript_path: Path) -> str:
+    """The transcript's name without its ``.jsonl`` suffix."""
+    name = transcript_path.name
+    return name[:-len(".jsonl")] if name.endswith(".jsonl") else name
 
 
 def _archive_name(transcript_path: Path, sid: str | None,
@@ -1137,9 +1143,7 @@ def _archive_name(transcript_path: Path, sid: str | None,
     regular file has no recoverable session id; key it on its identity
     (mtime + size) instead.
     """
-    stem = transcript_path.name
-    if stem.endswith(".jsonl"):
-        stem = stem[:-6]
+    stem = _transcript_stem(transcript_path)
     if sid:
         return f"{stem}.{sid}.jsonl"
     try:
@@ -1168,7 +1172,7 @@ def _find_identical_archive(adir: Path, p: Path) -> Path | None:
     transcript must never be mistaken for a copy of this one (the caller
     drops *p* when a match is found).
     """
-    stem = p.name[:-len(".jsonl")] if p.name.endswith(".jsonl") else p.name
+    stem = _transcript_stem(p)
     try:
         st = p.stat()
         entries = list(adir.glob(f"{stem}.*.jsonl"))
@@ -1201,17 +1205,35 @@ def _move_into_archive(p: Path, dest: Path, raw: str | None) -> bool:
             except FileExistsError:
                 raise
             except OSError:
-                # Filesystem without hard links; copy instead.  A partial
-                # copy must not stay behind: archive entries are immutable,
-                # so a truncated one would block every later attempt.
+                # Filesystem without hard links; copy instead.  The copy
+                # is created exclusively: a concurrent archive of the same
+                # session must not be overwritten with different bytes.  A
+                # partial copy must not stay behind either — archive
+                # entries are immutable, so a truncated one would block
+                # every later attempt.
+                created = False
                 try:
-                    shutil.copy2(p, dest)
-                except OSError:
-                    try:
-                        dest.unlink()
-                    except OSError:
-                        pass
+                    with open(p, "rb") as src:
+                        with open(dest, "xb") as out:
+                            created = True
+                            shutil.copyfileobj(src, out)
+                except FileExistsError:
                     raise
+                except OSError:
+                    # Remove only a partial copy of our own making; a
+                    # concurrent creator's entry is never touched.
+                    if created:
+                        try:
+                            dest.unlink()
+                        except OSError:
+                            pass
+                    raise
+                try:
+                    shutil.copystat(p, dest)
+                except OSError as e:
+                    # Metadata only; the content copy is what matters, so
+                    # a failure here must not discard the archive entry.
+                    _log.debug("transcript: copystat %s failed: %s", dest, e)
     except FileExistsError:
         return False
     except OSError as e:
@@ -1254,7 +1276,7 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
             # the archive subdirectory too.
             raw = str(_absolute_link_target(p, stored))
             sid = _session_id_of_path(Path(raw))
-    adir = p.parent / TRANSCRIPT_ARCHIVE_DIR
+    adir = transcript_archive_dir(p)
     try:
         adir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -1298,7 +1320,7 @@ def _freeze_archive_copy(p: Path, raw: str, target: Path,
     if p.parent.name == TRANSCRIPT_ARCHIVE_DIR:
         # *p* is itself the archive entry; finalize freezes it in place.
         return p
-    adir = p.parent / TRANSCRIPT_ARCHIVE_DIR
+    adir = transcript_archive_dir(p)
     dest = adir / _archive_name(p, sid, target)
     try:
         adir.mkdir(parents=True, exist_ok=True)
@@ -1415,12 +1437,22 @@ def finalize_transcript(transcript_path: Path,
             return False
     except OSError:
         return False
+    # Copy beside the path and replace atomically: readers see either the
+    # live symlink or the complete frozen copy, never a missing path or a
+    # truncated one, and a failed copy leaves the link live.
+    tmp = transcript_path.with_name(
+        f".{transcript_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     try:
-        transcript_path.unlink()
-        shutil.copy2(target, transcript_path)
+        shutil.copy2(target, tmp)
+        os.replace(tmp, transcript_path)
     except OSError as e:
         _log.warning("transcript: finalize %s failed: %s", transcript_path, e)
         return False
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
     _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
     return True
 
