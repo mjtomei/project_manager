@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T09:56:44.976278+00:00'
+  updated_at: '2026-10-28T10:20:24.538023+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39156,6 +39156,35 @@ prs:
       which needs review + targeted re-QA after the reconciliation.'
     created_at: '2026-10-28T09:56:44Z'
     last_edited: '2026-10-28T09:56:44Z'
+  - id: note-df3dab5
+    text: 'impl 2026-10-28 (master@89e3c501 reconciliation): merged master into the
+      branch as b2d1a15c — no change to this PRs own feature code. Master (pr-2e06289)
+      moved the GitHub-merge check into the new pm_core/merge_integrity.py (shared
+      with the TUI sync paths and pm pr sync), so I took master structure and PORTED
+      the R9-14 hand-edited-state guards there: (1) approved_candidate() reads a non-mapping
+      signoff/integration as absent and validates sha/base_sha through integration.revision_of;
+      (2) verify_github_merge() validates the revisions it interpolates into the git
+      log range, reads a non-mapping bound as absent, and renders every revision/tree
+      through a new _short (a hand-edited candidate_tree records the mismatch instead
+      of raising TypeError); (3) apply_to_pr() collects note ids through _notes_of/_note_id,
+      so an unhashable hand-edited id no longer raises out of the set it builds for
+      generate_note_id. cli/pr.py _verify_github_merge is now master thin wrapper
+      (verify -> record under the store lock) and the recovery path uses approved_candidate.
+      pm/project.yaml reconciled by record id with THIS PR own resolver (base/ours/theirs
+      from the merge index): 511 PR records / 22 plans, no id lost from either side,
+      no duplicates, base active_pr wins (documented UI-cursor rule), branch notes
+      + session_models kept. Evidence: the four guard tests (test_github_merge_verification_renders_a_malformed_candidate_safely,
+      test_recovery_skips_verification_for_a_malformed_approval, and the new test_approved_candidate_reads_malformed_approvals_as_absent
+      / test_apply_to_pr_tolerates_malformed_notes) all fail on master merge_integrity.py
+      and pass here; full suite 4332 passed, 1 skipped (run with PM_HOST_HOME unset
+      — with it set, test_hook_events::test_installer_writes_standalone_receiver fails
+      because the installer deliberately skips when the host home differs from the
+      container home). NEXT: the GitHub-merge verification / --propagation-only recovery
+      path changed shape in this reconciliation, so it needs review + targeted QA
+      on the merged tree; QA 33-38 PASS still hold for everything else (feature code
+      unchanged since 35693308).'
+    created_at: '2026-10-28T10:20:24Z'
+    last_edited: '2026-10-28T10:20:24Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
