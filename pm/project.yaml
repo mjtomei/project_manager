@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T19:01:36.460425+00:00'
+  updated_at: '2026-10-28T19:45:31.562241+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37017,6 +37017,41 @@ prs:
       guard, local slash-command echo transparency).'
     created_at: '2026-10-28T19:01:36Z'
     last_edited: '2026-10-28T19:01:36Z'
+  - id: note-33b77c3
+    text: 'QA scenario 20 (waits nobody can answer end cleanly; unrelated holds untouched):
+      PASS, 4/4 triples at d41ed19f, live TUI + interactive stand-in on a throwaway
+      local-backend project (A spec hold, B recorded QA INPUT_REQUIRED, C signed-off
+      hold, P review wait). (1) `z d` on a live wait: paused/review review #1 — review
+      loop stopped (last INPUT_REQUIRED), review {iteration 1, verdict INPUT_REQUIRED,
+      running/input_required/follow_up/resuming false}, win=review-<P>; popup PAUSED
+      with that detail; "Stopped review loop ... opening fresh review"; 0.2 s tree
+      sampling settles on ⟳1⏸ and it never returns; 3 reads + two scheduler passes
+      unchanged, no new Review loop started. (2) kill-window during the wait: failed/review
+      review #1 — review loop ended KILLED, win=<P> (impl-window fallback), verdict
+      KILLED, all flags false; ⟳1☠; popup FAILED; "Review loop done ... ☠ KILLED (1
+      iteration)"; stable at +10 s and after a scheduler pass, no relaunch. (3) answer
+      then kill-window during the follow-up: before = running/review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running) with popup RUNNING; ~1 s after the kill = failed/KILLED,
+      same field set, ⟳1☠, popup FAILED with no INPUT_REQUIRED/follow-up text; stable.
+      (4) three unrelated holds live at once (A waiting/implementation "spec generation
+      awaiting input"; B waiting/qa "last QA run ended INPUT_REQUIRED ..." qa.verdict
+      INPUT_REQUIRED recorded; C waiting/sign_off "signed off (fresh SIGNOFF_MERGE);
+      waiting for manual merge (held by pr-afeb59f)"): byte-identical in every field
+      across 11 JSON snapshots (baseline, 5 pre-answer idle samples, post-answer,
+      3 post samples); answering P flipped only P to running/follow_up after the typed
+      line (5/5 pre-answer samples still input_required=true), C stayed sign_off with
+      "auto_merge: <C> held (wait-for-merge ← <C>) — skipping merge", spec-mode restored
+      to prompt. Evidence /pm-captures/scenarios/20/{triple1..4}/ (cast+mp4+transcript+per-step
+      status JSON/text/popup/tree, marker samplers). Harness notes for the next run:
+      (a) the tree keeps painting the live ⏸1<spinner> form for ~1 s after the `z
+      d` chord because the loop state is still genuinely input_required until the
+      stop lands — bracket the keypress timestamp, not the sampler-arm time, or it
+      reads as a Then violation; (b) after answering, the TUI bottom log line keeps
+      the spec''d sticky(30) "⏸ INPUT_REQUIRED ... interact with Claude in the review
+      pane" notice until another log line replaces it (a log line, not a wait surface
+      — status/popup/tree all read running). No code changes made.'
+    created_at: '2026-10-28T19:45:31Z'
+    last_edited: '2026-10-28T19:45:31Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
