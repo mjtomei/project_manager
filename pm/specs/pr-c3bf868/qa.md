@@ -75,7 +75,11 @@ caller-side process-identity validation plus a spinner abort. See
   picker action)
 - **THEN** the command exits non-zero with a readable "the TUI … is not
   running / restart the TUI" message — no traceback, no spinner
-- **THEN** the stale pidfile is removed
+- **THEN** a caller that reaches the identity check (the picker, or a CLI
+  mutation's reload path) also removes the stale pidfile. `pm autostart`
+  reports the stale file but leaves it on disk — its owner resolution
+  short-circuits on liveness before the identity check — so cleanup there
+  falls to the next reload, picker dispatch, or TUI startup
 
 ### R6 — A dead TUI's pidfile is taken over at startup (TUI side)
 
@@ -120,17 +124,24 @@ caller-side process-identity validation plus a spinner abort. See
   pidfile path and exits non-zero
 - **THEN** the first TUI keeps working and still owns the pidfile
   (unchanged content, unchanged pid)
-- **WHEN** the user quits the first TUI normally
-- **THEN** the pidfile is removed and a fresh TUI starts without complaint
+- **WHEN** the first TUI process exits cleanly (Ctrl+Q only detaches the
+  client — the TUI keeps running and keeps its pidfile — so stop the
+  process itself)
+- **THEN** the pidfile and the session command queue are released, and a
+  fresh TUI starts without complaint
 
 ### R10 — The spinner aborts when the TUI dies mid-flight
 
 - **GIVEN** a picker action dispatched to a healthy TUI, still in flight
 - **WHEN** the TUI is killed before it applies the command
 - **THEN** within a few seconds the spinner aborts with a message that the
-  TUI is no longer running and the command may not have been applied
-- **THEN** restarting the TUI does **not** apply the failed command later
-  (it was rolled back out of the queue)
+  TUI is no longer running and the command **may not** have been applied
+- **THEN** the accepted command is not silently forgotten: if the line
+  reached the queue before the TUI died, a TUI restarted within the
+  startup queue age (~60 s) drains and applies it; a queue older than
+  that is discarded at startup rather than run unexpectedly. (Removal of
+  the line — a true rollback — happens only when the signal could not be
+  delivered at submit time, not on the spinner-abort path.)
 
 ### R11 — A restart while the spinner spins is not a false abort
 
@@ -180,9 +191,10 @@ caller-side process-identity validation plus a spinner abort. See
 
 ### R16 — The original failure does not reproduce end to end
 
-- **GIVEN** a TUI started from the pre-fix code (a checkout of `master`
-  used via `PYTHONPATH`), which writes a bare-number pidfile and has no
-  SIGUSR2 handler
+- **GIVEN** a TUI started from the code just before the command-queue
+  feature merged (`372f85f4^`, a worktree launched via `PYTHONPATH` —
+  **not** `master`, whose TUI already installs the SIGUSR2 handler),
+  which writes a bare-number pidfile and installs only the reload handler
 - **WHEN** the user routes a command to that session from the fixed CLI
 - **THEN** the old TUI is still alive and the user is told it predates the
   command-queue feature
@@ -207,10 +219,12 @@ for standalone CLI output. Save every capture under the per-PR captures
 directory the scenario prompt names.
 
 When a scenario needs a "pre-upgrade TUI", obtain one without touching the
-scenario clone's working tree: `git worktree add <scratch>/master master`
-and launch `PYTHONPATH=<scratch>/master pm _tui` in a pane (or install
-that worktree into a second venv). Never edit `pm_core/` in place to
-simulate old behaviour.
+scenario clone's working tree: `git worktree add --detach <scratch>/legacy
+372f85f4^` and launch `PYTHONPATH=<scratch>/legacy pm _tui` in a pane (or
+install that worktree into a second venv). Do **not** use `master` — its
+TUI already installs the SIGUSR2 handler, so a pre-fix CLI cannot kill it
+and the A/B would be invalid. Never edit `pm_core/` in place to simulate
+old behaviour.
 
 When a scenario needs a stale/foreign pidfile, write it as the user's
 environment would have it (`~/.pm/tui-<session>.pid`) — that file is user
@@ -261,6 +275,12 @@ state, not source code.
   (full disk / quota) is rolled back whole, so a command reported as "not
   applied" can never run later, and a concurrent caller's line is never
   removed by that rollback.
+- **E13 Spinner abort leaves the queue entry.** The spinner's abort path
+  does not cancel an accepted command: the line stays in the queue, and a
+  TUI restarted within ~60 s of it applies it, while a queue older than
+  that is discarded by the startup drain. The abort message therefore
+  says the command *may not* have been applied. Rollback of the line only
+  happens when the signal could not be delivered at submit time.
 
 ## Pass/Fail criteria
 
@@ -275,12 +295,15 @@ Partial passes must name the failing THEN clause and attach the evidence.
 
 ## Ambiguities
 
-- **A1 (resolved) — how to obtain a "pre-upgrade TUI".** A git worktree of
-  `master` launched via `PYTHONPATH` gives a real old TUI with a
-  bare-number pidfile and no SIGUSR2 handler; rewriting a live TUI's
-  pidfile to a bare number is an acceptable lighter-weight substitute
-  (same descriptor shape, same capability gap) when a second checkout is
-  impractical. Both are recorded in the scenario steps.
+- **A1 (resolved) — how to obtain a "pre-upgrade TUI".** Use the commit
+  before the command-queue feature (`372f85f4^` = `0e2cc2db`), which
+  writes a bare-number pidfile and installs only the SIGUSR1 reload
+  handler; verified to render under the container's textual. A `master`
+  worktree does **not** qualify: master's TUI already installs SIGUSR2,
+  so the pre-fix CLI would not kill it and the A/B would prove nothing.
+  Rewriting a live TUI's pidfile to a bare number is an acceptable
+  lighter-weight substitute for the refusal half only — it cannot
+  demonstrate the pre-fix CLI killing the process.
 - **A2 (resolved) — driving the picker headlessly.** The picker is an fzf
   popup bound to prefix+P. Drive it by sending the prefix key into the
   session, or by running its popup body in a pane of the session; either
@@ -295,3 +318,26 @@ Partial passes must name the failing THEN clause and attach the evidence.
   process check (pid from the pidfile still exists) and the user surface
   (`pm tui view` renders, keypresses still work). A surviving process with
   a wedged UI is a failure.
+- **A5 (resolved) — simulating "a TUI that is still starting up".** The
+  state a TUI publishes between claiming the pidfile and installing its
+  handlers is a descriptor with `caps: []`. Rewrite a live TUI's pidfile
+  `caps` to `[]`, run the command, then restore the descriptor (or restart
+  the TUI). The observable is the "has not advertised its signal handlers
+  yet" message and the pidfile being kept.
+
+## Post-merge context (base `master@89e3c501`, 2026-10-28)
+
+This branch was reconciled with master after the first QA round. Master
+reworked the autostart merge policy: `POLICY_STOP` was removed,
+`--stop-before-merge` is now a deprecated alias for `--wait-for-merge`,
+and new targets default to wait-for-merge. `pm autostart add` still
+dispatches through `submit_tui_command`, so the queued-command surface
+must keep carrying those policy flags and surfacing the same
+owner-unavailable reasons. Master also changed `pm_core/paths.py`,
+`pm_core/cli/tui.py`, `pm_core/cli/autostart.py`, `pm_core/qa_loop.py`,
+`pm_core/tui/app.py`, `pm_core/tui/pane_ops.py`, `pm_core/sync.py` and
+`pm_core/tui/signoff_ui.py`; the pidfile/IPC code itself was not changed
+by the merge. Scenarios should therefore re-exercise the round trip on
+the merged build — including a policy flag and a TUI pane that is not in
+the session's active window — since the earlier QA rounds all ran on the
+pre-merge build.

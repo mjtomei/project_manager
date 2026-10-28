@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T12:25:11.746569+00:00'
+  updated_at: '2026-10-28T12:57:42.002614+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16707,6 +16707,28 @@ prs:
       and scenario expectations still hold.'
     created_at: '2026-10-28T12:25:11Z'
     last_edited: '2026-10-28T12:25:11Z'
+  - id: note-f51c5bd
+    text: 'QA planner 2026-10-28 (post-merge re-plan): corrected pm/specs/pr-c3bf868/qa.md
+      against the code and prior QA notes — (1) R5: `pm autostart` reports a dead-pid
+      stale pidfile but does NOT remove it (_resolve_owner short-circuits on liveness
+      before submit_tui_command); cleanup happens on the reload/picker/startup path
+      (note-ff5e099). (2) R10/E13: the spinner-abort path does NOT roll back an accepted
+      command — the line stays queued and a TUI restarted within ~60s drains and applies
+      it; a queue older than that is discarded at startup (session.py _wait_for_tui_command
+      docstring, tui/app.py _STARTUP_QUEUE_MAX_AGE). (3) R9: Ctrl+Q only detaches
+      the client (TUI keeps running, pidfile stays); a clean process exit (SIGINT)
+      releases pidfile+queue via on_unmount. (4) R16/A1/Setup: the pre-upgrade TUI
+      must come from 372f85f4^ (0e2cc2db), not master, which already installs SIGUSR2.
+      Added A5 (simulate "still starting" by rewriting caps to []) and a post-merge
+      context section (master@89e3c501 autostart policy rework: --stop-before-merge
+      is now a deprecated alias for --wait-for-merge). New scenarios 14-18 re-exercise
+      the merged build: healthy IPC + policy flags + picker; legacy-TUI A/B (original
+      bug); crash/takeover/refusal/two-sessions/non-active-window discovery; restart-in-place
+      + concurrency + corrected spinner semantics; capability/foreign/corrupt/empty
+      pidfiles. Worker reminder: fake-claude must be on the PATH the session is started
+      with (QA/planner panes inherit the TUI process PATH).'
+    created_at: '2026-10-28T12:57:41Z'
+    last_edited: '2026-10-28T12:57:41Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
