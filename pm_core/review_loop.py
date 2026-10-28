@@ -498,9 +498,14 @@ def run_review_loop_sync(
     # its follow-up is still pending in the same review pane.
     adopt_wait = bool(last and last.iteration == state.iteration
                       and last.verdict == VERDICT_INPUT_REQUIRED)
-    if not adopt_wait:
-        # Whatever was restored, no human question is pending now.
-        state.input_required = False
+    # No human question is live until this loop has adopted the pane that
+    # asked it (below) or asked a new one.  A restored ``input_required`` is
+    # only the breadcrumb's copy of the wait: leaving it set while the adopt
+    # check runs reports a phantom "review INPUT_REQUIRED (iteration N)" to
+    # every status reader (CLI status, runs popup, scheduler) for as long as
+    # the resume takes — the same false-wait class this loop exists to
+    # prevent.  The adopted case re-sets it below.
+    state.input_required = False
 
     try:
         while state.iteration < max_iterations or adopt or adopt_wait:
@@ -522,6 +527,9 @@ def run_review_loop_sync(
                 _log.info("review_loop: adopting INPUT_REQUIRED wait for %s "
                           "iteration %d (transcript=%s)", state.pr_id,
                           state.iteration, wait_transcript)
+                # The question is live again: publish the wait now, before
+                # _wait_for_follow_up_verdict re-derives it from the pane.
+                state.input_required = True
                 verdict = VERDICT_INPUT_REQUIRED
             else:
                 # A new or adopted in-flight iteration owns the work now.

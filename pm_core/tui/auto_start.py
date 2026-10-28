@@ -285,7 +285,14 @@ async def consume_breadcrumb(app) -> None:
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
                 loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
-                input_required=loop_data.get("input_required", False),
+                # The saved flag is not a live human request: it is only
+                # meaningful once the resumed loop has re-adopted the pane
+                # that asked the question (review_loop.run_review_loop_sync
+                # sets it there).  Publishing it here would show a phantom
+                # "review INPUT_REQUIRED (iteration N)" to status readers
+                # from the mount until the loop thread reaches its adopt
+                # check — exactly the stale wait this is meant to prevent.
+                input_required=False,
                 _transcript_dir=loop_data.get("_transcript_dir"),
             )
             for h in loop_data.get("history", []):

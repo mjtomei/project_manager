@@ -744,6 +744,52 @@ class TestRestartAdoption:
             release.set()
             p.stop()
 
+    def test_restored_wait_is_not_published_before_the_adopt_check(self, env,
+                                                                   monkeypatch):
+        """The breadcrumb's ``input_required`` flag must not read as a live
+        human request while the resume is still deciding whether the wait can
+        be adopted.
+
+        QA S9 story 5: a plain restart with a restored iteration-6 wait whose
+        pane and transcript were already gone reported
+        ``waiting/review review #6 — review INPUT_REQUIRED (iteration 6)``
+        from the mount until the loop thread reached its adopt check (~1 s).
+        """
+        tdir, _ = env
+        gate = threading.Event()
+        real = rl._adoptable_wait_transcript
+
+        def blocked_adopt(state, pr_data, transcript_dir):
+            gate.wait(5)
+            return real(state, pr_data, transcript_dir)
+
+        monkeypatch.setattr(rl, "_adoptable_wait_transcript", blocked_adopt)
+        release7 = threading.Event()
+
+        def it7():
+            release7.wait(10)
+            return "**PASS**"
+
+        # Iteration 6 ended INPUT_REQUIRED; no pane/transcript for it.
+        state = _restored(tdir, 6, ["NEEDS_WORK"] * 5 + ["INPUT_REQUIRED"])
+        assert state.input_required is True
+        t, mock, p = _start(state, tdir, {7: it7})
+        try:
+            _until(lambda: state.running, what="resume started")
+            time.sleep(0.2)  # the adopt check is still blocked here
+            assert state.input_required is False
+            assert _status(state)[0] != "waiting"
+            gate.set()
+            _until(lambda: state.iteration == 7, what="iteration 7")
+            s, reason, review = _status(state)
+            assert s == "running" and reason.startswith("review iteration 7")
+            assert review["input_required"] is False
+        finally:
+            gate.set()
+            release7.set()
+            t.join(5)
+            p.stop()
+
     def test_restart_wait_with_no_recoverable_session_clears(self, env):
         """The pane is alive but its transcript yields no session_id, so there
         is no hook stream to wait on: nobody can answer.  Clear the wait and

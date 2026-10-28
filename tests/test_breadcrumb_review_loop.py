@@ -282,6 +282,65 @@ class TestConsumeBreadcrumbReviewLoops:
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
 
+    def test_restored_wait_is_not_published_before_the_loop_resumes(self, tmp_path):
+        """A breadcrumb's ``input_required`` flag must not restore into a live
+        wait: until the resumed loop re-adopts the pane that asked, every
+        status reader would report a phantom ``review INPUT_REQUIRED``.
+
+        QA S9 story 5: the row was visible from the mount until the loop
+        thread reached its adopt check.
+        """
+        breadcrumb_data = {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-001", "wait_for_merge": True}],
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 6,
+                    "latest_verdict": "INPUT_REQUIRED",
+                    "loop_id": "sd02",
+                    "input_required": True,
+                    "_transcript_dir": "/tmp/transcripts",
+                    "history": [
+                        {"iteration": 6, "verdict": "INPUT_REQUIRED",
+                         "timestamp": "2026-01-01T00:00:00"},
+                    ],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        pr_data = {"id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+        app = _make_app(auto_start=True, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        seen = {}
+
+        def capture_state(app_, pr_id, pr, transcript_dir, resume_state=None,
+                          superseded=False):
+            # What the runs popup / ``pm autostart status`` would read right
+            # before the loop thread starts.
+            seen["input_required"] = resume_state.input_required
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop") as mock_start:
+            mock_store.get_pr.return_value = pr_data
+            mock_start.side_effect = capture_state
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        rstate = app._review_loops["pr-001"]
+        assert rstate.iteration == 6
+        assert rstate.latest_verdict == "INPUT_REQUIRED"
+        assert rstate.input_required is False
+        assert seen["input_required"] is False
+        # The saved history is still restored, so the loop knows which
+        # iteration ended INPUT_REQUIRED and can adopt or skip its wait.
+        assert rstate.history[-1].iteration == 6
+
     def test_resume_summary_is_last_log_message(self, tmp_path):
         """The auto-start summary must not be overwritten by the per-loop
         resume messages (one is sticky) before it is ever painted."""
