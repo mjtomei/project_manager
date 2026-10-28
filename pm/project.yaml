@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T12:01:22.357496+00:00'
+  updated_at: '2026-10-28T12:02:56.143774+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39288,6 +39288,30 @@ prs:
       agg-aarch64-unknown-linux-gnu v1.4.3 to ~/.local/bin and chmod +x.'
     created_at: '2026-10-28T12:01:22Z'
     last_edited: '2026-10-28T12:01:22Z'
+  - id: note-c00b702
+    text: 'QA scenario 43 (concurrent sync/recovery on the shared registry) PASS at
+      72dd782a — no code change. Harness facts for the next run: (1) the scenario
+      step-4 setup leaves the local `master` carrying a `pm` state commit that is
+      never published to the stand-in, so once the stand-in merges a PR branch the
+      two diverge and `pm pr merge --propagation-only`''s `git merge --ff-only origin/<base>`
+      fails ("Not possible to fast-forward") and escalates to a repo-update window
+      instead of printing "Pulled latest master." / "PR #N marked as merged.". Publish
+      the state commit first (`git push origin master:pm/sync-<ts>` then merge it
+      on the stand-in) so local master stays an ancestor of origin; the fully-specified
+      ordering then appears. (2) Each `pm pr add` needs a `pm push` + ff + stand-in
+      merge before the next `pm pr start`, or start refuses with "not committed on
+      master yet". (3) A teammate''s `unreviewed.txt` added to an earlier PR branch
+      lands on master via its stand-in merge, so a later PR branch already contains
+      it and the same `echo unreviewed > unreviewed.txt` + commit silently no-ops
+      ("nothing to commit") — use a per-PR filename, and re-check that the branch
+      tip actually moved past the approved head before flipping state.json. (4) Redirecting
+      the two concurrent runs to files makes asciinema record a single burst (a ~3
+      s flash); stream live with `pm pr sync-github 2>&1 | sed "s/^/[A] /"` (and `PIPESTATUS[0]`
+      for rc) to get a watchable cast. (5) `pm pr show <pr>` prints two `Status:`
+      lines (the PR status and the `## Sign-off` status) — read only the first. (6)
+      Captures at /pm-captures/scenarios/43/{01b-two-syncs-live,02-sync-vs-recovery,02c-sync-vs-recovery-live,03b-two-recoveries-live}.'
+    created_at: '2026-10-28T12:02:56Z'
+    last_edited: '2026-10-28T12:02:56Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
