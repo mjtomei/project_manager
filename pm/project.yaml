@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T19:49:53.570294+00:00'
+  updated_at: '2026-10-28T20:21:27.349701+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35946,6 +35946,47 @@ prs:
       launch because _relaunch_impl runs after the step() reload).'
     created_at: '2026-10-28T19:49:53Z'
     last_edited: '2026-10-28T19:49:53Z'
+  - id: note-eea7a2e
+    text: 'QA S6 (two returns + two PRs in one run dir; two PRs at different steps;
+      a return relaunches only the returned PR) — the fix holds on all three. Story
+      1: two returns keep both pre-return impl sids (9606268e, c523fa7f) and both
+      SIGNOFF_IMPL routers (grep count 2), final rework is a distinct third sid, two
+      loop-scoped review files coexist, A/B sid sets disjoint, both merged, no merge-*.jsonl,
+      no error lines. Story 2: A sign_off vs B in_review simultaneously with per-(step,PR)
+      names and unique live sids. Story 3: X returned (new impl sid, pre-return archived,
+      router archived with SIGNOFF_IMPL, head gone) while Ys signoff link/head/stat
+      were byte-identical and Y stayed sign_off; return line matched X once, Y zero.
+
+
+      CONFLICT (why this run is INPUT_REQUIRED, not PASS): the scenario THEN asks
+      for exactly two impl-A/signoff-A archive entries and `readlink impl-A` naming
+      the third sid, measured after both merge. But the last target merging turns
+      auto-start OFF -> _disable -> _finalize_all_transcripts, which per impl.md R1/R2
+      freezes every canonical symlink and writes a sid-keyed archive copy first. End
+      state therefore has 3 impl-A / 3 signoff-A archive entries and `readlink` on
+      the canonical returns nothing. Both bullets hold only at the post-return checkpoint
+      (measured there: exactly 2/2 and readlink -> 114830c6). The extra archived final
+      session is the same class as pr-bab46cf (unbounded archive growth); the freeze
+      is spec-required, so I did not change it.
+
+
+      Observation (pre-existing, present on master, not filed to avoid touching project.yaml
+      during sign-off): after a sign-off IMPL return the review loop logs "impl_idle:
+      awaiting sign-off rework launch" for ~3-4 min until RETURN_LAUNCH_CLAIM_SECONDS
+      (180s) expires, then relaunches review. The CLI cleared signoff_return.awaiting
+      on disk at launch, but the TUI in-memory copy stayed stale (no reload after
+      the hop''s `pm pr start`), so each return costs ~3 min. Already filed by the
+      S5 run as pr-9966785 (same root cause: stale signoff_return.awaiting after the
+      rework launch); this run is a second reproduction.
+
+
+      Env: start `pm session` and the driving pane with /usr/bin ahead of ~/.local/bin
+      (the push-proxy git wrapper forwards local `git fetch <project-dir>` to a host
+      workdir, so the integration check records error/base_sha null and SIGNOFF_MERGE
+      is coerced to BLOCKED). Captures: /pm-captures/scenarios/6/{story1,story2,story3}/
+      (cast+mp4+transcripts+manifest).'
+    created_at: '2026-10-28T20:21:27Z'
+    last_edited: '2026-10-28T20:21:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
