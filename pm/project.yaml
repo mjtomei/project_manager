@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T09:06:44.376399+00:00'
+  updated_at: '2026-10-28T10:28:59.040883+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15179,6 +15179,19 @@ prs:
       resumed polls log "removed 0".'
     created_at: '2026-10-28T09:06:44Z'
     last_edited: '2026-10-28T09:06:44Z'
+  - id: note-5190caf
+    text: 'QA S83 follow-up (re-evaluation): verification flagged missing cli-recording.md
+      captures. Reran all five stories 09:47-10:25 on the same fixture with every
+      in-session pm command recorded (asciinema scripted form in a session window;
+      cast+mp4+recipe manifest in /pm-captures/scenarios/83/rerun/cli/NN-name, 23
+      captures). All Thens held again: restart3-1/3-2/restart4 show "Sent restart
+      to TUI pane %0" ~1 s after the triggering release; reap5 removes the kept IR
+      worker then podman empty; cstatus5 no Cleanup failures; every pm set list confirmation
+      recorded. Same-number overlap cannot recur on a reused project (per-PR renumbering),
+      first run showed it. Fixture lesson: on a PR with earlier QA runs, t only focuses
+      the QA window; use z t.'
+    created_at: '2026-10-28T10:28:58Z'
+    last_edited: '2026-10-28T10:28:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
