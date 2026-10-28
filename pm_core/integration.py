@@ -152,9 +152,20 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     Local backend: the main repo directory (merges land there).  Remote
     backends: the workdir's ``origin`` fetch URL (pushes may fan out to the
     local source as well; publication targets the upstream).
+
+    ``project.yaml`` is hand-editable state: a ``project`` that is not a
+    mapping is no configuration (``.get`` on a scalar raised
+    ``AttributeError`` out of ``run_check`` — which promises a ``status:
+    error`` record — and out of the approval/recovery paths), and a
+    ``base_branch``/``repo`` that is not a string cannot be a ref or a remote
+    (both are passed to git as arguments, where a non-string raises
+    ``TypeError``).  They read as absent/default like an unset one.
     """
-    project = data.get("project") or {}
-    base_branch = project.get("base_branch", "master")
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    base_branch = project.get("base_branch")
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     if project.get("backend") == "local":
         from pm_core.cli.helpers import _resolve_repo_dir, state_root
         from pm_core.paths import workdirs_base
@@ -179,7 +190,8 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
     url = (_out(_git("remote", "get-url", "origin", cwd=workdir))
            if isinstance(workdir, str) and workdir
            and Path(workdir).is_dir() else "")
-    return (url or project.get("repo", "")), base_branch
+    repo = project.get("repo")
+    return (url or (repo if isinstance(repo, str) else "")), base_branch
 
 
 def same_target(a: str, b: str) -> bool:
@@ -1387,8 +1399,16 @@ def run_check(data: dict, pr: dict, root: Path | None = None,
         target_repo, base_branch = target_for(
             data, dict(pr, workdir=workdir), root)
     except Exception as e:  # repo dir resolution is best-effort
-        target_repo, base_branch = "", (data.get("project") or {}).get(
-            "base_branch", "master")
+        # The same hand-edited-state contract as ``target_for``: a
+        # ``project`` that is not a mapping (or a non-string ``base_branch``)
+        # must not raise out of a check that promises a ``status: error``
+        # record — the fallback itself must not re-raise.
+        project = data.get("project")
+        project = project if isinstance(project, dict) else {}
+        base_branch = project.get("base_branch")
+        if not (isinstance(base_branch, str) and base_branch):
+            base_branch = "master"
+        target_repo = ""
         _log.warning("integration target for %s: %s", pr.get("id"), e)
     record.update(target_repo=target_repo, base_branch=base_branch)
     if not workdir:

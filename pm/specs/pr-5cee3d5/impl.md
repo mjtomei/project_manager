@@ -849,7 +849,13 @@ tests):
     the merge recovery path (`pm pr merge --propagation-only`, which runs
     before the gate), `spec_gen.get_spec` (every prompt builder inlines the
     specs through it) and the spec generator's subprocess cwd, while a string
-    workdir still supplies the workdir copy of a spec.  The note commands (`pm pr note add` /
+    workdir still supplies the workdir copy of a spec.  The same holds for the
+    top-level `project` mapping: a `project` that is not a mapping (or a
+    `base_branch`/`repo` that is not a string — both are passed to git as
+    arguments) is no configuration, so `integration.target_for` and
+    `run_check`'s own fallback read it as absent/default instead of raising
+    `AttributeError` out of a check that promises a `status: error` record and
+    out of the approval/recovery paths.  The note commands (`pm pr note add` /
     `edit` / `delete` — the canonical handoff channel) plus `_apply_pr_edit`
     treat a malformed member as "not a note" instead of raising `TypeError` /
     `KeyError` and losing the write: they preserve the malformed member rather

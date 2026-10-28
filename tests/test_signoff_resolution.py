@@ -2827,6 +2827,36 @@ def test_a_non_string_workdir_reads_as_absent_on_every_signoff_surface(
         assert branch == "master"
 
 
+def test_a_non_mapping_project_reads_as_absent_in_the_integration_check(
+        tmp_path):
+    """A hand-edited non-mapping ``project`` is no configuration.
+
+    ``project.yaml`` is hand-editable state.  ``data.get("project", {})``
+    returns the scalar when one is present, so ``.get`` raised
+    ``AttributeError`` out of ``run_check`` — which promises a ``status:
+    error`` record, never a traceback — and out of ``target_for`` (the
+    approval and recovery paths).  A ``base_branch``/``repo`` that is not a
+    string cannot be a git ref/remote (both are passed to git as arguments),
+    so it falls back too.
+    """
+    for bad in (5, ["x"], "scalar", True):
+        data = {"project": bad, "prs": []}
+        pr = {"id": PR, "workdir": str(tmp_path)}
+        target, branch = integration.target_for(data, pr, tmp_path)
+        assert (target, branch) == ("", "master"), (bad, target, branch)
+        rec = integration.run_check(data, pr, tmp_path)
+        # No git repo here, so the check reports an error rather than raising.
+        assert rec["status"] == integration.ERROR, (bad, rec)
+
+    # A mapping with non-string members reads each one as absent.
+    data = {"project": {"repo": 7, "base_branch": 9}, "prs": []}
+    pr = {"id": PR, "workdir": str(tmp_path)}
+    assert integration.target_for(data, pr, tmp_path) == ("", "master")
+    # A real string is still used verbatim.
+    data = {"project": {"repo": "/nope", "base_branch": "main"}, "prs": []}
+    assert integration.target_for(data, pr, tmp_path) == ("/nope", "main")
+
+
 def test_a_carried_record_keeps_the_bounded_totals():
     """A carried-forward bounded list must keep the real total.
 
