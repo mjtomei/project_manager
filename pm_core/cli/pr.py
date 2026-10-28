@@ -3730,19 +3730,13 @@ def _qa_run_starting(pr_id: str, iso_ts: str | None) -> bool:
     return own_run_started_since(pr_id, since)
 
 
-def _qa_run_driven_since(pr_id: str, iso_ts: str | None = None) -> bool:
-    """Whether a QA run of *pr_id* this pm session started (at or after the
-    ISO timestamp *iso_ts*, if given) is still driven by a live process,
-    with or without its qa window."""
-    from pm_core.qa_loop import own_run_driven_since
-    from pm_core.signoff import parse_ts
-    since = None
-    if iso_ts is not None:
-        try:
-            since = parse_ts(iso_ts).timestamp()
-        except (TypeError, ValueError):
-            return False
-    return own_run_driven_since(pr_id, since)
+def _qa_run_driven(pr_id: str) -> bool:
+    """Whether a QA run of *pr_id* this pm session started is still driven
+    by a live process, with or without its qa window.  It need not be the
+    re-run: a run from before a sign-off return still holds the PR until it
+    ends (S120)."""
+    from pm_core.qa_loop import own_run_driven
+    return own_run_driven(pr_id)
 
 
 def _qa_run_stopped(pr_id: str, status_path: Path | None) -> bool:
@@ -3762,7 +3756,7 @@ def _qa_run_stopped(pr_id: str, status_path: Path | None) -> bool:
     if not isinstance(data, dict) or not data.get("stopped"):
         return False
     return (not own_run_started_since(pr_id, stopped_at)
-            and not _qa_run_driven_since(pr_id))
+            and not _qa_run_driven(pr_id))
 
 
 def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
@@ -4032,7 +4026,7 @@ def pr_auto_sequence(pr_id: str):
             if awaiting == "qa":
                 if (qa_win and _qa_run_started_since(pr_id, return_ts)) \
                         or _qa_run_starting(pr_id, return_ts) \
-                        or _qa_run_driven_since(pr_id):
+                        or _qa_run_driven(pr_id):
                     # The TUI started the re-run while project.yaml was
                     # busy: its clear of ``awaiting`` is still pending (the
                     # poll tick retries it), and a tick queued on the lock
@@ -4080,7 +4074,7 @@ def pr_auto_sequence(pr_id: str):
                 from pm_core.signoff import return_launch_claimed
                 if return_launch_claimed(pr_entry, "qa") \
                         or _qa_run_starting(pr_id, return_ts) \
-                        or _qa_run_driven_since(pr_id):
+                        or _qa_run_driven(pr_id):
                     click.echo("running: qa")
                     return
             _launch_qa_detached(root, pr_id)
@@ -4141,7 +4135,7 @@ def pr_auto_sequence(pr_id: str):
             # it ends, as ``awaiting`` stays set (S120).
             from pm_core.signoff import claim_return_launch
             _check_qa_launch(root, pr_id)
-            if not _qa_run_driven_since(pr_id) \
+            if not _qa_run_driven(pr_id) \
                     and claim_return_launch(root, pr_id, "qa"):
                 _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")

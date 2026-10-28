@@ -602,17 +602,17 @@ def _start_qa_after_review(app, pr_id: str) -> None:
         # (S120: "Review PASS" was logged for a REQA's deferred start).
         reqa = pr_id in _reqa_waiting(app)
         cause = "Sign-off REQA" if reqa else "Review PASS"
+        log_cause = "sign-off REQA" if reqa else "review passed"
         if stage == "driven":
             _log.info("auto_qa: %s %s; QA starts once %s ends", pr_id,
-                      "sign-off REQA" if reqa else "review passed", reason)
+                      log_cause, reason)
             app.log_message(escape(
                 f"{cause} for {pr_id} — QA starts once {reason} ends"),
                 sticky=10)
             return
         locked = reason == store.LOCK_BUSY_REASON
         _log.warning("auto_qa: %s %s; QA %s waits until "
-                     "project.yaml %s: %s", pr_id,
-                     "sign-off REQA" if reqa else "review passed",
+                     "project.yaml %s: %s", pr_id, log_cause,
                      "start" if stage == "launch" else "transition",
                      "is unlocked" if locked else "loads again", reason)
         # Sticky: the "Review loop done … PASS" line logged just before is

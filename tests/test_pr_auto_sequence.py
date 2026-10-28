@@ -306,7 +306,7 @@ class TestQA:
                    return_value={"id": "@7", "index": "3"}), \
              patch("pm_core.qa_loop.own_run_started_since",
                    return_value=False), \
-             patch("pm_core.cli.pr._qa_run_driven_since", return_value=False), \
+             patch("pm_core.cli.pr._qa_run_driven", return_value=False), \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
@@ -329,7 +329,7 @@ class TestQA:
                    return_value={"id": "@7", "index": "3"}), \
              patch("pm_core.qa_loop.own_run_started_since",
                    return_value=newer), \
-             patch("pm_core.cli.pr._qa_run_driven_since", return_value=driven), \
+             patch("pm_core.cli.pr._qa_run_driven", return_value=driven), \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.output.strip() == "running: qa"
@@ -523,7 +523,7 @@ class TestSignOff:
              patch("pm_core.cli.pr.store.locked_update",
                    side_effect=_locked_update_runs(data)), \
              patch("pm_core.cli.pr._retire_signoff_window"), \
-             patch("pm_core.cli.pr._qa_run_driven_since", return_value=True), \
+             patch("pm_core.cli.pr._qa_run_driven", return_value=True), \
              patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
             result = runner.invoke(pr_auto_sequence, ["pr-001"])
         assert result.exit_code == 0, result.output
