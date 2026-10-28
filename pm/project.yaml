@@ -31437,6 +31437,20 @@ prs:
       was still alive. Captures: /pm-captures/scenarios/4/. (2026-10-28T13:35:00Z)'
     created_at: '2026-10-28T13:28:58Z'
     last_edited: '2026-10-28T13:28:58Z'
+  - id: note-4cafc51
+    text: 'QA S8 (flagged PASS, worker dies during re-evaluation) needs fake-claude
+      hold timers: the fake exits on ANY stdin input, so a verification follow-up
+      typed into a live worker pane kills it and the loop''s two extra send_keys(pane_id,
+      "") Enters (FLAGGED follow-up block) then hit the dead pane and raise CalledProcessError
+      -> "QA background thread crashed". Use qa_scenario hold=50 (alive through the
+      30 s verdict grace, gone before the ~30 s-later re-evaluation follow-up) and
+      qa_concretize/qa_verification hold=600 (the follow-up lands on the surviving
+      concretizer/verifier pane, which ignores input); the dead-pane branch then sees
+      idx in verification_failures and records an `exit` launch retry instead of re-collecting
+      the stale PASS. The same unguarded send is a latent crash if a real worker dies
+      in that ~2 s follow-up window.'
+    created_at: '2026-10-28T14:59:57Z'
+    last_edited: '2026-10-28T14:59:57Z'
   - id: note-d898e98
     text: 'QA scenario 6 (host mode, no container) PASS 3/3 stories at c9f8fd9d: (1)
       repeated worker-window kills -> row `launch retry n/6` (1/6..6/6) with the plain
