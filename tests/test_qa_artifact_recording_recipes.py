@@ -2419,6 +2419,34 @@ case "$sub" in
       fi
       exit 0 ;;
   capture-pane) cat "$STATE/pane" 2>/dev/null; exit 0 ;;
+  # Session user options: the capture-dir claim step 2 writes and step 5
+  # clears. Modelled on the real server (verified: `set-option -t S
+  # @pm_capture_dir V`, `show-options -t S -v @pm_capture_dir`, and
+  # `set-option -u` round-trip; a grouped session does not inherit it).
+  show-options)
+      s=$(val -t "$@")
+      case "$*" in
+        *@pm_capture_dir*)
+            [ -f "$STATE/claim.$s" ] && { cat "$STATE/claim.$s"; exit 0; }
+            exit 1 ;;
+      esac
+      exit 0 ;;
+  set-option)
+      s=$(val -t "$@")
+      case " $* " in
+        *" -u "*) rm -f "$STATE/claim.$s"; exit 0 ;;
+      esac
+      for a in "$@"; do v=$a; done
+      printf '%s\n' "$v" > "$STATE/claim.$s"
+      exit 0 ;;
+  list-sessions)
+      for f in "$STATE"/*; do
+          [ -e "$f" ] || continue
+          b=${f##*/}
+          case "$b" in pane|sends|claim.*) continue ;; esac
+          echo "$b"
+      done
+      exit 0 ;;
   send-keys)
       s=$(val -t "$@")
       # `stuck`: the recorder never goes away, so a stop wait runs out.
@@ -2578,6 +2606,17 @@ def _driving_block():
     return raw[raw.index("# 4."):raw.index("# 5.")]
 
 
+def _step_two_block():
+    """The tmux recipe's transcript-pipe step (``# 2.`` … ``# 3.``).
+
+    Pasted on its own when a run re-attaches its transcript to the same
+    session, which is also when an empty ``$TARGET`` would resolve to whatever
+    session tmux treats as current.
+    """
+    raw = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+    return raw[raw.index("# 2."):raw.index("# 3.")]
+
+
 class TestCaptureFlowExecution:
     """Run the capture block end to end against a stub tmux server."""
 
@@ -2735,6 +2774,84 @@ class TestCaptureFlowExecution:
         assert cast.stat().st_size > 0, "the completed cast is missing"
         assert "can't find session" not in r.stderr, (
             "a clean run prints a tmux error while stopping the transcript pipe")
+
+    def test_step_two_refuses_an_empty_target(self, tmp_path):
+        """Pasted alone with no session name, step 2 must not guess a session.
+
+        ``tmux -t ''`` resolves to whatever session tmux considers current, so
+        an empty ``$TARGET`` would read the claim from — and attach the pipe
+        to — another run's session. Steps 4 and 5 re-derive the handle for the
+        same reason.
+        """
+        r, _cast = _run_block(_step_two_block(), "ok", tmp_path,
+                              env_extra={"STUB_PM_NAME": ""})
+        assert r.returncode != 0, (
+            "step 2 ran with no target session instead of refusing")
+        assert "TARGET is unset and 'pm session name' printed nothing" in (
+            r.stderr), r.stderr
+
+    def test_step_two_claims_the_capture_dir_on_the_session(self, tmp_path):
+        """The claim is what the collision guards read; it has to be written.
+
+        Step 2 attaches the transcript pipe and records the capture directory
+        in a session option, so the guard survives the separate pastes that
+        follow. ``nostart`` fails the recorder start *after* step 2, which is
+        the earliest point the claim can be observed.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")),
+            "nostart", tmp_path, target=True)
+        assert r.returncode != 0, r.stderr
+        claim = tmp_path / "state" / "claim.pm-test"
+        assert claim.exists(), "step 2 did not claim the capture directory"
+        assert claim.read_text().strip() == str(tmp_path / "cap")
+
+    def test_a_second_capture_dir_on_one_session_is_refused(self, tmp_path):
+        """Two runs recording one pm session must not take each other's pipe.
+
+        Verified live (QA S24): the second run's ``pipe-pane`` (no ``-o``)
+        replaces the first's, so the first run's ``transcript.log`` stops
+        growing while its stop step still exits 0 — a silent false pass on a
+        transcript that is not the run's own. Step 2 claims the session for
+        its capture directory and refuses a different one.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True,
+            state_files={"claim.pm-test": str(tmp_path / "other-cap")})
+        assert r.returncode != 0, "a second capture dir took over the session"
+        assert "already being recorded into" in r.stderr, r.stderr
+
+    def test_one_capture_dir_claimed_by_another_session_is_refused(self,
+                                                                  tmp_path):
+        """Two runs into one capture directory cannot be told apart.
+
+        Verified live (QA S24): the second run's step 0 removes the first
+        run's cast and transcript, then the first run's stop block detaches
+        the *second* run's recorder and reads its status — exiting 0 on
+        evidence that belongs to the other run. Step 2 refuses a directory
+        another live pm session already records into.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True,
+            state_files={"pm-other": "",
+                         "claim.pm-other": str(tmp_path / "cap")})
+        assert r.returncode != 0, "a shared capture dir was recorded twice"
+        assert "is already being recorded by pm session pm-other" in r.stderr, (
+            r.stderr)
+
+    def test_a_finished_run_releases_its_capture_dir_claim(self, tmp_path):
+        """A claim must not outlive the run that made it.
+
+        Otherwise the next capture in the same session — into a different
+        directory — is refused by its own predecessor.
+        """
+        r, _cast = _run_capture_block(
+            "tmux-screen-recording.md", "ok", tmp_path, target=True)
+        assert r.returncode == 0, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the finished run left its capture-dir claim on the session")
 
     def test_tmux_transcript_that_is_never_written_fails(self, tmp_path):
         """The pipe can accept the attach and still write nothing.

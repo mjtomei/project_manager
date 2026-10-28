@@ -141,9 +141,57 @@ done
 #    closed), so this step is idempotent. The attach itself can fail (the
 #    pane is gone, or tmux cannot spawn the command) and would otherwise be
 #    silent until the empty transcript is found at the end.
+#    Replacing is exactly what makes two runs on one tmux server collide. A
+#    second run that pipes the same pm session into another capture directory
+#    takes the pipe over: the first run's transcript stops growing and its
+#    stop step still passes on the bytes written before the takeover. Two runs
+#    pointed at one capture directory collide the other way: the second run's
+#    step 0 removes the first run's cast and transcript and its recorder
+#    writes over them, so both stop steps read the same files as their own.
+#    Claim the capture directory before attaching the pipe and refuse one that
+#    is already claimed. The claim is a tmux session option, so it outlives
+#    this paste; step 5 clears it when the run ends. A claim left behind by an
+#    abandoned run is cleared with
+#    `tmux set-option -u -t <session> @pm_capture_dir` — the message below
+#    says so, because a stale claim would otherwise block this session.
+#    Like steps 4 and 5, this step is pasted on its own when a run re-attaches
+#    its transcript: an empty `$TARGET` would make `-t ''` resolve to whatever
+#    session tmux considers current (the claim below would be read from — and
+#    the pipe attached to — another run's session), so re-derive it.
+TARGET=${TARGET:-$(pm session name)}
+if [ -z "$TARGET" ]; then
+    echo "TARGET is unset and 'pm session name' printed nothing — run this" \
+        "step with pm on PATH, in the project directory" >&2
+    exit 1
+fi
+claimed=$(tmux show-options -t "$TARGET" -v @pm_capture_dir 2>/dev/null || true)
+if [ -n "$claimed" ] && [ "$claimed" != "<capture-dir>" ]; then
+    echo "$TARGET is already being recorded into $claimed — end that capture," \
+        "or clear the claim with 'tmux set-option -u -t $TARGET" \
+        "@pm_capture_dir' if it is stale" >&2
+    exit 1
+fi
+# The same directory claimed by a *different* pm session is the other
+# collision: neither run can tell its own cast, status or transcript from the
+# other's, so both stop steps would read the same files.
+other=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | while read -r s; do
+    [ "$s" = "$TARGET" ] && continue
+    v=$(tmux show-options -t "$s" -v @pm_capture_dir 2>/dev/null || true)
+    [ "$v" = "<capture-dir>" ] && { echo "$s"; break; }
+done)
+if [ -n "$other" ]; then
+    echo "<capture-dir> is already being recorded by pm session $other —" \
+        "end that capture, or use another capture directory" >&2
+    exit 1
+fi
 tmux pipe-pane -t "$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
     echo "could not stream $TARGET:0.0 to <capture-dir>/transcript.log —" \
         "check that pane exists" >&2
+    exit 1
+}
+tmux set-option -t "$TARGET" @pm_capture_dir "<capture-dir>" || {
+    echo "could not claim <capture-dir> on $TARGET — the session went away" \
+        "between the pipe and the claim" >&2
     exit 1
 }
 
@@ -362,6 +410,11 @@ test -s <capture-dir>/transcript.log || {
     tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 }
+# Release this run's capture-directory claim (step 2). A later run in this
+# session may record into another directory; leaving the claim behind would
+# make it refuse. Best-effort like the pipe stop below: the session may already
+# be gone, which is why the claim lives on the session in the first place.
+tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
 tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
 tmux kill-session -t pm-recorder 2>/dev/null || true   # already gone if it exited
 ```

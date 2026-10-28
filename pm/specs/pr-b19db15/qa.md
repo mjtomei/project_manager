@@ -399,6 +399,20 @@ run's video in the capture directory.
   `command -v agg`; the recipe's install line is the remedy either way, and
   the render prose says `agg` may be missing rather than claiming it is
   always absent.
+- Two runs on one tmux server → `pm-recorder` is one session name and
+  `pipe-pane` is per-pane, so the runs collide. A second run recording the
+  *same pm session* into another capture directory replaces the first run's
+  transcript pipe: the first run's `transcript.log` stops growing and its
+  stop step still exits 0 on the bytes written before the takeover. A second
+  run recording into the *same capture directory* removes the first run's
+  cast and transcript and overwrites them, and the first run's stop block
+  then detaches the second run's recorder and reads its status as its own.
+  Step 2 claims the capture directory in a `@pm_capture_dir` session option
+  and refuses a session recording a different directory, or a directory
+  another live pm session is recording; step 5 releases the claim. Both
+  collisions now fail loudly on at least one side instead of passing. A raw
+  `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
+  record it as a limitation, not a pass.
 
 ## Pass / Fail criteria
 
