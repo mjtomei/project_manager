@@ -808,6 +808,58 @@ class TestSubmitCommand:
         time.sleep(0.2)
         assert tui.poll() is None  # and never signaled
 
+    def test_partial_queue_write_is_cut_off(self, ipc_paths, start_fake_tui,
+                                            monkeypatch):
+        """A short write must not leave half a command behind.
+
+        ``_unqueue_line`` matches whole lines, so it cannot take back a
+        *partial* line.  A later drain would then run a truncated command
+        the caller was told was not applied (``pr qa fresh pr-1`` cut to
+        ``pr qa``), so the append truncates back to its pre-write size
+        under the same lock.
+        """
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        queue.write_bytes(b"pr qa fresh pr-9\n")
+        before = queue.read_bytes()
+
+        real_open = open
+
+        class _ShortWrite:
+            """Writes a prefix of the line, then fails like a full disk."""
+
+            def __init__(self, real):
+                self._real = real
+
+            def write(self, data):
+                self._real.write(data[:5])
+                self._real.flush()
+                raise OSError(28, "No space left on device")
+
+            def __getattr__(self, name):  # truncate/flush/fileno/tell/close
+                return getattr(self._real, name)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self._real.close()
+                return False
+
+        def fake_open(path, mode="r", *args, **kwargs):
+            f = real_open(path, mode, *args, **kwargs)
+            return _ShortWrite(f) if mode == "ab" else f
+
+        monkeypatch.setattr(helpers, "open", fake_open, raising=False)
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert res.reason == "queue_error"
+        assert queue.read_bytes() == before, "partial line must be removed"
+        assert pidfile.exists()
+        assert tui.poll() is None  # never signaled
+
     def test_empty_pidfile_is_starting_not_stale(self, ipc_paths):
         """A peer mid-claim must keep its file: deleting it reopens the race.
 

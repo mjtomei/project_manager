@@ -134,6 +134,14 @@ I3. The command queue file must exist before caps are published (a caller
     The drain reads UTF-8 with `errors="replace"` so a garbled queue can
     never raise out of a signal handler.
 
+    A *partial* line is rolled back too: `_unqueue_line` matches whole
+    lines, so it cannot take back a short write (ENOSPC / quota, which
+    the kernel is allowed to do) and a later drain would run a truncated
+    command the caller was told was not applied. The append records
+    `f.tell()` (the end of file, stable because we hold the `flock`) and
+    truncates back to it when the write/flush raises — under the same
+    lock, best effort, since the write itself just failed.
+
 I4. `trigger_tui_reload` keeps its fire-and-forget behavior and its
     `refresh_home` side effect (existing tests assert the kick). It now
     returns `True` only when SIGUSR1 was actually delivered and `False`
@@ -220,6 +228,25 @@ A5. *Should a JSON descriptor with `caps: []` (TUI starting) be retried
     dead end and the message also names "restart the TUI (Ctrl+R)".
 
 No **[UNRESOLVED]** items.
+
+## Incidental fixes on this branch
+
+These are outside the pidfile/IPC bug itself but were found while
+implementing and QA-ing it, and ship here (each has a PR note):
+
+- `pm_core/tui/pane_ops.py::heal_registry` resolved "the window" with
+  `get_window_id(session)` — the session's *active* window. A TUI whose
+  pane lives in any other window (a hand-started `pm _tui`, or the winner
+  of the startup race) never re-registered its pane; the registry then
+  lost the `tui` role entry and `_find_tui_pane` (`pm tui view`,
+  `pm autostart`, …) reported "No TUI pane found" against a live TUI that
+  owned the pidfile. It now resolves the window from `$TMUX_PANE`
+  (`pane_window_id`), with the session window as a fallback. Fixed in QA
+  commit `a2616b0d`; tests in `tests/test_pane_layout.py`
+  (`TestHealRegistryOwnWindow`).
+- `pm_core/qa_loop.py::_proc_stat_fields` / `resume_owned_elsewhere`: the
+  same non-UTF-8 `comm` and out-of-range-PID crash class as E16, on the
+  QA resume path (see E16 and test 29/32).
 
 ## Edge cases
 
@@ -509,6 +536,12 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     test asserts they already contain the command. Verified to fail
     before the `f.flush()` (`b''` at `LOCK_UN`; the line only appeared
     when the `with` block closed the file afterwards).
+35. a short write to the queue (I3) leaves no partial line: a fake `open`
+    writes five bytes of the command and then raises `ENOSPC`, and the
+    test asserts the queue still holds exactly its pre-append bytes.
+    Verified to fail before the truncate-back (`b'pr qa fresh
+    pr-9\nrevie'` left in the file, which a later drain would have run
+    as the command `revie`).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

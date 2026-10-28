@@ -594,15 +594,19 @@ def tui_owner_problem(session: str) -> str | None:
     return _read_tui_owner(session)[3]
 
 
-def _missing_cap_result(
-    session: str, desc: tui_pidfile.TuiPidfile, cap: str,
+def _missing_command_cap_result(
+    session: str, desc: tui_pidfile.TuiPidfile,
 ) -> TuiIpcResult:
-    """Explain that the live TUI cannot handle *cap*."""
-    feature = ("command-queue" if cap == tui_pidfile.CAP_COMMAND else "reload")
+    """Explain that the live TUI cannot handle a queued command.
+
+    Only the command-queue path needs a user-facing explanation: a reload
+    is fire-and-forget (see ``trigger_tui_reload``), so a TUI without
+    ``sigusr1`` is simply not signaled and the caller keeps its state.
+    """
     if desc.legacy:
         return TuiIpcResult(
             False, "missing_capability",
-            f"The TUI for session {session} predates the {feature} "
+            f"The TUI for session {session} predates the command-queue "
             f"feature; restart the TUI (Ctrl+R) to use it.")
     if not desc.caps:
         # Claimed but nothing published yet: mid-startup, or the handler
@@ -615,7 +619,7 @@ def _missing_cap_result(
     return TuiIpcResult(
         False, "missing_capability",
         f"The TUI for session {session} does not advertise the "
-        f"{feature} capability; restart the TUI (Ctrl+R) to use it.")
+        f"command-queue capability; restart the TUI (Ctrl+R) to use it.")
 
 
 # ``_signal_tui`` reasons that mean the pidfile no longer names a live TUI,
@@ -808,7 +812,7 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
     if error is not None:
         return error
     if tui_pidfile.CAP_COMMAND not in desc.caps:
-        return _missing_cap_result(session, desc, tui_pidfile.CAP_COMMAND)
+        return _missing_command_cap_result(session, desc)
     queue = _tui_command_queue_for_session(session)
     line = _queue_line(cmd)
     try:
@@ -819,16 +823,35 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
         with open(queue, "ab") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
-                f.write(line.encode("utf-8"))
-                # Flush to the kernel *before* releasing the lock: the
-                # TUI's drain reads and truncates the queue under this
-                # same flock, so bytes still sitting in Python's buffer
-                # at LOCK_UN would land in the file *after* a drain
-                # truncated it — the command would be silently dropped
-                # and the caller would spin on "queued…" forever with a
-                # perfectly healthy TUI (so the spinner's owner check
-                # would never abort it).
-                f.flush()
+                # Append mode: ``tell()`` is the current end of file, and
+                # we hold the lock, so no other appender or drain can move
+                # it.  Keep it so a failed write can be rolled back below.
+                start = f.tell()
+                try:
+                    f.write(line.encode("utf-8"))
+                    # Flush to the kernel *before* releasing the lock: the
+                    # TUI's drain reads and truncates the queue under this
+                    # same flock, so bytes still sitting in Python's buffer
+                    # at LOCK_UN would land in the file *after* a drain
+                    # truncated it — the command would be silently dropped
+                    # and the caller would spin on "queued…" forever with a
+                    # perfectly healthy TUI (so the spinner's owner check
+                    # would never abort it).
+                    f.flush()
+                except OSError:
+                    # A short write (ENOSPC, quota) can leave *part* of the
+                    # line behind.  ``_unqueue_line`` matches whole lines
+                    # only, so it could not take that back — cut the
+                    # partial bytes off here, under the same lock, or a
+                    # later drain would run a truncated command the caller
+                    # was told was not applied.  Best effort: the write
+                    # itself just failed, so this may fail too.
+                    try:
+                        f.truncate(start)
+                        f.flush()
+                    except OSError:
+                        pass
+                    raise
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:
