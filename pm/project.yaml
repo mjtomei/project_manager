@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T13:39:58.704763+00:00'
+  updated_at: '2026-10-28T14:04:45.247690+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15550,6 +15550,30 @@ prs:
       log.'
     created_at: '2026-10-28T13:39:58Z'
     last_edited: '2026-10-28T13:39:58Z'
+  - id: note-435a0c4
+    text: 'QA S89 (6672efdc, real rootless Podman 3.4.4 private store, build-base
+      passed incl. Chromium smoke, fake agents; evidence /pm-captures/scenarios/89/manifest.md):
+      NEEDS_WORK, two fixes pushed in c3c2e9918 with tests that fail on the old code.
+      (1) The QA status pane replaced its whole table with the ERROR block once the
+      run-end "N scenario(s) failed to launch (no verdict)" error was set (introduced
+      in aac0e282), hiding the other PASS verdicts, the launch-failed reason line
+      and Overall. It now shows the error, wrapped to the pane width, above the table.
+      (2) A pm qa run rerun after an interrupted setup (window killed at the config
+      cp) failed with "could not verify existing setup ... getcwd() failed". The CLI
+      loop id cli-<pr> reuses the container name, and the rerun re-clones s-N/repo
+      at the same path, so the old container mounts an unlinked dir. _ensure_reusable
+      now detects /workspace link count 0 (probed with exec -w /) and recreates an
+      unowned, unretained container. Everything else held: classified proxy failure
+      (rc=7 shows only in the debug log, leaves no dir/link/lock/run), in-place setup
+      finish, missing-image message, QA launch-failure INPUT_REQUIRED, -e ANTHROPIC_API_KEY
+      by name only via the env-file wrapper (canary only in providers.yaml), reap
+      keeps live exec owners, PM_CAPTURES_PR across restart/reuse/recreation, and
+      a nested throwaway project falls back to its own container-local captures path.
+      Fixture traps: an env file that unsets TMUX breaks pm pr review ("Review window
+      requires tmux"); pm qa run needs pm/specs/<pr>/qa.md; the full suite test_proxy_owner_metadata
+      fails while live /tmp/pm-push-proxy-* dirs exist.'
+    created_at: '2026-10-28T14:04:45Z'
+    last_edited: '2026-10-28T14:04:45Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
