@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T06:54:28.884786+00:00'
+  updated_at: '2026-10-28T06:58:06.660907+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35997,6 +35997,23 @@ prs:
       (all six stories) and 02-zzz-cancel (zzz with human-paced presses).'
     created_at: '2026-10-28T06:54:28Z'
     last_edited: '2026-10-28T06:54:28Z'
+  - id: note-b5c9275
+    text: 'QA scenario 3 (TUI fresh chords / key surfaces), commit bc7247d0: the in-TUI
+      help screen (?) clipped the three new rows — at any pane width the fixed 50-column
+      #help-container cut them to "z a … (kee", "z O … (sto", "z A … (aut", hiding
+      the merge-policy suffix the scenario checks. Widened #help-container to 66 columns
+      (longest row 57 + padding/border/scrollbar; still fits 80 cols). Everything
+      else in the scenario passed on the fake backend: plain a popup + Escape leaves
+      PR in_review/auto-start off; z a on a non-target resets to in_progress, adds
+      a stop-before-merge target, keeps the impl window/pane ids identical and starts
+      no review; z a on an existing wait-for-merge target keeps the policy and the
+      PR2 dependency hold, z O releases it, z A switches to auto-merge with the PR
+      staying in_progress; plain A/O only add/re-arm a target without resetting; with
+      the pending filter (no selection) all three chords log their "No PR selected
+      (…)" line and change nothing. Captures: /pm-captures/scenarios/3/pre-fix (clipped)
+      and post-fix (full flow).'
+    created_at: '2026-10-28T06:58:06Z'
+    last_edited: '2026-10-28T06:58:06Z'
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
