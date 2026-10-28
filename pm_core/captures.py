@@ -598,8 +598,15 @@ def quarantine_foreign(pr_captures_dir: Path | str | None, *,
     The move keeps every byte: the target is
     ``scenarios/_foreign/<run_id>-<index>`` (with a numeric suffix when that
     already exists).  Best effort — never raises.
+
+    An empty *pr_id* quarantines nothing, for the same reason
+    :func:`write_manifest` writes nothing without one: "another PR's record"
+    is only defined relative to the PR we are, so without one *every*
+    identity-carrying record would look foreign — and quarantine is a move,
+    which the caller cannot undo.  A caller with no PR id has a bug; it must
+    not turn that bug into displaced evidence.
     """
-    if pr_captures_dir is None:
+    if pr_captures_dir is None or not pr_id:
         return []
     root = Path(pr_captures_dir)
     moved: list[Path] = []

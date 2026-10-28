@@ -508,6 +508,19 @@ def test_quarantine_is_a_noop_without_foreign_records(tmp_path):
     assert captures.quarantine_foreign(root, pr_id="pr-x", run_id="run1") == []
 
 
+def test_quarantine_requires_a_pr_id_to_compare_against(tmp_path):
+    """A foreign record is only defined relative to the PR we are.  With no
+    pr_id every identity-carrying record would look foreign, and quarantine
+    is a *move* the caller cannot undo — so an empty id must quarantine
+    nothing (write_manifest refuses an empty pr_id for the same reason)."""
+    root = _root(tmp_path)
+    real = _scenario_dir(root, 2, {"index": 2, "pr_id": "pr-real",
+                                   "run_id": "run9"})
+    assert captures.quarantine_foreign(root, pr_id="", run_id="run1") == []
+    assert real.is_dir()
+    assert not (root / "scenarios" / captures.FOREIGN_DIR_NAME).exists()
+
+
 def test_non_canonical_dir_names_are_never_mapped_to_an_index(tmp_path):
     """``scenarios/03`` must not be treated as index 3: every helper turns an
     index back into a path, so classifying ``03`` as 3 would make quarantine
@@ -892,6 +905,11 @@ def test_signoff_prompt_requires_report_bound_to_the_qa_run(tmp_path,
     # must say so, or the session invents one and the merge gate then
     # refuses the approval it just recorded.
     assert "omit this tag" in flat
+    # The tag's value is the manifest's run.  A legacy-evidence block can
+    # still *name* a run (from qa_status.json), so the contract has to say
+    # that id is not the tag's value — otherwise the two instructions
+    # contradict each other on exactly the legacy path.
+    assert "never the `qa_status.json` run id on its own" in flat
 
 
 # ---------------------------------------------------------------------------

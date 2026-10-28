@@ -1146,14 +1146,16 @@ isolated candidate (your worktree and the base branch were not touched):
    <meta name="pm-signoff-qa-run" content="<the QA run id you reviewed>">
    ```
 
-   `pm-signoff-qa-run` is the `run_id` from `$CAP/qa_manifest.json` (also
-   named in the QA scenarios block above). It binds the report's scenario
-   membership and verdicts to a real QA run, so a report built from
-   superseded or foreign evidence is detectable: the dashboard flags a
-   report whose run is not the PR's current one, and `pm pr merge` refuses
-   it. If the QA scenarios block above names no QA run (no
-   `$CAP/qa_manifest.json` — legacy evidence), omit this tag rather than
-   inventing an id; a report without it is neither flagged nor refused.
+   `pm-signoff-qa-run` must be the run the QA scenarios block above takes
+   from `$CAP/qa_manifest.json` — never the `qa_status.json` run id on its
+   own, which can name a different run than the evidence does. It binds the
+   report's scenario membership and verdicts to a real QA run, so a report
+   built from superseded or foreign evidence is detectable: the dashboard
+   flags a report whose run is not the PR's current one, and `pm pr merge`
+   refuses it. When that block reports no run-bound manifest (legacy
+   evidence, even if it still names a run from `qa_status.json`), omit this
+   tag rather than inventing an id; a report without it is neither flagged
+   nor refused.
 
    A human approval (`pm pr signoff record`) is refused unless these match
    the current HEAD and the recorded integration check. Include an

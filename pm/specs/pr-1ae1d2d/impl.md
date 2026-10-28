@@ -159,6 +159,11 @@ a nested fixture's record is provably not this PR's evidence.
   observed contamination is written by a fixture *during* the outer run.
 - A pre-existing `_foreign/<run_id>-<n>` is not overwritten; a numeric
   suffix is appended.
+- An empty `pr_id` quarantines nothing: "a different `pr_id`" is only
+  defined relative to the PR we are, so without one every identity-carrying
+  record would look foreign — and a move is not undoable by the caller that
+  made the mistake. (`write_manifest` likewise writes nothing without a
+  `pr_id`/`run_id`.)
 
 ### R6 — Authoritative membership + audit surface
 `captures.audit` returns, for a `(captures_root, pr_id, run_id)`:
@@ -225,10 +230,11 @@ listing arbitrary directories.
 - The dashboard-contract block (`:986-1000`) adds a required meta tag:
   `<meta name="pm-signoff-qa-run" content="<the QA run id you reviewed>">`,
   documented as binding the report's scenario membership to that run. The
-  contract also says to omit the tag when the QA block names no run (legacy
-  evidence, no manifest) rather than invent one — the session would
-  otherwise bind its own report to a run that does not exist and the merge
-  gate would refuse it.
+  contract also says to omit the tag when the QA block reports no run-bound
+  manifest (legacy evidence) rather than invent one — including when the
+  block still names a run from `qa_status.json`, which is not the tag's
+  value — the session would otherwise bind its own report to a run that
+  does not exist and the merge gate would refuse it.
 
 ### R8 — Dashboard flags a report bound to another run
 `pm_core/behavior_report.py`:
