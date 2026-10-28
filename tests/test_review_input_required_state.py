@@ -143,7 +143,7 @@ def _status(state) -> tuple[str, str, dict]:
     return run["state"], run["reason"], run["review"]
 
 
-def _start(state, tdir, launches):
+def _start(state, tdir, launches, on_iteration=None):
     """Run the loop in a thread; ``launches`` maps iteration → callable
     returning the review output (it may block to keep the iteration live)."""
     def fake_review(pr_id, pm_root, pr_data, transcript, iteration=0, loop_id=""):
@@ -151,7 +151,8 @@ def _start(state, tdir, launches):
     p = patch.object(rl, "_run_claude_review", side_effect=fake_review)
     mock = p.start()
     t = threading.Thread(target=run_review_loop_sync,
-                         args=(state, "/tmp", PR, str(tdir)), daemon=True)
+                         args=(state, "/tmp", PR, str(tdir)),
+                         kwargs={"on_iteration": on_iteration}, daemon=True)
     t.start()
     return t, mock, p
 
@@ -256,6 +257,39 @@ class TestHumanResponseWatch:
         pane.user("b")
         assert w.poll() is not None
 
+    def test_assistant_after_answer_tracks_new_turns(self, tmp_path):
+        """An answer followed by no assistant record is the turn just
+        answered; Claude speaking again starts a new turn."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        assert w.answered_at is None and w.assistant_after_answer is False
+        pane.user("use option A")
+        assert w.poll() is not None and w.assistant_after_answer is False
+        pane.say("Working on it.")
+        w.poll()
+        assert w.assistant_after_answer is True
+        pane.user("and the other file")
+        w.poll()
+        assert w.assistant_after_answer is False
+
+    def test_assistant_after_answer_found_by_back_scan(self, tmp_path):
+        """After a restart the answer and Claude's next turn are both
+        already in the transcript."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        pane.user("use option A")
+        pane.say("Working on it.")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        assert w.answered_at is not None and w.assistant_after_answer is True
+
+    def test_back_scan_answer_with_no_new_turn(self, tmp_path):
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        pane.user("use option A")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        assert w.answered_at is not None and w.assistant_after_answer is False
+
 
 # ---------------------------------------------------------------------------
 # Live loop: INPUT_REQUIRED → answer → follow-up → NEEDS_WORK → next iteration
@@ -346,6 +380,9 @@ class TestLiveFlow:
             assert notified[-1] == "INPUT_REQUIRED"
             time.sleep(0.2)
             assert mock.call_count == 1 and t.is_alive()
+            # Exactly one round per question: no re-recording of the same
+            # turn while the human has not answered it.
+            assert notified == ["INPUT_REQUIRED", "INPUT_REQUIRED"]
 
             panes[1].user("B")
             _until(lambda: not state.input_required, what="second answer")
@@ -373,6 +410,76 @@ class TestLiveFlow:
             _until(lambda: state.input_required, what="prose question waits")
             panes[1].user("yes, both")
             _until(lambda: not state.input_required)
+            panes[1].verdict("PASS")
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_repeated_idle_after_answer_is_not_a_new_question(self, env):
+        """A refreshed idle_prompt for the turn the human just answered
+        (fake-claude re-emits it every ~2 s) is a stale re-read: it must
+        not re-record INPUT_REQUIRED, re-arm the notification or clear the
+        answered state."""
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        recorded = []
+        t, mock, p = _start(state, tdir, {1: it1},
+                            on_iteration=lambda s: recorded.append(
+                                s.latest_verdict))
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            panes[1].user("use option A")
+            _until(lambda: not state.input_required, what="answer clears wait")
+            for _ in range(5):
+                panes[1].idle()
+                time.sleep(0.05)
+            assert recorded == ["INPUT_REQUIRED"], (
+                "a refreshed idle for the answered turn was re-recorded")
+            assert state.input_required is False
+            assert _status(state)[:2] == (
+                "running",
+                "review iteration 1 (INPUT_REQUIRED answered; follow-up running)")
+            panes[1].verdict("PASS")
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_repeated_idle_after_answering_a_prose_question(self, env):
+        """Same stale re-read, but the question was prose (no verdict):
+        the answered turn must not flip the state back to waiting."""
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        t, mock, p = _start(state, tdir, {1: it1})
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            panes[1].user("A")
+            _until(lambda: not state.input_required, what="first answer")
+            panes[1].say("Do you mean option A for both files?")
+            panes[1].idle()
+            _until(lambda: state.input_required, what="prose question waits")
+            panes[1].user("yes, both")
+            _until(lambda: not state.input_required, what="prose answer clears")
+            for _ in range(5):
+                panes[1].idle()
+                time.sleep(0.05)
+            assert state.input_required is False, (
+                "a refreshed idle for the answered prose turn re-armed the wait")
             panes[1].verdict("PASS")
             t.join(5)
             assert state.latest_verdict == "PASS"

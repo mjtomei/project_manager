@@ -89,6 +89,11 @@ R5. **Repeated genuine INPUT_REQUIRED stays visible.**  When an idle follow-up
     the UI notification, and keeps waiting on the same pane.  It does not
     convert to NEEDS_WORK or relaunch.  An idle event whose latest assistant
     turn is the *same* unanswered INPUT_REQUIRED turn is ignored (stale re-read).
+    So is a repeated idle for the turn the human has *just answered*: with no
+    assistant record since the answer there is no new question, and treating it
+    as one re-records INPUT_REQUIRED on every refreshed hook event (fake-claude
+    re-emits `idle_prompt` every ~2 s), spinning `on_iteration` in a busy loop.
+    (Added in review i2: `HumanResponseWatch.assistant_after_answer`.)
 
 R6. **Status reason** (`autostart_state._derive`): while `review.running` and
     `verdict == INPUT_REQUIRED` and not `input_required`, the reason is
@@ -151,6 +156,11 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   land between two polls.  Ordering is taken from the transcript scan done just
   before each idle evaluation, so a repeated INPUT_REQUIRED after an answer is
   still seen as genuine.
+- A stale idle after the answer: the hook fires again for the turn the human
+  already answered (fake-claude refreshes it every ~2 s).  Only an assistant
+  record *after* the answer makes an idle a new turn; otherwise it is ignored
+  and the wait stays answered.  Without this, each refresh re-recorded
+  INPUT_REQUIRED and `_await_input_resolution` spun on it.  (Added in review i2.)
 - Answer and follow-up verdict both land during a TUI restart gap: Claude
   won't idle again, so the resumed waiter starts from the current idle event
   (not "newer than now") and accepts it when it is newer than the answer.

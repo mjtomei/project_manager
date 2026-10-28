@@ -284,13 +284,17 @@ def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
     nobody can answer that question any more.
     """
     import os
+    from pm_core.claude_launcher import session_id_from_transcript
     session = _get_pm_session()
     if not session or not transcript_dir:
         return None
     if not _find_claude_pane(session, _compute_review_window_name(pr_data)):
         return None
     transcript = _iteration_transcript(state, transcript_dir)
-    return transcript if os.path.lexists(transcript) else None
+    if not os.path.lexists(transcript):
+        return None
+    # No session_id means no hook stream to wait on: same as a dead pane.
+    return transcript if session_id_from_transcript(transcript) else None
 
 
 def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
@@ -300,8 +304,10 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     Returns the assistant text of the follow-up turn once an idle turn
     carries a verdict: PASS / NEEDS_WORK, or INPUT_REQUIRED asked *after*
     the user answered (a new question).  An idle event for the same,
-    still-unanswered INPUT_REQUIRED turn is ignored.  Returns None when
-    the pane disappears or a stop is requested.
+    still-unanswered INPUT_REQUIRED turn is ignored, as is a repeated idle
+    for the turn the user just answered (Claude has not spoken since, so
+    there is no new question).  Returns None when the pane disappears or a
+    stop is requested.
 
     Keeps ``state.input_required`` in step with the pane: False once a
     human prompt lands in the transcript (Claude is working on the
@@ -371,6 +377,14 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
             # Still the unanswered question (or an idle from before the
             # answer while Claude now works on it).
             state.input_required = answered_at is None
+            continue
+        if not watch.assistant_after_answer:
+            # The human answered and Claude has not spoken since.  A
+            # repeated idle_prompt for the turn just answered (fake-claude
+            # refreshes the hook every ~2 s) is a stale re-read, not a new
+            # question — and returning it would re-record INPUT_REQUIRED on
+            # every refresh.
+            state.input_required = False
             continue
         if verdict == VERDICT_INPUT_REQUIRED:
             _log.info("review_loop: follow-up asked INPUT_REQUIRED again")

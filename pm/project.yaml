@@ -31323,7 +31323,7 @@ prs:
   title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
     are working'
   branch: pm/pr-a80bde5-bug-review-input-required-stays-visible-after-reco
-  status: pending
+  status: in_review
   depends_on: []
   description: 'During supervised autostart on2026-10-22, #241/pr-1139060 continued
     reporting state=waiting, reason="review INPUT_REQUIRED (iteration N)", and review.input_required=true
@@ -31360,13 +31360,13 @@ prs:
     the report redesign.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/248
+  gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-22T18:44:26.601277+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-10-28T06:33:18.301072+00:00'
+  started_at: '2026-10-22T17:21:14.028691+00:00'
+  reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
   notes:
   - id: note-f9941b6
@@ -31383,6 +31383,70 @@ prs:
       pr-a80bde5 from base dir.'
     created_at: '2026-10-22T18:44:26Z'
     last_edited: '2026-10-22T18:44:26Z'
+  - id: note-resume-248-20261028
+    created_at: '2026-10-28T05:33:39.918891+00:00'
+    last_edited: '2026-10-28T05:33:39.918891+00:00'
+    text: 'User authorized resumption from the retained reviewed branch in the #249
+      controller session. Preserve existing source/specs/review history and all local
+      files. Fresh native review, then fresh QA/signoff; historical outcomes are not
+      new approval. DeepSeek 1017/high for implementation/review/QA/helpers, work
+      Opus 5.5/high for signoff; manual wait_for_merge and spec review OFF. No force
+      push or master rewrite.'
+  - id: note-3f2ea06
+    text: 'review i1 (581d): fix + handoff. (1) Hardened verdict_transcript.is_human_prompt_record:
+      a harness-written "type":"user" record no longer counts as a human answer —
+      <system-reminder> blocks are stripped (reminder-only = not a prompt), and <task-notification>,
+      /loop + autonomous-loop ticks, scheduled-prompt firings, "[Request interrupted
+      by user...]" and qa_loop verdict nudges are rejected. Pre-fix, any of those
+      landing after the INPUT_REQUIRED turn silently cleared input_required, i.e.
+      a false "answered" wait (the mirror of the bug this PR fixes). New tests: test_harness_records_are_not_answers,
+      test_prompt_with_appended_reminder_is_an_answer, test_harness_record_does_not_answer_the_question
+      (the last two fail without the hardening). (2) MASTER OVERLAP for sign-off:
+      origin/master has moved well ahead in the exact files this PR touches and already
+      has verdict_transcript.find_verdict_turn (task-scoped verdict scan) + _user_record_is_non_task
+      (the same "is this a real human prompt" predicate, richer). Python files still
+      auto-merge (only pm/project.yaml conflicts), but at sign-off the local _NON_TASK_PREFIXES/_NON_TASK_SENTINELS
+      copy and the latest-turn verdict reads should be reconciled onto those master
+      helpers instead of kept in parallel. Spec R4 + an edge-case bullet updated.
+      Full suite: 3382 passed.'
+    created_at: '2026-10-28T06:06:49Z'
+    last_edited: '2026-10-28T06:06:49Z'
+  - id: note-dec47aa
+    text: 'review i2 (581d): fix + handoff. Found a real bug in the wait state the
+      PR itself introduced: `_wait_for_follow_up_verdict` re-enters the hook wait
+      with `newer_than=0.0` (needed so a wait adopted after a TUI restart can see
+      the idle event that already landed). Consequence: an idle_prompt newer than
+      the human answer, while the latest assistant turn was still the question turn
+      just answered, was taken as a NEW INPUT_REQUIRED — `_await_input_resolution`
+      re-recorded it (history + latest_verdict + on_iteration → runtime_state write)
+      and looped. fake-claude re-emits idle every ~2s (`_HOOK_REFRESH`), so it was
+      a busy loop: probe measured 3035 on_iteration calls in 0.6s, each re-arming
+      the TUI INPUT_REQUIRED notification. Same false-state class as the bug this
+      PR fixes. Fix: `verdict_transcript.HumanResponseWatch.assistant_after_answer`
+      (byte order: an assistant record after the latest answer, kept by the back-scan
+      and poll(), reset by a new answer and by rearm()); `_wait_for_follow_up_verdict`
+      ignores an idle for the turn just answered, so only a real new turn re-raises
+      the wait — this also covers a verdict-less (prose) question. Regression tests
+      (both fail pre-fix): test_repeated_idle_after_answer_is_not_a_new_question,
+      test_repeated_idle_after_answering_a_prose_question, plus three HumanResponseWatch
+      unit tests; test_repeated_genuine_input_required_stays_visible now asserts exactly
+      one recorded round per question. Also `_adoptable_wait_transcript` now returns
+      None when no session_id can be recovered (R2s nobody-can-answer case) instead
+      of failing the wait and ending the loop KILLED. Spec R5 + edge-case bullet updated.
+      Suite: 3315 passed; the 55 failed/17 errors are all test_signoff_integration/test_merge_publish
+      and reproduce identically on a pristine origin/master tree in this sandbox (git
+      env), not this PR. Evidence: /pm-captures/review-a80bde5-i2/. MASTER OVERLAP
+      unchanged from i1: at sign-off reconcile is_human_prompt_record onto master
+      _user_record_is_non_task/find_verdict_turn.'
+    created_at: '2026-10-28T06:33:18Z'
+    last_edited: '2026-10-28T06:33:18Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-592e4bd
   plan: improvements
   title: Route QA scenario refinement and execution through claude-mixed work models;

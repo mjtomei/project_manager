@@ -342,12 +342,16 @@ class HumanResponseWatch:
     or a fast reply).  :meth:`poll` then reads only the bytes appended since
     the last call.  :attr:`answered_at` is the epoch time of the latest
     answer (the record's ``timestamp``, else the time it was seen), or None
-    while the question is unanswered.
+    while the question is unanswered.  :attr:`assistant_after_answer` says
+    whether Claude has produced any assistant record *after* that answer, so
+    a repeated idle for the turn just answered is distinguishable from a new
+    turn.
     """
 
     def __init__(self, transcript_path: str | Path | None, verdict: str):
         self._transcript_path = transcript_path
         self.answered_at: float | None = None
+        self.assistant_after_answer = False
         self._offset = 0
         self._partial = b""
         path = _resolve_transcript_path(transcript_path)
@@ -369,6 +373,11 @@ class HumanResponseWatch:
                 if verdict in line and _assistant_text_has_verdict(line, verdict):
                     self.answered_at = answer
                     break
+                # Walked past an assistant record while no answer had been
+                # seen yet: offsets only decrease here, so it sits *after*
+                # the latest answer — Claude has spoken since the human did.
+                if answer is None:
+                    self.assistant_after_answer = True
             elif answer is None and _USER_RE.search(line):
                 answer = self._answer_epoch(line)
 
@@ -405,11 +414,16 @@ class HumanResponseWatch:
         last_nl = data.rfind(b"\n")
         self._partial = data[last_nl + 1:]
         for line in data[:last_nl + 1].decode(errors="replace").splitlines():
-            at = self._answer_epoch(line) if _USER_RE.search(line) else None
-            if at is not None:
-                self.answered_at = max(self.answered_at or 0.0, at)
+            if _USER_RE.search(line):
+                at = self._answer_epoch(line)
+                if at is not None:
+                    self.answered_at = max(self.answered_at or 0.0, at)
+                    self.assistant_after_answer = False
+            elif _ASSISTANT_RE.search(line) and self.answered_at is not None:
+                self.assistant_after_answer = True
         return self.answered_at
 
     def rearm(self) -> None:
         """The assistant is waiting on the human again: forget the answer."""
         self.answered_at = None
+        self.assistant_after_answer = False
