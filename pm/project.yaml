@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T00:28:12.217091+00:00'
+  updated_at: '2026-10-28T01:10:05.765971+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11250,6 +11250,19 @@ prs:
       head held 80 s. Captures /pm-captures/scenarios/71.'
     created_at: '2026-10-28T00:28:12Z'
     last_edited: '2026-10-28T00:28:12Z'
+  - id: note-e7846b5
+    text: 'QA S73 (2026-10-28, 619ae5c6, nested rootless podman 3.4.4, fake-claude):
+      all 4 stories PASS live, no code change. All 17 valid / 8 invalid set messages
+      and rc matched; status initial/6g/off lines; cgroup-less helper -> unmeasurable
+      refusal rc=1, Blocked line, recovery launch (852M + 172M growth) clears it;
+      damaged queue/blocked/stats -> 3x status rc=0, queue rewritten empty on B launch,
+      growth 170M (1g default, not 8g), Dropping malformed + Failed to load stats
+      warnings, nothing for governor-blocked, 0 tracebacks; TUI kill -9 -> Zsl+ defunct,
+      3 status runs show no Queue depth and prune nothing, pm pr start C prunes both
+      entries (one line each). Harness: tmux capture-pane -J keeps trailing spaces,
+      strip them in prompt waiters. Captures /pm-captures/scenarios/73.'
+    created_at: '2026-10-28T01:10:05Z'
+    last_edited: '2026-10-28T01:10:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
