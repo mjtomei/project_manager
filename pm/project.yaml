@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-27T23:06:05.140230+00:00'
+  updated_at: '2026-10-28T00:32:08.290006+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36274,6 +36274,22 @@ prs:
       PASS.
     created_at: '2026-10-27T23:06:05Z'
     last_edited: '2026-10-27T23:06:05Z'
+  - id: note-dc1c8f1
+    text: 'QA scenario 8 (env-file privacy/lifetime R4 + unset ${VAR}) PASS on 75d0bc30.
+      Captures (cast+mp4+transcript.log, synthetic canaries only) in /pm-captures/scenarios/8/.
+      Story 1 = unset ${PM_QA_UNSET_VAR}: launch succeeds, fake-claude process env
+      has ANTHROPIC_API_KEY= (empty, not the stale session value), pane_start_command
+      carries only the env-*.sh path, pm log + pane registry clean, ~/.pm/run empty
+      after start. Story 2 = handoff file is 0600 in a 0700 dir, its canary value
+      reaches the process, and the file is gone once the pane command starts. Story
+      3 = pane killed before its command runs: orphan env-*.sh stays 0600 in a 0700
+      dir, referenced by no live pane, and is swept only by a later provider-env launch
+      once older than 24 h (fresh orphan kept, new launch file present). This covers
+      sign-off items (3) unset ${VAR} and (4) pane killed before its command runs;
+      items (1) openai + fake-claude and (2) openai + real claude still need recording
+      by scenario 6.'
+    created_at: '2026-10-28T00:32:08Z'
+    last_edited: '2026-10-28T00:32:08Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
