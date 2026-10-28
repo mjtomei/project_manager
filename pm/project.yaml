@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T01:29:01.527391+00:00'
+  updated_at: '2026-10-28T01:33:57.980698+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36777,6 +36777,38 @@ prs:
       and does not affect the review checks.'
     created_at: '2026-10-28T01:29:01Z'
     last_edited: '2026-10-28T01:29:01Z'
+  - id: note-db4d845
+    text: 'QA scenario 9 (first-iteration launch failure) NEEDS_WORK, fixed 7f38066a.
+      Core behavior verified end-to-end with a failing podman shim: 3 attempts at
+      +0/+5/+10 s, two "launch attempt N/3 … retrying in 5s/10s" WARNINGs and three
+      per-attempt "launch failed (rc=1)" WARNINGs, one ERROR at exhaustion, no review-<id>
+      window, PR stays in_review, ↻ LAUNCH_FAILED (1 iteration); attempt artifacts
+      are complete (timestamp/pr/iteration/loop_id/attempt/returncode/cmd/session_id/prompt/prompt_copy
+      + full stderr/stdout, one per attempt); `pm autostart status` names the artifact
+      exactly once; --json review = {iteration 1, LAUNCH_FAILED, running false, retryable
+      true, attempts 3, error, artifact} with targets[0].state=failed; runs popup
+      FAILED/review/review #1; session picker shows "[failed; retryable]"; auto-start
+      re-arms every 60 s with a fresh attempt budget (episodes 1–5) and the re-armed
+      run reports "review #1 (launch retry 2) — review iteration 1" with no stale
+      "(last LAUNCH_FAILED)". Two TUI-notice defects found and fixed: (1) the final
+      retry attempt was never announced — the notice was keyed on launch_attempts,
+      which the ~1 s poll never observes for an attempt that starts and dies inside
+      one tick, so every exhausted episode showed only "attempt 2; attempt 1 failed";
+      the poll now announces the upcoming attempt during the backoff (next_retry_at
+      in the future) and still announces each attempt exactly once across restarts/episodes;
+      (2) "Auto-start: retrying review launch for <pr>" was logged but never visible
+      because _start_loop''s "Review loop resumed …" replaced it in the same tick
+      — the re-arm announcement is now held (CONFIRM_HOLD_SECONDS), matching the "targets
+      +=" confirmation. Also fixed a latent test-isolation bug: test_old_window_then_container_failure_retries_the_same_command
+      patches the process-wide subprocess.run, so running pytest inside a tmux pane
+      let an ambient `tmux display-message` session-name lookup consume the "first
+      call fails" slot (failed inside tmux, passed outside). Reproduction test: 1
+      passed on the PR tree, 1 failed (assert 1 == 2) on a clean origin/master worktree.
+      Three targeted suites 183 passed; full suite 43F+17E, identical counts on a
+      clean origin/master worktree (pre-existing signoff/merge/git/hook-installer
+      env failures). Captures: /pm-captures/scenarios/9/{pre-fix,post-fix,story5-tests,evidence}.'
+    created_at: '2026-10-28T01:33:57Z'
+    last_edited: '2026-10-28T01:33:57Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
