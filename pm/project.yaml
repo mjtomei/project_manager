@@ -29687,7 +29687,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T09:11:11.771825+00:00'
+  updated_at: '2026-10-28T10:25:49.025008+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -29794,6 +29794,19 @@ prs:
       still representative (this iteration only changes an error-message remedy).'
     created_at: '2026-10-28T09:11:11Z'
     last_edited: '2026-10-28T09:11:11Z'
+  - id: note-1ec055e
+    text: 'QA S2 (unsafe-workdir holds) PASS: drove all 7 INPUT_REQUIRED holds from
+      the TUI command bar against a real file:// bare upstream — dirty-conflict, untracked
+      blocker, wrong checkout, detached HEAD, mid-merge, stopped rebase, unreachable
+      remote. Each held before planning, left the workdir byte-identical (sha256/refs/MERGE_HEAD/rebase-merge
+      unchanged), opened no qa-$PR window, and wrote overall=INPUT_REQUIRED plus a
+      matching note. Remote restored -> fast-forward e57b83b->71a3309 with qa-$PR-s0/qa-$PR
+      windows and planner reading the post-sync revision. tests/test_qa_branch_sync.py
+      31 passed. Captures: /pm-captures/scenarios/2/. Cosmetic only (not changed):
+      the unreachable-remote hold renders git stderr + ". Restart QA once the remote
+      is reachable." so the sentence ends "repository exists.. Restart" (double period).'
+    created_at: '2026-10-28T10:25:48Z'
+    last_edited: '2026-10-28T10:25:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
