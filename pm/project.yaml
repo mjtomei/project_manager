@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T19:45:32.578462+00:00'
+  updated_at: '2026-10-28T20:44:46.959099+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39610,6 +39610,51 @@ prs:
       readers; out of scope here (40 call sites, needs one shared reader).'
     created_at: '2026-10-28T19:45:32Z'
     last_edited: '2026-10-28T19:45:32Z'
+  - id: note-064a54a
+    text: 'review-loop 4f1e i2 (17fce568): a second independent review — two focused
+      passes over signoff.py/prompt_gen.py and cli/pr.py/merge_integrity.py, each
+      fuzzing the hand-edited-state contract — found four residual defects, all "malformed
+      value read as present instead of absent". All fixed, each with a test that fails
+      on the pre-fix code (verified by stashing the source). (1) `_apply_pr_edit`''s
+      no-op model omitted the editor''s ASCII substitution, which changes the bullet''s
+      STRUCTURE: `pr_edit` ASCII-izes the whole template, so `–` becomes `-` and a
+      continuation line starting `– ` is a real `- ` bullet, while a `2020–01–01T…Z`
+      suffix becomes a strippable timestamp. A no-op save therefore invented a duplicate
+      note for the continuation line, or replaced the suffix-bearing note with its
+      truncated form under a new id. The no-op block, the fragment list and "does
+      the template read this note back?" now all model the ASCII step, and the predicate
+      compares the parsed (restored) text with the note''s rendered form — exactly
+      the key the rebuild matches on. Verified on the real 105-note PR: a no-op save
+      reports no changes and preserves every id/text. (2) `pm pr merge`''s "workdir
+      is gone, say that instead of stale" probe passed the raw `signoff.sha` as the
+      revision to compare against, so a hand-edited non-string value made the gate
+      accept the record''s own value as a fresh match and then slice it (`head.startswith`)
+      — an AttributeError out of the command instead of a refusal; the probe now reads
+      it as a revision or absent. (3) `format_signoff_return` emitted its corrected
+      `git diff <base> HEAD` hint from the resolution block only when `signoff_return.applied.merge_sha`
+      was falsy, and from the `applied` block only for a string `merge_sha` AND a
+      sha-like `base_sha` — a hand-edited value satisfied neither, so the routed step
+      got no hint and fell back to the stale `<base>...HEAD` diff; the resolution
+      block now emits it whenever the `applied` block cannot. (4) the sign-off prompt''s
+      base-changes range took the applied-resolution branch on raw truthiness while
+      the "Not applied" label in the same block used isinstance(str), printing both
+      the pre-apply range and "Not applied". Also documented (no behaviour change)
+      why `approved_candidate` deliberately does not normalize `candidate_tree`: it
+      is the comparison target, so an unusable one records the mismatch rather than
+      skipping the check (skipping would let a hand-edited tree hide a genuinely different
+      merge). Specs updated (impl R6/R9-14, qa R12). Independent checks this iteration,
+      all clean: 4000-trial resolve_project_yaml fuzz (symmetry/determinism/duplicate
+      ids) + an independently written preservation checker (0 failures); ~1250 malformed-state
+      combinations across summary/valid_for/unresolved_paths/carried_applied_resolution/compact/_signoff_evidence_lines/format_signoff_return/_signoff_integration_block/contained_base
+      (0 exceptions); the resolver reproduces this branch''s own hand-reconciled master@89e3c501
+      pm/project.yaml merge BYTE-IDENTICALLY (511 PRs, 22 plans, no id lost, base
+      active_pr wins); live `pm pr signoff integrate pr-5cee3d5` = up to date with
+      master@89e3c501; the sign-off prompt builds on the real 515-PR/105-note state
+      at 119,700 bytes (under the 120,000 argv limit). Full suite 4360 passed, 1 skipped.
+      Remaining unguarded workdir/project reads in general CLI surfaces stay out of
+      scope (pr-2478bf4, pr-852dde2, pr-727073f, pr-4ee6b33 — all still pending).'
+    created_at: '2026-10-28T20:44:46Z'
+    last_edited: '2026-10-28T20:44:46Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
