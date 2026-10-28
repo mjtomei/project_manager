@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T09:20:48.354608+00:00'
+  updated_at: '2026-10-28T09:32:04.005241+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36177,6 +36177,33 @@ prs:
       /pm-captures/scenarios/10/{01-restart-wait,02-missing-window,03-turn-finishes-no-tui,04-target-removed,05-pane-identity}.'
     created_at: '2026-10-28T09:20:48Z'
     last_edited: '2026-10-28T09:20:48Z'
+  - id: note-016f727
+    text: 'QA scenario 11 (failed review launch — retry pacing and single review):
+      PASS, all three stories. Evidence in /pm-captures/scenarios/11/ (01-story1-logs-only,
+      03-story1-tui [video], 04-story2-cli [video], 05-story3-two-prs). Observed:
+      attempts fail with the store lock held and retry every 15-21 s (18 s typical)
+      instead of once per poll tick; zero review-/qa-/signoff- windows while failing;
+      PR stays in_progress and the row stays waiting/implementation with the reason
+      changing to "implementation turn complete; starting fresh review" at turn end;
+      on release exactly one review-<pr> window and one "Review loop started" per
+      PR, then PASS -> QA; two waiting PRs each keep attempt:1 / awaiting_handoff:False
+      and get exactly one reset + one review launch, no "already waiting:" lines.
+      Two Then-wording variances, neither a defect: (1) the lock-timeout TUI line
+      reads "log: Error: Error: Could not acquire lock on ... within 2.0s" (the TUI
+      Error: prefix plus the CLI message, which already starts with Error:) rather
+      than "log: Error: pm_core.store.StoreLockTimeout: ..."; (2) the loop-start line
+      is "Review loop started for pr-<id> loop=<id>" rather than "Auto-start: review
+      loop for <pr>". Also: a naive grep -c "^qa-" reads 2 once QA starts because
+      a single QA stage opens qa-<pr>-s0 (Scenario 0, qa_loop) plus qa-<pr> in the
+      same second — not a duplicate stage launch; review never exceeded 1. QA-harness
+      note for future runs: the TUI recorder client must attach to a grouped session
+      named <pm-session>~N (an arbitrary group name makes pane-based session resolution
+      return it and the review loop dies with RuntimeError "Not in a pm tmux session"),
+      and pm re-selects the attached grouped session on every window it opens (tmux.new_window_get_pane
+      -> current_or_base_session), so send the recorder "C-b 0" to return it to the
+      TUI after each switch.'
+    created_at: '2026-10-28T09:32:03Z'
+    last_edited: '2026-10-28T09:32:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
