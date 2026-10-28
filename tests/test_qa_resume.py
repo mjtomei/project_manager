@@ -465,6 +465,31 @@ def test_poll_qa_state_held_notes_once_and_keeps_state(tmp_path):
     assert len(qa_notes) == 1
 
 
+def test_resume_abort_stops_advertising_the_held_wait(tmp_path):
+    """A held run adopted after a restart can still fail to resume (no pm
+    session, PR workdir gone).  It is then not waiting for input any more:
+    leaving ``held`` set would keep the TUI poll timer armed and make a later
+    ``t`` report a wait for a run nothing is watching.  The failure must also
+    be published so it reaches the TUI log, not just the daemon log."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=True)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    state.held = True
+    published: list[QALoopState] = []
+
+    with patch.object(qa_loop, "get_pm_session", return_value=None):
+        returned = qa_loop.resume_qa_sync(
+            state, app._root, {"id": "pr-001"},
+            on_update=published.append)
+
+    assert returned is state
+    assert state.running is False
+    assert state.held is False
+    assert state.latest_verdict == "ERROR"
+    assert state.latest_output
+    assert published == [state]
+
+
 def test_resume_completed_snapshot_already_processed_is_not_renoted(tmp_path):
     """A held run that ends its hold without a follow-up (stop, PR left qa,
     last attempt dropped) leaves a completed snapshot whose result the TUI

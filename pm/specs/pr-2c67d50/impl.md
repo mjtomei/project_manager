@@ -61,12 +61,17 @@ progress, not a wait).
    `NEEDS_WORK`.
 3. Write status + persist verdict evidence.
 4. If the run was **not restored as already held** (`was_held`, the flag the
-   snapshot was adopted with, is false), run the normal finalize pane and set
-   `state.completion_processed = False` / `state._ui_complete_notified =
-   False`. A live run that newly enters the hold does run the pane (the hold
-   snapshot is written first, so a restart during the pane recovers the wait
-   instead of treating the run as finished); a restored held run already
-   finalized this result before the restart and skips it.
+   snapshot was adopted with, is false), clear `state.completion_processed`
+   and `state._ui_complete_notified` *first*, then run the normal finalize
+   pane. The clearing must precede the pre-finalize snapshot: that snapshot
+   is what a restart during the pane adopts, and a restored held run that
+   just collected a follow-up still carries the previous held result's
+   `completion_processed=True` — adopting it would skip the new result's QA
+   note and lifecycle transition (see §19). A live run that newly enters the
+   hold does run the pane (the hold snapshot is written first, so a restart
+   during the pane recovers the wait instead of treating the run as
+   finished); a restored held run already finalized this result before the
+   restart and skips it.
 5. `state.held = bool(waiting_for_input) and latest_verdict ==
    INPUT_REQUIRED and not stop_requested`.
 6. `state.running = False`; persist the resume snapshot; `notify()`.
@@ -669,3 +674,32 @@ covered by tests in `tests/test_qa_input_required.py` /
   Covered by `test_qa_held_run_points_at_the_worker_pane`,
   `test_qa_input_required_without_a_watcher_keeps_the_dashboard_hint` and
   `test_qa_progress_input_reports_a_held_run`.
+- **Spec correction.** R2 step 4 now states the ordering iteration 1
+  implemented: the completion flags are cleared *before* the pre-finalize
+  snapshot, not merely "when the pane runs" (see the first bullet above).
+
+## 20. Implementation notes (review loop ab13, iteration 2)
+
+- **A held run that fails to resume is no longer left "waiting for
+  input".** `resume_qa_sync`'s three abort paths (no pm session, PR workdir
+  gone, no QA workdir) set `running=False` and `latest_verdict="ERROR"` but
+  left `held` set and never published `latest_output`.  For a run adopted
+  from a held snapshot that is the wrong state: nothing is watching the
+  worker panes any more, so the flag kept the TUI poll timer armed and made
+  a later `t` report a wait (and `start_qa` log "waiting for input") for a
+  run that is dead, while the failure reached only the daemon log — the
+  TUI's completion poll suppresses `_on_qa_complete` for an adopted held run
+  (its earlier result was already noted).  All three aborts now go through
+  one `_abort` helper that clears `held`, sets a `latest_output` message and
+  notifies, matching the background-thread crash handlers (see §7).
+  Covered by `test_resume_abort_stops_advertising_the_held_wait`.
+- **Observation, still not changed: `runtime_state` shows a held run as
+  `running`.** §19 recorded this as "no waiting action state exists"; a
+  `waiting` action state does exist (`runtime_state.VALID_STATES`), but it is
+  hook-derived for pane-backed actions and writing it directly for a held QA
+  run would need a reopen/reset path the TUI does not own (the driver thread
+  publishes the transitions).  The TUI log, `qa_status.json` and the
+  autostart status all expose the wait, and the picker still derives
+  `[idle]`/`[wait]` from the live scenario panes for TUI-driven runs; only a
+  detached `pm pr qa` driver's own `[working]` mirror stays stale.  Left as
+  documented rather than widening this PR into runtime_state semantics.

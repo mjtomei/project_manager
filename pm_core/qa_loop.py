@@ -5166,14 +5166,29 @@ def resume_qa_sync(
     """
     from pm_core import store
 
+    def _abort(message: str) -> QALoopState:
+        """Publish a resume failure and stop advertising the run as live.
+
+        ``held`` is cleared like the background-thread crash handlers do: a
+        run that failed to resume is not waiting for input, and leaving the
+        flag set would keep the TUI poll timer armed and make a later ``t``
+        report a wait for a run nothing is watching.  Notifying publishes
+        ``latest_output`` so the failure reaches the TUI log, not only the
+        daemon log.
+        """
+        state.running = False
+        state.held = False
+        state.latest_verdict = "ERROR"
+        state.latest_output = message
+        if on_update:
+            on_update(state)
+        return state
+
     state.running = True
     session = get_pm_session()
     if not session:
         _log.error("QA resume aborted: no pm session for %s", state.pr_id)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        state.latest_output = "No pm session found"
-        return state
+        return _abort("No pm session found")
     if not state.session_tag:
         state.session_tag = session.removeprefix("pm-")
 
@@ -5185,16 +5200,13 @@ def resume_qa_sync(
     workdir_path = (live_pr or {}).get("workdir")
     if not workdir_path or not Path(workdir_path).is_dir():
         _log.error("QA resume aborted: workdir for %s missing", state.pr_id)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        state.latest_output = f"Workdir for {state.pr_id} missing — cannot resume QA"
-        return state
+        return _abort(
+            f"Workdir for {state.pr_id} missing — cannot resume QA")
 
     if not state.qa_workdir:
         _log.error("QA resume aborted: no qa_workdir for %s", state.pr_id)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        return state
+        return _abort(
+            f"No QA workdir for {state.pr_id} — cannot resume QA")
 
     status_path = Path(state.qa_workdir) / "qa_status.json"
     repo_root = Path(workdir_path) if Path(workdir_path).is_dir() else None
