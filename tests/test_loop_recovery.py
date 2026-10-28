@@ -105,6 +105,38 @@ class TestRecoveryMessages:
         assert "QA_PLAN_START ... QA_PLAN_END" in msg
         assert "partial edits" in msg
 
+    def test_every_recovery_request_is_a_single_line(self):
+        """Every built request must fit one ``tmux send-keys`` line.
+
+        A newline in a recovery message would submit partial input: the
+        first line goes to the session, the rest sits in its input buffer
+        as queued text.  The spec documents this constraint, so guard the
+        builders (and the role-specific verifier requests) against a future
+        edit that wraps them.
+        """
+        from pm_core.qa_loop import (
+            _VERIFIER_OUTCOME_REQUEST,
+            _VERIFIER_RESUME_REQUEST,
+        )
+
+        requests = {
+            "outcome": build_outcome_request(
+                ("PASS", "NEEDS_WORK", "INPUT_REQUIRED")),
+            "resume": build_resume_request(),
+            "block_outcome": build_block_outcome_request((
+                ("REFINED_STEPS_START", "REFINED_STEPS_END"),
+                ("REFINER_REJECT_START", "REFINER_REJECT_END"),
+            )),
+            "block_resume": build_block_resume_request(
+                (("QA_PLAN_START", "QA_PLAN_END"),)),
+            "verifier_outcome": _VERIFIER_OUTCOME_REQUEST,
+            "verifier_resume": _VERIFIER_RESUME_REQUEST,
+        }
+        for name, msg in requests.items():
+            assert msg, name
+            assert "\n" not in msg and "\r" not in msg, name
+            assert msg == msg.strip(), name
+
 
 # ---------------------------------------------------------------------------
 # MissingOutputRecovery

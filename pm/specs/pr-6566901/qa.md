@@ -24,11 +24,24 @@ This PR adds one shared, bounded recovery to all of them:
   hanging: `NO_VERDICT` for review/watcher (TUI `failed` state, autostart
   `failed`), `INPUT_REQUIRED` plus an actionable error for the QA planner and
   scenario workers, distinct reasons for the refiner/verifier, and
-  `[finalize: NO_VERDICT]` for the finalizer.
+  `[finalize: NO_VERDICT]` for the finalizer;
+* a run the *user* stops during recovery is not a missing outcome: it ends in
+  a terminal `STOPPED` state (no `INPUT_REQUIRED`, no `NO_VERDICT`, no QA
+  note, no `[finalize: NO_VERDICT]`), and auto-start holds a stopped QA run
+  instead of relaunching it.
 
 Three new settings control it (`verdict-recovery-max-attempts`,
 `verdict-recovery-settle-seconds`, `verdict-recovery-response-timeout`);
 `verdict-recovery-max-attempts 0` restores the old unbounded wait.
+`qa-verdict-reminder-timeout` (pre-existing) is retained as an override of
+the settle interval for QA scenario-worker nudges.
+
+Since the first QA round the implementation also: names a validator rejection
+in the planner's recovery request and exhaustion error (a malformed
+`QA_PLAN` block is not treated like "emitted nothing"); re-scans the
+transcript before retiring a worker; routes the verifier's machine-driven
+*re-check* through the same bounded poller; and records the QA verdict in
+shared runtime state so auto-start can hold `STOPPED`.
 
 ## Setup (cross-cutting)
 
@@ -157,6 +170,41 @@ on one PR and a normal QA run on another), When the stuck one exhausts,
 Then the other completes normally, both outcomes are visible in the TUI log,
 and the tree shows one failed and one completed.
 
+**R10 — A user-stopped QA run is a clean teardown, not a failure, and
+auto-start holds it.**
+Given a QA run stopped while it is inside a recovery episode (planning,
+scenario workers in flight, or the finalizer), When the run stops, Then it
+ends promptly with a terminal `STOPPED`-style teardown: no scenario/worker is
+retired as `INPUT_REQUIRED`, no `[finalize: NO_VERDICT]` is reported, no QA
+note or `INPUT_REQUIRED` lifecycle transition is recorded, and the run can be
+started again. Given auto-start enabled and such a run stopped during
+planning, When later scheduler passes run (and the TUI is restarted), Then
+QA is **not** relaunched, the PR stays in `qa`, and `pm autostart status`
+reports the phase as waiting with a reason saying the last QA run was
+stopped and how to re-run it (not as failed).
+
+**R11 — A malformed plan is not "no plan": the rejection is named.**
+Given a planner that emits a `QA_PLAN` block the validator refuses (e.g.
+scenario numbering `1, 3`), When recovery runs, Then the request sent to the
+planner says the last block was rejected, names the validation problem, and
+asks it to correct that and re-emit only its own complete block — it never
+supplies or infers a plan. When recovery is exhausted, Then the run's
+`INPUT_REQUIRED` error names the rejected block and the validation problem
+(not merely "no complete plan"), and no scenarios are launched.
+
+**R12 — Recovery requests stay targeted and role-specific.**
+Given a QA scenario worker, verifier or planner that idles without its
+outcome, When recovery nudges it, Then the request asks only for the agent's
+own standalone outcome in that role's vocabulary (worker: PASS / NEEDS_WORK /
+INPUT_REQUIRED; verifier: VERIFIED or the FLAGGED block; planner: its
+`QA_PLAN` block), tells it not to redo work or re-run tests, does not replay
+the original prompt, and does not contain a verdict. Given
+`qa-verdict-reminder-timeout` set to a few seconds while the shared settle is
+much larger, Then scenario workers are nudged on that override rather than
+waiting out the shared settle. Given a verifier that emits `VERIFIED` on the
+initial check but no outcome on the machine-driven re-check, Then the re-check
+is bounded and reports `verifier produced no verdict` instead of hanging.
+
 ## Edge cases
 
 * **Idle inside the grace window.** A verdict that arrives before the review
@@ -185,6 +233,27 @@ and the tree shows one failed and one completed.
   the documented escape hatch, not a bug.
 * **Finalize after a blocked verification** must not merge: a missing
   verifier outcome blocks finalize even when every scenario passed.
+* **A verdict that lands on the deadline tick** is recorded, not retired:
+  the loop re-scans the transcript before reporting a missing outcome.
+* **A user stop during an episode** is a clean `STOPPED` teardown in every
+  phase (planner, workers, finalizer), never `INPUT_REQUIRED`/`NO_VERDICT`,
+  and auto-start must not relaunch the stopped run.
+* **A malformed plan block** (validator rejection) is distinct from "emitted
+  nothing": the nudge and the exhaustion error name the rejection.
+* **Killing a session's pane mid-episode** ends the review/watcher loop on
+  its pane-gone path (`KILLED`), not as `NO_VERDICT`, and does not hang.
+
+## Residuals (documented, not failures)
+
+* `verdict-recovery-response-timeout` (default 1 h) can retire a worker that
+  is silently busy (e.g. a >1 h test run) as no-response; it is configurable
+  and `0` disables it.
+* A poller that starts while its session is *already* idle (review-loop
+  adoption after a TUI restart) is bounded only by `overall_timeout` / pane
+  death — nudging a pre-existing turn was rejected because the session may
+  already be in its next turn.
+* A recovery nudge can land in a permission hold that begins during an open
+  episode (queued input).
 
 ## Pass / Fail criteria
 
@@ -216,3 +285,22 @@ concurrent run is disturbed.
 5. **`verdict-recovery-max-attempts 0` hangs by design** — the legacy
    behaviour is intentionally retained and is asserted as "still waiting",
    not as a failure.
+6. **What does a user-stopped run surface?** Since the teardown fixes, a run
+   the user stops before any plan/outcome is a terminal `STOPPED` teardown:
+   the TUI logs "QA stopped for … — no verdict recorded", no QA note or
+   lifecycle transition is written, and auto-start holds the run. Scenarios
+   assert *absence* of `INPUT_REQUIRED`/`NO_VERDICT` for a stop, not that
+   the stop produced a verdict.
+7. **Same-turn hook refreshes.** A held-open session (the fake refreshes its
+   idle hook every ~2 s) is bounded by an internal consecutive-deferral limit
+   (10) and ends in a `no_progress` exhaustion, which is the default-settle
+   path. Only a *newer* turn with changed transcript text defers and resets
+   the budget; this is why the default-settle scenarios never nudge.
+8. **Malformed vs. missing plan.** A planner that emits a `QA_PLAN` block the
+   validator refuses is a distinct, actionable case: the recovery request and
+   the exhaustion error both name the validation problem. Use the fake's
+   block `body` (e.g. `SCENARIO 1:` then `SCENARIO 3:`) to drive it.
+9. **Pane death is not a missing verdict.** Killing a review/watcher pane
+   mid-episode ends the loop as `KILLED` via the pane-gone path; a killed QA
+   scenario-worker pane is relaunched by the existing retry logic (fresh
+   identity, fresh recovery budget), not immediately retired.

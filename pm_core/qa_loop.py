@@ -2906,6 +2906,44 @@ def _poll_tmux_verdicts(
         _notify()
         _drop_recovery(scenario.index)
 
+    def _retire_if_exhausted(scenario: QAScenario,
+                             exc: VerdictRecoveryExhausted) -> str | None:
+        """Retire a worker whose bounded recovery is exhausted.
+
+        Both exhaustion sites — the post-nudge response deadline
+        (``check_response``) and the attempt/deferral bound inside
+        ``handle`` — go through here so the teardown guard, the last-chance
+        transcript re-scan and the slot bookkeeping cannot drift apart.
+
+        Returns the verdict that landed while the deadline expired; the
+        caller records it normally.  ``None`` means nothing to record:
+        either the run is being torn down (the worker is left pending and
+        nothing is persisted into the resume snapshot) or the worker was
+        just retired as INPUT_REQUIRED.
+        """
+        nonlocal verdicts_changed
+        if state.stop_requested:
+            # A stop that landed while we were deciding (after the caller's
+            # ``stopping`` snapshot) is teardown, not a verdict: never
+            # persist a spurious INPUT_REQUIRED reason into the resume
+            # snapshot.
+            return None
+        # The scan at the idle event races the transcript write, and
+        # ``handle``'s ``no_progress`` bound is checked before its own
+        # ``verdict_check``, so an outcome that landed as the deadline
+        # expired must be recorded rather than retired — the "completed
+        # result treated as absent" failure this recovery exists to avoid.
+        verdict = extract_verdict_from_transcript(
+            scenario.transcript_path, ALL_VERDICTS,
+        )
+        if verdict is not None:
+            return verdict
+        _recovery_exhausted(scenario, exc)
+        pending.discard(scenario.index)
+        verdicts_changed = True
+        _launch_next_queued()
+        return None
+
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
 
@@ -3190,26 +3228,11 @@ def _poll_tmux_verdicts(
                 try:
                     _rec.check_response()
                 except VerdictRecoveryExhausted as e:
-                    if state.stop_requested:
-                        # A stop that landed while we were deciding (after
-                        # the ``stopping`` snapshot above) is teardown, not
-                        # a verdict: never persist a spurious
-                        # INPUT_REQUIRED reason into the resume snapshot.
-                        continue
-                    # The deadline can expire on the very tick the verdict
-                    # lands: the scan above runs at the idle event, which
-                    # races the transcript write.  Re-scan before retiring so
-                    # a completed outcome is never treated as absent; a
-                    # non-None verdict falls through to the recording block
-                    # below.
-                    verdict = extract_verdict_from_transcript(
-                        scenario.transcript_path, ALL_VERDICTS,
-                    )
+                    # A verdict that landed as the deadline expired falls
+                    # through to the recording block below; otherwise the
+                    # worker is retired (or the run is being torn down).
+                    verdict = _retire_if_exhausted(scenario, e)
                     if verdict is None:
-                        _recovery_exhausted(scenario, e)
-                        pending.discard(scenario.index)
-                        verdicts_changed = True
-                        _launch_next_queued()
                         continue
 
             # Bounded missing-output recovery: an idle turn without a
@@ -3257,27 +3280,13 @@ def _poll_tmux_verdicts(
                             is not None,
                         )
                     except VerdictRecoveryExhausted as e:
-                        if state.stop_requested:
-                            # ``handle``'s deferral bound is checked before
-                            # its own ``stop_check``, so a stop that landed
-                            # while we were deciding can surface here as a
-                            # spurious exhaustion.  Teardown is not a
-                            # verdict: leave the worker pending instead of
-                            # recording an INPUT_REQUIRED reason.
-                            continue
-                        # ``no_progress`` is raised from the settle branch
-                        # *before* ``handle``'s own ``verdict_check`` runs,
+                        # Same last-chance re-scan as the response-deadline
+                        # path: ``no_progress`` is raised from the settle
+                        # branch before ``handle``'s own ``verdict_check``,
                         # so an outcome that landed during the settle could
-                        # still be in the transcript.  Re-scan before
-                        # retiring (same guard as the ``no_response`` path).
-                        verdict = extract_verdict_from_transcript(
-                            scenario.transcript_path, ALL_VERDICTS,
-                        )
+                        # still be in the transcript.
+                        verdict = _retire_if_exhausted(scenario, e)
                         if verdict is None:
-                            _recovery_exhausted(scenario, e)
-                            pending.discard(scenario.index)
-                            verdicts_changed = True
-                            _launch_next_queued()
                             continue
                     else:
                         if result.status == "deferred":

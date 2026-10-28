@@ -348,9 +348,12 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   the transcript write and `handle`'s `no_progress` bound is checked before
   its own `verdict_check`, so an outcome that landed as the deadline
   expired must be recorded rather than retired as `no_response` /
-  `no_progress` (the "completed result treated as absent" failure). The
-  planner honours `stop_requested` the same way before its
-  `check_response`.
+  `no_progress` (the "completed result treated as absent" failure). Both
+  exhaustion sites share `_retire_if_exhausted` (teardown guard + re-scan
+  + retire + slot bookkeeping) so the two paths cannot drift apart; it
+  returns the verdict that landed during the deadline, which the caller
+  then records normally. The planner honours `stop_requested` the same way
+  before its `check_response`.
 * **planner** — per-attempt `MissingOutputRecovery` with a `QA_PLAN_START/END`
   outcome request and a resume request; on exhaustion break out with
   `INPUT_REQUIRED` + `_error` (reusing the existing "plan incomplete" surface
@@ -500,9 +503,11 @@ unbounded.
 
 * `tests/test_loop_recovery.py` (new): shared recovery unit tests —
   no-verdict nudge then success; exhaustion after N; no-output → resume
-  message; output → outcome message that names no specific verdict; a
-  provider error is only recognised on the turn's final line (a quoted
-  error line among findings is `no_verdict`); a
+  message; output → outcome message that names no specific verdict; every
+  built request (outcome / resume / both block variants / the verifier's
+  two) is a single `tmux send-keys` line (a newline would submit partial
+  input); a provider error is only recognised on the turn's final line (a
+  quoted error line among findings is `no_verdict`); a
   genuine newer turn during settle defers and resets; a hook refresh of the
   same turn defers without resetting and exhausts with `no_progress`
   (including the `poll_for_verdict` and QA-tick-loop integration cases); a
