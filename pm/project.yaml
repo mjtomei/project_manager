@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T21:48:43.986305+00:00'
+  updated_at: '2026-10-28T23:09:01.596763+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37275,6 +37275,47 @@ prs:
       still does not verify the pane runs the transcript session (pr-7e00786).'
     created_at: '2026-10-28T21:48:43Z'
     last_edited: '2026-10-28T21:48:43Z'
+  - id: note-d0b7d43
+    text: 'QA scenario 23 (turn ownership after the answer: which turns re-arm the
+      wait, and the verdict recorded when a wakeup lands after the verdict): PASS
+      at e9ec829e, all 4 stories driven live (real pm TUI + interactive stand-in,
+      throwaway local-backend project, one fresh PR per story). (1) Wakeup turns never
+      re-arm: `/loop tick` and `<task-notification>` wakeups, each with a no-verdict
+      reply plus transparent `system-reminder` + `/model` echo records injected BETWEEN
+      the wakeup and its idle, left the run at running / "review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running)" / ir=false / fu=true / it=1 for 16 one-second
+      samples, marker cyan ⟳1, one notice only, no new iteration; the real PASS then
+      resolved once ("Review loop done: ✓ PASS (1 iteration)", PR -> [qa]). (2) PASS-followed-by-/loop-tick
+      (the e386-i1/baa8-i3 class): PASS + /model echo + /loop wakeup + no-verdict
+      reply + idle still completed PASS, iteration 1, ir=false, fu=false, no wait,
+      nothing recorded as NEEDS_WORK, PR -> [qa]. (3) NEEDS_WORK + wakeup launched
+      exactly one iteration 2 (running / "review iteration 2 (last NEEDS_WORK)" /
+      it=2 / verdict=NEEDS_WORK / ir=false / fu=false), marker ⟳2, stable for 10 samples
+      with the iteration-2 stand-in in hold mode emitting no verdict; new review window
+      for the same PR, no ⏸. (4) Interrupt re-arms: `::say Working on it.` + Esc stop
+      marker + no-verdict idle -> waiting / "review INPUT_REQUIRED (iteration 1)"
+      / ir=true / fu=false / it=1, marker red ⏸1, notice shown, SAME pane %3003, no
+      relaunch (--fresh never used; stand-in launch count unchanged), iteration did
+      not advance; answering again cleared it and PASS resolved. Regression cross-check:
+      test_review_input_required_state.py + test_verdict_transcript.py 94 passed;
+      the wakeup/transparent/interrupt/loop_tick/local_command selection 11 passed.
+      No code changes needed. Captures /pm-captures/scenarios/23/ (evidence.md for
+      all four stories, tui-story1/ cast+mp4+transcript, cli-full-cycle/ cast+mp4+cli-output.txt
+      which drives the whole wait->answer->wakeup->interrupt->answer->PASS cycle from
+      the CLI with set -x). Harness notes for the next run: (a) ffmpeg/ffprobe are
+      NOT on this container PATH (agg and asciinema are) - use /tmp/ffenv/bin for
+      the render, and ffmpeg 9 rejects -vsync (use -fps_mode vfr); (b) the pane registry
+      keys windows by window id, not name, so map id->name with tmux list-windows
+      before picking the review-claude pane or you get the previous story stale pane;
+      (c) a recorder attached to the TUI session follows the active window, so a long
+      TUI cast drifts into the review window when the loop transitions - keep the
+      marker assertions inside the first window and note the switch in the manifest;
+      (d) the sticky(30) "⏸ INPUT_REQUIRED ... interact with Claude in the review
+      pane" log line can still be on screen after the wait clears - judge re-arm by
+      the marker/status and by counting notices in the pane scrollback, not by that
+      line.'
+    created_at: '2026-10-28T23:09:01Z'
+    last_edited: '2026-10-28T23:09:01Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
