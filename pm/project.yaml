@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T12:04:34.285194+00:00'
+  updated_at: '2026-10-28T12:33:54.711180+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32561,6 +32561,38 @@ prs:
       dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-28T12:04:34Z'
     last_edited: '2026-10-28T12:04:34Z'
+  - id: note-bf33f88
+    text: 'Review loop 419c i11: one leftover in the kept tmux recipe scope, same
+      class as the PR (a completion check that cannot tell a finished job from a dead
+      one). Step 5 treats "recorder gone AND target session gone" as a legitimate
+      finish because the attach client follows the session — that explains why the
+      recorder exited, not whether asciinema finished. With no live session left as
+      a witness, only `test -s` decided, so a recorder killed mid-scenario (or just
+      before a session teardown) was reported as a successful recording on its non-empty
+      truncated cast — exactly the CLI pane position i10 fixed. Reproduced in the
+      execution harness: the previous recipe exits 0 on the non-empty cast with no
+      recorder left. Fix: the pane command now also records asciinema own exit status
+      (`…; echo \$? > <capture-dir>/recorder.status`), step 5 fails on a missing or
+      non-zero one, and step 0 clears a stale status with the stale cast. Verified
+      live (real tmux 3.2a + asciinema 2.1.0, private socket, the recipe own statement):
+      nominal detach -> status 0 (cast 2970B); asciinema SIGKILLed mid-recording ->
+      137 on a 2401B cast (previously accepted); whole server killed -> no status
+      file (2400B cast), so the run fails as incomplete; and the legitimate finish
+      where the scenario ends the pm session itself -> status 0 on a complete 2946B
+      cast, so a real recording is not rejected. Tests: +3 (tmux status handle asserted
+      as text; the statement driven through stub tmux/asciinema so the `\$?` escaping
+      and `$TARGET` expansion are exercised; an execution case for a killed recorder
+      whose target session is also gone) — all three fail against the previous recipe.
+      The scaffold-execution stub logic is now shared by the CLI and tmux tests instead
+      of duplicated. File 59 pass; related suites 234 pass; full suite 3912 passed
+      / 1 skipped with only the two known environment baselines (test_git_ops::test_keeps_unpushed_merge,
+      test_hook_events::test_installer_writes_standalone_receiver, both reproduce
+      on origin/master); test_merge_publish/test_signoff_integration deselected (push
+      proxy rejects pushes to master). impl.md R2/R4/R7/Files/verification and qa.md
+      R2/edge cases updated. No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-28T12:33:54Z'
+    last_edited: '2026-10-28T12:33:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
