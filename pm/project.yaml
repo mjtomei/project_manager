@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T08:56:13.339486+00:00'
+  updated_at: '2026-10-28T09:05:47.360457+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37467,6 +37467,25 @@ prs:
       v1.9.0 to /home/pm/bin.'
     created_at: '2026-10-28T08:56:13Z'
     last_edited: '2026-10-28T08:56:13Z'
+  - id: note-a78e544
+    text: 'QA scenario 36 (approval provenance / base-bound refusal / unreadable delta
+      / refused resolution) PASS at 753f466a — no code change; all four triples held
+      live. Harness facts for the next run: (1) `pm pr signoff integrate --apply`
+      prints `head:` as the POST-apply head (same sha as the applied merge); the pre-apply
+      head (the one `pm pr show` renders as `Resolved from:`) is `integration.json`
+      -> `resolution.resolved_from.head`. (2) Story 3''s Given really needs a recorded
+      SIGNOFF_MERGE before the binary-delta launch, otherwise `## Sign-off` is absent
+      and the Then cannot hold; kill the earlier sign-off window first or `pm pr signoff`
+      just re-focuses it. (3) A second throwaway project''s tmux session must be created
+      with `env -u TMUX -u TMUX_PANE pm session` from another session''s pane: with
+      TMUX set, `pm pr start` resolves the AMBIENT session, prints "Window ''pr-…''
+      already exists", and silently does nothing. (4) Run every pm command in a pane
+      of the pm session (HOME=<scratchpad>/home); the agent shell''s HOME differs,
+      so `pm qa captures-path` resolves an empty directory. (5) A non-UTF-8 recorded
+      delta on the re-check keeps `resolution.diff_path`, drops `resolution.diff`,
+      leaves the file untouched, and prints no `Integration check failed:` line.'
+    created_at: '2026-10-28T09:05:47Z'
+    last_edited: '2026-10-28T09:05:47Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
