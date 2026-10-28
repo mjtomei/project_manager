@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T13:40:19.172330+00:00'
+  updated_at: '2026-10-28T13:41:59.088961+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16753,6 +16753,33 @@ prs:
       to the driver window, so one cast shows the board and the owner_timeout output.'
     created_at: '2026-10-28T13:40:19Z'
     last_edited: '2026-10-28T13:40:19Z'
+  - id: note-b6f7d5f
+    text: 'QA scenario 14 (healthy TUI round trips on the merged build) PASS 2026-10-28,
+      session pm-pm-test-1793193948-cc55245f on d3ac60c6. (1) R1: pidfile is v1 JSON
+      {pid 1673, session, started_at, starttime 8745924, caps [sigusr1,sigusr2]};
+      pid alive as `/tmp/pm-venv/bin/pm _tui`; `pm tui view --no-history` renders;
+      log has the `[tui] Installed SIGUSR1 reload + SIGUSR2 cmd-queue handlers (pidfile=...,
+      queue=...)` line. (2) R2: `pm pr add "Reload check"` -> `Created pr-5158a2f
+      ... (now active)`, TUI went 4->5 PRs with no keypress, pidfile byte-identical,
+      log `action: reload (state only)` at the mutation second. (3) R3 + post-merge
+      policy: `pm autostart add pr-d17fe55 --stop-before-merge` exits 0 with `added:
+      pr-d17fe55 (wait-for-merge)` / `auto-start targets; targets: pr-d17fe55`; `pm
+      autostart list` -> `pr-d17fe55  wait-for-merge`; tech-tree node gained `◎`;
+      Runs popup shows `▶ ◎ pr-d17fe55 [wait-for-merge]`; log `queue dispatch: cmd=..."autostart
+      add pr-d17fe55 --wait-for-merge --reply ..." result=ok` + `auto_start: target
+      pr-d17fe55 added policy=wait_for_merge source=cli`; queue 0 bytes, no owner_unavailable/signal_error.
+      (4) R4: picker fallback (no fzf) showed `PR Actions — pr-95325c4`, `t` -> `──
+      starting: qa for pr-95325c4 ──` -> `⠋ qa: queued…` -> `✓ qa: window qa-pr-95325c4
+      is open`; windows qa-pr-95325c4-s0 + qa-pr-95325c4; TUI log `queue dispatch:
+      cmd="pr qa pr-95325c4" result=ok`; pidfile/pid unchanged; TUI still renders.
+      Captures: /pm-captures/scenarios/14/{01-descriptor,02-reload,03-autostart-policy,04-picker-qa}.
+      Gotcha for the next run: `pm log grep` is a REGEX match, so the scenario pattern
+      `action: reload (state only)` matches nothing (parens are a group) and returns
+      RC=1 - use `action: reload \(state only\)`; also `pane_run`-style drivers must
+      not append `; cmd` after a piped command or the `| tee` binds to the last command.
+      No production defect found; no code changed.'
+    created_at: '2026-10-28T13:41:59Z'
+    last_edited: '2026-10-28T13:41:59Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
