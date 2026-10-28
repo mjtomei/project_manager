@@ -37733,7 +37733,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T09:41:00.628171+00:00'
+  updated_at: '2026-10-28T09:46:51.796585+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -38634,6 +38634,26 @@ prs:
       No code change.'
     created_at: '2026-10-28T09:41:00Z'
     last_edited: '2026-10-28T09:41:00Z'
+  - id: note-c638ef7
+    text: 'QA S26 PASS (a retry never adopts a pre-episode transcript or window).
+      Both live stories verified with a podman shim (image pm-nonexistent-qa:latest).
+      (1) A new loop against the broken runtime killed the pre-episode PASS window,
+      wrote the i1 symlink and failed at container creation; the pre-armed 5 s repair
+      landed, attempt 2 relaunched a fresh review (new --session-id 6d07c2a6, polled
+      by the loop) and the loop recorded iteration 1 NEEDS_WORK then iteration 2 PASS
+      with exactly one review window and no re-adopted PASS. (2) A loop whose attempts
+      1-2 failed at container creation in the SAME shared manual-6c1a36 dir as a pre-episode
+      i1=PASS was in its 10 s backoff when pm tui restart --breadcrumb ran; the new
+      TUI resumed the same loop (id 9144), launched attempt 3 at the persisted next_retry_at,
+      and recorded i1 NEEDS_WORK / i2 PASS; no stale PASS, no grace=0s poll, i1 now
+      carries the fresh session bdcedf30, both failed-attempt artifacts remain, one
+      review window. Non-blocking cosmetic observation: the sticky retry notice truncates
+      the launch error at 200 chars, so its inline ''(artifact: …)'' suffix can be
+      cut to a fragment like ''(artifact: /scratch/p''; the full artifact path still
+      appears on the notice''s own ''Artifact:'' line, so the notice does name the
+      artifact. Captures: /pm-captures/scenarios/26/{story1,story2} (cast+mp4+manifest+evidence).'
+    created_at: '2026-10-28T09:46:51Z'
+    last_edited: '2026-10-28T09:46:51Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
