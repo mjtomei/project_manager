@@ -34345,7 +34345,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T10:57:08.034585+00:00'
+  updated_at: '2026-10-28T11:43:13.775331+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34481,6 +34481,20 @@ prs:
       qa_status.json error and the PR note); spec R1 accepts either.'
     created_at: '2026-10-28T10:57:07Z'
     last_edited: '2026-10-28T10:57:07Z'
+  - id: note-620fd0d
+    text: 'impl 5160e58f: integrated master@89e3c501e08a (sign-off SIGNOFF_IMPL).
+      qa_loop.py: kept the PR placement of the planner prompt/command build (after
+      the pre-planning branch sync) and carried master''s provider-env transport into
+      it — planner_env is filled by build_claude_shell_cmd(env_out=planner_env) and
+      handed to the pane via tmux new_window(env=planner_env), same three sites as
+      master. project.yaml: union of both PR lists (508, no dupes; pr-33b65cd kept,
+      active_pr branch-local). Tests: test_qa_branch_sync 31, QA loop suites 205,
+      handoff/provider/auto-sequence 192 — all pass; full suite 4112 passed, 1 skipped,
+      1 env-only failure (test_hook_events installer skips because PM_HOST_HOME !=
+      HOME; passes with it unset). No behaviour change beyond the env transport; spec
+      R1 updated. Ready for a fresh sign-off.'
+    created_at: '2026-10-28T11:43:13Z'
+    last_edited: '2026-10-28T11:43:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
