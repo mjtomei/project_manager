@@ -25,8 +25,10 @@ hits, regardless of how it waits for a background job:
   the detach (or that dies in the gap before the detach key is sent) fails
   the run instead of passing on a truncated cast. A non-empty cast is not
   proof of a finished recording — an asciinema killed mid-recording leaves a
-  header-only cast — so the CLI scaffold has the pane's shell record
-  asciinema's own exit status and fails on a missing or non-zero one;
+  header-only cast — so both recipes have the pane's shell record asciinema's
+  own exit status and fail on a missing or non-zero one. In the tmux recipe
+  the target session is a witness only while it is alive, so the both-gone
+  finish needs the status handle too;
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, the pm-session poll waits on
   the computed session rather than any ``pm-`` session (which would also
@@ -108,11 +110,53 @@ def _render_block(name):
     raise AssertionError(f"{name}: no render block found")
 
 
+def _statement(block, start_marker):
+    """One shell statement from ``block``, joining its backslash continuations.
+
+    The scaffold statements span several lines, and what follows them is not
+    always a blank line, so the end is the first line without a trailing
+    backslash.
+    """
+    lines = []
+    for line in block[block.index(start_marker):].splitlines():
+        lines.append(line)
+        if not line.rstrip().endswith("\\"):
+            break
+    return "\n".join(lines)
+
+
 def _stub_tool(bindir, name, body="exit 1\n"):
     path = bindir / name
     path.write_text("#!/bin/sh\n" + body)
     path.chmod(0o755)
     return path
+
+
+def _drive_recorder_statement(stmt, tmp_path, env_extra=None):
+    """Run a scaffold's recorder statement, then its pane command.
+
+    ``stmt`` is the recipe's own ``tmux ... new-session`` statement. A stub
+    ``tmux`` captures the argv, so the last argument is the command tmux runs
+    with ``sh -c``; that command is then run against a stub ``asciinema`` that
+    records its argv and exits 7. Returns ``(pane command, asciinema argv
+    path)`` so a caller can assert on either layer.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    tmux_argv = tmp_path / "tmux-argv"
+    asci_argv = tmp_path / "asciinema-argv"
+    _stub_tool(bindir, "tmux", f'printf "%s\\n" "$@" > "{tmux_argv}"\n')
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
+               **(env_extra or {}))
+    r = subprocess.run(["bash", "-c", stmt], env=env,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    recorder_cmd = tmux_argv.read_text().splitlines()[-1]
+    _stub_tool(bindir, "asciinema",
+               f'printf "%s\\n" "$@" > "{asci_argv}"\nexit 7\n')
+    subprocess.run(["sh", "-c", recorder_cmd], env=env,
+                   capture_output=True, text=True)
+    return recorder_cmd, asci_argv
 
 
 class TestRecipes:
@@ -492,29 +536,13 @@ class TestRecipes:
             "the `bash -c` command breaks the outer quoting")
         escaped = line[len("-c '"):-1]
 
-        stmt_start = block.index("tmux -L scaffold new-session")
-        stmt = (block[stmt_start:block.index("\n\n", stmt_start)]
+        stmt = (_statement(block, "tmux -L scaffold new-session")
                 .replace("<capture-dir>", str(tmp_path))
                 .replace("<short-name>", "run")
                 .replace("<command-to-record>", escaped))
         (tmp_path / "run").mkdir()   # the pane command writes its status here
 
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        tmux_argv = tmp_path / "tmux-argv"
-        _stub_tool(bindir, "tmux",
-                   f'printf "%s\\n" "$@" > "{tmux_argv}"\n')
-        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
-        r = subprocess.run(["bash", "-c", stmt], env=env,
-                           capture_output=True, text=True)
-        assert r.returncode == 0, r.stderr
-        recorder_cmd = tmux_argv.read_text().splitlines()[-1]
-
-        asci_argv = tmp_path / "asciinema-argv"
-        _stub_tool(bindir, "asciinema",
-                   f'printf "%s\\n" "$@" > "{asci_argv}"\n')
-        subprocess.run(["sh", "-c", recorder_cmd], env=env,
-                       capture_output=True, text=True)
+        _, asci_argv = _drive_recorder_statement(stmt, tmp_path)
         argv = asci_argv.read_text().splitlines()
         assert argv[argv.index("-c") + 1] == 'bash -c "set -x; cmd-one; cmd-two"', (
             "cli-recording: the recorded command does not survive the "
@@ -579,31 +607,85 @@ class TestRecipes:
         """
         block = _scaffold_block(_recipe_text("cli-recording.md"))
         (tmp_path / "run").mkdir()
-        stmt_start = block.index("tmux -L scaffold new-session")
-        stmt = (block[stmt_start:block.index("\n\n", stmt_start)]
+        stmt = (_statement(block, "tmux -L scaffold new-session")
                 .replace("<capture-dir>", str(tmp_path))
                 .replace("<short-name>", "run")
                 .replace("<command-to-record>", "true"))
-        bindir = tmp_path / "bin"
-        bindir.mkdir()
-        tmux_argv = tmp_path / "tmux-argv"
-        _stub_tool(bindir, "tmux",
-                   f'printf "%s\\n" "$@" > "{tmux_argv}"\n')
-        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
-        r = subprocess.run(["bash", "-c", stmt], env=env,
-                           capture_output=True, text=True)
-        assert r.returncode == 0, r.stderr
-        recorder_cmd = tmux_argv.read_text().splitlines()[-1]
+        recorder_cmd, _ = _drive_recorder_statement(stmt, tmp_path)
         assert "$?" in recorder_cmd, (
             "cli-recording: the recorder command's `$?` was expanded by this "
             "shell, so the pane would record an earlier command's status "
             f"(got {recorder_cmd!r})")
-        _stub_tool(bindir, "asciinema", "exit 7\n")
-        subprocess.run(["sh", "-c", recorder_cmd], env=env,
-                       capture_output=True, text=True)
         assert (tmp_path / "run" / "recorder.status").read_text().strip() == "7", (
             "cli-recording: asciinema's exit status does not reach the file "
             "step 4 reads")
+
+    def test_tmux_scaffold_checks_asciinemas_own_exit_status(self):
+        """The tmux completion check must survive a killed recorder too.
+
+        The tmux recipe's witness that the recording finished is the target
+        session: a recorder that is gone while the session lives died
+        mid-scenario. When the session ended *too*, no witness is left and
+        ``test -s`` decides alone — the CLI pane's position exactly — so a
+        recorder killed just before (or during) a session teardown would pass
+        on its header-only cast. asciinema's own exit status is the handle, so
+        the pane's shell records it and step 5 fails on a missing or non-zero
+        one. The file the pane command writes and the file step 5 reads have
+        to be the same one, and it has to be cleared with the stale cast.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        write = re.search(r"^[^#\n]*echo \\\$\? > (\S+)", block, re.M)
+        assert write, (
+            "tmux-screen-recording: the pane command does not record "
+            "asciinema's exit status, so a recorder killed while the target "
+            "session also ended passes on its header-only cast")
+        status_path = write.group(1).rstrip('"')
+        read = re.search(
+            r"^status=\$\(cat (\S+) 2>/dev/null\) \|\| \{$", block, re.M)
+        assert read, (
+            "tmux-screen-recording: step 5 does not read the recorder's exit "
+            "status")
+        assert read.group(1) == status_path, (
+            "tmux-screen-recording: step 5 reads " + read.group(1) + " but "
+            "the pane command writes " + status_path)
+        assert '[ "$status" = 0 ]' in block, (
+            "tmux-screen-recording: a non-zero recorder status is not treated "
+            "as a failed recording")
+        assert "incomplete" in block, (
+            "tmux-screen-recording: the status failure does not say the cast "
+            "is incomplete")
+        stale = block[block.index("rm -f "):block.index("new-session -d")]
+        assert "recorder.status" in stale, (
+            "tmux-screen-recording: an earlier run's recorder status survives, "
+            "so a torn-down recorder can pass the status check")
+
+    def test_tmux_scaffold_records_the_recorders_exit_status(self, tmp_path):
+        """The status echo has to reach the *pane's* shell, and land on disk.
+
+        Same two quote layers as the CLI scaffold: the pane command is an
+        argument to ``tmux new-session``, which tmux runs with ``sh -c``, so
+        the status echo has to survive this shell's own expansion (``\\$?``)
+        while ``$TARGET`` is expanded here as intended. Run the recipe's own
+        statement against a stub tmux, then run the captured pane command with
+        a stub ``asciinema`` that exits 7: the status file has to hold 7.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        cap = tmp_path / "cap"
+        cap.mkdir()
+        stmt = (_statement(block, "tmux new-session -d -s pm-recorder")
+                .replace("<capture-dir>", str(cap)))
+        recorder_cmd, _ = _drive_recorder_statement(
+            stmt, tmp_path, {"TARGET": "pm-test"})
+        assert "$?" in recorder_cmd, (
+            "tmux-screen-recording: the recorder command's `$?` was expanded "
+            "by this shell, so the pane would record an earlier command's "
+            f"status (got {recorder_cmd!r})")
+        assert "pm-test" in recorder_cmd, (
+            "tmux-screen-recording: $TARGET no longer expands in the pane "
+            f"command (got {recorder_cmd!r})")
+        assert (cap / "recorder.status").read_text().strip() == "7", (
+            "tmux-screen-recording: asciinema's exit status does not reach the "
+            "file step 5 reads")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -1081,7 +1163,7 @@ case "$sub" in
             if [ -n "$STUB_STATUS_FILE" ]; then
                 case "$STUB_MODE" in
                   nostatus)  : ;;
-                  badstatus) printf '137\n' > "$STUB_STATUS_FILE" ;;
+                  badstatus|midbothbad) printf '137\n' > "$STUB_STATUS_FILE" ;;
                   *)         printf '0\n' > "$STUB_STATUS_FILE" ;;
                 esac
             fi ;;
@@ -1102,7 +1184,8 @@ case "$1 $2" in
   "tui send")
       case "$STUB_MODE" in
         midadied) rm -f "$STATE/pm-recorder" ;;
-        midboth)  rm -f "$STATE/pm-recorder" "$STATE/pm-test" ;;
+        midboth|midbothbad)
+            rm -f "$STATE/pm-recorder" "$STATE/pm-test" ;;
       esac
       exit 0 ;;
 esac
@@ -1267,6 +1350,29 @@ class TestCaptureFlowExecution:
         assert r.returncode == 0, r.stderr
         assert cast.stat().st_size > 0
         assert "can't find session" not in r.stderr, r.stderr
+
+    def test_tmux_recorder_killed_with_the_session_gone_fails(self, tmp_path):
+        """A truncated cast must not pass just because the session ended too.
+
+        "Recorder gone *and* target gone" is treated as a legitimate finish
+        because the attach client follows the session — that explains why the
+        recorder exited, not whether asciinema finished. A recorder that was
+        killed mid-scenario and a session teardown (or a session that ended
+        moments after the recorder died) leave the two indistinguishable to
+        `test -s`: no witness is left, which is exactly the CLI pane's
+        situation, and the header-only cast is reported as a successful
+        recording. asciinema's own exit status is the handle that tells them
+        apart.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "midbothbad", tmp_path, target=True)
+        assert cast.stat().st_size > 0, "the fixture left no cast to misread"
+        assert r.returncode != 0, (
+            "a recorder that was killed mid-scenario was reported as a "
+            "finished recording once the target session was gone as well")
+        assert "incomplete" in r.stderr, r.stderr
+        assert "137" in r.stderr, (
+            "the failure does not say how the recorder ended: " + r.stderr)
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

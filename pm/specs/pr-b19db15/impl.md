@@ -63,7 +63,9 @@ R2. **Remove a stale cast before recording, and a stale recorder.** Both
    then pass on the previous run's recorder. The CLI scaffold clears the
    session, not the server — `kill-server` followed a few milliseconds later
    by `new-session` races the server's exit ("server exited unexpectedly",
-   reproduced ~7 times in 40 tight iterations).
+   reproduced ~7 times in 40 tight iterations). Both recipes also remove a
+   stale `recorder.status` (R4): a leftover one would let a recorder that was
+   torn down before it finished pass the exit-status check.
 
 R3. **Wait for the recorder to be up before sending keys, on the right
    handle.** Keystrokes sent before asciinema has attached are silently lost,
@@ -127,20 +129,31 @@ R4. **Stop by ending the recorded command, then wait on the recorder's real
    exits at once on the gone session and `test -s` passes on the truncated
    cast — the same false success through a smaller window. The failed detach
    is therefore a failure with the same "cast is incomplete" message.
-   `test -s` is not proof the *CLI* recording finished either: the tmux pane
-   has the target session as an independent witness, the CLI pane has none, so
-   an asciinema killed mid-recording leaves a header-only cast that passes
-   (reproduced live: SIGKILL 1 s into a 60 s one-shot left a 117-byte cast and
-   the previous scaffold printed success). The pane's shell therefore records
-   asciinema's *own* exit status (`…; echo \$? > …/recorder.status` — the `\$`
-   survives this shell's double-quote expansion and is expanded by the pane's
-   shell), step 4 fails on a missing status file (the pane was torn down
-   before asciinema returned) or a non-zero one, and step 0 removes a stale
-   status file with the stale cast. asciinema's status is 0 whenever the
-   recording ran to completion — the *recorded* command's status is not
-   propagated (verified: `-c 'exit 3'`, and a recorded command killed by a
-   signal, both exit 0) — so recording a failing command is still a valid
-   recording, while an asciinema killed by a signal exits 128+N.
+   `test -s` is not proof the recording finished in either recipe. In the CLI
+   pane there is no independent witness at all, so an asciinema killed
+   mid-recording leaves a header-only cast that passes (reproduced live:
+   SIGKILL 1 s into a 60 s one-shot left a 117-byte cast and the previous
+   scaffold printed success). In the tmux recipe the target session is a
+   witness *only while it is alive*: the both-gone branch above has no live
+   session left, and a recorder killed mid-scenario followed by (or just
+   before) a session teardown leaves a truncated cast that `test -s` accepts
+   (reproduced in the execution harness: the previous recipe exits 0 on a
+   non-empty cast with no recorder left). Both recipes therefore have the
+   pane's shell record asciinema's *own* exit status (`…; echo \$? >
+   …/recorder.status` — the `\$` survives this shell's double-quote expansion
+   and is expanded by the pane's shell), fail on a missing status file (the
+   pane was torn down before asciinema returned) or a non-zero one, and
+   remove a stale status file in step 0 with the stale cast. asciinema's
+   status is 0 whenever the recording ran to completion — the *recorded*
+   command's status is not propagated (verified: `-c 'exit 3'`, and a
+   recorded command killed by a signal, both exit 0) — so recording a failing
+   command is still a valid recording, while an asciinema killed by a signal
+   exits 128+N. Verified live for the tmux recipe (real tmux 3.2a, asciinema
+   2.1.0): nominal detach → status 0; asciinema SIGKILLed mid-recording →
+   status 137 on a non-empty cast; server killed mid-recording → no status
+   file; and the legitimate "the pm session ended, the attach followed it
+   out" finish → status 0 on a complete cast, so the check does not reject a
+   real recording.
 
 R5. **CLI scaffold writes the cast where the render reads it.** The no-TTY
    scaffold uses `<capture-dir>/<short-name>/recording.cast`, matching every
@@ -195,13 +208,14 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    cast, a detach that itself fails because the recorder vanished in that
    gap failing the same way, the recorder readiness wait carrying its own
    deadline (the pm-session poll's `deadline` would otherwise satisfy a
-   looser assertion), and the CLI recorder-status handle: the file the pane
-   command writes is the file step 4 reads, a stale one is cleared with the
-   stale cast, `$?` survives the scaffold's own quoting (the statement is run
-   through a stub `tmux` and the captured pane command through a stub
-   `asciinema` that exits 7, so the status file has to hold 7), and the
-   web-UI driver block refuses an unset `CAPDIR` instead of creating a
-   `node_modules` link in the worker's cwd.
+   looser assertion), and the recorder-status handle in *both* recipes: the
+   file the pane command writes is the file the stop step reads, a stale one
+   is cleared with the stale cast, and `$?` survives the scaffold's own
+   quoting (each statement is run through a stub `tmux` and the captured pane
+   command through a stub `asciinema` that exits 7, so the status file has to
+   hold 7 — and in the tmux recipe `$TARGET` still expands in the same
+   command); and the web-UI driver block refuses an unset `CAPDIR` instead of
+   creating a `node_modules` link in the worker's cwd.
    The capture flow is also *executed*, not only matched as text
    (`TestCaptureFlowExecution`): each recipe's fenced capture block runs
    against stub `tmux`/`pm` that drive a session table, so the readiness and
@@ -213,12 +227,14 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    a recorder that exits before drawing fails; a failed attach that drew its
    error text fails; a recorder that died mid-scenario fails on its
    truncated cast; a detach that fails because the recorder vanished in the
-   check-to-send gap fails; and a recording that ended with the session
-   itself passes.
+   check-to-send gap fails; a tmux recorder killed mid-scenario whose target
+   session is *also* gone fails on its status although its cast is non-empty
+   (no live session is left as a witness, so `test -s` decides alone); and a
+   recording that ended with the session itself passes.
    Each of those fails when its fix is reverted (checked by mutation: dropping
    the settle re-check, the mid-scenario branch, the detach-failure branch,
-   the CLI cast check, the CLI status check, and the `2>/dev/null` on the
-   pipe stop each fail exactly one case).
+   the CLI cast check, the CLI status check, the tmux status check, and the
+   `2>/dev/null` on the pipe stop each fail exactly one case).
    The render/finalize assertions cover both recording recipes (a failed
    render leaves no mp4/gif and exits non-zero with its message) and the
    web-UI recipe (the pre-driver cleanup drops the previous run's webm, mp4,
@@ -351,7 +367,7 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked, `agg` prerequisite + install line |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + mp4 checked; `agg` prerequisite + install line; stop failure names the interactive remedy |
 | `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; finalize refuses an unset `CAPDIR`; driver block refuses an unset `CAPDIR` too (it would otherwise link `node_modules` in the worker's cwd); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
@@ -363,7 +379,7 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
 1. Run `tests/test_qa_artifact_recording_recipes.py` — all pass (including
    the execution tests: a failed render with stub `agg`/`ffprobe`/`ffmpeg`
    leaves no mp4/gif and exits non-zero, the scaffold's documented
-   escaped command form reaches asciinema's `-c` intact, the CLI scaffold's
+   escaped command form reaches asciinema's `-c` intact, both scaffolds'
    status echo survives its own quoting and lands asciinema's status on
    disk, a killed/missing recorder fails although the cast is non-empty, and
    the capture flow runs end to end against a stub `tmux`/`pm` for its
@@ -396,3 +412,15 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
   cast holds the driven command. asciinema's status was checked to be 0 for
   `-c 'exit 3'` and for a recorded command killed by a signal, so a failing
   recorded command is not mistaken for a failed recording.
+- Review loop 419c i11 extended that handle to the tmux recipe and verified
+  it live in this container (real tmux 3.2a + asciinema 2.1.0, the recipe's
+  own `new-session` statement on a private socket): nominal detach → status
+  0, cast 2970 bytes; asciinema SIGKILLed mid-recording → status 137 on a
+  non-empty (2401-byte) cast, which the previous recipe accepted on
+  `test -s`; whole server killed mid-recording → no status file, cast 2400
+  bytes, so the run fails as an incomplete recording; and the legitimate
+  finish where the scenario ends the pm session itself (the attach follows
+  it out) → status 0 on a complete 2946-byte cast, so the new check does not
+  reject a real recording. The execution harness reproduces the hole the fix
+  closes: with a killed recorder *and* the target session gone, the previous
+  recipe exits 0 on the non-empty cast.

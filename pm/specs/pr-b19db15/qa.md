@@ -20,7 +20,9 @@ recording-recipe bugs that any worker following the recipe hits:
   attach error ("can't find session: …") and then exits — is a failure, not
   an early finish;
 - both stop by ending the recorded command and then wait (bounded) on the
-  recorder's session handle and check the cast is non-empty;
+  recorder's session handle, check the cast is non-empty, and check
+  asciinema's own exit status (a killed recorder leaves a non-empty cast, and
+  in the tmux recipe the target session is a witness only while it lives);
 - the CLI no-TTY scaffold writes the cast where the render reads it;
 - the tmux pm-session poll is bounded and waits on the computed session
   (`tmux has-session -t "$TARGET"`), not on any `pm-` session (which would
@@ -101,7 +103,9 @@ session, stop the recorder, and render the cast,
 **Then**
 - `transcript.log` and `recording.cast` are non-empty and from this run;
 - the recorder session ends before the cast check (the completion signal is
-  observed, not assumed);
+  observed, not assumed), and a recorder that was killed mid-scenario — even
+  when the pm session ended too, leaving no live witness — fails on
+  asciinema's exit status instead of passing on its non-empty cast;
 - a recorder that is already gone before the detach while the pm session it
   was attaching to still exists (it died mid-scenario) fails the run with
   the "cast is incomplete" message instead of rendering a truncated cast as
@@ -172,6 +176,11 @@ run.
   successful recording. A recorder that dies in the gap between that check
   and the detach key send makes `tmux send-keys` fail, and that failure ends
   the run with the same message instead of falling through to the cast check.
+  When the target session ended *too*, no live session is left as a witness,
+  so the recipe decides on asciinema's own exit status: a recorder killed
+  mid-scenario (status 128+N) or a pane torn down before asciinema returned
+  (no status file) fails the run, while a recording that ended because the
+  pm session itself ended exits 0 and passes.
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
   `RECORDER_STOP_TIMEOUT` for a long command.

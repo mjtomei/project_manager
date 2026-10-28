@@ -46,7 +46,7 @@ the same tmux server is enough to break that recursion.
 
 Step 0 of the capture flow clears the recorder session and the files an
 earlier run left behind, then creates the capture directory with
-`mkdir -p <capture-dir>`. All three matter. A leftover `pm-recorder`
+`mkdir -p <capture-dir>`. All of them matter. A leftover `pm-recorder`
 session makes step 3's `new-session` fail with "duplicate session", and the
 readiness wait below would then pass on the *previous* run's attach
 client. `asciinema rec` reports "asciicast saved" and exits 0 even when the
@@ -58,14 +58,17 @@ the readiness wait — loudly, but for a reason unrelated to the scenario,
 and with the earlier run's cast still on disk for the render step to pick
 up if the worker overrides that failure. The transcript is appended to, so
 a stale `transcript.log` would silently mix an earlier run into this run's
-evidence.
+evidence. `recorder.status` holds this run's recorder exit status (step 5);
+a leftover one would let a recorder that was torn down before it finished
+pass that check.
 
 ```
 # 0. Clear what an earlier run left behind before anything writes into it:
 #    the recorder session, the capture directory, and the files in it.
 tmux kill-session -t pm-recorder 2>/dev/null || true
 mkdir -p <capture-dir>
-rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log
+rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
+      <capture-dir>/recorder.status
 
 # 1. Start the canonical pm session. `pm session` (no subcommand)
 #    creates the project's pm session and then attaches; the attach
@@ -108,9 +111,13 @@ tmux pipe-pane -t "$TARGET:0.0" "cat >> <capture-dir>/transcript.log"
 #    client, so set -x and -y large enough to render the TUI legibly
 #    (the cast inherits this size). 200x50 fits a typical desktop
 #    layout; bump them up if your scenario needs more room.
+#    The pane command also records asciinema's *own* exit status once it
+#    returns: step 5 needs it to tell a finished recording from a recorder
+#    that was killed, and `test -s` on the cast cannot. `\$?` is escaped so
+#    the pane's shell expands it, not this one.
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
-        -c 'tmux attach -t $TARGET'"
+        -c 'tmux attach -t $TARGET'; echo \$? > <capture-dir>/recorder.status"
 # Wait (bounded) for the recorder to draw: the detach key in step 5 (and
 # every key sent below) is lost if the attach client has not started yet.
 # A recorder that *exits* here cannot have recorded the TUI — the
@@ -182,7 +189,10 @@ if ! tmux has-session -t pm-recorder 2>/dev/null; then
         exit 1
     fi
     # Both are gone: the session itself ended, which ended the attach and so
-    # the recording. Nothing left to detach; the wait below is a no-op.
+    # the recording. Nothing left to detach; the wait below is a no-op. That
+    # explains why the recorder exited, not whether asciinema finished — the
+    # status check below is what decides in this branch, because there is no
+    # live session left as a witness.
 else
     # The detach is the last handle that can race the recorder: if it died
     # between the check above and this key send, `send-keys` fails (the
@@ -210,6 +220,30 @@ while tmux has-session -t pm-recorder 2>/dev/null; do
 done
 test -s <capture-dir>/recording.cast || {
     echo "asciinema wrote no cast — check the recorder pane" >&2
+    tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+    exit 1
+}
+# A non-empty cast is not proof the recording finished: an asciinema that was
+# killed mid-recording leaves a cast holding only its header, and when the
+# target session ended too there is no live session left to witness it — the
+# same position the CLI scaffold's pane is in. asciinema's own exit status is
+# the handle. It is 0 when the recording ran to completion — the *recorded*
+# command's status is not propagated, so a recording of a command that exits
+# non-zero (or an attach that ends because the session ended) is still a
+# finished recording — and non-zero when asciinema refused to start or was
+# killed, in which case the cast stops wherever it stopped. A missing status
+# file means the pane was torn down before asciinema returned, which is the
+# same failure.
+status=$(cat <capture-dir>/recorder.status 2>/dev/null) || {
+    echo "recorder status is missing — the pane was torn down before" \
+        "asciinema exited, so the cast is incomplete, not a finished" \
+        "recording" >&2
+    tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+    exit 1
+}
+[ "$status" = 0 ] || {
+    echo "asciinema exited $status — the cast is incomplete, not a finished" \
+        "recording; check the recorder pane" >&2
     tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     exit 1
 }
