@@ -31389,7 +31389,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-28T05:33:39.918891+00:00'
+  updated_at: '2026-10-28T13:28:59.032042+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -31423,6 +31423,20 @@ prs:
       new approval. DeepSeek 1017/high for implementation/review/QA/helpers, work
       Opus 5.5/high for signoff; manual wait_for_merge and spec review OFF. No force
       push or master rewrite.'
+  - id: note-8e753c1
+    text: 'QA scenario 4 (restart mid-backoff): stories 1-3 PASS; story 4 (E2/A4)
+      found that a worker which wrote its verdict and then died before collection
+      was relaunched (verdict discarded). Fixed in 600fd168: the dead-pane branch
+      of _poll_tmux_verdicts now collects the verdict from the transcript and settles
+      the scenario instead of spending a retry (guarded against resurrecting a verdict
+      cleared for a verification re-evaluation; unit test added). Verified live: worker-pane
+      death -> PASS (verified), no relaunch. Residual, pre-existing and out of R10
+      scope: if the whole scenario window is destroyed, PASS verification cannot find
+      a pane to split, so a preserved verdict ends INPUT_REQUIRED (window gone during
+      verification) instead of PASS — same as for a verdict collected while the pane
+      was still alive. Captures: /pm-captures/scenarios/4/. (2026-10-28T13:35:00Z)'
+    created_at: '2026-10-28T13:28:58Z'
+    last_edited: '2026-10-28T13:28:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
