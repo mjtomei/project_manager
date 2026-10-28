@@ -171,6 +171,11 @@ class QAScenario:
     verifier_session_id: str | None = None
     verifier_transcript: str | None = None
     verifier_cwd: str | None = None
+    # The recorded worker pane died (see _live_worker_pane) and the relaunch
+    # retries it used.  Persisted so a TUI restart during the retry backoff
+    # keeps retrying instead of adopting the concretizer by window name.
+    worker_died: bool = False
+    worker_retries: int = 0
 
 
 @dataclass
@@ -900,6 +905,8 @@ def _scenario_to_resume_dict(s: QAScenario) -> dict:
         "verifier_session_id": s.verifier_session_id,
         "verifier_transcript": s.verifier_transcript,
         "verifier_cwd": s.verifier_cwd,
+        "worker_died": s.worker_died,
+        "worker_retries": s.worker_retries,
     }
 
 
@@ -926,6 +933,8 @@ def _scenario_from_resume_dict(d: dict) -> QAScenario:
         verifier_session_id=d.get("verifier_session_id"),
         verifier_transcript=d.get("verifier_transcript"),
         verifier_cwd=d.get("verifier_cwd"),
+        worker_died=bool(d.get("worker_died")),
+        worker_retries=int(d.get("worker_retries") or 0),
     )
 
 
@@ -2910,7 +2919,9 @@ def _poll_tmux_verdicts(
                     or (state.scenario_verdicts[s.index] == VERDICT_PASS
                         and verify_enabled
                         and s.index not in state.verified_scenarios))}
-    retry_counts: dict[int, int] = {}  # scenario_index -> retries used
+    # scenario_index -> retries used (carried across a resume)
+    retry_counts: dict[int, int] = {
+        s.index: s.worker_retries for s in state.scenarios if s.worker_retries}
     # Track how many verification failures each scenario has had
     verification_failures: dict[int, int] = {}
     # Scenarios currently being verified (in a background thread)
@@ -3002,8 +3013,9 @@ def _poll_tmux_verdicts(
 
     released_indices: set[int] = set()
     release_retry_at = 0.0
-    # Scenarios whose recorded worker pane died this run (see _live_worker_pane).
-    dead_workers: set[int] = set()
+    # Scenarios whose recorded worker pane died this run (see _live_worker_pane),
+    # including before a resume.
+    dead_workers: set[int] = {s.index for s in state.scenarios if s.worker_died}
     # Last retained count logged as blocking a dequeue (log once per change).
     _held_logged = [0]
 
@@ -3273,6 +3285,7 @@ def _poll_tmux_verdicts(
                     # Keep retrying this worker rather than adopting another pane
                     # in its window once the relaunch fails.
                     dead_workers.add(scenario.index)
+                    scenario.worker_died = True
                     retries = retry_counts.get(scenario.index, 0)
                     if retries < _SCENARIO_MAX_RETRIES:
                         backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
@@ -3287,6 +3300,7 @@ def _poll_tmux_verdicts(
                             # window; relaunching would orphan a worker.
                             break
                         retry_counts[scenario.index] = retries + 1
+                        scenario.worker_retries = retries + 1
                         if _relaunch_scenario_window(
                             scenario, state, data, pr_data,
                             session, workdir_path,
