@@ -259,6 +259,20 @@ implementing and QA-ing it, and ship here (each has a PR note):
 - `pm_core/qa_loop.py::_proc_stat_fields` / `resume_owned_elsewhere`: the
   same non-UTF-8 `comm` and out-of-range-PID crash class as E16, on the
   QA resume path (see E16 and test 29/32).
+- `pm_core/cli/helpers.py::_find_live_tui_pane` + `pm_core/cli/tui.py`:
+  found in QA scenario 16 (commit `b2d9b75b`). After a TUI exits, the pane
+  registry keeps its `role="tui"` entry until the next `heal_registry`
+  pass, and `_find_tui_pane` returned it without checking liveness —
+  `pm tui view` printed an empty frame with exit 0 and `pm tui send`
+  raised a raw tmux "can't find pane" traceback. `pm tui view` / `send` /
+  `restart` now resolve through `_find_live_tui_pane`, which checks the
+  resolved pane against a single `tmux list-panes -a` query and falls
+  back only to a live `pm _tui` pane in the *same* session (never another
+  session's). `_find_tui_pane` is deliberately unchanged so `pm autostart`
+  still reports the right session's stale pidfile (a first attempt that
+  added the liveness check inside `_find_tui_pane` made autostart fall
+  through to another session's live TUI — do not move it back). Tests in
+  `tests/test_cli_helpers.py` (`TestFindLiveTuiPane`).
 
 ## Edge cases
 
