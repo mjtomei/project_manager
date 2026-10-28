@@ -292,6 +292,46 @@ implementing and QA-ing it, and ship here (each has a PR note):
   fallback exists to remove, on the other input shape. It now keeps the
   requested session and runs the live-pane scan. Tests in
   `TestFindLiveTuiPane` (`test_explicit_session_without_*`).
+- `pm_core/tui_pidfile.py` + `pm_core/tui/auto_start.py` (QA scenario 22,
+  commit `148a9ea2`): `~/.pm/merge-restart` and
+  `~/.pm/autostart-resume.json` are *single* files shared by every pm
+  session under one PM home, so two sessions restarting at once stepped
+  on each other. Observed in both directions on one build: B consumed A's
+  marker, applied A's targets to B's project (dropping them as
+  "missing") and left A at `mode=off`; and B preserved *its own* state on
+  a restart its user asked to be clean. The marker now records its owning
+  session (`~N` normalized) and `has`/`clear` only act on the caller's
+  own (an empty/legacy marker stays unscoped); `save_breadcrumb` stamps
+  `session` and `consume_breadcrumb` leaves another session's breadcrumb
+  in place for its owner. Separately, `on_mount` now resolves the mount
+  trigger through `auto_start.resolve_mount_trigger`, which *discards* a
+  marker that survived to mount — `save_breadcrumb` unlinks it before the
+  old process re-execs, so a marker present at mount was never consumed
+  and would otherwise turn the next plain Ctrl+R into a merge restart.
+  Tests in `tests/test_breadcrumb_review_loop.py`
+  (`TestOrphanedMergeRestartMarker`, `TestMergeRestartMarkerSessionScope`,
+  `TestBreadcrumbSessionOwnership`).
+- `pm_core/tui_pidfile.py` merge-restart marker I/O (review-loop c0c9 i1):
+  the marker was read with a bare `read_text()` that caught only `OSError`
+  and written with a non-atomic `write_text`. Three consequences, all the
+  same class this module exists to close: (a) an undecodable marker
+  raised `UnicodeDecodeError` out of `action_restart`/`save_breadcrumb`
+  (Ctrl+R would fail), and it could never be cleared — `on_mount` wraps
+  the same read in `except Exception`, so every mount silently re-read
+  the unreadable file forever instead of dropping it; (b) a torn write
+  could be read as an *unscoped* marker, letting another session consume
+  a restart request that was never meant for it; (c) `clear` unlinked
+  unconditionally after its ownership check, so a marker a concurrent
+  restart wrote between the read and the unlink was deleted, dropping
+  that session's state preservation. The read is now total
+  (`_read_marker_text`, `_marker_owner`), the write goes through the same
+  `_atomic_write` as the pidfile descriptor, and `clear` goes through
+  `unlink_if_unchanged` so it only removes the bytes it validated. Tests
+  in `TestMergeRestartMarkerSessionScope`
+  (`test_clear_leaves_another_sessions_marker`,
+  `test_clear_does_not_remove_a_marker_rewritten_underneath`,
+  `test_undecodable_marker_never_raises`; the last two verified to fail
+  against the pre-fix implementation).
 
 ## Edge cases
 
@@ -464,6 +504,22 @@ E20. **"Cannot tell" can also mean "it just exited".** `proc_cmdline`
     they keep degrading to the liveness check and nothing changes there.
     (`submit_tui_command` / `trigger_tui_reload` were already safe here:
     `_signal_tui` re-checks and reports `process is not running`.)
+
+E21. **The merge-restart marker is shared and is not a pidfile.** It is a
+    *single* file under one PM home, written by any session's
+    `pm tui restart --breadcrumb` / `trigger_tui_restart` and consumed by
+    whichever TUI restarts next, so it needs the same corruption and
+    concurrency rules the pidfile gets: the read must be total (an
+    undecodable file reads as an unscoped legacy marker, never a raise —
+    `action_restart` has no handler), the write must be atomic (a torn
+    write must not look unscoped, or another session consumes a request
+    that was not its own), and the clear must be conditional on the bytes
+    it validated (a concurrent restart's marker written between the read
+    and the unlink belongs to that session). A marker that survives to
+    mount is by definition orphaned — `save_breadcrumb` is its only
+    consumer and unlinks it before the old process re-execs — so
+    `resolve_mount_trigger` drops it rather than leaving it to poison a
+    later, unrelated start.
 
 ## Tests
 
@@ -671,6 +727,27 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     marker cannot outlive a restart that never happened. The four
     meaningful tests were verified to fail against HEAD (the fifth pins
     the no-live-pane case, which both versions satisfy).
+42. the merge-restart marker is one file shared by every session, so its
+    read/write/clear must be total and conditional (review-loop c0c9 i1):
+    an undecodable marker reads as unscoped instead of raising out of
+    `action_restart`, and the mount that observes it clears it (so it
+    cannot be re-read forever); `write_merge_restart_marker` goes through
+    `_atomic_write`, so a torn write can never be mistaken for an
+    unscoped marker by another session; and `clear_merge_restart_marker`
+    removes only the bytes it validated, so a marker a concurrent restart
+    wrote between the read and the unlink survives. The last two were
+    verified to fail against the pre-fix implementation (the old read
+    raised `UnicodeDecodeError`; the old clear deleted the concurrent
+    session's marker).
+43. session-scoped restart state (QA scenario 22): a marker naming another
+    session is neither acted on nor cleared by this one, a grouped
+    `pm-alpha~1` matches its base `pm-alpha`, an empty (legacy) marker is
+    still unscoped, `save_breadcrumb` records its session and leaves
+    another session's marker alone, and `consume_breadcrumb` leaves a
+    breadcrumb owned by another session for its own mount while still
+    consuming a legacy session-less one. Tests in
+    `TestMergeRestartMarkerSessionScope` /
+    `TestBreadcrumbSessionOwnership`.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

@@ -791,6 +791,56 @@ class TestMergeRestartMarkerSessionScope:
             assert tui_pidfile.clear_merge_restart_marker("pm-alpha~1") is True
             assert not (tmp_path / "merge-restart").exists()
 
+    def test_clear_leaves_another_sessions_marker(self, tmp_path):
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            # B must not be able to consume A's request...
+            assert tui_pidfile.clear_merge_restart_marker("pm-bravo") is False
+            assert (tmp_path / "merge-restart").exists()
+            # ...and A can.
+            assert tui_pidfile.clear_merge_restart_marker("pm-alpha") is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_clear_does_not_remove_a_marker_rewritten_underneath(
+            self, tmp_path, monkeypatch):
+        """A concurrent write between read and unlink must win.
+
+        Session A decides to clear its marker; before the unlink runs,
+        session B writes *its* marker.  Deleting B's request would drop the
+        state preservation B's restart asked for — the same cross-session
+        hazard scoping exists to prevent — so the clear is conditional on
+        the bytes it validated.
+        """
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-bravo")
+            # What A read was its own marker; the file now holds B's.
+            monkeypatch.setattr(tui_pidfile, "_read_marker_text",
+                                lambda: '{"session":"pm-alpha"}')
+            assert tui_pidfile.clear_merge_restart_marker("pm-alpha") is False
+            assert (tmp_path / "merge-restart").exists()
+            monkeypatch.undo()
+            assert tui_pidfile.read_merge_restart_marker() == (True, "pm-bravo")
+
+    def test_undecodable_marker_never_raises(self, tmp_path):
+        """A corrupt marker must not crash a restart, and must be clearable."""
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        (tmp_path / "merge-restart").write_bytes(b"\xff\xfe\x00garbage")
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            # Unscoped, so every session sees it (legacy behaviour)...
+            assert tui_pidfile.read_merge_restart_marker() == (True, None)
+            assert auto_start.has_merge_restart_marker("pm-alpha") is True
+            # ...and the mount that observes it can drop it rather than
+            # re-reading the same undecodable file forever.
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "initial"
+
     def test_unscoped_legacy_marker_still_honoured(self, tmp_path):
         from pm_core import tui_pidfile
 

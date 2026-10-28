@@ -112,34 +112,61 @@ def merge_restart_marker_path() -> Path:
     return pm_home() / MERGE_RESTART_MARKER
 
 
+def _read_marker_text() -> str | None:
+    """The marker's raw text, or ``None`` when missing/unreadable/undecodable."""
+    try:
+        return merge_restart_marker_path().read_text()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _marker_owner(raw: str | None) -> str | None:
+    """Session named by a marker's raw text, or ``None`` when unscoped.
+
+    ``None`` covers an empty file (what older CLIs wrote with ``touch``),
+    unparseable content, and anything that is not a ``{"session": ...}``
+    object — all of which keep the pre-scoping consume-anywhere behaviour.
+    """
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if isinstance(data, dict):
+        session = data.get("session")
+        if isinstance(session, str) and session:
+            return session.split("~")[0]
+    return None
+
+
 def read_merge_restart_marker() -> tuple[bool, str | None]:
     """``(exists, owning session)`` for the merge-restart marker.
 
     The session is ``None`` for an unscoped marker: empty, unparseable, or
-    written by a CLI that predates session scoping.
+    written by a CLI that predates session scoping.  Total: an undecodable
+    file (a torn or hand-mangled write) reads as an unscoped marker rather
+    than raising out of ``action_restart`` — the same "corruption must
+    never crash the caller" rule the pidfile reader follows.
     """
-    try:
-        raw = merge_restart_marker_path().read_text()
-    except OSError:
-        return False, None
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return True, None
-    if isinstance(data, dict):
-        session = data.get("session")
-        if isinstance(session, str) and session:
-            return True, session.split("~")[0]
-    return True, None
+    raw = _read_marker_text()
+    if raw is None:
+        return merge_restart_marker_path().exists(), None
+    return True, _marker_owner(raw)
 
 
 def write_merge_restart_marker(session: str | None) -> Path:
-    """Write the marker, scoped to *session* when one is known."""
+    """Write the marker, scoped to *session* when one is known.
+
+    Written atomically: a reader must never see a half-written marker and
+    mistake it for an unscoped (legacy) one, which would let a *different*
+    session consume a restart request that was never meant for it.
+    """
     path = merge_restart_marker_path()
     payload: dict[str, str] = {}
     if session:
         payload["session"] = session.split("~")[0]
-    path.write_text(json.dumps(payload))
+    _atomic_write(path, json.dumps(payload))
     return path
 
 
@@ -161,15 +188,25 @@ def clear_merge_restart_marker(session: str | None = None) -> bool:
     """Remove the marker when it is unscoped or owned by *session*.
 
     Returns True when a marker was removed.  Another session's marker is
-    left in place for its own TUI to consume.
+    left in place for its own TUI to consume.  The unlink is conditional on
+    the file still holding the bytes that were checked: a concurrent
+    restart in another session can write *its* marker between the read and
+    the unlink, and deleting that one would drop the state preservation it
+    asked for (the very race session scoping exists to close).
     """
-    if not has_merge_restart_marker(session):
+    path = merge_restart_marker_path()
+    raw = _read_marker_text()
+    if raw is None:
+        if not path.exists():
+            return False
+        # Undecodable: unscoped (see read_merge_restart_marker), and
+        # removed only while it stays unreadable so a peer that replaces
+        # it with a readable marker keeps its own.
+        return unlink_if_unchanged(path, None)
+    owner = _marker_owner(raw)
+    if owner is not None and session is not None and owner != session.split("~")[0]:
         return False
-    try:
-        merge_restart_marker_path().unlink()
-    except OSError:
-        return False
-    return True
+    return unlink_if_unchanged(path, raw)
 
 
 @dataclass(frozen=True)
