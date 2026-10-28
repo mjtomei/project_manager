@@ -770,7 +770,15 @@ def parse_ts(value):
 
 RETURN_LAUNCH_CLAIM_SECONDS = 180
 # Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
-# needs one launcher; a QA return is guarded by the QA loop's running check.
+# needs one launcher.  The claim is written in the same locked update as the
+# transition (:func:`build_return_record`), so only catch-up paths call
+# :func:`claim_return_launch` for them.
+#
+# ``qa`` is deliberately NOT here.  Its claim is taken by every *starter*
+# (qa_loop_ui.start_owed_reqa, the auto-sequence QA hop, auto-start), never
+# by the sign-off hop that performs the transition: that hop may have to
+# defer behind a live ``pm qa run``, and holding the claim would block the
+# owed start for the whole RETURN_LAUNCH_CLAIM_SECONDS after that run ends.
 _CLAIMED_RETURN_HOPS = ("impl", "review")
 
 

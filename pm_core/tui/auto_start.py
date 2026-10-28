@@ -987,14 +987,18 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
         # Skip if no workdir
         if not pr.get("workdir"):
             continue
-        _log.info("auto_start: starting QA loop for %s", pr_id)
-        app.log_message(f"Auto-start: QA for {pr_id}")
         from pm_core.tui import qa_loop_ui
         if return_awaiting(pr) == "qa":
             # A sign-off REQA's re-run: one claim-guarded starter, so this
             # pass and a TUI tick / auto-sequence tick can't both run it.
-            qa_loop_ui.start_owed_reqa(app, pr_id)
+            # Announce only when this pass actually won the launch.
+            if not qa_loop_ui.start_owed_reqa(app, pr_id):
+                continue
+            _log.info("auto_start: starting the owed QA re-run for %s", pr_id)
+            app.log_message(f"Auto-start: QA for {pr_id}")
         else:
+            _log.info("auto_start: starting QA loop for %s", pr_id)
+            app.log_message(f"Auto-start: QA for {pr_id}")
             qa_loop_ui.start_qa(app, pr_id)
 
 

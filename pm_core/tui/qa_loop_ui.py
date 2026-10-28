@@ -254,6 +254,24 @@ def _owed_reqa_deferrals(app) -> dict:
     return d
 
 
+def _consume_owed_reqa_in_memory(app, pr_id: str) -> None:
+    """Mirror ``start_qa``'s on-disk consumption in this process's state.
+
+    ``start_qa`` clears ``awaiting`` and the claim as the run starts.  The
+    in-memory copy would otherwise keep saying the PR is owed, and the ~5 s
+    reconciler would re-attempt the claim — a full project.yaml read plus a
+    fsynced rewrite — until some other path reloads the state.
+    """
+    for pr in (getattr(app, "_data", None) or {}).get("prs") or []:
+        if pr.get("id") != pr_id:
+            continue
+        rec = pr.get("signoff_return")
+        if isinstance(rec, dict):
+            rec["awaiting"] = None
+            rec.pop("launch_claim", None)
+        return
+
+
 def start_owed_reqa(app, pr_id: str) -> bool:
     """Start the full QA a sign-off REQA owes, once across every driver.
 
@@ -276,6 +294,11 @@ def start_owed_reqa(app, pr_id: str) -> bool:
         return False
     _log.info("owed REQA: starting the QA run for %s", pr_id)
     start_qa(app, pr_id)
+    if pr_id in app._qa_loops:
+        # The run really started, so ``start_qa`` consumed the obligation on
+        # disk; drop it here too (a start that bailed keeps the obligation,
+        # and the claim expiry makes the next tick retry it).
+        _consume_owed_reqa_in_memory(app, pr_id)
     return True
 
 
@@ -316,16 +339,13 @@ def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
 def arm_owed_reqa(app) -> None:
     """Mount/routing hook: make sure an owed REQA is not left to memory.
 
-    Reconciles once (reading project.yaml only when the in-memory state shows
-    nothing owed) and arms the poll timer so the obligation is retried even
-    when auto-start is off and no loop is running to keep the tick alive.
+    Reconciles once against the in-memory state (both callers — the mount
+    hook and the sign-off hop — reload it immediately before this, so no
+    extra project.yaml read is needed) and arms the poll timer so the
+    obligation is retried even when auto-start is off and no loop is running
+    to keep the tick alive.
     """
     prs = (getattr(app, "_data", None) or {}).get("prs") or []
-    if not owed_reqa_prs(app, prs) and getattr(app, "_root", None):
-        try:
-            prs = store.load(app._root).get("prs") or []
-        except (store.ProjectYamlParseError, OSError):
-            return
     if not owed_reqa_prs(app, prs):
         return
     _ensure_poll_timer(app)
@@ -412,6 +432,14 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # Remove stale loop state — run_qa_sync will clean up old windows
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
+
+    # Like start_qa: this loop *is* the full re-run a sign-off REQA owes, so
+    # consume the obligation as start_qa would.  This path starts the run
+    # without going through start_qa; leaving ``awaiting`` behind would make
+    # the owed-REQA reconciler start a second full run once this loop ends.
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(app._root, pr_id, "qa")
+    _consume_owed_reqa_in_memory(app, pr_id)
 
     # Like start_qa: the first run of a loop on an in_review PR moves it
     # to qa (restarts go through start_qa, which already does this).

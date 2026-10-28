@@ -151,7 +151,11 @@ edit that branch's captures or widen `#249` acceptance.
 - **I1** The reconciler must be cheap when nothing is owed: no project.yaml
   read and no workdir scan beyond one `glob` when no PR carries an open
   `awaiting: qa` return (`app._data` is a valid prefilter; the claim is the
-  authority).
+  authority).  This holds for the mount hook too — both callers (mount, the
+  sign-off hop) reload the state immediately before arming, so it reads no
+  second copy of project.yaml.  After a start, the consumed obligation is
+  also dropped from `app._data`, so the tick does not keep re-attempting the
+  claim (a full read plus fsynced rewrite of project.yaml) until a reload.
 - **I2** It must never start unrelated PRs: no autostart target is restored,
   no `in_scope` check is applied, and only R1-qualifying PRs are considered.
 - **I3** It must be idempotent under repeated calls in one process (restart
@@ -185,8 +189,11 @@ edit that branch's captures or widen `#249` acceptance.
   silently (the user's `t`/`zz t` owns it).
 - **`skip_qa` projects**: a REQA bounce is impossible (sign-off is only
   reachable through QA), so no special case.
-- **Self-driving QA** (`zz t`): `start_qa` clears `awaiting`, so the owed
-  obligation is consumed by the user's own start.
+- **Self-driving QA** (`zz t`): `start_or_stop_qa_loop` starts its run
+  without going through `start_qa`, so it clears `awaiting` itself.  That
+  loop *is* the full re-run the bounce asked for; leaving the record behind
+  would make the reconciler start a second full run once the loop ends.
+  (`z t` and plain `t` go through `start_qa`, which clears it.)
 
 ## Test plan
 
@@ -210,6 +217,12 @@ edit that branch's captures or widen `#249` acceptance.
 7. `_on_qa_complete` PASS while `awaiting: qa` → no sign-off hand-off.
 8. `_auto_start_qa_loops` skips a driven-elsewhere PR and routes a REQA
    through the claim.
+9. Wiring, not just the writer: `run_qa_sync` writes the run record before
+   planning, and `resume_qa_sync` rewrites it for the new driver.
+10. `arm_owed_reqa` (mount hook) arms the poll tick and starts the owed run;
+    with nothing owed it starts nothing and reads no project.yaml.
+11. A started obligation is dropped from `app._data` (no repeated claim
+    attempts after the run ends), and `zz t` consumes it like `start_qa`.
 
 ## Manual verification
 

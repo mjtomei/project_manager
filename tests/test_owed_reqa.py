@@ -19,8 +19,10 @@ The contract exercised here:
 """
 
 import json
+import os
 import subprocess
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -71,10 +73,15 @@ class App:
         self._pending_merge_prs = set()
         self._session_name = "pm-test"
         self._qa_resume_poll_counter = 0
+        self._review_loop_timer = None
         self._pane_idle_tracker = _Tracker()
         self.logs = []
         self.log_kw = []
         self.workers = []
+
+    def set_interval(self, interval, callback):
+        """Stand-in for Textual's timer registration (never fires here)."""
+        return object()
 
     def log_message(self, msg, **kw):
         self.logs.append(msg)
@@ -201,16 +208,66 @@ def test_run_record_absent_means_nothing_drives_it(home):
     assert qa_loop.run_driven_elsewhere(PR) is False
 
 
-def test_run_qa_sync_writes_the_run_record(home, tmp_path, monkeypatch):
-    """A run is visible to other processes from its start, not only once its
-    resume snapshot exists (that write lands after scenario launch)."""
+def test_write_run_record_names_the_current_process(home):
     state = qa_loop.QALoopState(pr_id=PR)
     state.qa_workdir = str(home / ".pm" / "workdirs" / "qa" / f"{PR}-x")
     (home / ".pm" / "workdirs" / "qa" / f"{PR}-x").mkdir(parents=True)
     qa_loop.write_run_record(state)
     rec = qa_loop.read_run_record(state.qa_workdir)
     assert rec["pr_id"] == PR and rec["loop_id"] == state.loop_id
-    assert rec["owner_pid"] == __import__("os").getpid()
+    assert rec["owner_pid"] == os.getpid()
+
+
+def _run_data(*, workdir):
+    return {"project": {"name": "t", "base_branch": "master",
+                        "backend": "local"},
+            "prs": [{"id": PR, "title": "T", "branch": "pm/x", "status": "qa",
+                     "workdir": str(workdir)}],
+            "plans": []}
+
+
+def test_run_qa_sync_writes_the_run_record_before_planning(home, tmp_path):
+    """The wiring, not just the writer: a started run is visible to other
+    processes from its first seconds — before planning, i.e. earlier than
+    the resume snapshot (first written after scenario launch)."""
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    data = _run_data(workdir=workdir)
+    state = qa_loop.QALoopState(pr_id=PR)
+    with patch("pm_core.qa_loop.get_pm_session", return_value="pm-s"), \
+         patch("pm_core.store.load", return_value=data), \
+         patch("pm_core.qa_loop._resolve_qa_model",
+               return_value=SimpleNamespace(model=None, provider=None,
+                                            effort=None)), \
+         patch("pm_core.container.is_container_mode_enabled",
+               return_value=False), \
+         patch("pm_core.prompt_gen.generate_qa_planner_prompt",
+               side_effect=RuntimeError("stop the run at the planner")):
+        with pytest.raises(RuntimeError):
+            qa_loop.run_qa_sync(state, tmp_path / "pm", data["prs"][0])
+    rec = qa_loop.read_run_record(state.qa_workdir)
+    assert rec is not None and rec["pr_id"] == PR
+    assert rec["owner_pid"] == os.getpid()
+
+
+def test_resume_qa_sync_rewrites_the_run_record(home, tmp_path):
+    """A resumed run has a new driver: a stale record naming the dead one
+    would leave another TUI thinking the run is up for grabs."""
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    data = _run_data(workdir=workdir)
+    state = qa_loop.QALoopState(pr_id=PR)
+    state.qa_workdir = str(home / ".pm" / "workdirs" / "qa" / f"{PR}-x")
+    (home / ".pm" / "workdirs" / "qa" / f"{PR}-x").mkdir(parents=True)
+    with patch("pm_core.qa_loop.get_pm_session", return_value="pm-s"), \
+         patch("pm_core.store.load", return_value=data), \
+         patch("pm_core.qa_loop._load_resume_file", return_value={}), \
+         patch("pm_core.qa_loop._execute_and_finalize",
+               side_effect=RuntimeError("stop the resume")):
+        with pytest.raises(RuntimeError):
+            qa_loop.resume_qa_sync(state, tmp_path / "pm", data["prs"][0])
+    rec = qa_loop.read_run_record(state.qa_workdir)
+    assert rec is not None and rec["owner_pid"] == os.getpid()
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +431,54 @@ def test_start_owed_reqa_claims_the_launch_before_starting(tmp_path):
     assert rec["launch_claim"]["hop"] == "qa"
 
 
+def test_a_started_owed_reqa_is_dropped_from_memory(tmp_path):
+    """Once the start consumed the obligation on disk, this process's copy
+    must stop offering it: otherwise every ~5 s tick re-attempts the claim —
+    a full project.yaml read plus an fsynced rewrite — until a reload."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+
+    def fake_start(a, pr_id, **kw):
+        a._qa_loops[pr_id] = qa_loop.QALoopState(pr_id=pr_id)
+        signoff.clear_return_awaiting(root, pr_id, "qa")
+
+    with _driven(False), \
+         patch.object(qa_loop_ui, "start_qa", side_effect=fake_start):
+        assert qa_loop_ui.start_owed_reqa(app, PR) is True
+    assert qa_loop_ui.owed_reqa_prs(app) == []
+
+    app._qa_loops.clear()                 # the run has ended
+    with patch.object(signoff, "claim_return_launch") as claim:
+        qa_loop_ui.reconcile_owed_reqa(app)
+    claim.assert_not_called()
+
+
+def test_arm_owed_reqa_arms_the_tick_and_starts_the_run(tmp_path):
+    """The mount hook: a restarted TUI must not wait for some other loop to
+    keep the poll tick alive (auto-start off, nothing running)."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+    with _driven(False), \
+         patch.object(qa_loop_ui, "start_qa") as sq, \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer") as timer:
+        qa_loop_ui.arm_owed_reqa(app)
+    timer.assert_called_once_with(app)
+    sq.assert_called_once_with(app, PR)
+
+
+def test_arm_owed_reqa_is_quiet_when_nothing_is_owed(tmp_path):
+    """Runs on every mount: the in-memory state (just loaded) is enough, so
+    an idle project pays no second project.yaml read."""
+    root = _project(tmp_path, ret=None)
+    app = App(root)
+    with patch.object(store, "load", side_effect=AssertionError("loaded")), \
+         patch.object(qa_loop_ui, "start_qa") as sq, \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer") as timer:
+        qa_loop_ui.arm_owed_reqa(app)
+    sq.assert_not_called()
+    timer.assert_not_called()
+
+
 def test_reconcile_is_wired_into_the_poll_tick(tmp_path):
     """Restart recovery must not depend on any loop being in memory: the
     shared poll tick reconciles (auto-start off, nothing running)."""
@@ -412,6 +517,19 @@ def test_autostart_qa_loop_starts_an_owed_reqa_through_the_claim(tmp_path):
         auto_start._auto_start_qa_loops(app, app._data["prs"])
     sq.assert_called_once_with(app, PR)
     assert app.pr()["signoff_return"]["launch_claim"]["hop"] == "qa"
+
+
+def test_zz_t_loop_start_consumes_the_owed_reqa(tmp_path):
+    """``zz t`` starts a full QA loop without going through ``start_qa``: it
+    must still consume the obligation, or the reconciler starts a *second*
+    full run once that loop ends."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+    with patch.object(qa_loop_ui, "start_qa_background") as bg:
+        qa_loop_ui.start_or_stop_qa_loop(app, PR)
+    bg.assert_called_once()
+    assert app.pr()["signoff_return"]["awaiting"] is None
+    assert qa_loop_ui.owed_reqa_prs(app) == []
 
 
 def test_a_pre_return_qa_pass_does_not_supersede_the_owed_reqa(tmp_path):
