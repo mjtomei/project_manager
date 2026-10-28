@@ -15267,6 +15267,20 @@ prs:
       IPC Then.'
     created_at: '2026-10-28T06:00:24Z'
     last_edited: '2026-10-28T06:00:24Z'
+  - id: note-5ec0b32
+    text: 'QA scenario 4 refined (verified end-to-end in-container). Foreign-live
+      pidfile -> `pm autostart list -s S` exits 2 with "not available (pid belongs
+      to a different program)" (cmdline mismatch) or "(pid was reused by another process)"
+      (starttime mismatch), and removes the pidfile; the reload path (`pm pr edit`)
+      is silent: mutation succeeds, pidfile removed, foreign process untouched. Caveat:
+      `pm autostart` short-circuits zombies and EPERM in `_resolve_owner` (kill(pid,0)/is_zombie)
+      and does NOT remove the pidfile, so drive the zombie and permission-denied cases
+      through a TUI-routed picker action (`pm _popup-picker S PR`, key `e`): zombie
+      -> "not available (process is a zombie); restart the TUI" + pidfile removed;
+      root-owned `python3 ... pm _tui` (passwordless sudo) -> "Could not signal the
+      TUI ... (permission denied)" + pidfile kept and the queued line rolled back.'
+    created_at: '2026-10-28T05:49:43Z'
+    last_edited: '2026-10-28T05:49:43Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
