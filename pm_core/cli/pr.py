@@ -3508,7 +3508,8 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
 
 # ---------------------------------------------------------------------------
-# Auto-sequence: chain start → review → QA on a single PR (stops before merge)
+# Auto-sequence: chain start → review → QA on a single PR (reports
+# ready_to_merge; the merge itself stays with the caller)
 # ---------------------------------------------------------------------------
 
 def _auto_seq_transcript_dir(root: Path, pr_id: str) -> Path:
@@ -3649,7 +3650,7 @@ def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
 @pr.command("auto-sequence")
 @click.argument("pr_id")
 def pr_auto_sequence(pr_id: str):
-    """Advance a PR through start → review → QA → sign-off, stopping before merge.
+    """Advance a PR through start → review → QA → sign-off, reporting ready_to_merge.
 
     Idempotent and non-blocking: each invocation examines the PR's current
     state and advances it by at most one phase.  Designed to be called
