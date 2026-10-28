@@ -44,7 +44,8 @@ def heal_registry(session: str | None) -> None:
     """Fix pane registry discrepancies on TUI startup.
 
     Heals all windows: removes dead panes, cleans empty window entries,
-    and ensures the TUI pane is registered in the current window.
+    and ensures the TUI pane is registered in the window it actually
+    lives in.
     """
     if not session or not tmux_mod.in_tmux():
         return
@@ -54,7 +55,14 @@ def heal_registry(session: str | None) -> None:
         return
 
     try:
-        window = tmux_mod.get_window_id(session)
+        # Resolve the window from our own pane, not from the session's
+        # active window: with a second client attached elsewhere (or a TUI
+        # started by hand in another window) those differ, and the TUI
+        # would never re-register itself.  Every CLI that resolves the
+        # session through _find_tui_pane (pm tui view, pm autostart, ...)
+        # then cannot find a live TUI.
+        window = (tmux_mod.pane_window_id(tui_pane_id)
+                  or tmux_mod.get_window_id(session))
         if not window:
             return
 
@@ -66,7 +74,7 @@ def heal_registry(session: str | None) -> None:
             live_panes = tmux_mod.get_pane_indices(session, win_id)
             window_live_ids[win_id] = {pid for pid, _ in live_panes}
 
-        # Also query current window's live panes for TUI re-registration
+        # Also query our own window's live panes for TUI re-registration
         if window not in window_live_ids:
             live_panes = tmux_mod.get_pane_indices(session, window)
             window_live_ids[window] = {pid for pid, _ in live_panes}
