@@ -36804,3 +36804,28 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a965833
+  plan: bugs
+  title: pm set list reports qa-verify-pass as off on a fresh install despite its
+    on default
+  branch: pm/pr-a965833-pm-set-list-reports-qa-verify-pass-as-off-on-a-fre
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/__init__.py _list_settings() boolean branch.
+    Repro: on a fresh install with no ~/.pm/settings/qa-verify-pass file, `pm set
+    list` prints "qa-verify-pass off" with no (default) marker. The documented default
+    (--help text and _SETTING_DEFAULTS) is "on", and qa_loop._is_verification_enabled()
+    treats an absent file as enabled, so the listing contradicts both the docs and
+    runtime behaviour. Cause: for booleans the listing derives the value from get_global_setting()
+    (absent file -> False -> "off") instead of falling back to _SETTING_DEFAULTS when
+    has_global_setting() is False. Noticed while running QA scenario 21 (pr-6566901);
+    unrelated to that PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T09:53:07.108901+00:00'
+  updated_at: '2026-10-28T09:53:07.108901+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
