@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T06:32:27.743140+00:00'
+  updated_at: '2026-10-28T06:40:18.634005+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11671,6 +11671,27 @@ prs:
       Captures /pm-captures/scenarios/98.'
     created_at: '2026-10-28T06:32:27Z'
     last_edited: '2026-10-28T06:32:27Z'
+  - id: note-8a255ad
+    text: 'QA S99 (2026-10-28, b64c5951 -> 1e5cc126, nested rootless podman, two sessions
+      sharing ~/.pm, fake-claude): fixed 1e5cc126. The S83 fix kept rows behind a
+      launching head on waiting_memory only when that head had just been refused.
+      In the fifo round a raise landed during A s1 launch, so A s2 was admitted at
+      its first attempt right after (no refusal in between) and A s3 read "queued
+      (1 queued)" for the whole 17 s launch. The last refusal reason is now carried
+      across back-to-back admissions (dropped on cap-fill, cap-held head or empty
+      queue); regression test mutation-checked; full suite 4128 passed, 1 env-only
+      hook_events failure. Post-fix fifo rerun reproduced the back-to-back case and
+      the row kept "waiting for memory: 86.4G used + 8G projected > 87G target" through
+      it. Every other Then held live: races x3 (impl won each, losers own-action +
+      8G reserved, exit 1/0), fifo A1-3,B1-3; drain impl first then A,B; rr impl,A1,B1,A2,B2,A3,B3
+      (B3 after honest headroom + rm -f spare); 7G big head held 80 s while B 2G impl
+      admitted, launched after raise; lock hold 35.3 s busy refusal exit=1, head reason
+      35 s in, launch same second as release; zombie (Zs) and reaped dead-TUI cases
+      admitted B first try with 3 stale removals. Harness: build-base must run in
+      a nested_podman project dir; story 4 needed a rerun (host used drifted +3.3G
+      during the hold). Captures /pm-captures/scenarios/99 (pre-fix/, post-fix/).'
+    created_at: '2026-10-28T06:40:18Z'
+    last_edited: '2026-10-28T06:40:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
