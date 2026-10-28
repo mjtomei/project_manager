@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T16:26:55.259614+00:00'
+  updated_at: '2026-10-28T16:26:55.809624+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36727,6 +36727,32 @@ prs:
       so a stand-in must key the PR off its workdir path (`pm-(pr-[0-9a-f]+)-`) and
       the iteration off a per-PR launch counter — an adopted wait after a restart
       does not relaunch, so the counter stays in step. (2026-10-28T16:30:00Z)'
+  - id: note-e3429bb
+    text: 'QA S13 (a follow-up that finishes while the TUI is restarting still resolves):
+      PASS, 5/5 stories at 7b153815, live TUI + interactive stand-in on a throwaway
+      local-backend project (5 PRs). (1) answer+NEEDS_WORK in the restart gap -> iteration
+      2 within ~1s; one "follow-up verdict NEEDS_WORK already in transcript", zero
+      "hook-driven follow-up verdict", one "iteration 2 for"; iteration-1 transcript
+      has exactly one answer + one NEEDS_WORK turn. (2) answer+PASS in the gap ->
+      verdict PASS, running false, iteration 1, reason "review passed; QA transition
+      pending"; no iteration 2; one PASS-already-in-transcript. (3) restart with NO
+      answer -> 33 samples over 15.5s after the adopt all waiting/review INPUT_REQUIRED
+      (iteration 1), input_required true, follow_up false; runs popup WAITING review
+      #1; same pane %23, no relaunch; answering then -> follow-up running in 2.0s
+      (input_required false, follow_up true), iteration stays 1. (4) answer+PASS then
+      a non-task "# /loop tick" turn + no-verdict reply in the gap -> recorded verdict
+      is PASS (not NEEDS_WORK), no iteration 2, no NEEDS_WORK. (5) hook file overwritten
+      with user_prompt_submit before the answer+NEEDS_WORK -> resolved from the transcript
+      alone, status and runs popup agree on running/review review #2 — review iteration
+      2 (last NEEDS_WORK). tests/test_review_input_required_state.py + tests/test_verdict_transcript.py:
+      80 passed. Evidence: /pm-captures/scenarios/13/. Harness notes for the next
+      run: stories 2/4 remove the autostart target the instant the review PASS is
+      seen — otherwise the 1s scheduler starts QA and this harness fake QA planner
+      (no qa.md) ends QA INPUT_REQUIRED, a fixture artifact unrelated to the review
+      wait; in story 1 one sample at +0.37s after the restart still read waiting (the
+      old loop last reply during the re-exec) and one at +0.65s read follow-up running
+      — the documented sub-second pre-adopt window; no sample >=5s after the restart
+      shows a wait.'
     created_at: '2026-10-28T16:26:55Z'
     last_edited: '2026-10-28T16:26:55Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
