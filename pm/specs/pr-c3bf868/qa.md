@@ -242,6 +242,25 @@ state, not source code.
 - **E9 Two TUIs racing to start.** Exactly one wins the pidfile; the other
   refuses (or waits out the winner's mid-claim window) — never two TUIs
   publishing descriptors over each other.
+- **E10 Restart in place.** Ctrl+R / `pm tui restart` re-execs the TUI
+  keeping its pid, and for the first fraction of a millisecond after
+  `execve` the process's `/proc/<pid>/cmdline` is empty while the pidfile
+  still names it. A caller must not read that window as "a different
+  program" (which would delete the live TUI's pidfile and report it
+  unavailable), and a second TUI started in that window must not take the
+  session over (the restarting TUI would then refuse and its pane die).
+  The pidfile is refreshed, not refused, and IPC keeps working across the
+  restart.
+- **E11 Owner reaped mid-check.** A stale pidfile whose PID is reaped
+  between the liveness check and the identity read must still be taken
+  over at startup — never refused with "another TUI … already owns
+  session" naming a dead pid.
+- **E12 Queue append integrity.** A queued line reaches the queue file
+  under the same lock the TUI drains with, so a concurrent drain cannot
+  drop a command the caller was told was queued; a failed or short write
+  (full disk / quota) is rolled back whole, so a command reported as "not
+  applied" can never run later, and a concurrent caller's line is never
+  removed by that rollback.
 
 ## Pass/Fail criteria
 
