@@ -402,6 +402,24 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `TestStoppedRunAggregation::test_stop_before_any_verdict_is_stopped_not_input_required`
   and `::test_stopped_before_any_verdict_skips_the_finalizer`; the partial
   case stays pinned by `::test_missing_verdict_is_input_required`.
+* **A stop during finalize is the same teardown** — the finalize pane is the
+  run's last step (it confirms the scenario pushes and reconciles the PR
+  workdir), so a stop that lands while it is polling means the run never
+  produced its outcome. `_run_qa_finalize_pane` already returns `None` on a
+  stop instead of `[finalize: NO_VERDICT]`, but the pre-finalize aggregate was
+  written and reported as-is: a run whose scenarios had all passed logged
+  `QA complete: PASS` / `QA PASS` and recorded a `QA PASS: …` note for a run
+  the user cancelled. When the stop left the finalize verdict `None` and the
+  pre-finalize aggregate was `PASS`, the run now ends in `STOPPED`
+  (`latest_output = "QA stopped during finalize"`), the status file is
+  rewritten so the status pane shows `Overall: STOPPED`, and the TUI records
+  no QA note and makes no lifecycle transition. Only a `PASS` is converted:
+  a `NEEDS_WORK` / `INPUT_REQUIRED` finding stays reported (the run did
+  determine something about the PR), and a finalize that already produced
+  `FINALIZE_DONE` keeps its `PASS`. Regression tests:
+  `::test_stop_during_finalize_is_stopped_not_pass`,
+  `::test_stop_during_finalize_keeps_a_needs_work_finding` and
+  `::test_completed_finalize_then_stop_stays_pass`.
 * **STOPPED is a hold verdict for auto-start** — `STOPPED` is recorded in
   runtime_state like any finished run (state `done`), so
   `auto_start.QA_HOLD_VERDICTS` must include it: otherwise

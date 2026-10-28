@@ -4783,6 +4783,34 @@ def _execute_and_finalize(
         except Exception:
             _log.exception("Failed to run QA finalize pane")
 
+    # A user stop that lands while the finalize pane is running is
+    # teardown, not a result.  Finalize is what confirms the scenario
+    # pushes and reconciles the PR workdir, so a run stopped there has
+    # not produced a QA outcome even when every scenario passed: report
+    # the same terminal STOPPED the planning and no-verdict paths use
+    # instead of the pre-finalize PASS (and the QA note a PASS records
+    # in the TUI).  Only a PASS is converted — a NEEDS_WORK /
+    # INPUT_REQUIRED finding stays reported, since the run did determine
+    # something about the PR before the stop.
+    stopped_in_finalize = (
+        state.stop_requested
+        and state.finalize_verdict is None
+        and state.latest_verdict == VERDICT_PASS
+        and bool(state.scenarios)
+    )
+    if stopped_in_finalize:
+        _log.info("QA finalize: stopped before an outcome for %s — "
+                  "reporting STOPPED", state.pr_id)
+        state.latest_verdict = VERDICT_STOPPED
+        # The status file was written with the pre-finalize PASS; rewrite
+        # it so the QA status pane does not keep showing a result the
+        # stop cancelled.
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           overall=state.latest_verdict,
+                           scenario_0=state.scenario_0, error=state._error,
+                           verdict_reasons=state.scenario_verdict_reasons)
+
     # Refresh the snapshot with the overall + finalize verdict so a
     # restart between completion and TUI processing still carries them.
     _write_resume_file(state, use_containers, concurrency_cap, queued_indices)
@@ -4795,6 +4823,8 @@ def _execute_and_finalize(
         # Mirror the planning-phase wording: a stop is a teardown, not a
         # completion with a per-scenario summary of "?" outcomes.
         state.latest_output = "QA stopped during execution"
+    elif stopped_in_finalize:
+        state.latest_output = "QA stopped during finalize"
     else:
         state.latest_output = (
             f"QA complete: {state.latest_verdict}{finalize_suffix} — "

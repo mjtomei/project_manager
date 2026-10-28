@@ -2173,6 +2173,56 @@ class TestStoppedRunAggregation:
         assert overall == VERDICT_STOPPED
         assert state.latest_output == "QA stopped during execution"
 
+    def test_stop_during_finalize_is_stopped_not_pass(self, tmp_path):
+        """A stop while the finalizer runs is teardown, not a PASS.
+
+        Every scenario had already passed, but finalize is what confirms
+        the scenario pushes and reconciles the PR workdir: a run stopped
+        there never reached its last step, so reporting the pre-finalize
+        PASS (and the QA note the TUI records for it) would surface a
+        result the user cancelled.
+        """
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a")]
+        state.scenario_verdicts = {3: VERDICT_PASS}
+        state.stop_requested = True
+        overall = self._finalize(state, tmp_path)
+        assert state.latest_verdict == VERDICT_STOPPED
+        assert overall == VERDICT_STOPPED
+        assert state.latest_output == "QA stopped during finalize"
+
+    def test_stop_during_finalize_keeps_a_needs_work_finding(self, tmp_path):
+        """A finding recorded before the stop is not discarded."""
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a"),
+                           QAScenario(index=4, title="B", focus="b")]
+        state.scenario_verdicts = {3: VERDICT_PASS, 4: VERDICT_NEEDS_WORK}
+        state.stop_requested = True
+        overall = self._finalize(state, tmp_path)
+        assert state.latest_verdict == VERDICT_NEEDS_WORK
+        assert overall == VERDICT_NEEDS_WORK
+
+    def test_completed_finalize_then_stop_stays_pass(self, tmp_path):
+        """A stop after the finalizer produced its outcome changes nothing."""
+        from pm_core import qa_loop
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=3, title="A", focus="a")]
+        state.scenario_verdicts = {3: VERDICT_PASS}
+        state.stop_requested = True
+        with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane",
+                   return_value="FINALIZE_DONE"):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+        assert state.latest_verdict == VERDICT_PASS
+        assert state.latest_output.startswith("QA complete: PASS")
+
     def test_stopped_before_any_verdict_skips_the_finalizer(self, tmp_path):
         """No outcome means nothing to reconcile: no finalize pane."""
         from pm_core import qa_loop

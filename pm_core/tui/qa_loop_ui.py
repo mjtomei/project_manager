@@ -539,9 +539,9 @@ def _on_qa_complete(app, state: QALoopState) -> None:
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
       - INPUT_REQUIRED: pause self-driving loop for human input.
-      - STOPPED: a user stop that left no QA result (no plan, or no
-        scenario verdict) — clean teardown, no lifecycle transition and
-        no QA note.
+      - STOPPED: a user stop that left no QA result (no plan, no
+        scenario verdict, or a stop while the finalizer was running) —
+        clean teardown, no lifecycle transition and no QA note.
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled
@@ -648,9 +648,10 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
     elif verdict == VERDICT_STOPPED:
         # The user stopped the run before it produced a QA result (during
-        # planning, or before any scenario reported).  This is a clean
-        # teardown, not a QA result: no lifecycle transition, no
-        # INPUT_REQUIRED surface, and no QA note on the PR.
+        # planning, before any scenario reported, or while the finalizer
+        # was running).  This is a clean teardown, not a QA result: no
+        # lifecycle transition, no INPUT_REQUIRED surface, and no QA note
+        # on the PR.
         app.log_message(f"QA stopped for {pr_id} — no verdict recorded")
         return
     else:
