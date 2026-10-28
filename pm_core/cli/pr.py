@@ -1803,8 +1803,8 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     store.locked_update(root, apply)
     if not entered["ok"]:
         click.echo(
-            f"PR {_pr_display_id(pr_entry)} moved to another phase during the "
-            f"base check; review not started.", err=True)
+            f"PR {_pr_display_id(pr_entry)} left the pre-review phase during "
+            f"the base check; review not started.", err=True)
         raise SystemExit(1)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
