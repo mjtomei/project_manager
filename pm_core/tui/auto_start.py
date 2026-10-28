@@ -369,15 +369,72 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
+def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
+    """Transcript names/prefixes whose session may still be writing.
+
+    Returns ``(exact_names, prefixes)``.  A running review loop owns every
+    ``review-<pr>-<loop_id>-i*`` path; a live impl/review/sign-off/merge
+    tmux window owns the canonical path of that step.
+    """
+    exact: set[str] = set()
+    prefixes: set[str] = set()
+    for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
+        if getattr(state, "running", False):
+            prefixes.add(f"review-{pr_id}-{state.loop_id}-i")
+    session = getattr(app, "_session_name", None)
+    prs = (getattr(app, "_data", None) or {}).get("prs") or []
+    if session:
+        from pm_core import tmux as tmux_mod
+        from pm_core.cli.helpers import _pr_display_id
+        try:
+            windows = {w["name"] for w in tmux_mod.list_windows(session)}
+        except Exception:
+            _log.debug("auto_start: list_windows failed", exc_info=True)
+            windows = set()
+        for pr in prs:
+            pr_id = pr.get("id")
+            if not pr_id:
+                continue
+            disp = _pr_display_id(pr)
+            for window, name in (
+                (disp, f"impl-{pr_id}.jsonl"),
+                (f"review-{disp}", f"review-{pr_id}.jsonl"),
+                (f"signoff-{disp}", f"signoff-{pr_id}.jsonl"),
+                (f"merge-{disp}", f"merge-{pr_id}.jsonl"),
+            ):
+                if window in windows:
+                    exact.add(name)
+    return exact, prefixes
+
+
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize transcript symlinks in the current run directory.
+
+    Skips transcripts whose session is still live — a running review loop
+    or an existing step window.  Freezing a live collector would hide the
+    verdict the session appends later (pr-9ee4d64).  Symlinks already in
+    the run archive are finalized too, so superseded attempts survive
+    Claude transcript pruning.
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
-    from pm_core.claude_launcher import finalize_transcript
+    from pm_core.claude_launcher import (
+        TRANSCRIPT_ARCHIVE_DIR, finalize_transcript,
+    )
+    exact, prefixes = _live_transcript_owners(app)
+
+    def _live(name: str) -> bool:
+        return name in exact or any(name.startswith(p) for p in prefixes)
+
     for p in tdir.iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
+        if p.is_symlink() and p.suffix == ".jsonl" and not _live(p.name):
             finalize_transcript(p)
+    adir = tdir / TRANSCRIPT_ARCHIVE_DIR
+    if adir.is_dir():
+        for p in adir.iterdir():
+            if p.is_symlink() and p.suffix == ".jsonl":
+                finalize_transcript(p)
 
 
 def _disable(app) -> None:

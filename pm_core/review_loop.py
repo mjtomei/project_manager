@@ -26,6 +26,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from pm_core.paths import configure_logger
@@ -83,6 +84,44 @@ class ReviewLoopState:
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
+    # Claude session id of each iteration's transcript, recorded when the
+    # iteration starts.  Completion finalizes only these sessions, so a
+    # superseded loop can never freeze a newer loop's live transcript.
+    iteration_sessions: dict[int, str] = field(default_factory=dict)
+
+
+def iteration_transcript(transcript_dir: str | Path, pr_id: str,
+                         loop_id: str, iteration: int) -> str:
+    """Per-loop iteration transcript path.
+
+    The loop id makes every iteration's transcript unique to its loop.
+    A sign-off REVIEW return starts a fresh loop at iteration 1; without
+    the loop id it would reuse (and overwrite) the earlier loop's
+    ``review-<pr>-i1.jsonl``, erasing the pre-return review from the run
+    archive (pr-9ee4d64).  Unique paths also make finalization
+    structurally ownership-safe: an obsolete loop's callback can only
+    touch its own loop's files.
+    """
+    return str(Path(transcript_dir)
+               / f"review-{pr_id}-{loop_id}-i{iteration}.jsonl")
+
+
+def resolve_iteration_transcript(transcript_dir: str | Path, pr_id: str,
+                                 loop_id: str, iteration: int) -> str:
+    """The iteration's transcript, preferring the loop-scoped path.
+
+    Falls back to the legacy ``review-<pr>-i<N>.jsonl`` when a loop
+    restored from a pre-upgrade breadcrumb has an in-flight iteration
+    under the old name.  New launches always use the loop-scoped name.
+    """
+    path = Path(iteration_transcript(transcript_dir, pr_id, loop_id,
+                                     iteration))
+    if path.exists() or path.is_symlink():
+        return str(path)
+    legacy = path.parent / f"review-{pr_id}-i{iteration}.jsonl"
+    if legacy.exists() or legacy.is_symlink():
+        return str(legacy)
+    return str(path)
 
 
 def _match_verdict(line: str) -> str | None:
@@ -234,7 +273,8 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
         return None
     window_name = _compute_review_window_name(pr_data)
     pane_id = _find_claude_pane(session, window_name)
-    transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    transcript = resolve_iteration_transcript(
+        transcript_dir, state.pr_id, state.loop_id, state.iteration)
     if not pane_id or not os.path.lexists(transcript):
         return None
     session_id = session_id_from_transcript(transcript)
@@ -273,7 +313,8 @@ def _wait_for_follow_up_verdict(pr_data: dict,
     if not getattr(state, "_transcript_dir", None):
         _log.warning("review_loop: no transcript_dir on state; cannot wait for follow-up")
         return None
-    iter_transcript = f"{state._transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    iter_transcript = resolve_iteration_transcript(
+        state._transcript_dir, state.pr_id, state.loop_id, state.iteration)
     return _wait_for_follow_up_shared(
         session, window_name, iter_transcript, verdicts=ALL_VERDICTS,
         stop_check=lambda: state.stop_requested, log_prefix="review_loop",
@@ -329,22 +370,36 @@ def run_review_loop_sync(
 
             try:
                 output = None
+                iter_transcript: str | None = None
                 if adopt:
                     adopt = False
+                    iter_transcript = resolve_iteration_transcript(
+                        saved_transcript_dir, state.pr_id, state.loop_id,
+                        state.iteration)
                     output = _adopt_in_flight_review(
                         state, pr_data, saved_transcript_dir)
                     if output is None:
                         # Nothing live to adopt — rerun the same iteration.
                         state.iteration -= 1
+                        iter_transcript = None
                 if output is None:
                     state.iteration += 1
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
-                    iter_transcript = f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+                    iter_transcript = iteration_transcript(
+                        transcript_dir, state.pr_id, state.loop_id,
+                        state.iteration)
                     output = _run_claude_review(
                         state.pr_id, pm_root, pr_data,
                         iteration=state.iteration, loop_id=state.loop_id,
                         transcript=iter_transcript,
                     )
+                if iter_transcript:
+                    from pm_core.claude_launcher import (
+                        session_id_from_transcript,
+                    )
+                    sid = session_id_from_transcript(iter_transcript)
+                    if sid:
+                        state.iteration_sessions[state.iteration] = sid
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED

@@ -935,9 +935,15 @@ def build_claude_shell_cmd(
         target = claude_dir / f"{sid}.jsonl"
         transcript_path = Path(transcript)
         transcript_path.parent.mkdir(parents=True, exist_ok=True)
-        # Remove stale symlink if present
+        # Preserve the outgoing attempt before the canonical path is
+        # reused: a sign-off return re-runs impl/sign-off (and a review
+        # loop restarts at iteration 1), so unlinking here used to erase
+        # the pre-return session from the run archive (pr-9ee4d64).  Fall
+        # back to the old unlink if archiving fails, so a launch is never
+        # blocked by it.
         if transcript_path.is_symlink() or transcript_path.exists():
-            transcript_path.unlink()
+            if archive_transcript(transcript_path) is None:
+                transcript_path.unlink()
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
@@ -1093,6 +1099,209 @@ def transcript_path_for(cwd: str, session_id: str) -> Path:
     return _claude_project_dir(cwd) / f"{session_id}.jsonl"
 
 
+# Immutable per-attempt archive subdirectory of a run's transcript dir.
+# Canonical names (``impl-<pr>.jsonl``, ``signoff-<pr>.jsonl``,
+# ``review-<pr>-<loop>-i<N>.jsonl``, …) are reused by successive attempts;
+# every superseded attempt is preserved here under a name keyed by its
+# Claude session id so a sign-off return can never erase the run archive
+# (pr-9ee4d64).  The subdirectory keeps every existing ``iterdir()`` scan
+# of the run dir from mistaking an archive for the current transcript.
+TRANSCRIPT_ARCHIVE_DIR = "archive"
+
+
+def _session_id_of_path(target: Path) -> str | None:
+    """Session id encoded in a native transcript file name, if any."""
+    name = target.name
+    if name.endswith(".jsonl"):
+        name = name[:-6]
+    if len(name) == 36 and name.count("-") == 4:
+        return name
+    return None
+
+
+def transcript_archive_dir(transcript_path: str | Path) -> Path:
+    """The archive directory that sits beside *transcript_path*."""
+    return Path(transcript_path).parent / TRANSCRIPT_ARCHIVE_DIR
+
+
+def _archive_name(transcript_path: Path, sid: str | None,
+                  frozen: Path | None = None) -> str:
+    """Archive file name for a transcript (``<stem>.<key>.jsonl``).
+
+    Symlinks are keyed by the Claude session id of their target, so the
+    same session always maps to the same immutable entry.  A finalized
+    regular file has no recoverable session id; key it on its identity
+    (mtime + size) instead.
+    """
+    stem = transcript_path.name
+    if stem.endswith(".jsonl"):
+        stem = stem[:-6]
+    if sid:
+        return f"{stem}.{sid}.jsonl"
+    try:
+        st = frozen.stat() if frozen is not None else None
+        key = f"{st.st_mtime_ns}-{st.st_size}" if st else uuid.uuid4().hex[:12]
+    except OSError:
+        key = uuid.uuid4().hex[:12]
+    return f"{stem}.{key}.jsonl"
+
+
+def _absolute_link_target(p: Path, raw: str) -> Path:
+    """Resolve a symlink's stored target against the link's directory."""
+    target = Path(raw)
+    return target if target.is_absolute() else p.parent / target
+
+
+def _find_identical_archive(adir: Path, p: Path) -> Path | None:
+    """An existing archive entry that is a copy of the frozen file *p*.
+
+    ``finalize_transcript`` writes a session-id archive copy and freezes
+    the canonical path with the same metadata (``copy2``).  When that
+    frozen canonical is later replaced, this keeps the replacement from
+    adding a second archive entry for the same session.
+    """
+    try:
+        st = p.stat()
+        entries = list(adir.glob("*.jsonl"))
+    except OSError:
+        return None
+    for cand in entries:
+        try:
+            cst = cand.stat()
+        except OSError:
+            continue
+        if cst.st_size == st.st_size and cst.st_mtime_ns == st.st_mtime_ns:
+            return cand
+    return None
+
+
+def _move_into_archive(p: Path, dest: Path, raw: str | None) -> bool:
+    """Create *dest* without clobbering an existing entry, then drop *p*.
+
+    ``raw`` is the symlink target when *p* is a symlink; ``None`` means a
+    regular file (hard-linked so the move is cheap, copied when the
+    filesystem refuses links).  Creation is no-clobber: an existing
+    archive entry is never overwritten.
+    """
+    try:
+        if raw is not None:
+            os.symlink(raw, dest)
+        else:
+            try:
+                os.link(p, dest)
+            except FileExistsError:
+                raise
+            except OSError:
+                # Filesystem without hard links; copy instead.
+                shutil.copy2(p, dest)
+    except FileExistsError:
+        return False
+    except OSError as e:
+        _log.warning("transcript: archiving %s -> %s failed: %s", p, dest, e)
+        return False
+    try:
+        p.unlink()
+    except OSError as e:
+        # Both copies exist; losing the canonical link is harmless.
+        _log.debug("transcript: archived %s but could not remove it: %s", p, e)
+    return True
+
+
+def archive_transcript(transcript_path: str | Path) -> Path | None:
+    """Preserve the transcript at *transcript_path* in the run archive.
+
+    Moves the outgoing attempt (symlink or finalized copy) to
+    ``<dir>/archive/<stem>.<session-id>.jsonl`` before a new attempt
+    reuses the canonical path.  Returns the archive path, or ``None`` when
+    there is nothing to archive.  Archive entries are immutable: an
+    existing entry is never overwritten, and an already-archived session's
+    redundant canonical link is dropped without touching its data.
+    """
+    p = Path(transcript_path)
+    try:
+        is_link = p.is_symlink()
+    except OSError:
+        return None
+    if not is_link and not p.exists():
+        return None
+    raw: str | None = None
+    sid: str | None = None
+    if is_link:
+        try:
+            stored = os.readlink(p)
+        except OSError:
+            stored = None
+        if stored:
+            # Store an absolute target so the archive link resolves from
+            # the archive subdirectory too.
+            raw = str(_absolute_link_target(p, stored))
+            sid = _session_id_of_path(Path(raw))
+    adir = p.parent / TRANSCRIPT_ARCHIVE_DIR
+    try:
+        adir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _log.warning("transcript: cannot create archive dir %s: %s", adir, e)
+        return None
+    if not is_link:
+        # A frozen canonical is normally a copy of a session already
+        # archived at finalize time; keep one entry per session.
+        identical = _find_identical_archive(adir, p)
+        if identical is not None:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+            _log.info("transcript: %s already archived at %s", p, identical)
+            return identical
+    dest = adir / _archive_name(p, sid, None if is_link else p)
+    if dest.is_symlink() or dest.exists():
+        if is_link and raw and dest.is_symlink():
+            try:
+                if os.readlink(dest) == raw:
+                    # Same session already archived; drop the duplicate link.
+                    p.unlink()
+            except OSError:
+                pass
+        _log.info("transcript: %s already archived at %s", p, dest)
+        return dest
+    if not _move_into_archive(p, dest, raw if is_link else None):
+        return None
+    _log.info("transcript: archived %s -> %s", p, dest)
+    return dest
+
+
+def _freeze_archive_copy(p: Path, raw: str, target: Path,
+                         sid: str | None) -> Path | None:
+    """Write (or refresh) the immutable archive copy for the session at *p*.
+
+    A symlink already placed by :func:`archive_transcript` is frozen in
+    place; an existing regular archive entry is left untouched.
+    """
+    if p.parent.name == TRANSCRIPT_ARCHIVE_DIR:
+        # *p* is itself the archive entry; finalize freezes it in place.
+        return p
+    adir = p.parent / TRANSCRIPT_ARCHIVE_DIR
+    dest = adir / _archive_name(p, sid, target)
+    try:
+        adir.mkdir(parents=True, exist_ok=True)
+        if dest.is_symlink():
+            try:
+                same = os.readlink(dest) == raw
+            except OSError:
+                same = False
+            if same:
+                dest.unlink()
+                shutil.copy2(target, dest)
+            return dest
+        if dest.exists():
+            return dest
+        shutil.copy2(target, dest)
+        return dest
+    except OSError as e:
+        _log.warning("transcript: archive copy of %s failed: %s", p, e)
+        return None
+
+
 _PANE_SESSION_RE = re.compile(
     r"--(?:session-id|resume)[ =]"
     r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
@@ -1132,22 +1341,84 @@ def pane_transcript_path(pane_id: str, workdir: str | None) -> Path | None:
     return transcript_path_for(cwd, m.group(1))
 
 
-def finalize_transcript(transcript_path: Path) -> None:
-    """Replace a transcript symlink with a copy of the target file.
+def finalize_transcript(transcript_path: Path,
+                        *, session_id: str | None = None) -> bool:
+    """Freeze a transcript symlink into a copy of its target file.
 
     Called when a session finishes so the transcript is self-contained
-    and survives Claude session pruning.  No-op if the path is not a
-    symlink or the target doesn't exist.
+    and survives Claude session pruning.  Returns True when this call
+    froze the path.
+
+    Ownership-checked (pr-9ee4d64): a superseded attempt's callback must
+    never freeze, replace, unlink or redirect the live transcript of the
+    attempt that now owns the path.
+
+    * ``session_id`` (when given) must match the link target's session;
+      otherwise the link belongs to another attempt and is left live.
+    * The link is re-read immediately before replacement; a link
+      redirected in between is left untouched.
+
+    An immutable archive copy keyed by session id is written first, so
+    the session survives even if the canonical path is later reused.
     """
+    transcript_path = Path(transcript_path)
     if not transcript_path.is_symlink():
-        return
-    target = transcript_path.resolve()
-    if target.exists():
+        return False
+    try:
+        raw = os.readlink(transcript_path)
+    except OSError:
+        return False
+    target = _absolute_link_target(transcript_path, raw)
+    sid = _session_id_of_path(target)
+    if session_id and sid and sid != session_id:
+        _log.info("transcript: %s now belongs to session %s (not %s); "
+                  "leaving it live", transcript_path, sid, session_id)
+        return False
+    if not target.exists():
+        _log.debug("transcript: target %s does not exist, skipping finalize", target)
+        return False
+    _freeze_archive_copy(transcript_path, str(target), target, sid)
+    try:
+        if os.readlink(transcript_path) != raw:
+            _log.info("transcript: %s was redirected during finalize; "
+                      "leaving the new link live", transcript_path)
+            return False
+    except OSError:
+        return False
+    try:
         transcript_path.unlink()
         shutil.copy2(target, transcript_path)
-        _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
-    else:
-        _log.debug("transcript: target %s does not exist, skipping finalize", target)
+    except OSError as e:
+        _log.warning("transcript: finalize %s failed: %s", transcript_path, e)
+        return False
+    _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
+    return True
+
+
+def finalize_transcript_dir(directory: str | Path) -> int:
+    """Finalize every transcript symlink in *directory* and its archive.
+
+    Returns the number of links frozen.  Archives are included so the
+    per-attempt sessions kept by :func:`archive_transcript` also survive
+    Claude transcript pruning.
+    """
+    d = Path(directory)
+    if not d.is_dir():
+        return 0
+    links: list[Path] = []
+    try:
+        links.extend(p for p in d.iterdir()
+                     if p.is_symlink() and p.suffix == ".jsonl")
+    except OSError:
+        pass
+    adir = d / TRANSCRIPT_ARCHIVE_DIR
+    if adir.is_dir():
+        try:
+            links.extend(p for p in adir.iterdir()
+                         if p.is_symlink() and p.suffix == ".jsonl")
+        except OSError:
+            pass
+    return sum(1 for p in links if finalize_transcript(p))
 
 
 def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,

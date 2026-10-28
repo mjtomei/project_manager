@@ -18,7 +18,7 @@ import click
 
 from pm_core import store, prompt_gen
 from pm_core import tmux as tmux_mod
-from pm_core.claude_launcher import build_claude_shell_cmd, finalize_transcript
+from pm_core.claude_launcher import build_claude_shell_cmd
 from pm_core.watchers.auto_start_watcher import AutoStartWatcher
 
 from pm_core.paths import configure_logger
@@ -66,11 +66,9 @@ def _run_user_watcher_loop(wait: int, max_iterations: int) -> None:
         watcher.state.stop_requested = True
         click.echo("\nStopping watcher loop...")
 
-    # Finalize transcript symlinks
-    from pathlib import Path
-    for p in Path(tdir).iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
-            finalize_transcript(p)
+    # Finalize transcript symlinks (including archived per-attempt sessions).
+    from pm_core.claude_launcher import finalize_transcript_dir
+    finalize_transcript_dir(tdir)
 
     click.echo(
         f"\nWatcher finished: {watcher.state.iteration} iteration(s), "

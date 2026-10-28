@@ -35784,16 +35784,57 @@ prs:
     (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
     at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
     impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
-    round (e.g. signoff-<pr>-r2.jsonl) or by session id.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.
+
+
+    2026-10-28 live collector failure: #241 old review completion finalized the shared
+    review-i1 transcript path before checking current loop ownership. A newer loop
+    (8101 i1) had reused the path; the obsolete callback froze its live symlink into
+    an early copy, so the collector saw no verdict even though the canonical newer
+    SID finished with its own NEEDS_WORK. Recovery preserved both and restored the
+    exact link before collecting the original reviewer outcome. Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
+    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed
+    loss of the earlier session_id from overwrite.
+
+
+    Extend acceptance to immutable per-attempt/loop/session archives and ownership-checked
+    finalization: superseded callbacks cannot freeze, replace, unlink or redirect
+    a current attempt''s live collector transcript. Keep both complete original sessions
+    across multiple sign-off returns, iteration resets, restart and late completion.
+    Current collectors must see later appended verdicts; never invent a verdict or
+    delete history. User authorized this PR to start2026-10-28 alongside the earlier
+    integration gate.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/275
+  gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-28T14:17:46.724158+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-31dcb1a
+    text: 'Fix (2026-10-28): (1) build_claude_shell_cmd now archives the outgoing
+      transcript to <run>/archive/<stem>.<sid>.jsonl before reusing a canonical path,
+      so pre-return impl/signoff/review/merge sessions survive; (2) finalize_transcript(path,
+      session_id=...) is ownership-checked (sid mismatch or a link redirected mid-finalize
+      is left live) and writes a sid-keyed archive copy; (3) review-loop iteration
+      transcripts are loop-scoped: review-<pr>-<loop_id>-i<N>.jsonl, so a REVIEW return
+      that restarts at i1 and an obsolete loop callback cannot collide/freeze; (4)
+      retire_signoff_run archives instead of deleting; (5) bulk finalize skips live
+      loops/windows and finalizes archive/ links. Legacy review-<pr>-i<N>.jsonl still
+      resolves for pre-upgrade restart adoption. Tests: tests/test_transcript_archive.py
+      (15). Captures: impl/pre-fix and impl/post-fix transcript-archive (all three
+      symptoms reproduce pre-fix).'
+    created_at: '2026-10-28T14:17:46Z'
+    last_edited: '2026-10-28T14:17:46Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-ccdec71
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the

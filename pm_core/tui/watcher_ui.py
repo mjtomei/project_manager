@@ -270,16 +270,11 @@ def _on_complete_from_thread(app, state) -> None:
     _log.info("watcher_ui: loop complete -- verdict=%s iterations=%d",
               state.latest_verdict, state.iteration)
 
-    # Finalize transcripts
+    # Finalize transcripts (including archived per-attempt sessions).
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
-        from pathlib import Path
-        from pm_core.claude_launcher import finalize_transcript
-        tdir_path = Path(tdir)
-        if tdir_path.is_dir():
-            for p in tdir_path.iterdir():
-                if p.is_symlink() and p.suffix == ".jsonl":
-                    finalize_transcript(p)
+        from pm_core.claude_launcher import finalize_transcript_dir
+        finalize_transcript_dir(tdir)
 
 
 # ---------------------------------------------------------------------------

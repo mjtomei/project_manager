@@ -973,20 +973,26 @@ def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
     the transcript check would replay the *old* verdict — re-bouncing forever
     (a re-qa never changes HEAD, so the consumed record can't guard it).
     Retiring both forces a genuine fresh router run on the next sign_off entry.
-    Captures / ``report.html`` are left alone.
+    Captures / ``report.html`` are left alone.  The transcript itself is
+    moved into the run archive rather than deleted: the router that made
+    the return decision (and any earlier run of this step) stays
+    recoverable, while the removed launch stamp keeps a consumed verdict
+    from being replayed (pr-9ee4d64).
     """
     from pm_core import home_window
+    from pm_core.claude_launcher import archive_transcript
     win = tmux_mod.find_window_by_name(session, signoff_window_name(pr_entry))
     if win:
         home_window.park_if_on(session, win["id"])
         tmux_mod.kill_window(session, win["id"])
     transcript = signoff_transcript(tdir, pr_entry["id"])
-    for f in (transcript, signoff_launch_stamp(transcript)):
-        try:
-            if f.is_symlink() or f.exists():
-                f.unlink()
-        except OSError:
-            pass
+    archive_transcript(transcript)
+    stamp = signoff_launch_stamp(transcript)
+    try:
+        if stamp.is_symlink() or stamp.exists():
+            stamp.unlink()
+    except OSError:
+        pass
 
 
 @dataclass(frozen=True)

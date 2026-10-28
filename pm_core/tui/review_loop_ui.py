@@ -301,17 +301,27 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     # Finalize review transcript symlinks for this loop's iterations.
     # Done before the supersede check because the transcripts are this
     # loop's own work — they need finalizing whether or not we still
-    # own the runtime_state entry.
+    # own the runtime_state entry.  Only this loop's loop-scoped paths are
+    # touched, and each with the session id recorded for its iteration:
+    # an obsolete loop's late completion must never freeze a newer loop's
+    # live collector transcript (pr-9ee4d64).
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
         from pathlib import Path
         from pm_core.claude_launcher import finalize_transcript
         tdir_path = Path(tdir)
         if tdir_path.is_dir():
+            prefix = f"review-{state.pr_id}-{state.loop_id}-i"
+            sessions = getattr(state, "iteration_sessions", None) or {}
             for p in tdir_path.iterdir():
-                if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith(f"review-{state.pr_id}-")):
-                    finalize_transcript(p)
+                if not (p.is_symlink() and p.suffix == ".jsonl"
+                        and p.name.startswith(prefix)):
+                    continue
+                try:
+                    iteration = int(p.name[len(prefix):-len(".jsonl")])
+                except ValueError:
+                    iteration = None
+                finalize_transcript(p, session_id=sessions.get(iteration))
 
     from pm_core import runtime_state as _rs
     if not _is_active_loop(state):
