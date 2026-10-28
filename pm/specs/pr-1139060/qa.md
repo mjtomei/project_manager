@@ -57,6 +57,17 @@ User-visible behavior added after `1bc65b72` that fresh scenarios must cover:
 - With `qa-verify-pass` off, a PASS is final as soon as it is emitted. Finalize runs, "QA complete" carries `[finalize: …]`, and a stop never downgrades such a PASS (1f6c0a5a).
 - Each run reads `qa-verify-pass` once and keeps that value for its whole life, including across a TUI restart. Turning the setting on mid-run neither holds finalize nor downgrades that run's PASSes on stop, and after a restart it does not relaunch released workers to verify them. Turning it off mid-run does not cancel verification the run already requires: a PASS still needs verification before finalize, and a stop before verification still downgrades it to INPUT_REQUIRED. A run started after the change uses the new value (4558c4dd, c07609ee, 6cb6149c).
 
+Refresh on 2026-10-28 at HEAD `d6061445` (code `b6338490`: QA fixes from scenarios 79–82). Scenarios 79–82 are locked historical evidence; fresh scenarios begin at 83. Results of the 79–82 run (aggregate NEEDS_WORK):
+- S79 (two runs share a full runtime through an inventory outage, retained container counts toward the limit) and S80 (partial run-end release, deferred retry judges "viewed" at retry time, finalize with verification off) PASS with no code change. Their code is unchanged apart from 2c26ddad, which adds a snapshot write in front of the per-poll release they exercise; S85 re-covers that path under an outage.
+- S81 held every Then except one: a TUI restart within one 5 s poll after a per-poll release relaunched a settled scenario ("Scenario 11 window died — retry 1/10", new container), because `qa_resume.json` was written only at the top of the poll. Fixed in 2c26ddad; the post-fix race had no relaunch. S81 is rerun on the current head.
+- S82 (final-head acceptance) held its product behaviour and found two presentation defects, both fixed: after `pm tui restart --breadcrumb` the TUI mount always logged `trigger=initial` (c5d0e0ba), and a stopped run's "QA complete" line gave no reason for the missing finalize pane (b6338490). Three Then wordings conflicted with the When timing or CLI output (resolution 29). S82 is rerun with corrected Thens.
+- The aggregate note's "planner edited application code" refers to the incidental fix 6cb6149c made during the previous planning pass. S81's restart stories exercised it live (story 3 post-fix resumed with the run's own "disabled" snapshot while the setting was on).
+
+User-visible behavior added after `6cb6149c` that fresh scenarios must cover:
+- A settled scenario's verdict is saved to the resume snapshot before its per-poll release removes its container and window. A TUI restart at any moment after that release resumes the scenario as settled: no "window died — retry", no relaunch, no new container, and the verdict still shows (2c26ddad).
+- A stopped run's TUI line reads `QA complete: <verdict> [finalize: skipped — run was stopped]`; a completed run still carries `[finalize: <verdict>]` (b6338490).
+- A merge-triggered `pm tui restart --breadcrumb` mounts the new TUI with `TUI mount: … trigger=merge_restart` in the debug log; an ordinary restart still logs `trigger=initial`. The trigger variable is consumed on mount and is not inherited by panes the TUI spawns (c5d0e0ba).
+
 User-visible behavior added after `afc151b5` that fresh scenarios must cover:
 - Inventory outage at a full runtime: the run makes one floor launch, then waits for a readable inventory (log "wait for a readable container inventory"). Its settled workers whose release is unconfirmed, and workers a release deliberately kept (INPUT_REQUIRED or viewed), count as held. So INPUT_REQUIRED settlements during the outage do not each admit another launch. Peak at most L+1; after recovery the deferred releases run, the peak returns to at most L and the batch grows back (70cd9492, 1bc65b72).
 - A partial run-end release, or its deferred retry, logs which viewed/INPUT_REQUIRED workers it kept even when it released others (60ccb95e).
@@ -144,6 +155,18 @@ Fresh scenarios 79–82 re-cover them on HEAD `6cb6149c`:
 - workdirs/evidence: all
 - Not rerun, because their code is unchanged since a PASS: locks/leases (S63), removal races (S76), trust dialog and retry-backoff restart (S75), process trees (S61), popups (S54) and locale (S55).
 
+Fresh scenarios 83–85 re-cover them on HEAD `d6061445` (code `b6338490`):
+- runtime namespace/identity: 84
+- reaper outcomes: 84, 85
+- retention: 84, 85
+- tmux sockets/clients: 83, 84, 85
+- push proxies: 84
+- headroom/queues: 85
+- global settings read by concurrent runs (`qa-verify-pass`): 83
+- QA resume snapshots: 83, 85
+- workdirs/evidence: all
+- Not rerun, because their code is unchanged since a PASS: cross-process outage admission (S79), deferred whole-run retry (S80), locks/leases (S63), removal races (S76), trust dialog (S75), process trees (S61), popups (S54) and locale (S55).
+
 ## Setup
 
 1. Follow `pm/qa/instructions/tui-manual-test.md`: use a throwaway git project with an initial commit, local bare origin and local backend; add PRs through PM and start its own named tmux session. Run PM commands in panes belonging to the test session, not the controller session. Confirm `pm which` selects this PR's code, overriding inherited `PYTHONPATH` when needed. Use `./install.sh --local` if PM is missing.
@@ -217,13 +240,22 @@ Fresh scenarios 79–82 re-cover them on HEAD `6cb6149c`:
     - A nested `podman build` here needs `--uts host`. Launch decisions by two PM processes can read the same pre-launch sample; record such pairs rather than asserting cross-process admission (resolution 24).
     - `pm set qa-verify-pass on|off` writes the global setting that every PM process reads; record the time of each toggle against the run's "PASS verdict verification is enabled/disabled" log line.
 
+24. Fixture lessons from 79–82:
+    - Reusable drivers (captures `scenarios/<N>/drivers`): S81 (`keys.sh` to the TUI pane, `inpane.sh` for commands in a new session window, `mkcfg.py`, 1 s `podman ps -a --no-trunc` sampler, 2 s `list-panes -a` timeline mapping verifier panes to windows) and S82 (`drive.sh` stamping `[t0]`/`[rc t1]` in a recorded shell window, `sel.sh` pressing real h/l until `pm tui view` shows the wanted card, recorder `pm-<tag>~N` on a separate `tmux -L rec` server pinned to window 0, `wd.sh` workdir hashes). Retarget their hard-coded `/scratch/s81`, `/tmp/s82` roots.
+    - To hit the per-poll-release restart race deterministically, fire `pm tui restart --breadcrumb` from a watcher that tails the debug log and triggers on the scenario's release line (S81 post-fix fired within the same second). A restart one full poll later passes even pre-fix.
+    - The debug log is `~/.pm/debug/<tag>.log`, where the tag already begins with `repo-`/`proj-`; name it exactly, a glob matches one log per QA clone tag.
+    - fake-claude writes its transcript only when it emits a verdict, so held workers that never emit have dangling transcript links. That is a fixture property, not data loss.
+    - A dashboard watcher must target pane `qa-<pr>.1` (QA Status), not the window's active pane (the planner).
+    - A 2 s pre-launch sample can race another process's removal; pair cross-process admission claims with shim ordering or a 0.25 s sampler (S79).
+    - `pm pr review` prints "Opened review window"; `pm container status` has no proxy lines (list proxy dirs and process state separately); nested `podman run -d` decoys need `--uts host`.
+
 ## Requirements — user stories
 
 ### R1 — Successful and reworked QA releases its own resources
 Given a container-mode QA run with delayed PASS/NEEDS_WORK then PASS workers and durable evidence, when the user lets the run finish, then disposable scenario containers stop running without waiting for the next run, the verdict/rework history remains visible, and source changes, captures, transcripts and clones remain readable.
 
 ### R2 — Stop and supersede release abandoned work
-Given an active QA run with workers and queued scenarios, when the user stops it, then abandoned workers are released, no stopped/unlaunched worker acquires a fabricated agent verdict, and its evidence remains. A scenario that emitted PASS but whose verification never ran is reported INPUT_REQUIRED, not PASS, and a stopped run opens no finalize pane. "Verification" here follows the run's own `qa-verify-pass` value, read once when the run starts polling and kept across a TUI restart. A run with verification off treats PASS as final: a stop keeps it, and a completed run finalizes. A later toggle affects only runs that start afterwards. Given a stopped or completed attempt with leftover containers, when the user starts another attempt, then the new run starts without waiting serially for the previous attempt's cleanup and old workers are eventually reclaimed.
+Given an active QA run with workers and queued scenarios, when the user stops it, then abandoned workers are released, no stopped/unlaunched worker acquires a fabricated agent verdict, and its evidence remains. A scenario that emitted PASS but whose verification never ran is reported INPUT_REQUIRED, not PASS, and a stopped run opens no finalize pane. "Verification" here follows the run's own `qa-verify-pass` value, read once when the run starts polling and kept across a TUI restart. A run with verification off treats PASS as final: a stop keeps it, and a completed run finalizes. A later toggle affects only runs that start afterwards. A stopped run's "QA complete" line says why there was no finalize: `[finalize: skipped — run was stopped]`. Given a stopped or completed attempt with leftover containers, when the user starts another attempt, then the new run starts without waiting serially for the previous attempt's cleanup and old workers are eventually reclaimed.
 
 ### R3 — Human input and discussion survive nondestructive cleanup
 Given a scenario actually awaiting human input, an explicitly retained discussion container and another live PR/session, when the user runs ownership-aware cleanup, then their containers and required proxies remain usable and the preview explains why they are kept. Given a completed scenario viewed by a client in a base or grouped session, when that QA run finalizes, then the viewed scenario remains available for inspection. An aggregate INPUT_REQUIRED status alone does not make every failed or unowned worker immortal.
@@ -271,7 +303,7 @@ Given real container-backed implementation, review, sign-off and QA-debug sessio
 Given two attached clients on distinct or grouped PM sessions viewing different PR workdirs with distinct session code/configuration, when each user opens a picker/command popup, then each overlay and resulting action belongs to the initiating client/session, not the last-active client. Popup dispatch uses session PM code or its explicit override, honors that session's fake-agent configuration, and does not import unmerged PM code from the PR cwd; a normal direct shell command in that cwd retains its intentional cwd-based code selection.
 
 ### R18 — Cancellation and resume preserve settled work across preparation stages
-Given QA is preparing a clone/instruction, concretizing, dequeuing, or allocating a dead-worker retry, when the user stops the run before that stage returns, then no late worker attaches, no synthetic human-wait retention/verdict is created, and allocated resources are released or visibly retryable. Given mixed completed, launch-failed, active and queued scenarios, when the user restarts/resumes QA, then settled entries are not silently replayed, active ownership remains correct and eligible queued work progresses. A middle queued launch failure must not starve later scenarios.
+Given QA is preparing a clone/instruction, concretizing, dequeuing, or allocating a dead-worker retry, when the user stops the run before that stage returns, then no late worker attaches, no synthetic human-wait retention/verdict is created, and allocated resources are released or visibly retryable. Given mixed completed, launch-failed, active and queued scenarios, when the user restarts/resumes QA, then settled entries are not silently replayed, active ownership remains correct and eligible queued work progresses. This holds for a restart that lands immediately after a settled worker's per-poll release removed its container: the scenario resumes as settled, never as a dead worker to retry. A middle queued launch failure must not starve later scenarios.
 
 ### R19 — Runtime identity and incomplete inventories fail closed
 Given managed containers are renamed or multiple isolated runtime stores share lifecycle/proxy paths, when concurrent cleanup/reuse/restart runs, then ownership, retention, leases, releases and proxy access follow immutable allocation identity in its recorded runtime domain. Unknown/partial inventory, inaccessible ownership, malformed proxy ownership or unavailable lifecycle locks must not authorize deletion or erase retryable state. Full and scoped retries must remain possible after the fault clears. Explicit destructive cleanup and failed-attachment disposal still recheck captured IDs/generations: a missing old name alone is not proof that a renamed allocation was removed or permission for duplicate host fallback. Per resolved implementation A7, rename-safe attachment checks use immutable-ID clients or PM-managed activity locks. Arbitrary external exec by OLDNAME followed by runtime rename is not guaranteed; explicitly retain or use immutable IDs for that manual case. No substantial external-client tracking is required.
@@ -356,5 +388,10 @@ BLOCKED/unsupported is required if the worker cannot obtain real runtime/image/n
     - The final running-container count is stated as the documented kept set: live implementation sessions, retained containers and live INPUT_REQUIRED workers. It is not a baseline plus that set, which would count the baseline's members twice.
 27. A setup failure whose cause is outside PM (for example an image without git) shows the classified runtime error and its real stderr. It need not name a PM command: the recovery is to fix the image or run `pm container set image …`. Keyring, memory, PID, missing-image and timeout causes must still print a runnable PM command (R25).
 28. `qa-verify-pass` is per run (see R2). Where two PRs' runs overlap a toggle, each keeps its own value. QA asserts that no run hangs, skips finalize forever, relaunches a settled worker, or downgrades a PASS its own setting made final.
+29. S82 wording (note-7ec30d8):
+    - When a PR is rerun with `z t` before the other PR starts, the first PR's same-numbered containers are released before the other PR's same-numbered workers launch. Identical scenario numbers across PRs are therefore asserted on windows (`qa-<A>-sN` and `qa-<B>-sN` open together), scenario directories and run-scoped container names, not on two same-numbered containers running at one instant. The ownership Then is that releasing one PR's `sN` never touches the other PR's `sN`.
+    - `pm pr review` reports "Opened review window"; Thens must not demand "Launched".
+    - `pm container status` has no push-proxy lines. Proxy liveness is proven by an allowed push from a surviving container and by the proxy socket directory and process; reap and `session cleanup` print `stopped  push proxy <dir>` for proxies they stop.
+    - The run-end release line can read "removed 0, kept K … (kept …)" when per-poll releases already removed the settled workers (note-c4b88dc). Count the earlier per-poll removal lines together with the run-end line.
 
-No unresolved product ambiguities remain. This refresh records planning only; it does not claim runtime validation.
+No unresolved product ambiguities remain. This refresh (d6061445) records planning only; it does not claim runtime validation.
