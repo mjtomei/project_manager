@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T16:30:40.185400+00:00'
+  updated_at: '2026-10-28T17:19:29.640750+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35874,6 +35874,26 @@ prs:
       passed = master 3991 + 23 new).'
     created_at: '2026-10-28T16:30:40Z'
     last_edited: '2026-10-28T16:30:40Z'
+  - id: note-515bb39
+    text: 'Review-loop 8602 i4: (a) `iteration_sessions` now round-trips through the
+      TUI breadcrumb (`save_breadcrumb`/`consume_breadcrumb`, JSON keys stringified
+      then restored as ints), so a resumed loop still finalizes each iteration with
+      its ownership check and an iteration adopted under the legacy `review-<pr>-i<N>`
+      name before a restart is still frozen/archived — the i3 guarantees no longer
+      stop at a restart. (b) The no-hardlink archive fallback creates the entry exclusively
+      (`open(dest,"xb")`) and only removes a partial copy of its own making; `shutil.copy2`
+      could overwrite a concurrent immutable entry. A `copystat` failure no longer
+      discards a complete content copy. (c) `finalize_transcript` freezes via a unique
+      temp copy + `os.replace` instead of `unlink`+`copy2`: a failed copy leaves the
+      live link in place, and readers never see a missing/truncated canonical. (d)
+      Shared `_transcript_stem`/`transcript_archive_dir` instead of re-deriving the
+      stem/archive dir in four places. Tests: 26 archive (4 new — incl. R4 "two sign-off
+      returns keep both pre-return sessions") + 1 review_loop + breadcrumb round-trip;
+      6 archive tests fail behaviourally on pre-fix 3699f71a. Verified: 432 passed
+      across affected suites; full suite 43F/36E with the same failure names as master
+      (4030 passed = master 4003 + 27 new). Commit 8b4ef4b8.'
+    created_at: '2026-10-28T17:19:29Z'
+    last_edited: '2026-10-28T17:19:29Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
