@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T01:54:42.050378+00:00'
+  updated_at: '2026-10-28T02:20:02.467978+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14949,6 +14949,39 @@ prs:
       and one line of the drain.'
     created_at: '2026-10-28T01:54:41Z'
     last_edited: '2026-10-28T01:54:41Z'
+  - id: note-bec2dd9
+    text: 'Review loop 4060 i6 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found one real defect of the class E3 already covers ("a corrupt
+      pidfile must never crash the claim or the picker"): parse_pidfile could still
+      raise. (a) A pid outside C int range (e.g. 10**20) parses as an int, but os.kill
+      then raises OverflowError, which is NOT an OSError, so it escaped pid_alive
+      -> identity_problem and crashed out of claim_tui_pidfile (pm _tui died at startup
+      with a traceback instead of taking the stale file over), submit_tui_command
+      (picker/autostart showed a traceback instead of a message) and tui_owner_problem
+      (spinner never aborts). (b) `"pid": "²"` or `"starttime": "²"` passes str.isdigit()
+      but not int(), raising ValueError out of parse_pidfile itself. Fixed: both fields
+      now parse through _parse_uint (gated on str.isdecimal, no bool/float/null coercion)
+      and pid is bounded to 1..2**31-1; a corrupt file is "unreadable pidfile" ->
+      stale_pidfile + removed, and the claim takes over. pid_alive also treats OverflowError/ValueError
+      as not-alive (defence in depth). 10 new tests, each verified to fail against
+      the pre-fix module (HEAD tui_pidfile.py checked out in place and re-run). (c)
+      Non-blocking UX fix: the `starting` message for a zero-length pidfile now also
+      names "restart the TUI (Ctrl+R)" — a TUI SIGKILLed between its O_EXCL create
+      and its first write leaves the file empty forever, so "try again in a moment"
+      alone was a dead end (same reasoning as the caps=[] message in A5). NOTE FOR
+      QA: the empty-pidfile picker/autostart text is now "has not finished starting
+      up; try again in a moment, otherwise restart the TUI (Ctrl+R)" (reason still
+      `starting`), which supersedes the i3 QA expectation; no other user-visible message
+      changed. Spec impl.md E3/A5/test 28 updated. Full suite: 3893 passed, 1 skipped,
+      12 failed — all 12 are tests/test_markdown_render.py (markdown not installed
+      in this container; pre-existing, unrelated; verified by running that file alone).
+      Evidence unchanged: /pm-captures/impl/{pre-fix,post-fix,failing-test,live-tui}
+      still accurate — this iteration touches only pidfile value parsing and one message.
+      Pushed 5f302fdf.'
+    created_at: '2026-10-28T02:20:02Z'
+    last_edited: '2026-10-28T02:20:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
