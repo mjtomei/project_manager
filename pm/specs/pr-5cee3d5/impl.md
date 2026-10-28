@@ -823,7 +823,15 @@ tests):
     `TypeError` out of `compact` (every recorded check, the sign-off launch)
     and out of the merge gate's digest comparison (`pm pr merge`). The
     normalisation leaves a well-formed resolution's digest byte-identical, so
-    an approval already recorded against one stays valid. The
+    an approval already recorded against one stays valid. It also walks a
+    *recursive* member (a YAML anchor referring back to itself —
+    `resolved_from: &r {self: *r}`, which `yaml.load` builds and `yaml.dump`
+    round-trips as an anchor) with a path guard: a container already on the
+    current path hashes as a fixed marker, so the digest is deterministic
+    instead of raising `RecursionError` out of `compact`, `pm pr show` and the
+    gate. The guard is a *path* set, not a seen-set, so an ordinary shared
+    alias (the same object reachable twice without a cycle) still expands at
+    both places and a well-formed digest is unchanged. The
     delta pointer is one of those values: a non-string `resolution.diff_path`
     must not make `_carry_forward` call `Path(...)` on it (that raised out of
     every later integration check and the sign-off launch reported only

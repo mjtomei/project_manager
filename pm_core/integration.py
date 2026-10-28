@@ -953,7 +953,7 @@ def resolution_conflicts_text(entry) -> str:
     return str(value)
 
 
-def _digest_payload(value):
+def _digest_payload(value, _on_path: set | None = None):
     """*value* with every mapping key rendered as a string, recursively.
 
     ``_compact_resolution`` filters the top-level keys of ``records`` (a
@@ -964,11 +964,32 @@ def _digest_payload(value):
     and every integration check, the merge gate and ``compact`` compute this
     digest: a malformed record must read as a stable hash, never crash the
     command that touches it.
+
+    YAML anchors can also make a hand-edited member *recursive*
+    (``resolved_from: &r {self: *r}``), which ``yaml.load`` builds happily and
+    ``yaml.dump`` round-trips as an anchor.  Walking it without a guard raised
+    ``RecursionError`` out of ``compact`` — i.e. out of every recorded check
+    (inside the store lock), ``pm pr show`` and the merge gate's digest
+    comparison.  A container already on the current path is therefore hashed
+    as a fixed marker: the digest stays deterministic and the record is
+    readable.  The guard is a *path* set (added on entry, discarded on exit),
+    not a seen-set, so an ordinary shared alias — the same object reachable
+    twice without a cycle — is still expanded at both places, which keeps the
+    digest of a well-formed resolution byte-identical to what it was.
     """
-    if isinstance(value, dict):
-        return {str(k): _digest_payload(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_digest_payload(v) for v in value]
+    if isinstance(value, (dict, list)):
+        if _on_path is None:
+            _on_path = set()
+        if id(value) in _on_path:
+            return "<cycle>"
+        _on_path.add(id(value))
+        try:
+            if isinstance(value, dict):
+                return {str(k): _digest_payload(v, _on_path)
+                        for k, v in value.items()}
+            return [_digest_payload(v, _on_path) for v in value]
+        finally:
+            _on_path.discard(id(value))
     return value
 
 

@@ -612,6 +612,14 @@ documented inference.
   the user runs `pm pr signoff integrate`, `pm pr show`, or launches sign-off.
   THEN each renders the record with no count, exits 0, and never raises
   `OverflowError` (which is not a `ValueError`).
+- GIVEN a PR's `integration.resolution` hand-edited with a YAML anchor that
+  refers back to itself (`resolved_from: &r {self: *r}`), which `yaml.load`
+  builds and `yaml.dump` round-trips. WHEN the user runs `pm pr show`,
+  `pm pr signoff integrate --record`, launches sign-off, or runs `pm pr merge`
+  (which recomputes the resolution digest). THEN each renders/hashes the
+  record with a deterministic digest and exits without raising `RecursionError`
+  out of `compact` or the digest comparison; a *shared* alias that is not a
+  cycle still expands normally.
 - GIVEN `report.html` names a `pm-signoff-base` other than the base the
   recorded integration check assessed, while `pm-signoff-head` matches. WHEN
   the user runs `pm pr signoff record`. THEN the recorded `## Sign-off`

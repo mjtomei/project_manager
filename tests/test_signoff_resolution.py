@@ -1584,6 +1584,48 @@ def test_a_non_finite_count_reads_as_no_count():
                                        "added_ours": float("inf")}}}]}})
 
 
+def test_a_recursive_hand_edited_resolution_hashes_instead_of_raising():
+    """A YAML alias cycle is hand-editable state, like any other malformed value.
+
+    ``yaml.load`` builds a self-referential member happily and ``yaml.dump``
+    round-trips it as an anchor, so ``resolved_from: &r {self: *r}`` inside a
+    PR's ``integration.resolution`` reaches the digest.  Walking it unguarded
+    raised ``RecursionError`` out of ``compact`` — i.e. out of every recorded
+    integration check (inside the store lock), ``pm pr show`` and the merge
+    gate's digest comparison — where the contract is "a stable hash, never
+    crash the command that touches it".
+    """
+    doc = yaml.safe_load("""
+prs:
+- id: pr-1
+  status: pending
+  integration:
+    status: resolved
+    resolution: &r
+      paths:
+      - path: pm/project.yaml
+        records: {pm/project.yaml: *r}
+      resolved_from: *r
+""")
+    rec = doc["prs"][0]["integration"]
+    assert rec["resolution"]["resolved_from"] is rec["resolution"]
+    # ``compact`` and the digest both promise a readable result.
+    compact = integration.compact(rec)
+    digest = integration._resolution_digest(rec["resolution"])
+    assert isinstance(digest, str) and len(digest) == 64
+    # Stable and deterministic: the same document hashes the same every time,
+    # and the compact form re-hashes to the same value (a benign re-check must
+    # not look like a changed resolution and invalidate an approval).
+    assert integration._resolution_digest(rec["resolution"]) == digest
+    assert integration._resolution_digest(compact["resolution"]) == digest
+    # A plain shared alias (the same object reachable twice, no cycle) is not
+    # a cycle: it still expands at both places, so a well-formed resolution's
+    # digest is unchanged by the guard.
+    shared = {"x": 1}
+    assert integration._digest_payload({"a": shared, "b": shared}) == \
+        {"a": {"x": 1}, "b": {"x": 1}}
+
+
 def test_a_truncated_path_list_records_its_total_and_apply_refuses_it(w):
     """``compact`` bounds ``paths``; an apply from the stored record refuses.
 
