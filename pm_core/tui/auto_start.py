@@ -1075,6 +1075,11 @@ async def _start_pr_quiet(app, pr_id: str, fresh: bool = False) -> None:
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    # The start's stdout says which launch path ran (relaunched a dead
+    # window, killed a live one, or found the window already there in
+    # background mode); it reaches no other surface.
+    _log.debug("auto_start: pm pr start %s exit=%d stdout=%r", pr_id,
+               proc.returncode, (stdout.decode() if stdout else "")[-1000:])
 
     if proc.returncode != 0:
         stderr_text = stderr.decode() if stderr else ""

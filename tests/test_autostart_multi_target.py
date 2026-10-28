@@ -1327,6 +1327,27 @@ class TestCursorFollowsActivePr:
             asyncio.run(auto_start._start_pr_quiet(app, "u"))
         assert "u" in app._quiet_activations
 
+    def test_start_pr_quiet_logs_stdout(self):
+        """The background start's stdout (which launch path ran) reaches
+        the debug log; it is shown nowhere else."""
+        app = FakeApp([_pr("u")])
+        app._quiet_activations = {}
+
+        class _P:
+            returncode = 0
+
+            async def communicate(self):
+                return b"Killed existing window 'u'\n", b""
+
+        async def fake_shell(*a, **k):
+            return _P()
+
+        with patch("pm_core.tui.auto_start._run_shell_async", fake_shell), \
+                patch.object(auto_start, "_log") as log:
+            asyncio.run(auto_start._start_pr_quiet(app, "u", fresh=True))
+        assert any("Killed existing window 'u'" in str(c.args)
+                   for c in log.debug.call_args_list)
+
 
 def test_predates_open_return_accepts_z_suffix():
     """runtime_state / return timestamps may end in "Z" (Python 3.10's
