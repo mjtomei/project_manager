@@ -1135,9 +1135,14 @@ def collect_status_inputs(app) -> dict:
             rec = rec if isinstance(rec, dict) else {}
             sha = _signoff.head_sha(pr.get("workdir"))
             fresh = _signoff.fresh_recorded_verdict(pr, sha)
-            signoff_info[pr_id] = {"verdict": rec.get("verdict"),
+            # Hand-edited state: a non-string ``verdict`` is no verdict, so the
+            # snapshot says "no sign-off verdict" instead of routing a mapping
+            # as if it were a decision — the same ``verdict_of`` reader every
+            # icon lookup and the driver's freshness check use.
+            verdict = _signoff.verdict_of(rec.get("verdict"))
+            signoff_info[pr_id] = {"verdict": verdict,
                                    "fresh": fresh is not None}
-            if fresh is None and rec.get("verdict"):
+            if fresh is None and verdict:
                 signoff_info[pr_id]["stale_reason"] = \
                     _signoff.stale_reason(rec)
 

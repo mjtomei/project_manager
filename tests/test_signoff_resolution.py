@@ -2673,6 +2673,36 @@ def test_a_malformed_signoff_record_does_not_break_the_status_snapshot():
     assert inp["signoff"][PR]["fresh"] is False
 
 
+def test_a_malformed_verdict_is_not_published_as_a_decision():
+    """A non-string ``verdict`` is no verdict in the status snapshot either.
+
+    ``fresh_recorded_verdict`` reads it as absent, so the snapshot must not
+    publish the raw mapping: the runs popup rendered it as
+    "routed {'SIGNOFF_MERGE': True} stale (HEAD moved)" — an invented
+    explanation for malformed state.
+    """
+    from pm_core.tui import auto_start
+
+    class _App:
+        _data = {"project": {}, "prs": [
+            {"id": PR, "status": "sign_off", "depends_on": [],
+             "signoff": {"verdict": {"SIGNOFF_MERGE": True},
+                         "sha": "a" * 40}}]}
+        _auto_start = True
+        _auto_start_all = True
+        _auto_start_run_id = None
+        _auto_start_targets: dict = {}
+        _session_name = None
+        _review_loops: dict = {}
+        _qa_loops: dict = {}
+        _pane_idle_tracker = None
+        _pending_merge_prs: set = set()
+
+    inp = auto_start.collect_status_inputs(_App())
+    assert inp["signoff"][PR]["verdict"] is None
+    assert "stale_reason" not in inp["signoff"][PR]
+
+
 def test_valid_for_reads_a_malformed_record_as_absent():
     """The public helper follows the same contract as its callers."""
     assert integration.valid_for(5, "a" * 40) is False

@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-3df0c15
+  active_pr: pr-4ee6b33
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -40699,6 +40699,48 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T11:52:14.360143+00:00'
   updated_at: '2026-10-28T11:52:14.360143+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4ee6b33
+  plan: bugs
+  title: 'Bug: a hand-edited non-mapping top-level project crashes pm readers (integration
+    check, pm pr signoff, store.save)'
+  branch: pm/pr-4ee6b33-bug-a-hand-edited-non-mapping-top-level-project-cr
+  status: pending
+  depends_on: []
+  description: "project.yaml is hand-edited state. A top-level `project` that is not\
+    \ a mapping (e.g. `project: 5`) makes many readers raise AttributeError/TypeError\
+    \ instead of reading it as absent.\n\nRepro (verified on pr-5cee3d5):\n\n    PYTHONPATH=/workspace\
+    \ python -c \"\n    from pm_core import integration\n    data = {\\\"project\\\
+    \": 5, \\\"prs\\\": [{\\\"id\\\": \\\"pr-1\\\", \\\"status\\\": \\\"in_review\\\
+    \", \\\"branch\\\": \\\"pm/x\\\", \\\"workdir\\\": \\\"/tmp\\\"}]}\n    integration.target_for(data,\
+    \ {\\\"id\\\": \\\"pr-1\\\", \\\"workdir\\\": \\\"/tmp\\\"})   # AttributeError:\
+    \ int has no get\n    integration.run_check(data, {\\\"id\\\": \\\"pr-1\\\", \\\
+    \"workdir\\\": \\\"/tmp\\\"})    # same, though it promises status:error\n   \
+    \ \"\n\nSites (all `(data.get(\\\"project\\\") or {}).get(...)` or `data[\\\"\
+    project\\\"].get(...)`):\n\n- pm_core/integration.py: target_for (156) and the\
+    \ run_check fallback (1384) -- reached by the sign-off launch (integration.prepare\
+    \ -> check_integration -> run_check), which then shows only a traceback.\n- pm_core/cli/pr.py:\
+    \ `pm pr signoff` (2167), auto-sequence (4322), `pm pr merge` (3296, 3313), `pm\
+    \ pr start`, `pm pr sync`, cleanup, and others read data[\"project\"].get directly.\n\
+    - pm_core/store.py: save (51) reads project.libyaml, so the project cannot even\
+    \ be written back.\n- pm_core/tui/auto_start.py (945, 1144), signoff_ui.py (67),\
+    \ review_loop_ui.py (520, 577), home_window, and the graph readers.\n\nFix shape:\
+    \ one helper (e.g. `store.project_of(data)` returning a mapping or {}) used by\
+    \ every reader, so a malformed value reads as absent -- the same contract the\
+    \ PR-member readers already follow. The integration resolver already reports a\
+    \ non-mapping `project` as a readable conflict (integration._shape_problems),\
+    \ so only the readers remain.\n\nFound while reviewing pr-5cee3d5; not fixed there\
+    \ because it spans master-owned modules and needs its own planning. pr-5cee3d5\
+    \ hardened the neighbouring member values (workdir, signoff, integration, resolution,\
+    \ notes, depends_on, description), not the top-level project mapping."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T15:09:21.583773+00:00'
+  updated_at: '2026-10-28T15:09:21.583773+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

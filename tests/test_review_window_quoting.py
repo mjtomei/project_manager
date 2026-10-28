@@ -168,6 +168,25 @@ def test_diff_pane_quotes_a_hostile_base_branch(fake_tmux, monkeypatch,
     assert not marker.exists()
 
 
+def test_diff_pane_reads_a_non_string_base_branch_as_the_default(
+        fake_tmux, monkeypatch):
+    """``base_branch`` is hand-edited project.yaml state, like ``workdir``.
+
+    On the local backend the fallback ref is ``shell_quote(base_branch)``;
+    ``shlex.quote(5)`` raised ``TypeError`` out of the launch before the
+    window was created.  A value that is not a branch name falls back to the
+    default, so the pane is still built.
+    """
+    import pm_core.integration as integration_mod
+    monkeypatch.setattr(integration_mod, "contained_base", lambda pr: None)
+    data = _make_data()
+    data["project"]["backend"] = "local"
+    data["project"]["base_branch"] = 5
+    pr_mod._launch_review_window(data, _make_pr("Demo PR", fake_tmux["workdir"]))
+    diff_cmd = fake_tmux["captured"]["diff_cmd"]
+    assert "diff master...HEAD" in diff_cmd
+
+
 @pytest.mark.parametrize("title", HOSTILE_TITLES)
 def test_diff_cmd_is_shell_safe(fake_tmux, title):
     """diff_cmd must be syntactically valid bash for any PR title."""

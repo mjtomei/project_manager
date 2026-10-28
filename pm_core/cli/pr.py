@@ -1773,6 +1773,12 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
 
     title = pr_entry.get("title", "")
     base_branch = data.get("project", {}).get("base_branch", "master")
+    # Hand-edited state: a ``base_branch`` that is not a branch name is not a
+    # ref to quote (``shell_quote(5)`` raised ``TypeError`` out of the launch
+    # on the local backend, before the window was created), so it falls back
+    # to the default the other readers assume.
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
 
     # Resolve model/provider for review session
     from pm_core.model_config import resolve_model_and_provider, get_pr_model_override
