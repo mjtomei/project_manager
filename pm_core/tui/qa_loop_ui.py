@@ -760,6 +760,12 @@ def _resume_incomplete_qa(app) -> None:
         except (json.JSONDecodeError, OSError):
             continue
         pr_id = rdata.get("pr_id", "")
+        # A `pm qa run` (loop id cli-<pr>) checks one instruction; it is
+        # never the PR's QA.  Interrupted, it has no verdict and keeps its
+        # snapshot: adopting it finished that one instruction as the PR's
+        # QA, in place of the full re-run a sign-off REQA owed (S119).
+        if rdata.get("loop_id") == f"cli-{pr_id}":
+            continue
         if pr_id:
             by_pr.setdefault(pr_id, []).append(
                 (resume_file, rdata, _overall(resume_file.parent)))

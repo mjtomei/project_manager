@@ -573,6 +573,25 @@ def test_cli_driver_keeps_snapshot_when_run_did_not_finish(tmp_path):
     resume_bg.assert_called_once()
 
 
+def test_resume_skips_interrupted_pm_qa_run(tmp_path):
+    """A `pm qa run` stopped with Ctrl-C keeps its snapshot (no verdict).
+    The TUI must not adopt that one-instruction run as the PR's QA: it
+    replaced the full re-run a sign-off REQA was waiting to start (S119)."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="", loop="cli-pr-001")
+    rdata = json.loads(_resume_file_path(qa_dir).read_text())
+    rdata["loop_id"] = "cli-pr-001"
+    _resume_file_path(qa_dir).write_text(json.dumps(rdata))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+    resume_bg.assert_not_called()
+    on_complete.assert_not_called()
+    assert "pr-001" not in app._qa_loops
+
+
 def test_resume_snapshot_records_owner_pid(tmp_path):
     import os
     state = _make_state(tmp_path)
