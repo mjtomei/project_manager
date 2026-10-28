@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-27T23:34:53.787836+00:00'
+  updated_at: '2026-10-28T00:26:49.294289+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37252,6 +37252,31 @@ prs:
       no new defect.'
     created_at: '2026-10-27T23:34:53Z'
     last_edited: '2026-10-27T23:34:53Z'
+  - id: note-da12a81
+    text: 'review-loop 3757 i2: closed a delta-pointer honesty gap, an I/O-under-the-store-lock
+      contract violation, and two smaller consistency gaps; four new tests, each failing
+      on the pre-fix code (verified by reverting the source). (1) `write_resolution_delta`
+      re-pointed a record at the local `$CAP/<pr>/integration-resolution.diff` and
+      returned it even with nothing to write — a carried resolution whose delta could
+      not be read back (another host, non-UTF-8, a null byte) — so `$CAP/integration.json`
+      and the read-only `pm pr signoff integrate` output named a file that does not
+      exist, and dropped where the delta actually lives. The pointer is now set only
+      for a delta this call wrote, and only a string is returned; `_record_check`
+      still sets the state pointer only for a real diff and still writes the delta
+      after the store update on purpose (a stale check''s delta must not overwrite
+      the recorded one). (2) `_apply_resolution`''s clean-merge path committed with
+      `--no-edit` (git''s `Merge commit <sha>`) while `_apply_locked` used the caller''s
+      `Integrate <base>@<sha> into <branch>`; both use the message now. (3) the sign-off
+      prompt interpolated `base_files_count` directly, so a hand-edited `"many"`/`True`/mapping
+      rendered as the file count the agent is told to weigh; only a non-negative non-bool
+      integer renders. (4) `record_signoff_verdict` read `qa_status.json`/`qa_resume.json`/`report.html`
+      inside `store.locked_update`, whose contract forbids I/O under the lock — both
+      are read before it and passed into `_evidence_block` (unchanged standalone signature
+      via a sentinel). Spec R2, R9 item 14 and the Locking requirement updated. Full
+      suite: 4017 passed, 1 skipped, 1 env-only failure (hook receiver: PM_HOST_HOME
+      is set in this sandbox; the test passes with it unset).'
+    created_at: '2026-10-28T00:26:49Z'
+    last_edited: '2026-10-28T00:26:49Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work

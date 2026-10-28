@@ -164,6 +164,12 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     """
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).isoformat()
+    # Read the evidence files before taking the store lock: ``locked_update``
+    # must not be held across I/O, and both live in the captures dir (a mount
+    # that can be slow).  The block itself still needs the PR's previous
+    # record, which only the locked read provides.
+    qa = qa_evidence(pr_id)
+    report = _report_evidence(pr_id, sha)
 
     def _apply(data):
         pr = store.get_pr(data, pr_id)
@@ -179,7 +185,8 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
                 if v is not None:
                     record[k] = v
             record["evidence"] = _evidence_block(pr, sha, integration,
-                                                 verdict=verdict)
+                                                 verdict=verdict, qa=qa,
+                                                 report=report)
             pr["signoff"] = record
             # A new verdict ends any "the merge gate invalidated this"
             # episode: its reason (and the previous report it pointed at) no
@@ -435,10 +442,26 @@ _VERDICT_STAGE = {
 }
 
 
+# Distinguishes "the caller did not read it" from "there is no QA evidence"
+# (``qa_evidence`` returns None when there is none), so a provided value is
+# never re-read inside the store lock.
+_UNREAD = object()
+
+
 def _evidence_block(pr: dict, reviewed_head: str | None,
                     integration: dict | None,
-                    verdict: str | None = None) -> dict:
-    """The provenance recorded on ``pr["signoff"]["evidence"]``."""
+                    verdict: str | None = None, *,
+                    qa=_UNREAD,
+                    report=_UNREAD) -> dict:
+    """The provenance recorded on ``pr["signoff"]["evidence"]``.
+
+    *qa* and *report* are the evidence files' contents
+    (:func:`qa_evidence`, :func:`_report_evidence`).  The writer passes them in
+    because it computes the block inside ``store.locked_update``, and the
+    store contract forbids I/O (the QA status and ``report.html`` live in the
+    captures dir, a mount that can be slow) while the lock is held.  Omitted,
+    they are read here — the standalone/test entry point.
+    """
     prior = _mapping(pr.get("signoff"))
     prior_block = None
     if prior.get("verdict"):
@@ -456,7 +479,10 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
         # that also has no revision.
         full = {}
     seen = _mapping(integration)
-    qa = qa_evidence(pr["id"])
+    if qa is _UNREAD:
+        qa = qa_evidence(pr["id"])
+    if report is _UNREAD:
+        report = _report_evidence(pr["id"], reviewed_head)
     if qa:
         changes = list(qa.get("planner_code_changes") or [])
         if len(changes) > _EVIDENCE_LIST_LIMIT:
@@ -489,7 +515,7 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
         },
         "qa": qa,
         "prior_signoff": prior_block,
-        **_report_evidence(pr["id"], reviewed_head),
+        **report,
     }
 
 

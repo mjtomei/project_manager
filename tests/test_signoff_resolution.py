@@ -1718,6 +1718,30 @@ def test_the_post_apply_record_keeps_the_base_overlap_and_file_count(w):
     assert "pm/project.yaml" in kept["overlap"], kept
 
 
+def test_a_hand_edited_base_file_count_is_not_rendered_as_a_count(w):
+    """A non-integer ``base_files_count`` is not a file count.
+
+    ``project.yaml`` is hand-editable state and the prompt interpolated the
+    value directly, so a hand-edited ``"many"`` printed as
+    "``(many file(s))``" — a number the agent is told to weigh — and ``True``
+    (an ``int`` to ``isinstance``) printed as "``(True file(s))``".  The range
+    itself is still shown; only the count it cannot read is omitted.
+    """
+    _metadata_conflict(w)
+    for bad in ("many", True, {"n": 1}):
+        def _mangle(d, bad=bad):
+            store.get_pr(d, PR)["integration"]["base_files_count"] = bad
+        store.locked_update(w.pm_dir, _mangle)
+        data = store.load(w.pm_dir)
+        with patch("pm_core.prompt_gen.store.find_project_root",
+                   side_effect=FileNotFoundError):
+            text = prompt_gen.generate_signoff_prompt(data, PR)
+        line = [l for l in text.splitlines()
+                if "Base changes since this PR branched" in l]
+        assert line, text
+        assert "file(s)" not in line[0], (bad, line[0])
+
+
 def test_review_and_qa_prompts_diff_against_the_applied_base(w):
     """Review/QA prompts must not list the merged base commits as PR changes.
 
@@ -2171,6 +2195,78 @@ def test_a_carried_resolution_with_an_unreadable_delta_path_does_not_raise(w):
     assert again["status"] == integration.UP_TO_DATE, again
     kept = pr_entry(w)["integration"]
     assert kept["resolution"]["applied_merge_sha"], kept
+
+
+def test_a_resolution_with_nothing_to_write_does_not_name_a_delta(w):
+    """A record with no delta must not name a delta file.
+
+    A carried resolution whose delta could not be read back (the file lives
+    on another host, or is unreadable) has a ``diff_path`` but no ``diff``.
+    The old code re-pointed the record at the local delta path and returned
+    it, so ``$CAP/integration.json`` and the read-only
+    ``pm pr signoff integrate`` output named a file that does not exist — and
+    the recorded pointer, where the delta actually lives, was overwritten.
+    Only a delta this call wrote is a delta path.
+    """
+    local = w.croot / PR / "integration-resolution.diff"
+    carried = {"status": "up_to_date",
+               "resolution": {"paths": [], "unresolved": [],
+                              "diff_path": "/elsewhere/host.diff"}}
+    with patch("pm_core.paths.captures_root", return_value=w.croot):
+        returned = integration.write_resolution_delta(PR, carried)
+        assert returned == "/elsewhere/host.diff", carried
+        assert carried["resolution"]["diff_path"] == "/elsewhere/host.diff"
+        assert not local.exists()
+
+        # No pointer at all: nothing is invented.
+        bare = {"status": "up_to_date",
+                "resolution": {"paths": [], "unresolved": []}}
+        assert integration.write_resolution_delta(PR, bare) is None
+        assert "diff_path" not in bare["resolution"]
+
+        # A malformed (non-string) pointer is not a path, and is not returned.
+        malformed = {"status": "up_to_date",
+                     "resolution": {"paths": [], "unresolved": [],
+                                    "diff_path": ["not", "a", "path"]}}
+        assert integration.write_resolution_delta(PR, malformed) is None
+
+        # A real delta is written and named.
+        written = {"status": "resolved",
+                   "resolution": {"paths": [], "unresolved": [],
+                                  "diff": "--- a\n+++ b\n"}}
+        path = integration.write_resolution_delta(PR, written)
+        assert path and Path(path).is_file()
+        assert written["resolution"]["diff_path"] == path
+
+
+def test_an_unreadable_carried_delta_keeps_its_recorded_pointer(w):
+    """The carried pointer must not be replaced by a local file that is absent.
+
+    ``_record_check`` rewrites the record through ``_write_artifacts``; with
+    an unreadable delta there is nothing to write, so the pointer must stay
+    where the delta actually is rather than be re-pointed at the (empty)
+    local captures path.
+    """
+    _metadata_conflict(w)
+    binary = w.croot / PR / "not-a-delta.bin"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_bytes(b"\xff\xfe\x00 not utf-8")
+
+    def _point_at_binary(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["diff_path"] = str(
+            binary)
+    store.locked_update(w.pm_dir, _point_at_binary)
+    # The original resolution wrote the local delta; remove it so the check
+    # below proves the re-check does not name a file it did not write.
+    (w.croot / PR / "integration-resolution.diff").unlink()
+    integration.check_integration(w.pm_dir, PR)
+    kept = pr_entry(w)["integration"]
+    assert kept["resolution"]["diff_path"] == str(binary), kept
+    assert not (w.croot / PR / "integration-resolution.diff").exists()
+    # ``$CAP/integration.json`` is what the prompt/CLI pointer leads to; the
+    # artifact write must not re-point it either.
+    artifact = json.loads((w.croot / PR / "integration.json").read_text())
+    assert artifact["resolution"]["diff_path"] == str(binary), artifact
 
 
 def test_malformed_return_state_does_not_crash_the_prompts(w):
@@ -3480,6 +3576,33 @@ def test_apply_refuses_a_clean_merge_with_another_candidate_tree(w):
     assert merged is None and "different tree" in err
     assert git(w.wd, "rev-parse", "HEAD") == head
     assert git(w.wd, "status", "--porcelain") == ""
+
+
+def test_a_resolved_candidate_that_merges_cleanly_uses_the_integration_message(
+        w):
+    """Both apply paths record the same merge the same way.
+
+    ``_apply_resolution`` committed its clean-merge path with ``--no-edit``
+    (git's ``Merge commit '<sha>'``) while the CLEAN path
+    (``_apply_locked``) recorded the caller's
+    ``Integrate <base>@<sha> into <branch>``.  The same integration must not
+    be recorded two ways depending on whether the base moved under the check.
+    """
+    commit(w.repo, "base.txt", "base\n", "base moves ahead")
+    git(w.wd, "fetch", "-q", "origin")
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.wd, "rev-parse", "origin/master")
+    cand = integration.compute_candidate(w.wd, head, base, resolve=False)
+    assert cand["status"] == integration.CLEAN, cand
+    record = {"status": integration.RESOLVED, "head": head, "base_sha": base,
+              "candidate_tree": cand["candidate_tree"],
+              "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                             "unresolved": []}}
+    msg = "Integrate master@deadbeef into pm/pr-200"
+    merged, err = integration._apply_resolution(
+        record, str(w.wd), head, base, msg)
+    assert err is None and merged, err
+    assert git(w.wd, "log", "-1", "--format=%s") == msg
 
 
 def test_apply_refuses_a_clean_apply_with_another_candidate_tree(w):

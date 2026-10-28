@@ -881,7 +881,13 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
             # recorded it (``integration._carry_base_interaction``).
             range_base = rec["base_range_from"]
         if range_base != base_sha:
-            count = rec.get("base_files_count", 0)
+            # Hand-edited state: only a non-negative integer is a file count —
+            # a string/mapping rendered as the count the agent is told to
+            # weigh, and ``True`` is an ``int`` to ``isinstance`` but not a
+            # count.  The range itself is still shown; the count is a hint.
+            raw_count = rec.get("base_files_count")
+            count = 0 if isinstance(raw_count, bool) \
+                else max(0, integ._as_int(raw_count))
             lines.append(
                 f"- Base changes since this PR branched: `git log --oneline "
                 f"{range_base[:12]}..{base_sha[:12]}` / `git diff "

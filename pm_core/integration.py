@@ -1581,6 +1581,14 @@ def write_resolution_delta(pr_id: str, record: dict) -> str | None:
     (or only an empty delta).  Shared by the recorded artifact write and the
     read-only ``pm pr signoff integrate`` surface: the check records nothing
     on the PR, but the delta its output names must be inspectable on disk.
+
+    A record with nothing to write must not name a delta.  A carried
+    resolution whose delta could not be read back (the file lives on another
+    host, or is unreadable) has a ``diff_path`` but no ``diff``: re-pointing it
+    at the local delta path would send ``pm pr show`` and the sign-off prompt
+    to a file that does not exist, and would overwrite where the delta
+    actually lives.  So the pointer is set only for a delta this call wrote,
+    and only a string is returned.
     """
     resolution = resolution_of(record)
     diff = resolution.get("diff")
@@ -1588,15 +1596,16 @@ def write_resolution_delta(pr_id: str, record: dict) -> str | None:
     # anything else, taking the artifact write down with it).
     diff = diff if isinstance(diff, str) else ""
     diff_path = resolution_diff_path(pr_id)
-    if diff_path is not None and (diff or resolution.get("diff_path")):
+    if diff and diff_path is not None:
         try:
             diff_path.parent.mkdir(parents=True, exist_ok=True)
-            if diff:
-                diff_path.write_text(diff)
+            diff_path.write_text(diff)
             resolution["diff_path"] = str(diff_path)
         except OSError as e:
             _log.warning("integration resolution diff for %s: %s", pr_id, e)
-    return resolution.get("diff_path")
+    # A failed write leaves no pointer (and an earlier one — where the delta
+    # really lives — is not replaced by a local path with no file behind it).
+    return revision_of(resolution.get("diff_path"))
 
 
 def _write_artifacts(pr_id: str, record: dict) -> None:
@@ -2002,7 +2011,10 @@ def _record_check(root: Path, pr_id: str, record: dict) -> dict:
         # the file itself is written with the artifact below.  Only a record
         # with an actual delta gets a pointer: a failed attempt retains its
         # unresolved conflicts but has nothing to write, and naming a file
-        # that does not exist would send the agent to an empty path.
+        # that does not exist would send the agent to an empty path.  (The
+        # write stays after the store update on purpose: a check that turns
+        # out to be stale is dropped there, and its delta must not overwrite
+        # the recorded resolution's delta with another merge's.)
         path = resolution_diff_path(pr_id)
         if path is not None:
             resolution["diff_path"] = str(path)
@@ -2530,9 +2542,12 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
             # discard that merge.  Report the current head; the caller
             # re-checks and binds that revision.
             return _out(_git("rev-parse", "HEAD", cwd=workdir)) or None, None
+        # ``-m msg`` (like the clean apply in ``_apply_locked``), not
+        # ``--no-edit``: the caller's message names the integration, and the
+        # two apply paths must not record the same merge differently.
         commit = _git(*no_hooks, "-c", "user.name=pm",
                       "-c", "user.email=pm@localhost",
-                      "commit", "--no-edit", cwd=workdir)
+                      "commit", "-m", msg, cwd=workdir)
         if commit.returncode != 0:
             _git("merge", "--abort", cwd=workdir)
             return None, f"merge commit failed: {_detail(commit)}"

@@ -105,7 +105,11 @@ returns, for a successful resolution:
 (sha256 over canonical resolution JSON) and, when there is an actual delta,
 the `resolution.diff_path` pointer (the digest excludes the host-specific
 path, so a re-compaction hashes identically; a failed attempt has nothing to
-write, so it names no file). The full record (including the diff) goes to
+write, so it names no file). The pointer is set only for a delta pm actually
+wrote: a carried resolution whose delta could not be read back (the file
+lives on another host, or is unreadable) keeps the pointer it recorded —
+re-pointing it at the local path would name a file that does not exist and
+lose where the delta really is. The full record (including the diff) goes to
 `$CAP/<pr>/integration.json`; the human-readable delta goes to
 `$CAP/<pr>/integration-resolution.diff`. The read-only
 `pm pr signoff integrate` writes the same delta (it records nothing on the
@@ -712,7 +716,11 @@ tests):
     enough to make the delta readable: a non-UTF-8 file raises
     `UnicodeDecodeError` and a null byte raises `ValueError` out of `open`
     (neither is an `OSError`), so reading the delta back tolerates both and
-    the resolution is carried without it. A carry-forward
+    the resolution is carried without it — and, having nothing to write, the
+    carried pointer is kept instead of being replaced by the local delta path
+    (which named a file that does not exist, and dropped where the delta
+    actually lives, in `$CAP/integration.json` and in the read-only
+    `pm pr signoff integrate` output). A carry-forward
     of an already-bounded list also keeps its recorded total
     (`overlap_total`, `base_behavior_count`), so the prompt does not
     under-report "… N more" after the re-check. The sign-off launch stamp is
@@ -781,7 +789,10 @@ tests):
 - **Read-only check.** `run_check` must not write the PR worktree, index,
   branch, or base; only the explicit `apply_integration` step does.
 - **Locking.** Resolution worktrees/fetches stay inside `_repo_lock`; the
-  project.yaml record writes stay inside `store.locked_update`.
+  project.yaml record writes stay inside `store.locked_update`. The evidence
+  files the verdict block records (`qa_status.json`/`qa_resume.json` and
+  `report.html`, all in the captures dir) are read *before* the lock:
+  `store.locked_update`'s contract forbids I/O while it is held.
 - **Backward compatibility.** `CLEAN`/`UP_TO_DATE` approvals without a report
   keep working; the new justification requirement only applies when the
   record carries a resolution or behavioral base changes.
