@@ -1002,6 +1002,45 @@ S13, S14, S22, S101.
     including the `running` entry of a `qa-run-bg` driver still alive in
     that session. After a `pm tui restart` the picker and auto-start
     must neither lose that run nor start a second driver.
+  - Decided (fortieth pass): (a) held live in S110 on cd617253. Ticks
+    from a plain terminal, a non-pm tmux session and `-C <clone>` from a
+    PR workdir drive QA in the project's pm session and write their
+    records to `pm-<tag>`. (b) S111 found three gaps (F1–F3), fixed in
+    d35c473a, 609e37b5 and 5e55b707. RQ56 states the behaviour.
+- **RQ56** (S111 d35c473a; review 82f2 i1 609e37b5, i2 5e55b707) One
+  driver per QA run. Given a QA run of a PR, When any mix of drivers
+  could start it, Then exactly one runs it. The possible drivers are a
+  `pm pr auto-sequence` tick's `qa-run-bg`, a TUI auto-start pass, a
+  `pm tui restart`, a TUI review→QA hand-off (`zz d`/`zz t`) and a
+  `pm qa run` CLI run. In detail:
+  - The tick writes the run's start record (naming the tick, then the
+    spawned driver) before the PR shows `qa`. A TUI pass at any point
+    after that says the run is "driven by another process" and starts
+    nothing. This holds while project.yaml is busy for under or over 2 s:
+    `qa-run-bg` locks only while the PR is still `in_review`, and waits
+    out a busy lock instead of dying unseen.
+  - When the provider check or the spawn fails, the tick prints its one
+    `Error:` line (RQ53) and leaves no start record. Once the setting is
+    fixed, the next TUI pass or tick starts QA at once, with no claim
+    expiry wait.
+  - `pm qa run` writes a fresh start record each run and clears its
+    resume snapshot once it has a verdict. A TUI never takes the one
+    instruction's verdict as the PR's QA result, and a second CLI run is
+    seen as live. While a CLI run is live, auto-start re-checks every
+    30 s and starts full QA once the CLI run ends.
+  - A review→QA hand-off that finds a run driven elsewhere stays pending,
+    with the sticky line "Review PASS for <pr> — QA starts once the QA
+    run another process drives ends". It is retried each poll tick, also
+    with auto-start off (`zz t`), and starts QA once the run ends. It
+    keeps the live driver's `[running]` picker entry and panes. It drops
+    a `done` entry from before that run, so an old PASS is never handed
+    to sign-off. When the driver records a verdict (even if a tick lands
+    between the verdict write and the driver's exit), that verdict is
+    the hand-off's QA result: no second full QA, one sign-off hand-off.
+  - Not covered: the TUI sign-off REQA hop calls `start_qa` without a
+    live-driver check. The judged run is finished at that hop. The
+    forty-first pass probes it (S117) and files a finding if a live
+    `pm qa run` loses its windows.
 
 ### Generic providers and per-PR configuration (2026-10-27; impl.md R10–R13)
 - **RQ48** (R10, 87fd093f) Generic router provider. Given a router
@@ -2302,6 +2341,60 @@ S13, S14, S22, S101.
     no other scenario's capture dir changes. The QA40 planner restored those
     files from the original runs' `qa_status.json` (the overwritten copies
     are in `nested-run-overwrite/` in each dir).
+    Results (run 223ffd9ddbbd6c97, every scenario mp4):
+    - S110 PASS.
+    - S111 NEEDS_WORK, fixed in d35c473a. Review 82f2 extended the fix in
+      609e37b5 and 5e55b707 (RQ56).
+    - S112 PASS.
+    - S115 PASS.
+    - S113 INPUT_REQUIRED. Every R9/RQ44 routing Then held. Decided by the
+      QA41 planner: two literal Thens fall outside this PR, and S113
+      counts as the container-mode R9 pass.
+      - pr-fcdd76f: a PR left in `sign_off` gets no resume after
+        `pm tui restart`. Resume is tested with the PR in `qa`, and that
+        held.
+      - pr-81a249e: finished-run containers are removed at a later QA
+        start by master's `cleanup_orphaned_qa_containers`. The "one
+        finished-run container per run" Then is dropped.
+    - S114 INPUT_REQUIRED. Every RQ52/RQ54 Then held in host and container
+      mode. Decided by the QA41 planner:
+      - "running: sign_off forever" after a user-opened sign-off is
+        pre-existing master behaviour (pr-95664e1). The auto-sequence
+        sign-off story uses only tick-launched sign-offs, which held.
+      - `pm pr review` on an open review window prints "Switched to
+        existing review window", and that is accepted.
+      - No re-run is needed for these two. S118 repeats the auto-sequence
+        story in its corrected form on the new HEAD.
+  - Forty-first pass (S116+), delta-only, QA41 planner 2026-10-28, HEAD
+    5e55b707. Product changes since run 223ffd9ddbbd6c97 are d35c473a,
+    609e37b5 and 5e55b707 (RQ56). Only d35c473a has run live (S111
+    post-fix). Every scenario publishes `recording.mp4`. Run controls
+    beside HEAD: 9a2dacaa (pre-d35c473a), d35c473a (pre-609e37b5) and
+    609e37b5 (pre-5e55b707). A PASS must show the control failing where
+    the fix applies. Harness: `/pm-captures/scenarios/111/scripts` and
+    `/pm-captures/scenarios/114/scripts`. Keep `PM_CAPTURES_PR` exported.
+    Not to redo: S103–S115.
+    - S116: host, fake-claude, TUI review→QA hand-off over a run driven
+      elsewhere. The other run is a live `pm qa run`, with auto-start on
+      and off (`zz t`). It is also a `qa-run-bg` driver that a tick
+      spawned while the hand-off waited on a busy project.yaml. Cover
+      the driver frozen between its verdict write and its exit. Expected:
+      the hand-off stays pending, the `[running]` row is kept, there is
+      no second loop, and QA starts once the CLI run ends. The driver's
+      verdict goes to sign-off once, and an old PASS never goes there.
+    - S117: host, fake-claude, start-record lifecycle. A tick with a
+      broken `qa_scenario`/`qa_planning` provider leaves no record, so the
+      TUI starts at once after the fix. A tick and a TUI pass race on a
+      busy project.yaml. Two `pm qa run` runs in a row each read as live,
+      and full QA follows once they end. The TUI sign-off REQA hop runs
+      while a `pm qa run` is live (finding probe).
+    - S118: container mode (podman 3) and then host, real claude routed
+      refiner/worker on the router stub beside an unrouted PR. Ticks from
+      outside tmux drive both PRs from review PASS through `qa-run-bg`
+      (`--loop-id`) to `ready_to_merge`, with only tick-launched
+      sign-offs. The router is down at the QA launch and comes back.
+      `pm tui restart` mid-QA adopts the run, with the PR in `qa`.
+      Routing, bridge mount and stub logs are as in RQ52/R9.
 
 ## 3. Edge cases
 
