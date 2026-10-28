@@ -3404,17 +3404,6 @@ def _poll_tmux_verdicts(
             setup_error = setup_errors[0] if setup_errors else None
             completed_verifications = dict(verification_results)
             verification_results.clear()
-        if setup_error is not None:
-            # The run stops here.  A verifier that passed in the same
-            # interval still counts in the stopped run's status (S106,
-            # see _write_dashboard); a flag gets no follow-up, so that
-            # scenario stays unverified.
-            for scenario_idx, (passed, _reason) in completed_verifications.items():
-                if passed:
-                    verifying.discard(scenario_idx)
-                    state.verified_scenarios.add(scenario_idx)
-            _write_dashboard()
-            raise setup_error
 
         for scenario_idx, (passed, reason) in completed_verifications.items():
             verifying.discard(scenario_idx)
@@ -3454,6 +3443,10 @@ def _poll_tmux_verdicts(
                     )
                     verdicts_changed = True
                     _notify()
+                elif setup_error is not None:
+                    # The run stops below: no follow-up, so the scenario
+                    # stays unverified ("verifying:<n>").
+                    verifying.add(scenario_idx)
                 else:
                     # Send the scenario a follow-up message and put back in pending.
                     # Use the stored pane_id to target the original scenario
@@ -3528,6 +3521,14 @@ def _poll_tmux_verdicts(
                         )
                         verdicts_changed = True
                         _notify()
+
+        if setup_error is not None:
+            # A verifier thread hit a provider setup error: the run stops
+            # here.  The verifications settled in the same interval
+            # (handled above) still count in the stopped run's status
+            # (S106, see _write_dashboard).
+            _write_dashboard()
+            raise setup_error
 
         for scenario in state.scenarios:
             if scenario.index not in pending or not scenario.window_name:

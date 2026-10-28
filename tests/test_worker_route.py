@@ -3063,18 +3063,22 @@ def test_verifier_setup_error_stops_the_run_without_flagging_the_worker(
     assert qa_loop.VERDICT_NEEDS_WORK not in state.scenario_verdicts.values()
 
 
-def test_verifier_setup_error_keeps_a_verification_passed_beside_it(
-        pm_home_dir, tmp_path):
-    """S106 class, verifier path: one verifier passes and another hits the
-    setup error in the same poll interval.  The stop raises at the next
-    tick's start, before that tick handles the pass: the stopped run's
-    qa_status.json still shows scenario 1 verified ("PASS", not a stale
-    "PASS (verifying)"), and scenario 2 stays unverified."""
+@pytest.mark.parametrize("max_retries,flagged", [
+    (0, "NEEDS_WORK"), (1, "PASS (verifying:1)")])
+def test_verifier_setup_error_keeps_verifications_settled_beside_it(
+        pm_home_dir, tmp_path, max_retries, flagged):
+    """S106 class, verifier path: verifiers settle and another hits the
+    setup error in the same poll interval.  The stop comes after that
+    tick handles the settled results: the stopped run's qa_status.json
+    shows scenario 1 verified ("PASS", not a stale "PASS (verifying)"),
+    scenario 2's flag as NEEDS_WORK past the retry limit, else unverified
+    with no follow-up sent.  Scenario 3 (the setup error) stays
+    unverified."""
     import itertools
     import threading
     from pm_core import qa_loop
     scenarios = []
-    for i in (1, 2):
+    for i in (1, 2, 3):
         sc = qa_loop.QAScenario(index=i, title=f"S{i}", focus="t")
         sc.window_name, sc.pane_id = f"qa-pr-001-s{i}", f"%{i}"
         sc.session_id = f"sid-{i}"
@@ -3090,18 +3094,24 @@ def test_verifier_setup_error_keeps_a_verification_passed_beside_it(
         threads[scenario.index] = threading.current_thread()
         if scenario.index == 1:
             return True, "ok", None
-        while 1 not in threads:  # both threads start in the same tick
-            threading.Event().wait(0.01)
-        threads[1].join()  # scenario 1's pass is recorded first
+        if scenario.index == 2:
+            return False, "flag 2", None
         return _launch_on_missing_provider(session_type="qa_verification")
 
     def sleep(_):
         assert next(spins) < 2000, "poll loop never stopped"
-        if 2 in threads:  # both verdicts landed before the next tick
-            threads[2].join()
+        if threads:  # all three start in the same tick: every result
+            for i in (1, 2, 3):  # lands before the next tick reads them
+                for _ in range(500):
+                    if i in threads:
+                        break
+                    threading.Event().wait(0.01)
+                threads[i].join()
 
     with patch.object(qa_loop, "_verify_single_scenario", side_effect=verify), \
-            patch.object(qa_loop, "_send_submitted"), \
+            patch.object(qa_loop, "_send_submitted") as send, \
+            patch.object(qa_loop, "_get_verification_max_retries",
+                         return_value=max_retries), \
             patch.object(qa_loop.time, "sleep", side_effect=sleep), \
             patch.object(qa_loop.time, "monotonic",
                          side_effect=itertools.count(0, 100)), \
@@ -3116,8 +3126,9 @@ def test_verifier_setup_error_keeps_a_verification_passed_beside_it(
                                         lambda *a: None)
     status = json.loads((tmp_path / "status.json").read_text())
     assert {s["index"]: s["verdict"] for s in status["scenarios"]} == {
-        1: "PASS", 2: "PASS (verifying)"}
+        1: "PASS", 2: flagged, 3: "PASS (verifying)"}
     assert state.verified_scenarios == {1}
+    send.assert_not_called()
 
 
 def test_finalizer_setup_error_stops_the_run_before_the_overall(
