@@ -946,3 +946,103 @@ def test_capped_return_resumes_once_a_human_reconciles_the_base(w):
     launch.assert_not_called()
     assert base_check.open_return(pr(w)) is None
     assert pr(w)["base_return"]["resolved_at"]
+
+
+def test_capped_return_resolves_from_the_previous_sessions_idle(w):
+    """A capped return launches nothing, so it must not demand a *new* idle turn.
+
+    ``needs_human`` clears ``awaiting``: no rework session is launched for the
+    capped episode.  The idle evidence that matters is the last relaunch's —
+    so the superseding record keeps ``launched_at``.  Without it the capped
+    record falls back to its creation time, which always postdates the
+    previous session's idle turn, and the TUI/CLI handoff waits forever even
+    after a human reconciles the base.
+    """
+    from datetime import datetime
+
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+        for i in range(base_check.MAX_RETURNS_PER_BASE + 2):
+            base_check.clear_return_awaiting(w.pm_dir, PR)
+            commit(w.wd, f"f{i}.txt", "x\n", f"impl {i}")
+            commit(w.repo, "shared.txt", f"base {i}\n", f"base {i}")
+            completion(w, transcript_dir=w.tdir)
+    ret = pr(w)["base_return"]
+    assert ret.get("needs_human")
+    assert ret.get("launched_at")          # carried across the supersede
+    assert ret.get("awaiting") is None
+
+    launched = datetime.fromisoformat(ret["launched_at"]).timestamp()
+    capped_at = datetime.fromisoformat(ret["ts"]).timestamp()
+    # The real hook event: the last rework session's idle turn, before the cap.
+    idle_since = launched + (capped_at - launched) / 2
+    assert launched < idle_since < capped_at
+
+    # A human reconciles the current base by hand.
+    subprocess.run(["/usr/bin/git", "fetch", str(w.repo), "master"],
+                   cwd=w.wd, capture_output=True)
+    subprocess.run(["/usr/bin/git", "merge", "--no-edit", "FETCH_HEAD"],
+                   cwd=w.wd, capture_output=True, text=True)
+    if git(w.wd, "status", "--porcelain"):
+        (w.wd / "shared.txt").write_text("resolved\n")
+        git(w.wd, "add", "shared.txt")
+        git(w.wd, "commit", "-q", "-m", "merge base")
+
+    # No new launch happens (the cap stopped automatic rework) ...
+    with patch("pm_core.base_check.launch_impl") as launch:
+        res = completion(w, idle_since=idle_since, transcript_dir=w.tdir)
+    launch.assert_not_called()
+    # ... and the handoff still advances on the reconciled base.
+    assert res.complete, res.reason
+    assert base_check.open_return(pr(w)) is None
+    assert pr(w)["base_return"]["resolved_at"]
+
+
+def test_share_impl_transcript_stores_an_absolute_target(w, monkeypatch):
+    """A relatively-spelled transcript must not create a dangling link.
+
+    ``pm pr start --transcript impl-<pr>.jsonl`` (or a relative symlink
+    target) would otherwise be copied verbatim into another driver's
+    directory, where it resolves against *that* directory and points nowhere.
+    """
+    import os
+
+    other = w.pm_dir / "transcripts" / "run-b" / f"impl-{PR}.jsonl"
+    other.parent.mkdir(parents=True)
+    other.symlink_to("/nonexistent/old-session.jsonl")
+    real = w.tdir / f"impl-{PR}.jsonl"
+    real.write_text("{}")
+    monkeypatch.chdir(w.tdir)
+
+    base_check.share_impl_transcript(w.pm_dir, PR, f"impl-{PR}.jsonl")
+
+    target = os.readlink(other)
+    assert os.path.isabs(target)
+    assert Path(target) == real
+
+
+def test_pr_review_does_not_demote_a_pr_that_moved_on_during_the_gate(w):
+    """A qa/sign_off transition inside the gate's fetch must win.
+
+    The pre-review gate is a network round-trip between reading the status and
+    writing ``in_review``; a PR that moved on to a later phase owns itself, so
+    the write must be refused (exit 1, no window) rather than pulling it back
+    and stranding the driver that is already running.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    set_pr(w, status="in_progress")
+
+    def _qa_during_gate(*_a, **_k):
+        set_pr(w, status="qa")
+        return base_check.GateResult(base_check.PROCEED, base_check.STAGE_REVIEW)
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch("pm_core.base_check.gate", side_effect=_qa_during_gate), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", PR])
+    assert result.exit_code == 1, result.output
+    window.assert_not_called()
+    assert pr(w)["status"] == "qa"

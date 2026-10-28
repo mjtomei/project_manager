@@ -376,6 +376,18 @@ def return_to_impl(root: Path, pr_id: str, record: dict, stage: str,
         needs_human = attempt > MAX_RETURNS_PER_BASE
         rec = _new_return(record, stage, iteration, attempt,
                           resume_loop=resume_loop)
+        if existing is not None and existing.get("launched_at"):
+            # The superseded episode's rework session is the one that did the
+            # work: keep its relaunch time so the completion guard ("idle
+            # evidence must postdate the relaunch") compares against the
+            # session that actually ran.  Without it a capped (``needs_human``)
+            # record — which launches nothing, so it has no ``launched_at`` of
+            # its own — falls back to its creation time, and the previous
+            # session's idle turn (always older) can never satisfy the guard:
+            # a human who reconciles the base would leave the PR stuck in the
+            # TUI/auto-sequence handoff with no way to resume.  A fresh launch
+            # overwrites it (``clear_return_awaiting``).
+            rec["launched_at"] = existing["launched_at"]
         if needs_human:
             # Stop automatic rework: no launch is awaited (a human must
             # reconcile the base), so no driver keeps relaunching impl.
@@ -586,11 +598,18 @@ def share_impl_transcript(root: Path, pr_id: str,
     transcript = Path(transcript)
     try:
         target = os.readlink(transcript)
+        if not os.path.isabs(target):
+            # A relative link target resolves against *this* link's directory;
+            # re-created under another driver's dir it would dangle.  Store
+            # the absolute target so every refreshed link resolves.
+            target = os.path.normpath(
+                os.path.join(os.path.dirname(os.path.abspath(transcript)),
+                             target))
     except OSError:
         # A direct JSONL path (not a symlink) is the target itself.
         if not transcript.exists():
             return
-        target = str(transcript)
+        target = os.path.abspath(transcript)
     base = Path(root) / "transcripts"
     if not base.is_dir():
         return

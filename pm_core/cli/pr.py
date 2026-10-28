@@ -1789,8 +1789,12 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         # The pre-flight base check above is a network round-trip.  A
         # concurrent merge/close (e.g. a GitHub sync) landing inside that
         # window must not be demoted to in_review: it would un-merge the PR
-        # in project.yaml and start a reviewer against a finished PR.
-        if pr.get("status") in ("merged", "closed"):
+        # in project.yaml and start a reviewer against a finished PR.  Nor
+        # may a PR that moved on to qa/sign_off be pulled back: those phases
+        # own the PR, and demoting would strand the running driver.  Only
+        # the pre-review statuses may be advanced (in_review is idempotent —
+        # a concurrent review may have written it already).
+        if pr.get("status") not in ("in_progress", "in_review"):
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")

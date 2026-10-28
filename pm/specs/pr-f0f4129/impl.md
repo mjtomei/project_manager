@@ -95,9 +95,11 @@ already drops it because the status is no longer `qa`.
   The gate is a network round-trip inserted between the phase check and the
   status write / window creation, so both choke points re-check the PR is
   still eligible afterwards: `pr_review`'s `in_review` write refuses (exit 1,
-  no window) when a concurrent merge/close landed, and `run_qa_sync`
-  re-checks `merged`/`closed` after the gate. Neither may demote a finished
-  PR or start a writer against it.
+  no window) unless the PR is still in a pre-review status
+  (`in_progress`/`in_review`), so neither a concurrent merge/close nor a
+  concurrent `qa`/`sign_off` transition is demoted back to `in_review`; and
+  `run_qa_sync` re-checks `merged`/`closed` after the gate. Neither may
+  demote a finished PR or start a writer against it.
 - **R4 — Clean integration continues.** `clean` / `up_to_date` / `in_base`
   resolve any open base return and let the caller proceed exactly as before.
   No review/QA reset, no status change, no re-run.
@@ -126,7 +128,14 @@ already drops it because the status is no longer `qa`.
   `idle_prompt` — still visible through a stale `impl-<pr>.jsonl` symlink in
   another driver's transcript dir — is not the rework session's turn, so the
   relaunch re-points those symlinks (`share_impl_transcript`) to keep the
-  new session trackable. That call lives in `pm pr start` (the single
+  new session trackable. A superseding return (a moved base that still
+  conflicts, including the capped `needs_human` one, which launches nothing
+  itself) keeps the superseded episode's `launched_at`, so the guard keeps
+  comparing against the session that actually ran instead of the new
+  record's creation time — otherwise the previous session's idle turn could
+  never satisfy it and a reconciled base would leave the handoff waiting
+  forever. A fresh launch overwrites it.
+  That call lives in `pm pr start` (the single
   implementation launcher) as well as in `launch_impl`, so a relaunch
   started by the TUI auto-start catch-up or a manual `pm pr start` also
   refreshes the CLI auto-sequence dir's link — otherwise that driver keeps
@@ -137,7 +146,10 @@ already drops it because the status is no longer `qa`.
   comparison uses the *resolved* path as well as the literal one, so a
   transcript handed over relatively (`pm pr start --transcript
   transcripts/run/impl-<pr>.jsonl`) is never mistaken for another driver's
-  stale copy and renamed out from under its own session.
+  stale copy and renamed out from under its own session. The target written
+  into the refreshed links is normalized to an absolute path, so a
+  relatively-spelled transcript (or a relative link target) does not become
+  a dangling link in another driver's directory.
   A successful launch also clears a previous attempt's `apply_error`. An
   idle notification alone never qualifies: a
   missing idle timestamp (`idle_since is None`, e.g. the pane/tracker could
@@ -166,7 +178,11 @@ already drops it because the status is no longer `qa`.
   another episode or note while it conflicts), so a human who reconciles
   the base lets review/QA resume — matching the note's "a human must
   reconcile the base before review/QA resumes" instead of leaving the PR
-  permanently stuck with no `pm` command to clear it.
+  permanently stuck with no `pm` command to clear it. Because the capped
+  record launches nothing, it carries the last relaunch's `launched_at`
+  (R6) so `impl_completion` can accept the previous session's idle turn;
+  without that the handoff would wait forever even after the base was
+  reconciled by hand.
 - **R9 — Sign-off ownership preserved.** The gate skips when the PR is
   `sign_off` or an open `signoff_return` exists (`open_return`): sign-off
   owns integration there, and a sign-off REVIEW/REQA hop must still launch.
@@ -357,6 +373,13 @@ No unresolved ambiguities.
 14. a merge landing during the gate's fetch: `pm pr review` does not write
     `in_review` (exit 1, no window) and `run_qa_sync` does not create the QA
     workdir.
+15. a capped (`needs_human`) return resolves through `impl_completion` from
+    the previous session's idle turn once a human reconciles the base (no
+    new launch), i.e. the superseded record keeps `launched_at`.
+16. a relatively-spelled transcript (direct path or relative link target)
+    yields an absolute target in every refreshed link.
+17. a `qa`/`sign_off` transition landing during the gate's fetch is not
+    demoted to `in_review` (exit 1, no window).
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
