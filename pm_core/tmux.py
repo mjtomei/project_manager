@@ -1,9 +1,11 @@
 """Tmux session management for pm."""
 
 import os
+import re
+import shlex
 import subprocess
 
-from pm_core.paths import configure_logger
+from pm_core.paths import configure_logger, write_env_file
 
 _log = configure_logger("pm.tmux")
 
@@ -31,6 +33,56 @@ def _run(*args, **kwargs) -> subprocess.CompletedProcess:
     """
     kwargs.setdefault("capture_output", True)
     return subprocess.run(*args, **kwargs)
+
+
+# ``cd <dir> && `` prefix produced by build_claude_shell_cmd.  It is kept
+# outside the env wrapper so pane_start_command parsing (transcript/cwd
+# recovery in claude_launcher.pane_transcript_path) still sees it.
+_LEADING_CD_RE = re.compile(r"^(cd (?:'[^']*'|\"[^\"]*\"|[^\s;&]+) && )")
+
+
+def _wrap_cmd_env(cmd: str, env: dict[str, str]) -> tuple[str, str]:
+    """Return ``(wrapped_command, env_file_path)`` for a pane command.
+
+    The values are written to a private file that the pane's shell sources
+    and deletes before running the real command, so they never appear in the
+    command string (logged and kept as ``#{pane_start_command}``).
+
+    ``tmux -e NAME`` is not an option: on tmux 3.2 (the supported floor)
+    ``new-window``/``split-window`` resolve a bare name from the server or
+    session environment, not the client's, so it would silently drop the
+    variable — or worse, inject a different value that happens to be there.
+    ``sh -c`` makes the POSIX ``set -a; . file`` prefix work under a
+    non-POSIX ``default-shell`` such as fish.
+    """
+    prefix, path = write_env_file(env)
+    m = _LEADING_CD_RE.match(cmd)
+    head = m.group(1) if m else ""
+    body = cmd[len(head):]
+    return f"{head}sh -c {shlex.quote(prefix + body)}", path
+
+
+def _run_with_env(args: list[str], env: dict[str, str] | None,
+                  **kwargs) -> subprocess.CompletedProcess:
+    """Run a tmux command whose last argument is the pane's shell command.
+
+    When *env* is given, the command is wrapped so the new pane receives the
+    values through its environment (see ``_wrap_cmd_env``).
+    """
+    path: str | None = None
+    if env:
+        args = list(args)
+        args[-1], path = _wrap_cmd_env(args[-1], env)
+    try:
+        return _run(args, **kwargs)
+    except BaseException:
+        # tmux never created the pane, so nothing will source the file.
+        if path is not None:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        raise
 
 
 def has_tmux() -> bool:
@@ -65,27 +117,38 @@ def grant_server_access(users: list[str], socket_path: str | None = None) -> Non
         )
 
 
-def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None) -> None:
-    """Create a detached tmux session running cmd."""
-    _run(
-        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd, cmd,
-                   socket_path=socket_path),
+def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None,
+                   env: dict[str, str] | None = None) -> None:
+    """Create a detached tmux session running cmd.
+
+    *env* is exported into the new session's panes through a private file
+    (see ``_wrap_cmd_env``).
+    """
+    _run_with_env(
+        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
+                  cmd, socket_path=socket_path),
+        env,
         check=True,
     )
 
 
 def split_pane(session: str, direction: str, cmd: str,
-               window: str | None = None) -> str:
+               window: str | None = None,
+               env: dict[str, str] | None = None) -> str:
     """Split a pane and run cmd. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
     window: optional tmux window id/name to target. When omitted, splits
         the active pane of the session's active window.
+    env: environment variables for the new pane, exported via a private
+        file (see ``_wrap_cmd_env``).
     """
     flag = "-h" if direction == "h" else "-v"
     target = f"{session}:{window}" if window else session
-    result = _run(
-        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F", "#{pane_id}", cmd),
+    result = _run_with_env(
+        _tmux_cmd("split-window", flag, "-t", target, "-P", "-F",
+                  "#{pane_id}", cmd),
+        env,
         text=True,
         check=True,
     )
@@ -143,7 +206,8 @@ def kill_window(session: str, window: str) -> None:
 
 
 def new_window(session: str, name: str, cmd: str, cwd: str,
-               switch: bool = True) -> None:
+               switch: bool = True,
+               env: dict[str, str] | None = None) -> None:
     """Create a new tmux window with the given name, running cmd.
 
     Uses 'session:' format to ensure numeric session names aren't
@@ -152,11 +216,15 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     # Use session: format to explicitly target session, not window index
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
+    _run_with_env(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  cmd),
+        env,
         check=True,
     )
     win = find_window_by_name(session, name)
@@ -173,7 +241,8 @@ def new_window(session: str, name: str, cmd: str, cwd: str,
 
 
 def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
-                        switch: bool = True) -> str | None:
+                        switch: bool = True,
+                        env: dict[str, str] | None = None) -> str | None:
     """Create a new tmux window and return its initial pane ID.
 
     Like new_window but returns the pane ID so callers can split on it.
@@ -181,10 +250,14 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
 
     Set *switch* to False to create the window without changing the
     active window (useful for background operations like the review loop).
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     target = f"{session}:"
-    _run(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd, cmd),
+    _run_with_env(
+        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
+                  cmd),
+        env,
         check=True,
     )
     win = find_window_by_name(session, name)
@@ -208,29 +281,38 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     return None
 
 
-def create_window(session: str, cmd: str) -> tuple[str, str]:
+def create_window(session: str, cmd: str,
+                  env: dict[str, str] | None = None) -> tuple[str, str]:
     """Create a new window in *session* running *cmd*.
 
     Returns ``(pane_id, window_id)`` of the newly created window.
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
-    result = _run(
+    result = _run_with_env(
         _tmux_cmd("new-window", "-t", f"{session}:",
                   "-P", "-F", "#{pane_id} #{window_id}", cmd),
+        env,
         text=True, check=True,
     )
     parts = result.stdout.strip().split()
     return parts[0], parts[1]
 
 
-def split_pane_background(session: str, direction: str, cmd: str) -> str:
+def split_pane_background(session: str, direction: str, cmd: str,
+                          env: dict[str, str] | None = None) -> str:
     """Split a pane without switching focus. Returns new pane ID.
 
     Like split_pane but uses -d to keep focus on the current pane.
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     flag = "-h" if direction == "h" else "-v"
-    result = _run(
-        _tmux_cmd("split-window", "-d", flag, "-t", session, "-P", "-F", "#{pane_id}", cmd),
+    result = _run_with_env(
+        _tmux_cmd("split-window", "-d", flag, "-t", session, "-P", "-F",
+                  "#{pane_id}", cmd),
+        env,
         text=True,
         check=True,
     )
@@ -238,7 +320,8 @@ def split_pane_background(session: str, direction: str, cmd: str) -> str:
 
 
 def split_pane_at(pane_id: str, direction: str, cmd: str,
-                  background: bool = False, cwd: str | None = None) -> str:
+                  background: bool = False, cwd: str | None = None,
+                  env: dict[str, str] | None = None) -> str:
     """Split a specific pane. Returns new pane ID.
 
     direction: 'h' for horizontal (left/right), 'v' for vertical (top/bottom)
@@ -246,6 +329,8 @@ def split_pane_at(pane_id: str, direction: str, cmd: str,
         the target pane's current /proc cwd, which can drift if the
         target's shell has been chdir'd by a long-running process
         (e.g. Claude Code's persistent Bash tool).
+    *env* is exported into the new pane through a private file (see
+    ``_wrap_cmd_env``).
     """
     flag = "-h" if direction == "h" else "-v"
     args = ["split-window", flag, "-t", pane_id, "-P", "-F", "#{pane_id}"]
@@ -254,7 +339,7 @@ def split_pane_at(pane_id: str, direction: str, cmd: str,
     args.append(cmd)
     if background:
         args.insert(2, "-d")
-    result = _run(_tmux_cmd(*args), text=True, check=True)
+    result = _run_with_env(_tmux_cmd(*args), env, text=True, check=True)
     return result.stdout.strip()
 
 

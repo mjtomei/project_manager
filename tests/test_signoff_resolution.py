@@ -4911,6 +4911,70 @@ def test_recovery_skips_verification_for_a_malformed_approval(w, monkeypatch):
     assert calls == []
 
 
+def test_approved_candidate_reads_malformed_approvals_as_absent():
+    """``signoff``/``integration`` are hand-edited state, not typed records.
+
+    The recovery path (``--no-signoff-check`` / ``--propagation-only``) skips
+    the merge gate, so a scalar ``signoff`` (``.get`` on it raised
+    ``AttributeError``) or a non-string revision (sliced in
+    ``verify_github_merge``) must read as no bound approval instead of
+    raising out of ``pm pr merge``.
+    """
+    from pm_core import merge_integrity
+
+    good = {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+            "integration": {"base_sha": "b" * 40}}
+    assert merge_integrity.approved_candidate({"signoff": good}) == (
+        "a" * 40, good["integration"])
+    # Not a mapping: no record at all.
+    assert merge_integrity.approved_candidate({"signoff": "merged"}) is None
+    assert merge_integrity.approved_candidate(
+        {"signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                     "integration": "bound"}}) is None
+    # A revision that is not a string cannot name the signed-off candidate.
+    assert merge_integrity.approved_candidate(
+        {"signoff": {"verdict": SIGNOFF_MERGE, "sha": 123,
+                     "integration": {"base_sha": "b" * 40}}}) is None
+    assert merge_integrity.approved_candidate(
+        {"signoff": {"verdict": SIGNOFF_MERGE, "sha": "a" * 40,
+                     "integration": {"base_sha": 456}}}) is None
+
+
+def test_apply_to_pr_tolerates_malformed_notes():
+    """Recording a mismatch must not raise on hand-edited note members.
+
+    The id set handed to ``generate_note_id`` is a ``set``, so a list/mapping
+    note id (unhashable) raised ``TypeError`` out of every sync path that
+    recorded a mismatch; a scalar ``notes`` value was iterated as characters.
+    The malformed members are kept as they are, and the note is still added
+    once.
+    """
+    from pm_core import merge_integrity
+
+    pr = {"id": "pr-200", "notes": [
+        {"id": ["not", "hashable"], "text": "hand-written"},
+        "scalar-member",
+        {"text": "no id"},
+    ]}
+    result = merge_integrity.MergeVerification(problem="merged elsewhere")
+    merge_integrity.apply_to_pr(pr, result)
+    assert pr["merge_integrity"]["problem"] == "merged elsewhere"
+    texts = [n.get("text") for n in pr["notes"] if isinstance(n, dict)]
+    assert texts.count("Merge integrity: merged elsewhere.") == 1
+    # The hand-written members are preserved, not dropped.
+    assert "scalar-member" in pr["notes"]
+    assert {"id": ["not", "hashable"], "text": "hand-written"} in pr["notes"]
+    # Recording the same problem again does not add a second note.
+    merge_integrity.apply_to_pr(pr, result)
+    texts = [n.get("text") for n in pr["notes"] if isinstance(n, dict)]
+    assert texts.count("Merge integrity: merged elsewhere.") == 1
+    # A scalar ``notes`` value is no collection: it is replaced by a list.
+    scalar = {"id": "pr-200", "notes": "hand-written"}
+    merge_integrity.apply_to_pr(scalar, result)
+    assert [n["text"] for n in scalar["notes"]] == [
+        "Merge integrity: merged elsewhere."]
+
+
 def test_concurrent_applies_serialize_on_the_repository_lock(w):
     """Two applies at once: one merges, the other sees HEAD moved.
 

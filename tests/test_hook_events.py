@@ -346,6 +346,230 @@ def test_poll_for_verdict_hook_fast_path(tmp_hooks_home, monkeypatch, tmp_path):
     assert elapsed < 2.0, f"hook path was too slow ({elapsed}s)"
 
 
+def test_poll_for_verdict_returns_the_verdict_turn(tmp_hooks_home, monkeypatch,
+                                                   tmp_path):
+    """pr-8efa789: a /loop wakeup postscript after the verdict must not
+    replace the returned text — callers parse reasons/markers out of the
+    turn that carried the verdict."""
+    import json as _json
+    hook_events = _reload_hook_events()
+    from pm_core.hook_install import ensure_hooks_installed
+    ensure_hooks_installed(tmp_hooks_home / ".claude" / "settings.json")
+    assert hook_events.hooks_available()
+
+    from pm_core import loop_shared
+
+    sid = "12345678-1234-1234-1234-123456789abc"
+    postscript = "Already submitted INPUT_REQUIRED; ending the loop."
+    transcript_target = tmp_path / f"{sid}.jsonl"
+    transcript_target.write_text("\n".join([
+        _json.dumps({"type": "user", "message": {
+            "role": "user", "content": [
+                {"type": "text", "text": "run scenario 44"}]}}),
+        _json.dumps({"type": "assistant", "message": {
+            "role": "assistant", "content": [
+                {"type": "text", "text": "Reason: CP4/CP5 not exercised\n"
+                                          "INPUT_REQUIRED"}]}}),
+        _json.dumps({"type": "user", "isMeta": True, "message": {
+            "role": "user", "content": [
+                {"type": "text", "text": "# Autonomous loop tick "
+                                          "(dynamic pacing)"}]}}),
+        _json.dumps({"type": "assistant", "message": {
+            "role": "assistant", "content": [
+                {"type": "text", "text": postscript}]}}),
+    ]) + "\n")
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    import pm_core.tmux as tmux_mod
+    monkeypatch.setattr(tmux_mod, "pane_exists", lambda pane_id: True)
+
+    def writer():
+        time.sleep(0.1)
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 5)
+
+    t = threading.Thread(target=writer)
+    t.start()
+    try:
+        content = loop_shared.poll_for_verdict(
+            pane_id="%0",
+            transcript_path=str(transcript_link),
+            verdicts=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+            wait_timeout=5,
+            log_prefix="test",
+        )
+    finally:
+        t.join()
+    assert content is not None
+    assert "INPUT_REQUIRED" in content
+    assert "CP4/CP5 not exercised" in content
+    assert postscript not in content
+
+
+def test_follow_up_verdict_ignores_the_verdict_that_prompted_it(
+        tmp_hooks_home, monkeypatch, tmp_path):
+    """pr-8efa789: the follow-up waiter must not re-deliver the INPUT_REQUIRED
+    verdict that prompted it when a /loop wakeup adds a no-verdict turn.
+
+    The task-scoped scan crosses the wakeup, so without a baseline the waiter
+    would return immediately and the caller (review/watcher INPUT_REQUIRED)
+    would coerce the stale verdict to NEEDS_WORK instead of waiting for the
+    human's answer.
+    """
+    import json as _json
+    hook_events = _reload_hook_events()
+    from pm_core.hook_install import ensure_hooks_installed
+    ensure_hooks_installed(tmp_hooks_home / ".claude" / "settings.json")
+    assert hook_events.hooks_available()
+
+    from pm_core import loop_shared
+
+    sid = "12345678-1234-1234-1234-123456789abc"
+    transcript_target = tmp_path / f"{sid}.jsonl"
+
+    def user(text):
+        return _json.dumps({"type": "user", "message": {
+            "role": "user", "content": [{"type": "text", "text": text}]}})
+
+    def assistant(text):
+        return _json.dumps({"type": "assistant", "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}]}})
+
+    tick = _json.dumps({"type": "user", "isMeta": True, "message": {
+        "role": "user", "content": [
+            {"type": "text", "text": "# Autonomous loop tick"}]}})
+
+    initial = "\n".join([
+        user("run the scenario"),
+        assistant("Reason: need a decision\nINPUT_REQUIRED"),
+        tick,
+        assistant("Nothing left to do; ending the loop."),
+    ]) + "\n"
+    transcript_target.write_text(initial)
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    monkeypatch.setattr(loop_shared, "find_claude_pane",
+                        lambda session, window: "%0")
+
+    def writer():
+        time.sleep(0.1)
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 5)
+
+    t = threading.Thread(target=writer)
+    t.start()
+    deadline = time.monotonic() + 0.5
+    try:
+        content = loop_shared.wait_for_follow_up_verdict(
+            "pm-session", "review-x", str(transcript_link),
+            verdicts=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+            wait_timeout=0.2,
+            stop_check=lambda: time.monotonic() > deadline,
+            log_prefix="test",
+        )
+    finally:
+        t.join()
+    # The stale INPUT_REQUIRED must not be returned as the follow-up.
+    assert content is None
+
+    # A verdict emitted after the call starts *is* the follow-up.
+    def writer2():
+        time.sleep(0.1)
+        with open(transcript_target, "a") as f:
+            f.write(user("here is the decision you asked for") + "\n")
+            f.write(assistant("Reason: decision applied\nPASS") + "\n")
+        _write_event(tmp_hooks_home, sid, "idle_prompt", ts=time.time() + 10)
+
+    deadline = time.monotonic() + 10
+    t = threading.Thread(target=writer2)
+    t.start()
+    try:
+        content = loop_shared.wait_for_follow_up_verdict(
+            "pm-session", "review-x", str(transcript_link),
+            verdicts=("INPUT_REQUIRED", "NEEDS_WORK", "PASS"),
+            wait_timeout=0.2,
+            stop_check=lambda: time.monotonic() > deadline,
+            log_prefix="test",
+        )
+    finally:
+        t.join()
+    assert content is not None
+    assert "PASS" in content
+    assert "decision applied" in content
+    assert "INPUT_REQUIRED" not in content
+
+
+def test_follow_up_verdict_honors_a_pre_prompt_baseline(
+        tmp_hooks_home, monkeypatch, tmp_path):
+    """pr-8efa789: a caller that prompts the pane itself snapshots the
+    baseline *before* sending, because the answer can land during the
+    send/settle window.
+
+    qa_loop's re-verification does exactly that: it sends the follow-up
+    prompt, settles the pane for ~2s, then waits.  A waiter that scanned the
+    transcript at call time would see the answer already there, treat it as
+    the verdict that prompted the wait, and block for a second verdict that
+    never comes.
+
+    The answer's own ``idle_prompt`` predates the waiter's ``hook_baseline``
+    (it fired during the settle), so the waiter can never be woken by it: it
+    must inspect the transcript once *before* blocking.  No hook event is
+    written here — exactly the state the real caller is in.
+    """
+    import json as _json
+    hook_events = _reload_hook_events()
+    from pm_core.hook_install import ensure_hooks_installed
+    ensure_hooks_installed(tmp_hooks_home / ".claude" / "settings.json")
+    assert hook_events.hooks_available()
+
+    from pm_core import loop_shared
+
+    sid = "12345678-1234-1234-1234-123456789abc"
+    transcript_target = tmp_path / f"{sid}.jsonl"
+
+    def user(text):
+        return _json.dumps({"type": "user", "message": {
+            "role": "user", "content": [{"type": "text", "text": text}]}})
+
+    def assistant(text):
+        return _json.dumps({"type": "assistant", "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}]}})
+
+    # The verifier already answered the follow-up prompt before the waiter
+    # was reached.  The baseline was snapshotted before the prompt was sent,
+    # when the transcript still ended on the previous round's verdict (line
+    # 1); a call-time scan would find the *new* verdict at line 3 and reject
+    # it as the one that prompted the wait.
+    transcript_target.write_text("\n".join([
+        user("Verify the scenario against its transcript."),
+        assistant("Reason: first round\nVERIFIED"),
+        user("The scenario has been re-evaluated and produced a new verdict."),
+        assistant("Reason: re-checked\nVERIFIED"),
+    ]) + "\n")
+    transcript_link = tmp_path / "t.jsonl"
+    transcript_link.symlink_to(transcript_target)
+
+    monkeypatch.setattr(loop_shared, "find_claude_pane",
+                        lambda session, window: "%0")
+
+    # No idle event: the verifier's answer already landed, so its event is
+    # older than the waiter's baseline and would never wake the loop.
+    deadline = time.monotonic() + 0.5
+    content = loop_shared.wait_for_follow_up_verdict(
+        "pm-session", "verify-x", str(transcript_link),
+        verdicts=("VERIFIED", "FLAGGED_END"),
+        wait_timeout=0.2,
+        stop_check=lambda: time.monotonic() > deadline,
+        log_prefix="test",
+        baseline_line=1,
+    )
+    assert content is not None
+    assert "VERIFIED" in content
+    assert "re-checked" in content
+
+
 def test_session_id_from_transcript(tmp_path):
     from pm_core.claude_launcher import session_id_from_transcript
 

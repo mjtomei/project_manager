@@ -97,6 +97,12 @@ def run_git(*args: str, cwd: Optional[str | Path] = None, check: bool = True) ->
     return result
 
 
+def git_detail(result: subprocess.CompletedProcess) -> str:
+    """stdout+stderr of a git call, for an error message."""
+    return ((result.stdout or "").strip() + "\n"
+            + (result.stderr or "").strip()).strip()
+
+
 def clone(repo_url: str, dest: Path, branch: Optional[str] = None) -> None:
     """Clone a repo to dest.
 

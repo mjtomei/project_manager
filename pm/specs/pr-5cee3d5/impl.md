@@ -785,9 +785,18 @@ tests):
     instead of slicing an int). The GitHub recovery path
     (`pm pr merge --no-signoff-check` / `--propagation-only`) skips the merge
     gate, so it reads a non-string approved `sha`/`base_sha` as absent (no
-    verification, not a crash) and `_verify_github_merge` renders every
-    revision/tree through a short helper, so a hand-edited `candidate_tree`
-    records the mismatch instead of raising `TypeError`.
+    verification, not a crash) and `merge_integrity._short` renders every
+    revision/tree, so a hand-edited `candidate_tree` records the mismatch
+    instead of raising `TypeError`. That contract lives in
+    `pm_core/merge_integrity.py`, the single implementation shared by the
+    publisher, the TUI sync paths and `pm pr sync` (see "Integration with
+    master: merge_integrity" below): `approved_candidate` reads a scalar
+    `signoff`/`integration` as absent and validates both revisions through
+    `integration.revision_of`, `verify_github_merge` validates the revisions
+    it interpolates into `git log` and reads a non-mapping `bound` as absent,
+    and `apply_to_pr` collects note ids through `_notes_of`/`_note_id` so a
+    hand-edited unhashable id cannot raise `TypeError` out of the set it
+    builds for `generate_note_id`.
     `pm pr show` — the reader `integration_pointer` tells a session to run —
     renders the overlap/conflict path lists through the same contract: a
     non-list `overlap`/`conflicts` (an int broke `len()`, a string was joined
@@ -1017,3 +1026,49 @@ prompt lists. Both behaviours are kept; neither side's intent is dropped.
   block is a fixed few lines. Worst-case size therefore stays well inside
   `PROMPT_ARG_LIMIT`; if a large PR pushes the whole prompt over anyway, the
   launcher's file-backed delivery still carries every instruction intact.
+
+## Integration with master: merge_integrity (pr-2e06289)
+
+A later base (`master@89e3c501`) moved the GitHub-merge check out of
+`pm_core/cli/pr.py` into the new `pm_core/merge_integrity.py`, which the TUI
+background/startup sync and `pm pr sync` now share with the publisher
+(`verify_github_merge` git reads only; the caller records under its own store
+lock). This PR's R9-14 hand-edited-state guards were inline in
+`_verify_github_merge` and in the recovery path's approval lookup, so the
+merge keeps master's structure and ports them into `merge_integrity`:
+
+- `approved_candidate()` reads a non-mapping `signoff`/`integration` as absent
+  and validates `sha`/`base_sha` through `integration.revision_of` — a
+  revision that is not a string cannot name the signed-off candidate, so the
+  recovery path skips verification instead of raising.
+- `verify_github_merge()` validates `base_sha`/`head` through `revision_of`
+  before interpolating them into the `git log` range and reads a non-mapping
+  `bound` as absent. Every displayed revision/tree goes through `_short`
+  (a hand-edited `candidate_tree` renders `?` and the mismatch is recorded
+  rather than raising `TypeError`).
+- `apply_to_pr()` reads notes through `_notes_of`/`_note_id`, so a hand-edited
+  unhashable id cannot raise `TypeError` out of the set passed to
+  `generate_note_id`; malformed members are preserved, and the mismatch note
+  is still added once.
+- `pm_core/cli/pr.py` keeps master's thin `_verify_github_merge` wrapper
+  (verify → record under the store lock) and the recovery path's
+  `merge_integrity.approved_candidate` call. `_notes_of`/`_note_id`/
+  `_note_text` stay in `pm_core/cli/pr.py` for the note commands;
+  `merge_integrity` has its own small pair.
+
+Regression: `test_github_merge_verification_renders_a_malformed_candidate_safely`
+and `test_recovery_skips_verification_for_a_malformed_approval` (this branch's
+existing coverage) and the new
+`test_approved_candidate_reads_malformed_approvals_as_absent` /
+`test_apply_to_pr_tolerates_malformed_notes` all fail on master's
+`merge_integrity.py` and pass on the merged tree.
+
+`pm/project.yaml` was reconciled by record id with this PR's own resolver
+(`integration.resolve_project_yaml`, base/ours/theirs from the merge index):
+511 PR records and 22 plans, no id lost from either side, no duplicates, the
+base's `active_pr` wins (the documented UI-cursor rule), and this branch's
+notes/`session_models` survive.
+
+The GitHub-merge verification and `--propagation-only` recovery path changed
+shape in this reconciliation, so it needs review and targeted QA on the merged
+tree; the rest of the PR's code is unchanged since `35693308` (QA 33-38 PASS).
