@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T00:04:59.416722+00:00'
+  updated_at: '2026-10-28T00:20:51.574882+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15296,6 +15296,21 @@ prs:
       $CTR bash -c "cd /workspace && git push ..."`. Captures: /pm-captures/scenarios/4/{story12-socket-loss-heal,story3-daemon-crash-heal,story4-refusals}.'
     created_at: '2026-10-28T00:04:59Z'
     last_edited: '2026-10-28T00:04:59Z'
+  - id: note-6a3426f
+    text: 'QA scenario 5 (2026-10-28): PASS. Harness prerequisites for a re-run: (1)
+      the fake-claude qa_planning body must NOT include QA_PLAN_START/QA_PLAN_END
+      — fake-claude appends the markers itself, and including them makes the planner
+      poll reject the plan as ''already-closed block (plan truncated)''; (2) the QA
+      worker''s ~/.local/bin/git wrapper forwards fetch/pull/ls-remote to a host workdir
+      that cannot resolve this container''s /scratch paths, so install a /tmp/pm-venv/bin/git
+      shim that always execs /usr/bin/git before running pm (the scenario upstreams
+      are local file:// repos). Verified: shared stop of the s1 QA scenario removed
+      its socket+proxy.json and kept the dir+discovery link, s2/impl proxies kept
+      serving and pushed, session kill removed every trace (links, dirs, locks, daemons,
+      containers), and killing project A left project B''s proxy/pid/socket intact
+      with its push still working.'
+    created_at: '2026-10-28T00:20:51Z'
+    last_edited: '2026-10-28T00:20:51Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
