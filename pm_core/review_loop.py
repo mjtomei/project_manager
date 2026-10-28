@@ -330,7 +330,10 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     Keeps ``state.input_required`` in step with the pane: False once a
     human prompt lands in the transcript (Claude is working on the
     follow-up), True again if Claude goes idle after that answer without
-    a verdict (it asked something in prose).
+    a verdict (it asked something in prose).  An idle for a turn a harness
+    wakeup started (``/loop`` tick, task notification) is not a question and
+    does not re-arm the wait — the human answered and Claude was woken by
+    the harness, not by them.
 
     Deliberately not :func:`pm_core.loop_shared.wait_for_follow_up_verdict`:
     the QA/watcher waiters only need "the next verdict", while this one also
@@ -426,6 +429,13 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
         if verdict == VERDICT_INPUT_REQUIRED:
             _log.info("review_loop: follow-up asked INPUT_REQUIRED again")
             return hit.text or hit.verdict
+        if watch.wakeup_turn:
+            # The turn was started by a harness wakeup (``/loop`` tick, task
+            # notification), not by the human's answer: its idle is not a
+            # question, and re-arming would show a wait nobody asked for
+            # (the false-wait class this loop exists to prevent).
+            state.input_required = False
+            continue
         _log.info("review_loop: %s idle after the answer without a verdict — "
                   "waiting on the user again", state.pr_id)
         watch.rearm()
@@ -511,8 +521,6 @@ def run_review_loop_sync(
     saved_transcript_dir = state._transcript_dir or transcript_dir
     # Stash transcript_dir on state so _on_complete_from_thread can finalize
     state._transcript_dir = transcript_dir
-    state.running = True
-    state.stop_requested = False
 
     last = state.history[-1] if state.history else None
     last_done = last.iteration if last else 0
@@ -532,8 +540,12 @@ def run_review_loop_sync(
     # ... and until that check finishes the wait is not "answered" either:
     # running + not input_required + a recorded INPUT_REQUIRED history would
     # otherwise read as "INPUT_REQUIRED answered; follow-up running" for the
-    # length of the check.
+    # length of the check.  Set both before ``running`` so a concurrent
+    # status reader never sees the new loop running with the flags of the
+    # state it was resumed from.
     state._adopting_wait = adopt_wait
+    state.running = True
+    state.stop_requested = False
 
     try:
         while state.iteration < max_iterations or adopt or adopt_wait:

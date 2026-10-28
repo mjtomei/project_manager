@@ -135,13 +135,17 @@ class VerdictHit:
 _SCHEDULED_TASK_PREFIX = (
     "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]"
 )
-# Dynamic / loop.md loop ticks and the autonomous-loop sentinels.
-_NON_TASK_TEXT_PREFIXES = (
+# Harness *wakeups*: they start an assistant turn of their own — and so
+# produce an ``idle_prompt`` — without any human having said anything.
+_WAKEUP_TEXT_PREFIXES = (
     _SCHEDULED_TASK_PREFIX,
     "# /loop tick",
     "# Autonomous loop check",
     "# Autonomous loop tick",
     "<task-notification>",
+)
+# Dynamic / loop.md loop ticks and the autonomous-loop sentinels.
+_NON_TASK_TEXT_PREFIXES = _WAKEUP_TEXT_PREFIXES + (
     # Harness marker written when the user hits Esc / stops the turn
     # (``[Request interrupted by user]`` and the ``for tool use`` variant).
     # It is not a new task: the user asked for nothing, so a verdict emitted
@@ -569,6 +573,26 @@ def is_human_prompt_record(rec: object) -> bool:
     return not text.startswith(_LOCAL_COMMAND_PREFIXES)
 
 
+def is_wakeup_record(rec: object) -> bool:
+    """True for a harness *wakeup*: a record that starts an assistant turn
+    of its own (a ``/loop`` tick, a scheduled prompt firing, a Monitor task
+    notification, an autonomous-loop sentinel) without any human input.
+
+    Such a turn ends with its own ``idle_prompt``, so an idle that belongs
+    to one is not Claude asking the human anything.  Tool results are
+    ``"type":"user"`` records too but belong to the assistant's turn and
+    never start one, so they are not wakeups.
+    """
+    if not isinstance(rec, dict) or rec.get("type") != "user":
+        return False
+    if _is_tool_result_record(rec):
+        return False
+    text = _unwrap_system_reminder(_record_text(rec))
+    if text is None:
+        return False
+    return text in _NON_TASK_SENTINELS or text.startswith(_WAKEUP_TEXT_PREFIXES)
+
+
 def _record_epoch(rec: dict) -> float | None:
     """The record's ISO ``timestamp`` as epoch seconds, or None."""
     from datetime import datetime
@@ -616,13 +640,17 @@ class HumanResponseWatch:
     while the question is unanswered.  :attr:`assistant_after_answer` says
     whether Claude has produced any assistant record *after* that answer, so
     a repeated idle for the turn just answered is distinguishable from a new
-    turn.
+    turn.  :attr:`wakeup_turn` says the newest non-tool-result user record is
+    a harness wakeup (a ``/loop`` tick, a task notification): the assistant
+    turn it started is not a response to the human, so its idle is not a
+    question either.
     """
 
     def __init__(self, transcript_path: str | Path | None, verdict: str):
         self._transcript_path = transcript_path
         self.answered_at: float | None = None
         self.assistant_after_answer = False
+        self.wakeup_turn = False
         self._offset = 0
         self._partial = b""
         path = _resolve_transcript_path(transcript_path)
@@ -639,6 +667,7 @@ class HumanResponseWatch:
         # can't be found, the latest human prompt may be the iteration's own
         # review prompt, so stay unanswered rather than guess.
         answer = None
+        newest_user_seen = False
         for line in reversed(data[:last_nl + 1].decode(errors="replace").splitlines()):
             if _ASSISTANT_RE.search(line):
                 if verdict in line and _assistant_text_has_verdict(line, verdict):
@@ -649,17 +678,19 @@ class HumanResponseWatch:
                 # the latest answer — Claude has spoken since the human did.
                 if answer is None:
                     self.assistant_after_answer = True
-            elif answer is None and _USER_RE.search(line):
-                answer = self._answer_epoch(line)
+            elif _USER_RE.search(line):
+                rec = _parse_record(line)
+                if (not newest_user_seen and rec is not None
+                        and not _is_tool_result_record(rec)):
+                    newest_user_seen = True
+                    self.wakeup_turn = is_wakeup_record(rec)
+                if answer is None:
+                    answer = self._answer_epoch(rec)
 
     @staticmethod
-    def _answer_epoch(line: str) -> float | None:
-        """Epoch time of *line* when it is a human prompt, else None."""
-        try:
-            rec = json.loads(line)
-        except json.JSONDecodeError:
-            return None
-        if not is_human_prompt_record(rec):
+    def _answer_epoch(rec: dict | None) -> float | None:
+        """Epoch time of *rec* when it is a human prompt, else None."""
+        if rec is None or not is_human_prompt_record(rec):
             return None
         at = _record_epoch(rec)
         if at is None:
@@ -686,10 +717,14 @@ class HumanResponseWatch:
         self._partial = data[last_nl + 1:]
         for line in data[:last_nl + 1].decode(errors="replace").splitlines():
             if _USER_RE.search(line):
-                at = self._answer_epoch(line)
+                rec = _parse_record(line)
+                if rec is not None and not _is_tool_result_record(rec):
+                    self.wakeup_turn = is_wakeup_record(rec)
+                at = self._answer_epoch(rec)
                 if at is not None:
                     self.answered_at = max(self.answered_at or 0.0, at)
                     self.assistant_after_answer = False
+                    self.wakeup_turn = False
             elif _ASSISTANT_RE.search(line) and self.answered_at is not None:
                 self.assistant_after_answer = True
         return self.answered_at

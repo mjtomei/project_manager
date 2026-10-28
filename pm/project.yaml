@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T17:40:19.925786+00:00'
+  updated_at: '2026-10-28T18:06:12.122506+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36937,6 +36937,37 @@ prs:
       shows a pre-adopt wait), not a wait-state defect — left to the QA gate.'
     created_at: '2026-10-28T17:40:19Z'
     last_edited: '2026-10-28T17:40:19Z'
+  - id: note-59bf6ca
+    text: 'review baa8 i2 (fix + handoff). Found and fixed a real false wait the PR
+      itself introduced: after the human answers, a harness wakeup turn (# /loop tick,
+      scheduled firing, <task-notification>) can start and finish an assistant turn
+      of its own with an idle_prompt and no verdict. The waiter treated that idle
+      as a prose question, re-armed, and published `waiting / review INPUT_REQUIRED
+      (iteration N)` while the reviewer was working — the false-wait class this PR
+      fixes, and what QA spec E9 forbids. Fix: verdict_transcript.is_wakeup_record
+      + HumanResponseWatch.wakeup_turn (newest non-tool_result user record); the prose
+      branch now keeps input_required=false for a wakeup turn. _NON_TASK_TEXT_PREFIXES
+      is now _WAKEUP_TEXT_PREFIXES + (interrupt/nudge) — same list, no duplicate literals.
+      Regression test_wakeup_turn_after_the_answer_does_not_rearm_the_wait fails pre-fix
+      (verified by removing the guard) and passes after; plus two watch-level tests.
+      Also: run_review_loop_sync now sets input_required=false and _adopting_wait
+      before running=True, so a concurrent status reader can never see the resumed
+      loop running with the restored flags. impl.md R3 + an edge-case bullet updated.
+      Verification: 360 related tests pass; full suite 4033 passed, 1 skipped, 55
+      failed/36 errors — the same documented git-env families (sync_merge_integrity
+      19, merge_publish 17+19, signoff_integration 3), none in touched files. Remaining,
+      NOT a code change: QA S16 story 4 marker Then (⏸1 never renders before the adopt
+      log line; ⟳1 during the check) is a stale-frame artifact — the pre-restart frame
+      stays on screen because consume_breadcrumb mount blocks the event loop, so no
+      post-mount paint can precede the adopt check. Both committed specs support current
+      behavior (impl.md documents the residual; qa.md R7 asks only that the pane is
+      kept, the question stays on screen, status shows the wait, and the iteration
+      does not advance) and the status path never reports a pre-adopt wait. Recommend
+      refining that Then to "no post-mount paint renders ⏸ before the adopt line"
+      rather than deferring the resume start (needs its own regressions + the S1-S3
+      re-run).'
+    created_at: '2026-10-28T18:06:12Z'
+    last_edited: '2026-10-28T18:06:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high

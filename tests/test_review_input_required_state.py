@@ -340,6 +340,38 @@ class TestHumanResponseWatch:
         w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
         assert w.answered_at is not None and w.assistant_after_answer is False
 
+    def test_wakeup_turn_tracking(self, tmp_path):
+        """A harness wakeup starts a turn of its own; a human prompt, or a
+        tool result (part of the assistant's turn), does not."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        assert w.wakeup_turn is False
+        pane.user("use option A")
+        w.poll()
+        assert w.wakeup_turn is False
+        pane.tool("ran the tests")
+        w.poll()
+        assert w.wakeup_turn is False, "a tool result does not start a turn"
+        pane.harness("# /loop tick\ncontinue")
+        w.poll()
+        assert w.wakeup_turn is True
+        pane.user("and the other file")
+        w.poll()
+        assert w.wakeup_turn is False
+
+    def test_wakeup_turn_found_by_back_scan(self, tmp_path):
+        """After a restart: answer -> wakeup turn -> assistant reply with no
+        verdict.  The turn is the wakeup's, not a question to the human."""
+        pane = Pane(tmp_path, 1)
+        pane.verdict("INPUT_REQUIRED")
+        pane.user("use option A")
+        pane.harness("# /loop tick\ncontinue")
+        pane.say("Nothing new to do.")
+        w = HumanResponseWatch(pane.link, "INPUT_REQUIRED")
+        assert w.answered_at is not None and w.assistant_after_answer is True
+        assert w.wakeup_turn is True
+
 
 # ---------------------------------------------------------------------------
 # Live loop: INPUT_REQUIRED → answer → follow-up → NEEDS_WORK → next iteration
@@ -569,6 +601,45 @@ class TestLiveFlow:
                 time.sleep(0.05)
             assert state.input_required is False, (
                 "a refreshed idle for the answered prose turn re-armed the wait")
+            panes[1].verdict("PASS")
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_wakeup_turn_after_the_answer_does_not_rearm_the_wait(self, env):
+        """A non-task wakeup turn that ends before the follow-up verdict is
+        not a question: the wait must not re-arm for its idle.
+
+        A ``/loop`` tick (or task notification) starts an assistant turn of
+        its own.  Answering, then letting such a turn idle with no verdict,
+        used to flip the status back to ``waiting / review INPUT_REQUIRED``
+        — a wait nobody asked for.
+        """
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        t, mock, p = _start(state, tdir, {1: it1})
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            panes[1].user("use option A")
+            _until(lambda: not state.input_required, what="answer clears wait")
+            panes[1].harness("# /loop tick\ncontinue")
+            panes[1].say("Nothing new to do.")
+            panes[1].idle()
+            time.sleep(0.3)
+            assert state.input_required is False, (
+                "a wakeup turn's idle re-armed the wait")
+            assert _status(state)[:2] == (
+                "running",
+                "review iteration 1 (INPUT_REQUIRED answered; follow-up running)")
+            assert mock.call_count == 1
             panes[1].verdict("PASS")
             t.join(5)
             assert state.latest_verdict == "PASS"

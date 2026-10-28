@@ -68,7 +68,11 @@ R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
     It becomes True again if the reviewer goes idle (idle_prompt hook newer than
     that prompt) without a PASS/NEEDS_WORK verdict.  That includes a genuine
     repeated INPUT_REQUIRED, or an idle turn with no verdict, which is a question
-    in prose.
+    in prose.  It does *not* include an idle for a turn a harness wakeup started
+    (a `/loop` tick, a scheduled firing, a `<task-notification>`): those turns
+    have their own `idle_prompt` but nobody asked the human anything, so the wait
+    must not re-arm for them (`HumanResponseWatch.wakeup_turn`,
+    `verdict_transcript.is_wakeup_record`; QA spec E9).
 
 R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     with `"type":"user"` whose `message.content` is a string or contains a
@@ -197,6 +201,18 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   record *after* the answer makes an idle a new turn; otherwise it is ignored
   and the wait stays answered.  Without this, each refresh re-recorded
   INPUT_REQUIRED and `_await_input_resolution` spun on it.  (Added in review i2.)
+- A wakeup turn that ends before the follow-up verdict: after the human answers,
+  a `/loop` tick (or scheduled firing / task notification) can start and finish
+  an assistant turn of its own, with an `idle_prompt` and no verdict.  That idle
+  is not a prose question — nobody asked the human anything — so the wait must
+  not re-arm for it (QA spec E9).  `HumanResponseWatch.wakeup_turn` tracks
+  whether the newest non-`tool_result` user record is a wakeup
+  (`is_wakeup_record`), so the answer keeps reading as
+  `running / … (INPUT_REQUIRED answered; follow-up running)`.  Without this the
+  status flipped back to `waiting / review INPUT_REQUIRED (iteration N)` while
+  the reviewer was working — the same false wait this PR fixes.  (Added in
+  review baa8 i2; regression
+  `test_wakeup_turn_after_the_answer_does_not_rearm_the_wait`.)
 - Answer and follow-up verdict both land during a TUI restart gap: Claude
   won't idle again, so the resumed waiter starts from the current idle event
   (not "newer than now") and accepts it when it is newer than the answer.
