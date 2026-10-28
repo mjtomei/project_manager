@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T10:25:20.467537+00:00'
+  updated_at: '2026-10-28T12:32:00.990942+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36589,6 +36589,31 @@ prs:
       for QA S1-S3+ on the integrated code, then sign-off.'
     created_at: '2026-10-28T10:25:20Z'
     last_edited: '2026-10-28T10:25:20Z'
+  - id: note-586f561
+    text: 'QA scenario 8 (repeated questions / stale idles / non-human records): PASS
+      on the integrated code (f31675d1), live TUI + interactive stand-in. Noise immunity:
+      8 harness records (system-reminder-only, <task-notification>, # /loop tick,
+      scheduled firing, [Request interrupted by user], qa_loop nudge, assistant tool_use
+      + tool_result containing PASS/yes/INPUT_REQUIRED, empty user record) each followed
+      by an idle left the run waiting on iteration 1 with the same review fields/window
+      (@3), red ⏸1, WAITING popup, one notice frame trigger, zero "follow-up verdict="
+      records and no relaunch. Answer -> running in ~1.5 s and stayed running across
+      6 samples of the stand-in 12 s stale-idle window (marker ⟳1). Second genuine
+      INPUT_REQUIRED re-raised the same iteration wait on the same pane with a new
+      notice trigger and exactly one follow-up verdict=INPUT_REQUIRED; verdict-less
+      prose question waited again with verdict still INPUT_REQUIRED; answer+NEEDS_WORK
+      in one read advanced to iteration 2 (new window @4, count 2); PASS followed
+      by a /loop tick turn recorded PASS and stopped (⟳2✓, "stopping — verdict=PASS",
+      no iteration 3, no NEEDS_WORK). Evidence: /pm-captures/scenarios/8/tui-input-required/
+      (cast+mp4+frames, per-step status JSON/text, evidence.txt). tests/test_review_input_required_state.py
+      + test_verdict_transcript.py: 78 passed. One scenario-text nit: `pm log grep
+      "follow-up verdict"` also matches the pre-noise "INPUT_REQUIRED — polling for
+      follow-up verdict" line logged when the wait starts; the invariant (no follow-up
+      verdict recorded) holds (zero "follow-up verdict=" records). Optional E6 (second
+      human line before any assistant turn) not driven; not required by the scenario.
+      (2026-10-28T12:35:00Z)'
+    created_at: '2026-10-28T12:32:00Z'
+    last_edited: '2026-10-28T12:32:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
