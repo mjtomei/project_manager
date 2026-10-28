@@ -727,7 +727,12 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
     """
     import fcntl
 
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` here, which every window
+    # launch — start / review / sign-off — calls on the way to provisioning),
+    # so it reads as absent and is re-provisioned like a missing one.
     workdir = pr_entry.get("workdir")
+    workdir = workdir if isinstance(workdir, str) and workdir else None
     if workdir and Path(workdir).exists():
         return workdir
 
@@ -747,6 +752,8 @@ def _ensure_workdir(data: dict, pr_entry: dict, root: Path) -> str | None:
             fresh_wd = (fresh_pr or {}).get("workdir")
         except Exception:
             fresh_wd = None
+        # Same hand-edited-state rule as the recorded value above.
+        fresh_wd = fresh_wd if isinstance(fresh_wd, str) and fresh_wd else None
         if fresh_wd and Path(fresh_wd).exists():
             pr_entry["workdir"] = fresh_wd
             return fresh_wd

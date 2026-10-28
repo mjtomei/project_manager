@@ -122,8 +122,16 @@ def signoff_window_name(pr_entry: dict) -> str:
 # its sha matches the current HEAD (no code change since).
 
 def head_sha(workdir: str | None) -> str | None:
-    """Return the git HEAD sha of *workdir*, or None if unavailable."""
-    if not workdir or not Path(workdir).exists():
+    """Return the git HEAD sha of *workdir*, or None if unavailable.
+
+    ``project.yaml`` is hand-editable state: a ``workdir`` that is not a path
+    string is not a checkout (``Path(5)`` raises ``TypeError``), so it reads
+    as absent — every caller passes ``pr["workdir"]`` straight in (the driver
+    tick, the TUI's auto-merge, ``pm pr signoff``), and one malformed value
+    must not take those down.
+    """
+    if not isinstance(workdir, str) or not workdir \
+            or not Path(workdir).exists():
         return None
     from pm_core import git_ops
     r = git_ops.run_git("rev-parse", "HEAD", cwd=workdir, check=False)
@@ -853,7 +861,12 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         print(f"Sign-off window: tmux session '{pm_session}' not found.")
         return
 
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` out of the launch, before the
+    # window could be created), so it reads as absent and takes the same
+    # provisioning path as a missing one.
     workdir = pr_entry.get("workdir")
+    workdir = workdir if isinstance(workdir, str) else None
     if not workdir or not Path(workdir).exists():
         root = state_root()
         workdir = _ensure_workdir(data, pr_entry, root)

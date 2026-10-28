@@ -2986,6 +2986,11 @@ def _recover_completed_merge(data: dict, root: Path, pr_entry: dict,
     branch = pr_entry.get("branch", "")
     repo_dir = str(_resolve_repo_dir(root, data))
     workdir = pr_entry.get("workdir")
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` out of the recovery path,
+    # which runs before the merge gate), so it reads as absent and the
+    # revision is resolved from the main repo instead.
+    workdir = workdir if isinstance(workdir, str) and workdir else None
     if not workdir or not Path(workdir).exists():
         workdir = None
     # The PR's revision: the workdir HEAD, else the branch in the main repo.

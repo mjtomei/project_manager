@@ -2642,6 +2642,37 @@ def test_a_malformed_signoff_record_does_not_crash_the_tui():
         review_loop_ui._maybe_auto_merge(_App(), PR)  # no AttributeError
 
 
+def test_a_malformed_signoff_record_does_not_break_the_status_snapshot():
+    """``collect_status_inputs`` runs on the TUI event loop (runs popup).
+
+    It read ``pr["signoff"]`` with ``.get`` on whatever the field held, so a
+    hand-edited non-mapping value raised ``AttributeError`` out of the status
+    snapshot and the popup showed "status failed" instead of the run.  It
+    reads as absent now — the same contract the tech-tree signature and the
+    auto-merge path follow.
+    """
+    from pm_core.tui import auto_start
+
+    class _App:
+        _data = {"project": {}, "prs": [
+            {"id": PR, "status": "sign_off", "signoff": 5,
+             "depends_on": []}]}
+        _auto_start = True
+        _auto_start_all = True
+        _auto_start_run_id = None
+        _auto_start_targets: dict = {}
+        _session_name = None
+        _review_loops: dict = {}
+        _qa_loops: dict = {}
+        _pane_idle_tracker = None
+        _pending_merge_prs: set = set()
+
+    inp = auto_start.collect_status_inputs(_App())
+    assert PR in inp["signoff"]
+    assert inp["signoff"][PR]["verdict"] is None
+    assert inp["signoff"][PR]["fresh"] is False
+
+
 def test_valid_for_reads_a_malformed_record_as_absent():
     """The public helper follows the same contract as its callers."""
     assert integration.valid_for(5, "a" * 40) is False
@@ -2677,6 +2708,36 @@ def test_a_malformed_dependency_list_does_not_fail_the_behaviour_summary(
         "/tmp", "a" * 40, "b" * 40, "pm/project.yaml",
         pr={"id": PR, "depends_on": ["pr-1"], "plan": None})
     assert any("skip_qa" in c for c in out), out
+
+
+def test_a_non_string_workdir_reads_as_absent_on_every_signoff_surface(
+        tmp_path):
+    """A hand-edited ``workdir`` that is not a path string is not a checkout.
+
+    ``project.yaml`` is hand-editable state and every sign-off surface passes
+    ``pr["workdir"]`` straight in: ``head_sha`` (the driver tick, the TUI's
+    auto-merge, ``pm pr signoff``), the sign-off launch, the integration check
+    and the target-repo resolution (``pm pr merge``).  ``Path(5)`` raises
+    ``TypeError``, so one malformed value took the tick/launch down instead of
+    reading as "no workdir".  A string workdir still works.
+    """
+    assert signoff.head_sha(5) is None
+    assert signoff.head_sha({"a": 1}) is None
+    assert signoff.head_sha(["not", "a", "path"]) is None
+    assert signoff.head_sha(None) is None
+    assert signoff.head_sha(str(tmp_path)) is None  # real path, no git repo
+
+    data = {"project": {"name": "p", "repo": "https://example.invalid/r"}}
+    for bad in (5, {"a": 1}, ["x"]):
+        pr = {"id": PR, "workdir": bad}
+        rec = integration.run_check(data, pr, tmp_path)
+        assert rec["status"] == integration.ERROR, rec
+        assert rec["error"] == "no PR workdir", rec
+        # ``target_for`` is on the approval path (``pm pr merge``); a
+        # malformed workdir must not raise there either.
+        target, branch = integration.target_for(data, pr, tmp_path)
+        assert target == "https://example.invalid/r"
+        assert branch == "master"
 
 
 def test_a_carried_record_keeps_the_bounded_totals():

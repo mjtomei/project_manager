@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-727073f
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T03:01:52.498953+00:00'
+  updated_at: '2026-10-28T04:35:50.319408+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37309,6 +37309,38 @@ prs:
       5 new tests, each failing on the pre-fix code.'
     created_at: '2026-10-28T03:01:52Z'
     last_edited: '2026-10-28T03:01:52Z'
+  - id: note-b81b1d6
+    text: 'review-loop 4440 i3: a hand-edited non-string `workdir` is not a path.
+      `project.yaml` is hand-editable state and every sign-off surface passed `pr["workdir"]`
+      straight into `Path(...)`, so one bad value raised TypeError instead of reading
+      as "no workdir": `signoff.head_sha` (the auto-sequence driver tick, the TUI
+      auto-merge path and `pm pr signoff`), the sign-off launch (it crashed before
+      the window was created), `_ensure_workdir` (the shared provisioning helper every
+      window launch reaches — without the guard the launch fix would have crashed
+      one call deeper, on both the recorded and the freshly re-read value), `integration.run_check`
+      (it promises a `status: error` record, never a traceback), `integration.target_for`
+      (on the `pm pr merge` approval path), the merge recovery path (`pm pr merge
+      --propagation-only`, which runs before the gate), and `spec_gen.get_spec` plus
+      the spec generator cwd (every prompt builder inlines the specs through it, so
+      the impl/review/sign-off/QA-planner window could not launch). Each reads a non-string
+      workdir as absent; a string workdir still supplies the workdir spec copy (guard
+      test). 3 new tests, two fail on the pre-fix source (verified by reverting it).
+      The remaining call sites outside this feature (pm pr start/cd/review/done, the
+      review and merge window launches, container start, the push proxy) are filed
+      as pr-727073f.'
+    created_at: '2026-10-28T04:31:45Z'
+    last_edited: '2026-10-28T04:31:45Z'
+  - id: note-10b30fb
+    text: 'review-loop 4440 i3 (second fix, same hand-edited-state contract): `auto_start.collect_status_inputs`
+      read `pr["signoff"]` with `(pr.get("signoff") or {}).get(...)`, so a hand-edited
+      non-mapping value raised AttributeError out of the auto-start status snapshot
+      — which runs on the TUI event loop, and whose only callers swallow it, so the
+      runs popup showed "status failed" and the status-bar reply carried no status.
+      It now reads a non-mapping record as absent (verdict None, not fresh), like
+      the tech-tree layout signature and the auto-merge path (spec R9 item 14 updated).
+      New test fails on the pre-fix source (verified by reverting it).'
+    created_at: '2026-10-28T04:35:50Z'
+    last_edited: '2026-10-28T04:35:50Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
@@ -37676,6 +37708,58 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:54:10.204577+00:00'
   updated_at: '2026-10-28T03:54:10.204577+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-727073f
+  plan: bugs
+  title: 'Bug: a hand-edited non-string PR `workdir` crashes pm commands with an uncaught
+    TypeError'
+  branch: pm/pr-727073f-bug-a-hand-edited-non-string-pr-workdir-crashes-pm
+  status: pending
+  depends_on: []
+  description: 'project.yaml is hand-editable state, but `workdir` is read as a path
+    without a type check. A value YAML parses as a non-string (e.g. `workdir: 5`,
+    or a hand-edit that turns the line into a mapping/list) makes `Path(workdir)`
+    raise TypeError and the command dies with a traceback.
+
+
+    Remaining unguarded sites (the sign-off/merge surfaces were fixed in pr-5cee3d5;
+    the shared `_ensure_workdir` provisioning helper, `integration.run_check`/`target_for`,
+    `signoff.head_sha` and `spec_gen` read a non-string workdir as absent there):
+
+    - pm_core/cli/pr.py:1334 — `pm pr start` (`Path(existing_workdir).exists()`)
+
+    - pm_core/cli/pr.py:567 — `pm pr cd`
+
+    - pm_core/cli/pr.py:1594 — the review window launch
+
+    - pm_core/cli/pr.py:1893 — `pm pr review` GitHub draft upgrade
+
+    - pm_core/cli/pr.py:2341 — the merge-resolution window launch
+
+    - pm_core/cli/pr.py:3908 — `pm pr done` workdir cleanup
+
+    - pm_core/container.py:1106 — container start (`workdir=Path(workdir)`)
+
+    - pm_core/push_proxy.py:68 — relative-path resolution
+
+
+    Repro: set a PR entry to `workdir: 5` in project.yaml and run `pm pr cd <id>`
+    (or `pm pr start`), then `pm pr review`/`pm pr merge`: TypeError: expected str,
+    bytes or os.PathLike object, not int.
+
+
+    Fix shape: read a non-string workdir as absent everywhere (treat it like a missing
+    one — re-provision or refuse with the existing "no workdir" message), or normalise
+    it once in `store.load` (see pr-a187153, which validates the prs/plans/project
+    shape but not per-PR fields).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T04:29:24.986760+00:00'
+  updated_at: '2026-10-28T04:29:24.986760+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

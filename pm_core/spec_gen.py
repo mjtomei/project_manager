@@ -85,8 +85,13 @@ def get_spec(pr: dict, phase: str) -> str | None:
     pr_id = pr.get("id", "")
 
     # 1. Workdir — most up-to-date copy while the PR is in flight.
+    # Hand-edited state: only a path string is a checkout (``Path(5)`` raised
+    # ``TypeError`` out of ``format_spec_for_prompt``, which every prompt
+    # builder calls — the sign-off/review/QA window could not launch), so a
+    # malformed value reads as "no workdir copy" and the canonical spec is
+    # used.
     workdir = pr.get("workdir")
-    if workdir:
+    if isinstance(workdir, str) and workdir:
         p = Path(workdir) / "pm" / "specs" / pr_id / f"{phase}.md"
         if p.exists():
             content = p.read_text().strip()
@@ -312,7 +317,11 @@ def generate_spec(data: dict, pr_id: str, phase: str,
     _log.info("spec_gen: generating %s spec for %s (mode=%s)", phase, pr_id, mode)
 
     prompt = _build_spec_prompt(data, pr, phase)
+    # Hand-edited state: a non-string ``workdir`` is not a cwd (passing it to
+    # the subprocess raised ``TypeError`` out of the spec generation), so it
+    # reads as absent and the session runs in the current directory.
     workdir = pr.get("workdir")
+    workdir = workdir if isinstance(workdir, str) and workdir else None
 
     click.echo(f"Generating {phase} spec for {pr_id}...")
     spec_text = launch_claude_print(prompt, cwd=workdir,

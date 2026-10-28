@@ -703,8 +703,11 @@ tests):
     (and the digest, computed over the compact form, changes with it, so an
     approval bound to the clean form stops matching) — and
     `return_awaiting`/`open_return` still answer. The TUI readers follow the
-    same contract: the tech-tree layout signature (run on every render) and
-    the auto-merge path read a non-mapping `signoff` as absent, and a
+    same contract: the tech-tree layout signature (run on every render), the
+    auto-merge path and the auto-start status snapshot
+    (`auto_start.collect_status_inputs`, also run on the TUI event loop — its
+    runs popup showed "status failed" for a scalar `signoff`) read a
+    non-mapping `signoff` as absent, and a
     malformed `depends_on` (a scalar where a list belongs) is no list of ids
     there or in the behaviour summary. `integration.valid_for` reads a
     non-mapping record as absent too. A
@@ -806,7 +809,8 @@ tests):
     return block's marker reports the record's remainder and not just the
     bounded copy's.
     The same hand-edited-state contract covers the PR's `notes` / `depends_on`
-    / `description` fields, read *and written*: `prompt_gen._format_pr_notes`
+    / `description` / `workdir` fields, read *and written*:
+    `prompt_gen._format_pr_notes`
     and `_note_mappings` skip a member that is not a mapping (and a `notes`
     value that is not a list) instead of raising `AttributeError` out of every
     prompt builder (a note whose `text` is a non-string renders through `str`
@@ -819,9 +823,22 @@ tests):
     builders strip (a non-string `description` has no `.strip()`, so one bad
     value raised `AttributeError` out of the impl / review / sign-off / QA
     planner prompts and `spec_gen._build_spec_prompt`, and the window could
-    not launch), while the note commands (`pm pr note add` / `edit` /
-    `delete` — the canonical handoff channel) plus `_apply_pr_edit` treat a
-    malformed member as "not a note" instead of raising `TypeError` /
+    not launch).  The same rule covers `workdir`, which every sign-off surface
+    passes straight in: a value that is not a path string is not a checkout
+    (`Path(5)` raised `TypeError`), so it reads as absent in
+    `signoff.head_sha` (the driver tick, the TUI's auto-merge, `pm pr
+    signoff`), the sign-off launch (which provisions a workdir the way it does
+    for a missing one), `_ensure_workdir` (the shared provisioning helper every
+    window launch reaches — without it the launch's own guard would crash one
+    call deeper, on the recorded value and on the freshly re-read one),
+    `integration.run_check` (which promises a `status: error` record, never a
+    traceback), `integration.target_for` (on the `pm pr merge` approval path),
+    the merge recovery path (`pm pr merge --propagation-only`, which runs
+    before the gate), `spec_gen.get_spec` (every prompt builder inlines the
+    specs through it) and the spec generator's subprocess cwd, while a string
+    workdir still supplies the workdir copy of a spec.  The note commands (`pm pr note add` /
+    `edit` / `delete` — the canonical handoff channel) plus `_apply_pr_edit`
+    treat a malformed member as "not a note" instead of raising `TypeError` /
     `KeyError` and losing the write: they preserve the malformed member rather
     than dropping hand-written state, and repair a scalar `notes` value into a
     real list.  `_apply_pr_edit` preserves the same way a note whose `text` is

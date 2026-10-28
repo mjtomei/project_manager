@@ -363,3 +363,17 @@ class TestEnsureWorkdir:
         data = {"project": {"name": "test"}}
         result = _ensure_workdir(data, pr_entry, tmp_path)
         assert result is None
+
+    def test_a_non_string_workdir_is_reprovisioned_not_crashed(self, tmp_path):
+        """A hand-edited ``workdir`` that is not a path string is not a checkout.
+
+        Every window launch (start / review / sign-off) reaches provisioning
+        through this helper, and ``Path(5)`` raised ``TypeError`` there — so a
+        malformed value crashed the launch instead of being re-cloned like a
+        missing workdir.  (No branch here, so the re-provisioning itself
+        declines without cloning.)
+        """
+        for bad in (5, {"a": 1}, ["x"]):
+            pr_entry = {"id": "pr-001", "workdir": bad}
+            data = {"project": {"name": "test"}}
+            assert _ensure_workdir(data, pr_entry, tmp_path) is None

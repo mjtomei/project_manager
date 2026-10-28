@@ -173,8 +173,12 @@ def target_for(data: dict, pr: dict, root: Path | None = None) -> tuple[str, str
             return origin, base_branch
         return str(repo_dir), base_branch
     workdir = pr.get("workdir")
+    # Hand-edited state: only a path string is a checkout to read the origin
+    # from (``Path(5)`` raises; ``pm pr merge`` calls this on the approval
+    # path, where the target repo decides what gets published).
     url = (_out(_git("remote", "get-url", "origin", cwd=workdir))
-           if workdir and Path(workdir).is_dir() else "")
+           if isinstance(workdir, str) and workdir
+           and Path(workdir).is_dir() else "")
     return (url or project.get("repo", "")), base_branch
 
 
@@ -1358,7 +1362,11 @@ def run_check(data: dict, pr: dict, root: Path | None = None,
     """
     record: dict = {"checked_at": _now()}
     workdir = pr.get("workdir")
-    if not workdir or not Path(workdir).is_dir():
+    # Hand-edited state: a ``workdir`` that is not a path string is not a
+    # checkout (``Path(5)`` raised ``TypeError`` out of the check — this
+    # function promises a ``status: error`` record, never a traceback).
+    if not isinstance(workdir, str) or not workdir \
+            or not Path(workdir).is_dir():
         workdir = _cwd_checkout_of(pr)
     try:
         # The target comes from the checkout actually used (its origin), so

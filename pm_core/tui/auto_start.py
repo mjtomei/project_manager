@@ -1152,7 +1152,13 @@ def collect_status_inputs(app) -> dict:
                      and (qa_loops.get(pr_id) or {}).get("verdict") == "PASS")
         if qa_passed or status == "sign_off" or pr_id in pending_merge:
             from pm_core import signoff as _signoff
-            rec = pr.get("signoff") or {}
+            # Hand-edited state: a non-mapping ``signoff`` value is no record
+            # (``(5 or {}).get`` raised ``AttributeError`` out of this status
+            # snapshot, which runs on the TUI event loop — the runs popup then
+            # showed "status failed").  Read as absent, like the tech-tree
+            # signature and the auto-merge path.
+            rec = pr.get("signoff")
+            rec = rec if isinstance(rec, dict) else {}
             sha = _signoff.head_sha(pr.get("workdir"))
             fresh = _signoff.fresh_recorded_verdict(pr, sha)
             signoff_info[pr_id] = {"verdict": rec.get("verdict"),

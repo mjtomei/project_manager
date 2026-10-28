@@ -1552,6 +1552,35 @@ class TestHandEditedPrText:
         # Rendered through ``str``, like the full renderer renders it.
         assert "- 7 " in out
 
+    def test_a_non_string_workdir_does_not_crash_the_prompt_builders(
+            self, tmp_path):
+        """A ``workdir`` that is not a path string is not a checkout.
+
+        Every builder inlines the specs through
+        ``spec_gen.format_spec_for_prompt`` → ``get_spec``, which built
+        ``Path(workdir)`` from the field: one hand-edited value raised
+        ``TypeError`` out of the impl / review / sign-off / QA-planner
+        prompts, so the session window could not launch at all.  It now reads
+        as absent (the canonical spec is used instead).
+        """
+        pr = _pr(workdir=20260101)
+        data = _data(pr)
+        for build in (prompt_gen.generate_prompt,
+                      prompt_gen.generate_review_prompt,
+                      prompt_gen.generate_signoff_prompt,
+                      prompt_gen.generate_qa_planner_prompt):
+            assert build(data, "pr-x")
+        assert spec_gen.get_spec(pr, "impl") is None
+
+    def test_a_string_workdir_still_supplies_the_workdir_spec(self, tmp_path):
+        """The guard reads a malformed value as absent — not every value."""
+        workdir = tmp_path / "wd"
+        (workdir / "pm" / "specs" / "pr-x").mkdir(parents=True)
+        (workdir / "pm" / "specs" / "pr-x" / "impl.md").write_text(
+            "workdir spec\n")
+        pr = _pr(workdir=str(workdir))
+        assert spec_gen.get_spec(pr, "impl") == "workdir spec"
+
 
 # ---------------------------------------------------------------------------
 # launcher guard
