@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T06:35:04.715046+00:00'
+  updated_at: '2026-10-28T07:21:37.625878+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37404,6 +37404,22 @@ prs:
       suite: 4045 passed, 1 skipped. Spec R9 item 14 updated.'
     created_at: '2026-10-28T06:35:04Z'
     last_edited: '2026-10-28T06:35:04Z'
+  - id: note-59aa906
+    text: 'review-loop 2572 i1: fixed a duplicate-note bug in `_apply_pr_edit`. A
+      note the edit template cannot fully represent (multi-line text, a text ending
+      in a `# <timestamp>`-looking suffix, a continuation line that looks like a bullet)
+      is kept verbatim, but its rendered bullet still parses back as one or more notes
+      ("fragments"). The rebuild only matched editable notes, so a save that edited
+      any other note created a new note for each fragment — editing one note duplicated
+      the kept member content (e.g. `alpha\nbeta` gained a separate `alpha` note;
+      `note  # <ts>` gained a truncated `note`). The reconciliation now collects those
+      fragments (every bullet line that parses back as a note) and consumes a matching
+      parsed line, with an editable note match taking precedence. New test in test_pr_notes.py
+      fails on the pre-fix code. No integration/sign-off code change: the resolver,
+      carry-forward, merge gate and prompt surfaces were re-reviewed and found sound.
+      Full suite 4046 passed, 1 skipped.'
+    created_at: '2026-10-28T07:21:37Z'
+    last_edited: '2026-10-28T07:21:37Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
