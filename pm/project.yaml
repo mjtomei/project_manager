@@ -14508,7 +14508,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-27T23:49:26.109779+00:00'
+  updated_at: '2026-10-28T00:04:59.416722+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15258,6 +15258,44 @@ prs:
       nested_podman.'
     created_at: '2026-10-27T23:49:26Z'
     last_edited: '2026-10-27T23:49:26Z'
+  - id: note-d558aed
+    text: 'Refiner note (QA scenario 4, 2026-10-27): the drafted recovery step ("reopen
+      the implementation session") cannot be driven by closing the impl window and
+      re-running `pm pr start`. build_exec_cmd wraps the impl pane in `bash -c "trap
+      ...; podman exec -it <ctr> ..."` with cleanup=True, so when the pane dies the
+      EXIT trap runs `podman rm -f <impl-ctr>` and the container is gone; and while
+      the impl window exists, `pm pr start` short-circuits on `find_window_by_name`
+      and never re-runs create_container. Refined recovery re-runs the same container-start
+      path by starting the review session on the same PR workdir (`pm pr review --fresh
+      <pr>`): same session tag + pr id + realpath(workdir) => same proxy key, so start_push_proxy
+      respawns the socket in the same bind-mounted directory while the impl container
+      keeps running (verify by unchanged container Id/StartedAt). Fixture requirements
+      verified: bare upstream must be addressed via a file:// URL (plain local-path
+      origins are refused by design), the PR entry must be committed on the base branch
+      (pm push then merge pm/sync-* into master, else pm pr start refuses with "not
+      committed on master yet"), and the test tmux session must be started with TMUX
+      unset (or on a private PM_TMUX_SOCKET) so `pm session` does not adopt the outer
+      session.'
+    created_at: '2026-10-27T23:32:33Z'
+    last_edited: '2026-10-27T23:32:33Z'
+  - id: note-cfb7a13
+    text: 'QA S4 (2026-10-28, container mode, nested podman): PASS. All four stories
+      verified against a throwaway project (fixture PR pr-4b110cf) with a file://
+      bare upstream: lost socket -> push exits 1 with "git-proxy: cannot connect:
+      [Errno 2] No such file or directory", upstream unchanged, local-only commit,
+      container id/StartedAt unchanged, mount has no push.sock; pm pr review --fresh
+      (same tag/pr/realpath(workdir)) respawns the socket in the same bind-mounted
+      dir with a new pid and the existing container pushes again; SIGKILLed daemon
+      (stale socket) -> "[Errno 111] Connection refused", then the same heal replaces
+      the stale entry; wrong-branch/--all/--mirror/--tags/--upload-pack/local-path-origin/foreign-workdir
+      requests all rejected with the expected explicit messages and nothing pushed.
+      Regression test test_impl_and_qa_get_distinct_proxies passes at HEAD. Driver
+      caveat for the next run: the in-container git wrapper only intercepts when $1
+      is push/fetch/pull/ls-remote, so `podman exec $CTR git -C /workspace push ...`
+      bypasses the proxy (pre-existing, out of scope) - drive pushes as `podman exec
+      $CTR bash -c "cd /workspace && git push ..."`. Captures: /pm-captures/scenarios/4/{story12-socket-loss-heal,story3-daemon-crash-heal,story4-refusals}.'
+    created_at: '2026-10-28T00:04:59Z'
+    last_edited: '2026-10-28T00:04:59Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
