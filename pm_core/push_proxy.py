@@ -43,6 +43,27 @@ _CONTAINER_SOCKET_DIR = "/run/pm-push-proxy"
 _CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 
 
+# Push options that publish more than the single allowed branch.
+# ``--branches`` is git's alias of ``--all``.
+_BROAD_PUSH_OPTIONS = ("--all", "--branches", "--mirror", "--tags")
+
+
+def _long_option_match(arg: str, options: tuple[str, ...]) -> str | None:
+    """Return the long option in *options* that git would read *arg* as.
+
+    git's option parser accepts any unambiguous prefix of a long option,
+    with or without ``=value``: ``--mir`` is ``--mirror``.  Checking exact
+    spellings only is therefore not enough to keep an option out.  An
+    ambiguous prefix (``--a`` for ``--all``/``--atomic``) also matches —
+    git would refuse it anyway, so treating it as the option fails closed.
+    Short options and the bare ``--`` separator never match.
+    """
+    name = arg.split("=", 1)[0]
+    if len(name) <= 2 or not name.startswith("--"):
+        return None
+    return next((opt for opt in options if opt.startswith(name)), None)
+
+
 def _resolve_local_remote_url(workdir: str, remote: str = "origin") -> str | None:
     """If *remote* in *workdir* points to a local directory, return its path.
 
@@ -276,11 +297,14 @@ class PushProxy:
         if danger:
             return danger
 
-        # Reject broad-push flags that bypass branch restrictions
-        broad_flags = {"--all", "--mirror", "--tags"}
+        # Reject broad-push flags that bypass branch restrictions, in any
+        # spelling git accepts (``--mir``, ``--branches``, ``--tags=x``, …)
         for arg in push_args:
-            if arg in broad_flags:
-                msg = (f"push-proxy: rejected — '{arg}' is not allowed, "
+            matched = _long_option_match(arg, _BROAD_PUSH_OPTIONS)
+            if matched is not None:
+                shown = (arg if arg == matched
+                         else f"{arg} (read by git as {matched})")
+                msg = (f"push-proxy: rejected — '{shown}' is not allowed, "
                        f"only single-branch push to '{self.allowed_branch}'\n")
                 _log.warning("Push rejected: broad flag %s", arg)
                 return {"exit_code": 1, "stdout": "", "stderr": msg}

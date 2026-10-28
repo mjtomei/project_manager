@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
 
+from pm_core.verdict_transcript import VerdictHit
 from pm_core.qa_loop import (
     parse_qa_plan,
     parse_new_mocks_from_plan,
@@ -1508,6 +1509,49 @@ class TestVerifySingleScenario:
         assert passed is False
         assert "cwd" in reason.lower()
 
+    def test_reverification_baselines_before_prompting_the_verifier(
+            self, tmp_path):
+        """pr-8efa789: the re-verification prompts the verifier and only then
+        waits, so the baseline must be snapshotted *before* the prompt — the
+        answer can land during the send/settle window, and a waiter scanning
+        at call time would reject it and block for a second verdict."""
+        import json
+
+        transcript = tmp_path / "verify-s1.jsonl"
+        transcript.write_text("\n".join([
+            json.dumps({"type": "user", "message": {
+                "role": "user", "content": [
+                    {"type": "text", "text": "verify the scenario"}]}}),
+            json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "content": [
+                    {"type": "text", "text": "Reason: first round\nVERIFIED"}]}}),
+        ]) + "\n")
+        scenario = QAScenario(
+            index=1, title="Test", focus="test", steps="steps",
+            window_name="qa-s1", pane_id="%1",
+            verifier_pane_id="%7", verifier_session_id="vsid",
+            verifier_transcript=str(transcript),
+            verifier_cwd=str(tmp_path),
+        )
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   return_value="claude ..."), \
+             patch("pm_core.loop_shared.wait_for_follow_up_verdict",
+                   return_value="Reason: re-checked\nVERIFIED") as mock_wait, \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="VERIFIED"):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir=str(tmp_path),
+                pr_workdir="/tmp/prworkdir",
+            )
+        assert passed is True, reason
+        # The previous round's verdict sits on line 1; anything later is the
+        # answer to the prompt we just sent.
+        assert mock_wait.call_args.kwargs["baseline_line"] == 1
+
 
 class TestVerificationSetting:
     """Tests for _is_verification_enabled global setting."""
@@ -1698,7 +1742,8 @@ class TestScenarioRetryLogic:
                  300,  # 3rd poll: past grace
              ]), \
              patch("pm_core.hook_events.read_event", return_value=fake_event), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript", return_value="PASS"), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
              patch("pm_core.tmux.capture_pane", return_value="PASS"), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
@@ -1810,7 +1855,8 @@ class TestScenarioRetryLogic:
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
              patch("pm_core.hook_events.read_event", return_value=fake_event), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript", return_value="PASS"), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
              patch("pm_core.tmux.capture_pane", return_value="PASS"), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
@@ -1834,6 +1880,86 @@ class TestScenarioRetryLogic:
     def test_max_retries_constant(self):
         from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
         assert _SCENARIO_MAX_RETRIES == 10
+
+
+class TestPollVerdictsAfterLoopWakeup:
+    """pr-8efa789: a /loop wakeup postscript must not hide the verdict."""
+
+    def _write_transcript(self, path):
+        import json
+
+        def assistant(text, uuid=""):
+            rec = {"type": "assistant", "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": text}],
+            }}
+            if uuid:
+                rec["uuid"] = uuid
+                rec["timestamp"] = "2026-05-13T14:00:00.000Z"
+            return json.dumps(rec)
+
+        tick = json.dumps({
+            "type": "user",
+            "isMeta": True,
+            "message": {"role": "user", "content": (
+                "# Autonomous loop tick (dynamic pacing)\n\n"
+                "Run the autonomous check using the loop instructions "
+                "established earlier in this conversation."
+            )},
+        })
+        prompt = json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": (
+                'You are running QA scenario 44: "INPUT_REQUIRED gate"'
+            )},
+        })
+        path.write_text("\n".join([
+            prompt,
+            assistant("Running the steps..."),
+            assistant("Reason: CP4/CP5 could not be exercised\nINPUT_REQUIRED",
+                      uuid="turn-verdict-44"),
+            tick,
+            assistant("Scenario 44 is complete; verdict already submitted as "
+                      "INPUT_REQUIRED with captures pushed. No further work "
+                      "to do — ending the loop.", uuid="turn-postscript-44"),
+        ]) + "\n")
+
+    def test_verdict_and_reason_survive_loop_wakeup(self, tmp_path):
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        transcript = tmp_path / "transcript-s1.jsonl"
+        self._write_transcript(transcript)
+        scenario = QAScenario(
+            index=1, title="Test", focus="t",
+            window_name="qa-test-s1", pane_id="%1",
+            transcript_path=str(transcript), session_id="sid-loop-1",
+        )
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = None  # skip snapshot writes inside the loop
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt",
+                      "timestamp": 1e12, "session_id": scenario.session_id}
+        status_path = tmp_path / "status.json"
+
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic", side_effect=[0, 100]), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False):
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work", status_path, lambda *a: None,
+            )
+
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert state.scenario_verdict_reasons[1] == (
+            "CP4/CP5 could not be exercised"
+        )
+        source = state.scenario_verdict_sources[1]
+        assert source["session_id"] == "sid-loop-1"
+        assert source["turn_id"] == "turn-verdict-44"
+        assert source["pr_id"] == "pr-001"
 
 
 # ---------------------------------------------------------------------------

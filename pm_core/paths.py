@@ -102,18 +102,25 @@ def captures_dir(pr_id: str,
        already exists. ``tag`` is *session_tag* if supplied, else the
        tmux-derived tag, else the cwd-derived tag.
     2. Otherwise the container bind-mount at
-       :data:`CONTAINER_CAPTURES_MOUNT` if it exists (set up by
-       :func:`container.create_container`) and belongs to *pr_id* — the
-       container's :data:`CAPTURES_PR_ENV` names the mounted PR; when it
-       is unset any PR may use the mount.
+       :data:`CONTAINER_CAPTURES_MOUNT` if it exists and belongs to
+       *pr_id*: the container's :data:`CAPTURES_PR_ENV` names the mounted
+       PR, and only a match may use the mount (surrounding whitespace is
+       stripped first, so a trailing newline from a shell export still
+       matches). A missing, empty or different marker fails closed — a
+       throwaway pm project driven inside the container (nested QA runs)
+       must never write its own PRs' captures into the enclosing PR's
+       evidence, and losing a marker-less worker's captures to its
+       container-local home is recoverable where overwriting host
+       evidence is not.
     3. Otherwise create and return the host path.
 
     The ``~/.pm`` path takes precedence so on the host we always land
     in the canonical location; inside a container the host path
     doesn't exist and we fall through to the bind-mount.
 
-    Returns None when no tag can be derived AND the bind-mount isn't
-    present.
+    Returns None when no tag can be derived AND the bind-mount is absent
+    or not owned by *pr_id* (the fail-closed case: never the mount for a
+    PR it doesn't belong to).
     """
     if session_tag is None:
         session_tag = _resolve_session_tag(start_path)
@@ -126,9 +133,10 @@ def captures_dir(pr_id: str,
     # The mount belongs to one PR (PM_CAPTURES_PR, set at container
     # creation). A throwaway pm project driven inside the container
     # (e.g. nested fake-Claude QA runs) must not write its own PRs'
-    # captures into it.
-    mount_pr = os.environ.get(CAPTURES_PR_ENV)
-    if mount.is_dir() and (not mount_pr or mount_pr == pr_id):
+    # captures into it, so an absent/empty/mismatched marker fails
+    # closed instead of granting the mount to any PR.
+    mount_pr = (os.environ.get(CAPTURES_PR_ENV) or "").strip()
+    if mount.is_dir() and mount_pr and mount_pr == pr_id:
         return mount
     if host_path is not None:
         host_path.mkdir(parents=True, exist_ok=True)
