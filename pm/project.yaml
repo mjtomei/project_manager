@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T13:23:06.016257+00:00'
+  updated_at: '2026-10-28T13:50:34.793397+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36655,6 +36655,34 @@ prs:
       43 failed/36 errors all in the documented git-env families.'
     created_at: '2026-10-28T13:23:05Z'
     last_edited: '2026-10-28T13:23:05Z'
+  - id: note-83c4539
+    text: 'review 484e i1 (fix + handoff, 7cb690d7). (1) Real gap closed: `_wait_for_follow_up_verdict`
+      only read the transcript when an `idle_prompt` hook event arrived, so after
+      a restart where the event file no longer held the follow-up idle (lost/overwritten)
+      the resumed loop blocked forever on "follow-up running" even though the PASS/NEEDS_WORK
+      verdict was already in the transcript. It now reads once when the wait starts
+      and returns such a verdict before blocking; at wait start the task scope newest
+      verdict is the INPUT_REQUIRED question, so it can only match a verdict emitted
+      after it. Regression `test_follow_up_verdict_resolves_without_a_hook_event`
+      times out pre-fix (verified) and passes after. (2) impl.md was stale: the breadcrumb
+      bullets still said the saved `input_required` is used for the first paint, which
+      09cadcee removed; documented the adopt gate + pre-wait verdict read and fixed
+      the R7/Background wording. (3) Committed the QA-spec refinement that was left
+      uncommitted in the workdir (R5b + R11 wording; d402f0be) — content matches the
+      QA notes already on this PR. Verification: full suite 4119 passed, 1 skipped,
+      0 failed (/pm-captures/review-a80bde5-484e-i1/full-suite.log); the 4 related
+      files 165 passed. Merge integrity re-checked: 509 PRs, no id lost or duplicated
+      vs origin/master, store.load(validate=True) OK. Known residual (documented in
+      impl.md, NOT a wait): for the sub-second adopt check after a restart the row
+      can read "review iteration N (INPUT_REQUIRED answered; follow-up running)" before
+      the resume reconciles it. Considered and deliberately not changed: a hook event
+      whose receipt is delayed past the answer and past a mid-turn assistant record
+      can flip the wait back to waiting (hook_receiver stamps receipt time); real
+      Claude emits idle_prompt once per turn so it needs a multi-second hook delay,
+      and the spec defines the idle-driven rule. Analogous issues already tracked:
+      pr-e0f54ca (watcher_base) and pr-4caa36a (slash-echo task boundary).'
+    created_at: '2026-10-28T13:50:34Z'
+    last_edited: '2026-10-28T13:50:34Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
