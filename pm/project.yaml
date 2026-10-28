@@ -36014,6 +36014,40 @@ prs:
       and post-fix (full flow).'
     created_at: '2026-10-28T06:58:06Z'
     last_edited: '2026-10-28T06:58:06Z'
+  - id: note-a409a8e
+    text: 'QA scenario 2 refinement: fake-claude sign-off writes no report.html (it
+      emits only the verdict) — verify preserved evidence via the QA note in project.yaml,
+      the captures dir (pm qa captures-path) and native Claude JSONL transcripts;
+      the run-dir signoff-<pr>.jsonl/.head are driver-side and are retired. Setup
+      prerequisites: commit pm/project.yaml and pm/specs/<pr>/qa.md on master before
+      pm pr start, and commit a real change in the workdir on the PR branch (a PR
+      with no commit of its own is in_base, so SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED).'
+    created_at: '2026-10-28T06:12:40Z'
+    last_edited: '2026-10-28T06:12:40Z'
+  - id: note-af7db78
+    text: 'QA scenario 2 (fresh autostart downstream flow) PASS. Environment note
+      for future QA runs in this container: launch the pm session with PATH=/usr/bin:$PATH
+      (real git ahead of ~/.local/bin/git). The push-proxy git wrapper hijacks `git
+      fetch <local path>`, so the sign-off integration check fails (base= empty) and
+      the fake SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED before the flow can park
+      at the merge gate. Also: the fixture workdir must contain a real commit on the
+      PR branch, otherwise the PR is in_base and the fake SIGNOFF_MERGE is blocked
+      for that reason instead.'
+    created_at: '2026-10-28T06:55:01Z'
+    last_edited: '2026-10-28T06:55:01Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
