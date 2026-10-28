@@ -862,6 +862,14 @@ tests):
     save is a true no-op: it neither invents an empty note for a member the
     template could not show nor launders the template's lossy unicode
     round-trip (a right quote came back as a left one) into the stored notes.
+    A kept-verbatim member still contributes *fragments* to the parse (a
+    multi-line note's lines, a suffix-bearing text's truncated form — every
+    line of its bullet that parses back as a note), and a fragment must not
+    become a second note: a save that edited any other note used to create a
+    new note for it, duplicating the member's content.  The reconciliation
+    consumes those fragments (an editable note's match takes precedence, so a
+    fragment that collides with a real note's text reuses the real note) and
+    only then creates a new note.
     The same rule holds for the fields the template renders beside the notes:
     the parsed `title` and `description` are compared against the *rendered*
     form of the stored value (`_rendered_text`), not the stored value itself,

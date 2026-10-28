@@ -325,6 +325,27 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             for n in current_notes:
                 old_by_text.setdefault(_rendered_text(_note_text(n)),
                                        []).append(n)
+            # A member the template cannot fully represent still contributes
+            # *fragments* to the parsed template: a multi-line note renders
+            # its lines as bullets, and a text ending in a timestamp-looking
+            # suffix renders truncated.  Those fragments are already
+            # represented by the uneditable note kept verbatim below, so a
+            # parsed line that matches one must not become a second note —
+            # editing any other note used to duplicate the member's content
+            # (the fragments were never matched, so a new note was created for
+            # each on every rebuild).  One fragment per parsed line the member
+            # contributes, consumed in order; a bare ``- `` bullet parses to
+            # no note at all and contributes none.
+            fragments: list[str] = []
+            for n in uneditable:
+                # Every line of the member's bullet that parses back as a note
+                # is a fragment: the first line for a multi-line text, the
+                # truncated form of a suffix-bearing text, and any
+                # ``- ``-prefixed continuation line the text happens to carry.
+                for line in _note_bullet_line(n).splitlines():
+                    frag = _note_bullet_text(line)
+                    if frag is not None:
+                        fragments.append(_rendered_text(frag))
             new_notes = []
             # Every id already stored is a key (``pm pr note edit/delete``
             # look notes up by id, and the integration resolver refuses a
@@ -333,12 +354,18 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             existing_note_ids: set[str] = {
                 i for i in (_note_id(n) for n in stored_notes) if i}
             for text in parsed["note_texts"]:
+                # An editable note first, so a fragment text that collides
+                # with a real note's text reuses the real note (the fragment
+                # is represented by the verbatim member appended below).
                 if text in old_by_text and old_by_text[text]:
                     reused = old_by_text[text].pop(0)
                     new_notes.append(reused)
                     reused_id = _note_id(reused)
                     if reused_id:
                         existing_note_ids.add(reused_id)
+                elif text in fragments:
+                    # The kept uneditable member already carries this line.
+                    fragments.remove(text)
                 else:
                     note_id = store.generate_note_id(pr_id, text, existing_note_ids)
                     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

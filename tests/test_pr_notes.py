@@ -1051,6 +1051,55 @@ class TestPrNoteWritePaths:
         assert any(n.get("text") == "a new note"
                    for n in notes if isinstance(n, dict))
 
+    def test_a_note_the_template_cannot_read_back_is_not_duplicated(
+            self, tmp_path):
+        """A save must not add a second note for the fragment it *can* show.
+
+        A member the template cannot fully represent still renders fragments
+        the parser reads back as notes: a multi-line note renders its lines as
+        bullets, and a text ending in a timestamp-looking suffix renders
+        truncated.  Those fragments are not editable notes (the whole member
+        is kept verbatim), but the reconciliation only matched editable notes,
+        so editing any *other* note created brand-new notes for them —
+        silently duplicating the member's content on every save that touched
+        the notes.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        suffixed = "note  # 2026-01-15T10:30:00Z"
+        original = [
+            {"id": "note-multiline", "text": "alpha\nbeta",
+             "created_at": "2026-01-01T00:00:00Z"},
+            # A continuation line that itself looks like a bullet parses back
+            # as another note, so it is a fragment too.
+            {"id": "note-bulleted", "text": "foo\n- bar",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "note-suffixed", "text": suffixed},
+            {"id": "note-real", "text": "real",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        # What the template parses back to, with "real" edited to "changed".
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["alpha", "foo", "bar", "note", "changed"],
+            "description": "A test PR",
+        })
+        assert "notes updated" in changes
+        notes = self._notes(root)
+        texts = [n.get("text") for n in notes if isinstance(n, dict)]
+        # The members the template cannot hold survive verbatim ...
+        assert "alpha\nbeta" in texts
+        assert "foo\n- bar" in texts
+        assert suffixed in texts
+        assert "changed" in texts
+        # ... and their fragments are not also added as separate notes.
+        assert "alpha" not in texts
+        assert "foo" not in texts
+        assert "bar" not in texts
+        assert "note" not in texts
+
     def test_a_noop_editor_save_changes_nothing(self, tmp_path):
         """The editor watcher saves on every write, unchanged or not.
 
