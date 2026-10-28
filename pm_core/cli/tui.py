@@ -15,6 +15,7 @@ from pm_core.paths import pane_registry_dir, debug_dir
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _find_tui_pane,
+    _find_live_tui_pane,
     state_root,
 )
 
@@ -183,7 +184,7 @@ def tui_view(no_history: bool, session: str | None):
     Captures the current TUI pane content and displays it.
     Also adds the frame to history for later review (unless --no-history).
     """
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
@@ -250,7 +251,7 @@ def tui_send(keys: str, session: str | None):
       pm tui send C-c        # Press Ctrl+C
     """
     import subprocess
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
@@ -319,7 +320,7 @@ def tui_restart(breadcrumb: bool, session: str | None):
         pm tui restart                  # Clean restart (no state preserved)
         pm tui restart --breadcrumb     # Restart preserving loop state
     """
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)

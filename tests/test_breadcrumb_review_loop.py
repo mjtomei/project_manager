@@ -563,7 +563,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             result = runner.invoke(tui_restart, [])
 
@@ -576,7 +576,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.paths.pm_home", return_value=tmp_path), \
              patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             result = runner.invoke(tui_restart, ["--breadcrumb"])
@@ -591,7 +591,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.paths.pm_home", return_value=tmp_path), \
              patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             mock_tmux.send_keys_literal.side_effect = Exception("tmux error")
@@ -606,7 +606,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=(None, None)):
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=(None, None)):
             result = runner.invoke(tui_restart, [])
 
         assert result.exit_code == 1

@@ -363,3 +363,96 @@ class TestEnsureWorkdir:
         data = {"project": {"name": "test"}}
         result = _ensure_workdir(data, pr_entry, tmp_path)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _find_live_tui_pane
+# ---------------------------------------------------------------------------
+
+
+class TestFindLiveTuiPane:
+    """_find_live_tui_pane must not hand a dead pane to pm tui view/send.
+
+    The pane registry keeps its ``role="tui"`` entry after the TUI exits
+    until the next heal_registry pass.  Driving that pane used to make
+    ``pm tui view`` print an empty frame with exit 0 and ``pm tui send``
+    raise a raw tmux error.
+    """
+
+    def _registry(self, *panes):
+        return {
+            "session": "pm-test",
+            "windows": {"@0": {"panes": list(panes), "user_modified": False}},
+            "generation": "1",
+        }
+
+    def _panes(self, stdout):
+        from types import SimpleNamespace
+        return patch(
+            "pm_core.cli.helpers.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=stdout),
+        )
+
+    def test_dead_tui_entry_is_not_returned(self):
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes("%3 pm-test bash\n"):
+            assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+    def test_live_tui_entry_is_returned(self):
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes('%6 pm-test "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
+    def test_dead_entry_falls_back_to_a_live_tui_in_same_session(self):
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes("%3 pm-test bash\n"
+                         '%8 pm-test "pm _tui"\n'
+                         '%9 pm-other "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%8", "pm-test")
+
+    def test_never_falls_back_to_another_session(self):
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             self._panes('%9 pm-other "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+    def test_tmux_unavailable_degrades_to_no_live_tui(self):
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.cli.helpers.subprocess.run",
+                   side_effect=OSError("no tmux")):
+            assert _find_live_tui_pane("pm-test") == (None, "pm-test")
+
+    def test_find_tui_pane_still_reports_the_dead_pane_for_autostart(self):
+        """pm autostart needs the session even when its pane is dead so it
+        can report the stale pidfile for that session."""
+        from pm_core.cli.helpers import _find_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data):
+            assert _find_tui_pane("pm-test") == ("%6", "pm-test")

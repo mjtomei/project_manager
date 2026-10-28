@@ -1329,3 +1329,66 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
                     return parts[0], parts[1]
 
     return None, None
+
+
+def _live_panes_and_tuis() -> tuple[set[str], list[tuple[str, str]]]:
+    """Return ``(live_pane_ids, live_tui_panes)`` from tmux in one query.
+
+    ``live_pane_ids`` is every pane tmux currently knows about;
+    ``live_tui_panes`` is the ``(pane_id, session_name)`` pairs whose
+    start command is ``pm _tui``.  Returns ``(set(), [])`` when tmux
+    cannot be queried (no server), so callers degrade to "no live TUI".
+    """
+    try:
+        result = subprocess.run(
+            tmux_mod._tmux_cmd(
+                "list-panes", "-a",
+                "-F", "#{pane_id} #{session_name} #{pane_start_command}"),
+            capture_output=True, text=True,
+        )
+    except Exception:
+        _log.debug("_live_panes_and_tuis: tmux query failed", exc_info=True)
+        return set(), []
+    if result.returncode != 0:
+        return set(), []
+    ids: set[str] = set()
+    tuis: list[tuple[str, str]] = []
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 2)
+        if not parts:
+            continue
+        ids.add(parts[0])
+        if len(parts) >= 3 and "_tui" in parts[2]:
+            tuis.append((parts[0], parts[1]))
+    return ids, tuis
+
+
+def _find_live_tui_pane(
+        session: str | None = None) -> tuple[str | None, str | None]:
+    """Find the TUI pane, ignoring registry entries whose pane is gone.
+
+    ``_find_tui_pane`` resolves the *session* even when the recorded pane
+    no longer exists — callers such as ``pm autostart`` use that to report
+    a stale pidfile for the right session.  Commands that drive the pane
+    (``pm tui view`` / ``pm tui send`` / ``pm tui restart``) must not
+    target a dead pane: the pane registry keeps its ``role="tui"`` entry
+    after the TUI exits until the next ``heal_registry`` pass, and
+    capturing or sending to that pane yields an empty frame with exit 0
+    (view) or a raw tmux error (send).
+
+    Returns ``(pane_id, session)`` only when the pane is still alive in
+    tmux.  When the recorded pane is gone, falls back to a live
+    ``pm _tui`` pane in the same session (never another session's), and
+    otherwise returns ``(None, session)``.
+    """
+    pane_id, sess = _find_tui_pane(session)
+    if not sess:
+        return None, None
+    live_ids, live_tuis = _live_panes_and_tuis()
+    if pane_id and pane_id in live_ids:
+        return pane_id, sess
+    base = sess.rsplit("~", 1)[0]
+    for tui_id, tui_sess in live_tuis:
+        if tui_sess.rsplit("~", 1)[0] == base:
+            return tui_id, sess
+    return None, sess
