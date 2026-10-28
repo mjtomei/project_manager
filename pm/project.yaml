@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T16:37:09.578312+00:00'
+  updated_at: '2026-10-28T18:08:39.171138+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38683,6 +38683,31 @@ prs:
       skipped (markdown installed, PM_HOST_HOME unset, PATH=/usr/bin:/bin). (2026-10-28T16:40:00Z)'
     created_at: '2026-10-28T16:37:09Z'
     last_edited: '2026-10-28T16:37:09Z'
+  - id: note-a0b1afc
+    text: 'review-loop a6a3 i2 (pending push). Found and fixed a cross-process stranding
+      bug in the run record: it was kept after the run and `run_driven_elsewhere`
+      keyed only on "owner pid is alive", so a TUI that had run QA for a PR kept reading
+      as *in flight* for the rest of that process''s life — a second TUI, a `pm pr
+      auto-sequence` tick and `auto_start._auto_start_qa_loops` would all defer to
+      a run that ended hours ago (the auto-sequence QA catch-up echoes "running: qa
+      (driven elsewhere)" and does nothing; with auto-start off the PR is stranded).
+      `qa_loop.end_run_record` now marks the record `ended_at`, `run_qa_sync`/`resume_qa_sync`
+      call it in a `finally` (completion, aborted run and crash all end it), and `run_driven_elsewhere`
+      requires an unended record; `end_run_record` refuses a record written by another
+      `loop_id`. Also: a claim refused because *another* process already consumed
+      the obligation now drops this process''s in-memory copy (`_disk_owed_state`
+      distinguishes "consumed" from "unreadable"), so the 5 s tick stops rewriting
+      project.yaml for nothing; the mount hook logs a failed arm at warning instead
+      of debug; `claim_return_launch`''s docstring now describes the qa hop correctly.
+      Tests: ended record with a live owner is not a driver, the crash path ends the
+      record, only its own run is ended, an obligation consumed elsewhere is dropped
+      from memory. Full suite in the review container: 4119 passed, 1 skipped (markdown
+      installed, PM_HOST_HOME unset, PATH=/usr/bin:/bin). Spec updated (R2 + "Review-loop
+      amendments (a6a3 i2)"). Incidental bug filed separately as pr-ca66563 (review
+      PASS -> QA start in review_loop_ui._maybe_start_qa ignores a live `pm qa run`;
+      a naive guard would strand self-driving mode, so it needs deferral + retry).'
+    created_at: '2026-10-28T18:08:39Z'
+    last_edited: '2026-10-28T18:08:39Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
@@ -38690,3 +38715,30 @@ prs:
   session_effort:
     signoff: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-db3bf10-bug-a-sign-off-reqa-deferred-behind--76c89d06
+- id: pr-ca66563
+  plan: bugs
+  title: 'Bug: review PASS → QA start ignores a live pm qa run and retires its windows'
+  branch: pm/pr-ca66563-bug-review-pass-qa-start-ignores-a-live-pm-qa-run-
+  status: pending
+  depends_on: []
+  description: 'pm_core/tui/review_loop_ui.py:_maybe_start_qa calls qa_loop_ui.start_qa
+    without checking qa_loop.run_driven_elsewhere(pr_id). A user running `pm qa run
+    <instr> --pr <id>` while the PR is in_review, followed by the review loop passing
+    (or a manual review PASS), starts a full QA loop over the live instruction run;
+    run_qa_sync planning calls _cleanup_stale_scenario_windows and retires the instruction
+    run''s qa-<pr> / qa-<pr>-sN windows, so that run loses its panes mid-flight (same
+    class as S117 / pr-db3bf10, which guards the sign-off hop, auto-start and pm pr
+    auto-sequence but not this path). Repro: auto-start or `zz t` review loop on a
+    PR in_review; `pm qa run <instr> --pr <id>` from a shell; let the review loop
+    PASS. Expected: the full QA waits for the live run to end (the owed-REQA reconciler
+    already shows the pattern). Note: a naive skip here strands the PR in self-driving
+    mode (nothing retries), so the fix needs a deferral + retry, not just a guard.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T18:02:48.130836+00:00'
+  updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

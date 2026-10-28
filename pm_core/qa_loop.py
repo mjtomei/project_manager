@@ -978,10 +978,24 @@ def resume_owned_elsewhere(resume_data: dict) -> bool:
 # A ``qa_resume.json`` snapshot only appears once the execution poll begins
 # (after planning and scenario launch), so it cannot answer "is a run of this
 # PR in flight right now?" at the start of a run.  The run record is written
-# first, names its driver, and is kept after the run ends: a dead owner is
-# simply not a driver (``resume_owned_elsewhere`` guards pid reuse).
+# first and names its driver; it is kept after the run ends (its start time
+# and driver are evidence) but is marked ended, because a *finished* run of a
+# long-lived driver — a TUI that goes on to other work — must not keep reading
+# as in flight for the rest of that process's life.
 
 _RUN_RECORD = "qa_run.json"
+
+
+def _write_run_record_data(qa_workdir: str | Path, data: dict) -> None:
+    """Atomically (re)write the run record of *qa_workdir*.  Best-effort."""
+    path = Path(qa_workdir) / _RUN_RECORD
+    try:
+        tmp = path.with_name(_RUN_RECORD + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.rename(path)
+    except OSError:
+        _log.warning("QA: could not write the run record %s", path,
+                     exc_info=True)
 
 
 def write_run_record(state: QALoopState) -> None:
@@ -992,18 +1006,37 @@ def write_run_record(state: QALoopState) -> None:
     """
     if not state.qa_workdir:
         return
-    data = {"pr_id": state.pr_id, "loop_id": state.loop_id,
-            "session_tag": state.session_tag, "started_at": time.time(),
-            "owner_pid": os.getpid(),
-            "owner_start": _proc_start_time(os.getpid())}
-    path = Path(state.qa_workdir) / _RUN_RECORD
-    try:
-        tmp = path.with_name(_RUN_RECORD + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        tmp.rename(path)
-    except OSError:
-        _log.warning("QA: could not write the run record %s", path,
-                     exc_info=True)
+    _write_run_record_data(state.qa_workdir, {
+        "pr_id": state.pr_id, "loop_id": state.loop_id,
+        "session_tag": state.session_tag, "started_at": time.time(),
+        "owner_pid": os.getpid(),
+        "owner_start": _proc_start_time(os.getpid()),
+    })
+
+
+def end_run_record(state: QALoopState) -> None:
+    """Mark *state*'s run as over in its run record.
+
+    The record stays (which process drove the run, and when it started, is
+    evidence — and the overlap checks a sibling branch keeps read it after
+    the run), but from here on it no longer names a driver.  Without this a
+    finished run of a long-lived driver reads as in flight for as long as
+    that process lives — a TUI that ran QA and then went on to other work —
+    and every other driver (a second TUI's scheduler, a ``pm pr
+    auto-sequence`` tick) defers to a run that ended long ago.
+
+    Best-effort, like the write: a record that still says it is running only
+    costs a deferral until its owner exits.
+    """
+    if not state.qa_workdir:
+        return
+    rec = read_run_record(state.qa_workdir)
+    # Only our own run: a record written by another driver (a resumed or
+    # newer run in this workdir) is not ours to end.
+    if not rec or rec.get("loop_id") != state.loop_id or rec.get("ended_at"):
+        return
+    rec["ended_at"] = time.time()
+    _write_run_record_data(state.qa_workdir, rec)
 
 
 def read_run_record(qa_workdir: str | Path) -> dict | None:
@@ -1022,11 +1055,15 @@ def run_driven_elsewhere(pr_id: str) -> bool:
     run of another TUI.  A TUI must not start its own loop over one: the new
     loop retires the driver's ``qa-<pr>`` / ``qa-<pr>-sN`` windows as stale
     and runs QA a second time, verifier and finalizer included (S117).
+
+    A run that has ended is not a driver even while its process lives
+    (:func:`end_run_record`), and neither is one whose driver died.
     """
     qa_root = Path.home() / ".pm" / "workdirs" / "qa"
     for rec_path in qa_root.glob(f"{pr_id}-*/{_RUN_RECORD}"):
         rec = read_run_record(rec_path.parent)
-        if rec and rec.get("pr_id") == pr_id and resume_owned_elsewhere(rec):
+        if rec and rec.get("pr_id") == pr_id and not rec.get("ended_at") \
+                and resume_owned_elsewhere(rec):
             return True
     return False
 
@@ -3792,8 +3829,24 @@ def run_qa_sync(
     5. Aggregate verdicts, detect changes via git status
     6. Set final state
 
-    Returns the updated state.
+    Returns the updated state.  The run record this process wrote is marked
+    ended however the run leaves (completion, an aborted run, a crash), so
+    no other driver waits on it afterwards.
     """
+    try:
+        return _run_qa_sync(state, pm_root, pr_data, on_update, max_scenarios)
+    finally:
+        end_run_record(state)
+
+
+def _run_qa_sync(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    on_update: Callable[[QALoopState], None] | None = None,
+    max_scenarios: int | None = None,
+) -> QALoopState:
+    """The body of :func:`run_qa_sync` (see it for the phases)."""
     from pm_core import tmux as tmux_mod, prompt_gen, git_ops, store
     from pm_core.claude_launcher import build_claude_shell_cmd
     _qa_planning_resolution = _resolve_qa_model(pr_data, store.load(pm_root), session_type="qa_planning")
@@ -4461,7 +4514,23 @@ def resume_qa_sync(
     scenario launch are skipped — the scenario tmux windows / containers
     are still alive from before the restart.  We rebuild the execution
     context and re-enter the verdict-collection + finalize phase.
+
+    Like :func:`run_qa_sync`, the run record is marked ended however the
+    resume leaves, so other drivers stop deferring to it.
     """
+    try:
+        return _resume_qa_sync(state, pm_root, pr_data, on_update)
+    finally:
+        end_run_record(state)
+
+
+def _resume_qa_sync(
+    state: QALoopState,
+    pm_root: Path,
+    pr_data: dict,
+    on_update: Callable[[QALoopState], None] | None = None,
+) -> QALoopState:
+    """The body of :func:`resume_qa_sync` (see it for the phases)."""
     from pm_core import store
 
     state.running = True

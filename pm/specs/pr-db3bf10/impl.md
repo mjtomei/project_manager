@@ -54,18 +54,24 @@ New `pm_core/qa_loop.py`:
 _RUN_RECORD = "qa_run.json"                 # per QA workdir
 def write_run_record(state) -> None         # pr_id, loop_id, session_tag,
                                             # started_at, owner_pid, owner_start
+def end_run_record(state) -> None           # adds ended_at (its own loop_id)
 def read_run_record(qa_workdir) -> dict | None
-def run_driven_elsewhere(pr_id) -> bool     # any <pr>-*/qa_run.json whose owner
-                                            # is a live process (resume_owned_elsewhere)
+def run_driven_elsewhere(pr_id) -> bool     # any <pr>-*/qa_run.json, not ended,
+                                            # whose owner is a live process
+                                            # (resume_owned_elsewhere)
 ```
 
 `write_run_record` is called at the top of `run_qa_sync` (right after the QA
 workdir is ensured, before planning) and in `resume_qa_sync`, so a run is
 visible from its first seconds — earlier than its `qa_resume.json` snapshot
 (first written in `_poll_tmux_verdicts`' tail, `qa_loop.py:4306`). The record
-is kept after the run ends (a dead pid is not a driver; `owner_start` guards
-pid reuse) — same shape as `c9ce4f6a`'s `qa_run.json`, which keeps the two
-branches mergeable.
+is kept after the run ends (its driver and start time are evidence, and
+`c9ce4f6a`'s richer record set reads it after the run — same shape keeps the
+two branches mergeable), but `run_qa_sync`/`resume_qa_sync` mark it ended in a
+`finally` (`end_run_record`), because a *finished* run of a long-lived driver
+(a TUI that goes on to other work) would otherwise read as in flight for the
+rest of that process's life and every other driver would defer to it. A dead
+pid is not a driver either; `owner_start` guards pid reuse.
 
 ### R3 — Reconciliation independent of auto-start
 
@@ -202,7 +208,9 @@ edit that branch's captures or widen `#249` acceptance.
 ## Test plan
 
 `tests/test_owed_reqa.py` (new) plus additions to
-`tests/test_tui_signoff_handoff.py` and `tests/test_qa_resume.py`:
+`tests/test_tui_signoff_handoff.py` (the run-record wiring tests live in
+`test_owed_reqa.py` too — they drive `run_qa_sync`/`resume_qa_sync`
+directly):
 
 1. `run_driven_elsewhere`: live foreign owner (a `sleep` child) → True; own
    pid → False; dead pid → False; pid reuse (owner_start mismatch) → False;
@@ -286,3 +294,32 @@ one full QA starts (one `qa-<pr>` window set, one verifier, one finalizer, one
   obligation, a finished/stopped loop entry does not block the owed start,
   `resume_qa_background` publishes `running` synchronously, and the in-memory
   mirror leaves another hop alone.
+
+## Review-loop amendments (a6a3 i2)
+
+- **A finished run no longer reads as a driver** (`qa_loop.end_run_record`).
+  The record is written at the start of a run and kept after it, and
+  `run_driven_elsewhere` keyed only on "the owner pid is alive" — but a TUI
+  that ran QA for a PR stays alive for the rest of the session.  Every
+  *other* driver (a second TUI's scheduler and reconciler, a
+  `pm pr auto-sequence` tick, `auto_start._auto_start_qa_loops`) therefore
+  saw a run that ended hours ago as in flight and deferred to it for as long
+  as that TUI lived — stranding a PR at `qa` with auto-start off and
+  suppressing the auto-sequence QA catch-up.  `run_qa_sync`/`resume_qa_sync`
+  now mark their record `ended_at` in a `finally` (completion, an aborted
+  run and a crash all end it), `end_run_record` refuses a record written by
+  another `loop_id`, and `run_driven_elsewhere` requires an unended record.
+  Tests: an ended record with a live owner is not a driver, the crash path
+  ends the record, and only its own run is ended.
+- **A cross-process start stops this process's claim churn.** When the claim
+  is refused, `start_owed_reqa` re-reads the record and, if another driver
+  already consumed it, mirrors the consumption into `app._data`
+  (`_disk_owed_state` tells "consumed" apart from "unreadable").  Without
+  that the tick re-attempted the claim every ~5 s — a full project.yaml read
+  plus an fsynced rewrite — until some other path reloaded the state.
+  Test: an obligation consumed elsewhere is dropped from memory and no
+  further claim is attempted.
+- The mount hook logs a failed `arm_owed_reqa` at warning level (a silent
+  loss there is the bug the hook exists to prevent), and
+  `claim_return_launch`'s docstring now describes the `qa` hop correctly:
+  its claim is taken by every starter, not held from the transition.

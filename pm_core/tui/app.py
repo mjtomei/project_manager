@@ -534,7 +534,9 @@ class ProjectManagerApp(App):
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.arm_owed_reqa(self)
         except Exception:
-            _log.debug("owed REQA arm on mount failed", exc_info=True)
+            # Not fatal — the poll tick reconciles it again — but a silent
+            # loss here is exactly the bug this hook exists to prevent.
+            _log.warning("owed REQA arm on mount failed", exc_info=True)
         # Start the coalescing write queue now that the project root is known.
         # TUI mutations enqueue here instead of writing to disk inline.
         #

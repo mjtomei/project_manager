@@ -129,13 +129,15 @@ def _project(tmp_path, *, status="qa", ret=None, pr_id=PR):
 
 
 def _qa_workdir(home, *, pr_id=PR, loop_id="loop1", owner_pid=None,
-                owner_start=None):
+                owner_start=None, ended_at=None):
     """Create a QA workdir carrying a run record, as run_qa_sync writes it."""
     qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-{loop_id}"
     qa_dir.mkdir(parents=True, exist_ok=True)
     rec = {"pr_id": pr_id, "loop_id": loop_id, "started_at": 0.0,
            "owner_pid": owner_pid if owner_pid is not None else 0,
            "owner_start": owner_start}
+    if ended_at is not None:
+        rec["ended_at"] = ended_at
     (qa_dir / qa_loop._RUN_RECORD).write_text(json.dumps(rec))
     return qa_dir
 
@@ -188,7 +190,6 @@ def test_run_record_names_a_live_foreign_driver(home, live_owner):
 
 
 def test_run_record_ignores_own_dead_and_reused_owners(home, live_owner):
-    import os
     _qa_workdir(home, loop_id="own", owner_pid=os.getpid())
     assert qa_loop.run_driven_elsewhere(PR) is False   # this process's run
 
@@ -202,6 +203,35 @@ def test_run_record_ignores_own_dead_and_reused_owners(home, live_owner):
     owner.wait()
     _qa_workdir(home, loop_id="dead", owner_pid=owner.pid, owner_start=start)
     assert qa_loop.run_driven_elsewhere(PR) is False
+
+
+def test_an_ended_run_record_is_not_a_driver(home, live_owner):
+    """A finished run of a *long-lived* driver (a TUI that went on to other
+    work) must not keep reading as in flight: without the end marker every
+    other driver — a second TUI, a ``pm pr auto-sequence`` tick — would defer
+    to a run that ended hours ago, for as long as that process lives."""
+    owner = live_owner()
+    _qa_workdir(home, owner_pid=owner.pid,
+                owner_start=qa_loop._proc_start_time(owner.pid),
+                ended_at=1.0)
+    assert qa_loop.run_driven_elsewhere(PR) is False
+
+
+def test_end_run_record_marks_only_its_own_run(home):
+    state = qa_loop.QALoopState(pr_id=PR)
+    state.qa_workdir = str(home / ".pm" / "workdirs" / "qa" / f"{PR}-x")
+    (home / ".pm" / "workdirs" / "qa" / f"{PR}-x").mkdir(parents=True)
+    qa_loop.write_run_record(state)
+    qa_loop.end_run_record(state)
+    assert qa_loop.read_run_record(state.qa_workdir)["ended_at"]
+
+    # A record written by another driver in the same workdir (a resumed run)
+    # is not ours to end.
+    other = qa_loop.QALoopState(pr_id=PR)
+    other.qa_workdir = state.qa_workdir
+    qa_loop.write_run_record(other)
+    qa_loop.end_run_record(state)            # stale state, different loop_id
+    assert "ended_at" not in qa_loop.read_run_record(state.qa_workdir)
 
 
 def test_run_record_absent_means_nothing_drives_it(home):
@@ -248,6 +278,9 @@ def test_run_qa_sync_writes_the_run_record_before_planning(home, tmp_path):
     rec = qa_loop.read_run_record(state.qa_workdir)
     assert rec is not None and rec["pr_id"] == PR
     assert rec["owner_pid"] == os.getpid()
+    # The crash still ends the run: a live driver that raised must not keep
+    # other drivers deferring to it for the rest of its life.
+    assert rec.get("ended_at")
 
 
 def test_resume_qa_sync_rewrites_the_run_record(home, tmp_path):
@@ -268,6 +301,7 @@ def test_resume_qa_sync_rewrites_the_run_record(home, tmp_path):
             qa_loop.resume_qa_sync(state, tmp_path / "pm", data["prs"][0])
     rec = qa_loop.read_run_record(state.qa_workdir)
     assert rec is not None and rec["owner_pid"] == os.getpid()
+    assert rec.get("ended_at")           # the failed resume is over too
 
 
 def test_resume_qa_background_publishes_running_immediately():
@@ -525,6 +559,28 @@ def test_in_memory_consumption_leaves_another_hop_alone(tmp_path):
     qa_loop_ui._consume_owed_reqa_in_memory(app, PR)
     assert app._data["prs"][0]["signoff_return"]["awaiting"] == "review"
     assert app.pr()["signoff_return"]["awaiting"] == "review"
+
+
+def test_an_obligation_consumed_elsewhere_is_dropped_from_memory(tmp_path):
+    """Another process (a second TUI, an auto-sequence tick) started the run,
+    so the obligation is gone on disk while this process's copy still shows
+    it.  Re-attempting the claim every ~5 s would rewrite project.yaml for
+    nothing until some other path reloads the state."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)                      # app._data still says owed
+
+    def consumed_elsewhere(d):
+        store.get_pr(d, PR)["signoff_return"]["awaiting"] = None
+    store.locked_update(root, consumed_elsewhere)
+
+    with _driven(False), patch.object(qa_loop_ui, "start_qa") as sq:
+        qa_loop_ui.reconcile_owed_reqa(app)
+    sq.assert_not_called()
+    assert qa_loop_ui.owed_reqa_prs(app) == []
+
+    with _driven(False), patch.object(signoff, "claim_return_launch") as claim:
+        qa_loop_ui.reconcile_owed_reqa(app)
+    claim.assert_not_called()            # no further locked rewrite
 
 
 def test_arm_owed_reqa_arms_the_tick_and_starts_the_run(tmp_path):

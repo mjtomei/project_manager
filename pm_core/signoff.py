@@ -792,11 +792,16 @@ def claim_return_launch(root: Path, pr_id: str, hop: str,
     finds — so two concurrent launchers kill each other's session and leave
     duplicates behind.  A QA return's relaunch starts a whole loop (windows,
     verifier, finalizer), so it needs the same single-owner gate.  The first
-    caller records a claim
-    and launches; later callers see it and leave the launch alone.  The
-    driver that performs the hop holds the claim from the transition on
+    caller records a claim and launches; later callers see it and leave the
+    launch alone.
+
+    For the hops in :data:`_CLAIMED_RETURN_HOPS` the driver that performs
+    the hop holds the claim from the transition on
     (:func:`build_return_record`), so only catch-up paths (restart, an
-    ``awaiting`` tick) call this.
+    ``awaiting`` tick) call this.  A ``qa`` claim is taken by every starter
+    instead, because the hop that defers behind a live QA run must not hold
+    one — see that constant.
+
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
 

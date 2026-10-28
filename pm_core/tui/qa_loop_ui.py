@@ -239,14 +239,23 @@ def owed_reqa_prs(app, prs: list[dict] | None = None) -> list[dict]:
     return [pr for pr in prs if _is_owed_reqa(pr)]
 
 
-def _owed_reqa_on_disk(app, pr_id: str) -> bool:
-    """Whether the PR's return record on disk still owes its QA run."""
+def _disk_owed_state(app, pr_id: str) -> bool | None:
+    """Whether the PR's *on-disk* return record still owes its QA run.
+
+    ``None`` when the record cannot be read: a caller must not read that as
+    "nothing is owed".
+    """
     if not getattr(app, "_root", None):
-        return False
+        return None
     try:
         return _is_owed_reqa(store.get_pr(store.load(app._root), pr_id))
     except (store.ProjectYamlParseError, OSError):
-        return False
+        return None
+
+
+def _owed_reqa_on_disk(app, pr_id: str) -> bool:
+    """Whether the PR's return record on disk still owes its QA run."""
+    return _disk_owed_state(app, pr_id) is True
 
 
 def _owed_reqa_deferrals(app) -> dict:
@@ -259,12 +268,13 @@ def _owed_reqa_deferrals(app) -> dict:
 
 
 def _consume_owed_reqa_in_memory(app, pr_id: str) -> None:
-    """Mirror ``start_qa``'s on-disk consumption in this process's state.
+    """Mirror the on-disk consumption of the obligation in this process.
 
-    ``start_qa`` clears ``awaiting`` and the claim as the run starts.  The
-    in-memory copy would otherwise keep saying the PR is owed, and the ~5 s
-    reconciler would re-attempt the claim — a full project.yaml read plus a
-    fsynced rewrite — until some other path reloads the state.
+    A QA start clears ``awaiting`` and the claim on disk (``start_qa``, the
+    ``zz t`` loop, or another process's start).  The in-memory copy would
+    otherwise keep saying the PR is owed, and the ~5 s reconciler would
+    re-attempt the claim — a full project.yaml read plus a fsynced rewrite —
+    until some other path reloads the state.
     """
     for pr in (getattr(app, "_data", None) or {}).get("prs") or []:
         if pr.get("id") != pr_id:
@@ -303,6 +313,13 @@ def start_owed_reqa(app, pr_id: str) -> bool:
     if run_driven_elsewhere(pr_id):
         return False
     if not claim_return_launch(app._root, pr_id, "qa", require_status="qa"):
+        # Another driver holds the claim — or one already consumed the
+        # obligation (its start cleared ``awaiting`` on disk).  The second
+        # case must also drop this process's copy: otherwise every ~5 s tick
+        # retries the claim, i.e. a full project.yaml read plus a fsynced
+        # rewrite, until some other path reloads the state.
+        if _disk_owed_state(app, pr_id) is False:
+            _consume_owed_reqa_in_memory(app, pr_id)
         _log.info("owed REQA: %s launch claimed elsewhere or no longer owed",
                   pr_id)
         return False
