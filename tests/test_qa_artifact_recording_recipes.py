@@ -273,6 +273,49 @@ class TestRecipes:
         assert "exit 1" in settle, (
             "a recorder that died after drawing is not reported as a failure")
 
+    def test_tmux_recorder_dying_mid_scenario_fails(self):
+        """A recorder gone before the detach did not finish the recording.
+
+        The stop step's completion signal is the recorder session ending
+        *after* the detach. The attach client follows the session, so it
+        exits only on the detach, when the session ends, or because it (or
+        asciinema) died. A recorder that is already gone while the session it
+        was attaching to is still there therefore died mid-scenario: the cast
+        stops wherever it stopped, and the ``test -s`` check below would pass
+        on that truncated cast and report the run as a successful recording.
+        A recorder that ended because the session ended is a legitimate
+        finish, so the recipe has to tell the two apart.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        seg = block[block.index("# 5."):
+                    block.index("tmux send-keys -t pm-recorder")]
+        assert "! tmux has-session -t pm-recorder" in seg, (
+            "tmux recipe detaches without noticing that the recorder is "
+            "already gone, so a truncated cast passes the `test -s` check")
+        assert 'tmux has-session -t "$TARGET"' in seg, (
+            "tmux recipe cannot tell a recorder that died mid-scenario apart "
+            "from one that ended because the session ended")
+        assert "incomplete" in seg and "exit 1" in seg, (
+            "a recorder that died mid-scenario is not reported as a failure")
+
+    def test_tmux_recorder_readiness_is_bounded(self):
+        """The recorder readiness wait needs its own deadline.
+
+        The pm-session poll earlier in the block also sets ``deadline``, so
+        finding the word anywhere in the block would pass even with the
+        recorder wait unbounded. Anchor on the recorder loop: a recorder that
+        never draws has to fail with its own message rather than hang.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        seg = block[block.index("new-session -d -s pm-recorder"):
+                    block.index("pm tui send")]
+        loop_start = seg.index("while :; do")
+        loop = seg[loop_start:seg.index("\ndone\n", loop_start)]
+        assert "deadline" in loop, "tmux recorder readiness wait is unbounded"
+        assert "did not come up within" in loop, (
+            "tmux recorder readiness wait has no actionable timeout message")
+        assert "exit 1" in loop, "the readiness timeout does not fail the run"
+
     @pytest.mark.parametrize("name", RECIPES)
     def test_scaffold_block_parses(self, name):
         """The no-TTY scaffold must be runnable shell, not just prose."""

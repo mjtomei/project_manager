@@ -112,6 +112,15 @@ R4. **Stop by ending the recorded command, then wait on the recorder's real
    `RECORDER_STOP_TIMEOUT` (default 30 s) and the failure message says so —
    otherwise a healthy long recording is killed at the deadline and leaves a
    cast holding only its header (verified with `-c 'echo started; sleep 45'`).
+   The tmux stop step also distinguishes a recorder that ended because the
+   session ended (a legitimate finish — the attach client follows the session,
+   so it only exits on the detach, when the session ends, or because it died)
+   from one that is *already* gone while the session it was attaching to
+   still exists: that one died mid-scenario, the cast stops wherever it
+   stopped, and `test -s` alone would pass on a truncated recording and
+   report the run as success (reproduced live: the step-5 block exits 0 with
+   a partial cast when the recorder session is gone). The recipe fails that
+   case instead, and skips the detach when both are gone.
 
 R5. **CLI scaffold writes the cast where the render reads it.** The no-TTY
    scaffold uses `<capture-dir>/<short-name>/recording.cast`, matching every
@@ -147,9 +156,12 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    web-UI failure path stopping the server it started), clearing a stale
    recorder session before starting a new one (session, not server, for the
    CLI scaffold), the transcript pipe being reattachable, a tmux recorder
-   that exits before drawing failing instead of passing, and the tmux
+   that exits before drawing failing instead of passing, the tmux
    settle check that keeps a failed attach's error text from counting as a
-   drawn TUI.
+   drawn TUI, a tmux recorder that is already gone before the detach while
+   the target session still exists failing instead of passing on a truncated
+   cast, and the recorder readiness wait carrying its own deadline (the
+   pm-session poll's `deadline` would otherwise satisfy a looser assertion).
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**

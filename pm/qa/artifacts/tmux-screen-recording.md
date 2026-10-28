@@ -53,10 +53,12 @@ client. `asciinema rec` reports "asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
 capture that wrote nothing. A leftover cast is worse in the other
 direction: without `--overwrite`, `asciinema rec` aborts with "recording
-already exists", the recorder session dies, and the render step then
-rewrites the `.mp4` from the *old* cast — a failed recording that looks
-like a fresh capture. The transcript is appended to, so a stale
-`transcript.log` would silently mix an earlier run into this run's evidence.
+already exists" and the recorder dies before it draws, so the run fails at
+the readiness wait — loudly, but for a reason unrelated to the scenario,
+and with the earlier run's cast still on disk for the render step to pick
+up if the worker overrides that failure. The transcript is appended to, so
+a stale `transcript.log` would silently mix an earlier run into this run's
+evidence.
 
 ```
 # 0. Clear what an earlier run left behind before anything writes into it:
@@ -160,7 +162,27 @@ pm tui send a -s "$TARGET"            # open the picker
 #    which ends the recorder session. Wait for that — it is the only
 #    evidence the cast was flushed — instead of tearing the session
 #    down underneath a still-running recorder.
-tmux send-keys -t pm-recorder C-b d
+#    First make sure there is a recorder left to detach. The attach client
+#    follows the session, so it only exits on the detach, when the session
+#    ends, or because it (or asciinema) died. If it is already gone while
+#    the session it was attaching to is still there, it died mid-scenario:
+#    the cast stops at that point and is a truncated recording, not a
+#    finished one. `test -s` below cannot tell the difference, so fail here
+#    instead of rendering a truncated cast as this run's evidence. A
+#    recorder that ended because the session itself ended is a legitimate
+#    finish — the wait below sees it.
+if ! tmux has-session -t pm-recorder 2>/dev/null; then
+    if tmux has-session -t "$TARGET" 2>/dev/null; then
+        echo "recorder exited while the TUI was still running — the cast is" \
+            "incomplete, not a finished recording" >&2
+        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+        exit 1
+    fi
+    # Both are gone: the session itself ended, which ended the attach and so
+    # the recording. Nothing left to detach; the wait below is a no-op.
+else
+    tmux send-keys -t pm-recorder C-b d
+fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t pm-recorder 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
