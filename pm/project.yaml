@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T04:06:17.909213+00:00'
+  updated_at: '2026-10-28T06:03:24.472177+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26075,6 +26075,20 @@ prs:
       hang) remains subsumed by this PR i2.'
     created_at: '2026-10-28T04:06:17Z'
     last_edited: '2026-10-28T04:06:17Z'
+  - id: note-78bfa40
+    text: 'QA scenario 19 PASS (self-driving QA loop start / PASS hand-off / no-plan
+      pause). Captures: /pm-captures/scenarios/19/{story1-loop-pass,story2-no-plan-pause,story3-recovery-pass}
+      + evidence.txt. Note for the next run: scenario 19 story 2 says "no qa-<B>-s*
+      windows" after a failed plan, but `qa-<B>-s0` always exists — it is the pre-existing
+      "Scenario 0 (interactive)" helper session launched for every QA run right after
+      stale cleanup (qa_loop.py), not a scenario worker. The real check is: no qa-<B>-s1+
+      window and no "QA execution phase" log line for that run. Observed: exactly
+      one INPUT_REQUIRED with the "re-announced its idle turn 11 time(s) … recovery
+      made no progress" detail, status pane ERROR block, planner pane left open, one
+      note, B stayed qa; a following happy-config re-run replaced the stale window
+      and completed PASS with a second QA PASS note.'
+    created_at: '2026-10-28T06:03:24Z'
+    last_edited: '2026-10-28T06:03:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
