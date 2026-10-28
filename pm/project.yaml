@@ -31383,7 +31383,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T08:53:33.342208+00:00'
+  updated_at: '2026-10-28T08:59:09.603711+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -31508,6 +31508,43 @@ prs:
       the documented waiting-loop supersede is clean.'
     created_at: '2026-10-28T08:53:33Z'
     last_edited: '2026-10-28T08:53:33Z'
+  - id: note-fdbd41e
+    text: 'QA scenario 3 (TUI restart during an INPUT_REQUIRED wait): PASS — all 5
+      stories verified at runtime against a live stand-in review pane. Breadcrumb
+      restart re-adopted the live wait (window/pane ids unchanged, question still
+      on screen, no --fresh relaunch), the answer cleared input_required and set follow_up,
+      gap-landing follow-ups were recorded, an unanswerable restored wait was cleared
+      (iteration N+1, last INPUT_REQUIRED), the pane-death control settled at failed/KILLED,
+      and a latched legacy resume file reconciled to iteration N+1 and PASS. Evidence:
+      /pm-captures/scenarios/3/ (manifest.md + story1 recording). Observation for
+      the next session: when the answer AND follow-up verdict both land inside the
+      restart gap, the pre-restart loop and the resumed loop each record the follow-up
+      and each launch the next iteration ~1s apart; the second --fresh launch replaces
+      the first, so the end state is correct but a redundant window launch occurs
+      (08:11:00 old loop, 08:11:01 resumed). Not a scenario failure. Stories 3-5 ran
+      one iteration later than the step text because in-flight iteration 3 had already
+      reached its wait; all asserted transitions hold with N+1.'
+    created_at: '2026-10-28T08:27:19Z'
+    last_edited: '2026-10-28T08:27:19Z'
+  - id: note-25cea85
+    text: 'QA S3 re-evaluation (Story 5 re-run, TUI capture). Reset the PR to in_review,
+      seeded the prescribed latched resume file (iteration 7, latest_verdict NEEDS_WORK,
+      input_required true, history NEEDS_WORK), review fake PASS, then a plain pm
+      tui restart. Result: the seeded file was consumed, the latched flag cleared,
+      and the restored loop launched iteration 8 immediately (no --fresh relaunch
+      of 7), recorded PASS and stopped. After re-adding the target the status settled
+      — and stayed stable over a minute — at state=waiting, reason="review passed;
+      QA transition pending", status=in_review, review={iteration 8, verdict PASS,
+      running false, input_required false, follow_up false}, qa=null, held_by=[] —
+      no review INPUT_REQUIRED reason and no QA hold. One extra user action: pm autostart
+      remove for the ~24s until the loop finished, then pm autostart add, because
+      with auto-start left on the TUI 1s scheduler moves the PR to qa about a second
+      after PASS (pre-existing autostart behavior, unrelated to the review-wait fix);
+      this pins the sample to the review-side settle the scenario specifies. Evidence
+      (TUI home-pane cast + mp4, settled snapshots): /pm-captures/scenarios/3/story5-rerun/.
+      Stories 1-4 unchanged and still PASS.'
+    created_at: '2026-10-28T08:59:09Z'
+    last_edited: '2026-10-28T08:59:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
