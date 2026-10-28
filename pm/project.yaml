@@ -14730,6 +14730,22 @@ prs:
       through when the count dips; use a strict soft limit (100) to force the deferral.'
     created_at: '2026-10-28T02:35:22Z'
     last_edited: '2026-10-28T02:35:22Z'
+  - id: note-d7368c4
+    text: 'Refine S62 (2026-10-28, HEAD 07b77965, code trace only): 53b5d4f8/4276eb87
+      are pre-rebase hashes of 71b8f7b8/fcb5ce9c. qa-debug containers use a per-container
+      proxy and pm pr cleanup --resources skips kind qa-debug, so story 1 uses impl+review+sign-off
+      (impl retained --note discussion) as the shared-proxy set. Impl/review/sign-off
+      windows have a cleanup=True EXIT release: tmux kill-window removes the container
+      within ~1-2 s, so the young-abandoned reap path (ebba345e) needs the pane session
+      SIGKILLed (S53 s1_given.sh). Attaching-launch keep reason "launching (no pane
+      yet)" = gate the launching pane tmux new-window (created, lock released, lease
+      fresh, no pane; pm tmux calls have no timeout). Reaper inventory = ps -a x2
+      then one inspect with {{json .Config.Labels}} (60 s timeout): gate that from
+      the reap process, rm -f a C container during the hold, one-shot. release_on_exit
+      first podman call is info (10 s timeout): hold <=8 s. Story 4 PR needs pm pr
+      edit --status qa before each signoff after a review.'
+    created_at: '2026-10-28T01:59:51Z'
+    last_edited: '2026-10-28T01:59:51Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
