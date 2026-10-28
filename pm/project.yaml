@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T17:20:37.012482+00:00'
+  updated_at: '2026-10-28T17:53:24.670625+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39509,6 +39509,25 @@ prs:
       02-apply-vs-merge, 03-record-notes-tui, 04-sync-with-popup, pre-fix+post-fix/03b-malformed-verdict).'
     created_at: '2026-10-28T17:20:36Z'
     last_edited: '2026-10-28T17:20:36Z'
+  - id: note-98e8853
+    text: 'review-loop ef5b i1: found and fixed a hole in the merge-integrity safety
+      net. A hand-edited non-string `workdir` (e.g. `workdir: 5`) crashed the merge-detection
+      path: `pm pr sync` raised TypeError outright, and `sync_from_github`/`sync_prs`
+      (the TUI background sync) either crashed or, because the check-dir selection
+      sits inside the per-PR `except Exception`, finalized the merge WITHOUT the integrity
+      verification pr-2e06289 exists to enforce — the silent finalize the module prevents.
+      Guarded `pr_sync.find_workdir` / `sync_prs` / `sync_from_github` and `cli.pr.pr_sync`
+      to read a non-string `workdir` as absent (the same contract the sign-off surfaces
+      follow); three tests each fail on the pre-fix code. Filed pr-2478bf4 for the
+      remaining unguarded `workdir` reads in general CLI surfaces (pm pr cd / list
+      --workdirs / start / review, the review window, cwd inference) — out of this
+      PR scope, same class as pr-4ee6b33. Re-reviewed the resolver, apply/merge gate,
+      carry-forward chain, prompt surfaces and merge_integrity port; no other concrete
+      defects. Full suite 4345 passed, 1 skipped (run with PM_HOST_HOME unset — the
+      one hook-installer test asserts the receiver is written, which the container
+      guard skips).'
+    created_at: '2026-10-28T17:53:24Z'
+    last_edited: '2026-10-28T17:53:24Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
