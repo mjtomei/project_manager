@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T13:50:34.793397+00:00'
+  updated_at: '2026-10-28T16:12:32.972105+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36683,6 +36683,27 @@ prs:
       pr-e0f54ca (watcher_base) and pr-4caa36a (slash-echo task boundary).'
     created_at: '2026-10-28T13:50:34Z'
     last_edited: '2026-10-28T13:50:34Z'
+  - id: note-fed385e
+    text: 'QA scenario 14 (concurrent readers / two simultaneous review waits): PASS
+      on 7b153815, live TUI + interactive stand-in, two PRs waiting at once. 279 one-second
+      samples from a JSON and a text reader plus the tree and runs popup never disagreed:
+      both waits at iteration 1 (one runs[] entry and one text row per PR with its
+      own window); answering A gave running/follow_up in ~1 s and held for 25 samples
+      across the 30 s window with B untouched and no re-armed INPUT_REQUIRED notice;
+      the NEEDS_WORK follow-up launched iteration 2 for A only (⏸2 vs ⏸1); a second
+      genuine question re-raised iteration 2 on the same window @10 / pane %13 / transcript
+      session with no iteration 3 and no flap over 14 samples; pm tui restart --breadcrumb
+      resumed both loops, adopted B and re-watched A (window/pane ids unchanged, 267
+      rc=0 samples across the restart, no phantom wait); three human lines typed in
+      a row left A running/follow_up with no new notice and B untouched. Story 2 runs-popup
+      check was sampled in the equivalent follow-up window at iteration 2 (popup showed
+      RUNNING review #2 with the follow-up reason); the iteration-1 window is covered
+      by the 34 JSON + text one-second samples. tests/test_review_input_required_state.py
+      + test_verdict_transcript.py: 80 passed. Evidence: /pm-captures/scenarios/14/
+      (recording.cast+mp4, transcript.log, evidence/ with per-story samples, poller
+      logs, debug log, manifest.md).'
+    created_at: '2026-10-28T16:12:32Z'
+    last_edited: '2026-10-28T16:12:32Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
