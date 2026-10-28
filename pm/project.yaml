@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T03:09:57.953682+00:00'
+  updated_at: '2026-10-28T03:29:23.639058+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11453,6 +11453,22 @@ prs:
       137. Captures /pm-captures/scenarios/85.'
     created_at: '2026-10-28T03:09:57Z'
     last_edited: '2026-10-28T03:09:57Z'
+  - id: note-2840417
+    text: 'QA S84 (2026-10-28, 17e68cc3, nested rootless podman, fake-claude): all
+      5 stories PASS live, no code change. Restart: same PID, 8 keys/ids/enqueued_at
+      kept, 0 stale removals, raise launched P3 s1 only. 180 s lock: 68 h/l probes
+      max 0.042 s (one probe sent 0.2 s after restart landed in the re-exec, 4.5 s),
+      t focuses, zz t stops, busy reason reached P3 pane 152.5 s after restart, P3
+      ids kept after release, P4 entries gone, E1 back. SIGKILL (Zsl+) + 60 s lock
+      + pm session: new PID adopted all 8 in the release second; raise launched P3
+      first scenario only. Stale acquired: rm sL + restart -> Removing stale 1 s after
+      restart, growth 18.6G->14.1G, no reserved term, no new sL ctr/entry. Workdir-missing
+      abort: reason + ERROR, P4 keys gone 1.7 s, second restart skips P4, z t after
+      restore makes 4 new entries. Harness: host had ~27G free, so at 8G projection
+      the 4th scenario hit honest host-headroom refusal; story 4 used system-memory-default-projection
+      6g. Captures /pm-captures/scenarios/84.'
+    created_at: '2026-10-28T03:29:23Z'
+    last_edited: '2026-10-28T03:29:23Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
