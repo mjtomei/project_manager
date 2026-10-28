@@ -101,3 +101,33 @@ def test_unknown_inventory_keeps_listing_deferred_releases(monkeypatch):
     out = _status(monkeypatch, None)
     section = out.split("Released while retained", 1)[1]
     assert GONE in section and LIVE in section
+
+
+def _ps_runtime(monkeypatch, ps_results):
+    calls = []
+
+    def run(*args, **_kw):
+        calls.append(args)
+        if args[0] == "ps":
+            rc, out, err = ps_results.pop(0)
+            return subprocess.CompletedProcess(args, rc, out, err)
+        return subprocess.CompletedProcess(args, 0, _row(LIVE, "id-b"), "")
+
+    monkeypatch.setattr(container, "_run_runtime", run)
+    return calls
+
+
+def test_ps_racing_a_removal_retakes_inventory(monkeypatch):
+    # S52: Podman 3.4 ps fails outright when a container is removed mid-listing
+    # (review/sign-off --fresh removes the old allocation while its pane's
+    # exit release lists containers).
+    race = (125, "", "Error: container 69905ace does not exist in database: no such container")
+    calls = _ps_runtime(monkeypatch, [race, (0, f"{LIVE}\n", ""), (0, f"{LIVE}\n", "")])
+    assert [i.name for i in reaper.list_containers()] == [LIVE]
+    assert sum(a[0] == "ps" for a in calls) == 3
+
+
+def test_other_ps_failure_still_fails_closed(monkeypatch):
+    calls = _ps_runtime(monkeypatch, [(125, "", "Error: cannot connect to the runtime socket")])
+    assert reaper.list_containers() is None
+    assert sum(a[0] == "ps" for a in calls) == 1

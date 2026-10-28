@@ -545,6 +545,10 @@ def _list_containers_once(vanished: list[str]) -> list[ContainerInfo] | None:
         except (OSError, subprocess.TimeoutExpired):
             return None
         if ps.returncode != 0:
+            # Podman 3.x ps itself fails ("container … does not exist in
+            # database: no such container") when one is removed mid-listing.
+            if container_mod._container_absent(ps.stderr or ""):
+                vanished.append((ps.stderr or "").strip())
             return None
         for line in (ps.stdout or "").splitlines():
             name = line.strip()
