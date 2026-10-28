@@ -951,3 +951,31 @@ def test_resumed_poll_does_not_repeat_the_outage_floor_launch(
         assert launched == [], "no second floor launch while holding containers"
     else:
         assert launched == [1], "a run holding nothing keeps its floor launch"
+
+
+def test_reservation_turning_running_between_listings_is_not_missed(monkeypatch):
+    """The no-own headroom paths take two listings (running count, then the
+    reservations' inventory).  A reserved container that turns running
+    between them must be counted at least once: read in the other order it
+    was in neither (not running for the count, running so not in flight),
+    and another run could take its slot."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 9)
+    others = [_info(f"pm-t-other-{i}") for i in range(8)]
+    calls = [0]
+
+    def snapshot():
+        # The reserved container starts running right after the first listing.
+        calls[0] += 1
+        return others + [_info("pm-t-qa-pr-a-L-s8", running=calls[0] > 1)]
+
+    monkeypatch.setattr(container_reaper, "list_containers", snapshot)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: sum(i.running for i in snapshot()))
+    token = qa_loop._reserve_launches(["pm-t-qa-pr-a-L-s8"])
+    try:
+        assert qa_loop._container_launch_room_known(2, desired=4, active=2)[0] == 2
+        calls[0] = 0
+        assert qa_loop._clamp_to_container_headroom(4) == 1
+    finally:
+        qa_loop._release_launches(token)

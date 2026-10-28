@@ -4905,11 +4905,15 @@ def _clamp_to_container_headroom(cap: int) -> int:
     limit = container_mod.max_running_containers()
     if limit <= 0:
         return cap
+    # Another run's dequeued launch is capacity in use before its container
+    # exists (see _launch_admission_lock).  Read the reservations' inventory
+    # BEFORE the running count: a reserved container that turns running
+    # between the two listings is then counted twice (briefly conservative)
+    # rather than in neither (another run could take its slot).
+    inflight = _inflight_unlisted()
     running = container_mod.running_container_count()
     if running is not None:
-        # Another run's dequeued launch is capacity in use before its
-        # container exists (see _launch_admission_lock).
-        running += _inflight_unlisted()
+        running += inflight
     if running is None:
         # An unavailable inventory is not zero running containers — a busy
         # runtime is exactly when the cap matters.  Launch one scenario and
@@ -4989,12 +4993,17 @@ def _container_launch_room_known(cap: int, desired: int | None = None,
             held = sum(1 for info in running
                        if info.name in own or (info.id and info.id in own))
         running_count = None if running is None else len(running)
+        inflight = 0 if inventory is None else _inflight_unlisted(inventory)
     else:
+        # Reservations first, as in _clamp_to_container_headroom: the two
+        # listings must over-count a container turning running between
+        # them, never miss it.
+        inflight = _inflight_unlisted()
         running_count = container_mod.running_container_count()
     if running_count is not None:
         # Another run's dequeued launch is capacity in use before its
         # container exists (see _launch_admission_lock).
-        running_count += _inflight_unlisted(inventory)
+        running_count += inflight
     if running_count is None:
         # An unreadable inventory is unknown, not zero running containers:
         # launch one at a time and re-clamp on the next poll.
