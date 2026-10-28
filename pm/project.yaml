@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T09:17:02.217420+00:00'
+  updated_at: '2026-10-28T09:20:48.354608+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36135,6 +36135,48 @@ prs:
       (cast+mp4+transcript+manifests).'
     created_at: '2026-10-28T09:17:02Z'
     last_edited: '2026-10-28T09:17:02Z'
+  - id: note-01e1eff
+    text: 'QA S10 refinement (2026-10-28): stories 1-4 refined against the code, story
+      5 reshaped. (1) Story 5 ("unsent draft at the implementation prompt") is not
+      drivable with fake-claude: the fake returns/exits on the first stdin byte (select
+      on stdin in _hold_open), so no draft can sit at its prompt. The Then is now
+      "same single impl window, same pane id, same --session-id across the restart"
+      — the observable evidence that the session is untouched — with a note that the
+      draft text itself is unobservable in this environment. (2) The missing-window
+      explanation is on the `pm autostart status` row (same row as the `a` popup),
+      NOT the TUI log, and is only visible between closing the window and the next
+      scheduler pass (check_and_start is sync/loop-callback driven, not a timer) —
+      trigger the pass with an idempotent `pm autostart add <pr>` (prints `unchanged:
+      <pr> (stop-before-merge)`). (3) The restart log line is exactly `Auto-start:
+      resumed fresh attempt for <pr> (waiting for its implementation handoff)` and
+      does not name the policy; read the restored policy from `pm autostart list`
+      (use `pm autostart fresh --auto-merge` in story 3 so the restored policy is
+      distinguishable from the default). (4) Fixture mechanic for a feedback turn
+      in flight: start impl with `pm pr start --transcript <dir>/impl-<pr>.jsonl`,
+      then append a `type:user` record to that symlink (in_progress) and a later `type:assistant`
+      text record to finish it; the fake keeps re-emitting idle_prompt every 2 s,
+      which is exactly the stale-idle condition reconcile_idle_status must correct.
+      (5) Start the review loop with `pm tui send zzd`, then stop it by killing `review-<pr>`
+      (a running loop cannot be stopped with `z d`, which kills it and opens a fresh
+      review window). Build the fixture in a fresh throwaway project per story.'
+    created_at: '2026-10-28T08:55:57Z'
+    last_edited: '2026-10-28T08:55:57Z'
+  - id: note-c776722
+    text: 'QA scenario 10 (wait-status accuracy / lost panes / TUI restart recovery)
+      PASS, all 5 stories. Handoff for future runs: (1) "stop the TUI entirely" cannot
+      be done with `tmux kill-pane` on the `pm _tui` pane — the global after-kill-pane
+      hook runs `pm _pane-closed` and pane_layout deliberately respawns the TUI ("TUI
+      pane was killed, respawning"; pre-existing on master at 450a6362), so `pm autostart
+      status` keeps answering with a new run= id. Terminate the pane process instead
+      (`kill -TERM $(tmux list-panes -t "$SESSION:0" -F "#{pane_pid}")`) — that leaves
+      the implementation window alive and gives the intended `owner_unavailable` (rc=2)
+      with the turn able to finish while no TUI runs. (2) `pane_start_command` is
+      quoted (`"pm _tui"`), so the scenario awk matcher needs gsub(/"/,"") to find
+      the TUI pane. (3) `pm autostart status` prints one extra `run=` id per TUI (re)start,
+      so a changed run id is the cheapest proof the TUI restarted/resumed. Captures:
+      /pm-captures/scenarios/10/{01-restart-wait,02-missing-window,03-turn-finishes-no-tui,04-target-removed,05-pane-identity}.'
+    created_at: '2026-10-28T09:20:48Z'
+    last_edited: '2026-10-28T09:20:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
