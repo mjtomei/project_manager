@@ -34345,7 +34345,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T13:38:53.504265+00:00'
+  updated_at: '2026-10-28T13:44:57.530583+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34538,6 +34538,21 @@ prs:
       pre-fix/, post-fix/).'
     created_at: '2026-10-28T13:38:53Z'
     last_edited: '2026-10-28T13:38:53Z'
+  - id: note-2ecb3c9
+    text: 'QA S7 (stale workdir refreshed before planning) PASS on 0fe7b8af: pm/-only
+      worker commit upstream -> "Fast-forwarded <branch> in the PR workdir from L
+      to U" before "Plan: 1 scenario(s)", no hold/route line, planner pane at the
+      PR workdir, planning_base/planner_head = U, both scenario clones at U, run ends
+      PASS with the PR at status qa. App-code import still fast-forwards then routes
+      to review (no qa-* window, no Plan:, qa_status NEEDS_WORK, PR back in_review).
+      Already-synced and plain-directory-origin workdirs plan normally with no ff/hold.
+      tests/test_qa_branch_sync.py 31 passed. Harness notes for future S7 runs: (1)
+      the provider env is delivered by a sourced-then-deleted env file, so #{pane_pid}
+      is the sh -c wrapper and has no ANTHROPIC_API_KEY — read the wrapper child (the
+      planner process) instead; (2) a TUI recorder client must be sent C-b 0 every
+      ~2 s during a QA run, else pm window switches pull the cast off the log pane.'
+    created_at: '2026-10-28T13:44:57Z'
+    last_edited: '2026-10-28T13:44:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
