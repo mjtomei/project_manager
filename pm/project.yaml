@@ -38895,6 +38895,38 @@ prs:
       PASS with one workdir.'
     created_at: '2026-10-28T21:53:22Z'
     last_edited: '2026-10-28T21:53:22Z'
+  - id: note-c63bde2
+    text: 'QA scenario 4 refinement: the ''PR at qa whose signoff_return awaits a
+      different hop (review/impl)'' sub-case is NOT constructible through the user
+      surface. apply_signoff_hop writes awaiting=<hop> in the same locked update that
+      its driver launches from, and pr_review/pr_start clear awaiting as they launch
+      (signoff.clear_return_awaiting), so awaiting=review/impl never persists on a
+      PR at qa; hand-editing signoff_return is excluded by the QA spec. Folded into
+      the consumed-return case (awaiting=None). The other negatives are driven through
+      the real bounce: a live ''pm qa run --pr <id>'' makes the sign_off->qa hop defer
+      (''sign_off: re-qa deferred: a QA run is in flight''), leaving awaiting=qa on
+      disk; then either let the live run end (TUI reconciler starts the owed run)
+      or ''pm pr edit --status merged'' to move the PR off qa before the run ends.
+      Note pm pr auto-sequence needs TWO ticks on a sign_off PR: the first launches
+      the stamped sign-off window (action=launch), the second reads SIGNOFF_REQA and
+      routes it (an unstamped run is retired as stale).'
+    created_at: '2026-10-28T20:57:47Z'
+    last_edited: '2026-10-28T20:57:47Z'
+  - id: note-675a9f8
+    text: 'QA scenario 4 (authorization negatives + idle-tick cost): PASS — all four
+      stories held (bare qa status, consumed return, clean restart, PR moved to merged
+      while a live run was in flight: no QA start, no new window/workdir, project.yaml
+      mtime unchanged while idle). Observed outside the scenario steps, unverified:
+      after `pm tui restart` mid-QA, the in-flight loop''s qa_run.json stayed without
+      `ended_at` (owner_pid 141769 = the restarted TUI process, still alive) and the
+      loop produced no further log lines for 15+ min; `run_driven_elsewhere` therefore
+      keeps reporting that PR as driven elsewhere for the life of that process. If
+      the loop thread does not survive restart_app, a later owed REQA on that PR would
+      be deferred indefinitely (until the TUI exits). Repro: start a QA run from the
+      TUI, `pm tui restart` while it is in flight, then check ~/.pm/workdirs/qa/<pr>-<loop>/qa_run.json
+      — no ended_at, no completion. Worth a follow-up if the thread is genuinely abandoned.'
+    created_at: '2026-10-28T21:46:08Z'
+    last_edited: '2026-10-28T21:46:08Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
