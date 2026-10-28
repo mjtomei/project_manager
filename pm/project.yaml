@@ -31364,7 +31364,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T06:33:18.301072+00:00'
+  updated_at: '2026-10-28T08:08:46.158489+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -31440,6 +31440,29 @@ prs:
       _user_record_is_non_task/find_verdict_turn.'
     created_at: '2026-10-28T06:33:18Z'
     last_edited: '2026-10-28T06:33:18Z'
+  - id: note-41afb5e
+    text: 'QA scenario 2 (repeated genuine questions / stale idles / non-human records):
+      PASS. Live TUI + interactive stub-claude run — harness `user` records (system-reminder-only,
+      task-notification, /loop + autonomous ticks, scheduled firing, [Request interrupted
+      by user...], qa_loop nudge) and a tool_result containing PASS/yes/INPUT_REQUIRED
+      never cleared or re-raised the wait; answer -> running in ~0.9 s and stayed
+      running through 6 stale idle refreshes; second genuine INPUT_REQUIRED re-raised
+      the same iteration-1 wait on the same pane (@2) with exactly one `follow-up
+      verdict=INPUT_REQUIRED`; a verdict-less prose question waited again with verdict
+      still INPUT_REQUIRED. Evidence: /pm-captures/scenarios/2/tui-input-required/
+      (cast+mp4+evidence.txt). NOTE for whoever reads the log next: the TUI notice
+      `interact with Claude in the review pane` appears only ONCE in the debug log
+      even though `log_message` ran once per question, because pm_core/tui/app.py:59
+      `_record_log_message` drops a message identical to the previous recorded one.
+      Do not read that single line as "notice not re-armed" — the per-question re-arm
+      is visible in the frame-capture triggers (/home/pm/.pm/debug/<session>-frames.json):
+      log_message:...INPUT_REQUIRED at 07:59:13, 08:00:34 and 08:05:00. Also: the
+      red notice line stays on screen after an answer (log lines are only replaced
+      by the next message); the persistent tree marker does flip to the cyan follow-up
+      spinner. tests/test_review_input_required_state.py 27 passed, tests/test_verdict_transcript.py
+      23 passed.'
+    created_at: '2026-10-28T08:08:46Z'
+    last_edited: '2026-10-28T08:08:46Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
