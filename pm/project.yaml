@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T03:56:54.346984+00:00'
+  updated_at: '2026-10-28T04:18:19.641627+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15042,6 +15042,44 @@ prs:
       markdown on the path).'
     created_at: '2026-10-28T03:56:54Z'
     last_edited: '2026-10-28T03:56:54Z'
+  - id: note-497e432
+    text: 'Review loop e44d i2 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found no defect in the signalling, capability, or takeover logic.
+      One real gap fixed: `claim_tui_pidfile` raised `TuiPidfileConflict` when it
+      exhausted `_CLAIM_MAX_ATTEMPTS`, so a stale pidfile it could not unlink (read-only
+      ~/.pm, a file owned by another user) made `pm _tui` REFUSE to start — taking
+      the whole TUI down for a pidfile problem, which is exactly what E13 forbids.
+      Every exhaustion path is "the file never named a live TUI, but we could not
+      remove it" (a live sibling raises the conflict on the round that observes it),
+      so it now raises `TuiPidfileUnavailable`, an `OSError` subclass that the launcher
+      and `_install_reload_signal` already handle by logging and running without external
+      IPC; callers then read the leftover file as stale and report/remove it. Verified
+      against a real 0555 dir (pre-fix: TuiPidfileConflict) and with a test that fails
+      against the pre-fix raise. Incidental fix (same "a corrupt snapshot must never
+      raise" class as E3/E16): `pm_core/qa_loop.py::resume_owned_elsewhere` called
+      `os.kill(pid, 0)` with an out-of-range `owner_pid` from a corrupt `qa_resume.json`;
+      `OverflowError` is not an `OSError`, so it escaped the TUI startup resume path.
+      Such a pid can never exist, so the run now reads as orphaned/resumable. Test
+      verified to fail pre-fix. Spec impl.md A2/E13/E16 + tests 31/32 updated. Full
+      suite: 3915 passed, 1 skipped (pytest 8.4.2; env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      PYTHONPATH=/workspace, markdown on the venv path). Pushed f81ccc61. Non-blocking
+      observations left as-is: (a) the startup-refusal message is printed to the pane,
+      but the real pm session has no remain-on-exit, so the pane vanishes on exit
+      and the text is only in the pm log — the live-tui capture only shows it because
+      that scaffold server sets remain-on-exit on; (b) `helpers.trigger_tui_command`
+      is production-dead (kept as the documented bool API); (c) `autostart._resolve_owner`
+      keeps its own liveness+zombie check (spec I1) and reports a mid-claim empty
+      pidfile as "stale pidfile" rather than "starting up"; (d) `_atomic_write` can
+      leave a hidden `.<pidfile>.<pid>.tmp` if SIGKILLed mid-publish; (e) a legacy
+      numeric pidfile has no starttime, so its identity rests on the cmdline marker
+      alone (a recycled PID that is another pm TUI gets a harmless SIGUSR1 reload,
+      but would make the startup claim refuse until that TUI exits — safe, manual-intervention-only,
+      inherent to pre-upgrade files). No user-visible message changed this iteration,
+      so the i3/i6 QA expectations still hold.'
+    created_at: '2026-10-28T04:18:19Z'
+    last_edited: '2026-10-28T04:18:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
