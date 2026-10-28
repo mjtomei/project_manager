@@ -35,7 +35,10 @@ hits, regardless of how it waits for a background job:
 - the CLI scaffold's ``<command-to-record>`` placeholder sits inside single
   quotes inside the outer double-quoted argument, so the recipe has to show
   the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
-  string and leaves asciinema with a broken command.
+  string and leaves asciinema with a broken command;
+- the web-UI driver is an ES module and the image's Playwright is a *global*
+  install advertised through ``NODE_PATH``, which ESM's resolver ignores, so
+  the run block links a ``node_modules`` beside the driver before running it.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -551,6 +554,71 @@ def test_failed_render_leaves_no_video(name, tmp_path):
         "place, so the capture looks successful with a stale video")
     assert not gif.exists(), (
         f"{name}: a failed render left the previous run's gif in place")
+
+
+def _web_ui_driver_block():
+    """The fenced block that runs ``driver.mjs``."""
+    text = _recipe_text("web-ui-recording.md")
+    for block in re.findall(r"```bash\n(.*?)```", text, re.S):
+        if "node driver.mjs" in block:
+            return block
+    raise AssertionError("web-ui recipe has no block that runs driver.mjs")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_resolves_playwright_beside_it(tmp_path):
+    """The driver is an ES module, and ESM ignores the image's ``NODE_PATH``.
+
+    The QA image installs Playwright globally under ``/usr/lib/node_modules``
+    and exports ``NODE_PATH`` for it, but Node's *ES module* resolver ignores
+    ``NODE_PATH``: the recipe's ``driver.mjs`` (``import { chromium } from
+    'playwright'``) fails at startup with ``ERR_MODULE_NOT_FOUND: Cannot find
+    package 'playwright'`` (verified in the QA image), so a worker that
+    follows the recipe gets no capture at all. A ``node_modules`` beside the
+    driver resolves the package, so the run block has to create one before
+    running the driver.
+    """
+    text = _recipe_text("web-ui-recording.md")
+    tooling = text.split("## Tooling", 1)[1].split(
+        "## What this recipe produces", 1)[0]
+    assert "ERR_MODULE_NOT_FOUND" in text, (
+        "web-ui recipe does not name the ESM resolution failure a worker hits")
+    assert "NODE_PATH" in tooling, (
+        "web-ui recipe does not explain why the image's global Playwright "
+        "does not resolve for an ES module")
+    block = _web_ui_driver_block()
+    link = block.find("ln -sfn")
+    assert link != -1 and "node_modules" in block[link:link + 60], (
+        "web-ui recipe runs driver.mjs without a node_modules beside it")
+    assert link < block.index('APP_URL="$APP_URL" node driver.mjs'), (
+        "web-ui recipe links node_modules only after running the driver")
+
+    # Drive the block the way a worker does: a fake "global" Playwright
+    # install (a sibling of the link target), a driver that imports it, and
+    # the recipe's own link + run lines. The import only resolves through the
+    # link, so a regression here fails the driver exactly as the image does.
+    capdir = tmp_path / "cap"
+    fake_global = tmp_path / "global"
+    capdir.mkdir()
+    (fake_global / "playwright").mkdir(parents=True)
+    (fake_global / "playwright" / "package.json").write_text(
+        '{"name": "playwright", "type": "module", "exports": "./index.js"}\n')
+    (fake_global / "playwright" / "index.js").write_text(
+        "export const chromium = {stub: true};\n")
+    (capdir / "driver.mjs").write_text(
+        'import { chromium } from "playwright";\n'
+        'console.log("driver saw", typeof chromium);\n')
+
+    script = block.replace("/usr/lib/node_modules", str(fake_global))
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1")
+    r = subprocess.run(["bash"], input=script, env=env,
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, f"{script}\n{r.stderr}"
+    assert "playwright ok" in r.stdout, (
+        "web-ui recipe's resolution check does not run: " + r.stdout + r.stderr)
+    assert "driver saw object" in r.stdout, (
+        "web-ui recipe runs driver.mjs without a resolvable playwright: "
+        + r.stdout + r.stderr)
 
 
 def test_web_ui_clears_a_previous_video():

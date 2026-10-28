@@ -194,7 +194,11 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    render leaves no mp4/gif and exits non-zero with its message) and the
    web-UI recipe (the pre-driver cleanup drops the previous run's webm, mp4,
    trace, DOM dump and screenshots before the app starts, and the transcode
-   drops the old mp4 before running and checks the new one exists).
+   drops the old mp4 before running and checks the new one exists). The
+   web-UI driver's module resolution is executed too: the recipe's own run
+   block is driven against a fake global Playwright install, so the link has
+   to make the driver's bare `import 'playwright'` resolve (a wrong link
+   target reproduces the image's `ERR_MODULE_NOT_FOUND`).
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
@@ -230,6 +234,21 @@ R8. **A failed render must not leave the previous run's video, and the
      "asciinema wrote no cast". The escaped form was verified end to end with
      real asciinema + tmux (rc 0, the cast holds the recorded output).
 
+R9. **The web-UI driver has to resolve Playwright before it can run.** The
+   QA image installs Playwright globally under `/usr/lib/node_modules` and
+   advertises it through `NODE_PATH`, which Node's *ES module* resolver
+   ignores, so the recipe's `driver.mjs` (`import { chromium } from
+   'playwright'`) dies at startup with `ERR_MODULE_NOT_FOUND: Cannot find
+   package 'playwright'` (verified in the QA image: rc 1, no driver output,
+   no capture). A `node_modules` beside the driver that resolves the package
+   fixes it, so the run block links the image's global install
+   (`ln -sfn /usr/lib/node_modules node_modules`) and checks it with
+   `node -e "import('playwright')…"` before running the driver; the Tooling
+   section explains why the image alone is not enough. Verified end to end in
+   the QA image: after the link the same driver launches Chromium and drives
+   a page (rc 0), and with a wrong link target the run fails with the same
+   `ERR_MODULE_NOT_FOUND` the recipe now documents.
+
 ## Non-goals
 
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
@@ -243,7 +262,7 @@ R8. **A failed render must not leave the previous run's video, and the
 |---|---|
 | `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked |
-| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked |
+| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; driver resolves the image's global Playwright through a local `node_modules` (ESM ignores `NODE_PATH`) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |

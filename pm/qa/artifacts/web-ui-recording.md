@@ -20,8 +20,12 @@ For terminal/CLI surfaces use `cli-recording.md`; for the pm TUI use
 ## Tooling
 
 Needs Playwright + its bundled Chromium. The QA container image ships
-these; elsewhere install with `npm i -D playwright && npx playwright
-install --with-deps chromium`.
+both — Playwright globally under `/usr/lib/node_modules`, its Chromium
+under `/opt/ms-playwright` — and advertises the global install through
+`NODE_PATH`, which Node's *ES module* resolver ignores. A driver saved as
+`driver.mjs` (an ES module, as below) therefore has to resolve the package
+locally; step 2 shows the one-line fix. Elsewhere install with
+`npm i playwright && npx playwright install --with-deps chromium`.
 
 ## What this recipe produces
 
@@ -92,10 +96,18 @@ done
 
 ### 2. Drive Chromium with the Playwright driver
 
-Save the skeleton below as `driver.mjs`, then run it with the capture dir
-and base URL in the environment:
+Save the skeleton below as `driver.mjs` in the capture directory, then run
+it with the capture dir and base URL in the environment:
 
 ```bash
+cd "$CAPDIR"                                 # where driver.mjs lives
+# The driver is an ES module, and Node's ES-module resolver ignores
+# NODE_PATH, so with only the image's global Playwright a bare
+# `node driver.mjs` fails at once with "ERR_MODULE_NOT_FOUND: Cannot find
+# package 'playwright'". A node_modules beside the driver that resolves the
+# package fixes it — the image's global install, or `npm i playwright` here.
+ln -sfn /usr/lib/node_modules node_modules
+node -e "import('playwright').then(() => console.log('playwright ok'))"
 CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs
 ```
 
@@ -261,6 +273,8 @@ fencing deep:
 
     - `recording.mp4` — the rendered walk-through, transcoded to H.264
       from Playwright's native webm.
+    - `driver.mjs` — the Playwright driver that produced this capture (the
+      adapted skeleton: locators, interactions, side-channel trigger).
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.
     - `01-loaded.png` … `NN-*.png` — key-state screenshots.
     - `dom.html` — DOM dump at a representative state.

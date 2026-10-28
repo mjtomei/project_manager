@@ -126,6 +126,10 @@ run.
   message, and stops the server process it started (no orphan listener);
 - a single blocking `curl` cannot stall the deadline (per-attempt
   connect/max-time bounds);
+- the Playwright driver starts in the image: `node driver.mjs` resolves
+  `playwright` through the recipe's `node_modules` link (without it the run
+  dies with `ERR_MODULE_NOT_FOUND`), and the recipe's resolution check
+  prints its ok line;
 - with an app that does answer, the recipe proceeds and produces its captures.
 
 ## Edge cases
@@ -157,6 +161,11 @@ run.
   `RECORDER_STOP_TIMEOUT` for a long command.
 - The web-UI server accepts the connection but never answers → the per-attempt
   curl bound keeps the deadline meaningful.
+- The web-UI driver is an ES module and the image's Playwright is a *global*
+  install advertised through `NODE_PATH`, which ESM ignores → a bare
+  `node driver.mjs` fails with `ERR_MODULE_NOT_FOUND: Cannot find package
+  'playwright'`; the recipe links the global install as a `node_modules`
+  beside the driver and checks the import before running it.
 - A render fails (no `agg`, unreadable cast, failed transcode) in a capture
   directory that already holds a video → the render steps delete this run's
   mp4/gif (and the web-UI webm) first and then check the mp4, so the run ends
