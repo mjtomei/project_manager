@@ -333,6 +333,29 @@ def test_resolve_iteration_transcript_falls_back_to_legacy(env):
         env.run, "pr-abc", "aaaa", 2) == str(legacy)
 
 
+def test_resolve_iteration_transcript_prefers_the_loop_scoped_path(env):
+    """When both names exist the loop-scoped one wins: a resumed post-upgrade
+    loop must poll its own iteration, never an older loop's legacy transcript
+    (a stale verdict there would be recorded as this loop's)."""
+    (env.run / "review-pr-abc-i2.jsonl").write_text("")
+    scoped = env.run / "review-pr-abc-aaaa-i2.jsonl"
+    scoped.write_text("")
+    assert rl.resolve_iteration_transcript(
+        env.run, "pr-abc", "aaaa", 2) == str(scoped)
+
+
+def test_resolve_iteration_transcript_prefers_a_dangling_loop_scoped_link(env):
+    """The launch creates the link before Claude writes the native JSONL, so a
+    dangling loop-scoped link is still the current attempt's transcript; it
+    must not fall back to an older loop's legacy file."""
+    (env.run / "review-pr-abc-i2.jsonl").write_text("")
+    scoped = env.run / "review-pr-abc-aaaa-i2.jsonl"
+    scoped.symlink_to(env.cwd / f"{_sid()}.jsonl")  # native not written yet
+    assert not scoped.exists()
+    assert rl.resolve_iteration_transcript(
+        env.run, "pr-abc", "aaaa", 2) == str(scoped)
+
+
 def test_review_completion_finalizes_only_its_own_loop(env, monkeypatch):
     """The 2026-10-28 failure: an obsolete loop's late completion froze the
     newer loop's shared ``review-i1`` live transcript."""

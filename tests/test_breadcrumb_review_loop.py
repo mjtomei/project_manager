@@ -314,6 +314,38 @@ class TestConsumeBreadcrumbReviewLoops:
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
 
+    def test_malformed_iteration_sessions_does_not_abort_the_restore(self, tmp_path):
+        """A hand-edited breadcrumb with a non-object ``iteration_sessions``
+        must not raise: the loop is still restored and resumed."""
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 1,
+                    "loop_id": "ab12",
+                    "iteration_sessions": ["not", "an", "object"],
+                    "history": [],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop") as mock_start:
+            mock_store.get_pr.return_value = {
+                "id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert app._review_loops["pr-001"].iteration_sessions == {}
+        mock_start.assert_called_once()
+
     def test_resume_summary_is_last_log_message(self, tmp_path):
         """The auto-start summary must not be overwritten by the per-loop
         resume messages (one is sticky) before it is ever painted."""

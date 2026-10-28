@@ -303,8 +303,12 @@ async def consume_breadcrumb(app) -> None:
                     timestamp=h.get("timestamp", ""),
                 ))
             # JSON object keys are strings; iteration_sessions is keyed by
-            # the integer iteration number.
-            for k, sid in (loop_data.get("iteration_sessions") or {}).items():
+            # the integer iteration number.  A malformed value must not abort
+            # the restore of the remaining loops and auto-start state.
+            recorded_sessions = loop_data.get("iteration_sessions")
+            if not isinstance(recorded_sessions, dict):
+                recorded_sessions = {}
+            for k, sid in recorded_sessions.items():
                 try:
                     rstate.iteration_sessions[int(k)] = sid
                 except (TypeError, ValueError):

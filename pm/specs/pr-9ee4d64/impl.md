@@ -311,9 +311,11 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (26) in `tests/test_transcript_archive.py` covering:
+- New unit tests (28) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
-  retire preserving history, live-appends visibility, restart fallback,
+  retire preserving history, live-appends visibility, restart fallback
+  (legacy fallback, loop-scoped preference when both names exist, and a
+  dangling loop-scoped link winning over a stale legacy file),
   both pre-return sessions surviving two sign-off returns (R4),
   legacy-iteration live/finalize handling, the no-hardlink archive
   fallback, a dangling link and a failed copy left alone by finalize, and
@@ -322,8 +324,9 @@ No **[UNRESOLVED]** ambiguities.
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
   `tests/test_breadcrumb_review_loop.py` gains an
-  `iteration_sessions` round-trip test and asserts int-keyed restoration
-  in the existing consume test.
+  `iteration_sessions` round-trip test, asserts int-keyed restoration in
+  the existing consume test, and pins that a malformed (non-object)
+  `iteration_sessions` value does not abort the restore.
   The archive tests that exercise a pre-fix behaviour fail on the pre-fix
   tree (`git show 3699f71a:pm_core/claude_launcher.py`); the tests that
   call helpers introduced here can only fail by import on that tree, which
@@ -386,6 +389,12 @@ Applied on top of the design above; keep them when editing the code.
   `_archive_name`, `_find_identical_archive`, `archive_transcript`,
   `_freeze_archive_copy` and `finalize_transcript_dir` (8602 i4) instead
   of each re-deriving the stem / archive directory.
+- `consume_breadcrumb` ignores a non-object `iteration_sessions` value
+  (8602 i5): a hand-edited or truncated breadcrumb must not abort the
+  restore of the remaining loops and auto-start state.  The
+  loop-scoped-over-legacy precedence in `resolve_iteration_transcript`
+  (including a dangling loop-scoped link, which is the current attempt
+  before Claude writes its native JSONL) is now pinned by tests.
 
 ## Known limitations (accepted)
 
