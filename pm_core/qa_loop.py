@@ -264,6 +264,8 @@ class QALoopState:
     # tmux session of a run-end container release that was deferred; the
     # run's thread retries it after completion (_retry_deferred_release).
     _deferred_release_session: str = ""
+    # Set by resume_qa_sync: this run's poll re-entered after a TUI restart.
+    _resumed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -3148,7 +3150,12 @@ def _poll_tmux_verdicts(
     _held_logged = [0]
     # Queued launches made while the container inventory was unreadable; reset
     # once it is readable again (see the re-clamp in _launch_next_queued).
-    _blind_launches = [0]
+    # A resumed poll cannot know whether its pre-restart poll already made
+    # the outage's floor launch (S90: a restart right after that worker
+    # settled admitted a second one, L+2), so it starts as if it had: while
+    # the inventory stays unreadable its settled, kept and deferred containers
+    # count as held, and it launches only while it holds nothing.
+    _blind_launches = [1 if state._resumed else 0]
 
     def _launch_next_queued() -> bool:
         """Release settled allocations, then launch one queued scenario.
@@ -5408,6 +5415,7 @@ def resume_qa_sync(
     _log.info("Resuming QA for %s: %d scenario(s), %d queued",
               state.pr_id, len(state.scenarios), len(queued_scenarios))
     state.latest_output = "Resuming QA after restart..."
+    state._resumed = True
     _notify()
 
     return _execute_and_finalize(

@@ -858,3 +858,82 @@ def test_queued_launch_reserves_its_name_only_while_creating(tmp_path, monkeypat
 
     assert seen == [{container_mod.qa_container_name("pr-aaaa", "L", 2, session_tag="t")}]
     assert qa_loop._inflight_launches == {}
+
+
+@pytest.mark.parametrize("holds", [True, False])
+def test_resumed_poll_does_not_repeat_the_outage_floor_launch(
+        tmp_path, monkeypatch, holds):
+    """S90: the pre-restart poll made the outage's one floor launch (F) and F
+    settled during the outage; a breadcrumb restart then resumed the run with
+    H kept for a human and the other releases deferred. The resumed poll had
+    no record of the floor launch and made another one (L2+2). A resumed poll
+    holding settled or kept containers waits for a readable inventory; one
+    that holds nothing still gets its single floor launch."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state._resumed = True
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 5)
+    ]
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    if holds:
+        for sc in state.scenarios[:3]:
+            launch(sc)
+        # H (s1) waits for a human; s2 and the floor worker s3 settled PASS.
+        state.scenario_verdicts = {1: "INPUT_REQUIRED", 2: "PASS", 3: "PASS"}
+        queued = state.scenarios[3:]
+    else:
+        queued = state.scenarios
+    launched.clear()
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        for sc in scenarios:
+            if st.scenario_verdicts.get(sc.index) == "INPUT_REQUIRED":
+                kept_indices.add(sc.index)
+        return True  # the inventory is unreadable: cleanup deferred
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 8:
+            state.stop_requested = True
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 8)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: None)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    # Running workers report nothing new.
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=queued,
+        concurrency_cap=1, desired_cap=3, use_containers=True)
+
+    if holds:
+        assert launched == [], "no second floor launch while holding containers"
+    else:
+        assert launched == [1], "a run holding nothing keeps its floor launch"
