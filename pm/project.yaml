@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T07:53:47.960985+00:00'
+  updated_at: '2026-10-28T08:18:32.829676+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15114,6 +15114,18 @@ prs:
       needs V2 and L to settle in the same poll.'
     created_at: '2026-10-28T06:49:24Z'
     last_edited: '2026-10-28T06:49:24Z'
+  - id: note-1829eaf
+    text: 'S85 refine: (1) the S77/S80 podman shim fails every command except info,
+      so podman run fails too and an outage floor launch would become "launch failed".
+      Fail only `ps --filter` (S44/S79 mode a) so the floor launch runs and releases
+      still log "container cleanup unavailable". (2) z t kills the previous run qa-<id>-s*
+      windows, and the run-start cleanup then reaps its kept INPUT_REQUIRED container,
+      so only the latest run IR worker survives. (3) The per-poll release and the
+      next queued launch share one _launch_next_queued call, so a restart on the release
+      line can land mid-launch. For an outage restart, trigger on "wait for a readable
+      container inventory" (one poll after the floor launch).'
+    created_at: '2026-10-28T08:18:32Z'
+    last_edited: '2026-10-28T08:18:32Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
