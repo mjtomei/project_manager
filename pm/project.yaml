@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T05:59:38.578294+00:00'
+  updated_at: '2026-10-28T06:11:27.596219+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11620,6 +11620,23 @@ prs:
       "failed verification: …", 6->7. Dead panes all status 137. Captures /pm-captures/scenarios/95.'
     created_at: '2026-10-28T05:59:38Z'
     last_edited: '2026-10-28T05:59:38Z'
+  - id: note-6ee768d
+    text: 'QA S97 (2026-10-28, b64c5951, nested rootless podman, fake-claude): all
+      5 stories PASS live, no code change. z d/zz d at 1m: refusal + loop "! ERROR
+      (1 iteration)", Blocked bar/status, no container, @5/%6/%5 unchanged, cmp 0.
+      40g zz d: Created (new id) -> kill_window @5 -> new_window_get_pane @6, relauncher
+      stdout "Closed review window", PASS, removed with new id. Bounce at 1m: exit=1
+      stdout (no Killed/Closed/refusal) + failed line at hop+1 s, re-arm "already
+      claimed", second failed at re-arm+185 s, 0 Created impl, dead window kept, awaiting
+      impl; nudge at 40g: Created -> kill_window -> new_window -> exit=0 "Closed window…Launched"
+      -> succeeded, awaiting null. Live --fresh L: Killed -> kill_window -> remove_container
+      -> Created new id, poll old gone before new, no Reusing, pane live 32 s later.
+      Harness trap for next run: the exec pane dies up to 16 s AFTER the "Stop-on-idle:
+      removed container" line and tmux appends "Pane is dead"; capture capS only once
+      pane_dead=1 (story 3 was re-driven on a 4th PR for a clean cmp 0). Captures
+      /pm-captures/scenarios/97.'
+    created_at: '2026-10-28T06:11:27Z'
+    last_edited: '2026-10-28T06:11:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
