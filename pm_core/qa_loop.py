@@ -1342,27 +1342,33 @@ def own_run_driven(pr_id: str) -> bool:
     running, or it is a ``pm qa run`` whose process still runs.  The user
     can close a run's main qa window while its driver goes on to a verdict
     (S89), so a missing window does not mean nothing drives the run."""
-    for qa_wd, rec in _own_run_records(pr_id):
+    for qa_wd, _rec in _own_run_records(pr_id):
         data = _load_resume_file(qa_wd)
         if isinstance(data, dict) and resume_owned_elsewhere(data):
             return True
-        # A ``pm qa run`` writes its snapshot only once its refiner is done,
-        # but its start record names its process from the start, and that
-        # process exits when the run ends: a REQA landing while it still
-        # refined launched over it and killed its windows (S123).
-        if is_instruction_run(pr_id, qa_wd) and resume_owned_elsewhere(rec):
-            return True
-    return False
+    # A ``pm qa run`` writes its snapshot only once its refiner is done:
+    # a REQA landing while it still refined launched over it and killed
+    # its windows (S123).
+    return instruction_run_live(pr_id)
 
 
 def instruction_run_live(pr_id: str) -> bool:
     """True while a ``pm qa run`` of one instruction against *pr_id*,
-    started in this pm session, still runs in another process.  It never
-    writes the PR's ``qa`` runtime entry (its verdict is not the PR's QA
-    result), so the picker would show the last full run's badge over it
-    (S125)."""
-    return any(is_instruction_run(pr_id, qa_wd) and resume_owned_elsewhere(rec)
-               for qa_wd, rec in _own_run_records(pr_id))
+    started in this pm session, still runs in another process.  Its start
+    record names that process from the start, and the process exits when
+    the run ends.  It never writes the PR's ``qa`` runtime entry (its
+    verdict is not the PR's QA result), so the picker would show the last
+    full run's badge over it (S125).
+
+    Reads only that run's fixed workdir, owner first: the picker calls
+    this on every render, and finished runs' records are kept, each
+    costing tmux lookups in :func:`launched_elsewhere`."""
+    qa_wd = (Path.home() / ".pm" / "workdirs" / "qa"
+             / f"{pr_id}-{instruction_run_loop_id(pr_id)}")
+    rec = read_run_record(qa_wd)
+    return bool(rec and rec.get("pr_id") == pr_id
+                and resume_owned_elsewhere(rec)
+                and not launched_elsewhere(rec.get("session_tag")))
 
 
 def run_driven_elsewhere(pr_id: str) -> bool:

@@ -976,6 +976,26 @@ class TestQaLaunchRecord:
             child.kill()
             child.wait()
 
+    def test_instruction_run_live_reads_only_its_own_record(
+            self, records, monkeypatch):
+        """The picker asks on every render: finished full runs' kept
+        records must cost no session lookup, nor a dead ``pm qa run``."""
+        import json, os
+        from pm_core import qa_loop
+        calls = []
+        real = qa_loop.launched_elsewhere
+        monkeypatch.setattr(qa_loop, "launched_elsewhere",
+                            lambda tag: calls.append(tag) or real(tag))
+        for loop_id in ("a", "b", "cli-pr-001"):
+            (records / f"pr-001-{loop_id}").mkdir(parents=True)
+            (records / f"pr-001-{loop_id}" / "qa_run.json").write_text(
+                json.dumps({"pr_id": "pr-001", "loop_id": loop_id,
+                            "session_tag": "own", "started_at": 1.0,
+                            "owner_pid": os.getppid() if loop_id != "cli-pr-001"
+                            else 2 ** 22 + 1}))
+        assert not qa_loop.instruction_run_live("pr-001")
+        assert calls == []
+
     def test_driver_record_replaces_the_launch_record_only(self, records):
         import json, os
         from pm_core import qa_loop
