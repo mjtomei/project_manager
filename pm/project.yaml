@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T03:22:05.458806+00:00'
+  updated_at: '2026-10-28T03:22:48.577521+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14811,6 +14811,22 @@ prs:
       may take the L+1 slot.'
     created_at: '2026-10-28T03:22:05Z'
     last_edited: '2026-10-28T03:22:05Z'
+  - id: note-9583baf
+    text: 'QA S58 PASS (2026-10-28, head 2f6afa65, real rootless Podman 3.4.4, unmodified
+      build-base incl. Chromium smoke, fake agents; evidence /pm-captures/scenarios/58/manifest.md).
+      Impl commit in container used /etc/gitconfig identity, A pane-exit removal 3.4
+      s, B untouched (ID/StartedAt/proxy/push; master push rejected). Two z d review
+      and two signoff --fresh replacements: one container each, old IDs gone, decoys
+      kept, no owner-release-pending, reap rc 0. QA run1 NEEDS_WORK -> run2 PASS:
+      peak L+1+10, run1 containers released by qa-run-end before its verdict; immediate
+      z t overlap retested on B: run2 planner/launch latency unchanged while run1
+      final release ran. Merge + ctrl+r: A leftovers gone via pane-exit, startup cleanup
+      clean, count L+1, keyring 35<=38+2, 197 artifacts sha-unchanged. Fixture traps:
+      a grouped session not named pm-* breaks TUI QA start (filed pr-5d90350); fake
+      planner needs a committed pm/specs/<pr>/qa.md; pm debug log contains NUL bytes
+      (use grep -a); pm pr signoff needs a shell inside the pm tmux session.'
+    created_at: '2026-10-28T03:22:48Z'
+    last_edited: '2026-10-28T03:22:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
