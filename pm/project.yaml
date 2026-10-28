@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T10:01:06.043038+00:00'
+  updated_at: '2026-10-28T10:03:17.910388+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26244,6 +26244,17 @@ prs:
       on unmodified origin/master.'
     created_at: '2026-10-28T10:01:05Z'
     last_edited: '2026-10-28T10:01:05Z'
+  - id: note-b0859f7
+    text: 'QA scenario 22 PASS (2026-10-28): STOPPED/NO_VERDICT holds survive a TUI
+      restart, and z t overrides them. Two harness caveats for the next run of this
+      scenario: (1) a run stopped during planning leaves its qa-<pr>-s0 "Scenario
+      0 (interactive)" helper window open, so the literal `tmux list-windows | grep
+      -c "^qa-<pr>"` check returns 1 during the post-restart scheduler passes — assert
+      on window IDs instead (no new window/pane); (2) the TUI log tail shows one line,
+      so "Planning QA scenarios..." can read "(hidden by sticky message)" while the
+      log file has it — grep `pm log grep` for the sequence. Captures: /pm-captures/scenarios/22/.'
+    created_at: '2026-10-28T10:03:17Z'
+    last_edited: '2026-10-28T10:03:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
