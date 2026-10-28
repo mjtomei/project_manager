@@ -29687,7 +29687,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T08:02:07.602484+00:00'
+  updated_at: '2026-10-28T08:48:23.481064+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -29765,6 +29765,18 @@ prs:
       guard then holds once (R7 fallback).'
     created_at: '2026-10-28T08:02:07Z'
     last_edited: '2026-10-28T08:02:07Z'
+  - id: note-2a59ffa
+    text: 'review 53f0 i4: no functional defects found in the sync/handoff/route logic.
+      Two hardening changes: (1) a malformed `qa_branch_sync` value in project.yaml
+      (hand-editable / merge-resolvable) is now ignored as if absent instead of raising
+      AttributeError out of run_qa_sync mid-planning — a divergence then re-routes
+      and rewrites a valid record; (2) coverage for the previously untested fetch-failure
+      hold (ls-remote ok, fetch fails → hold quoting git''s message, nothing changed).
+      Spec R5 updated. Full suite with PATH=/usr/bin: 3388 passed, 1 failure = pre-existing
+      test_hook_events HOME issue (/pm-captures/review-53f0-i4/full-suite.txt). Bug-fix
+      captures under /pm-captures/impl/ unchanged and still representative.'
+    created_at: '2026-10-28T08:48:23Z'
+    last_edited: '2026-10-28T08:48:23Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high

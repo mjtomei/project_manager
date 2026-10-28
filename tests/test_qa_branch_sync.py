@@ -303,6 +303,22 @@ class TestSyncPrBranch:
         assert sync.outcome == "hold"
         assert "Could not refresh the upstream" in sync.detail
 
+    def test_failed_fetch_holds_with_the_git_error(self, repos):
+        """ls-remote succeeded but the fetch did not (auth, network drop):
+        hold quoting git's message instead of classifying a head that was
+        never fetched."""
+        s = repos
+        _worker_push(s)
+        failed = subprocess.CompletedProcess(
+            ["git", "fetch"], 128, "", "fatal: could not read from remote")
+        with patch.object(qa_loop, "_fetch_upstream_commit",
+                          return_value=failed):
+            sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "Could not fetch" in sync.detail
+        assert "could not read from remote" in sync.detail
+        assert _head(s) == s["L"]
+
     def test_upstream_moved_during_fetch_holds(self, repos):
         """ls-remote classified a head the fetch no longer brings: hold
         with an accurate reason instead of quoting an empty git error."""
@@ -515,6 +531,20 @@ class TestRunQaSyncBranchSync:
             s, sync_record={"local": s["L"], "upstream": "b" * 40})
         assert seen["planner_reads"] == u
         assert "qa_branch_sync" not in pr
+
+    def test_malformed_sync_record_does_not_crash(self, repos):
+        """project.yaml is hand-editable: a foreign qa_branch_sync value
+        must not crash planning — it is treated as absent, so the
+        divergence routes to review and a valid record replaces it."""
+        s = repos
+        c = _commit(s["wd"], "pm/qa/instructions/s1.md", "S1\n", "planner")
+        u = _worker_push(s)
+        state, seen, pr = _run_qa(s, sync_record="not-a-record")
+        assert "planner_reads" not in seen
+        assert state.latest_verdict == qa_loop.VERDICT_NEEDS_WORK
+        assert isinstance(pr["qa_branch_sync"], dict)
+        assert (pr["qa_branch_sync"]["local"],
+                pr["qa_branch_sync"]["upstream"]) == (c, u)
 
     def test_hold_keeps_routed_divergence_record(self, repos):
         """A hold after a routed divergence must not forget it: once the

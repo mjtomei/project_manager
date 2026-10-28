@@ -84,7 +84,10 @@ R5. **Specific actionable holds** (INPUT_REQUIRED, no planning) for:
     does not merge).  The last one is detected via a small record on the
     PR (`pr["qa_branch_sync"] = {local, upstream, routed_at}`) written when R3
     routes.  Only an unchanged / fast-forwarded sync clears it; a hold
-    keeps it so the same heads still hold (no re-route) once fixed.
+    keeps it so the same heads still hold (no re-route) once fixed.  A
+    malformed record (project.yaml is hand-editable and merge-resolvable)
+    is ignored as if absent instead of raising, so routing a divergence
+    rewrites a valid one.
     The workdir checkout and unfinished-merge holds are local checks: they
     apply on every sync, including local-only repos and an up-to-date
     branch (a stale checkout or half-done merge is as unplannable there).

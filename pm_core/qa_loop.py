@@ -765,6 +765,13 @@ def _branch_sync_stops_qa(state: "QALoopState", sync: BranchSync,
         except Exception:
             _log.warning("QA sync: could not read qa_branch_sync for %s",
                          state.pr_id, exc_info=True)
+    if prev is not None and not isinstance(prev, dict):
+        # project.yaml is hand-editable (and merge-resolvable): a foreign
+        # value must not crash planning.  Treat it as absent — routing a
+        # divergence rewrites a valid record.
+        _log.warning("QA sync: ignoring malformed qa_branch_sync for %s: %r",
+                     state.pr_id, prev)
+        prev = None
 
     # Only a reconciled branch retires the record: a hold (unreachable
     # remote, dirty tree) after a routed divergence must still recognise
