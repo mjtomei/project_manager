@@ -99,6 +99,8 @@ def test_fresh_setup_failure_names_the_container_not_its_id(monkeypatch, tmp_pat
     assert error.value.kind == "timeout"
     assert name in message
     assert cid not in message
+    # Renaming keeps the stage that says how long setup was given (S90).
+    assert f"Container '{name}' setup did not finish (finish setup within 30s)" in message
     discard.assert_called_once_with(name, container_id=cid)
 
 

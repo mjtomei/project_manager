@@ -2314,14 +2314,17 @@ def _create_fresh(
     try:
         # Setup helpers address the captured id; a launch error must name the
         # container a user can act on, not its immutable id.
+        # Keep the helper's stage (e.g. "finish setup within 30s").
         try:
             _wait_for_setup(container_id)
         except ContainerLaunchError as exc:
-            raise launch_error(name, exc.kind, exc.stderr, stage="finish setup") from exc
+            raise launch_error(name, exc.kind, exc.stderr,
+                               stage=exc.stage or "finish setup") from exc
         try:
             _post_setup(container_id, workdir, _is_podman)
         except ContainerLaunchError as exc:
-            raise launch_error(name, exc.kind, exc.stderr, stage="finish setup") from exc
+            raise launch_error(name, exc.kind, exc.stderr,
+                               stage=exc.stage or "finish setup") from exc
         if allowed_push_branch:
             from pm_core.push_proxy import proxy_is_alive
             if not proxy_is_alive(sock_path):
