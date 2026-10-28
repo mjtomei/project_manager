@@ -5305,6 +5305,52 @@ def test_pr_show_reads_malformed_path_lists_as_absent(w):
     assert "## Sign-off return" not in r.output
 
 
+def test_the_signoff_evidence_block_tolerates_every_malformed_member():
+    """``pm pr show``'s ``## Sign-off`` reader against hand-edited state.
+
+    ``record_signoff_verdict`` writes the evidence block into the tracked
+    project.yaml, so every member is hand-editable.  ``pm pr show`` is the
+    reader the abbreviated surfaces point at, so a member that is not the
+    expected type must contribute no line rather than raising out of the
+    command (or printing a value the record does not hold).
+    """
+    from pm_core.cli.pr import _signoff_evidence_lines
+
+    bad = {"SIGNOFF_MERGE": True}
+    record = {
+        "verdict": SIGNOFF_MERGE, "sha": bad, "origin": 5, "ts": [],
+        "invalidated": bad,
+        "integration": {"base_sha": bad, "base_branch": 5},
+        "evidence": {
+            "reviewed_head": bad,
+            "candidate_tree": bad,
+            "resolved_from": {"head": bad, "base_sha": bad},
+            "review": {"sha": bad, "sha_source": [], "note": 7},
+            "qa": {"planner_head": bad, "overall": []},
+            "reused": "not-a-list",
+            "reused_total": "3",
+            "reason": 5,
+            "checks": [],
+            "required_return_stage": bad,
+            "prior_signoff": {"verdict": bad, "sha": bad},
+        },
+    }
+    lines = _signoff_evidence_lines(record)
+    assert lines and lines[0] == f"Verdict: {SIGNOFF_MERGE}"
+    joined = "\n".join(lines)
+    for member in ("Approved head", "Approved base", "Reviewed head",
+                   "Candidate tree", "Resolved from", "Review:", "QA:",
+                   "Reused evidence", "Reuse reason", "Targeted checks",
+                   "Required return stage", "Prior sign-off"):
+        assert member not in joined, (member, joined)
+
+    # A non-string verdict is no decision, and a non-mapping record is no
+    # record: no section at all.
+    assert _signoff_evidence_lines({"verdict": bad}) == []
+    assert _signoff_evidence_lines(5) == []
+    assert _signoff_evidence_lines(None) == []
+
+
 def test_a_non_utf8_launch_stamp_does_not_crash_the_driver(w):
     """A stamp file that cannot be decoded reads as "no stamp".
 
@@ -5994,6 +6040,29 @@ def test_a_hand_edited_boolean_count_is_not_a_count():
               "candidate_tree": "c" * 40, "base_files_count": True}
     assert integration.compact(record)["base_files_count"] == 0
 
+    # The other count readers are the same class.  ``compact``'s own
+    # ``paths_total``/``records_total`` checks already excluded booleans, so
+    # these are contract locks rather than pre-fix failures: a hand-edited
+    # ``true`` must not be written back as a total (which the prompt would
+    # report as a real "… N more" remainder and ``_apply_resolution`` would
+    # read as a count).
+    compact = integration.compact(
+        {"status": "resolved",
+         "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                        "paths_total": True}})
+    assert "paths_total" not in compact["resolution"], compact["resolution"]
+    entry = integration.compact(
+        {"status": "resolved",
+         "resolution": {"paths": [{
+             "path": "pm/project.yaml",
+             "records": {"pm/project.yaml": {"added_ours": True}}}]}}
+    )["resolution"]["paths"][0]
+    assert "records_total" not in entry
+    assert "added_ours_total" not in entry
+    # The *summary* count went through ``_as_int``, so this one did count a
+    # hand-edited ``true`` as "1 added from PR" before the fix.
+    assert integration._added_count(entry, "added_ours") == 0
+
 
 def test_a_hand_edited_resolved_from_is_not_rendered_as_a_revision(w):
     """The prompt and the return text agree on what a revision is.
@@ -6118,3 +6187,123 @@ def test_a_moved_branch_that_does_not_carry_the_base_keeps_no_assessment(w):
     assert not err.get("base_sha"), err
     assert not err.get("base_files_count"), err
     assert not err.get("base_behavior_changes"), err
+
+
+def test_merge_refuses_a_non_string_approved_sha_without_a_workdir(w):
+    """A hand-edited approval must not crash the merge gate.
+
+    ``pm pr merge`` probes the approval against the approved revision when the
+    workdir (and so HEAD) is gone, so it can say "workdir not found" instead of
+    "stale".  Passing the raw ``signoff.sha`` made the gate treat the record's
+    own value as a fresh match and then slice it (``head.startswith``) — an
+    ``AttributeError`` out of the command instead of a refusal.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+
+    def _malformed(d):
+        store.get_pr(d, PR)["signoff"]["sha"] = ["hand-edited"]
+    store.locked_update(w.pm_dir, _malformed)
+
+    # The workdir is gone, so there is no HEAD to compare against.
+    gone = w.wd.with_name(w.wd.name + "-gone")
+    w.wd.rename(gone)
+    try:
+        result, _, finalized = merge(w)
+    finally:
+        gone.rename(w.wd)
+    assert not finalized
+    assert result.exit_code != 0
+    assert not isinstance(result.exception, AttributeError), result.exception
+    # A refusal naming the PR, not an empty output with a traceback behind it.
+    assert f"PR {PR}" in result.output, result.output
+
+    # The same probe still gives the useful message for a *valid* approval.
+    def _restore(d):
+        store.get_pr(d, PR)["signoff"]["sha"] = rec["head"]
+    store.locked_update(w.pm_dir, _restore)
+    w.wd.rename(gone)
+    try:
+        result, _, finalized = merge(w)
+    finally:
+        gone.rename(w.wd)
+    assert not finalized
+    assert result.exit_code != 0
+    assert "workdir not found" in result.output, result.output
+
+
+def test_a_malformed_applied_member_still_gets_the_diff_hint():
+    """The return text must always name the base the branch contains.
+
+    The resolution block emitted its corrected ``git diff <base> HEAD`` hint
+    only when ``signoff_return.applied.merge_sha`` was falsy, while the
+    ``applied`` block emitted it only for a string ``merge_sha`` *and* a
+    sha-like ``base_sha``.  A hand-edited value satisfied neither, so the
+    routed step got no hint at all and fell back to the stale
+    ``<base>...HEAD`` diff — which lists the merged base commits as the PR's
+    own changes.
+    """
+    base, head, merge = "b" * 40, "a" * 40, "d" * 40
+
+    def _text(applied):
+        integ = {"base_branch": "master", "base_sha": base,
+                 "target_repo": "r", "status": "up_to_date", "head": merge,
+                 "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                                "unresolved": [],
+                                "applied_merge_sha": merge,
+                                "resolved_from": {"head": head,
+                                                  "base_sha": base,
+                                                  "merge_base": "e" * 40}}}
+        return signoff.format_signoff_return({
+            "id": PR,
+            "integration": integ,
+            "signoff_return": {"verdict": SIGNOFF_REVIEW, "hop": "review",
+                               "reason": "r", "reviewed_head": merge,
+                               "integration": integ, "applied": applied}})
+
+    hint = "The PR's changes on top of that base: `git diff"
+    # Well-formed: the ``applied`` block names the base.
+    assert hint in _text({"merge_sha": merge, "base_sha": base})
+    # No ``applied`` block (the launch apply): the resolution block names it.
+    assert hint in _text(None)
+    # Hand-edited members: one of the two blocks must still name the base.
+    for applied in ({"merge_sha": {"x": 1}, "base_sha": base},
+                    {"merge_sha": ["x"], "base_sha": base},
+                    {"merge_sha": True, "base_sha": base},
+                    {"merge_sha": merge, "base_sha": {"x": 1}}):
+        assert hint in _text(applied), applied
+
+
+def test_a_malformed_applied_merge_does_not_contradict_the_not_applied_label():
+    """A non-string ``applied_merge_sha`` is no applied merge, everywhere.
+
+    The base-changes range took the applied-resolution branch on raw
+    truthiness while the label in the same block used ``isinstance(..., str)``,
+    so one hand-edited record printed both the pre-apply base range and
+    "**Not applied**" — two contradictory statements in one prompt.
+    """
+    base = "b" * 40
+
+    def _block(applied_merge):
+        integ = {"base_branch": "master", "base_sha": base,
+                 "target_repo": "r", "status": "up_to_date", "head": "a" * 40,
+                 "merge_base": base, "candidate_tree": "c" * 40,
+                 "resolution": {"paths": [{"path": "pm/project.yaml"}],
+                                "unresolved": [],
+                                "applied_merge_sha": applied_merge,
+                                "resolved_from": {"head": "a" * 40,
+                                                  "base_sha": base,
+                                                  "merge_base": "e" * 40}}}
+        return prompt_gen._signoff_integration_block({"integration": integ},
+                                                     PR)
+
+    # A real revision: the range is shown and the resolution is not "not
+    # applied".
+    real = _block("d" * 40)
+    assert "Base changes since this PR branched" in real
+    assert "Not applied" not in real
+    # A hand-edited value: "Not applied", and no applied-resolution range.
+    for value in ({"x": 1}, ["x"], 5, True):
+        block = _block(value)
+        assert "Not applied" in block, value
+        assert "Base changes since this PR branched" not in block, value

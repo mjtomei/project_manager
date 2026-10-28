@@ -1517,7 +1517,21 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                 # and see the merged base commits as PR changes.  The branch
                 # can carry a *newer* base than the resolution merged (a later
                 # bounce), so name the newest one it contains.
-                if not _mapping(rec.get("applied")).get("merge_sha"):
+                #
+                # Emit the hint here only when the ``applied`` block below
+                # will not — a raw truthiness test on ``merge_sha`` was not
+                # enough: a hand-edited non-string value is no merge (that
+                # block skips it too, so neither emitted the hint), and a
+                # string merge whose ``base_sha`` is unusable leaves that block
+                # unable to name the base.  Both left the routed step with no
+                # hint at all, which is the stale-diff failure this exists to
+                # prevent.
+                applied_block = _mapping(rec.get("applied"))
+                applied_block_hint = bool(
+                    isinstance(applied_block.get("merge_sha"), str)
+                    and applied_block.get("merge_sha")
+                    and integration._sha_like(applied_block.get("base_sha")))
+                if not applied_block_hint:
                     # Object names only: the revision becomes a
                     # `git diff <rev> HEAD` command the routed step runs
                     # (``_contained_base`` already refuses anything else).

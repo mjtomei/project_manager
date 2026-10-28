@@ -403,6 +403,15 @@ THEN each untouched/unrepresentable note survives exactly once (not dropped,
 not duplicated as a fragment), malformed members are preserved verbatim, and no
 command raises a traceback.
 
+GIVEN a note whose text the editor's ASCII substitution makes structural — a
+continuation line starting with a unicode en dash (`– beta`, which the template
+renders as a real `- beta` bullet) and a text ending in an en-dash timestamp
+suffix (`2020–01–01T00:00:00Z`, which becomes a strippable timestamp) — with no
+`created_at`.
+WHEN the user opens the edit template and saves without changing anything.
+THEN no note is created, dropped, truncated or given a new id: both notes
+survive exactly as stored, and the command reports no changes.
+
 GIVEN a PR.
 WHEN the user adds the exact same note text twice, including two simultaneous
 adds from separate terminals.

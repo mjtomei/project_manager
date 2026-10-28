@@ -1100,6 +1100,42 @@ class TestPrNoteWritePaths:
         assert "bar" not in texts
         assert "note" not in texts
 
+    def test_a_noop_editor_save_survives_the_templates_ascii_step(
+            self, tmp_path):
+        """The ASCII substitution can change the bullet's *structure*.
+
+        ``pr_edit`` ASCII-izes the whole template before the parser sees it, so
+        an en dash in a note's text becomes a plain hyphen.  That turns a
+        continuation line starting ``– `` into a real ``- `` bullet, and a
+        ``2020–01–01T…Z`` suffix into a strippable timestamp.  The no-op
+        comparison modelled the *raw* bullet, so it saw neither change: an
+        unchanged save invented a duplicate note for the continuation line, and
+        replaced the suffix-bearing note with its truncated form under a new id
+        (both lose the hand-written note the save was supposed to leave alone).
+        """
+        original = [
+            {"id": "note-multi", "text": "alpha\n– beta"},
+            {"id": "note-suffix",
+             "text": "note  # 2020–01–01T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+        saved = {}
+
+        def fake_editor(template, on_save):
+            saved["template"] = template
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        # Sanity: the editor really holds the ASCII form of both notes.
+        assert "- beta" in saved["template"]
+        assert "2020-01-01T00:00:00Z" in saved["template"]
+        assert self._notes(root) == original
+
     def test_a_noop_editor_save_changes_nothing(self, tmp_path):
         """The editor watcher saves on every write, unchanged or not.
 

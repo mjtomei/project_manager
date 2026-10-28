@@ -64,6 +64,13 @@ def approved_candidate(pr_entry: dict) -> tuple[str, dict] | None:
     mapping is no record, and a revision that is not a string cannot name the
     candidate that was signed off, so it reads as absent — verification is
     skipped, not crashed.
+
+    ``candidate_tree`` is deliberately *not* normalized here.  It is the value
+    the published tree is compared against, not a revision to look up: a
+    hand-edited (or absent) tree cannot confirm any merge, so
+    :func:`verify_github_merge` records the mismatch (rendering the value
+    through :func:`_short`) instead of skipping the check.  Skipping would let
+    a hand-edited tree hide a genuinely different published result.
     """
     approved = pr_entry.get("signoff")
     approved = approved if isinstance(approved, dict) else {}

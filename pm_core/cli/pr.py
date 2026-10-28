@@ -293,13 +293,25 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             always stamp one, so the shape is hand-written), for a text whose
             trailing ``# <timestamp>``-looking suffix the comment stripping
             would eat, and for a text the bullet cannot hold on one line (a
-            newline).  Parsed line by line, like the template itself.
+            newline).  Parsed exactly like the template: the editor's ASCII
+            substitution comes first, then the line parser, then the parser's
+            per-field unicode restoration.  The ASCII step matters
+            structurally — an en dash becomes a plain hyphen, so a
+            continuation line starting ``– `` becomes a real ``- `` bullet and
+            a ``2020–01–01…`` suffix becomes a strippable timestamp.  Modelling
+            the bullet before that step missed both: a no-op save then created
+            a duplicate note for the continuation line, or replaced the note
+            with its truncated form under a new id.
             """
             text = _note_text(n)
             if text is None:
                 return False
-            lines = _note_bullet_line(n).splitlines()
-            return len(lines) == 1 and _note_bullet_text(lines[0]) == text
+            lines = _to_editor_ascii(_note_bullet_line(n)).splitlines()
+            if len(lines) != 1:
+                return False
+            read_back = _note_bullet_text(lines[0])
+            return read_back is not None \
+                and _restore_unicode(read_back) == _rendered_text(text)
 
         uneditable = [n for n in stored_notes if not _renders_back(n)]
         current_notes = [n for n in stored_notes if _renders_back(n)]
@@ -309,7 +321,13 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         # the editor watcher calls this on every save, and a no-op save must
         # neither invent an empty note for each member the template could not
         # show nor launder its lossy unicode round-trip into the stored notes.
-        block = "".join(_note_bullet_line(n) + "\n" for n in stored_notes)
+        # The block is ASCII-ized exactly like the template (``pr_edit`` runs
+        # ``_to_editor_ascii`` over the whole thing): that step can turn a
+        # unicode continuation line into a real bullet or a unicode timestamp
+        # suffix into a strippable one, and the model must see the same text
+        # the parser does.
+        block = _to_editor_ascii(
+            "".join(_note_bullet_line(n) + "\n" for n in stored_notes))
         rendered = [_rendered_text(text)
                     for text in (_note_bullet_text(line)
                                  for line in block.splitlines())
@@ -341,8 +359,11 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                 # Every line of the member's bullet that parses back as a note
                 # is a fragment: the first line for a multi-line text, the
                 # truncated form of a suffix-bearing text, and any
-                # ``- ``-prefixed continuation line the text happens to carry.
-                for line in _note_bullet_line(n).splitlines():
+                # ``- ``-prefixed continuation line the text happens to carry
+                # — including one the ASCII substitution turns into a real
+                # bullet (``– beta`` becomes ``- beta`` in the template).
+                for line in _to_editor_ascii(
+                        _note_bullet_line(n)).splitlines():
                     frag = _note_bullet_text(line)
                     if frag is not None:
                         fragments.append(_rendered_text(frag))
@@ -3342,8 +3363,16 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     refusal = merge_gate_refusal(pr_entry, current_sha, base_branch)
     approved = pr_entry.get("signoff")
     approved = approved if isinstance(approved, dict) else {}
+    # The approved revision is hand-editable state: a non-string value is not a
+    # revision, so it cannot stand in for the (missing) workdir HEAD.  Passing
+    # it raw made the gate treat the record's own value as a fresh match and
+    # then slice it (``head.startswith``) — an ``AttributeError`` out of
+    # `pm pr merge` instead of the refusal below.
+    approved_sha = approved.get("sha")
+    approved_sha = approved_sha \
+        if isinstance(approved_sha, str) and approved_sha else None
     if current_sha is None and refusal and merge_gate_refusal(
-            pr_entry, approved.get("sha"), base_branch) is None:
+            pr_entry, approved_sha, base_branch) is None:
         refusal = (f"PR {pr_id} workdir not found; the approved HEAD and "
                    f"candidate live there, so nothing can be published. "
                    f"Restore the workdir, then re-run sign-off.")

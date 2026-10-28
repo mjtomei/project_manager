@@ -860,7 +860,12 @@ def _signoff_integration_block(pr: dict, pr_id: str) -> str:
         range_base = rec["merge_base"]
         pre = resolution.get("resolved_from")
         pre = pre if isinstance(pre, dict) else {}
-        if resolution.get("applied_merge_sha") \
+        # A revision, not a truthiness test: a hand-edited non-string
+        # ``applied_merge_sha`` is no applied merge (the block below labels the
+        # same record "Not applied"), so taking the applied-resolution range
+        # here printed both the pre-apply base range and that "Not applied"
+        # line in the same prompt.
+        if integ._sha_like(resolution.get("applied_merge_sha")) \
                 and integ._sha_like(pre.get("merge_base")) \
                 and range_base == base_sha:
             # Only when the base inside HEAD is the one the resolution

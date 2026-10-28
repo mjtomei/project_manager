@@ -434,7 +434,15 @@ workdir's stale `<base>`/`origin/<base>` ref would list the merged base
 commits as PR changes. The applied base is taken from the applied resolution,
 a newer `up_to_date` check, or the merge a bounce recorded in
 `signoff_return.applied` (a clean bounce leaves the pre-merge `clean` check
-in place). The branch can contain more than one base revision (a resolution
+in place). A recorded `applied_merge_sha` counts only when it is a git object
+name: a hand-edited non-string value is no applied merge, so the prompt's
+base-changes range does not take the applied branch (taking it on raw
+truthiness printed the pre-apply range *and* "**Not applied**" in the same
+block) and the return text's hint is emitted by whichever block can name the
+base — the resolution block emits it whenever the `applied` block cannot (a
+malformed `merge_sha`, or a string one whose `base_sha` is unusable), instead
+of both skipping it and leaving the routed step with only the stale
+`<base>...HEAD` diff. The branch can contain more than one base revision (a resolution
 applied at sign-off, then a newer base merged by a later bounce), so
 `integration.contained_base(pr)` collects those candidates (only values that
 look like git object names: the value is interpolated into a command the
@@ -783,19 +791,34 @@ tests):
     `pm pr signoff integrate` output). A carry-forward
     of an already-bounded list also keeps its recorded total
     (`overlap_total`, `base_behavior_count`), so the prompt does not
-    under-report "… N more" after the re-check. The sign-off launch stamp is
+    under-report "… N more" after the re-check. A recorded count is a count
+    only when it is an integer and not a boolean: `_as_int` reads a
+    hand-edited `true` as no count (`isinstance(True, int)` is true, and
+    counting it as `1` invents a number pm never recorded), so
+    `base_files_count` / `paths_total` / the per-record counts are absent
+    rather than one — the same rule the prompt's own `base_files_count`
+    reader applies. The sign-off launch stamp is
     another: `prepare` can return the *stored* record when a concurrent apply
     won, so `stamp_signoff_launch` receives a hand-editable `base_sha`; a
     non-string value stamps nothing instead of raising `TypeError` out of the
     launch before the sign-off window is created. The same stale record reaches
     the `integrate --apply` output, so the applied-merge line reads
     `base_sha` through `revision_of` (it printed with an empty revision
-    instead of slicing an int). The GitHub recovery path
+    instead of slicing an int). `pm pr merge`'s "the workdir is gone, so say
+    that instead of 'stale'" probe passes the approved `sha` as the revision to
+    compare against; a hand-edited non-string value is not a revision, so it
+    reads as absent and the generic refusal stands — passing it raw made the
+    gate accept the record's own value as a fresh match and then slice it
+    (`head.startswith`), an `AttributeError` out of the command. The GitHub
+    recovery path
     (`pm pr merge --no-signoff-check` / `--propagation-only`) skips the merge
     gate, so it reads a non-string approved `sha`/`base_sha` as absent (no
     verification, not a crash) and `merge_integrity._short` renders every
     revision/tree, so a hand-edited `candidate_tree` records the mismatch
-    instead of raising `TypeError`. That contract lives in
+    instead of raising `TypeError` (by design: the tree is the value the
+    published result is compared against, not a revision to look up, so
+    skipping would let an unusable one hide a genuinely different merge).
+    That contract lives in
     `pm_core/merge_integrity.py`, the single implementation shared by the
     publisher, the TUI sync paths and `pm pr sync` (see "Integration with
     master: merge_integrity" below): `approved_candidate` reads a scalar
@@ -885,6 +908,16 @@ tests):
     save is a true no-op: it neither invents an empty note for a member the
     template could not show nor launders the template's lossy unicode
     round-trip (a right quote came back as a left one) into the stored notes.
+    That model must include the editor's ASCII substitution, which changes the
+    bullet's *structure*, not only its characters: `–` becomes `-`, so a
+    continuation line starting `– ` is a real `- ` bullet in the template and a
+    `2020–01–01T…Z` suffix becomes a strippable timestamp.  Modelling the raw
+    bullet missed both, and an unchanged save then invented a duplicate note
+    for the continuation line or replaced the suffix-bearing note with its
+    truncated form under a new id.  The block the no-op comparison parses and
+    the fragments a kept-verbatim member contributes are therefore both built
+    from the ASCII-ized bullet, and "does the template read this note back?"
+    compares the parsed (restored) text with the note's rendered form.
     A kept-verbatim member still contributes *fragments* to the parse (a
     multi-line note's lines, a suffix-bearing text's truncated form — every
     line of its bullet that parses back as a note), and a fragment must not
