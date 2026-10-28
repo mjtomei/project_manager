@@ -247,7 +247,14 @@ def _turn_state_from_tail(text: str,
     """Classify the newest user/assistant record in *text* (see above)."""
     if not text.strip():
         return "unknown"
-    for line in reversed(text.splitlines()):
+    # Split on "\n" only: ``str.splitlines`` also splits on Unicode line
+    # boundaries (U+2028, U+2029, U+0085) that JSON leaves *unescaped* inside
+    # a string — real transcripts contain them.  Such a record would be
+    # fragmented into pieces that fail ``json.loads`` and skipped, so the
+    # newest turn would be read from an older record: a handoff that never
+    # advances when the final answer carries one, or an early "complete" over
+    # a prompt that was just submitted.
+    for line in reversed(text.split("\n")):
         line = line.strip()
         if not line:
             continue
@@ -350,7 +357,7 @@ def extract_verdict_from_transcript(
     ]
 
     in_turn = False
-    for line in reversed(text.splitlines()):
+    for line in reversed(text.split("\n")):
         is_assistant = bool(_ASSISTANT_RE.search(line))
         is_user = bool(_USER_RE.search(line))
         if not in_turn:
@@ -421,7 +428,7 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
     # record and the end of file, bypassing meta records).
     turn_lines: list[str] = []
     in_turn = False
-    for line in reversed(text.splitlines()):
+    for line in reversed(text.split("\n")):
         is_assistant = bool(_ASSISTANT_RE.search(line))
         is_user = bool(_USER_RE.search(line))
         if not in_turn:

@@ -382,6 +382,20 @@ class TestHandoff:
         assert marker["awaiting_handoff"] is False
         assert marker["handoff_at"] and marker["review_started_at"]
 
+    def test_consume_handoff_also_updates_the_in_memory_row(self, project):
+        # ``_auto_review_idle_prs`` reloads ``app._data`` *before* consuming,
+        # so without an in-memory update the status row keeps saying "waiting"
+        # (and the fresh branch can be re-entered on a later in_progress
+        # bounce) until something else reloads the file.
+        pm_dir = project
+        autostart_fresh.reset_pr(pm_dir, "pr-a", "test")
+        app = FakeApp(store.load(pm_dir)["prs"], pm_dir)
+        assert st.fresh_awaiting(store.get_pr(app._data, "pr-a"))
+        autostart_fresh.consume_handoff(app, "pr-a")
+        marker = st.fresh_marker(store.get_pr(app._data, "pr-a"))
+        assert marker["awaiting_handoff"] is False
+        assert marker["handoff_at"] and marker["review_started_at"]
+
     def test_pane_transcript_wins_over_the_tracker_copy(self, tmp_path):
         # The run-dir ``impl-<pr>.jsonl`` symlink is *finalized* (replaced by
         # a snapshot) when auto-start is disabled, so the copy stops tracking

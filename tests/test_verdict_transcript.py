@@ -530,3 +530,60 @@ def test_turn_state_interrupt_without_a_fence_is_in_progress(
     assert latest_turn_state(p) == "in_progress"
     assert latest_turn_state(p, 0.0) == "in_progress"
 
+
+
+# JSON leaves Unicode line separators (U+2028 / U+2029 / U+0085) unescaped
+# inside a string, and real transcripts contain them.  The JSONL reader must
+# split on "\n" only: ``str.splitlines`` would fragment such a record into
+# pieces that fail ``json.loads``, so the newest turn would be read from an
+# older record.
+def _raw_separator_line(rec: dict) -> str:
+    return json.dumps(rec, ensure_ascii=False)
+
+
+def test_turn_state_complete_when_the_answer_has_a_unicode_separator(
+        tmp_path: Path) -> None:
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        _user_line("do it") + "\n"
+        + _raw_separator_line({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text",
+                             "text": "done next paragraph"}],
+            },
+        }) + "\n")
+    assert latest_turn_state(p) == "complete"
+
+
+def test_turn_state_in_progress_when_a_prompt_has_a_unicode_separator(
+        tmp_path: Path) -> None:
+    # The dangerous direction: a fragmented prompt would be skipped and the
+    # older (complete) answer would read as the handoff.
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        _user_line("do it") + "\n"
+        + _assistant_line("done") + "\n"
+        + _raw_separator_line({
+            "type": "user",
+            "message": {"role": "user",
+                        "content": "pasted text, now change it"},
+        }) + "\n")
+    assert latest_turn_state(p) == "in_progress"
+
+
+def test_verdict_survives_a_unicode_separator_in_the_record(
+        tmp_path: Path) -> None:
+    p = tmp_path / "t.jsonl"
+    p.write_text(
+        _user_line("do it") + "\n"
+        + _raw_separator_line({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text",
+                             "text": "some notes\nPASS"}],
+            },
+        }) + "\n")
+    assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"

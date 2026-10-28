@@ -559,20 +559,37 @@ def consume_handoff(app, pr_id: str) -> None:
     if not getattr(app, "_root", None):
         return
     now = now_iso()
+    written = False
 
     def _apply(data):
+        nonlocal written
         pr = store.get_pr(data, pr_id)
         marker = (pr or {}).get(FRESH_KEY)
         if isinstance(marker, dict) and marker.get("awaiting_handoff"):
             marker["awaiting_handoff"] = False
             marker["handoff_at"] = now
             marker["review_started_at"] = now
+            written = True
 
     try:
         store.locked_update(app._root, _apply)
     except Exception:
         _log.debug("autostart_fresh: consume handoff for %s failed",
                    pr_id, exc_info=True)
+        return
+    if not written:
+        return
+    # Keep the in-memory row in step with disk: the status row (``_derive``)
+    # and ``handoff_ready`` read ``app._data``, which the caller reloaded
+    # *before* this write, so it would otherwise keep claiming the attempt is
+    # still waiting (and could take the fresh branch on a later in_progress
+    # bounce of the same PR).
+    pr = store.get_pr(getattr(app, "_data", None) or {}, pr_id)
+    marker = (pr or {}).get(FRESH_KEY)
+    if isinstance(marker, dict) and marker.get("awaiting_handoff"):
+        marker["awaiting_handoff"] = False
+        marker["handoff_at"] = now
+        marker["review_started_at"] = now
 
 
 def resume_pending(app) -> list[str]:

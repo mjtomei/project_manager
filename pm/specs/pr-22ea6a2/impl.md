@@ -783,3 +783,31 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   it said "pr-a, pr-b already waiting for its implementation turn"; it now
   says "their" when more than one PR is in the call (TUI log line only; the
   returned message is built per PR).
+
+## Review-iteration notes (2649 i1)
+
+* **A JSON record containing a Unicode line separator is no longer
+  fragmented** — ``latest_turn_state`` (and the two pre-existing JSONL
+  scanners in the same module) split the transcript with
+  ``str.splitlines()``, which also splits on U+2028 / U+2029 / U+0085.  JSON
+  leaves those characters *unescaped* inside a string and real transcripts
+  contain them (7 of 15,764 local transcripts; one of them in a tail
+  assistant record), so such a record was cut into pieces that failed
+  ``json.loads`` and skipped, and the newest turn was read from an older
+  record: a handoff that never advances when the final answer carries one,
+  or — the dangerous direction — an early ``complete`` over a prompt that
+  was just submitted.  All three JSONL scanners now split on ``"\n"`` only
+  (the assistant-*content* scanner in ``extract_verdict_reason_from_transcript``
+  keeps ``splitlines``: that text is not line-delimited JSON).  Pinned by
+  three direct tests (answer with a separator → ``complete``; prompt with a
+  separator → ``in_progress``; verdict extraction with a separator), each
+  verified to fail without the fix.
+* **``consume_handoff`` keeps ``app._data`` in step with disk** —
+  ``_auto_review_idle_prs`` reloads ``app._data`` *before* consuming, so the
+  in-memory marker kept ``awaiting_handoff=True``: the status row could keep
+  reporting "waiting" (and ``handoff_ready`` could re-enter the fresh branch
+  on a later ``in_progress`` bounce) until something else reloaded the file.
+  The consume now also clears the in-memory marker, but only when the locked
+  write succeeded (a failed write must not make memory claim a consumed
+  handoff).  Pinned by
+  ``test_consume_handoff_also_updates_the_in_memory_row``.
