@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
+from click.testing import CliRunner
 
 from pm_core.cli.helpers import (
     _infer_pr_id,
@@ -377,3 +378,48 @@ class TestEnsureWorkdir:
             pr_entry = {"id": "pr-001", "workdir": bad}
             data = {"project": {"name": "test"}}
             assert _ensure_workdir(data, pr_entry, tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# `pm pr list --timestamps` reads hand-edited timestamps safely
+# ---------------------------------------------------------------------------
+
+
+class TestPrListTimestamps:
+    """A hand-edited timestamp is not always a string.
+
+    ``project.yaml`` is hand-editable state: an unquoted date is a
+    ``datetime.date``, which cannot be compared with another PR's ISO string.
+    ``format_pr_line`` (the same PR list's renderer) and the home window's PR
+    list already read such a value through ``str``; the CLI's own sort key
+    raised ``TypeError`` out of the command.
+    """
+
+    def _root(self, tmp_path):
+        (tmp_path / "project.yaml").write_text(
+            "project:\n"
+            "  name: test\n"
+            "  repo: /tmp/fake\n"
+            "  base_branch: master\n"
+            "plans: []\n"
+            "prs:\n"
+            "  - id: pr-001\n"
+            "    title: Dated\n"
+            "    status: in_progress\n"
+            "    updated_at: 2026-01-02\n"
+            "  - id: pr-002\n"
+            "    title: Stamped\n"
+            "    status: in_progress\n"
+            "    updated_at: '2026-01-03T00:00:00Z'\n"
+        )
+        return tmp_path
+
+    def test_a_hand_edited_date_does_not_crash_the_sort(self, tmp_path):
+        from pm_core.cli import cli
+
+        root = self._root(tmp_path)
+        result = CliRunner().invoke(
+            cli, ["-C", str(root), "pr", "list", "--timestamps"])
+        assert result.exit_code == 0, result.output
+        assert "pr-001" in result.output
+        assert "pr-002" in result.output

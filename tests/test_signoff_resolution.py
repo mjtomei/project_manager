@@ -4975,6 +4975,41 @@ def test_apply_to_pr_tolerates_malformed_notes():
         "Merge integrity: merged elsewhere."]
 
 
+def test_same_target_reads_a_non_string_as_a_different_repository():
+    """A hand-edited ``target_repo`` cannot name the same repository.
+
+    ``same_target`` is handed the approval's ``integration.target_repo`` when
+    ``pm pr merge`` revalidates what the verdict was bound to.  ``Path(5)``
+    raised ``TypeError`` out of the command instead of reporting the mismatch,
+    so a value that is not a string reads as a *different* target (a refusal).
+    """
+    assert integration.same_target("/tmp", "/tmp") is True
+    assert integration.same_target("/tmp", 5) is False
+    assert integration.same_target(5, "/tmp") is False
+    assert integration.same_target("/tmp", None) is False
+
+
+def test_publish_refuses_a_malformed_bound_target_repo(w):
+    """``pm pr merge`` returns to sign-off instead of raising ``TypeError``.
+
+    The merge gate validates the approval's revisions and candidate tree, not
+    its ``target_repo``: a hand-edited value reached ``same_target`` and
+    crashed the publish path with a traceback instead of the refusal every
+    other binding mismatch gets.
+    """
+    entry = dict(pr_entry(w), signoff={
+        "verdict": SIGNOFF_MERGE, "sha": w.head,
+        "integration": {"status": "clean", "base_sha": "b" * 40,
+                        "candidate_tree": "c" * 40, "target_repo": 5}})
+    with patch.object(pr_mod, "trigger_tui_refresh"):
+        with pytest.raises(SystemExit) as exc:
+            pr_mod._publish_approved(
+                store.load(w.pm_dir), w.pm_dir, entry, "local", "master",
+                str(w.wd), resolve_window=False, background=False,
+                transcript=None, companion=False)
+    assert exc.value.code == 1
+
+
 def test_concurrent_applies_serialize_on_the_repository_lock(w):
     """Two applies at once: one merges, the other sees HEAD moved.
 

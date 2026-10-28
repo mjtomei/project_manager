@@ -689,7 +689,14 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         prs = [p for p in prs if (p.get("plan") or "_standalone") == filter_plan]
 
     if timestamps:
-        prs = sorted(prs, key=lambda p: p.get("updated_at") or p.get("created_at") or "", reverse=True)
+        # ``str(...)``: a hand-edited timestamp that YAML parses as a
+        # non-string (an unquoted date is a ``datetime.date``) cannot be
+        # compared with another PR's string — that raised ``TypeError`` out of
+        # `pm pr list --timestamps`.  The home window's PR list and
+        # ``format_pr_line`` already apply the same guard; the ISO strings pm
+        # writes sort identically either way.
+        prs = sorted(prs, key=lambda p: str(
+            p.get("updated_at") or p.get("created_at") or ""), reverse=True)
     else:
         # Sort newest first (by gh_pr_number descending, then pr id descending)
         prs = sorted(prs, key=lambda p: (p.get("gh_pr_number") or _pr_id_sort_key(p["id"])[0], _pr_id_sort_key(p["id"])[1]), reverse=True)

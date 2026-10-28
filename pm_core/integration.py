@@ -187,9 +187,16 @@ def same_target(a: str, b: str) -> bool:
 
     Local paths compare resolved (a PR workdir's origin and the main repo
     dir can spell one directory differently); URLs compare verbatim.
+
+    ``b`` can come from hand-edited state (an approval's
+    ``integration.target_repo``): a value that is not a string cannot name the
+    same repository, so it reads as a *different* one — a refusal, never a
+    ``Path(5)`` ``TypeError`` out of ``pm pr merge``.
     """
     if a == b:
         return True
+    if not (isinstance(a, str) and isinstance(b, str)):
+        return False
     try:
         pa, pb = Path(a), Path(b)
         return pa.is_dir() and pb.is_dir() and pa.resolve() == pb.resolve()
