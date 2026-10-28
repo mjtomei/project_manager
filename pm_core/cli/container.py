@@ -91,10 +91,9 @@ def _echo_reaper_state(runtime_ok: bool = True, inventory=None) -> None:
             # A retained allocation removed since (e.g. by pm pr cleanup) has
             # nothing left to release; its records are pruned by the next full
             # pass, so don't list it as still waiting on the retention.
-            ids = {info.id for info in inventory if info.id}
-            names = {info.name for info in inventory}
+            present = container_reaper.inventory_has(inventory)
             deferred = {name: info for name, info in deferred.items()
-                        if (str(info["id"]) in ids if info.get("id") else name in names)}
+                        if present(name, info.get("id"))}
         if deferred:
             click.echo("Released while retained (removed once "
                        "'pm container retain --release' drops the retention):")

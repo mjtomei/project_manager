@@ -3133,8 +3133,10 @@ def _poll_tmux_verdicts(
                     )
                     _notify()
                 else:
+                    # Recorded only once this result is handled (below): a
+                    # fork failure part-way hands the result back, and its
+                    # retry must not count the same flag twice.
                     fails = verification_failures.get(scenario_idx, 0) + 1
-                    verification_failures[scenario_idx] = fails
                     _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
                               scenario_idx, scenario.title, fails, reason)
 
@@ -3216,6 +3218,7 @@ def _poll_tmux_verdicts(
                             )
                             verdicts_changed = True
                             _notify()
+                    verification_failures[scenario_idx] = fails
                 unhandled_verifications.pop(scenario_idx, None)
 
             for scenario in state.scenarios:

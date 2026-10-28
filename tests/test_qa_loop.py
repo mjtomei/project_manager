@@ -1913,6 +1913,51 @@ class TestPollTmuxVerdictsForkFailure:
         assert len(calls) == 2
         relaunch.assert_not_called()
 
+    def test_fork_failure_during_flag_counts_it_once(self, tmp_path):
+        """A flag handed back by a failed fork is not counted twice.
+
+        One retry is allowed: the first flag sends a follow-up (its pane
+        lookup hits EAGAIN once), the re-check passes.  Counting the
+        handed-back flag again would exhaust the retry and mark NEEDS_WORK.
+        """
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        calls = []
+
+        def pane_exists(pane):
+            calls.append(pane)
+            # The second lookup is the follow-up's (the first is the poll's).
+            if len(calls) == 2:
+                raise OSError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+            return True
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", side_effect=pane_exists), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=1), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=[(False, "flagged", None), (True, "", None)]):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert 1 in state.verified_scenarios
+
     def test_other_errors_still_raise(self, tmp_path):
         def pane_exists(pane):
             raise FileNotFoundError(errno.ENOENT, "tmux")

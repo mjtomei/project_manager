@@ -249,6 +249,17 @@ def retained_names() -> list[str]:
                    if isinstance(rec.get("name"), str) and rec["name"]})
 
 
+def inventory_has(inventory: "list[ContainerInfo]"):
+    """Return ``present(name, cid)`` for display filters over a complete inventory.
+
+    A record bound to an allocation ID matches only that ID (a same-name
+    replacement is a different allocation); an unbound record matches by name.
+    """
+    ids = {info.id for info in inventory if info.id}
+    names = {info.name for info in inventory}
+    return lambda name, cid=None: str(cid) in ids if cid else name in names
+
+
 def local_retained_names(inventory: "list[ContainerInfo] | None" = None) -> list[str]:
     """Retained names that belong to the current runtime, for display.
 
@@ -264,10 +275,8 @@ def local_retained_names(inventory: "list[ContainerInfo] | None" = None) -> list
     records = [rec for _, rec in _retention_records()
                if isinstance(rec.get("name"), str) and rec["name"]]
     if inventory is not None:
-        ids = {info.id for info in inventory if info.id}
-        names = {info.name for info in inventory}
-        records = [rec for rec in records
-                   if (str(rec["id"]) in ids if rec.get("id") else rec["name"] in names)]
+        present = inventory_has(inventory)
+        records = [rec for rec in records if present(rec["name"], rec.get("id"))]
     domain = (_runtime_domain()
               if any(rec.get("runtime_domain") is not None for rec in records) else None)
     return sorted({rec["name"] for rec in records
