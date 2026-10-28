@@ -687,6 +687,18 @@ def _cleanup_stale_scenario_windows(session: str, pr_data: dict,
 _FINALIZE_VERDICTS = ("FINALIZE_DONE", "FINALIZE_BLOCKED")
 
 
+def _unverified_passes(state: "QALoopState") -> list[int]:
+    """Scenario indices whose PASS still awaits the verifier.
+
+    With verification disabled (``qa-verify-pass`` off) nothing is ever
+    verified and a PASS is final, so nothing is awaiting verification.
+    """
+    if not _is_verification_enabled():
+        return []
+    return [idx for idx, v in state.scenario_verdicts.items()
+            if v == VERDICT_PASS and idx not in state.verified_scenarios]
+
+
 def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
                           session: str, window_name: str,
                           workdir_path: str | None,
@@ -711,13 +723,8 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     # Gate: every PASS verdict must have been confirmed by the verifier
     # before we finalize. The poll loop already waits for verifications
     # to settle, but this guards against any path that reaches finalize
-    # with an unverified PASS still in scenario_verdicts.  With verification
-    # disabled (qa-verify-pass off) nothing is ever verified and a PASS is
-    # final, so there is nothing to wait for.
-    unverified = [
-        idx for idx, v in state.scenario_verdicts.items()
-        if v == VERDICT_PASS and idx not in state.verified_scenarios
-    ] if _is_verification_enabled() else []
+    # with an unverified PASS still in scenario_verdicts.
+    unverified = _unverified_passes(state)
     if unverified:
         _log.warning("QA finalize: skipping — PASS verdicts %s have not been "
                      "verified yet", unverified)
@@ -4766,12 +4773,11 @@ def _finalize_scenarios(
     # Keeping PASS would report coverage the run never verified — the same
     # false-PASS class the exhausted-relaunch branch rejects. Downgrade only
     # when verification is enabled; otherwise a PASS is final.
-    if state.stop_requested and _is_verification_enabled():
-        for idx, verdict in list(state.scenario_verdicts.items()):
-            if verdict == VERDICT_PASS and idx not in state.verified_scenarios:
-                state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
-                state.scenario_verdict_reasons.setdefault(
-                    idx, "PASS was not verified before the run was stopped")
+    if state.stop_requested:
+        for idx in _unverified_passes(state):
+            state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons.setdefault(
+                idx, "PASS was not verified before the run was stopped")
     verdicts = list(state.scenario_verdicts.values())
     # A stopped run can leave scenarios without a verdict; never call
     # that coverage PASS.
