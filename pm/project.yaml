@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T08:53:30.238571+00:00'
+  updated_at: '2026-10-28T08:55:10.259994+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15145,6 +15145,21 @@ prs:
       key-users +5 all from other sandboxes container keyrings (ours 11->11).'
     created_at: '2026-10-28T08:53:30Z'
     last_edited: '2026-10-28T08:53:30Z'
+  - id: note-9517bf5
+    text: 'QA S85 PASS (e682fedd, code b6338490 incl. 2c26ddad; real rootless Podman
+      3.4.4, fake agents, podman stand-in failing only ps --filter; evidence /pm-captures/scenarios/85/manifest.md).
+      No code change. S1: restart 2 ms after the first per-poll ''released containers:
+      removed 1'' resumed with 3 queued, no relaunch/second verdict, s5 never recreated,
+      queued launched without a second t, peak 4, B push ok. S2: z t reaped prior
+      IR at run start, batch 3; outage floor launch V only (1 run in fault), peak
+      5=L+1, restart on ''wait for a readable container inventory'' -> startup ''cleanup
+      unavailable'', retry removed 2 PASSes 8.4 s after clear, V kept viewed then
+      removed at run end, IR kept. S3: dry-run keep/live pane, reap removed 1 after
+      kill-window, B id/inode unchanged, push ok, snapshots identical. Fixture trap:
+      QA panes call fake-claude by name, so link $R/bin/fake-claude (not only claude);
+      an ERROR run consumes fake entry 0, so re-set the config before retrying.'
+    created_at: '2026-10-28T08:55:10Z'
+    last_edited: '2026-10-28T08:55:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
