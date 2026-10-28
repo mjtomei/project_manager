@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T07:55:03.700685+00:00'
+  updated_at: '2026-10-28T08:12:00.370907+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32338,6 +32338,30 @@ prs:
       deselected. Evidence /pm-captures/review-419c-i2/. No pm_core/ change. (2026-10-28)'
     created_at: '2026-10-28T07:55:03Z'
     last_edited: '2026-10-28T07:55:03Z'
+  - id: note-8f2a785
+    text: 'Review loop 419c i3: one hole left in the kept recipe scope, reproduced
+      live. The tmux recipe''s step 5 waits on `tmux has-session -t pm-recorder` after
+      the detach, but if the recorder (attach client or asciinema) died DURING the
+      scenario the session is already gone, so the wait is a no-op, `test -s` passes
+      on the truncated cast, and the run reports a successful recording — the "a wait
+      that ends badly is never a successful render" class. Verified with real tmux
+      3.2a: HEAD''s step-5 block exits 0 ("SUCCESS", 37-byte partial cast) with the
+      target session still alive. Fix: step 5 first distinguishes the two ways the
+      recorder can be gone. The attach client follows the session (it only exits on
+      the detach, when the session ends, or because it died), so recorder-gone + target-alive
+      means it died mid-scenario → exit 1 with "recorder exited while the TUI was
+      still running — the cast is incomplete"; recorder-gone + target-gone is a legitimate
+      finish (nothing to detach). Post-fix: rc 1 and rc 0 respectively. New tests:
+      test_tmux_recorder_dying_mid_scenario_fails (fails against HEAD''s recipe) and
+      test_tmux_recorder_readiness_is_bounded (pins the recorder readiness loop''s
+      own deadline — the old "deadline in block[:first_key]" assertion was satisfied
+      by the pm-session poll''s deadline, so an unbounded recorder wait would have
+      passed). Doc fix: the tmux prose claimed a leftover cast makes the render step
+      rewrite the mp4 from the old cast; the readiness wait now fails first, so it
+      says that instead. impl.md R4/R7 and qa.md R2/edge cases updated. Evidence /pm-captures/review-419c-i3/.
+      File 31 pass (3 runs); related suites 305 pass. No pm_core/ change. (2026-10-28)'
+    created_at: '2026-10-28T08:12:00Z'
+    last_edited: '2026-10-28T08:12:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
