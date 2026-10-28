@@ -35,6 +35,21 @@ behaviourally-changed base.
    read the captures/diff, write `report.html` with the `pm-signoff-*` meta
    tags, then run `pm pr signoff record`. With fake-claude configured for the
    `signoff` session type, `pm pr signoff` can also be driven end to end.
+8. For the GitHub-backend surfaces (R15): inside the project's pm session,
+   seed a git-backed stand-in with `pm fake-github config set '<json>'`
+   (`{"prs":[{"head":"<branch>","title":"...","files":{...}}]}`). It creates a
+   real remote at `~/.pm/sessions/<tag>/fake-github/remote.git`; point the
+   project at a clone of it and `pm init` with `--backend github` (or set
+   `project.backend: github` and `project.repo` to that clone). Every `gh`
+   call pm makes in that session — including a freshly spawned `pm pr ...` —
+   is served by the fake. The stand-in's on-disk registry
+   (`~/.pm/sessions/<tag>/fake-github/state.json`) holds a `prs` list with each
+   PR's `state`; the git remote is an ordinary repo, so "a teammate merged on
+   GitHub" is `git -C <remote.git> merge --no-ff <branch>` (after pushing any
+   extra commit to `<branch>`) followed by flipping that PR's `state` to
+   `MERGED` in `state.json`. That is exactly the merge the sync paths must
+   detect; do not re-seed with `config set` for this (a re-seed adds a second
+   PR record rather than transitioning the first).
 
 Reproduction traps (from the prior QA runs — avoid rediscovering them):
 - Local backend: put the real git binary ahead of any QA wrapper in `PATH`
@@ -49,15 +64,22 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   cursors by hand. Also sync the PR branch with master before committing the
   branch-side record, because `pm pr start` records the workdir state after
   cloning.
-- The branch now contains `master@450a6362` (merged as 363ec8b8), so HEAD is
-  level with the base (`git rev-list --count HEAD..origin/master` is 0) and
-  the "behind master" warning in older notes no longer applies. That merge
-  was made **by hand** (`git merge`, no pm `--apply`: the implementation
-  container had no PR workdir), so no applied-resolution record exists. The
-  next check therefore reports `up to date` with an empty base diff, and the
+- The branch now contains `master@89e3c501` (merged as b2d1a15c, after the
+  earlier hand merge of `master@450a6362` as 363ec8b8). Both merges were made
+  **by hand** (`git merge`, no pm `--apply`), so no applied-resolution record
+  exists; a check reports `up to date` with an empty base diff and the
   base-interaction summary must be carried forward from the earlier conflict
   check (R7, `base_range_from`) or the evidence requirement silently
-  disappears. This post-merge state is the main new surface.
+  disappears. That post-merge state still needs coverage.
+- The `master@89e3c501` merge is the main new surface for scenarios 39+: master
+  (pr-2e06289) moved the GitHub-merge verification out of `pm_core/cli/pr.py`
+  into a new shared `pm_core/merge_integrity.py` (also called by the TUI
+  background/startup sync and `pm pr sync`). The merge took master's structure
+  and **ported this PR's hand-edited-state guards** into it, so the reconciled
+  module — not the old inline copy — is what every publisher, recovery and
+  sync path now runs (see R15). The rest of master's churn in the overlapping
+  files (sign-off launch env plumbing, the `--wait-for-merge` autostart policy,
+  push-proxy/container changes) came in with the same merge.
 - Scenarios 13-17 PASSed at 481644d5 and QA 18-23 PASSed at 25fb1918 (the
   re-run pointer, `pm pr show` resolution rendering, the real #250 shape,
   bounded evidence, concurrent operators, hostile project.yaml). Scenarios
@@ -412,6 +434,69 @@ byte in the path).
 WHEN the user launches sign-off.
 THEN the launch succeeds, the provenance is still shown, and the delta reads as
 absent — no bare "Integration check failed".
+
+### R15. Every discovered or recovered merge is checked against the signed-off candidate
+GIVEN a github-backend PR holding a bound `SIGNOFF_MERGE` (approved head,
+signed-off base, candidate tree), and a merge that GitHub published from a
+branch carrying a commit made after sign-off.
+WHEN the user runs `pm pr sync` / `pm pr sync-github` (or the TUI's
+startup/background sync discovers the merge), or recovers it with
+`pm pr merge --propagation-only`.
+THEN the PR is finalized as merged, a warning names the published merge, the
+approved head it did not carry and the base branch, the PR records
+`merge_integrity` with that problem, and a `Merge integrity: …` note appears
+exactly once on the PR (a second sync or recovery adds no second note).
+`pm pr note list` / `pm pr show` show the note.
+
+GIVEN the same PR and a merge GitHub published of exactly the signed-off
+candidate.
+WHEN the user syncs or recovers.
+THEN the PR is finalized as merged with no warning, no `merge_integrity`
+record and no note.
+
+GIVEN a PR merged on GitHub with no bound approval (no sign-off record, or a
+legacy HEAD-only `SIGNOFF_MERGE`).
+WHEN the user syncs or recovers.
+THEN the PR is finalized as merged and nothing is recorded — there is no
+candidate to compare against, and no invented mismatch.
+
+GIVEN the check cannot run — the base cannot be fetched or read, or the PR's
+own workdir is gone.
+WHEN the user syncs.
+THEN the PR is still finalized as merged, a "could not verify" warning says
+so, and nothing is recorded on the PR (unknown is not a mismatch). With the
+workdir gone the check still runs from the directory the sync used (another
+workdir, or the project repo), so a bad merge is still flagged.
+
+GIVEN an approval whose stored state was edited by hand (a scalar `signoff`,
+a non-string `sha`/`base_sha`/`candidate_tree`, a note member that is not a
+mapping or whose id is a list).
+WHEN the user syncs, recovers or publishes.
+THEN the command completes without a traceback: the malformed approval reads
+as absent (verification skipped), or the mismatch is recorded with the
+unreadable value rendered as `?`; hand-written notes are preserved and the
+warning note is still added once.
+
+GIVEN a merge that is not in the base yet.
+WHEN the user runs the recovery path (`--propagation-only` /
+`--no-signoff-check`).
+THEN it refuses, says the PR's HEAD is not in the base, and points back at
+`pm pr signoff` → `pm pr merge`; nothing is finalized.
+
+## Edge cases (Given / When / Then)
+
+- GIVEN a teammate pushed an unreviewed commit to the PR's remote branch after
+  sign-off and merged on GitHub. WHEN the user runs `pm pr merge`. THEN
+  publication is refused before anything is published, naming the remote head
+  that was not signed off.
+- GIVEN two syncs (or a sync and a recovery) run at once for the same detected
+  merge. WHEN they finish. THEN the PR carries exactly one `merge_integrity`
+  record and one integrity note, every other PR record is intact, and neither
+  run reports a lost update.
+- GIVEN a base that moved after a bad merge was detected. WHEN the user runs
+  the recovery path again. THEN the mismatch is re-derived against the
+  recorded approval (or reported as unverifiable), and no second note is
+  added.
 
 ## Pass / Fail criteria
 
