@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T21:49:08.413048+00:00'
+  updated_at: '2026-10-28T21:50:02.328736+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33117,6 +33117,48 @@ prs:
       Evidence: captures/pr-b19db15/scenarios/22/.'
     created_at: '2026-10-28T21:49:08Z'
     last_edited: '2026-10-28T21:49:08Z'
+  - id: note-52529ef
+    text: 'QA scenario 26 refinement (2026-10-28): in the pm-dev image (node 22.22.2,
+      Playwright chromium-1223) a driver killed with SIGTERM exits 0 — Playwright''s
+      handler makes `node driver.mjs` return 0 — so the web-UI driver block''s `node
+      driver.mjs || { ... exit 1; }` does not catch a plain `kill`. SIGKILL exits
+      137 and the block stops with "the driver failed — this run''s video, trace and
+      screenshots are incomplete; do not finalize this attempt". The finalize step''s
+      no-webm guard still catches the SIGTERM case one step later ("there is no webm
+      to transcode — the driver wrote no video"), but the driver block''s own check
+      is bypassed; when QAing a killed driver use `kill -KILL` (or a driver that fails
+      through its own catch). Also: Playwright''s auto-named `page@<hash>.webm` after
+      a kill is timing-dependent (could not reproduce on demand); seed it in the capture
+      dir to test the `*.webm` cleanup deterministically. The scenario''s other branches
+      (no webm, no ffmpeg, empty/failed transcode, concurrent drivers) were verified
+      in the pm-dev image and are unchanged.'
+    created_at: '2026-10-28T21:33:48Z'
+    last_edited: '2026-10-28T21:33:48Z'
+  - id: note-c3303d8
+    text: 'QA scenario 26 (web-UI driver + finalize) PASS 2026-10-28 on 865a88f9 —
+      all 9 triples reproduced the documented behaviour, no leftovers found. Environment
+      facts for the next run: (1) the local pm-dev image predates the Dockerfile Playwright
+      layer — no /usr/lib/node_modules/playwright, no /opt/ms-playwright, no ffmpeg
+      — so I built the branch Dockerfile (pm-qa-26: node 22.23.4, Playwright 1.64.1,
+      chromium-1248, ffmpeg 4.4.2, agg 1.9.0) and ran the extracted recipe blocks
+      in it with --network host; that build is the reliable way to get the environment
+      the scenario describes. (2) `unshare -rm` is blocked on this host in docker
+      (default seccomp, seccomp=unconfined and --privileged all fail: uid_map write
+      / root-fs propagation denied), so the hidden-Playwright triple used the scenario
+      fallback — the driver block run in pm-dev:latest (node 22.22.1, no playwright)
+      — and it behaved exactly as documented (ERR_MODULE_NOT_FOUND + the check message,
+      no driver-ran.marker, no dangling link, all seeded *.webm/trace.zip/*.png/dom.html
+      removed). (3) Two observations that are not defects: a driver that fails partway
+      or is SIGKILLed leaves a 0-byte `page@<hash>.webm` (this attempt own partial
+      — step 2 cleared the earlier attempt first, and finalize correctly refuses because
+      recording.webm is absent), and a plain SIGTERM still exits 0 through Playwright
+      own handler as note-52529ef says. Evidence: captures/pr-b19db15/scenarios/26/
+      (web-ui/ has the manifest + mp4 + trace + pngs + dom + http.log + sse.log; t2..t9
+      hold each triple logs; recipe-inputs/ has the extracted blocks, fixture and
+      drivers). Tests: tests/test_qa_artifact_web_ui_recording.py 19 pass, test_qa_artifact_recording_recipes.py
+      + test_qa_instructions.py 171 pass. No repo change made.'
+    created_at: '2026-10-28T21:50:02Z'
+    last_edited: '2026-10-28T21:50:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
