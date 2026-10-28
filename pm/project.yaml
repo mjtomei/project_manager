@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-000d03e
+  active_pr: pr-991aaab
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T19:09:46.017688+00:00'
+  updated_at: '2026-10-28T20:14:04.137155+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17151,6 +17151,56 @@ prs:
       + scratch pylibs). Pushed 23a05814.'
     created_at: '2026-10-28T19:09:45Z'
     last_edited: '2026-10-28T19:09:45Z'
+  - id: note-7ce1f0f
+    text: 'QA scenario 24 (concurrent restarts / queued commands on the shared restart
+      state) PASS 2026-10-28 on build 1755a172, all three stories, captures under
+      scenarios/24/{story1-concurrent-restarts,story2-two-sessions-one-marker,story3-restart-vs-add}
+      (cast + mp4 + transcript.log + manifest each).
+
+
+      (1) One session, breadcrumb restart vs plain restart fired 7 ms apart: both
+      printed their lines, board re-rendered, same pid 2450591 with starttime unchanged
+      and started_at advanced 20:04:52.07 -> 20:05:50.96, caps [sigusr1,sigusr2],
+      NO ~/.pm/merge-restart left, autostart ended as one consistent outcome (targets,
+      pr-95325c4); a follow-up plain restart gave same pid, fresh started_at, Auto-start:
+      off, marker still absent.
+
+
+      (2) Two sessions, A `pm tui restart --breadcrumb` vs B plain restart 6 ms apart
+      (A=pm-a-327bfdab/pr-95325c4, B=pm-b-fe61f926/pr-ce3770e): A ended Auto-start:
+      targets with its own PR, B Auto-start: off, neither list held the other''s PR
+      id, no merge-restart marker and no autostart-resume.json left behind, both pidfiles
+      live with both caps. Not asserted: the both-preserve case (known pr-000d03e).
+
+
+      (3) `pm tui restart --breadcrumb` vs `pm autostart add pr-d17fe55 --wait-for-merge
+      --timeout 30` 7 ms apart: race pane printed `added: ... (wait-for-merge)` +
+      EXIT=0, list showed the target exactly once, queue 0 bytes, log gained exactly
+      one restart_app (reason=merge_restart_marker), TUI alive same pid with both
+      caps.
+
+
+      Run mechanics for the next QA run: (a) other QA scenarios share this host''s
+      default tmux server AND ~/.pm, so run the scenario on a private socket (export
+      PM_TMUX_SOCKET=/tmp/pm-qa24-tmux.sock and use `tmux -S $PM_TMUX_SOCKET` for
+      the manual tmux calls) — a fresh server makes panes inherit your shell env directly,
+      no set-environment -g needed; (b) do NOT use the scenario''s `mktemp -d ...pm-qa24-a.XXXXXX`
+      dir name as-is: tmux rewrites the "." to "_", `pm session name` keeps the dot,
+      and every `-s`-targeted command then fails with "can''t find session" (filed
+      as pr-991aaab) — use a dot-free dir; (c) agg/ffmpeg are not installed; a working
+      agg 1.9.0 + ffmpeg 7.0.2 static pair was copied into scratch/bin from another
+      scenario''s /tmp/pm-s25-* dir; (d) `grep -c` in `$(... || echo 0)` yields "0\n0"
+      when the count is zero — compare counts in python or use `|| true`; (e) `pm
+      which` is hijacked by ~/.pm/sessions/<tag>/override (the harness writes a stale
+      one pointing at a different PR workdir); rewrite it to the clone root to get
+      `pm which` == clone; (f) live validation of the c0c9 i2 scoping happened by
+      accident: another scenario''s autostart-resume.json for session pm-pm-A-1793218054-6bc82bea
+      was present at this TUI''s mount and the log shows `consume_breadcrumb: leaving
+      breadcrumb for session pm-pm-A-... (this session is pm-pm-qa24-c-...)` — the
+      foreign breadcrumb was left alone, so story 2''s `test ! -e ~/.pm/autostart-resume.json`
+      must be read as "no file for MY sessions" when other scenarios run in parallel.'
+    created_at: '2026-10-28T20:14:04Z'
+    last_edited: '2026-10-28T20:14:04Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -39996,6 +40046,40 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T19:29:42.080267+00:00'
   updated_at: '2026-10-28T19:29:42.080267+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-991aaab
+  plan: bugs
+  title: 'Bug: a project directory containing a dot gets a pm session name tmux cannot
+    address'
+  branch: pm/pr-991aaab-bug-a-project-directory-containing-a-dot-gets-a-pm
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/paths.py get_session_tag() uses git_root.name verbatim\
+    \ (around line 242-244), and pm_core/cli/session.py builds the tmux session name\
+    \ as \"pm-<tag>\" without sanitizing.\n\nRepro (verified 2026-10-28 on build 1755a172):\n\
+    \  D=$(mktemp -d /tmp/pm-demo.XXXXXX)   # the mktemp separator puts a \".\" in\
+    \ the dir name\n  cd \"$D\" && git init && pm init --backend local --no-import\
+    \ && pm session\n  pm session name   -> pm-demo.abcd1234-<hash>   (contains a\
+    \ dot)\n  tmux ls           -> pm-demo_abcd1234-<hash>   (tmux rewrote the dot\
+    \ to an underscore at creation)\n  pm tui view -s pm-demo.abcd1234-<hash>  ->\
+    \ no TUI pane found; tmux says \"can't find pane: abcd1234-<hash>\"\n  tmux has-session\
+    \ -t pm-demo.abcd1234-<hash> -> exit 1\n  tmux has-session -t pm-demo_abcd1234-<hash>\
+    \ -> exit 0\n\nEffect: for any repo directory whose name contains \".\" or \"\
+    :\", every tmux-targeted command keyed by the computed session name fails: pm\
+    \ tui view/send/restart -s, pm session kill, pm autostart ... -s, and any pidfile\
+    \ lookup by the printed name. tmux forbids \".\" and \":\" in session names and\
+    \ silently substitutes \"_\".\n\nSuggested fix: sanitize the session tag (or the\
+    \ \"pm-<tag>\" composition) the same way tmux does, e.g. tag.replace(\".\", \"\
+    _\").replace(\":\", \"_\"), in one shared helper used by both the tmux-facing\
+    \ name and pm session name/tag, keeping pidfile and pane-registry keys consistent."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T20:13:23.449920+00:00'
+  updated_at: '2026-10-28T20:13:23.449920+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
