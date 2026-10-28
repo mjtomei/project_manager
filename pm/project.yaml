@@ -36917,6 +36917,17 @@ prs:
       (recording.mp4/cast, transcript, status-after-restart/, final-state/, test-evidence/).'
     created_at: '2026-10-28T06:17:34Z'
     last_edited: '2026-10-28T06:17:34Z'
+  - id: note-454c1ee
+    text: 'Scenario 22 refinement (2026-10-28): drive the closed outcome with `pm
+      pr edit <pr> --status closed` — `_pr_is_terminal` only treats status merged/closed
+      as terminal; `pm pr close` removes the PR entry, so the loop instead retries
+      into a retryable LAUNCH_FAILED. Script each supersede/close timeline in ONE
+      shell command (wall-clock between tool calls is 20-80 s). The fake-claude review
+      entry needs `delay` >= ~25 s (> the 20 s verdict grace) so the host can be broken
+      between iteration 1 and iteration 2. Use a private PM_TMUX_SOCKET + HOME so
+      the TUI, panes, CLI and fake-claude all share the same ~/.pm.'
+    created_at: '2026-10-28T05:39:07Z'
+    last_edited: '2026-10-28T05:39:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
