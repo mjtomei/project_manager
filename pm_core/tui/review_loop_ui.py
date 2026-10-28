@@ -322,6 +322,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                 except ValueError:
                     iteration = None
                 finalize_transcript(p, session_id=sessions.get(iteration))
+            # A loop restored from a pre-upgrade breadcrumb ran its
+            # in-flight iteration under the legacy shared name; freeze
+            # that too, with the session id recorded for the iteration so
+            # a newer loop that took the path is never clobbered.
+            for iteration, sid in sessions.items():
+                legacy = tdir_path / f"review-{state.pr_id}-i{iteration}.jsonl"
+                if legacy.is_symlink():
+                    finalize_transcript(legacy, session_id=sid)
 
     from pm_core import runtime_state as _rs
     if not _is_active_loop(state):

@@ -291,6 +291,36 @@ def test_review_completion_finalizes_only_its_own_loop(env, monkeypatch):
     assert "NEEDS_WORK" in p2.read_text()
 
 
+def test_review_completion_finalizes_an_adopted_legacy_iteration(
+        env, monkeypatch):
+    """A loop restored from a pre-upgrade breadcrumb adopts its in-flight
+    iteration under the legacy shared name; completion must freeze that too
+    (with the recorded session id) or the only copy stays a live link."""
+    from pm_core.tui import review_loop_ui
+
+    sid = _sid()
+    adopted = _native(env.cwd, sid, "ADOPTED LEGACY ITERATION")
+    legacy = env.run / "review-pr-abc-i2.jsonl"
+    _link(legacy, adopted)
+    # A different loop owns another legacy iteration; never touch it.
+    other_sid = _sid()
+    other = env.run / "review-pr-abc-i1.jsonl"
+    _link(other, _native(env.cwd, other_sid, "OTHER LOOP"))
+
+    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa",
+                               _transcript_dir=str(env.run))
+    state.iteration_sessions[2] = sid
+    state.iteration_sessions[1] = sid  # recorded id, but not that link's owner
+
+    monkeypatch.setattr(review_loop_ui, "_is_active_loop",
+                        lambda state: False)
+    review_loop_ui._on_complete_from_thread(None, state)
+
+    assert legacy.is_file() and not legacy.is_symlink()
+    assert "ADOPTED LEGACY ITERATION" in legacy.read_text()
+    assert other.is_symlink()  # another session's link stays live
+
+
 # --- sign-off retire keeps history ---------------------------------------
 
 def test_retire_signoff_run_archives_transcript(env, monkeypatch):
@@ -344,6 +374,30 @@ def test_disable_skips_a_running_review_loop(env):
     with live.open("a") as f:
         f.write(_record("NEEDS_WORK") + "\n")
     assert "NEEDS_WORK" in p.read_text()
+    assert idle.is_file() and not idle.is_symlink()
+
+
+def test_disable_skips_a_legacy_iteration_of_a_running_loop(env):
+    """A loop restored from a pre-upgrade breadcrumb polls the legacy shared
+    iteration name; a bulk sweep must leave that live too."""
+    from pm_core.tui import auto_start
+
+    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa", running=True)
+    app = _fake_app(env, loops={"pr-abc": state})
+    tdir = auto_start.get_transcript_dir(app)
+    tdir.mkdir(parents=True)
+    live = _native(env.cwd, _sid(), "LEGACY ITERATION RUNNING")
+    legacy = tdir / "review-pr-abc-i2.jsonl"
+    _link(legacy, live)
+    idle = tdir / "impl-pr-abc.jsonl"
+    _link(idle, _native(env.cwd, _sid(), "IDLE"))
+
+    auto_start._finalize_all_transcripts(app)
+
+    assert legacy.is_symlink()
+    with live.open("a") as f:
+        f.write(_record("NEEDS_WORK") + "\n")
+    assert "NEEDS_WORK" in legacy.read_text()
     assert idle.is_file() and not idle.is_symlink()
 
 

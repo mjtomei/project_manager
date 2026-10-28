@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T16:01:49.889487+00:00'
+  updated_at: '2026-10-28T16:30:40.185400+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35857,6 +35857,23 @@ prs:
       to master (32F/36E, env-only). Captures impl/{pre,post}-fix show all three symptoms.'
     created_at: '2026-10-28T16:01:49Z'
     last_edited: '2026-10-28T16:01:49Z'
+  - id: note-907a024
+    text: 'Review-loop 8602 i3: closed the legacy-adoption hole in R2/R4. A loop restored
+      from a pre-upgrade breadcrumb polls the legacy `review-<pr>-i<N>.jsonl` name,
+      which the loop-scoped prefix did not cover: (a) `_live_transcript_owners` now
+      also marks `review-<pr>-i` live for a running loop, so a disable or watcher-completion
+      sweep cannot freeze the iteration it is still polling (the exact bug class this
+      PR fixes); (b) loop completion now finalizes that legacy path for each iteration
+      with a recorded session id (ownership-checked), so an adopted legacy iteration
+      is frozen and archived instead of lingering as a symlink. Both new tests (22
+      archive tests now) fail on the pre-fix code for the right reason. Also hoisted
+      the `session_id_from_transcript` import out of the iteration loop. Spec pm/specs/pr-9ee4d64/impl.md
+      updated (22 archive tests, legacy coverage, one new accepted limitation: a running
+      loop keeps legacy iteration links live for its whole run). Verified: 515 passed
+      across the affected suites; full suite 55F/36E, identical names to master (4014
+      passed = master 3991 + 23 new).'
+    created_at: '2026-10-28T16:30:40Z'
+    last_edited: '2026-10-28T16:30:40Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high

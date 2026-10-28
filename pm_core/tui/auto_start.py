@@ -386,6 +386,15 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
     for pr_id, state in loops:
         if getattr(state, "running", False):
             prefixes.add(f"review-{pr_id}-{getattr(state, 'loop_id', '')}-i")
+            # A loop restored from a pre-upgrade breadcrumb adopts its
+            # in-flight iteration under the legacy shared name
+            # ``review-<pr>-i<N>.jsonl`` (see
+            # ``review_loop.resolve_iteration_transcript``).  Freezing
+            # that while the loop still polls would hide the verdict it
+            # appends later, so the legacy prefix counts as live for the
+            # whole run of a running loop.  Loop-scoped names can never
+            # match it: the loop id is hex, so it never starts with "i".
+            prefixes.add(f"review-{pr_id}-i")
     manager = getattr(app, "_watcher_manager", None)
     if manager is not None:
         try:

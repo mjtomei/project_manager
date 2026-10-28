@@ -220,7 +220,10 @@ available in the run dir:
 
 - `_on_complete_from_thread`: finalize only
   `review-<pr>-<loop_id>-i*.jsonl`, passing the recorded session id per
-  iteration. Keep it before the supersede check (own work).
+  iteration. Keep it before the supersede check (own work).  Also finalize
+  the legacy `review-<pr>-i<N>.jsonl` of each iteration with a recorded
+  session id (ownership-checked), so a loop that adopted a pre-upgrade
+  in-flight iteration does not leave that transcript a permanent symlink.
 
 ### `pm_core/signoff.py`
 
@@ -234,7 +237,11 @@ available in the run dir:
   `review-<pr>-<loop_id>-i*` of a running review loop, every
   `<watcher-type>-i*` of a running watcher loop, and the canonical path
   of each live impl/review/sign-off/merge window (window names come from
-  `autostart_state._window_names`).
+  `autostart_state._window_names`).  A running loop also marks the legacy
+  prefix `review-<pr>-i`: a loop restored from a pre-upgrade breadcrumb
+  polls the legacy shared iteration name, and freezing it would hide the
+  verdict it appends later.  Loop-scoped names can never match that
+  prefix (the loop id is hex, so it never starts with `i`).
 - `_live_transcript_skip(app)` wraps that as the `skip` predicate.
 - `_finalize_all_transcripts`: call
   `finalize_transcript_dir(tdir, skip=_live_transcript_skip(app))`.
@@ -302,15 +309,19 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (20) in `tests/test_transcript_archive.py` covering:
+- New unit tests (22) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback,
-  and the live-owner skips (running review loop, running watcher, live
-  step windows) for both bulk sweeps.  One more
+  legacy-iteration live/finalize handling, and the live-owner skips
+  (running review loop, running watcher, live step windows) for both bulk
+  sweeps.  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`.
-  All 20 archive tests fail on the pre-fix tree (`git show
-  3699f71a:pm_core/claude_launcher.py`).
+  The archive tests that exercise a pre-fix behaviour fail on the pre-fix
+  tree (`git show 3699f71a:pm_core/claude_launcher.py`); the tests that
+  call helpers introduced here can only fail by import on that tree, which
+  is why `impl/{pre,post}-fix/transcript-archive/repro.py` (real helpers,
+  pre-fix fallbacks) is the behavioural before/after evidence.
 - Regression run of `tests/test_review_loop.py`,
   `tests/test_signoff.py`, `tests/test_signoff_integration.py`,
   `tests/test_workspace_trust.py`, `tests/test_tui_signoff_handoff.py`,
@@ -344,6 +355,13 @@ Applied on top of the design above; keep them when editing the code.
 - `_live_transcript_owners` snapshots `app._review_loops` / `app._data`
   before iterating: the watcher-completion sweep calls it from a
   background thread while the TUI thread mutates those containers.
+- Legacy iteration coverage (8602 i3): a running loop also marks the
+  legacy `review-<pr>-i` prefix live, so a bulk sweep cannot freeze the
+  iteration that a loop restored from a pre-upgrade breadcrumb is still
+  polling; and loop completion finalizes the legacy
+  `review-<pr>-i<N>.jsonl` of every iteration with a recorded session id
+  (ownership-checked), so an adopted legacy iteration is frozen and
+  archived instead of lingering as a link.
 
 ## Known limitations (accepted)
 
@@ -359,3 +377,8 @@ Applied on top of the design above; keep them when editing the code.
   session id to compare against; `finalize_transcript` still writes the
   sid-keyed archive copy first, so no content is lost if a newer merge
   run owns the path.
+- **A running loop keeps legacy iteration links live for its whole run.**
+  The legacy `review-<pr>-i*` prefix is marked live whenever a loop for
+  that PR runs, because the loop may be polling an adopted pre-upgrade
+  iteration.  A stale legacy link from an earlier loop is therefore
+  frozen by a later sweep (or the loop's completion), not during the run.
