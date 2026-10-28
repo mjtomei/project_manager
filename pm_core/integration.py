@@ -393,25 +393,33 @@ def _duplicate_id_problems(data, label: str) -> list[str]:
     exactly as ambiguous as a duplicate top-level record id, and taking such
     a list wholesale (identical on both sides, or added by one side) would
     otherwise carry the ambiguity into the merged document unnoticed.
+
+    Every mapping member's id is checked, not only those of a wholly
+    well-formed list: one hand-edited member that is not a mapping (or whose
+    id is not a string) makes ``_is_id_list`` false, and the resolver then
+    treats the list as atomic — so a duplicate id hiding behind that member
+    would ride along whenever the list is taken wholesale.  Ids are keys
+    wherever pm stores records by them (``pm pr note add`` looks a note up by
+    id), so the ambiguity is the same.
     """
     problems: list[str] = []
 
     def walk(value, path: str) -> None:
         if isinstance(value, list):
-            if _is_id_list(value):
-                seen: set = set()
-                for entry in value:
-                    rec_id = entry["id"]
-                    if rec_id in seen:
-                        problems.append(
-                            f"{path}: duplicate record id {rec_id!r} on the "
-                            f"{label} side (ambiguous)")
-                    seen.add(rec_id)
-                for entry in value:
-                    walk(entry, f"{path}[{entry['id']}]")
-            else:
-                for index, entry in enumerate(value):
-                    walk(entry, f"{path}[{index}]")
+            seen: set = set()
+            for entry in value:
+                rec_id = entry.get("id") if isinstance(entry, dict) else None
+                if not isinstance(rec_id, str):
+                    continue
+                if rec_id in seen:
+                    problems.append(
+                        f"{path}: duplicate record id {rec_id!r} on the "
+                        f"{label} side (ambiguous)")
+                seen.add(rec_id)
+            id_list = _is_id_list(value)
+            for index, entry in enumerate(value):
+                walk(entry, f"{path}[{entry['id']}]" if id_list
+                     else f"{path}[{index}]")
         elif isinstance(value, dict):
             for key, child in value.items():
                 walk(child, f"{path}.{key}" if path else str(key))

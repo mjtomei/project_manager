@@ -2138,6 +2138,63 @@ def test_pr_show_renders_the_resolution(w):
     assert ", … 17 more" in r.output
 
 
+def test_pr_show_prints_the_recorded_signoff_evidence(w):
+    """The evidence block is what makes the reuse decision auditable.
+
+    ``record_signoff_verdict`` records the reviewed head, the candidate, the
+    review/QA revisions and the agent's reuse statement so a person can assess
+    the approval.  ``pm pr show`` is the reader every other abbreviated
+    surface of this feature points at, so the block must not exist only in
+    ``project.yaml``.
+    """
+    rec = _metadata_conflict(w)
+
+    def _record(d):
+        store.get_pr(d, PR)["integration"] = integration.compact(rec)
+    store.locked_update(w.pm_dir, _record)
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=integration.binding(rec))
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Sign-off" in r.output
+    assert f"Verdict: {SIGNOFF_MERGE} (manual, " in r.output
+    assert f"Approved head: {rec['head'][:12]}" in r.output
+    assert f"Candidate tree: {rec['candidate_tree'][:12]}" in r.output
+    # pm does not invent a review revision it cannot confirm.
+    assert "pm does not record the revision the review ran on" in r.output
+    assert "Reused evidence: review@aaaaaaa, qa@bbbbbbb" in r.output
+    assert ("Reuse reason: only independent project.yaml records changed"
+            in r.output)
+    assert "Required return stage: merge" in r.output
+
+    # Hand-edited state: a non-mapping record member reads as absent instead
+    # of raising out of the reader the prompts point sessions at.
+    def _malformed(d):
+        store.get_pr(d, PR)["signoff"] = {
+            "verdict": SIGNOFF_MERGE, "sha": 5, "ts": 7,
+            "evidence": {"reviewed_head": ["nope"], "candidate_tree": 3,
+                         "resolved_from": "garbage", "review": "garbage",
+                         "qa": ["x"], "reused": "review@abc",
+                         "reused_total": "many", "reason": 9,
+                         "checks": ["x"], "required_return_stage": None,
+                         "prior_signoff": 4},
+        }
+    store.locked_update(w.pm_dir, _malformed)
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "Verdict: SIGNOFF_MERGE" in r.output
+    # The malformed members contribute nothing (the integration section above
+    # still prints its own candidate tree, so it is not in this list).
+    for absent in ("Approved head", "Reused evidence", "Reuse reason",
+                   "Required return stage", "Prior sign-off"):
+        assert absent not in r.output
+
+
 def test_a_carried_resolution_with_a_malformed_delta_path_does_not_raise(w):
     """A hand-edited ``diff_path`` must not take the integration check down.
 
@@ -3313,6 +3370,40 @@ def test_nested_duplicate_ids_are_refused_even_when_taken_wholesale():
     merged, details = integration.resolve_project_yaml(base, dup, base)
     assert merged is None
     assert any("duplicate record id" in c for c in details["conflicts"])
+
+
+def test_a_duplicate_id_behind_a_malformed_member_is_still_ambiguous():
+    """A malformed member must not hide a duplicate id from the check.
+
+    ``_is_id_list`` requires every member to be a well-formed record, so one
+    hand-edited member (here a bare string) makes the list "atomic" and it is
+    then taken wholesale whenever the other side did not touch it.  The
+    duplicate note id would ride into the merged document unnoticed, where
+    pm's note commands — which look a note up by id — could only edit one of
+    the two.  The ambiguity is refused like any other duplicate.
+    """
+    base = "project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+    dup = ("project:\n  name: p\nprs:\n- id: pr-1\n  status: pending\n"
+           "  notes:\n  - id: note-1\n    text: a\n"
+           "  - id: note-1\n    text: b\n"
+           "  - just-a-hand-edited-string\n")
+    # Added by one side only: the list is taken wholesale, not merged.
+    merged, details = integration.resolve_project_yaml(base, dup, base)
+    assert merged is None
+    assert any("duplicate record id 'note-1'" in c
+               for c in details["conflicts"]), details
+    # And on the side that does not carry the malformed member either way.
+    merged, details = integration.resolve_project_yaml(base, base, dup)
+    assert merged is None
+    assert any("duplicate record id 'note-1'" in c
+               for c in details["conflicts"]), details
+    # A unique id behind a malformed member is still a plain merge (the
+    # malformed member is preserved, as the other readers preserve it).
+    ok = dup.replace("  - id: note-1\n    text: b\n", "  - id: note-2\n    text: b\n")
+    merged, details = integration.resolve_project_yaml(base, ok, base)
+    assert merged is not None, details
+    assert "just-a-hand-edited-string" in merged
+    assert "note-2" in merged
 
 
 @pytest.mark.parametrize("base,ours,theirs,needle", [

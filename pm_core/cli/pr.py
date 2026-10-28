@@ -74,6 +74,18 @@ _UNICODE_TO_ASCII = [
 ]
 
 
+def _to_editor_ascii(text: str) -> str:
+    """Replace unicode characters vim renders badly with ASCII equivalents.
+
+    The inverse of :func:`_restore_unicode`; applied to the whole template and,
+    per note text, to model what an unmodified template parses back to (see
+    ``_apply_pr_edit``).
+    """
+    for uc, ascii_rep in _UNICODE_TO_ASCII:
+        text = text.replace(uc, ascii_rep)
+    return text
+
+
 def _restore_unicode(text: str) -> str:
     """Restore unicode characters that were replaced for the editor.
 
@@ -85,6 +97,38 @@ def _restore_unicode(text: str) -> str:
     for uc, ascii_rep in _UNICODE_TO_ASCII:
         text = text.replace(ascii_rep, uc)
     return text
+
+
+def _note_bullet_line(n) -> str:
+    """One stored note as the edit template's bullet line.
+
+    Shared by the template (``pr_edit``) and the reconciliation
+    (``_apply_pr_edit``) so the "did the notes change?" test can compare
+    against exactly what was rendered: a member the template cannot show (no
+    ``text``, a non-string ``text``, a non-mapping member) renders as an empty
+    bullet, and a note with a ``created_at`` carries it as a comment suffix.
+    """
+    ts = n.get("created_at", "") if isinstance(n, dict) else ""
+    ts_suffix = f"  # {ts}" if ts else ""
+    return f"- {_note_text(n) or ''}{ts_suffix}"
+
+
+_EDIT_NOTE_TS_RE = re.compile(r"\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+
+def _note_bullet_text(line: str) -> str | None:
+    """The note text a template bullet line parses to (``None``: not a note).
+
+    The counterpart of :func:`_note_bullet_line`, shared with the template
+    parser so both agree by construction.  ``line.strip()`` drops a bare
+    ``- `` (an empty bullet renders as just ``-``), which is why a no-op save
+    of a member the template cannot show must be compared against the *parsed*
+    render rather than the rendered text.
+    """
+    stripped = line.strip()
+    if not stripped.startswith("- "):
+        return None
+    return _EDIT_NOTE_TS_RE.sub("", stripped[2:])
 
 
 def _parse_pr_edit_raw(raw: str) -> dict:
@@ -118,12 +162,8 @@ def _parse_pr_edit_raw(raw: str) -> dict:
         if in_desc:
             desc_lines.append(line)
         elif in_notes:
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                text = stripped[2:]
-                text = re.sub(
-                    r'\s+#\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$', '', text
-                )
+            text = _note_bullet_text(line)
+            if text is not None:
                 note_lines.append(text)
         elif line.startswith("title:"):
             title = line[len("title:"):].strip()
@@ -199,16 +239,31 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                         changes.append(f"depends_on={', '.join(deps)}")
 
         # Notes reconciliation.  Hand-edited state: a member that is not a
-        # mapping, or a note without ``text``/``id``, is not a note the edit
-        # template could have shown — skip it instead of raising
-        # ``AttributeError``/``KeyError`` out of the write path (which would
-        # leave the file untouched and hide the problem).
-        current_notes = _notes_of(pr_entry)
-        malformed_notes = [n for n in current_notes if not isinstance(n, dict)]
-        current_notes = [n for n in current_notes if isinstance(n, dict)]
-        old_texts = [_note_text(n) for n in current_notes]
-        if parsed["note_texts"] != old_texts:
-            old_by_text: dict[str | None, list] = {}
+        # mapping, or a note whose ``text`` is not text (a hand-edited
+        # unquoted date, a number, a missing ``text``), is not a note the edit
+        # template could have shown — it renders as an empty bullet, so a
+        # round-trip would rebuild it away (or replace it with an empty note
+        # under a new id) even when the user changed nothing.  Keep those
+        # verbatim instead of raising ``AttributeError``/``KeyError`` out of
+        # the write path or dropping hand-written state silently.
+        stored_notes = _notes_of(pr_entry)
+        uneditable = [n for n in stored_notes
+                      if not isinstance(n, dict) or _note_text(n) is None]
+        current_notes = [n for n in stored_notes
+                         if isinstance(n, dict) and _note_text(n) is not None]
+        # Compare the parse against what an *unmodified* template parses back
+        # to — the same bullet renderer, line parser, ASCII substitution and
+        # unicode restoration — rather than against the editable notes alone:
+        # the editor watcher calls this on every save, and a no-op save must
+        # neither invent an empty note for each member the template could not
+        # show nor launder its lossy unicode round-trip into the stored notes.
+        block = "".join(_note_bullet_line(n) + "\n" for n in stored_notes)
+        rendered = [_restore_unicode(_to_editor_ascii(text))
+                    for text in (_note_bullet_text(line)
+                                 for line in block.splitlines())
+                    if text is not None]
+        if parsed["note_texts"] != rendered:
+            old_by_text: dict[str, list] = {}
             for n in current_notes:
                 old_by_text.setdefault(_note_text(n), []).append(n)
             new_notes = []
@@ -229,10 +284,10 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
                     })
                     existing_note_ids.add(note_id)
             new_notes.sort(key=_note_sort_key)
-            # The edit template cannot show a member that is not a note, so
-            # keep those hand-written values rather than dropping them
-            # silently (the readers render them, ``_note_line`` shows ``?``).
-            pr_entry["notes"] = new_notes + malformed_notes
+            # The edit template cannot show those members, so keep them
+            # rather than dropping them silently (the readers render them,
+            # ``_note_line`` shows ``?``).
+            pr_entry["notes"] = new_notes + uneditable
             changes.append("notes updated")
 
         if changes:
@@ -387,9 +442,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         notes_lines = ""
         if current_notes:
             for n in current_notes:
-                ts = n.get("created_at", "") if isinstance(n, dict) else ""
-                ts_suffix = f"  # {ts}" if ts else ""
-                notes_lines += f"- {_note_text(n) or ''}{ts_suffix}\n"
+                notes_lines += _note_bullet_line(n) + "\n"
         else:
             notes_lines = "# (no notes)\n"
 
@@ -409,9 +462,7 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             f"{orig_desc}\n"
         )
 
-        editor_template = template
-        for uc, ascii_rep in _UNICODE_TO_ASCII:
-            editor_template = editor_template.replace(uc, ascii_rep)
+        editor_template = _to_editor_ascii(template)
 
         def on_save(raw: str) -> None:
             _apply_pr_edit(root, pr_id, _parse_pr_edit_raw(raw))
@@ -632,11 +683,102 @@ def _note_line(n: dict) -> str:
     return f"  {n.get('id') or '?'}{ts_str}: {n.get('text') or ''}"
 
 
+def _signoff_evidence_lines(record) -> list[str]:
+    """The recorded sign-off decision and the provenance behind it.
+
+    ``signoff.record_signoff_verdict`` stores an ``evidence`` block on the PR
+    (reviewed head, candidate tree, the revisions review and QA ran on, the
+    agent's reuse statement and the required return stage) so the decision can
+    be assessed after the fact — the merge gate enforces the statement, and a
+    person auditing the approval needs to see it.  Without a reader the block
+    exists only in ``project.yaml``, so ``pm pr show`` — the reader every
+    other abbreviated surface in this feature points at — prints it.
+
+    Every value is hand-edited state: a non-mapping record, a non-string
+    revision and a non-list id list read as absent instead of raising out of
+    the command (the contract the rest of this module follows).
+    """
+    from pm_core import integration
+
+    rec = record if isinstance(record, dict) else {}
+    verdict = rec.get("verdict")
+    if not (isinstance(verdict, str) and verdict):
+        return []
+    lines: list[str] = []
+    details = [v for v in (rec.get("origin"), rec.get("ts"))
+               if isinstance(v, str) and v]
+    lines.append(f"Verdict: {verdict}"
+                 + (f" ({', '.join(details)})" if details else ""))
+    if rec.get("invalidated"):
+        lines.append(f"Invalidated: {rec['invalidated']}")
+    sha = integration.revision_of(rec.get("sha"))
+    if sha:
+        lines.append(f"Approved head: {sha[:12]}")
+
+    evidence = rec.get("evidence")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    reviewed = integration.revision_of(evidence.get("reviewed_head"))
+    if reviewed:
+        lines.append(f"Reviewed head: {reviewed[:12]}")
+    tree = integration.revision_of(evidence.get("candidate_tree"))
+    if tree:
+        lines.append(f"Candidate tree: {tree[:12]}")
+    resolved_from = evidence.get("resolved_from")
+    resolved_from = resolved_from if isinstance(resolved_from, dict) else {}
+    pre_head = integration.revision_of(resolved_from.get("head"))
+    if pre_head:
+        base_rev = integration.revision_of(resolved_from.get("base_sha"))
+        lines.append(f"Resolved from: {pre_head[:12]} against base "
+                     f"{base_rev[:12] if base_rev else '?'}")
+    review = evidence.get("review")
+    review = review if isinstance(review, dict) else {}
+    review_sha = integration.revision_of(review.get("sha"))
+    if review_sha:
+        source = review.get("sha_source")
+        lines.append(f"Review: {review_sha[:12]}"
+                     + (f" ({source})"
+                        if isinstance(source, str) and source else ""))
+    elif isinstance(review.get("note"), str) and review["note"]:
+        # "pm does not record the revision the review ran on" — say so rather
+        # than leave the reader guessing why there is no review revision.
+        lines.append(f"Review: {review['note']}")
+    qa = evidence.get("qa")
+    qa = qa if isinstance(qa, dict) else {}
+    qa_head = integration.revision_of(qa.get("planner_head"))
+    if qa_head or qa.get("overall"):
+        lines.append("QA: " + str(qa.get("overall") or "?")
+                     + (f" at {qa_head[:12]}" if qa_head else ""))
+    reused = evidence.get("reused")
+    reused = [str(v) for v in reused] if isinstance(reused, list) else []
+    if reused:
+        total = evidence.get("reused_total")
+        more = (f" (+{total - len(reused)} more)"
+                if isinstance(total, int) and not isinstance(total, bool)
+                and total > len(reused) else "")
+        lines.append("Reused evidence: " + ", ".join(reused) + more)
+    for label, key in (("Reuse reason", "reason"),
+                       ("Targeted checks", "checks")):
+        value = evidence.get(key)
+        if isinstance(value, str) and value:
+            lines.append(f"{label}: {value}")
+    stage = evidence.get("required_return_stage")
+    if isinstance(stage, str) and stage:
+        lines.append(f"Required return stage: {stage}")
+    prior = evidence.get("prior_signoff")
+    prior = prior if isinstance(prior, dict) else {}
+    prior_verdict = prior.get("verdict")
+    if isinstance(prior_verdict, str) and prior_verdict:
+        prior_sha = integration.revision_of(prior.get("sha"))
+        lines.append(f"Prior sign-off: {prior_verdict}"
+                     + (f" at {prior_sha[:12]}" if prior_sha else ""))
+    return lines
+
+
 @pr.command("show")
 @click.argument("pr_id")
 def pr_show(pr_id: str):
     """Show a PR's full detail: description, tests, files, deps, notes,
-    sign-off return, and integration.
+    sign-off decision and its evidence, sign-off return, and integration.
 
     The on-demand companion to the abbreviated listings prompt builders
     emit when a collection is too large to inline: sessions told to "run
@@ -711,6 +853,15 @@ def pr_show(pr_id: str):
                         if total > len(vals) else "")
                 click.echo(f"{label} ({total}): {', '.join(vals)}{more}")
 
+    # The sign-off decision and the provenance the approval rests on: the
+    # merge gate enforces an explicit reuse/checks statement for a resolved or
+    # behaviourally-changed base, and a person assessing that decision needs
+    # the recorded revisions and statement, not only the verdict icon.
+    signoff_lines = _signoff_evidence_lines(pr_entry.get("signoff"))
+    if signoff_lines:
+        click.echo("\n## Sign-off")
+        for line in signoff_lines:
+            click.echo(line)
     # The sign-off return is a separate prompt block from the notes (it is a
     # different document), so its omission marker points here rather than at
     # `pm pr note list`, which does not contain it.  Print the whole record.

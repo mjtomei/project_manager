@@ -37579,3 +37579,40 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-b53c95b
+  plan: bugs
+  title: 'Bug: pm pr edit truncates a multi-line note to its first line on save'
+  branch: pm/pr-b53c95b-bug-pm-pr-edit-truncates-a-multi-line-note-to-its-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py — pr_edit''s editor template (_note_bullet_line)
+    and _apply_pr_edit''s notes rebuild.
+
+
+    The editor template renders each note as a single bullet (''- <text>  # <created_at>''),
+    so a note whose text contains newlines is written out as its first line plus bare
+    continuation lines that _parse_pr_edit_raw ignores. Any save that actually changes
+    the notes (adding/editing/deleting one note) then rebuilds the list from the parsed
+    texts, replacing every multi-line note with its first line — the rest of the text
+    is lost. This repo''s own pm/project.yaml carries 56 such notes, so it is the
+    common case for long handoff notes, not an edge case.
+
+
+    Repro: pm pr note add pr-x ''line one<newline>line two''; then pm pr edit pr-x,
+    change any other note, save. The new note is now just ''line one''.
+
+
+    Not fixed in pr-5cee3d5: review-loop 6c99 i1 made an *unchanged* save a true no-op
+    (protecting the watcher''s every-save path), but a real edit still truncates.
+    A proper fix is a template format that can round-trip a multi-line note (indented
+    continuation lines re-joined by the parser) — a format change with its own compatibility
+    questions, so it needs its own plan rather than riding that PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T01:53:21.746726+00:00'
+  updated_at: '2026-10-28T01:53:21.746726+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

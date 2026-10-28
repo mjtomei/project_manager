@@ -40,7 +40,11 @@ theirs_text)`:
   independently on both sides with different content is an ambiguous record
   and a conflict; duplicate ids within one side are ambiguous and a conflict —
   including inside a nested list (e.g. two notes with one id), even when that
-  list is taken wholesale because the other side did not touch it.
+  list is taken wholesale because the other side did not touch it. The
+  duplicate check looks at every mapping member of every list, not only of a
+  wholly well-formed one: a single hand-edited member that is not a mapping
+  makes the list "atomic" (it is then taken wholesale), so a duplicate id
+  hiding behind it would otherwise ride into the merged document unnoticed.
   Ordering changes are preserved when only one side reordered; conflicting
   reorders are a conflict. A list absent from the merge base (a PR record
   that never had a `notes` key) merges like an empty one — independent
@@ -333,7 +337,14 @@ reviewed HEAD — a check of another revision (or a failed one with no HEAD)
 must not lend its candidate/resolution to this decision.
 The block is rewritten into `project.yaml` on every record, so its lists
 (`reused`, `planner_code_changes`) are bounded at 20 entries with a
-`*_total` count when truncated.
+`*_total` count when truncated. `pm pr show` prints it (a `## Sign-off`
+section: verdict/origin/time, any invalidation, approved head, reviewed head,
+candidate tree, the revisions the resolution combined, the review and QA
+revisions — including pm's "does not record the review revision" note — the
+reused evidence and its reason or the targeted checks, the required return
+stage and the prior sign-off). The block is what makes the reuse decision
+auditable, so it must not exist only in `project.yaml`; every member is
+hand-edited state and reads as absent there when it is not the expected type.
 `pr_signoff_record` and the auto-sequence driver refuse/coerce a `MERGE` when
 the integration carries a `resolution` or `base_behavior_changes` but the
 report does not state (a) the candidate tree (`pm-signoff-candidate`) for
@@ -499,7 +510,10 @@ records pm combined, added from each side, merged and removed, with a `… N
 more` marker from the record's real total), the unresolved conflicts, the
 applied merge, the resolution digest the approval binds to and the delta
 file's basename. A resolved candidate must not be a dead end there (the
-prompt's abbreviated lists point at this command).
+prompt's abbreviated lists point at this command). It also prints the
+recorded sign-off decision and its evidence block (R6) under `## Sign-off`,
+so the reuse statement a person must assess is readable without hand-parsing
+`project.yaml`.
 
 ### R9. Regression coverage
 Real-git tests (new `tests/test_signoff_resolution.py` plus resolver unit
@@ -558,7 +572,11 @@ tests):
    only when they are object names (the prompt omits the "Resolved from PR
    HEAD …" line for a head pm cannot confirm, and the return text — which
    feeds the impl/review/QA prompts — matches it instead of showing a sliced
-   fragment).
+   fragment). `pm pr show` prints the recorded sign-off decision and evidence
+   block (`## Sign-off`), and a hand-edited member of that block (a non-string
+   revision, a non-mapping `evidence`/`review`/`qa`/`prior_signoff`, a
+   non-list `reused`) contributes no line rather than raising out of the
+   command.
 10. Notes appended to the same PR record on both sides (the merge base has no
     `notes` key) resolve, both notes survive, and the nested ids are named in
     the summary/prompt; the same id with different content is still ambiguous.
@@ -578,9 +596,11 @@ tests):
     committed over or reset away.
 12. Resolver safety rails: conflicting reorders, field (scalar-key)
     deletion-vs-edit in both directions, a merged document with an invalid
-    status or a plan cycle, a nested duplicate id, and a merge that loses a
-    side's change (scalar or id-keyed record) are all refused (a one-sided
-    field deletion is kept; a record both sides deleted is removed).
+    status or a plan cycle, a nested duplicate id (including one that sits
+    beside a hand-edited member which is not a mapping — such a list is taken
+    wholesale, so the duplicate would otherwise survive), and a merge that
+    loses a side's change (scalar or id-keyed record) are all refused (a
+    one-sided field deletion is kept; a record both sides deleted is removed).
     Malformed values — a list/dict status or plan parent, a non-mapping
     `project`, and a base `project.yaml` with a non-string record id — are
     refused as readable conflicts rather than raising (and a malformed base
@@ -775,7 +795,18 @@ tests):
     malformed member as "not a note" instead of raising `TypeError` /
     `KeyError` and losing the write: they preserve the malformed member rather
     than dropping hand-written state, and repair a scalar `notes` value into a
-    real list.  The notes merge dedupes by a *string* id only, so a
+    real list.  `_apply_pr_edit` preserves the same way a note whose `text` is
+    not a string (or is missing): the edit template renders it as an empty
+    bullet, so the parsed round-trip never matches it and a no-op save used to
+    drop the note and replace it with a fresh empty one on every save.  The
+    template's bullet renderer, line parser, ASCII substitution and unicode
+    restoration are shared (`_note_bullet_line` / `_note_bullet_text` /
+    `_to_editor_ascii` / `_restore_unicode`), and the reconciliation compares
+    the parse against what an unmodified template parses back to — so a no-op
+    save is a true no-op: it neither invents an empty note for a member the
+    template could not show nor launders the template's lossy unicode
+    round-trip (a right quote came back as a left one) into the stored notes.
+    The notes merge dedupes by a *string* id only, so a
     hand-edited non-hashable id (a list/mapping) reads as unkeyed instead of
     raising `TypeError` out of `merged.get`.
 

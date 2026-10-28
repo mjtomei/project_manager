@@ -891,6 +891,83 @@ class TestPrNoteWritePaths:
         assert "just a string" in notes
         assert store.get_pr(store.load(root), "pr-001")["description"] == "desc"
 
+    def test_pr_edit_keeps_a_note_whose_text_is_not_text(self, tmp_path):
+        """A save must not rebuild an unrenderable note away.
+
+        The template renders a note whose ``text`` is not a string (a
+        hand-edited unquoted date, a number, a missing ``text``) as an empty
+        bullet, so the parsed round-trip never matched it: the note was
+        dropped and replaced by an empty note under a new id on *every* save.
+        It is hand-written state, so it is kept verbatim.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        original = [
+            {"id": "note-keep", "text": 20261026},
+            {"id": "note-null", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-abc1234", "text": "old"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        # What the template's notes block parses back to with nothing changed:
+        # the bare bullet (no text, no timestamp) is dropped by the parser, the
+        # textless note that carries a timestamp parses as an empty note, and
+        # the real note is unchanged.
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["", "old"], "description": "A test PR",
+        })
+        assert changes == []
+        assert self._notes(root) == original
+
+        # A real edit keeps them too (they are not dropped by the rebuild).
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["", "new"], "description": "A test PR",
+        })
+        assert "notes updated" in changes
+        notes = [n for n in self._notes(root) if isinstance(n, dict)]
+        assert any(n.get("id") == "note-keep" and n.get("text") == 20261026
+                   for n in notes)
+        assert any(n.get("id") == "note-null" for n in notes)
+        assert any(n.get("text") == "new" for n in notes)
+
+    def test_a_noop_editor_save_changes_nothing(self, tmp_path):
+        """The editor watcher saves on every write, unchanged or not.
+
+        Driving the real template through the real parser, an unchanged save
+        must not rewrite the notes: the members the template cannot show (no
+        ``text``, a non-string ``text``, a non-mapping member) used to be
+        replaced by empty notes, and a note's unicode was laundered through the
+        template's lossy ASCII round-trip (a right quote came back as a left
+        one).
+        """
+        original = [
+            {"id": "note-keep", "text": 20261026},
+            {"id": "note-null", "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-abc1234", "text": "old -- dashes",
+             "created_at": "2026-01-15T10:30:00Z"},
+            {"id": "note-quoted", "text": "“quoted”"},
+            "a bare string member",
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) if isinstance(n, dict) else n
+                                            for n in original])
+        saved = {}
+
+        def fake_editor(template, on_save):
+            saved["template"] = template
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        # Sanity: this drove the real template (and the editor's ASCII step).
+        assert "- old -- dashes" in saved["template"]
+        assert self._notes(root) == original
+
 
 class TestPrNotesHandoffGuidance:
     """The ungated 'PR Notes — Handoff Channel' block must reach every work
