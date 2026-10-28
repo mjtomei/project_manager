@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T03:39:44.559149+00:00'
+  updated_at: '2026-10-28T04:00:05.234349+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38556,6 +38556,48 @@ prs:
       so R was re-run with z t; match only scenario>=1 panes.'
     created_at: '2026-10-28T03:39:44Z'
     last_edited: '2026-10-28T03:39:44Z'
+  - id: note-8cd339f
+    text: 'Refine S114 (HEAD 9a2dacaa; pm_core unchanged since abd23015): (1) RQ52
+      ''ERROR for a verdictless review iteration'' is still not what the code does:
+      review_loop polls idle_prompt forever (ERROR only on launch exceptions; pane
+      gone = KILLED), so S114 asserts the iteration keeps waiting with no ERROR/route
+      line, then a killed pane gives KILLED. (2) RQ54 ''one ContainerError line''
+      prints as plain stderr ''provider acme: cannot set up the host route bridge:
+      <dir> is not a directory owned by uid 1000. Remedy: run pm provider test acme
+      --container ...'', rc 1, no class name; the TUI shows it as ''Error: <same line>''.
+      (3) Auto-start = TUI-owned ''pm autostart add R D'' (stop-before-merge); S114
+      uses ''pm project set skip-qa on'' so review PASS goes straight to sign-off
+      and the draft''s fake verifier/finalizer are not needed; skip-qa also lets ''pm
+      pr signoff'' accept an in_review PR after failed --fresh start/review. (4) Sign-off
+      needs a pushed branch commit or SIGNOFF_MERGE is coerced BLOCKED. (5) Foreign-owned
+      bridge dir without sudo: ''podman unshare chown 1:1 ~/.pm/route-bridge/acme''
+      (host owner = subuid); fix with ''podman unshare chown 0:0''. (6) No pm-dev
+      image in this container: build from a nested_podman project or ''podman build
+      --uts host''. Restart the router within ~30-60 s of the first API error (Claude
+      reaches attempt 6/10 in ~25 s, gives up ~3 min); verdicts land ~60 s after the
+      reply (idle_prompt).'
+    created_at: '2026-10-28T03:02:20Z'
+    last_edited: '2026-10-28T03:02:20Z'
+  - id: note-5c6aac6
+    text: 'QA S114 (2026-10-28, host + container podman 3, real claude 2.1.312 vs
+      main + acme router stubs, HEAD 9a2dacaa; captures /pm-captures/scenarios/114,
+      REPORT.md, 24 mp4): INPUT_REQUIRED, no code change. RQ52/RQ54 routing held on
+      both modes: router outage = Claude ECONNREFUSED/ECONNRESET retries, no route
+      wait/defer/stall/recover/nudge line, no main fallback, recovery with no pm action
+      (start, zz d loop PASS, sign-off, auto-start R2/R3 to ready-to-merge); verdictless
+      iteration on the final API error waits 2.5 min untouched, pane kill = KILLED
+      like a default PR; unusable bridge (symlink, subuid-owned) = one stderr line
+      rc 1 for start/review/signoff, TUI Error: <same line>, no container. Failed
+      Thens as written: (1) after a sign-off the user opened (TUI i / pm pr signoff)
+      auto-sequence ticks print running: sign_off forever (pre-existing, same code
+      on master, filed pr-95664e1); ticks reach ready_to_merge only on the tick-launched
+      relaunch path. Next run: either drop the i/pm pr signoff launch from the S114
+      sign-off story or wait for pr-95664e1. (2) pm pr review R after zz d prints
+      "Switched to existing review window" not "Opened". Harness: env.sh copied from
+      S105 lacks PM_CAPTURES_PR; pre-create captures dirs for every PR; R window name
+      is the bare pr id (not pr-<id>).'
+    created_at: '2026-10-28T04:00:05Z'
+    last_edited: '2026-10-28T04:00:05Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -41262,6 +41304,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:26:59.313415+00:00'
   updated_at: '2026-10-28T03:26:59.313415+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-95664e1
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence reports "running: sign_off" forever for a sign-off
+    window the user opened (TUI i / pm pr signoff)'
+  branch: pm/pr-95664e1-bug-pm-pr-auto-sequence-reports-running-sign-off-f
+  status: pending
+  depends_on: []
+  description: 'Found in QA S114 (pr-592e4bd, captures /pm-captures/scenarios/114/h3-signoff).
+    Repro: PR in in_review with skip-qa on; press i in the TUI (or run pm pr signoff
+    <pr>); the router replies SIGNOFF_MERGE in the window; then run pm pr auto-sequence
+    <pr> every 10 s. Every tick prints "running: sign_off" for as long as the window
+    exists (observed >3 min after the verdict, 83 ticks), never ready_to_merge, and
+    pr.signoff stays unset. Cause: step_signoff (pm_core/signoff.py _step_signoff_locked)
+    reads the verdict only from the auto-sequence transcript dir (pm/transcripts/auto-sequence/<pr>/signoff-<pr>.jsonl);
+    a manual/TUI launch writes no transcript there (pm pr signoff without --transcript
+    writes none), and window_pane() finds the window, so the step returns running.
+    Same code on origin/master. Workaround: close the window; the next tick relaunches
+    with its own transcript (advanced: sign_off_relaunched) and then reports ready_to_merge.
+    Fix idea: on a window not launched by auto-sequence, either adopt its transcript
+    (the window pane claude session) or retire and relaunch it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:31:57.950146+00:00'
+  updated_at: '2026-10-28T03:31:57.950146+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
