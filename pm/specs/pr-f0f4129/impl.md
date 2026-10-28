@@ -106,7 +106,9 @@ already drops it because the status is no longer `qa`.
   window so a background test/edits started just before the idle turn can
   surface); no merge/rebase/cherry-pick/revert is in progress; the tracked
   worktree is clean (`--untracked-files=no`, so fixtures/drafts/untracked
-  files, and pm's own `project.yaml`/lock, are untouched and do not block);
+  files, and pm's own `project.yaml`/lock at the repo root or under `pm/` —
+  matched as those exact paths, so a same-named file in another `pm/`
+  directory is a real edit — are untouched and do not block);
   and a fresh integration check is no longer a conflict. Same
   `(head, base_sha)` as the return ⇒ wait; a moved pair that still conflicts
   ⇒ one more return (bounded); `clean`/`up_to_date` ⇒ resolve and complete.
@@ -318,6 +320,9 @@ No unresolved ambiguities.
 10. the `pm pr review` choke point: exit 3 with no status write and no
     review window; a clean base still launches the reviewer.
 11. a malformed `attempt` in `base_return` still records the return.
+12. `tracked_dirty` ignores only pm's exact state paths (`project.yaml` /
+    its lock at the root or under `pm/`); a tracked `sub/pm/project.yaml`
+    edit still blocks completion.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
@@ -348,3 +353,8 @@ a second loop; `poll_qa_state` drops a returned run.
   build on the preserved evidence; this PR only avoids the wasted cycle).
 - Syncing a workdir to its own upstream before QA (pr-62fdd54).
 - Changing the sign-off verdict router, the merge gate, or merge policy.
+- The one remaining transcript overwrite outside `share_impl_transcript`:
+  `claude_launcher.build_claude_shell_cmd` unlinks whatever already exists
+  at the launch transcript path (including a finalized copy) before creating
+  its symlink. That path is owned by pr-9ee4d64 (see the note left on it);
+  this PR keeps the finalized copy safe only in the re-pointing path.

@@ -421,4 +421,6 @@ def test_base_return_retires_the_review_window(tmp_path):
          mock.patch.object(tmux_mod, "kill_window") as kill, \
          mock.patch("pm_core.home_window.park_if_on"):
         pr_mod._retire_review_window_for_return(pr_entry)
-    kill.assert_called_once_with("pm-test", "review-#42")
+    # Kill by the id returned by the lookup (the sign-off retire pattern),
+    # not by the name we searched for.
+    kill.assert_called_once_with("pm-test", "@9")

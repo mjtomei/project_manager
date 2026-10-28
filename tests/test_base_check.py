@@ -470,6 +470,33 @@ def test_settle_window_blocks_an_immediate_idle(w):
     assert "settle" in res.reason
 
 
+def test_pm_state_exemption_is_path_exact(w):
+    """Only pm's own state paths are ignored, not any ``project.yaml``.
+
+    The exemption exists for the host-written state file at the repo root or
+    under ``pm/``.  A tracked file that merely happens to be named
+    ``project.yaml`` in some other ``pm/`` directory is a real implementation
+    edit and must block the handoff (a directory-name match would hide it).
+    """
+    assert base_check.tracked_dirty(str(w.wd)) is False
+
+    nested = w.wd / "sub" / "pm"
+    nested.mkdir(parents=True)
+    (nested / "project.yaml").write_text("tracked\n")
+    git(w.wd, "add", "sub/pm/project.yaml")
+    git(w.wd, "commit", "-q", "-m", "track nested state file")
+    (nested / "project.yaml").write_text("unfinished edit\n")
+    assert base_check.tracked_dirty(str(w.wd)) is True
+
+    # A dirty root project.yaml (the host's write) is exempt, as before.
+    (w.wd / "project.yaml").write_text("host state\n")
+    git(w.wd, "add", "project.yaml")
+    git(w.wd, "commit", "-q", "-m", "track root state file")
+    (w.wd / "project.yaml").write_text("host rewrite\n")
+    git(w.wd, "checkout", "--", "sub/pm/project.yaml")
+    assert base_check.tracked_dirty(str(w.wd)) is False
+
+
 def test_moved_base_during_handoff_returns_again(w):
     with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
         gate(w)

@@ -129,6 +129,46 @@ class TestPolling:
         assert tracker.poll("k") is False
         assert not tracker.is_idle("k")
 
+    def test_idle_since_requires_idle(self, tracker, transcript, monkeypatch):
+        """The settle-window timestamp is only meaningful while idle.
+
+        A base-rework handoff treats "no idle evidence" as "not finished", so
+        a busy pane (and an unknown key) must report None rather than a stale
+        timestamp.
+        """
+        assert tracker.idle_since("unknown") is None
+        tracker.register("k", "%0", str(transcript))
+        monkeypatch.setattr("pm_core.pane_idle.tmux_mod.pane_exists",
+                            lambda p: True)
+        assert tracker.idle_since("k") is None      # no hook event yet
+
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "permission_prompt", "timestamp": 5.0,
+                         "session_id": sid},
+        )
+        tracker.poll("k")
+        assert tracker.idle_since("k") is None      # working, not idle
+
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "idle_prompt", "timestamp": 7.0,
+                         "session_id": sid},
+        )
+        tracker.poll("k")
+        assert tracker.idle_since("k") == 7.0
+
+        # A later event that does not end the idle turn (Stop) refreshes the
+        # timestamp: a conservative settle window, never an earlier one.
+        monkeypatch.setattr(
+            "pm_core.hook_events.read_event",
+            lambda sid: {"event_type": "Stop", "timestamp": 9.0,
+                         "session_id": sid},
+        )
+        tracker.poll("k")
+        assert tracker.is_idle("k") is True
+        assert tracker.idle_since("k") == 9.0
+
 
 def test_tracked_keys(tracker, transcript, tmp_path):
     sid2 = "87654321-4321-4321-4321-cba987654321"

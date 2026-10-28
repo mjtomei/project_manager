@@ -199,11 +199,13 @@ class PaneIdleTracker:
             return state.idle if state else False
 
     def idle_since(self, key: str) -> float | None:
-        """Wall-clock time of the idle event when the pane is idle, else None.
+        """Timestamp of the last hook event when the pane is idle, else None.
 
         Callers that must not treat an immediate idle turn as finished work
         (e.g. a base-rework handoff) use this to require a settle window; a
-        later hook event refreshes it.
+        later hook event refreshes it.  The value is the most recent event's
+        timestamp (an event after ``idle_prompt``, such as ``Stop``, only
+        makes the settle window more conservative).
         """
         with self._lock:
             state = self._states.get(key)

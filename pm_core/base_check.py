@@ -157,8 +157,13 @@ def git_op_in_progress(workdir: str) -> str | None:
 
 
 # pm's own state file is written by the host in a PR workdir; it is never
-# the implementation's unfinished edit and must not block the handoff.
-_PM_STATE_NAMES = ("project.yaml", "project.yaml.lock")
+# the implementation's unfinished edit and must not block the handoff.  Match
+# the exact repo-root-relative paths: a file that merely happens to be named
+# ``project.yaml`` in some other ``pm/`` directory is a real edit.
+_PM_STATE_PATHS = frozenset({
+    "project.yaml", "project.yaml.lock",
+    "pm/project.yaml", "pm/project.yaml.lock",
+})
 
 
 def tracked_dirty(workdir: str) -> bool:
@@ -177,8 +182,7 @@ def tracked_dirty(workdir: str) -> bool:
         path = line[2:].strip()
         if " -> " in path:  # porcelain rename: "old -> new"
             path = path.split(" -> ", 1)[1].strip().strip('"')
-        p = Path(path)
-        if p.name in _PM_STATE_NAMES and p.parent.name in ("", "pm"):
+        if Path(path).as_posix() in _PM_STATE_PATHS:
             continue
         return True
     return False

@@ -38537,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T19:25:51.580853+00:00'
+  updated_at: '2026-10-28T20:31:47.058501+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38657,6 +38657,24 @@ prs:
       needs PM_HOST_HOME unset).'
     created_at: '2026-10-28T19:25:51Z'
     last_edited: '2026-10-28T19:25:51Z'
+  - id: note-9fce3d2
+    text: 'Review-loop a6f7 i6 fixes. (1) `_retire_review_window_for_return` now kills
+      the review window by the id `find_window_by_name` returned, matching `home_window.park_if_on`/`signoff.retire_signoff_run`;
+      killing by name could target a different window when the name also parses as
+      an index. (2) `base_check.tracked_dirty` exempts only pm''s exact state paths
+      (project.yaml / .lock at the repo root or under pm/); the old `parent.name ==
+      "pm"` match ignored a real tracked edit at e.g. `sub/pm/project.yaml` and could
+      declare the rework complete beside unfinished work. (3) `PaneIdleTracker.idle_since`
+      docstring now says it is the last hook event timestamp (a Stop after idle_prompt
+      only widens the settle window). Tests: new `test_pm_state_exemption_is_path_exact`
+      (real git), a real-tracker `idle_since` test, and the retire-window assertion
+      updated to the id. Full suite before these edits: 4155 passed, 1 skipped; touched
+      files re-run green. Residual (documented in the spec, unchanged): a writer-launch
+      gate self-heals an open return once the base is clean and the tree quiescent,
+      which cannot detect a mid-turn impl session with a clean tree; `impl_completion`
+      (idle evidence) remains the normal resolver. (2026-10-28T20:35:00Z)'
+    created_at: '2026-10-28T20:31:46Z'
+    last_edited: '2026-10-28T20:31:46Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

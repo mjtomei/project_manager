@@ -1604,8 +1604,10 @@ def _retire_review_window_for_return(pr_entry: dict) -> None:
         window_name = f"review-{_pr_display_id(pr_entry)}"
         win = tmux_mod.find_window_by_name(session, window_name)
         if win:
+            # Kill by id, not name (the ``park_if_on``/sign-off pattern): the
+            # name is what we searched for, the id is unambiguous.
             home_window.park_if_on(session, win["id"])
-            tmux_mod.kill_window(session, window_name)
+            tmux_mod.kill_window(session, win["id"])
             _log.info("base return: retired review window %s", window_name)
     except Exception:
         _log.debug("base return: retiring the review window failed",
