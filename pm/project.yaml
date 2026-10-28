@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T23:58:34.673883+00:00'
+  updated_at: '2026-10-28T00:09:54.630322+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14571,6 +14571,25 @@ prs:
       so an odd pane title cannot exist (and pm does not read titles).'
     created_at: '2026-10-27T23:58:34Z'
     last_edited: '2026-10-27T23:58:34Z'
+  - id: note-48fd364
+    text: 'QA S53 (2026-10-27, 39cdb8ef; real rootless Podman 3.4.4 overlay+fuse-overlayfs,
+      build-base PASSED incl. Chromium smoke when run from a nested_podman project):
+      NEEDS_WORK, fixed 5292bea9. Story 1 step 7 `pm pr cleanup A --resources` kills
+      the worker window, so the pane EXIT-trap release races the removal: its proxy
+      sweep listed A, inspect hit "no such object", and list_containers failed closed
+      -> status showed "push proxy …: runtime inventory unavailable; proxy preserved"
+      (proxy already stopped) plus the removed A under "Released while retained".
+      Fix: list_containers retakes the inventory once on an explicit missing-object
+      inspect failure (other failures still fail closed); status hides deferred releases
+      absent from its complete inventory. Post-fix trial reproduced the race (shim
+      log shows the retry) and all story-1 Thens held. Stories 2 (two-store markers/down),
+      3 (hung status 10.155 s, 1 info call), 4 (legacy merged-PR container via grouped
+      ~1 pane in project Y) and 5 (retained stopped R refusal/release/restart/help)
+      PASS. Fixture notes: nested `podman run -d` needs `--uts host` (sethostname
+      EPERM); a stale retention marker of a removed allocation shows twice under unknown-identity
+      diagnostics until a full pass. Evidence /pm-captures/scenarios/53/manifest.md.'
+    created_at: '2026-10-28T00:09:54Z'
+    last_edited: '2026-10-28T00:09:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
