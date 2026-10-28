@@ -35808,7 +35808,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-28T14:46:27.089662+00:00'
+  updated_at: '2026-10-28T16:01:49.889487+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35843,6 +35843,20 @@ prs:
       test.'
     created_at: '2026-10-28T14:46:27Z'
     last_edited: '2026-10-28T14:46:27Z'
+  - id: note-88872cd
+    text: 'Review-loop 8602 i2: `_live_transcript_owners` now snapshots `app._review_loops`/`app._data`
+      before iterating. The watcher-completion sweep calls it from a background thread
+      while the TUI thread adds/removes loops; a dict resize during iteration raises
+      RuntimeError (caught by on_complete, so it would silently skip finalization).
+      Spec pm/specs/pr-9ee4d64/impl.md updated: test counts (20 archive + 1 review_loop),
+      the 94dc/8602 hardening list, and two accepted limitations — step windows are
+      treated as live for the whole sweep (final session whose path is never reused
+      stays a symlink until Claude prunes it), and `_finalize_merge` passes no session
+      id (archive copy is still written first). Verified: all 20 archive tests fail
+      on pre-fix 3699f71a; affected suites 280 passed; full suite failures identical
+      to master (32F/36E, env-only). Captures impl/{pre,post}-fix show all three symptoms.'
+    created_at: '2026-10-28T16:01:49Z'
+    last_edited: '2026-10-28T16:01:49Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high

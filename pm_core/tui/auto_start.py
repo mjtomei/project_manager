@@ -379,7 +379,11 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
     """
     exact: set[str] = set()
     prefixes: set[str] = set()
-    for pr_id, state in (getattr(app, "_review_loops", None) or {}).items():
+    # Snapshot: this also runs from a watcher's completion callback (a
+    # background thread) while the TUI thread adds/removes loops, and
+    # iterating a dict being resized raises RuntimeError.
+    loops = list((getattr(app, "_review_loops", None) or {}).items())
+    for pr_id, state in loops:
         if getattr(state, "running", False):
             prefixes.add(f"review-{pr_id}-{getattr(state, 'loop_id', '')}-i")
     manager = getattr(app, "_watcher_manager", None)
@@ -391,7 +395,7 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
         except Exception:
             _log.debug("auto_start: list_watchers failed", exc_info=True)
     session = getattr(app, "_session_name", None)
-    prs = (getattr(app, "_data", None) or {}).get("prs") or []
+    prs = list((getattr(app, "_data", None) or {}).get("prs") or [])
     if session:
         from pm_core import tmux as tmux_mod
         try:

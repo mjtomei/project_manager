@@ -302,14 +302,60 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (18) in `tests/test_transcript_archive.py` covering:
+- New unit tests (20) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback,
   and the live-owner skips (running review loop, running watcher, live
-  step windows) for both bulk sweeps.
+  step windows) for both bulk sweeps.  One more
+  (`test_launches_loop_scoped_transcript_and_records_session`) lives in
+  `tests/test_review_loop.py` because it drives `run_review_loop_sync`.
+  All 20 archive tests fail on the pre-fix tree (`git show
+  3699f71a:pm_core/claude_launcher.py`).
 - Regression run of `tests/test_review_loop.py`,
   `tests/test_signoff.py`, `tests/test_signoff_integration.py`,
   `tests/test_workspace_trust.py`, `tests/test_tui_signoff_handoff.py`,
   `tests/test_claude_launcher.py`.
 - Manual repro (pre/post) recorded under
   `$CAP/impl/{pre-fix,post-fix}/` with `pm/qa/artifacts/cli-recording.md`.
+
+## Review-loop hardening (2026-10-28, iterations 94dc / 8602)
+
+Applied on top of the design above; keep them when editing the code.
+
+- `build_claude_shell_cmd` clears the canonical path after the archive
+  attempt (not only on archive failure).  `archive_transcript` can return
+  an archive path while leaving the canonical link in place (the session's
+  entry already existed, or the post-rename unlink failed); a following
+  `symlink_to` would then raise `FileExistsError` and kill the launch.
+- `_find_identical_archive` scopes its mtime+size match to the same stem;
+  a directory-wide match could pair a different step's entry with this
+  transcript, after which the canonical would be dropped unarchived.
+- `_freeze_archive_copy` writes its temp file under a per-call unique name
+  (pid + random suffix): a bulk sweep and a loop completion can finalize
+  the same transcript from two threads of one process.
+- `_move_into_archive` removes a partial copy when the no-hardlink
+  fallback fails, so a truncated immutable entry cannot block later
+  attempts.
+- `retire_signoff_run` drops a leftover canonical *symlink* after
+  archiving so a consumed verdict stays unreplayable; a regular file (the
+  only copy of its content) is never removed.  A leftover regular file is
+  caught by the missing-`.head` guard in `_step_signoff_locked`, which
+  retires and relaunches rather than replaying it.
+- `_live_transcript_owners` snapshots `app._review_loops` / `app._data`
+  before iterating: the watcher-completion sweep calls it from a
+  background thread while the TUI thread mutates those containers.
+
+## Known limitations (accepted)
+
+- **Step windows are treated as live for the whole sweep.**  A disable
+  while a step window is open leaves that step's canonical transcript a
+  symlink (never frozen), because an idle-looking pane is not provably
+  done.  It is archived on the next launch that reuses the path
+  (`build_claude_shell_cmd`), so pre-return sessions are still preserved;
+  only a final session whose path is never reused stays a link until
+  Claude prunes it.  Distinguishing idle from running would need the pane
+  idle tracker, which is TUI-only and not available for sign-off/merge.
+- **`_finalize_merge` passes no session id.**  It has no launch-time
+  session id to compare against; `finalize_transcript` still writes the
+  sid-keyed archive copy first, so no content is lost if a newer merge
+  run owns the path.
