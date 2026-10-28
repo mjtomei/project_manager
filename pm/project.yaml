@@ -32859,11 +32859,52 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T15:27:51.803055+00:00'
-  updated_at: '2026-10-13T15:27:51.803055+00:00'
+  updated_at: '2026-10-27T19:06:15.156875+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0af873b
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: current
+      captures_dir still accepts any PR when PM_CAPTURES_PR is absent. Keep this fix
+      narrowly on fail-closed capture routing for absent/empty/mismatched owner markers
+      while preserving matching-owner and legitimate host fallback behavior. Exercise
+      nested throwaway fixtures with separate captures and preserve existing real
+      evidence. Broader PR/run evidence ownership remains tracked separately in pr-1ae1d2d.'
+    created_at: '2026-10-27T18:43:33Z'
+    last_edited: '2026-10-27T18:43:33Z'
+  - id: note-7b79f85
+    text: 'Impl 2026-10-27 (2739187c, pushed): captures_dir now fails closed. The
+      mount is used only when PM_CAPTURES_PR (whitespace-stripped) equals pr_id; absent/empty/mismatched
+      markers fall back to the per-session host path, or None when no tag resolves
+      — never /pm-captures. Matching-owner routing, host-first precedence and container.create_container
+      (-v mount + -e marker) are unchanged; legacy containers created without the
+      marker now write to their container-local ~/.pm instead of the mount (recoverable
+      loss vs. unrecoverable overwrite — deliberate per note-0af873b). Evidence in
+      impl/pre-fix/ and impl/post-fix/: sandboxed repro (unshare bind over /pm-captures,
+      real evidence untouched) shows a nested throwaway project with PM_CAPTURES_PR
+      unset overwriting the enclosing PR''s scenarios/1 evidence pre-fix and landing
+      in its own ~/.pm/sessions/<nested-tag>/captures/pr-nested1 post-fix, with the
+      owning PR still resolving /pm-captures as a positive control. tests/test_captures_dir_mount.py:
+      12 tests (5 failed pre-fix for the mount being returned). Full suite: 3747 passed;
+      the 60 failures in test_git_ops/test_merge_publish/test_signoff_integration/test_hook_events
+      are identical on the pre-fix tree (environment: git in this sandbox). Spec:
+      pm/specs/pr-1e9c117/impl.md.'
+    created_at: '2026-10-27T19:06:15Z'
+    last_edited: '2026-10-27T19:06:15Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
 - id: pr-dc4dd45
   plan: bugs
   title: 'Bug: trust-blocked message for an approved pm workdir tells the user to

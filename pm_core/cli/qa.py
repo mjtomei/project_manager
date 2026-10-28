@@ -196,7 +196,10 @@ def qa_captures_path(pr_id: str):
     ``/pm-captures``; this command prints that path (because the
     host-side ``~/.pm`` location isn't visible from inside the
     container) so a session can resolve its own captures path without
-    caring whether it runs on the host or inside a container.
+    caring whether it runs on the host or inside a container. The mount
+    is only used for the PR named by ``PM_CAPTURES_PR``; with that marker
+    absent or naming a different PR, the container-local ``~/.pm`` path
+    is printed instead (fail closed — see :func:`pm_core.paths.captures_dir`).
     """
     from pm_core import store
     from pm_core.cli.helpers import _resolve_pr_id, state_root
@@ -210,7 +213,9 @@ def qa_captures_path(pr_id: str):
     path = captures_dir(pr_entry["id"])
     if path is None:
         click.echo(
-            "Error: cannot resolve session tag (not inside a git repo?)",
+            "Error: cannot resolve captures dir: no session tag (not "
+            "inside a git repo?) and no /pm-captures mount owned by this "
+            "PR (PM_CAPTURES_PR)",
             err=True,
         )
         raise click.exceptions.Exit(1)
