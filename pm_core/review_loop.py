@@ -322,6 +322,12 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     human prompt lands in the transcript (Claude is working on the
     follow-up), True again if Claude goes idle after that answer without
     a verdict (it asked something in prose).
+
+    Deliberately not :func:`pm_core.loop_shared.wait_for_follow_up_verdict`:
+    the QA/watcher waiters only need "the next verdict", while this one also
+    has to report whether the human has answered (the wait state the CLI, TUI
+    and scheduler read).  Both use ``find_verdict_turn`` for the verdict
+    itself, so their task-scoping cannot drift apart.
     """
     from pm_core import hook_events
     from pm_core.claude_launcher import session_id_from_transcript

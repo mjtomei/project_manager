@@ -77,9 +77,12 @@ R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     (stripped; a record that is *only* reminders is not a prompt),
     `<task-notification>`, `/loop` and autonomous-loop ticks, scheduled prompt
     firings, the `[Request interrupted by user…]` marker, qa_loop's verdict
-    nudge, and compact summaries.  Tool results and assistant output never
-    count, so arbitrary tool output is never treated as an answer, and a
-    harness notice can never clear a wait nobody answered.  (Hardened in review
+    nudge, and compact summaries.  A record whose only content is an
+    empty/whitespace text block carries no prompt and does not count, while
+    content with no text at all — a pasted image — still does.  Tool results
+    and assistant output never count, so arbitrary tool output is never
+    treated as an answer, and a harness notice can never clear a wait nobody
+    answered.  (Hardened in review
     i1: these record shapes are real — master's `_user_record_is_non_task` and
     its scenario replays show them — and counting one as an answer is the same
     false-state class this PR fixes.)  The predicate is *built on*
@@ -196,6 +199,17 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   (Added in review i3.)
 - Transcript symlink slug mismatch: the response watch resolves the path with the
   same session-id fallback as `_read_transcript_text`.
+- An empty user record is not an answer.  A `type:"user"` record whose only
+  content is an empty or whitespace text block (or a `text: null` block) carries
+  nothing; counting it would clear a wait nobody answered — the mirror of the
+  bug this PR fixes.  Content with no text at all (a pasted image) still counts.
+  (Added in review 3bf4 i1: the image branch of `is_human_prompt_record`
+  over-triggered on empty text blocks after the integration rework.)
+- A restored wait whose transcript yields no session_id cannot be answered (no
+  hook stream).  `_adoptable_wait_transcript` returns None, so the resumed loop
+  clears `input_required` and launches the next iteration rather than failing
+  the wait and ending KILLED.  (Guard added in 581d i2; regression added in
+  3bf4 i1: `test_restart_wait_with_no_recoverable_session_clears`.)
 - Master overlap (review i1, **resolved at integration**): current
   `origin/master` grew `verdict_transcript.find_verdict_turn` /
   `_user_record_is_non_task` (task-scoped verdict scan + "is this a real human

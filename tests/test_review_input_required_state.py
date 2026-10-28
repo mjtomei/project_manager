@@ -223,6 +223,29 @@ class TestHumanPromptRecord:
         assert is_human_prompt_record({"type": "user", "message": {"content": (
             "use option A\n\n<system-reminder>ide notice</system-reminder>")}})
 
+    def test_record_with_no_text_is_not_an_answer(self):
+        """A ``type:"user"`` record whose only content is an empty/whitespace
+        text block carries nothing: it must not clear a wait (the false-answer
+        mirror of the bug this PR fixes), and it agrees with the shared
+        task-boundary predicate the verdict scan uses."""
+        from pm_core.verdict_transcript import _user_record_is_non_task
+        for content in ([{"type": "text", "text": ""}],
+                        [{"type": "text", "text": None}],
+                        [{"type": "text", "text": "   "}],
+                        [{"type": "tool_result", "content": "x"},
+                         {"type": "image", "source": {}}]):
+            rec = {"type": "user", "message": {"content": content}}
+            assert _user_record_is_non_task(rec), content
+            assert not is_human_prompt_record(rec), content
+
+    def test_pasted_image_is_an_answer(self):
+        """Content with no text at all is still a human prompt."""
+        for content in ([{"type": "image", "source": {}}],
+                        [{"type": "image", "source": {}},
+                         {"type": "text", "text": ""}]):
+            assert is_human_prompt_record(
+                {"type": "user", "message": {"content": content}}), content
+
     def test_agrees_with_the_shared_task_boundary_predicate(self):
         """Built on ``_user_record_is_non_task``, so the answer predicate and
         the task-scoped verdict scan can never disagree about which records
@@ -715,6 +738,36 @@ class TestRestartAdoption:
             s, reason, review = _status(state)
             assert s == "running" and reason.startswith("review iteration 3")
             assert review["input_required"] is False and review["follow_up"] is False
+            release.set()
+            t.join(5)
+        finally:
+            release.set()
+            p.stop()
+
+    def test_restart_wait_with_no_recoverable_session_clears(self, env):
+        """The pane is alive but its transcript yields no session_id, so there
+        is no hook stream to wait on: nobody can answer.  Clear the wait and
+        launch the next iteration instead of failing it and ending KILLED."""
+        tdir, _ = env
+        release = threading.Event()
+        panes = {}
+
+        def it3():
+            panes[3] = Pane(tdir, 3)
+            release.wait(10)
+            return panes[3].verdict("PASS")
+
+        # A plain file, not a symlink to a <session-id>.jsonl: the wait's
+        # session_id recovery fails while lexists()/pane lookups succeed.
+        (tdir / f"review-{PR_ID}-i2.jsonl").write_text("")
+        state = _restored(tdir, 2, ["NEEDS_WORK", "INPUT_REQUIRED"])
+        t, mock, p = _start(state, tdir, {3: it3})
+        try:
+            _until(lambda: 3 in panes, what="iteration 3 launch")
+            assert state.input_required is False
+            s, reason, review = _status(state)
+            assert s == "running" and reason.startswith("review iteration 3")
+            assert review["input_required"] is False
             release.set()
             t.join(5)
         finally:

@@ -530,8 +530,11 @@ def is_human_prompt_record(rec: object) -> bool:
     Tool results are ``"type":"user"`` records too — they carry command
     output, never a human decision, so they never count.  (A *mixed* record
     that also carries real user text is a prompt, the same rule the verdict
-    scan uses.)  Neither do meta, sidechain and compact-summary records, local
-    slash-command echoes, or any harness record
+    scan uses.)  A record carrying content but *no* text — e.g. a pasted
+    image — is a prompt, while a record whose only content is an empty or
+    whitespace text block carries nothing and is not.  Neither do meta,
+    sidechain and compact-summary records, local slash-command echoes, or any
+    harness record
     :func:`_user_record_is_non_task` classifies as not starting a new task
     (system reminders, task notifications, ``/loop`` ticks, scheduled firings,
     the Esc interrupt marker, qa_loop's verdict nudge).  Counting one of those
@@ -552,8 +555,13 @@ def is_human_prompt_record(rec: object) -> bool:
     if isinstance(content, list):
         blocks = [b for b in content if isinstance(b, dict)]
         if (blocks and not _record_text(rec).strip()
-                and not any(b.get("type") == "tool_result" for b in blocks)):
-            # No text at all — e.g. a pasted image — but still a human prompt.
+                and not any(b.get("type") == "tool_result" for b in blocks)
+                and any(b.get("type") not in (None, "text") for b in blocks)):
+            # Content but no text at all — e.g. a pasted image — is still a
+            # human prompt.  A record whose only content is an empty or
+            # whitespace text block has no text either but carries nothing, so
+            # it falls through and is rejected as a non-task record (never
+            # clear a wait nobody answered).
             return True
     if _user_record_is_non_task(rec):
         return False
