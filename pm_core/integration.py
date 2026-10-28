@@ -1462,6 +1462,17 @@ def run_check(data: dict, pr: dict, root: Path | None = None,
     if not target_repo:
         record.update(status=ERROR, error="no target repository")
         return record
+    # ``base_sha`` re-checks against an already-fetched revision instead of
+    # fetching again (used right after applying a resolution).  It reaches here
+    # from ``prepare`` as ``previous.get("base_sha")``, and ``prepare`` can be
+    # handed the *stored* record (a concurrent apply won the race) — which is
+    # hand-editable state.  The value is passed to git and sliced into the log
+    # line below, so anything that is not a git object name would raise
+    # ``TypeError`` out of a function that promises a record, never a
+    # traceback.  A value that is not a revision is not one: fall back to the
+    # ordinary fetch (which also cannot fabricate a base).
+    if base_sha is not None:
+        base_sha = _sha_like(base_sha)
     if base_sha is None:
         base_sha, err = fetch_base(workdir, target_repo, base_branch)
         if err:

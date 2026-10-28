@@ -924,8 +924,16 @@ tests):
     arguments) is no configuration, so `integration.target_for` and
     `run_check`'s own fallback read it as absent/default instead of raising
     `AttributeError` out of a check that promises a `status: error` record and
-    out of the approval/recovery paths.  The note commands (`pm pr note add` /
-    `edit` / `delete` — the canonical handoff channel) plus `_apply_pr_edit`
+    out of the approval/recovery paths.  The same rule covers the `base_sha` a
+    re-check is handed: `prepare`'s post-apply re-check and its lost-race
+    re-check pass `previous.get("base_sha")`, and `prepare` can be handed the
+    *stored* record when a concurrent apply won the race — so the value is
+    project.yaml state.  A value that is not a git object name is not that
+    revision (it was passed to `git merge-base` and sliced into the log line,
+    a `TypeError` out of a check that promises a record), so `run_check` reads
+    it as absent and runs the ordinary fetch.  The note commands
+    (`pm pr note add` / `edit` / `delete` — the canonical handoff channel) plus
+    `_apply_pr_edit`
     treat a malformed member as "not a note" instead of raising `TypeError` /
     `KeyError` and losing the write: they preserve the malformed member rather
     than dropping hand-written state, and repair a scalar `notes` value into a

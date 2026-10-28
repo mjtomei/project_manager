@@ -564,6 +564,13 @@ alongside PRs with pm's ISO strings.
 WHEN the user runs `pm pr list --timestamps`.
 THEN both rows render, newest first, without a comparison error.
 
+GIVEN the stored `integration.base_sha` hand-edited to a non-string (an int, a
+mapping, a list, a boolean) on a PR whose apply loses a race and `prepare`
+re-checks the revision the branch now has.
+WHEN sign-off launches (`pm pr signoff`, or `pm pr signoff integrate --apply`).
+THEN the re-check names the base it actually fetched (the ordinary fetch runs)
+and records its real status — never a `TypeError` out of the check.
+
 ## Edge cases (Given / When / Then)
 
 - GIVEN a hand-edited non-string verdict and a clean integration check. WHEN the

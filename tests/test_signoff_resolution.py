@@ -2960,6 +2960,28 @@ def test_a_non_string_workdir_reads_as_absent_on_every_signoff_surface(
         assert branch == "master"
 
 
+def test_a_malformed_recheck_base_reads_as_absent(w):
+    """``run_check``'s ``base_sha`` comes from stored (hand-editable) state.
+
+    ``prepare`` re-checks against ``previous.get("base_sha")`` after a lost
+    apply race, and it can be handed the *stored* record — so the value is
+    project.yaml state.  A value that is not a git object name was passed
+    straight to ``git merge-base`` and sliced into the log line, raising
+    ``TypeError`` out of a check that promises a ``status: error`` record,
+    never a traceback.  It now reads as absent and the ordinary fetch runs
+    (here it succeeds, so the check describes the real base).
+    """
+    data = store.load(w.pm_dir)
+    pr = pr_entry(w)
+    expected = git(w.repo, "rev-parse", "master")
+    for bad in (5, {"a": 1}, ["x"], True, 1.5, "", "HEAD", "master"):
+        rec = integration.run_check(data, pr, w.pm_dir, base_sha=bad)
+        # Never a traceback: the check names the base it actually fetched.
+        assert rec["base_sha"] == expected, (bad, rec)
+        assert rec["status"] in (integration.CLEAN, integration.UP_TO_DATE), (
+            bad, rec)
+
+
 def test_a_non_mapping_project_reads_as_absent_in_the_integration_check(
         tmp_path):
     """A hand-edited non-mapping ``project`` is no configuration.
