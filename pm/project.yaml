@@ -15240,6 +15240,21 @@ prs:
       attaching so the TUI is not active.'
     created_at: '2026-10-28T06:34:50Z'
     last_edited: '2026-10-28T06:34:50Z'
+  - id: note-9425851
+    text: 'QA refiner note (scenario 6, spinner): the spinner-abort path (session.py
+      _wait_for_tui_command owner check) does NOT unqueue the accepted command; _unqueue_line
+      only runs when submit_tui_command''s signal fails (cli/helpers.py). So after
+      a hard-kill abort with the command still queued, a new TUI started within _STARTUP_QUEUE_MAX_AGE
+      (60s) drains and APPLIES it (tui/app.py _drain_command_queue); only a >60s-old
+      queue is discarded on startup. QA spec R10''s ''restarting the TUI does not
+      apply the failed command later'' holds only for the signal-failure path, not
+      the spinner-abort path. Scenario 6 was refined to test the deterministic submit-failure
+      rollback (stale pidfile -> message, nothing queued) plus the restart/no-false-abort
+      contract instead. Picker driving: the popup needs an open PR window (or pass
+      the PR display id as the _popup-picker window arg); run ''pm _popup-picker $S
+      $PR'' in a session pane and press t for the tui-routed qa action.'
+    created_at: '2026-10-28T06:07:37Z'
+    last_edited: '2026-10-28T06:07:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
