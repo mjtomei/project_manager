@@ -31,17 +31,24 @@ substitutes the actual captures directory for `<capture-dir>`):
 
 ## Capture
 
-Create the capture directory first: `mkdir -p <capture-dir>/<short-name>`,
-and delete any cast an earlier run left there (`rm -f
-<capture-dir>/<short-name>/recording.cast`). The no-TTY scaffold also clears
-a `rec` session an earlier run left behind, since a leftover one makes
-`new-session` fail with "duplicate session: rec" and the readiness wait
-would then pass on the previous run's recorder. `asciinema rec` reports
-"asciicast saved" and exits 0 even when the directory does not exist, so a
-missing `mkdir` looks like a successful capture that wrote nothing — and a
-leftover cast is worse: the render step rewrites the `.mp4` from it, so a
-run that recorded nothing would still produce a fresh-looking video of the
-*previous* run.
+Before any of the forms below, create the capture directory and clear an
+earlier run's cast:
+
+```
+mkdir -p <capture-dir>/<short-name>
+rm -f <capture-dir>/<short-name>/recording.cast
+```
+
+`asciinema rec` reports "asciicast saved" and exits 0 even when the
+directory does not exist, so a missing `mkdir` looks like a successful
+capture that wrote nothing — and a leftover cast is worse: without
+`--overwrite` the recorder aborts on it, and the render step rewrites the
+`.mp4` from whatever cast is on disk, so a run that recorded nothing would
+still produce a fresh-looking video of the *previous* run. The no-TTY
+scaffold repeats both steps, and also clears a `rec` session an earlier run
+left behind: a leftover one makes `new-session` fail with "duplicate
+session: rec" and the readiness wait would then pass on the previous run's
+recorder.
 
 ### One command, end-to-end
 
@@ -90,7 +97,10 @@ where the CLI runs.
 #    aborted run first — `new-session` fails with "duplicate session: rec"
 #    while it exists — with `kill-session`, not `kill-server`: killing the
 #    server and reconnecting immediately races its exit ("server exited
-#    unexpectedly").
+#    unexpectedly"). <command-to-record> sits inside single quotes below:
+#    use the double-quoted `bash -c "..."` form from above (or escape), not
+#    `bash -c '...'`, which ends the quoting and leaves asciinema with a
+#    broken command.
 tmux -L scaffold kill-session -t rec 2>/dev/null || true
 mkdir -p <capture-dir>/<short-name>
 rm -f <capture-dir>/<short-name>/recording.cast
@@ -98,17 +108,20 @@ tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
         -c '<command-to-record>'"
 
-# 2. Wait (bounded) for the recorder to draw its first screen before any
-#    keys go in: keystrokes sent before asciinema has attached to the pane
-#    are silently lost, so an immediate `exit` leaves it recording. A quick
-#    one-shot command can finish first — then the session is already gone
-#    and there is nothing left to drive.
+# 2. Wait (bounded) for the recorder to start before any keys go in:
+#    keystrokes sent before asciinema has attached to the pane are silently
+#    lost, so an immediate `exit` leaves it recording. The cast is the
+#    handle — asciinema writes its header the moment it starts recording, so
+#    a non-empty cast means the pty is live and keys will land. Pane content
+#    is *not* a readiness signal here: a command that prints nothing for a
+#    while (a long run, a quiet `-q` command) is recording fine with a blank
+#    pane. A quick one-shot command can finish first — then the session is
+#    already gone and there is nothing left to drive.
 deadline=$(( $(date +%s) + 30 ))
-until tmux -L scaffold capture-pane -p -t rec:0.0 2>/dev/null \
-        | grep -q '[^[:space:]]' ||
+until [ -s <capture-dir>/<short-name>/recording.cast ] ||
       ! tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "recorder did not come up within 30s — check the pane with" \
+        echo "recorder did not start within 30s — check the pane with" \
             "'tmux -L scaffold capture-pane -p -t rec'" >&2
         tmux -L scaffold kill-server 2>/dev/null
         exit 1
@@ -128,11 +141,16 @@ done
 
 # 4. Wait (bounded) for asciinema to exit — the pane *is* the recording, so
 #    the session ending is the completion signal — then confirm the cast is
-#    there and non-empty.
-deadline=$(( $(date +%s) + 30 ))
+#    there and non-empty. For a one-shot command that legitimately runs
+#    longer than the default bound, set RECORDER_STOP_TIMEOUT (seconds)
+#    before this step: the bound is a hang detector, not a time limit on
+#    the recorded work, and killing a healthy recording loses the evidence.
+stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
+deadline=$(( $(date +%s) + stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "recorder did not exit within 30s — check the pane with" \
+        echo "recorder did not exit within ${stop_timeout}s — for a longer" \
+            "command set RECORDER_STOP_TIMEOUT; check the pane with" \
             "'tmux -L scaffold capture-pane -p -t rec'" >&2
         tmux -L scaffold kill-server 2>/dev/null
         exit 1

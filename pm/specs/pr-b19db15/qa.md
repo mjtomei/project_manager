@@ -73,6 +73,10 @@ foreground render block,
   run's marker is not present);
 - the interactive form is stopped with `exit`, and the recorder session is
   observed to end before the cast is checked;
+- a one-shot command that prints nothing for longer than the 30 s readiness
+  bound still records (the scaffold's readiness wait is on the cast file, not
+  pane content), and one that runs longer than the default stop bound records
+  when `RECORDER_STOP_TIMEOUT` is raised;
 - `recording.mp4` is freshly written, non-empty, and `ffprobe` reports
   `codec_name=h264`;
 - `manifest.md` exists and its `## Files` section lists the produced files.
@@ -124,8 +128,12 @@ run.
 - Ctrl-C at a recorded interactive shell reaches the recorded command, not
   asciinema → the recipe ends the recorded shell with `exit` and checks the
   cast, rather than killing the pane by process name.
-- Keystrokes sent before the recorder draws are silently dropped → the recipe
-  waits (bounded) for pane content before driving it.
+- Keystrokes sent before the recorder draws are silently dropped → the tmux
+  recipe waits (bounded) for pane content before driving it, and the CLI
+  scaffold waits for the cast header (a quiet command draws nothing).
+- A quiet or long one-shot CLI command is still recording → it must not be
+  killed at the readiness or stop deadline; the stop bound is raised with
+  `RECORDER_STOP_TIMEOUT` for a long command.
 - The web-UI server accepts the connection but never answers → the per-attempt
   curl bound keeps the deadline meaningful.
 

@@ -13,11 +13,14 @@ hits, regardless of how it waits for a background job:
   one (with ``kill-session``, not ``kill-server``, which races the server's
   exit), and the tmux transcript pipe is reattachable so a leftover pipe
   cannot silently swallow the new log;
-- keys are not sent before the recorder has drawn (they are silently lost),
-  and a tmux recorder that exits before drawing is a failure rather than an
-  early finish;
+- keys are not sent before the recorder is up (they are silently lost); the
+  tmux recipe waits on pane content, while the CLI scaffold waits on the cast
+  file — a quiet command draws nothing but is recording, and a tmux recorder
+  that exits before drawing is a failure rather than an early finish;
 - the recorder is stopped by ending the recorded command and awaited with a
-  bound, and the cast is checked non-empty;
+  bound, and the cast is checked non-empty; the CLI scaffold's bound is
+  raisable (`RECORDER_STOP_TIMEOUT`) so a legitimately long one-shot command
+  is not killed at the deadline;
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, and the pm-session poll
   waits on the computed session rather than any ``pm-`` session (which would
@@ -72,13 +75,18 @@ class TestRecipes:
         ``asciinema rec`` prints "asciicast saved" and exits 0 when the
         parent directory is missing — it writes nothing — so a recipe that
         only names the path produces a capture that looks successful and
-        does not exist. It has to be in the runnable block, not just in the
-        prose: a worker that pastes the block skips prose-only steps.
+        does not exist. It has to be in a runnable block, not just in the
+        prose: a worker that pastes a block skips prose-only steps. Both
+        recipes put it in the *first* block of the capture section, so every
+        form below it (the CLI one-command and ``bash -c`` forms included)
+        is preceded by it.
         """
         text = _recipe_text(name)
-        intro = text.split("## Capture", 1)[1].split("```", 1)[0]
-        assert "mkdir -p <capture-dir>" in intro, (
-            f"{name}: capture section never creates the capture directory")
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        assert "mkdir -p <capture-dir>" in first_block, (
+            f"{name}: the first runnable capture block does not create the "
+            "capture directory")
         block = _scaffold_block(text)
         mkdir = block.find("mkdir -p <capture-dir>")
         assert mkdir != -1, (
@@ -101,7 +109,13 @@ class TestRecipes:
         *fresh* mp4 — of the previous run. Deleting the cast first is what
         makes a failed recording fail the render instead.
         """
-        block = _scaffold_block(_recipe_text(name))
+        text = _recipe_text(name)
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        assert re.search(r"^rm -f [^\n]*recording\.cast", first_block, re.M), (
+            f"{name}: the first runnable capture block keeps an earlier cast, "
+            "so a form below it can render the previous run")
+        block = _scaffold_block(text)
         rm = re.search(r"^rm -f [^\n]*recording\.cast", block, re.M)
         assert rm, f"{name}: scaffold never removes an earlier cast"
         start = block.index("asciinema rec")
@@ -219,18 +233,26 @@ class TestRecipes:
                            capture_output=True, text=True)
         assert r.returncode == 0, f"{name} scaffold block:\n{r.stderr}\n{block}"
 
-    @pytest.mark.parametrize("name", RECIPES)
-    def test_recorder_is_ready_before_keys_are_sent(self, name):
-        """Keystrokes sent before the recorder draws are silently dropped.
+    @pytest.mark.parametrize("name,ready_marker", [
+        # The tmux recorder must have *drawn* before keys are sent: the pane
+        # is the attach client, and the cast exists before it renders.
+        ("tmux-screen-recording.md", "capture-pane"),
+        # The CLI pane is the recording itself, and asciinema writes the
+        # cast header as soon as it starts — that, not pane content, is the
+        # handle (a quiet command draws nothing but records fine).
+        ("cli-recording.md", "recording.cast ]"),
+    ])
+    def test_recorder_is_ready_before_keys_are_sent(self, name, ready_marker):
+        """Keystrokes sent before the recorder is up are silently dropped.
 
         Driving the recorded shell (or detaching the recorder) right after
         ``new-session`` races asciinema's startup: the keys vanish, the
         recording keeps running, and the only symptom is a stop-step
-        timeout. A bounded readiness wait on the pane's content removes the
-        race without polling a process name.
+        timeout. A bounded readiness wait on the recorder's own handle
+        removes the race without polling a process name.
         """
         block = _scaffold_block(_recipe_text(name))
-        ready = block.find("capture-pane")
+        ready = block.find(ready_marker)
         assert ready != -1, f"{name}: no recorder readiness wait"
         first_key = min(
             i for i in (block.find("send-keys"), block.find("pm tui send"))
@@ -277,6 +299,49 @@ class TestRecipes:
             "cli-recording: an interactive `bash` recording needs `exit`")
         assert "does not stop the recording" in block, (
             "cli-recording: must say Ctrl-C does not stop the recording")
+
+    def test_cli_readiness_waits_on_the_cast_not_pane_content(self):
+        """A quiet command records fine while drawing nothing.
+
+        ``asciinema`` writes the cast header the moment it starts, so a
+        non-empty cast is the recorder's own handle; pane content is a proxy
+        that only appears once the *recorded command* prints something.
+        Reproduced against the previous recipe: ``-c 'sleep 45'`` failed
+        with "recorder did not come up within 30s" after 30 s, and the
+        failure path killed a healthy recording whose cast already held the
+        header.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        seg = block[block.index("# 2."):block.index("# 3.")]
+        until = re.search(r"^until .*?; do$", seg, re.M | re.S)
+        assert until, "cli-recording: no recorder readiness wait"
+        assert "recording.cast" in until.group(0), (
+            "cli-recording: readiness wait does not use the cast as its handle")
+        assert "capture-pane" not in until.group(0), (
+            "cli-recording: pane content is not a readiness signal — a quiet "
+            "command records with a blank pane")
+        assert "has-session" in until.group(0), (
+            "cli-recording: a recorder that exits (one-shot command finished, "
+            "or asciinema failed) must end the wait")
+
+    def test_cli_stop_bound_is_raisable_for_a_long_command(self):
+        """The stop bound is a hang detector, not a limit on the recorded work.
+
+        A one-shot command legitimately runs as long as it runs, so a fixed
+        30 s bound kills healthy recordings — reproduced: ``-c 'echo
+        started; sleep 45'`` failed with "recorder did not exit within 30s"
+        and left a cast holding only its header. The bound stays, as a
+        raisable knob with an actionable message.
+        """
+        block = _scaffold_block(_recipe_text("cli-recording.md"))
+        assert "stop_timeout=${RECORDER_STOP_TIMEOUT:-" in block, (
+            "cli-recording: the stop bound cannot be raised for a long command")
+        stop = block[block.index("stop_timeout="):]
+        body = stop[:stop.index("\ndone")]
+        assert "deadline=$(( $(date +%s) + stop_timeout ))" in body, (
+            "cli-recording: the stop deadline ignores RECORDER_STOP_TIMEOUT")
+        assert "RECORDER_STOP_TIMEOUT" in body, (
+            "cli-recording: the stop failure does not say how to raise the bound")
 
     def test_cli_scaffold_writes_the_cast_beside_the_render(self):
         """The scaffold must write the cast where the render step reads it.

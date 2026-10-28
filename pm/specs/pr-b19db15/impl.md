@@ -65,14 +65,23 @@ R2. **Remove a stale cast before recording, and a stale recorder.** Both
    by `new-session` races the server's exit ("server exited unexpectedly",
    reproduced ~7 times in 40 tight iterations).
 
-R3. **Wait for the recorder to draw before sending keys.** Both recipes have a
-   bounded readiness wait on the pane content (and the session still
-   existing). Keystrokes sent before asciinema has attached are silently lost,
-   so an immediate `exit`/detach leaves the recorder running. In the tmux
-   recipe a recorder that *exits* before drawing is a failure (the attach
-   could not start; the cast it leaves holds asciinema's error, not the TUI),
-   not a recording that finished early — the CLI scaffold still accepts an
-   early exit, because a one-shot command legitimately ends the pane.
+R3. **Wait for the recorder to be up before sending keys, on the right
+   handle.** Keystrokes sent before asciinema has attached are silently lost,
+   so an immediate `exit`/detach leaves the recorder running. Both recipes
+   have a bounded readiness wait that also ends when the session goes away
+   (a quick one-shot command legitimately finishes first). The *handle*
+   differs by recipe: the tmux recipe waits on pane content, because there the
+   pane is the attach client and the cast exists before it renders; the CLI
+   scaffold waits on the cast file, because asciinema writes the header the
+   moment it starts recording, and pane content is not a readiness signal
+   there — a command that prints nothing for a while (a long run, a quiet
+   `-q` command) records fine with a blank pane (verified: the previous
+   pane-content wait failed `-c 'sleep 45'` at 30 s and killed a healthy
+   recording whose cast already held the header). In the tmux recipe a
+   recorder that *exits* before drawing is a failure (the attach could not
+   start; the cast it leaves holds asciinema's error, not the TUI), not a
+   recording that finished early — the CLI scaffold still accepts an early
+   exit, because a one-shot command legitimately ends the pane.
 
 R4. **Stop by ending the recorded command, then wait on the recorder's real
    handle and check the cast.** The tmux recipe detaches the attach client and
@@ -81,7 +90,12 @@ R4. **Stop by ending the recorded command, then wait on the recorder's real
    signal — then `test -s` the cast. The CLI no-TTY scaffold ends an
    interactive `bash` with `exit` (Ctrl-C is forwarded to the recorded command,
    not asciinema) and applies the same bounded wait and cast check. Tearing the
-   pane down under a live recorder can truncate the cast.
+   pane down under a live recorder can truncate the cast. The CLI bound is a
+   hang detector, not a time limit on the recorded work: a one-shot command
+   legitimately runs as long as it runs, so the bound is raisable with
+   `RECORDER_STOP_TIMEOUT` (default 30 s) and the failure message says so —
+   otherwise a healthy long recording is killed at the deadline and leaves a
+   cast holding only its header (verified with `-c 'echo started; sleep 45'`).
 
 R5. **CLI scaffold writes the cast where the render reads it.** The no-TTY
    scaffold uses `<capture-dir>/<short-name>/recording.cast`, matching every
@@ -109,7 +123,9 @@ R6. **Bound the remaining readiness polls, and poll the right handle.** The
 R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    asserts the kept recipe behaviour: capture-dir creation in the runnable
    block, stale-cast and stale-transcript removal, scaffold parses, recorder
-   readiness before keys, bounded stop + cast check, the CLI `exit` stop, the
+   readiness before keys on the right handle (pane content for tmux, the cast
+   file for the CLI scaffold), the raisable CLI stop bound, bounded stop +
+   cast check, the CLI `exit` stop, the
    CLI scaffold cast path, the pm-session poll targeting the computed handle
    (and not `grep '^pm-'`), the bounded readiness polls (including the
    web-UI failure path stopping the server it started), clearing a stale
