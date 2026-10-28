@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T04:00:05.234349+00:00'
+  updated_at: '2026-10-28T04:01:39.964086+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38598,6 +38598,46 @@ prs:
       is the bare pr id (not pr-<id>).'
     created_at: '2026-10-28T04:00:05Z'
     last_edited: '2026-10-28T04:00:05Z'
+  - id: note-fadb23e
+    text: 'S113 refine (2026-10-28, HEAD 9a2dacaa): container mode has no claude --resume
+      launch surface (tmux-path impl/review/QA always use a fresh --session-id; only
+      the plain-terminal launch_claude fallback resumes, and it runs on the host,
+      uncontainerised). S113 "resume one N session" = pm tui restart adopting N''s
+      running QA run, then a worker relaunch from the restarted TUI. N/P reach the
+      main stub through a claude-type default provider on 10.0.2.100 (slirp containers
+      cannot reach host 127.0.0.1); decoy "other route" listener on 10.0.2.100 so
+      a leaked BASE_URL would be visible. Harness: /pm-captures/scenarios/109/scripts
+      + 63/scripts.'
+    created_at: '2026-10-28T03:01:07Z'
+    last_edited: '2026-10-28T03:01:07Z'
+  - id: note-64da988
+    text: 'QA S113 (2026-10-28, container mode podman 3 slirp4netns, HEAD 9a2dacaa,
+      real claude 2.1.312 impl/review/signoff/s0/refiner/worker vs main stub 10.0.2.100:19131
+      + acme router stub 127.0.0.1:19132 + decoy other-route :19133; captures /pm-captures/scenarios/113,
+      REPORT.md): INPUT_REQUIRED, no product change. Every R9/RQ44 routing Then held
+      from a TUI started in another route''s full routed env: only R''s impl/review/qa-s1/signoff
+      containers mount /run/pm-route; all slirp4netns, no ports; N/P commands env
+      -u aliases+SMALL_FAST+AUTO_MODE+PM_ROUTE_BASE_URL with BASE_URL=main stub (N
+      also -u pin/FORCE, no --model; P pin claude-opus-5-5 FORCE=1 --model claude-opus-5-5);
+      N/P environs have no other/ value, CLOUD_ML_REGION kept; R ensure step + acme-only
+      env, no API key/auth token; stub split by session id: main 58 N/P only, acme
+      40 R only acme-opus-1, decoy 0; R relaunch reused its container with acme env;
+      pm tui restart resumed N (PR in qa) and the resumed loop relaunched N''s worker
+      with the main-stub env and no route mount. QA launch lines say route=none (qa.md
+      line 29 rename of route=main). Two literal Thens failed on pre-existing master
+      behaviour, filed: (1) pr-fcdd76f: the literal story-2 Given has the PRs in sign_off
+      after story 1''s i; t/z t then run QA without moving status to qa, and pm tui
+      restart deletes the run''s qa_resume.json ("left QA") so it is never resumed
+      and its verdict is never recorded (minimal repro finding/); resume held once
+      z d + z t put the PRs in qa. (2) pr-81a249e: "one finished-run qa container
+      per run" fails because cleanup_orphaned_qa_containers at the next QA start removes
+      old containers whose window is gone, but keeps them when ANY PR has a qa-*-sN
+      window with the same suffix (N cc955-s3 and P d071-s1 removed, others kept).
+      Spec decision needed: should the S113 Then expect finished-run containers to
+      survive later QA starts? Harness: stub HOLD_CAP 300 s, plan relaunch/restart
+      steps inside it (scripts/s2run.sh).'
+    created_at: '2026-10-28T04:01:39Z'
+    last_edited: '2026-10-28T04:01:39Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -41308,6 +41348,36 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-fcdd76f
+  plan: bugs
+  title: 'Bug: TUI restart deletes the qa_resume.json of a running QA run on a PR
+    that is not in qa status (z t from sign_off), so the run is never resumed and
+    its verdict is never recorded'
+  branch: pm/pr-fcdd76f-bug-tui-restart-deletes-the-qa-resume-json-of-a-ru
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py _resume_incomplete_qa ("if not
+    pr or pr.get(\"status\") != \"qa\"": clear_resume_file) with _enter_qa_status
+    only moving in_review -> qa (same on master). Repro (QA S113, pr-592e4bd, /pm-captures/scenarios/113/finding
+    + story2/finding-restart-drop): PR in sign_off (after QA PASS + `i`); hold its
+    worker at the stub; TUI `z t` on it -> "Fresh QA start", QA runs, status stays
+    sign_off, qa_resume.json written (03:50:24); `pm tui restart` -> no "Resuming
+    QA", qa_resume.json gone 2 s later; release the worker -> worker replies PASS
+    at 03:50:40 but nothing collects it: qa_status.json keeps s2 verdict "" / overall
+    "" 110 s later, no pm log line for the PR. Same with two PRs at once in story
+    2. The same restart resumes the run fine when the PR is in qa status (z d then
+    z t). Expected: a running run started by t/z t survives a restart (either z t
+    moves the PR to qa, or the scan resumes runs whatever the status unless the PR
+    is merged/closed).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:55:07.007769+00:00'
+  updated_at: '2026-10-28T03:55:07.007769+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
 - id: pr-95664e1
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "running: sign_off" forever for a sign-off
@@ -41333,6 +41403,34 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:31:57.950146+00:00'
   updated_at: '2026-10-28T03:31:57.950146+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-81a249e
+  plan: bugs
+  title: 'Bug: cleanup_orphaned_qa_containers keeps a PR''s old QA container whenever
+    ANY PR has a qa-*-sN window with the same -sN suffix, so which finished-run containers
+    survive a new QA start depends on other PRs'
+  branch: pm/pr-81a249e-bug-cleanup-orphaned-qa-containers-keeps-a-pr-s-ol
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py cleanup_orphaned_qa_containers: has_window
+    = any(w.endswith(suffix) and w.startswith("qa-") for w in live_windows) never
+    checks the window belongs to pr_id (same on master). Observed (QA S113, pr-592e4bd,
+    container mode, PRs N/P/R, /pm-captures/scenarios/113/final/leftover-containers.txt
+    + monitors/podman.log): fresh z t on N removed its finished PASS run container
+    qa-<N>-cc955…-s3 (no -s3 window left after R''s z t killed R''s s3 window 7 s
+    earlier) but kept N''s story-1 container qa-<N>-ad5c…-s1 (its window was killed
+    long ago; P''s qa-<P>-s1 window still exists); R''s finished qa-<R>-101bd…-s3
+    survived R''s z t only because N''s qa-<N>-s3 window was still open. Expected:
+    the orphan check matches the PR''s own window name (qa-<display_id>-sN), and the
+    retention of finished-run containers is the same whatever other PRs are doing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:55:14.879292+00:00'
+  updated_at: '2026-10-28T03:55:14.879292+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
