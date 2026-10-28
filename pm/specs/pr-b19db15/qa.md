@@ -32,7 +32,8 @@ recording-recipe bugs that any worker following the recipe hits:
   mp4 afterwards, so a failed render ends with no video and a clear error
   instead of the previous run's mp4 (and the CLI scaffold documents the
   escaped `bash -c` command form that actually survives its quoting). The
-  render sections name `agg` as a prerequisite and carry its install line;
+  render sections name `agg` as a prerequisite and carry its install line,
+  guarded on `command -v agg` so it never replaces a working binary;
   they also check the renderers' own exit statuses (a failed `agg`/`ffmpeg`
   leaves a partial mp4 that `test -s` accepts), say "there is no cast to
   render" when the recording wrote nothing, and the tmux recipe reports a
@@ -218,9 +219,11 @@ run.
   install advertised through `NODE_PATH`, which ESM ignores → a bare
   `node driver.mjs` fails with `ERR_MODULE_NOT_FOUND: Cannot find package
   'playwright'`; the recipe links the global install as a `node_modules`
-  beside the driver (only when there is no local install and the global one
-  exists) and stops at its resolution check, with an actionable message, when
-  the import still does not resolve.
+  beside the driver (only when there is no local install and
+  `/usr/lib/node_modules/playwright` exists — a global directory without the
+  package is not linked, so a later `npm i playwright` still lands in the
+  capture directory) and stops at its resolution check, with an actionable
+  message, when the import still does not resolve.
 - A render fails (no `agg`, unreadable cast, failed transcode) in a capture
   directory that already holds a video → the render steps delete this run's
   mp4/gif (and the web-UI webm) first and then check the mp4, so the run ends
@@ -228,7 +231,10 @@ run.
   presented as this run's capture. `agg` is the missing piece in the image:
   the recipe's own install line (`agg-$(uname -m)-unknown-linux-gnu`, verified
   as agg 1.9.0) has to make the same cast render to H.264; substituting a
-  different renderer is not a pass.
+  different renderer is not a pass. The install block is guarded on
+  `command -v agg`, so on an image that already has `agg` it must do nothing
+  — re-downloading over the working binary would truncate it earlier on
+  `PATH` if the transfer failed partway.
 - An encoder fails *partway* → the render steps check `agg`'s and `ffmpeg`'s
   own exit statuses, not only the output file: a killed `ffmpeg` leaves a
   non-empty partial mp4 (verified: 267,945 bytes) that `test -s` accepts, so
@@ -252,7 +258,10 @@ run.
   teardown that silently does nothing leaves the app holding the port, which
   the next run's port pre-check then reports as "something already answers";
   the protocol block with no `CAPDIR` redirects to `/http.log` and
-  `/sse.log` and exits 0, reporting success with no capture. In a fresh shell
+  `/sse.log` and exits 0, reporting success with no capture. Its per-route
+  `curl` also carries `--connect-timeout`/`--max-time`, so a route that
+  accepts but never answers is recorded in `http.log` as a curl error with
+  status `000` instead of hanging the block. In a fresh shell
   the teardown must still stop the app: step 1 records its pid in
   `server.pid`, and the block falls back to it (`SERVER_PID` itself does not
   survive step 1's shell).

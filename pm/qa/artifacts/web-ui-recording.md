@@ -169,8 +169,11 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # Link only when needed: with no global install `ln -sfn` would leave a
 # *dangling* node_modules that then breaks the `npm i playwright` fallback,
 # and with a local install already in place it would create a nested
-# node_modules/node_modules.
-if [ ! -e node_modules ] && [ -d /usr/lib/node_modules ]; then
+# node_modules/node_modules. The test is the package directory, not just the
+# global node_modules: linking a directory that does not hold `playwright`
+# leaves a node_modules that cannot resolve, which then sends a later
+# `npm i playwright` into the global install instead of this capture dir.
+if [ ! -e node_modules ] && [ -d /usr/lib/node_modules/playwright ]; then
     ln -sfn /usr/lib/node_modules node_modules
 fi
 # Check before running the driver, and stop here on failure: otherwise the
@@ -330,11 +333,16 @@ if [ ! -d "$CAPDIR" ]; then
     exit 1
 fi
 # http.log — snapshot each route you care about. -sS keeps it quiet but
-# shows errors; -w records the status line per route.
+# shows errors; -w records the status line per route. Each request is
+# bounded, like the step-1 readiness poll: a route that accepts the
+# connection but never answers would otherwise block this block forever.
+# A timed-out route is recorded in the log as curl's own error with status
+# 000 — that is the evidence for that route, not a hang.
 {
   for route in "/" "/some-view" "/another-view"; do
     echo "===== GET $route ====="
-    curl -sS -w '\n[HTTP %{http_code}]\n' "$APP_URL$route"
+    curl -sS --connect-timeout 2 --max-time 10 \
+         -w '\n[HTTP %{http_code}]\n' "$APP_URL$route"
   done
 } > "$CAPDIR/http.log" 2>&1
 

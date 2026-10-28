@@ -376,9 +376,11 @@ R9. **The web-UI driver has to resolve Playwright before it can run.** The
 
    Two guards make the step safe in the cases the image's own path does not
    cover. The link is conditional (`[ ! -e node_modules ] && [ -d
-   /usr/lib/node_modules ]`): the recipe offers a *local* `npm i playwright`
-   as the alternative, and an unconditional `ln -sfn` creates a link named
-   after the target's basename *inside* an existing `node_modules` (verified:
+   /usr/lib/node_modules/playwright ]`, so a global directory that does not
+   hold the package is not linked — R16): the recipe offers a *local*
+   `npm i playwright` as the alternative, and an unconditional `ln -sfn`
+   creates a link named after the target's basename *inside* an existing
+   `node_modules` (verified:
    `node_modules/global` for a substituted target, `node_modules/node_modules`
    for the image's), and with no global install it leaves a dangling
    `node_modules` beside the driver that breaks that same fallback. And the
@@ -399,8 +401,9 @@ R10. **Name the renderer prerequisite, and never aim a cleanup at the
      the per-architecture release-binary install
      (`agg-$(uname -m)-unknown-linux-gnu` under
      `github.com/asciinema/agg/releases/latest/download`; verified: agg 1.9.0
-     downloads, runs, and renders the recipe's own cast to H.264) and say not
-     to substitute a different renderer.
+     downloads, runs, and renders the recipe's own cast to H.264), guarded on
+     `command -v agg` so it never re-downloads over a working binary (R16),
+     and say not to substitute a different renderer.
    - The CLI scaffold is pasted as one block and step 3 (driving the shell)
      is comments, so a worker that pastes it whole for the `-c bash` form
      waits out the stop bound with the shell still at its prompt. The stop
@@ -616,6 +619,40 @@ R15. **A start step that cannot do its job says so, instead of being
      says `agg` *may* be missing and keeps the `command -v agg` conditional
      (the actionable rule was already conditional).
 
+R16. **A remedy must not damage the thing it is meant to fix, and no request
+   may be left unbounded.** Three leftovers of the PR's own class found by
+   review loop e7e1 i3:
+   - **The `agg` install block re-downloaded over a working binary.** The
+     prose said to install `agg` only when `command -v agg` prints nothing,
+     but the runnable block was unconditional — and the bundled `Dockerfile`
+     now installs `agg`, so a worker pasting the remedy block on a current
+     image would replace it for nothing. That is not harmless: the image's
+     `PATH` puts `~/.local/bin` first, and `curl -o` writes in place, so a
+     transfer that fails partway leaves a truncated binary that shadows the
+     working one (verified in this container with real `curl`: a server that
+     closed mid-body replaced a working 12-byte `agg` with a 500-byte
+     partial). The block is now guarded on `command -v agg` in both recording
+     recipes, matching its own prose; verified that the guarded block still
+     installs `agg` 1.9.0 for real when it is missing.
+   - **The Playwright link tested the parent directory, not the package.**
+     The driver block linked `/usr/lib/node_modules` whenever that directory
+     existed. With the directory present but `playwright` absent, the link
+     cannot resolve, the block then stops at its own check and tells the
+     worker to create *that same link* (a remedy that cannot work), and the
+     stray `node_modules` sends a later `npm i playwright` into the global
+     install instead of the capture directory. The guard now tests
+     `/usr/lib/node_modules/playwright`, so the link is created only when the
+     package is actually there and the `npm i playwright` fallback is left
+     usable.
+   - **The protocol block's route snapshots were unbounded.** R6 bounded the
+     step-1 readiness poll per attempt because a deadline is only consulted
+     between attempts, but the Layer 2 `curl` per route had no timeout at all:
+     a route that accepted the connection and never answered blocked the
+     block forever — the unbounded wait this PR removes everywhere else. Each
+     route now carries `--connect-timeout 2 --max-time 10`; a timed-out route
+     is recorded in `http.log` as curl's own error with status `000`, so that
+     route's failure is the evidence rather than a hang.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -626,9 +663,9 @@ R15. **A start step that cannot do its job says so, instead of being
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), and a failed `new-session` is reported as a start failure (R15) |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15) |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), a failed `new-session` is reported as a start failure (R15), and the `agg` install is guarded on `command -v agg` so it cannot replace a working binary (R16) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15); the `agg` install is guarded on `command -v agg` (R16) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -652,7 +689,13 @@ R15. **A start step that cannot do its job says so, instead of being
    session that `new-session` cannot create, a capture directory that cannot
    be created (both recording recipes, and the web-UI start block), the
    web-UI driver block with a missing capture directory, and a failed web-UI
-   start removing its pid file).
+   start removing its pid file; R16's remedies: the `agg` install block is
+   *executed* both ways against a stub `curl` — with `agg` on `PATH` the
+   download never runs and the binary is untouched, and with it missing the
+   download runs and the file is made executable — the driver block, given a
+   global `node_modules` that does not hold `playwright`, stops at its
+   resolution check without creating the link, and the Layer 2 route snapshots
+   carry their per-request bounds).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -799,3 +842,38 @@ R15. **A start step that cannot do its job says so, instead of being
   PATH=/usr/bin:/bin` and `markdown` on the path, which is what makes the
   hook-installer, git-pull and markdown baselines pass here. Evidence:
   `/pm-captures/review-e7e1-i2/` (`probe.log`, the pre/post recipe copies).
+- Review loop e7e1 i3 verified R16 live in this container. The `agg` install
+  hazard is real: a local HTTP server that sent a `Content-Length: 100000`
+  header, 500 bytes of body and then closed made real `curl -fsSL … -o agg`
+  replace a working `agg` with a **500-byte** partial file (curl rc 18,
+  "transfer closed with 99500 bytes remaining"), and that file is still
+  executable — so it would shadow the image's working binary earlier on
+  `PATH`. The guarded block does nothing when `agg` is present (stub `curl`
+  not called, binary byte-identical) and still installs for real when it is
+  missing: `command -v agg` empty → the same block downloaded **agg 1.9.0**
+  into `~/.local/bin` and `agg --version` answered. For the Playwright link,
+  a global directory that exists but holds no `playwright` made the old guard
+  create `node_modules`, after which the block stopped at its own check and
+  told the worker to create that same link — while the stray link would send
+  a later `npm i playwright` into the global install. Post-fix no link is
+  created and the `npm i playwright` advice stays valid. The Layer 2 route
+  snapshots were the one request in the recipes with no bound at all (step 1's
+  readiness poll bounds each attempt for exactly this reason), so they now
+  carry `--connect-timeout 2 --max-time 10`; a timed-out route lands in
+  `http.log` as curl's error with status 000, which is that route's evidence.
+  New tests: the install block executed both ways (2 recipes ×
+  present/missing), the driver block with a package-less global directory, and
+  the protocol block's per-route bounds; the three behavioural ones fail
+  against the pre-fix recipes (checked by restoring them in place), the
+  missing-`agg` cases pass both ways by design, and the bound assertion fails
+  with the timeouts removed. File 105 pass (3 runs); related suites 175 pass;
+  full suite 3958 passed, 1 skipped, 94 deselected (`test_merge_publish`/
+  `test_signoff_integration` — the push proxy rejects pushes to master — plus
+  the two known baselines `test_git_ops::TestPullRebase::test_keeps_unpushed_merge`
+  and `test_hook_events::test_installer_writes_standalone_receiver`, both of
+  which reproduce on origin/master), run with `markdown` on the path so the
+  render tests run too. Verified the recipes' own edited blocks live: the
+  guarded `agg` block downloaded real agg 1.9.0 when agg was missing, the
+  driver block still linked and ran the driver against the image's
+  `/usr/lib/node_modules/playwright`, and the Layer 2 block wrote `http.log`
+  and `sse.log` against a real local server with the new timeouts in place.

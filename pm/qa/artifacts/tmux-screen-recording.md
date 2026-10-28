@@ -335,13 +335,22 @@ Dockerfile now installs it), and the block below fails instead of leaving a
 missing or stale video — so install `agg` first when `command -v agg` prints
 nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
 it is missing, since `curl -o` cannot; the asset is per architecture, verified
-with agg 1.9.0):
+with agg 1.9.0). The block is guarded on `command -v agg` for that reason, so
+pasting it on an image that already has `agg` does nothing:
 
 ```
-mkdir -p ~/.local/bin
-curl -fsSL \
-    https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
-    -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+# Install only when agg is missing. The bundled Dockerfile installs it, so
+# this block usually does nothing. Re-downloading over an existing agg is
+# not harmless: `~/.local/bin` comes first on PATH, and `curl -o` writes in
+# place, so a transfer that fails partway leaves a truncated binary that
+# shadows the image's working one (verified: a dropped transfer replaced a
+# working agg with a 500-byte file).
+if ! command -v agg >/dev/null; then
+    mkdir -p ~/.local/bin
+    curl -fsSL \
+        https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
+        -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
+fi
 ```
 
 Don't substitute a different renderer: the mp4 is the required artifact.

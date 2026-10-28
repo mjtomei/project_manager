@@ -41,9 +41,12 @@ hits, regardless of how it waits for a background job:
   web-UI driver's trace, screenshots and DOM dump are cleared the same way,
   and the web-UI finalize step refuses to run at all with no ``CAPDIR``
   rather than aim its cleanup and ffmpeg at the filesystem root;
-- the render steps name their renderer prerequisite: the QA image ships
-  ``ffmpeg`` but not ``agg``, and the render now fails loudly, so the recipe
-  carries the per-architecture release-binary install line;
+- the render steps name their renderer prerequisite: ``agg`` may be missing
+  (the image used for QA on 2026-10-27 did not have it, although the bundled
+  Dockerfile now installs it), and the render fails loudly, so the recipe
+  carries the per-architecture release-binary install line — guarded on
+  ``command -v agg``, because re-downloading over a working binary can
+  truncate it earlier on PATH;
 - the CLI scaffold's ``<command-to-record>`` placeholder sits inside single
   quotes inside the outer double-quoted argument, so the recipe has to show
   the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
@@ -975,13 +978,13 @@ def test_render_says_when_there_is_no_cast(name, tmp_path):
 def test_render_documents_how_to_get_the_renderer(name):
     """The render step fails without `agg`, so the recipe has to say how to get it.
 
-    The QA image ships `ffmpeg` but not `agg` (verified: `command -v agg`
-    prints nothing in the pm-dev image), and the render block now exits 1
-    rather than leave a missing or stale video. Without the install line the
-    failure message ("check 'agg' is installed") sends the worker nowhere:
-    the recipe never names a prerequisite, so the only remaining moves are to
-    substitute a different renderer or to report the capture as impossible.
-    The release-binary URL is the one verified against agg 1.9.0.
+    `agg` may be missing (the image used for QA on 2026-10-27 did not have it,
+    although the bundled Dockerfile now installs it), and the render block
+    exits 1 rather than leave a missing or stale video. Without the install
+    line the failure message ("check 'agg' is installed") sends the worker
+    nowhere: the recipe never names a prerequisite, so the only remaining
+    moves are to substitute a different renderer or to report the capture as
+    impossible. The release-binary URL is the one verified against agg 1.9.0.
     """
     text = _recipe_text(name)
     section = text.split("## Render to video", 1)[1]
@@ -993,8 +996,90 @@ def test_render_documents_how_to_get_the_renderer(name):
         f"{name}: the downloaded agg binary is never made executable")
     assert install < section.index("agg --idle-time-limit"), (
         f"{name}: the agg install line comes after the render block")
-    assert re.search(r"^curl -fsSL", section, re.M), (
+    assert re.search(r"^\s*curl -fsSL", section, re.M), (
         f"{name}: the agg prerequisite is not a runnable install command")
+    # The guard has to be in the runnable block, not only in the prose above
+    # it: a worker pastes the block, so a prose-only rule is what made the
+    # block replace a working `agg` (R16).
+    install_block = _install_block(name)
+    assert "command -v agg" in install_block, (
+        f"{name}: the install block is not guarded on `command -v agg`, so a "
+        "worker who pastes it on an image that already has agg re-downloads "
+        "over the working binary")
+    assert (install_block.index("command -v agg")
+            < install_block.index("curl -fsSL")), (
+        f"{name}: the agg install guard comes after the download")
+
+
+def _install_block(name):
+    """The fenced block that installs ``agg`` in the render section."""
+    section = _recipe_text(name).split("## Render to video", 1)[1]
+    for block in re.findall(r"```[a-z]*\n(.*?)```", section, re.S):
+        if "agg-$(uname -m)" in block:
+            return block
+    raise AssertionError(f"{name}: no agg install block found")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+@pytest.mark.parametrize("agg_present", [True, False])
+def test_renderer_install_block_only_runs_when_agg_is_missing(name,
+                                                              agg_present,
+                                                              tmp_path):
+    """Re-downloading over a working `agg` can destroy it.
+
+    ``~/.local/bin`` comes first on the image's PATH, and ``curl -o`` writes
+    in place: a transfer that fails partway leaves a truncated binary that
+    shadows the image's working ``agg`` (verified: a dropped transfer replaced
+    a working agg with a 500-byte file). The bundled Dockerfile installs
+    ``agg``, so a worker pasting the remedy block on a current image would
+    take that risk for nothing — the block is guarded on ``command -v agg``,
+    matching the prose that says to install it only when that prints nothing.
+    This runs the recipe's own block both ways against a stub ``curl``.
+    """
+    block = _install_block(name)
+    home = tmp_path / "home"
+    local = home / ".local" / "bin"
+    local.mkdir(parents=True)
+    agg = local / "agg"
+    if agg_present:
+        agg.write_text("#!/bin/sh\necho working\n")
+        agg.chmod(0o755)
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "curl-called"
+    # The block's own tools, stubbed to the real ones by absolute path, so the
+    # test's PATH cannot pick up a host `agg` and mask the guard.
+    for tool in ("mkdir", "chmod", "uname"):
+        real = shutil.which(tool)
+        assert real, f"{tool} is required"
+        _stub_tool(bindir, tool, f'exec "{real}" "$@"\n')
+    # The stub's PATH is the stub dir itself, so it may only use builtins.
+    _stub_tool(bindir, "curl", f''': > "{called}"
+for a in "$@"; do last=$a; done
+printf '#!/bin/sh\\necho downloaded\\n' > "$last"
+''')
+    # `~/.local/bin` is on the image's PATH ahead of the system dirs, and the
+    # stubs stand in for everything else, so no host `agg` can mask the guard.
+    # `bash` itself is resolved before PATH is replaced.
+    bash = shutil.which("bash")
+    env = dict(os.environ, HOME=str(home), PATH=f"{local}:{bindir}")
+
+    r = subprocess.run([bash], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode == 0, r.stderr
+    if agg_present:
+        assert not called.exists(), (
+            f"{name}: the install block downloaded over a working agg, and a "
+            "failed transfer would leave a truncated binary earlier on PATH")
+        assert agg.read_text() == "#!/bin/sh\necho working\n", (
+            f"{name}: the install block replaced the existing agg")
+    else:
+        assert called.exists(), (
+            f"{name}: the install block did nothing although agg is missing")
+        assert agg.read_text() == "#!/bin/sh\necho downloaded\n", agg.read_text()
+        assert os.access(agg, os.X_OK), (
+            f"{name}: the downloaded agg is never made executable")
 
 
 def test_cli_stop_failure_names_the_interactive_remedy():
@@ -1016,6 +1101,13 @@ def test_cli_stop_failure_names_the_interactive_remedy():
         "RECORDER_STOP_TIMEOUT is the only fix it suggests")
 
 
+def _web_ui_finalize_block():
+    """The fenced block under ``### 3. Finalize`` (the transcode step)."""
+    text = _recipe_text("web-ui-recording.md")
+    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
+    return re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+
+
 def test_web_ui_finalize_refuses_an_unset_capdir(tmp_path):
     """The finalize step must not run its new `rm -f` against the filesystem root.
 
@@ -1025,9 +1117,7 @@ def test_web_ui_finalize_refuses_an_unset_capdir(tmp_path):
     targets ``/recording.mp4`` and ffmpeg is handed ``/recording.webm``. The
     step stops with a message instead.
     """
-    text = _recipe_text("web-ui-recording.md")
-    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
-    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+    block = _web_ui_finalize_block()
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -1049,9 +1139,7 @@ def test_web_ui_finalize_refuses_an_unset_capdir(tmp_path):
 
 def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
     """The guard must not break the step it protects."""
-    text = _recipe_text("web-ui-recording.md")
-    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
-    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+    block = _web_ui_finalize_block()
 
     capdir = tmp_path / "cap"
     capdir.mkdir()
@@ -1082,9 +1170,7 @@ def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
     header-only-cast bug again, one artifact over. ffmpeg's own exit status is
     the handle, and its partial output goes with it.
     """
-    text = _recipe_text("web-ui-recording.md")
-    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
-    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+    block = _web_ui_finalize_block()
 
     capdir = tmp_path / "cap"
     capdir.mkdir()
@@ -1231,9 +1317,7 @@ def test_web_ui_finalize_guard_stops_an_interactive_paste(tmp_path):
     run, not the paste-into-a-shell form the recipe is written for. The block
     therefore has to stop itself (`if … exit 1`), which is what this drives.
     """
-    text = _recipe_text("web-ui-recording.md")
-    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
-    block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+    block = _web_ui_finalize_block()
 
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -1468,6 +1552,32 @@ def test_web_ui_driver_does_not_clobber_a_local_install(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_links_only_when_playwright_is_there(tmp_path):
+    """A global ``node_modules`` without the package must not become the link.
+
+    The image's layout is ``/usr/lib/node_modules/playwright``. Testing only
+    the parent directory links a directory that cannot resolve the package: the
+    block then stops at its own check and tells the worker to create that same
+    link again (a remedy that cannot work), and the stray ``node_modules``
+    makes a later ``npm i playwright`` install into the global directory
+    instead of the capture directory.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    global_dir = tmp_path / "global"
+    global_dir.mkdir()      # the directory exists; the playwright package does not
+    r = _run_driver_block(capdir, global_dir)
+    assert r.returncode != 0, (
+        "the block ran the driver without a resolvable playwright")
+    assert "playwright does not resolve beside driver.mjs" in r.stderr, r.stderr
+    assert not os.path.lexists(capdir / "node_modules"), (
+        "the block linked a global node_modules that does not hold playwright, "
+        "so the remedy it prints cannot work and a later `npm i playwright` "
+        "lands in the global install")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
     """The resolution check has to gate the driver, not just print.
 
@@ -1644,8 +1754,7 @@ def test_web_ui_clears_a_previous_video():
         "web-ui recipe globs \"$CAPDIR\"/*.png without the `${CAPDIR:?}` "
         "guard: with CAPDIR unset the glob expands against the filesystem "
         "root, so the cleanup would target every PNG there")
-    finalize = text.split("### 3. Finalize", 1)[1].split("## Capture", 1)[0]
-    finalize_block = re.findall(r"```[a-z]*\n(.*?)```", finalize, re.S)[0]
+    finalize_block = _web_ui_finalize_block()
     rm = finalize_block.index('rm -f "$CAPDIR/recording.mp4"')
     assert rm < finalize_block.index("\nffmpeg "), (
         "web-ui recipe only drops the old mp4 after the transcode")
@@ -1714,6 +1823,22 @@ def test_web_ui_layer2_block_refuses_a_missing_capture_dir(tmp_path):
     assert "does not exist" in r.stderr, r.stderr
     assert not called.exists(), (
         "the protocol block ran curl with nowhere to write its logs")
+
+
+def test_web_ui_layer2_route_snapshots_are_bounded():
+    """A route that accepts but never answers must not hang the protocol block.
+
+    Step 1's readiness poll bounds each attempt (``--connect-timeout 2
+    --max-time 5``) because a deadline is only consulted *between* attempts;
+    the protocol block's per-route ``curl`` had no bound at all, so a route
+    that stalled blocked the worker forever — the unbounded-wait class this
+    PR bounds everywhere else. A timed-out route is recorded in ``http.log``
+    as curl's own error with status ``000``, which is that route's evidence.
+    """
+    block = _web_ui_layer2_block()
+    loop = block[block.index("for route in"):block.index("\n} > ")]
+    assert "--max-time" in loop and "--connect-timeout" in loop, (
+        "the protocol block's route snapshots are unbounded: " + loop)
 
 
 def test_web_ui_layer2_block_writes_both_logs(tmp_path):
