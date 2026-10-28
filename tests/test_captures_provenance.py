@@ -491,6 +491,33 @@ def test_audit_without_a_captures_dir_never_walks_the_cwd(tmp_path,
     assert any("no captures dir" in x for x in a.anomalies)
 
 
+def test_audit_says_a_damaged_root_manifest_is_unreadable(tmp_path):
+    """The audit is the surface that reports what is on disk, so a root
+    ``qa_manifest.json`` that exists but does not parse must be called
+    unreadable — not "no qa_manifest.json" — both when membership is
+    recovered from ``qa_runs/`` and when there is nothing to recover."""
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text("{ not json", encoding="utf-8")
+
+    # Nothing to recover: damaged, not absent.
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+    assert a.manifest is None
+    assert any("unreadable (damaged JSON)" in x and "not run-bound" in x
+               for x in a.anomalies)
+    assert not any("no qa_manifest.json" in x for x in a.anomalies)
+
+    # Membership recovered from the per-run copy, and the damage is named.
+    (root / captures.RUNS_DIR_NAME).mkdir()
+    (root / captures.RUNS_DIR_NAME / "run1.json").write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1", "scenarios": [],
+    }), encoding="utf-8")
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+    assert a.manifest is not None
+    assert any("unreadable (damaged JSON)" in x
+               and captures.RUNS_DIR_NAME in x for x in a.anomalies)
+    assert not any("no qa_manifest.json at the top" in x for x in a.anomalies)
+
+
 # ---------------------------------------------------------------------------
 # Quarantine
 # ---------------------------------------------------------------------------
@@ -908,6 +935,46 @@ def test_signoff_qa_block_binds_the_run_without_a_status_file(tmp_path,
     assert "No qa_status.json found" in head
     assert "QA run: `run1`" in head
     assert "qa_manifest.json" in head
+
+
+def test_signoff_qa_block_resolves_captures_under_the_pm_session(
+        tmp_path, monkeypatch):
+    """The QA run wrote its captures under the pm session's tag, while prompt
+    generation can run with a cwd whose own tag would drift (a workdir
+    clone).  Resolving with the session the prompt is written for is what
+    keeps a real manifest from being reported as "not run-bound" — that
+    wording tells the session to omit the run tag, silently dropping the
+    binding this change adds."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    status = _status_file(tmp_path, "run1")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    seen = []
+
+    def fake_captures_dir(pr_id, session_tag=None, start_path=None,
+                          create=True):
+        seen.append(session_tag)
+        return root if session_tag == "sess1" else None
+
+    monkeypatch.setattr(paths, "captures_dir", fake_captures_dir)
+
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x", "sess1")
+    assert "QA run: `run1`" in head
+    assert "not run-bound" not in head
+    assert seen == ["sess1"]
+
+    # The public entry point threads the pm session name down as its tag
+    # (``pm-<tag>`` -> ``<tag>``), the same mapping ``qa_loop`` uses.
+    seen.clear()
+    data = {
+        "project": {"name": "t", "base_branch": "master"},
+        "prs": [{"id": "pr-x", "title": "T", "status": "sign_off"}],
+        "plans": [],
+    }
+    prompt_gen.generate_signoff_prompt(data, "pr-x", session_name="pm-sess1")
+    assert seen == ["sess1"]
 
 
 def test_signoff_prompt_requires_report_bound_to_the_qa_run(tmp_path,

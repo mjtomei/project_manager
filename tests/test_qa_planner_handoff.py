@@ -955,6 +955,7 @@ class TestPlannerCodeChangesForceReview:
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop._write_resume_file"), \
              patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._sync_captures_evidence"), \
              patch("pm_core.qa_loop._run_qa_finalize_pane",
                    return_value="FINALIZE_DONE"):
             return qa_loop._execute_and_finalize(

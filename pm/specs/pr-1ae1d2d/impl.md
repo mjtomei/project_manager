@@ -178,9 +178,11 @@ a nested fixture's record is provably not this PR's evidence.
 - `orphans`: directories not present in `members`.
 - `anomalies`: human-readable one-liners for foreign/unowned/orphan dirs, a
   manifest/`qa_status.json` run-id disagreement, a root `qa_manifest.json`
-  that is missing, unusable, or names another PR while the membership came
-  from `qa_runs/` (the fixture-clobber signature — the audit is the surface
-  that has to show it), and a **manifest member with no evidence directory**
+  that is missing, unreadable (damaged JSON — reported as damaged, not as
+  absent: the audit must say what is actually on disk), unusable, or names
+  another PR while the membership came from `qa_runs/` (the fixture-clobber
+  signature — the audit is the surface that has to show it), and a
+  **manifest member with no evidence directory**
   (its evidence was destroyed or never captured — sign-off must see missing
   evidence, not a synthetic record). A member whose directory exists but
   holds no provenance record is reported as a member without a record, not as
@@ -203,7 +205,12 @@ listing arbitrary directories.
 ### R7 — Sign-off prompt binds to the run
 `pm_core/prompt_gen.py`:
 
-- `_signoff_qa_scenarios_parts` (`:641`) reads the manifest for the PR and:
+- `_signoff_qa_scenarios_parts` (`:641`) reads the manifest for the PR —
+  resolving it under the **pm session's** captures tag (threaded from
+  `generate_signoff_prompt`'s `session_name`, `pm-<tag>` -> `<tag>`, exactly
+  as `qa_loop` derives `QALoopState.session_tag`), because prompt generation
+  can run with a cwd whose own tag drifts (a workdir clone) and a real
+  manifest must not then be reported as "not run-bound" — and:
   - adds `QA run: <run_id>` to the inlined `head` (never truncated — it is
     pm-generated evidence, like the overall verdict and QA error);
   - when the manifest's scenario indices differ from `qa_status.json`'s,

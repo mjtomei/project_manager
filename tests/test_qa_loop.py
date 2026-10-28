@@ -2037,10 +2037,15 @@ class TestStoppedRunAggregation:
 
     def _finalize(self, state, tmp_path):
         from pm_core import qa_loop
+        # ``_sync_captures_evidence`` resolves the real captures dir (via the
+        # cwd-derived session tag here) and writes a run manifest into it —
+        # keep that out of the developer's ``~/.pm`` tree; the writer itself is
+        # covered by tests/test_captures_provenance.py.
         with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
              patch("pm_core.qa_loop._write_status_file") as write_status, \
              patch("pm_core.qa_loop._write_resume_file"), \
              patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._sync_captures_evidence"), \
              patch("pm_core.qa_loop._run_qa_finalize_pane", return_value=None):
             qa_loop._execute_and_finalize(
                 state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",

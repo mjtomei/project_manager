@@ -639,7 +639,8 @@ def _qa_scenarios_pointer() -> str:
 
 
 def _qa_run_binding(pr_id: str, status: dict, status_path,
-                    listing_expected: bool = True) -> list[str]:
+                    listing_expected: bool = True,
+                    session_tag: str | None = None) -> list[str]:
     """Lines binding this QA listing to the run that produced the evidence.
 
     The report's scenario membership must come from a real QA run, not from
@@ -655,6 +656,14 @@ def _qa_run_binding(pr_id: str, status: dict, status_path,
     in the prompt.  Without a readable ``qa_status.json`` there is none, so
     the legacy-evidence line must not tell the session to cite "the scenarios
     listed below" — there would be nothing below it.
+
+    *session_tag* is the tag of the pm session this prompt is written for
+    (``<session name>`` minus its ``pm-`` prefix).  The QA run wrote its
+    captures under that session's dir, so resolving the manifest with it is
+    what makes the binding correct even when prompt generation runs with a
+    cwd whose own tag would drift (a workdir clone) — the same reason
+    ``qa_loop`` captures ``QALoopState.session_tag`` once.  ``None`` keeps
+    :func:`captures_dir`'s cwd/tmux resolution.
     """
     from pm_core import captures
     from pm_core.paths import captures_dir
@@ -665,7 +674,7 @@ def _qa_run_binding(pr_id: str, status: dict, status_path,
     # shared with `pm qa evidence`.
     status_run = captures.status_run_id(status, status_path, pr_id)
     try:
-        root = captures_dir(pr_id, create=False)
+        root = captures_dir(pr_id, session_tag=session_tag, create=False)
     except Exception:
         root = None
     manifest = (captures.read_manifest(root, pr_id=pr_id,
@@ -744,7 +753,8 @@ def _idx_list(indices: list, limit: int = 20) -> str:
 
 
 def _qa_head_without_status(note: str, pr_id: str,
-                            status_path) -> tuple[str, str]:
+                            status_path,
+                            session_tag: str | None = None) -> tuple[str, str]:
     """QA block head when there is no readable ``qa_status.json``.
 
     The live status file is the *listing*; the run binding comes from the
@@ -754,11 +764,13 @@ def _qa_head_without_status(note: str, pr_id: str,
     """
     lines = [note]
     lines.extend(_qa_run_binding(pr_id, {}, status_path,
-                                 listing_expected=False))
+                                 listing_expected=False,
+                                 session_tag=session_tag))
     return ("\n" + "\n".join(lines) + "\n", "")
 
 
-def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
+def _signoff_qa_scenarios_parts(pr_id: str,
+                                session_tag: str | None = None) -> tuple[str, str]:
     """Split the QA status block into ``(head, listing)``.
 
     *head* is the overall verdict, the QA error and the QA-run binding.  All
@@ -784,13 +796,13 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         # run that owns it instead of leaving membership implicit.
         return _qa_head_without_status(
             "_No qa_status.json found — read the captures dir directly._",
-            pr_id, None)
+            pr_id, None, session_tag)
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
         return _qa_head_without_status(
             "_qa_status.json unreadable — read the captures dir directly._",
-            pr_id, latest)
+            pr_id, latest, session_tag)
     if not isinstance(data, dict):
         # A truncated or hand-edited file can parse as a list/scalar.  It
         # carries no verdict and no listing, so treat it exactly like an
@@ -798,7 +810,7 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         # sign-off session must still get its run binding.
         return _qa_head_without_status(
             "_qa_status.json unreadable — read the captures dir directly._",
-            pr_id, latest)
+            pr_id, latest, session_tag)
     scenarios = data.get("scenarios") or []
     if isinstance(scenarios, dict):
         scenarios = list(scenarios.values())
@@ -816,7 +828,8 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     # A status file with no scenario entries yields no listing either, so the
     # run binding must not point at one that will not follow.
     head_lines.extend(_qa_run_binding(pr_id, data, latest,
-                                      listing_expected=bool(valid)))
+                                      listing_expected=bool(valid),
+                                      session_tag=session_tag))
     head = "\n" + "\n".join(head_lines) + "\n"
     if not valid:
         return (head, "")
@@ -861,13 +874,14 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     return (head + "\n", "\n".join(listing_lines) + "\n")
 
 
-def _signoff_qa_scenarios_block(pr_id: str) -> str:
+def _signoff_qa_scenarios_block(pr_id: str,
+                                session_tag: str | None = None) -> str:
     """The complete QA status block (head + listing).
 
     See :func:`_signoff_qa_scenarios_parts` for the split; the sign-off
     builder passes only the listing to ``fit_prompt``.
     """
-    head, listing = _signoff_qa_scenarios_parts(pr_id)
+    head, listing = _signoff_qa_scenarios_parts(pr_id, session_tag)
     return head + listing
 
 
@@ -984,8 +998,17 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     # The QA block is split: the overall verdict and the QA error are
     # pm-generated evidence, inlined whole; only the per-scenario verdict
-    # listing is handed to fit_prompt as a shrinkable enumeration.
-    qa_head, qa_listing = _signoff_qa_scenarios_parts(pr_id)
+    # listing is handed to fit_prompt as a shrinkable enumeration.  The QA-run
+    # binding resolves captures under the session this prompt is written for,
+    # not under whatever tag this process's cwd would derive (prompt
+    # generation can run from a workdir clone) — ``qa_loop`` captured the same
+    # tag once when the run wrote its evidence.
+    session_tag = None
+    if session_name and session_name.startswith("pm-"):
+        # ``pm-<tag>`` -> ``<tag>``; an empty remainder keeps the cwd/tmux
+        # resolution rather than pinning an unusable empty tag.
+        session_tag = session_name.removeprefix("pm-") or None
+    qa_head, qa_listing = _signoff_qa_scenarios_parts(pr_id, session_tag)
     integration_block = _signoff_integration_block(pr, pr_id)
 
     if _is_bug_pr(pr):

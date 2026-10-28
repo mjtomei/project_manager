@@ -467,7 +467,8 @@ def audit(pr_captures_dir: Path | str | None, *,
     # data as the pointer's own content — the clobber is the incident's
     # signature, and this is the surface that has to show it.
     root_pointer = manifest_path(root)
-    root_raw = _read_json(root_pointer) if root_pointer.is_file() else None
+    root_present = root_pointer.is_file()
+    root_raw = _read_json(root_pointer) if root_present else None
     root_ok = _valid_manifest(root_raw, pr_id) is not None
     members = [m for m in ((manifest or {}).get("scenarios") or [])
                if isinstance(m, dict)]
@@ -478,9 +479,15 @@ def audit(pr_captures_dir: Path | str | None, *,
 
     anomalies: list[str] = []
     if manifest is None:
-        if root_raw is None:
+        if not root_present:
             anomalies.append(
                 "no qa_manifest.json — scenario membership is not run-bound")
+        elif root_raw is None:
+            # The file is there but unparseable: say "damaged", not "absent".
+            # The audit exists to report what is actually on disk.
+            anomalies.append(
+                "the root qa_manifest.json is unreadable (damaged JSON) — "
+                "scenario membership is not run-bound")
         elif _manifest_owner(root_raw) == pr_id:
             anomalies.append(
                 "the root qa_manifest.json is unusable (no run id) — "
@@ -495,9 +502,13 @@ def audit(pr_captures_dir: Path | str | None, *,
                 f"the manifest belongs to QA run {manifest_run}, "
                 f"not {run_id}; the manifest is authoritative")
         if not root_ok:
-            if root_raw is None:
+            if not root_present:
                 anomalies.append(
                     "no qa_manifest.json at the top of the captures dir — "
+                    f"membership recovered from {RUNS_DIR_NAME}/")
+            elif root_raw is None:
+                anomalies.append(
+                    "the root qa_manifest.json is unreadable (damaged JSON) — "
                     f"membership recovered from {RUNS_DIR_NAME}/")
             elif _manifest_owner(root_raw) == pr_id:
                 anomalies.append(
