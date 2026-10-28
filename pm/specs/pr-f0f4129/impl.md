@@ -78,7 +78,11 @@ already drops it because the status is no longer `qa`.
   intended stage. Then the winner calls `claim_impl_launch` (already held
   from the record) and `launch_impl` (`pm pr start --fresh --background
   --transcript <tdir>/impl-<pr>.jsonl`), so implementation gets the rework
-  prompt block. The launch clears `awaiting` via `pr_start`.
+  prompt block. The launch clears `awaiting` via `pr_start`. A conflict
+  also retires the PR's review window (`_retire_review_window_for_return`),
+  mirroring sign-off's bounce, so no reviewer writer is left behind; a
+  refused/raced writer start normalizes the status back to `in_progress`
+  (`ensure_impl_status`).
 - **R3 — No downstream writer on conflict.** `pr_review` prints a one-line
   stdout status and exits with code **3** (no status write, no review
   window) on `conflict`/`wait`. `run_qa_sync` sets
@@ -102,11 +106,14 @@ already drops it because the status is no longer `qa`.
   window so a background test/edits started just before the idle turn can
   surface); no merge/rebase/cherry-pick/revert is in progress; the tracked
   worktree is clean (`--untracked-files=no`, so fixtures/drafts/untracked
-  files are untouched and do not block); and a fresh integration check is no
-  longer a conflict. Same `(head, base_sha)` as the return ⇒ wait; a moved
-  pair that still conflicts ⇒ one more return (bounded); `clean`/
-  `up_to_date` ⇒ resolve and complete. An idle notification alone never
-  qualifies.
+  files, and pm's own `project.yaml`/lock, are untouched and do not block);
+  and a fresh integration check is no longer a conflict. Same
+  `(head, base_sha)` as the return ⇒ wait; a moved pair that still conflicts
+  ⇒ one more return (bounded); `clean`/`up_to_date` ⇒ resolve and complete.
+  An idle notification alone never qualifies. The TUI runs the network check
+  in a worker thread (throttled to `BASE_CHECK_POLL_SECONDS`, keyed to the
+  return episode); the CLI passes the tracker's idle timestamp so the same
+  settle window applies.
 - **R7 — Idempotent / single owner.** The return is created at most once per
   open episode and never twice for the same unresolved `(head, base_sha)`
   pair (second gate ⇒ `wait`, no new return, no launch). `launch_claim`
