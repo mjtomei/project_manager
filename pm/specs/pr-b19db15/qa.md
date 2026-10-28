@@ -183,6 +183,10 @@ run.
   "playwright does not resolve beside driver.mjs" message (it does not run
   the driver into a second copy of the error), and a local `npm i playwright`
   install is left alone (no link created inside it);
+- a driver that exits 0 but records no video leaves no `recording.webm`, and
+  the finalize step then fails with "there is no webm to transcode — the
+  driver wrote no video" instead of blaming ffmpeg, and leaves no mp4 (a
+  stale one from an earlier run is removed);
 - with an app that does answer, the recipe proceeds and produces its captures.
 
 ## Edge cases

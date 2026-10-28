@@ -1188,6 +1188,42 @@ def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
         "the finalize step keeps the webm although the mp4 exists")
 
 
+def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path):
+    """A missing webm is not an ffmpeg problem, and must not send the worker there.
+
+    The driver block checks the driver's exit status (R18), but a driver that
+    exits 0 without recording still writes no webm — ``recordVideo`` dropped
+    while adapting it, or a ``video`` that came back null. The finalize step
+    then handed ffmpeg a nonexistent input and reported "transcode produced no
+    mp4 — ffmpeg failed on the driver's webm" (verified live), which points at
+    the encoder: the same misdiagnosis R12 fixed for a missing cast. The stale
+    mp4 must still go, so a failed run cannot present the previous run's video.
+    """
+    block = _web_ui_finalize_block()
+
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.mp4").write_bytes(b"an earlier run's video")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, "a transcode with no webm was reported as success"
+    assert "there is no webm to transcode" in r.stderr, r.stderr
+    assert "ffmpeg failed" not in r.stderr, (
+        "the no-webm failure blames the encoder: " + r.stderr)
+    assert not called.exists(), (
+        "the finalize step ran ffmpeg with no webm to read")
+    assert not (capdir / "recording.mp4").exists(), (
+        "the no-webm failure left the previous run's mp4 as this run's "
+        "recording")
+
+
 def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
     """`test -s` on the mp4 is not proof the transcode finished.
 

@@ -723,6 +723,22 @@ R18. **The web-UI driver is a job too: its exit status is the handle, and its
      recording. (A driver that exits through its own `.catch` leaves no webm
      at all — verified — which is why the stale-video case needs the kill.)
 
+R19. **A missing transcode input is not an ffmpeg problem.** One leftover of
+   the PR's own class found by review loop e7e1 i6, reproduced live in this
+   container with real ffmpeg 4.4.2. The finalize step checked ffmpeg's exit
+   status and the mp4 (R12), but never that there was a webm to transcode: a
+   driver that exits 0 without recording — `recordVideo` dropped while
+   adapting the skeleton, or a `video` that comes back null — leaves no
+   `recording.webm`, and the step then handed ffmpeg a nonexistent input and
+   reported "transcode produced no mp4 — ffmpeg failed on the driver's webm",
+   pointing the worker at the encoder. That is the same misdiagnosis R12 fixed
+   for a missing cast ("there is no cast to render", not "check 'agg' is
+   installed"), one artifact over. The step now checks `recording.webm` before
+   running ffmpeg and stops with "there is no webm to transcode — the driver
+   wrote no video; re-run step 2 and check the driver's recordVideo option".
+   The stale mp4 is still removed first, so a run that recorded nothing cannot
+   present the previous run's video as its own.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -735,7 +751,7 @@ R18. **The web-UI driver is a job too: its exit status is the handle, and its
 |---|---|
 | `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), a failed `new-session` is reported as a start failure (R15), the `agg` install is guarded on `command -v agg` so it cannot replace a working binary (R16), and the produced-files list names the flow's diagnostics (R17) |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15); the `agg` install is guarded on `command -v agg` (R16); the produced-files list names the flow's diagnostics (R17) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status (the webm glob is `*.webm`, so Playwright's auto-named video from a killed driver goes too — R18); finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver block clears this attempt's own outputs and checks `node driver.mjs`'s exit status, so a failed driver is named where it fails instead of being misdiagnosed as an ffmpeg error and a retry cannot be finalized from an earlier attempt's webm (R18); the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16); the busy-port refusal names the manual pid hunt instead of a teardown whose `server.pid` this step just cleared, and the Playwright resolution failure only offers the link when the package is there (R17) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status (the webm glob is `*.webm`, so Playwright's auto-named video from a killed driver goes too — R18); finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver block clears this attempt's own outputs and checks `node driver.mjs`'s exit status, so a failed driver is named where it fails instead of being misdiagnosed as an ffmpeg error and a retry cannot be finalized from an earlier attempt's webm (R18); the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16); the busy-port refusal names the manual pid hunt instead of a teardown whose `server.pid` this step just cleared, and the Playwright resolution failure only offers the link when the package is there (R17); the finalize step checks that there is a `recording.webm` to transcode before running ffmpeg, so a driver that wrote no video is named instead of surfacing as an encoder failure (R19) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -774,7 +790,9 @@ R18. **The web-UI driver is a job too: its exit status is the handle, and its
    guard) and the driver block is *executed* against a failing driver that
    exits after resolving Playwright, which must fail with "the driver failed"
    and leave none of the earlier attempt's webm/trace/`dom.html`/screenshot
-   behind).
+   behind; R19's missing input: the finalize block is *executed* with no
+   `recording.webm`, which must fail with "there is no webm to transcode"
+   (not an ffmpeg message), never run ffmpeg, and still drop the stale mp4).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -1004,3 +1022,16 @@ R18. **The web-UI driver is a job too: its exit status is the handle, and its
   place) and pass with it. File 108 pass; related suites
   (`test_qa_artifact_web_ui_recording.py`, `test_qa_instructions.py`,
   `test_qa_loop.py`, `test_markdown_render.py`) pass.
+- Review loop e7e1 i6 verified R19 live in this container with real ffmpeg
+  4.4.2, using the recipe's own fenced finalize block. With `CAPDIR` set and
+  no `recording.webm`, the pre-fix block exits 1 with "transcode produced no
+  mp4 — ffmpeg failed on the driver's webm" (real ffmpeg on stderr:
+  "…/recording.webm: No such file or directory") — an encoder diagnosis for a
+  driver that recorded nothing. Post-fix the same block exits 1 with "there is
+  no webm to transcode — the driver wrote no video; re-run step 2 and check the
+  driver's recordVideo option", never invokes ffmpeg, and still removes the
+  stale mp4 seeded in the capture directory. Tests: 1 new execution case
+  (stub ffmpeg that records that it was called), which fails against the
+  pre-fix recipe (checked by restoring `HEAD`'s `web-ui-recording.md` in
+  place) and passes with it. File 109 pass. No `pm_core/` change; the dropped
+  helper/prompt/verifier work stays dropped.

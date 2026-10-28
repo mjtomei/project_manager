@@ -320,6 +320,17 @@ fi
 # fails, so a failed transcode would otherwise keep the previous run's video
 # as this run's recording.
 rm -f "$CAPDIR/recording.mp4"
+# No webm means there is nothing to transcode, and that is *not* an ffmpeg
+# problem: the driver block checks the driver's exit status, but a driver that
+# exits 0 without recording (`recordVideo` dropped while adapting it, or a
+# `video` that came back null) writes no video at all, and the failure below
+# would otherwise blame the encoder — the same misdiagnosis as reporting a
+# missing cast as an `agg` problem in the recording recipes. Say which it is.
+[ -s "$CAPDIR/recording.webm" ] || {
+    echo "there is no webm to transcode — the driver wrote no video; re-run" \
+        "step 2 and check the driver's recordVideo option" >&2
+    exit 1
+}
 # Check ffmpeg's own exit status as well as the file. A failed or killed
 # transcode leaves a *partial* mp4 behind (verified: a killed ffmpeg leaves a
 # non-empty output), which the `test -s` below accepts — the same
