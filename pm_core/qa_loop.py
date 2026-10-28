@@ -385,7 +385,7 @@ def _fetch_upstream_commit(workdir: str | Path, url: str, branch: str,
     """
     if _has_commit(workdir, sha):
         return None
-    return _git_capture(workdir, "fetch", "--quiet", url,
+    return _git_capture(workdir, "fetch", "--quiet", "--no-tags", url,
                         f"refs/heads/{branch}")
 
 
@@ -544,6 +544,35 @@ def _count_commits(workdir: str, rev_range: str) -> int:
         return 0
 
 
+def _workdir_state_hold(workdir_path: str, branch: str,
+                        local: str) -> BranchSync | None:
+    """A hold when the PR workdir cannot be planned in as it stands.
+
+    The planner and every scenario clone read this workdir, so QA must not
+    plan in a tree that is not checked out on the PR branch or that has an
+    unfinished git operation in it.  Checked on every sync, not just when
+    the branch needs a fast-forward: an up-to-date branch with a stale
+    checkout or a half-done merge is exactly as unplannable.
+    """
+    where = f"PR workdir {workdir_path} has {branch} at {local[:12]}"
+    current = _git_capture(workdir_path, "symbolic-ref", "--quiet", "HEAD")
+    checked_out = current.stdout.strip()
+    if checked_out != f"refs/heads/{branch}":
+        return BranchSync("hold", local=local, detail=(
+            f"{where}, but the workdir has "
+            f"{checked_out or 'a detached HEAD'} checked out. "
+            f"Check out {branch} there, then restart QA."))
+    for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+                   "rebase-merge", "rebase-apply"):
+        p = _git_capture(workdir_path, "rev-parse", "--git-path", marker)
+        path = Path(workdir_path, p.stdout.strip())
+        if p.returncode == 0 and p.stdout.strip() and path.exists():
+            return BranchSync("hold", local=local, detail=(
+                f"{where}, but the workdir has an unfinished git operation "
+                f"({marker}). Finish or abort it, then restart QA."))
+    return None
+
+
 def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
     """Bring the PR workdir up to the upstream PR branch before QA planning.
 
@@ -572,11 +601,23 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
     real_url = resolve_real_origin(workdir_path)
     if not real_url:
         return BranchSync("unchanged", local=local)
+
+    # Before any network work: a workdir that is not on the PR branch, or
+    # is mid-merge, cannot be planned in even if the branch is current.
+    state_hold = _workdir_state_hold(workdir_path, branch, local)
+    if state_hold:
+        return state_hold
+
     try:
         upstream = _remote_branch_sha(workdir_path, real_url, branch)
     except PlannerHandoffError as exc:
         return hold(f"Could not refresh the upstream PR branch: {exc}. "
                     "Restart QA once the remote is reachable.", local=local)
+    # Report both heads on every sync: what the upstream has (e.g. a lost
+    # worker's push, pr-3201ea8) must never be hidden by a no-op sync.
+    _log.info("QA sync: %s in %s at %s; %s has %s", branch, workdir_path,
+              local[:12], real_url,
+              upstream[:12] if upstream else "no branch")
     if not upstream or upstream == local:
         return BranchSync("unchanged", local=local, upstream=upstream)
 
@@ -596,23 +637,6 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
 
     where = (f"PR workdir {workdir_path} has {branch} at {local[:12]}; "
              f"{real_url} has {upstream[:12]}")
-    current = _git_capture(workdir_path, "symbolic-ref", "--quiet", "HEAD")
-    if current.stdout.strip() != f"refs/heads/{branch}":
-        return hold(
-            f"{where}, but the workdir has "
-            f"{current.stdout.strip() or 'a detached HEAD'} checked out. "
-            f"Check out {branch} there, then restart QA.",
-            local=local, upstream=upstream)
-    for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
-                   "rebase-merge", "rebase-apply"):
-        p = _git_capture(workdir_path, "rev-parse", "--git-path", marker)
-        path = Path(workdir_path, p.stdout.strip())
-        if p.returncode == 0 and p.stdout.strip() and path.exists():
-            return hold(
-                f"{where}, but the workdir has an unfinished git operation "
-                f"({marker}). Finish or abort it, then restart QA.",
-                local=local, upstream=upstream)
-
     if not _is_ancestor(workdir_path, local, upstream):
         ahead = _count_commits(workdir_path, f"{upstream}..{local}")
         behind = _count_commits(workdir_path, f"{local}..{upstream}")
@@ -688,6 +712,9 @@ def _branch_sync_stops_qa(state: "QALoopState", sync: BranchSync,
     from pm_core import store
 
     def _set_sync_record(record: dict | None) -> None:
+        if not pm_root:
+            return
+
         def apply(data):
             pr = store.get_pr(data, state.pr_id)
             if pr is None:

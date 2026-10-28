@@ -796,6 +796,9 @@ class TestPlannerHeadPublication:
                 qa_loop._publish_planner_head(str(s["workdir"]), "pm/pr-001")
         msg = str(ei.value)
         assert s["c"][:8] in msg and "diverged" in msg
+        # Restarting QA is the remedy: the pre-planning sync routes the
+        # divergence to review instead of re-planning the stale tree.
+        assert "Restart QA: it returns the diverged branch to review" in msg
         # Never force-pushed over someone else's commit.
         assert _git(s["remote"], "rev-parse", "pm/pr-001") != s["c"]
 

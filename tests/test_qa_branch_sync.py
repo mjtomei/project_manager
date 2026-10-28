@@ -206,6 +206,46 @@ class TestSyncPrBranch:
         assert _head(s) == c
         assert (s["wd"] / ".git" / "MERGE_HEAD").exists()
 
+    def test_wrong_branch_checked_out_holds_when_up_to_date(self, repos):
+        """Nothing to fast-forward, but the planner would still read the
+        wrong tree: the checkout itself is a hold."""
+        s = repos
+        _git(s["wd"], "checkout", "--quiet", "master")
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "refs/heads/master" in sync.detail
+        assert _head(s) == s["L"]
+
+    def test_detached_head_holds_when_up_to_date(self, repos):
+        s = repos
+        _git(s["wd"], "checkout", "--quiet", "--detach")
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold" and "detached HEAD" in sync.detail
+
+    def test_unfinished_merge_holds_when_up_to_date(self, repos):
+        """A conflict left in the workdir while the branch is current: the
+        planner would read conflict markers, so hold."""
+        s = repos
+        _git(s["wd"], "checkout", "--quiet", "master")
+        _commit(s["wd"], "app.py", "master side\n", "master edit")
+        _git(s["wd"], "push", "origin", "master")
+        _git(s["wd"], "checkout", "--quiet", BRANCH)
+        _commit(s["wd"], "app.py", "pr side\n", "pr edit")
+        _git(s["wd"], "push", "origin", BRANCH)  # upstream == local
+        r = subprocess.run(["git", *GIT_ID, "merge", "master"], cwd=s["wd"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert (s["wd"] / ".git" / "MERGE_HEAD").exists()
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold" and "MERGE_HEAD" in sync.detail
+
+    def test_absent_upstream_branch_is_a_noop(self, repos):
+        """A branch that exists only locally: the handoff publishes it."""
+        s = repos
+        _git(s["wd"], "checkout", "-b", "pm/pr-002")
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), "pm/pr-002")
+        assert sync.outcome == "unchanged"
+
     def test_missing_local_branch_left_to_handoff_guard(self, repos):
         s = repos
         sync = qa_loop._sync_pr_branch(str(s["wd"]), "pm/no-such-branch")
