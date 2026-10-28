@@ -603,11 +603,14 @@ crashing `pm container status`.
   the retained container and its evidence are preserved. The at-least-one
   floor (one launch into a full runtime) applies only to a run that holds no
   container of its own, and an unreadable inventory still clamps to one
-  (qa.md resolution 19). During an inventory outage that floor is one per PM
-  process (qa.md resolution 35): whichever run makes it — from its queue or
-  as its run-start batch — claims it, and every other run in the process
-  waits for a readable inventory (a run starting in the same outage queues
-  all of its scenarios). A run whose start or resume was blind counts its
+  (qa.md resolution 19). That floor is one extra slot per PM process, with a
+  readable full inventory as well as during an outage (A10; qa.md resolutions
+  35 and 37): whichever run makes it — from its queue or as its run-start
+  batch — occupies the slot, and every other run in the process waits behind
+  it (a run starting while it is occupied queues all of its scenarios), even
+  when that container is retained for a human. The slot frees when a readable
+  inventory shows the count back within the limit or its container gone
+  (not running and not reserved). A run whose start or resume was blind counts its
   settled, release-deferred workers as held from its first poll, so a
   start-time floor worker that settles does not admit a second blind launch.
   Resume must not recreate already
@@ -749,6 +752,14 @@ container cleared it and kept its files.  Running state is not health.
   `PushProxyError` is a `ContainerError`, so launch/cleanup classification
   covers proxy failures. Session teardown releases only directories whose
   runtime inventory shows no users (no unconditional sweep).
+
+- A10 *One floor launch per PM process* — resolved by the user after review
+  2d18 i1 (note-c4d29b0): "Share one extra slot per TUI". With limit 8 and 8
+  running, two QA runs in one TUI must reach at most 9, not 10, with a
+  readable inventory as well as during an outage. A run holding nothing may
+  wait behind the occupied floor slot, including a container retained for a
+  human; A8 (retained containers count toward the limit) stays in force.
+  Separate PM processes remain uncoordinated (qa.md resolution 24).
 
 ## 4. Edge cases
 

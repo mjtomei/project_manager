@@ -260,15 +260,15 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
     # Spy on the re-clamp: the batch reaching the cap check must be recomputed
     # from the desired size, not left at the start-time clamped value.
-    real_room = qa_loop._container_launch_room_known
+    real_room = qa_loop._container_admission
     reclamps: list[tuple[int | None, int, int]] = []
 
-    def _spy(cap, desired=None, active=0, own=()):
-        result = real_room(cap, desired=desired, active=active, own=own)
+    def _spy(cap, desired=None, active=0, own=(), run=None):
+        result = real_room(cap, desired=desired, active=active, own=own, run=run)
         reclamps.append((desired, active, result[0]))
         return result
 
-    monkeypatch.setattr(qa_loop, "_container_launch_room_known", _spy)
+    monkeypatch.setattr(qa_loop, "_container_admission", _spy)
     # Settled s1's container is gone by then: only the active worker runs.
     monkeypatch.setattr(container_reaper, "list_containers", lambda: [
         container_reaper.ContainerInfo(name="pm-t-qa-pr-aaaa-L-s2", running=True)])
@@ -973,7 +973,8 @@ def test_two_runs_share_one_outage_floor_launch(tmp_path, monkeypatch,
     monkeypatch.setattr(qa_loop._log, "info",
                         lambda msg, *a, **k: logged.append(msg % a))
     if other_run_floor:
-        monkeypatch.setitem(qa_loop._outage_floor, "run", ("pr-bbbb", "L"))
+        monkeypatch.setattr(qa_loop, "_floor_slot",
+                            {"run": ("pr-bbbb", "L"), "name": "pm-t-qa-pr-bbbb-L-s1"})
     launched = []
 
     def launch(scenario):
@@ -991,7 +992,7 @@ def test_two_runs_share_one_outage_floor_launch(tmp_path, monkeypatch,
         ticks += 1
         outage["polls_left"] -= 1
         if ticks == 5:
-            seen["outage"] = (list(launched), dict(qa_loop._outage_floor))
+            seen["outage"] = (list(launched), qa_loop._floor_slot.get("run"))
         if ticks >= 10:
             state.stop_requested = True
 
@@ -1028,16 +1029,16 @@ def test_two_runs_share_one_outage_floor_launch(tmp_path, monkeypatch,
     during, floor = seen["outage"]
     if other_run_floor:
         assert during == [], "the other run's floor launch is this outage's only one"
-        assert floor == {"run": ("pr-bbbb", "L")}
+        assert floor == ("pr-bbbb", "L")
         waits = [m for m in logged
                  if "another QA run made this outage's floor launch" in m]
         assert len(waits) == 1, waits
     else:
         assert during == [1], "a run holding nothing still makes the floor launch"
-        assert floor == {"run": ("pr-aaaa", state.loop_id)}
+        assert floor == ("pr-aaaa", state.loop_id)
         # Its own floor worker keeps it waiting; that is not another run's floor.
         assert not [m for m in logged if "another QA run" in m], logged
-    assert qa_loop._outage_floor == {}, "a readable inventory frees the floor"
+    assert qa_loop._floor_slot == {}, "a readable inventory within the limit frees the floor"
     assert launched == [1, 2, 3], "the batch grows back after recovery"
 
 
@@ -1053,7 +1054,8 @@ def test_blind_run_start_is_the_outage_floor_launch(monkeypatch, other_run_floor
     monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
     monkeypatch.setattr(container_reaper, "list_containers", lambda: None)
     if other_run_floor:
-        monkeypatch.setitem(qa_loop._outage_floor, "run", ("pr-bbbb", "L"))
+        monkeypatch.setattr(qa_loop, "_floor_slot",
+                            {"run": ("pr-bbbb", "L"), "name": "pm-t-qa-pr-bbbb-L-s1"})
     state = qa_loop.QALoopState(pr_id="pr-aaaa")
     state.scenarios = [qa_loop.QAScenario(index=i, title=f"s{i}", focus="")
                        for i in (1, 2, 3)]
@@ -1063,10 +1065,13 @@ def test_blind_run_start_is_the_outage_floor_launch(monkeypatch, other_run_floor
     assert state._blind_start
     if other_run_floor:
         assert initial == 0
-        assert qa_loop._outage_floor == {"run": ("pr-bbbb", "L")}
+        assert qa_loop._floor_slot["run"] == ("pr-bbbb", "L")
     else:
         assert initial == 1
-        assert qa_loop._outage_floor == {"run": ("pr-aaaa", state.loop_id)}
+        assert qa_loop._floor_slot == {
+            "run": ("pr-aaaa", state.loop_id),
+            "name": container_mod.qa_container_name("pr-aaaa", state.loop_id, 1,
+                                                    session_tag=state.session_tag)}
 
     # A readable inventory at the next start frees the floor.
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 2)
@@ -1074,7 +1079,119 @@ def test_blind_run_start_is_the_outage_floor_launch(monkeypatch, other_run_floor
     with qa_loop._launch_admission_lock:
         assert qa_loop._initial_container_batch(fresh, 3) == (3, 3)
     assert not fresh._blind_start
-    assert qa_loop._outage_floor == {}
+    assert qa_loop._floor_slot == {}
+
+
+def test_two_runs_starting_at_a_full_runtime_share_one_floor_launch(monkeypatch):
+    """User decision note-c4d29b0 ("Share one extra slot per TUI"): with
+    container-max-running=8 and 8 running, two QA runs starting in one TUI
+    reached 10. The second run now queues everything behind the first run's
+    floor launch: the peak is 9."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 8)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 8)
+    monkeypatch.setattr(container_reaper, "list_containers",
+                        lambda: _running(*[f"pm-other-{i}" for i in range(8)]))
+    a = qa_loop.QALoopState(pr_id="pr-aaaa")
+    b = qa_loop.QALoopState(pr_id="pr-bbbb")
+    for st in (a, b):
+        st.scenarios = [qa_loop.QAScenario(index=i, title=f"s{i}", focus="")
+                        for i in (1, 2)]
+    a_name = container_mod.qa_container_name("pr-aaaa", a.loop_id, 1,
+                                             session_tag=a.session_tag)
+    with qa_loop._launch_admission_lock:
+        assert qa_loop._initial_container_batch(a, 4) == (1, 1)
+        token = qa_loop._reserve_launches([a_name])
+        assert qa_loop._initial_container_batch(b, 4) == (1, 0)
+    assert qa_loop._floor_slot == {"run": ("pr-aaaa", a.loop_id), "name": a_name}
+    assert not a._blind_start and not b._blind_start
+    qa_loop._release_launches(token)
+
+
+@pytest.mark.parametrize("floor_container", ["running", "retained", "gone", "within"])
+def test_queued_launch_waits_behind_another_runs_floor_slot(
+        tmp_path, monkeypatch, floor_container):
+    """A run holding nothing at a full readable runtime waits while another
+    run in the process occupies the floor slot, even when that container is
+    retained for a human. The slot frees once its container is gone or the
+    count is back within the limit; the waiting run then makes the floor
+    launch itself."""
+    from pm_core import container as container_mod
+    other = "pm-t-qa-pr-bbbb-L-s1"
+    monkeypatch.setattr(qa_loop, "_floor_slot",
+                        {"run": ("pr-bbbb", "L"), "name": other})
+    names = [f"pm-other-{i}" for i in range(8)]
+    if floor_container in ("running", "retained"):
+        names.append(other)  # 9 = L+1: the slot is in use
+    elif floor_container == "within":
+        names = names[:7] + [other]  # 8 = L: no launch is past the limit
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 8)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: len(names))
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: _running(*names))
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in (1, 2)
+    ]
+    logged = []
+    monkeypatch.setattr(qa_loop._log, "info",
+                        lambda msg, *a, **k: logged.append(msg % a))
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        names.append(container_mod.qa_container_name(
+            "pr-aaaa", state.loop_id, scenario.index, session_tag=state.session_tag))
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 6:
+            state.stop_requested = True
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, **k: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios,
+        concurrency_cap=1, desired_cap=2, use_containers=True)
+
+    waits = [m for m in logged if "another QA run holds" in m]
+    if floor_container in ("running", "retained"):
+        assert launched == [], "the process's one extra slot is in use"
+        assert len(waits) == 1, waits
+        assert qa_loop._floor_slot["run"] == ("pr-bbbb", "L")
+    elif floor_container == "gone":
+        # Still full (8 others), but the slot's container is gone: this run
+        # makes the floor launch and occupies the slot itself.
+        assert launched == [1]
+        assert qa_loop._floor_slot == {
+            "run": ("pr-aaaa", state.loop_id),
+            "name": container_mod.qa_container_name(
+                "pr-aaaa", state.loop_id, 1, session_tag=state.session_tag)}
+    else:
+        assert launched == [1]
+        assert not waits
 
 
 def test_run_started_in_an_outage_does_not_add_a_second_blind_launch(

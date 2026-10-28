@@ -46,10 +46,10 @@ def _isolated_container_state(tmp_path_factory, monkeypatch):
     # pre-launch reap inside unit tests.
     monkeypatch.setattr(container, "_KEY_USERS_FILE",
                         "/nonexistent/pm-test-key-users")
-    # A floor launch left claimed by an earlier test's unreadable inventory
-    # must not hold this test's queue.
+    # A floor launch left claimed by an earlier test must not hold this
+    # test's queue.
     from pm_core import qa_loop
-    monkeypatch.setattr(qa_loop, "_outage_floor", {})
+    monkeypatch.setattr(qa_loop, "_floor_slot", {})
 
 
 @pytest.fixture

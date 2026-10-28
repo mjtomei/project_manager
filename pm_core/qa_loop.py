@@ -26,7 +26,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Collection
+from typing import Callable, Collection, NamedTuple
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
@@ -3204,7 +3204,7 @@ def _poll_tmux_verdicts(
         # Size and reserve the launch atomically with the other runs in this
         # process (see _launch_admission_lock).
         launch_reservation = None
-        floor_taken = False
+        floor_needed = floor_taken = False
         with _launch_admission_lock:
             if use_containers:
                 # Re-clamp the *total* batch from the run's desired size with a
@@ -3223,15 +3223,15 @@ def _poll_tmux_verdicts(
                        if s.index in state.scenario_verdicts
                        and s.index not in pending and s.index not in verifying
                        for ident in (s.container_id, s.container_name) if ident}
-                concurrency_cap, held, known = _container_launch_room_known(
-                    concurrency_cap, desired_cap, active=active, own=own)
+                room = _container_admission(concurrency_cap, desired_cap,
+                                            active=active, own=own, run=run_key)
+                concurrency_cap, held, known = room.batch, room.held, room.known
                 if known:
                     _blind_launches[0] = 0
-                    _outage_floor.clear()
-                else:
-                    # Another run in this process already made this outage's
-                    # floor launch: this run waits as if it had made it.
-                    floor_taken = _outage_floor.get("run", run_key) != run_key
+                # This launch would need the floor, and another run in this
+                # process occupies it: wait behind that run's floor launch.
+                floor_needed = room.floor
+                floor_taken = room.floor and room.floor_taken
                 if not known and (_blind_launches[0] or floor_taken):
                     # Releases need the same inventory, so while it is unreadable
                     # every settled worker's release is deferred and its container
@@ -3265,18 +3265,25 @@ def _poll_tmux_verdicts(
                               "headroom; %d of this run's container(s) are retained "
                               "(container-max-running)", state.pr_id,
                               len(_launch_queue), held)
+                elif floor_taken and not held and _held_logged[0] != -1:
+                    _log.info("QA %s: %d queued scenario(s) wait for container "
+                              "headroom; another QA run holds this process's one "
+                              "launch past the limit (container-max-running)",
+                              state.pr_id, len(_launch_queue))
                 _held_logged[0] = held if held or not floor_taken else -1
                 return False
             scenario = _launch_queue.pop(0)
             _queued_indices.discard(scenario.index)
             if not known:
                 _blind_launches[0] += 1
-                _outage_floor.setdefault("run", run_key)
             if use_containers:
                 from pm_core import container as container_mod
-                launch_reservation = _reserve_launches([container_mod.qa_container_name(
+                cname = container_mod.qa_container_name(
                     state.pr_id, state.loop_id, scenario.index,
-                    session_tag=state.session_tag)])
+                    session_tag=state.session_tag)
+                if floor_needed:
+                    _claim_floor_slot(run_key, cname)
+                launch_reservation = _reserve_launches([cname])
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
         # Launch this single scenario by temporarily swapping state.scenarios
@@ -4877,14 +4884,17 @@ def run_qa_sync(
 # coordinated (qa.md resolution 24).
 _launch_admission_lock = threading.RLock()
 _inflight_launches: dict[object, frozenset[str]] = {}
-# The outage floor is shared the same way. While the inventory is unreadable a
-# run may make one floor launch into a full runtime (qa.md resolution 19), but
-# releases are deferred too, so every run's settled workers keep running. Two
-# runs in one TUI each making their own floor launch reached L+2 (S93); one
-# floor per process keeps the combined peak at L+1 (resolution 35). Holds the
-# run key of the run that made this outage's floor launch; cleared by the
-# first readable inventory any run sees.
-_outage_floor: dict[str, tuple[str, str]] = {}
+# The floor launch is shared the same way: one extra slot per PM process
+# (qa.md resolution 35; user decision note-c4d29b0, "Share one extra slot per
+# TUI"). A run holding nothing may make one launch past a full runtime
+# (resolution 21), or one launch while the inventory is unreadable (resolution
+# 19), but two runs in one TUI each doing so reached L+2 (S93; and at a full
+# readable runtime, two runs starting together). Holds ``run`` (the run key)
+# and ``name`` (the container) of the launch occupying the slot; other runs
+# wait behind it, even when that container is retained for a human. Freed by
+# a readable inventory that shows the count back within the limit or that
+# container gone (see _floor_slot_taken).
+_floor_slot: dict[str, object] = {}
 
 
 def _reserve_launches(names) -> object:
@@ -4929,15 +4939,10 @@ def _clamp_to_container_headroom(cap: int) -> int:
     0 means unlimited for both.  At least one scenario always launches; the
     rest wait in the existing queue and start as running scenarios finish.
     """
-    return _clamp_to_container_headroom_known(cap)[0]
-
-
-def _clamp_to_container_headroom_known(cap: int) -> tuple[int, bool]:
-    """:func:`_clamp_to_container_headroom` plus whether the inventory was readable."""
     from pm_core import container as container_mod
     limit = container_mod.max_running_containers()
     if limit <= 0:
-        return cap, True
+        return cap
     # Another run's dequeued launch is capacity in use before its container
     # exists (see _launch_admission_lock).  Read the reservations' inventory
     # BEFORE the running count: a reserved container that turns running
@@ -4953,36 +4958,47 @@ def _clamp_to_container_headroom_known(cap: int) -> tuple[int, bool]:
         # re-clamp on the next poll with a fresh count.
         _log.warning("container-max-running=%d: running-container count "
                      "unavailable; launching one scenario at a time", limit)
-        return 1, False
+        return 1
     headroom = max(1, limit - running)
     if cap <= 0 or headroom < cap:
         _log.info("QA launch batch clamped to %d (container-max-running=%d, "
                   "%d running)", headroom, limit, running)
-        return headroom, True
-    return cap, True
+        return headroom
+    return cap
 
 
 def _initial_container_batch(state: QALoopState, desired_cap: int) -> tuple[int, int]:
     """Return ``(concurrency_cap, initial_launches)`` for a container run's start.
 
-    The caller holds :data:`_launch_admission_lock`.  A start whose inventory
-    is unreadable clamps to one launch: that launch *is* this outage's floor
-    launch, so it is shared with the other runs in this process exactly like
-    a floor launch from the queue (:data:`_outage_floor`).  When another run
-    already made it, this run starts with everything queued and waits for a
-    readable inventory.  Either way the run's poll must count its settled,
+    The caller holds :data:`_launch_admission_lock`.  A start into a full
+    runtime, or with an unreadable inventory, clamps to one launch: that launch
+    is the floor launch, shared with the other runs in this process exactly
+    like a floor launch from the queue (:data:`_floor_slot`).  When another
+    run occupies the slot, this run starts with everything queued; its poll
+    logs the wait.  A blind start also makes the poll count its settled,
     release-deferred workers as held (``state._blind_start``), or the first
     one to settle would admit a second blind launch (L+2).
     """
-    cap, known = _clamp_to_container_headroom_known(desired_cap)
-    if known:
-        _outage_floor.clear()
-        return cap, cap
-    state._blind_start = True
+    from pm_core import container as container_mod
     run_key = (state.pr_id, state.loop_id)
-    if _outage_floor.setdefault("run", run_key) != run_key:
-        # The poll's first fill pass logs the wait.
+    room = _container_admission(desired_cap, desired_cap, run=run_key)
+    cap = room.batch
+    limit = container_mod.max_running_containers()
+    if not room.known:
+        _log.warning("container-max-running=%d: running-container count "
+                     "unavailable; launching one scenario at a time", limit)
+        state._blind_start = True
+    elif limit > 0 and (desired_cap <= 0 or cap < desired_cap):
+        _log.info("QA launch batch clamped to %d (container-max-running=%d)",
+                  cap, limit)
+    if not room.floor:
+        return cap, cap
+    if room.floor_taken:
         return cap, 0
+    if state.scenarios:
+        _claim_floor_slot(run_key, container_mod.qa_container_name(
+            state.pr_id, state.loop_id, state.scenarios[0].index,
+            session_tag=state.session_tag))
     return cap, cap
 
 
@@ -5016,7 +5032,26 @@ def _container_launch_room(cap: int, desired: int | None = None, active: int = 0
 def _container_launch_room_known(cap: int, desired: int | None = None,
                                  active: int = 0, own: Collection[str] = (),
                                  ) -> tuple[int, int, bool]:
-    """Return ``(batch, held, known)`` for the next queued launch (one inventory).
+    """Return ``(batch, held, known)``; see :func:`_container_admission`."""
+    room = _container_admission(cap, desired, active=active, own=own)
+    return room.batch, room.held, room.known
+
+
+class _Admission(NamedTuple):
+    batch: int
+    held: int
+    # False when the running-container inventory was unreadable.
+    known: bool
+    # The next launch would need the floor: no headroom, or an unknown inventory.
+    floor: bool
+    # Another run in this process holds the floor slot (only computed with ``run``).
+    floor_taken: bool
+
+
+def _container_admission(cap: int, desired: int | None = None, active: int = 0,
+                         own: Collection[str] = (), run: tuple | None = None,
+                         ) -> _Admission:
+    """Size the next launch from one inventory.
 
     ``known`` is False when the running-container inventory was unreadable.
 
@@ -5030,16 +5065,24 @@ def _container_launch_room_known(cap: int, desired: int | None = None,
     run that holds no container.  ``batch`` is ``active + held + headroom``
     capped by ``desired + held``; an unknown inventory is ``(1, 0)``, which
     launches one at a time (the outage case) and re-clamps on the next poll.
+
+    The floor is one extra slot per process (:data:`_floor_slot`).  With
+    ``run`` (the caller's run key; the caller holds
+    :data:`_launch_admission_lock`), ``floor_taken`` reports whether another
+    run occupies it, after freeing a slot the inventory shows is no longer in
+    use.  A caller whose launch needs the floor must not launch while it is
+    taken, and claims it (:func:`_claim_floor_slot`) when it does launch.
     """
     from pm_core import container as container_mod
     limit = container_mod.max_running_containers()
     if limit <= 0:
         # No inventory: fall back to the run's desired batch (or the legacy
         # already-clamped value when the caller predates ``desired``).
-        return (cap if desired is None else (desired if desired > 0 else 0)), 0, True
+        batch = cap if desired is None else (desired if desired > 0 else 0)
+        return _Admission(batch, 0, True, False, False)
     if desired is None:
         # Legacy callers keep the old clamp semantics.
-        return _clamp_to_container_headroom(cap), 0, True
+        return _Admission(_clamp_to_container_headroom(cap), 0, True, False, False)
     held = 0
     inventory = None
     if own:
@@ -5064,13 +5107,52 @@ def _container_launch_room_known(cap: int, desired: int | None = None,
     if running_count is None:
         # An unreadable inventory is unknown, not zero running containers:
         # launch one at a time and re-clamp on the next poll.
-        return 1, 0, False
+        taken = run is not None and _floor_slot_taken(run, None, limit, None)
+        return _Admission(1, 0, False, True, taken)
     # Keep the batch at least one: zero would encode "unlimited" and launch
     # past a momentarily full runtime instead of waiting for a slot.
-    total = max(1, active + held + max(0, limit - running_count))
+    headroom = limit - running_count
+    total = max(1, active + held + max(0, headroom))
     if desired > 0:
         total = min(total, desired + held)
-    return total, held, True
+    taken = (run is not None
+             and _floor_slot_taken(run, running_count, limit, inventory))
+    return _Admission(total, held, True, headroom <= 0, taken)
+
+
+def _floor_slot_taken(run: tuple, running_count: int | None, limit: int,
+                      inventory) -> bool:
+    """Whether another run in this process occupies the floor slot.
+
+    The caller holds :data:`_launch_admission_lock`.  ``running_count`` is the
+    readable count including reservations (None while the inventory is
+    unreadable: nothing can be freed then).  A readable count within the limit
+    means no launch is past it any more; otherwise the slot stays occupied
+    while its container is running or still reserved.
+    """
+    if not _floor_slot:
+        return False
+    if running_count is not None:
+        free = running_count <= limit
+        if not free:
+            if inventory is None:
+                from pm_core.container_reaper import list_containers
+                inventory = list_containers()
+            if inventory is not None:
+                with _launch_admission_lock:
+                    reserved = set().union(*_inflight_launches.values())
+                name = _floor_slot.get("name")
+                free = not (name in reserved or any(
+                    info.running and info.name == name for info in inventory))
+        if free:
+            _floor_slot.clear()
+            return False
+    return _floor_slot.get("run") != run
+
+
+def _claim_floor_slot(run: tuple, name: str) -> None:
+    """Record that *run* made this process's floor launch of container *name*."""
+    _floor_slot.update(run=run, name=name)
 
 
 def _execute_and_finalize(
