@@ -192,7 +192,7 @@ class TestLaunchClaudeInTmux:
         launch_claude_in_tmux("%1", "hello", cwd="/tmp/proj")
         # cwd is now forwarded to build_claude_shell_cmd rather than prepended
         mock_build.assert_called_once_with(prompt="hello", cwd="/tmp/proj",
-                                           session_type=None)
+                                           session_type=None, env_out={})
         mock_sk.assert_called_once_with("%1", "claude 'hello'")
 
 
@@ -231,6 +231,31 @@ class TestLaunchClaude:
         import pytest
         with pytest.raises(FileNotFoundError, match="claude CLI not found"):
             launch_claude("hello", "key", tmp_path)
+
+    @patch("pm_core.claude_launcher.log_shell_command")
+    @patch("pm_core.claude_launcher.subprocess.run")
+    @patch("pm_core.claude_launcher._skip_permissions", return_value=False)
+    @patch("pm_core.claude_launcher.find_claude", return_value="/usr/bin/claude")
+    def test_debug_env_dump_names_only(self, mock_fc, mock_sp, mock_run,
+                                       mock_log, tmp_path):
+        """The debug env dump must name the provider vars, never print values.
+
+        This is a debug log in ~/.pm/debug; an api_key value there is the
+        same class of leak the launch-command fix removed.
+        """
+        mock_run.return_value = MagicMock(returncode=0)
+        run_env = {**os.environ, "ANTHROPIC_API_KEY": CANARY}
+        with patch(
+            "pm_core.claude_launcher._resolve_provider",
+            return_value=({"ANTHROPIC_API_KEY": CANARY}, None, run_env),
+        ), patch("pm_core.claude_launcher._log.debug") as debug:
+            launch_claude("hello", "key1", tmp_path)
+        dumped = " ".join(str(a) for call in debug.call_args_list
+                          for a in call.args)
+        assert "ANTHROPIC_API_KEY" in dumped
+        assert CANARY not in dumped
+        # The command handed to log_shell_command is clean too.
+        assert CANARY not in " ".join(str(c) for c in mock_log.call_args_list)
 
     @patch("pm_core.claude_launcher.log_shell_command")
     @patch("pm_core.claude_launcher.subprocess.run")
@@ -371,6 +396,32 @@ class TestLaunchBridgeInTmux:
         cmd = mock_split.call_args[0][2]
         assert "--prompt" not in cmd
 
+    @patch("pm_core.tmux.split_pane_background")
+    def test_oversized_prompt_is_passed_by_file(self, mock_split, tmp_path):
+        """An over-limit prompt cannot be a shell argument (E2BIG), so the
+        complete text goes to a file the bridge reads with --prompt-file."""
+        import shlex
+        from pm_core.prompt_bounds import PROMPT_ARG_LIMIT, prompt_bytes
+
+        huge = "x" * (PROMPT_ARG_LIMIT + 1)
+        launch_bridge_in_tmux(huge, str(tmp_path), "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt-file" in cmd
+        assert "--prompt " not in cmd
+        assert huge not in cmd
+        # The command itself stays small enough to exec.
+        assert prompt_bytes(cmd) < PROMPT_ARG_LIMIT
+        argv = shlex.split(cmd)
+        prompt_file = argv[argv.index("--prompt-file") + 1]
+        assert Path(prompt_file).read_text() == huge
+
+    @patch("pm_core.tmux.split_pane_background")
+    def test_small_prompt_is_still_a_shell_argument(self, mock_split, tmp_path):
+        launch_bridge_in_tmux("small prompt", str(tmp_path), "sess")
+        cmd = mock_split.call_args[0][2]
+        assert "--prompt-file" not in cmd
+        assert "small prompt" in cmd
+
 
 # ---------------------------------------------------------------------------
 # launch_claude_print_background — additional coverage
@@ -417,3 +468,66 @@ class TestLaunchClaudePrintBackgroundExtra:
         assert results["rc"] == 1
         # log_shell_command called twice (once for cmd, once for failure)
         assert mock_log.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# provider env transport (pr-84ebabf)
+# ---------------------------------------------------------------------------
+
+CANARY = "canary-84ebabf-do-not-use"
+
+
+class TestLaunchClaudeInTmuxProviderEnv:
+    @patch("pm_core.claude_launcher.write_env_file",
+           return_value=("set -a; . /tmp/canary.env; set +a; "
+                         "rm -f /tmp/canary.env; ", "/tmp/canary.env"))
+    @patch("pm_core.tmux.send_keys")
+    def test_sources_private_env_file_instead_of_inlining(
+            self, mock_sk, mock_envfile):
+        """send_keys has no pane-env channel: hand values over in a file."""
+        def fake_build(**kwargs):
+            kwargs["env_out"]["ANTHROPIC_API_KEY"] = CANARY
+            return "claude 'hello'"
+
+        with patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   side_effect=fake_build):
+            launch_claude_in_tmux("%1", "hello")
+
+        sent = mock_sk.call_args[0][1]
+        assert CANARY not in sent
+        # sh -c so the POSIX source prefix also works under fish.
+        assert sent.startswith("sh -c ")
+        assert "set -a; . /tmp/canary.env" in sent
+        assert "claude" in sent and "hello" in sent
+
+    @patch("pm_core.tmux.send_keys")
+    def test_no_provider_env_sends_command_unchanged(self, mock_sk):
+        def fake_build(**kwargs):
+            return "claude 'hello'"
+
+        with patch("pm_core.claude_launcher.build_claude_shell_cmd",
+                   side_effect=fake_build):
+            launch_claude_in_tmux("%1", "hello")
+
+        mock_sk.assert_called_once_with("%1", "claude 'hello'")
+
+
+class TestWriteEnvFile:
+    def test_private_and_shell_quoted(self, tmp_path, monkeypatch):
+        import os
+        import stat
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        from pm_core.paths import write_env_file
+        prefix, path = write_env_file(
+            {"ANTHROPIC_API_KEY": "value with spaces 'and quotes'"})
+        try:
+            assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+            text = Path(path).read_text()
+            assert "ANTHROPIC_API_KEY=" in text
+            # The value is shell-quoted, so sourcing it round-trips.
+            assert "value with spaces" in text
+            assert path in prefix
+            assert "rm -f" in prefix
+        finally:
+            os.unlink(path)
