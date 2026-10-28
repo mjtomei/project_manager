@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T06:27:12.686028+00:00'
+  updated_at: '2026-10-28T06:49:24.112565+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36972,6 +36972,24 @@ prs:
       /pm-captures/scenarios/23/{run,cli-evidence,evidence}.'
     created_at: '2026-10-28T06:27:12Z'
     last_edited: '2026-10-28T06:27:12Z'
+  - id: note-f6569ff
+    text: 'Sign-off (HEAD 33c19886, base master@89e3c501) -> SIGNOFF_IMPL for integration
+      only: the behaviour is complete, reviewed and live-QA PASS. Merge master and
+      resolve the conflicts in pm/project.yaml (mechanical registry/notes 3-way) and
+      pm_core/review_loop.py. Semantic item: master (pr-8efa789) switched _adopt_in_flight_review
+      to verdict_transcript.find_verdict_turn (returns hit.text or hit.verdict) so
+      a later /loop wakeup turn cannot hide the verdict; this PR moved that logic
+      into _verdict_output_if_present (used by _landed_verdict and retry discovery),
+      which still uses extract_verdict_from_transcript + read_latest_assistant_text.
+      Switch _verdict_output_if_present to find_verdict_turn, or master fix is silently
+      dropped on every adopt/retry path. Also: master (pr-25f4038) removed app._stop_before_merge
+      / POLICY_STOP; drop the two stale app._stop_before_merge = set() lines in this
+      PR tests, and re-check consume_breadcrumb keeps both master targets_from_breadcrumb(data,
+      prs) change and this PR resume-before-scheduler ordering. Then run tests/test_review_launch_retry.py,
+      test_breadcrumb_review_loop.py, test_review_loop.py, test_verdict_transcript.py.
+      Report: /pm-captures/report.html'
+    created_at: '2026-10-28T06:49:24Z'
+    last_edited: '2026-10-28T06:49:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
