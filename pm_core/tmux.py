@@ -169,6 +169,36 @@ def session_exists(name: str, socket_path: str | None = None,
     return result.returncode == 0
 
 
+def find_session_server(session_name: str) -> tuple[str | None, bool]:
+    """Return ``(socket_path, is_private)`` for the server hosting a session.
+
+    Single source of truth for "which tmux server is this pm session on":
+    the per-session socket is checked first, then the user's default server
+    (legacy pre-isolation sessions).  The private check runs first so a
+    live private session is never shadowed by a same-named legacy one.
+
+    The default server's socket is returned explicitly rather than as
+    ``None``: with no ``-S`` the tmux binary follows ``$TMUX``, which from
+    inside a pm pane names that session's private server.
+
+    Returns ``(None, False)`` when the session is running on neither
+    server.  ``session_name`` may carry a grouped-session ``~N`` suffix.
+    """
+    from pm_core.paths import default_socket_path, session_socket_path
+
+    # Same rule as pane_registry.base_session_name; kept inline because
+    # tmux.py is the lower-level module and should not depend on the
+    # registry.
+    base = session_name.split("~", 1)[0]
+    if base.startswith("pm-"):
+        sock = str(session_socket_path(base.removeprefix("pm-")))
+        if session_exists(base, socket_path=sock):
+            return sock, True
+    if session_exists(base, use_env=False):
+        return str(default_socket_path()), False
+    return None, False
+
+
 def grant_server_access(users: list[str], socket_path: str | None = None) -> None:
     """Grant tmux server-access to a list of users.
 

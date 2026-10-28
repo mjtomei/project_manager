@@ -376,3 +376,32 @@ gaps surfaced:
 4. The private-socket ownership refusal now names the remedy (the socket's
    owner must remove a stale file; a 1777 directory's sticky bit prevents
    anyone else from doing it).
+
+## Review iteration (2026-10-28, review-loop b972 i3)
+
+Three quality/robustness items, no requirement changes:
+
+1. **One source of truth for "which server hosts this session".** The
+   private-socket-then-default-server lookup was implemented four times
+   (`session._pick_existing_session`, `session_kill`,
+   `pm session --print-connect`, `helpers._select_session_socket`) and had
+   already diverged once across i1/i2.  New
+   `tmux.find_session_server(name) -> (socket_path, is_private)` (R4.3
+   semantics: the private socket is probed first, the default server is
+   returned by its *explicit* path, `(None, False)` when neither has the
+   session) is now the only implementation; all four call sites use it.
+   `_resolve_session_socket()`'s legacy detection uses it too, so "no
+   private session but one on the default server" is expressed once.
+2. **`_find_tui_pane()` no longer leaks env mutations on failure.**  The
+   cross-server scan re-points `PM_TMUX_SOCKET` at each server in turn; when
+   nothing is found it now restores the ambient value, so a failed lookup
+   cannot leave the process addressing an unrelated server.
+3. **Integration fixtures respect the AF_UNIX path limit.**  The two
+   disposable-server tests now take a `short_sock_dir` fixture that falls back to
+   a short `/tmp` directory when the pytest `tmp_path` would exceed the
+   ~108-byte socket-path limit (the contract R6.4 already documented).
+
+New tests: `find_session_server` (private wins / explicit default / missing
+/ non-pm names never map to a pm socket), `pm session kill` targeting the
+private socket, the legacy default socket, and the not-found stale-socket
+cleanup, plus the `_find_tui_pane` env-restoration case.

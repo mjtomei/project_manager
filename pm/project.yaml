@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-28T22:24:04.826085+00:00'
+  updated_at: '2026-10-28T22:56:39.224457+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4448,6 +4448,29 @@ prs:
       and qa_status._tmux_argv by design (no early pm_core import).'
     created_at: '2026-10-28T22:24:04Z'
     last_edited: '2026-10-28T22:24:04Z'
+  - id: note-9d44134
+    text: 'Review loop b972 i3 (consolidation + robustness; full suite 4131 passed
+      / 1 skipped). (1) The private-socket-then-default-server lookup existed in four
+      places (_pick_existing_session, pm session kill, pm session --print-connect,
+      helpers._select_session_socket) and had already diverged across i1/i2; it is
+      now one function, tmux.find_session_server(name) -> (socket, is_private), used
+      by all four plus _resolve_session_socket legacy detection. The private socket
+      is probed first and the default server is returned by its explicit path, so
+      the R4.3 lesson lives in one place. (2) _find_tui_pane restores PM_TMUX_SOCKET
+      when its cross-server scan finds nothing, so a failed lookup no longer leaves
+      the process addressing an unrelated server. (3) The disposable-server integration
+      fixtures use a short_sock_dir fixture that falls back to a short /tmp dir when
+      pytest tmp_path would exceed the ~108-byte AF_UNIX limit (R6.4). New tests:
+      find_session_server (private wins / explicit default / missing / non-pm names),
+      pm session kill on the private and legacy default servers plus stale-socket
+      cleanup, _find_tui_pane env restoration. Verified end-to-end with pm/specs/pr-073910f/session_start_smoke.py
+      on a disposable socket (private server, session env, global env, hooks all correct;
+      default server untouched). Unchanged non-blocking notes: uid check only on pm
+      session start (other paths fail closed via 0600 socket + server-access ACL);
+      /tmp/pm-sessions literal stays duplicated in wrapper._mark_tmux_socket and qa_status._tmux_argv
+      by design. (2026-10-28T23:00:00Z)'
+    created_at: '2026-10-28T22:56:39Z'
+    last_edited: '2026-10-28T22:56:39Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -6001,11 +6024,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-08T22:07:07.976580+00:00'
-  updated_at: '2026-03-08T22:07:07.976580+00:00'
+  updated_at: '2026-10-28T22:56:54.277135+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-2e1dae3
+    text: 'Heads-up from pr-073910f (per-session tmux server isolation): every pm
+      session now runs on its own tmux server, and the socket is derived from the
+      session *name* (paths.session_socket_path(session_name.removeprefix("pm-"))),
+      so distinct session names automatically get distinct servers — the planned pm-<project>-plan-<plan>
+      naming works with no extra plumbing. Two things to reuse rather than re-derive:
+      tmux_mod.find_session_server(name) -> (socket_path, is_private) finds the hosting
+      server (private socket first, legacy default server second, default addressed
+      by its explicit path), and helpers._select_session_socket(name) points PM_TMUX_SOCKET
+      at it. Anything that derives a socket from the cwd tag instead of the final
+      session name will target the wrong server for a per-plan session. (2026-10-28)'
+    created_at: '2026-10-28T22:56:54Z'
+    last_edited: '2026-10-28T22:56:54Z'
 - id: pr-0b2a0f5
   plan: tui-ux
   title: Add top-level orchestrator session with plan session overview and Claude
@@ -6066,11 +6102,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-08T22:13:54.374747+00:00'
-  updated_at: '2026-03-08T22:13:54.374747+00:00'
+  updated_at: '2026-10-28T22:56:48.583422+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9d73b50
+    text: 'Heads-up from pr-073910f (per-session tmux server isolation): every pm
+      session now runs on its own tmux server at /tmp/pm-sessions/pm-<session-tag>,
+      and a tmux client can be attached to only one server at a time. The planned
+      "Enter on a plan switches into that plan TUI session (tmux switch-client ...)"
+      will not work across servers — switch-client only moves a client between sessions
+      on the same server. Use detach + attach to the target socket instead: resolve
+      it with tmux_mod.find_session_server(name) (returns (socket_path, is_private))
+      and print/run `tmux -S <socket> attach` (pm session --print-connect already
+      does this). Also note hooks/bindings are per server, so anything the orchestrator
+      sets with set-hook -g will not be visible to plan sessions. (2026-10-28)'
+    created_at: '2026-10-28T22:56:48Z'
+    last_edited: '2026-10-28T22:56:48Z'
 - id: pr-5e116f0
   plan: tui-ux
   title: Add list view mode for the main TUI tech tree pane

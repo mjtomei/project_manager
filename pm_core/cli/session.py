@@ -254,17 +254,13 @@ def _pick_existing_session(candidates: list[str]) -> str:
     """Return the first candidate session that is actually running.
 
     Used where the cwd-derived name may differ from the session that
-    hosts it (workdir clones hash to their own tag).  Checks each
-    candidate's private socket, then the legacy default server, so a
-    different project's ambient session is never preferred over the
-    cwd's own live session.
+    hosts it (workdir clones hash to their own tag).  Each candidate is
+    looked up on its private socket and then the legacy default server
+    (``tmux_mod.find_session_server``), so a different project's ambient
+    session is never preferred over the cwd's own live session.
     """
-    from pm_core.paths import session_socket_path
-
     for name in candidates:
-        sock = str(session_socket_path(name.removeprefix("pm-")))
-        if (tmux_mod.session_exists(name, socket_path=sock)
-                or tmux_mod.session_exists(name, use_env=False)):
+        if tmux_mod.find_session_server(name)[0]:
             return name
     return candidates[0]
 
@@ -308,19 +304,17 @@ def _resolve_session_socket(session_name: str,
             raise SystemExit(1)
     os.environ["PM_TMUX_SOCKET"] = socket_path
 
-    if (not is_shared
-            and not tmux_mod.session_exists(session_name,
-                                            socket_path=socket_path)
-            and tmux_mod.session_exists(session_name, use_env=False)):
-        _log.info("legacy default-server session found: %s", session_name)
-        # Address the default server explicitly rather than clearing the
-        # override: with no -S the tmux binary follows $TMUX, which from
-        # inside another pm pane names that session's private server.  The
-        # legacy session would then look missing, and the create path would
-        # duplicate it on the wrong server.
-        from pm_core.paths import default_socket_path
-        os.environ["PM_TMUX_SOCKET"] = str(default_socket_path())
-        return None, True
+    if not is_shared:
+        hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+        if hosting_socket is not None and not on_private:
+            _log.info("legacy default-server session found: %s", session_name)
+            # Address the default server explicitly rather than clearing the
+            # override: with no -S the tmux binary follows $TMUX, which from
+            # inside another pm pane names that session's private server.
+            # The legacy session would then look missing, and the create
+            # path would duplicate it on the wrong server.
+            os.environ["PM_TMUX_SOCKET"] = hosting_socket
+            return None, True
     return socket_path, False
 
 
@@ -678,8 +672,9 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
             # command names the session that would actually be attached.
             session_name = _resolve_start_session_name()
         sp = str(session_socket_path(session_name.removeprefix("pm-")))
-        if (not tmux_mod.session_exists(session_name, socket_path=sp)
-                and tmux_mod.session_exists(session_name, use_env=False)):
+        hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+        if hosting_socket is not None and not on_private:
+            # Legacy session on the default server: no -S needed.
             click.echo(f"tmux attach -t {session_name}")
         else:
             click.echo(f"tmux -S {sp} attach")
@@ -763,10 +758,11 @@ def session_kill(start_dir):
     session_tag = session_name.removeprefix("pm-")
     socket_path = str(session_socket_path(session_tag))
 
-    on_private = tmux_mod.session_exists(session_name, socket_path=socket_path)
-    on_default = (not on_private
-                  and tmux_mod.session_exists(session_name, use_env=False))
-    if not (on_private or on_default):
+    # The hosting server: the session's own socket, or the default server
+    # for a legacy pre-isolation session (addressed by its explicit path,
+    # since tmux follows $TMUX when no -S is given).
+    hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+    if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
         # A stale socket file from a crashed server is safe to remove.
         try:
@@ -775,23 +771,11 @@ def session_kill(start_dir):
             pass
         raise SystemExit(1)
 
-    # Kill grouped sessions first, then the base, on the server that hosts
-    # the session.  Legacy sessions live on the default server.
-    if on_private:
-        for g in tmux_mod.list_grouped_sessions(session_name,
-                                                socket_path=socket_path):
-            tmux_mod.kill_session(g, socket_path=socket_path)
-        tmux_mod.kill_session(session_name, socket_path=socket_path)
-    else:
-        # Address the default server explicitly: tmux follows $TMUX when no
-        # -S is given, which from inside another pm session names a
-        # different server.
-        from pm_core.paths import default_socket_path
-        legacy_socket = str(default_socket_path())
-        for g in tmux_mod.list_grouped_sessions(session_name,
-                                                socket_path=legacy_socket):
-            tmux_mod.kill_session(g, socket_path=legacy_socket)
-        tmux_mod.kill_session(session_name, socket_path=legacy_socket)
+    # Kill grouped sessions first, then the base, on the hosting server.
+    for g in tmux_mod.list_grouped_sessions(session_name,
+                                            socket_path=hosting_socket):
+        tmux_mod.kill_session(g, socket_path=hosting_socket)
+    tmux_mod.kill_session(session_name, socket_path=hosting_socket)
 
     pane_layout.set_force_mobile(session_name, False)
 

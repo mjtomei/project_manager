@@ -14,8 +14,10 @@ live tmux server.
 
 import os
 import shlex
+import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -140,6 +142,54 @@ class TestUseEnvFlag:
         p = paths.default_socket_path()
         assert p.name == "default"
         assert p.parent.name == f"tmux-{os.getuid()}"
+
+
+# ---------------------------------------------------------------------------
+# tmux: which server hosts a session (private socket vs legacy default)
+# ---------------------------------------------------------------------------
+
+class TestFindSessionServer:
+    def test_private_socket_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(
+            tmux, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path == str(tmp_path / "pm-repo-abc"))
+
+        sock, private = tmux.find_session_server("pm-repo-abc~2")
+        assert (sock, private) == (str(tmp_path / "pm-repo-abc"), True)
+
+    def test_falls_back_to_explicit_default_server(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(
+            tmux, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            socket_path is None and not use_env)
+
+        sock, private = tmux.find_session_server("pm-legacy")
+        # Not None: the default server must be addressed by its path,
+        # because tmux would otherwise follow $TMUX.
+        assert sock == str(paths.default_socket_path())
+        assert private is False
+
+    def test_missing_everywhere(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(tmux, "session_exists", lambda *a, **kw: False)
+        assert tmux.find_session_server("pm-gone") == (None, False)
+
+    def test_non_pm_name_only_checks_default(self, monkeypatch, tmp_path):
+        """A plain tmux session must never be mapped to a pm socket."""
+        seen: list[str | None] = []
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+
+        def exists(name, socket_path=None, use_env=True):
+            seen.append(socket_path)
+            return True
+
+        monkeypatch.setattr(tmux, "session_exists", exists)
+        sock, private = tmux.find_session_server("work")
+        assert (sock, private) == (str(paths.default_socket_path()), False)
+        assert seen == [None]  # no private-socket probe was made
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +441,31 @@ class TestFindTuiPaneAcrossServers:
         assert (pane_id, session) == ("%42", "pm-target")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
 
+    def test_failed_scan_restores_ambient_socket(self, monkeypatch):
+        """A lookup that finds nothing must not leave the env re-pointed."""
+        from pm_core.cli import helpers
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [{"name": "pm-a", "socket": "/tmp/s1",
+                                      "attached": 0},
+                                     {"name": "pm-b", "socket": "/tmp/s2",
+                                      "attached": 0}])
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists", lambda p: False)
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        monkeypatch.setattr(helpers.subprocess, "run",
+                            lambda *a, **kw: MagicMock(returncode=1,
+                                                       stdout=""))
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert "PM_TMUX_SOCKET" not in os.environ
+
     def test_explicit_session_selects_its_server(self, monkeypatch, tmp_path):
         from pm_core.cli import helpers
         from pm_core import pane_registry
@@ -478,6 +553,65 @@ class TestResolveSessionSocket:
 
         with pytest.raises(SystemExit):
             session_mod._resolve_session_socket("pm-repo-abc", False)
+
+
+class TestSessionKillServerSelection:
+    """``pm session kill`` must target the server that hosts the session."""
+
+    def _invoke(self, monkeypatch, tmp_path, hosting):
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+        from pm_core import container, push_proxy
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod, "_known_ambient_session", lambda: None)
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: hosting)
+        killed: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "list_grouped_sessions",
+            lambda name, socket_path=None: [f"{name}~1"])
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "kill_session",
+            lambda name, socket_path=None: killed.append((name, socket_path)))
+        monkeypatch.setattr(session_mod.pane_layout, "set_force_mobile",
+                            lambda *a, **k: None)
+        monkeypatch.setattr(container, "cleanup_session_containers",
+                            lambda tag: 0)
+        monkeypatch.setattr(push_proxy, "stop_session_proxies", lambda tag: 0)
+
+        result = CliRunner().invoke(session_mod.session, ["kill"])
+        return result, killed
+
+    def test_private_session_kills_on_its_own_socket(self, monkeypatch,
+                                                     tmp_path):
+        sock = str(tmp_path / "pm-repo-abc")
+        result, killed = self._invoke(monkeypatch, tmp_path, (sock, True))
+
+        assert result.exit_code == 0, result.output
+        assert killed == [("pm-repo-abc~1", sock), ("pm-repo-abc", sock)]
+
+    def test_legacy_session_kills_on_explicit_default_socket(
+            self, monkeypatch, tmp_path):
+        default = str(paths.default_socket_path())
+        result, killed = self._invoke(monkeypatch, tmp_path, (default, False))
+
+        assert result.exit_code == 0, result.output
+        # The default server is addressed by path, never by omitting -S.
+        assert killed == [("pm-repo-abc~1", default),
+                          ("pm-repo-abc", default)]
+
+    def test_missing_session_unlinks_stale_socket(self, monkeypatch, tmp_path):
+        stale = tmp_path / "pm-repo-abc"
+        stale.write_text("")
+        result, killed = self._invoke(monkeypatch, tmp_path, (None, False))
+
+        assert result.exit_code == 1
+        assert killed == []
+        assert not stale.exists()
 
 
 class TestPickExistingSession:
@@ -580,6 +714,24 @@ class TestTuiQuitRestart:
 # Integration: disposable servers
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def short_sock_dir(tmp_path):
+    """A directory short enough for AF_UNIX socket paths.
+
+    A Unix socket path is limited to ~108 bytes; ``tmp_path`` can exceed
+    that under a deep pytest root or a long user name, so fall back to a
+    short disposable directory under /tmp.
+    """
+    if len(str(tmp_path / "pm-iso-test.sock")) <= 100:
+        yield tmp_path
+        return
+    short = Path(tempfile.mkdtemp(prefix="pmiso-", dir="/tmp"))
+    try:
+        yield short
+    finally:
+        shutil.rmtree(short, ignore_errors=True)
+
+
 def _tmux(sock, *args):
     return subprocess.run(
         ["tmux", "-S", str(sock), *args],
@@ -641,13 +793,13 @@ def _close(proc, sock):
 @pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
 class TestServerIsolationIntegration:
     def test_detach_and_cleanup_in_one_server_leaves_other_intact(
-            self, tmp_path, monkeypatch):
+            self, short_sock_dir, monkeypatch):
         if not subprocess.run(["which", "script"],
                               capture_output=True).returncode == 0:
             pytest.skip("`script` not available for attaching a client")
 
-        sock_a = tmp_path / "a.sock"
-        sock_b = tmp_path / "b.sock"
+        sock_a = short_sock_dir / "a.sock"
+        sock_b = short_sock_dir / "b.sock"
         sess_a = _make_server(sock_a, "pm-iso-a", "true")
         sess_b = _make_server(sock_b, "pm-iso-b", "true")
         proc_a, _ = _attach_client(sock_a, sess_a)
@@ -687,9 +839,9 @@ class TestServerIsolationIntegration:
             _close(proc_a, sock_a)
             _close(proc_b, sock_b)
 
-    def test_hooks_are_per_server(self, tmp_path):
-        sock_a = tmp_path / "a.sock"
-        sock_b = tmp_path / "b.sock"
+    def test_hooks_are_per_server(self, short_sock_dir):
+        sock_a = short_sock_dir / "a.sock"
+        sock_b = short_sock_dir / "b.sock"
         _make_server(sock_a, "pm-iso-a", "true")
         _make_server(sock_b, "pm-iso-b", "false")
         try:

@@ -974,22 +974,17 @@ def _select_session_socket(session_name: str) -> str | None:
     the session is on the default server or was not found (the ambient
     setting is left untouched in the latter case).
     """
-    from pm_core.paths import session_socket_path
-
     base = pane_registry.base_session_name(session_name)
     if not base.startswith("pm-"):
         return None
-    sock = str(session_socket_path(base.removeprefix("pm-")))
-    if tmux_mod.session_exists(base, socket_path=sock):
-        _use_tmux_socket(sock)
-        return sock
-    if tmux_mod.session_exists(base, use_env=False):
-        # Address the default server explicitly rather than clearing the
-        # override: tmux would follow $TMUX, which from inside another pm
-        # session names a different server.
-        _use_tmux_socket(None)
+    sock, on_private = tmux_mod.find_session_server(base)
+    if sock is None:
         return None
-    return None
+    # ``None`` selects the default server by its explicit path: clearing
+    # the override is not enough, because tmux would then follow $TMUX and
+    # reach the private server this process happens to run on.
+    _use_tmux_socket(sock if on_private else None)
+    return sock if on_private else None
 
 
 def _registry_tui_pane(session: str) -> str | None:
@@ -1049,7 +1044,10 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             return pane_id, expected_session
 
     # Fall back to scanning every pm server (private sockets + legacy
-    # default) for a session with a live registered TUI pane.
+    # default) for a session with a live registered TUI pane.  The scan
+    # re-points PM_TMUX_SOCKET at each server in turn; remember the
+    # ambient value so a failed lookup leaves the process where it was.
+    ambient_socket = os.environ.get("PM_TMUX_SOCKET")
     servers = tmux_mod.list_pm_sessions()
     for info in servers:
         _use_tmux_socket(info["socket"])
@@ -1077,4 +1075,10 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
                 if "_tui" in cmd_text:
                     return parts[0], pane_registry.base_session_name(parts[1])
 
+    # Nothing found: undo the scan's env mutations so the caller keeps the
+    # server it started with.
+    if ambient_socket is None:
+        os.environ.pop("PM_TMUX_SOCKET", None)
+    else:
+        os.environ["PM_TMUX_SOCKET"] = ambient_socket
     return None, None
