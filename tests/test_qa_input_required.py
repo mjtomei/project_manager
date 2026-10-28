@@ -213,6 +213,30 @@ class TestScanWaitingScenarios:
             scan = _scan_waiting_scenarios(state)
         assert scan.follow_ups[1].verdict == VERDICT_NEEDS_WORK
 
+    def test_dead_pane_accepts_a_pass_after_a_repeated_input_required(
+            self, tmp_path):
+        """A worker that asks again and then passes before its pane exits must
+        have that PASS collected — not dropped with the attempt because the
+        repeated INPUT_REQUIRED was the newest turn when the pane died."""
+        path = _write(
+            tmp_path / "t.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"),
+            _user("use option B"),
+            _assistant("Reason: need the other secret\nINPUT_REQUIRED",
+                       "turn-ir-2", "2026-05-13T14:10:00.000Z"),
+            # A wakeup (not a new task) delivers the answer, so the repeated
+            # INPUT_REQUIRED and the PASS share one task segment.
+            _user("<task-notification> the secret is in the vault"),
+            _assistant("Reason: blocker resolved\nPASS", "turn-pass",
+                       "2026-05-13T14:33:00.000Z"),
+        )
+        state = _waiting_state(path)
+        with self._patch_pane(False):
+            scan = _scan_waiting_scenarios(state)
+        assert scan.dropped == set()
+        assert scan.follow_ups[1].verdict == VERDICT_PASS
+
     def test_dead_pane_without_a_follow_up_is_dropped_for_relaunch(
             self, tmp_path):
         path = _write(
@@ -714,6 +738,53 @@ class TestFinalizeHoldsForInput:
 
         assert seen["snapshot"]["held"] is True
         assert seen["snapshot"]["waiting_for_input"] == [1]
+
+    def test_reopen_publishes_in_progress_so_a_restart_resumes(self, tmp_path):
+        """The held finalize leaves an INPUT_REQUIRED ``overall`` in
+        qa_status.json.  Reopening must clear it, or a restart during the
+        (possibly long) collection window reads that stale result as final
+        and drops the run before its follow-up verdict is collected."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.qa_workdir = str(tmp_path)
+        state.held = True
+        state.completion_processed = True
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+
+        overalls: list[str] = []
+        snapshots: list[dict] = []
+
+        def _status(*_a, **kw):
+            overalls.append(kw.get("overall", ""))
+
+        def _resume(state_, *_a, **_k):
+            snapshots.append({"held": state_.held,
+                              "latest_verdict": state_.latest_verdict,
+                              "waiting": sorted(state_.waiting_for_input)})
+
+        with patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._write_status_file",
+                   side_effect=_status), \
+             patch("pm_core.qa_loop._write_resume_file",
+                   side_effect=_resume), \
+             patch("pm_core.qa_loop._hold_for_follow_up",
+                   side_effect=[True, False]), \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane",
+                   return_value="FINALIZE_DONE"):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        # Held result → in-progress reopen → the second result.
+        assert overalls == [VERDICT_INPUT_REQUIRED, "", VERDICT_INPUT_REQUIRED]
+        # The snapshot written at the reopen describes a live collection, so
+        # build_resume_state/_resume_incomplete_qa resumes it instead of
+        # treating the run as complete.
+        in_progress = [s for s in snapshots if s["latest_verdict"] == ""]
+        assert in_progress == [{"held": False, "latest_verdict": "",
+                                "waiting": [1]}]
 
 
 # ---------------------------------------------------------------------------

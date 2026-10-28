@@ -338,3 +338,24 @@ covered by tests in `tests/test_qa_input_required.py` /
 - **The `(waiting)` marker fits the status line.** `qa_status._render`
   reserves the suffix width when any row is waiting; otherwise an 80-column
   pane wrapped the row and pushed the footer off screen.
+
+## 8. Implementation notes (review iteration 3)
+
+- **Reopening publishes an in-progress status.** The held finalize leaves
+  `overall: INPUT_REQUIRED` in `qa_status.json`, and
+  `qa_loop_ui._resume_incomplete_qa` reads that `overall` as "the run
+  completed while the TUI was down". A restart during the reopened
+  collection window (seconds for a dropped attempt, minutes while a
+  follow-up PASS is verified) therefore finalized the stale result, cleared
+  the snapshot and dropped the run before the follow-up was collected.
+  `_execute_and_finalize` now rewrites the status file with `overall=""`
+  (and the snapshot with `held=False`, `latest_verdict=""`) at the reopen,
+  status first: a restart between the two writes re-adopts the safe held
+  snapshot instead of finalizing.
+- **A dead pane no longer discards a PASS behind a repeated
+  INPUT_REQUIRED.** `_scan_waiting_scenarios`'s pane-death branch skipped
+  the PASS/NEEDS_WORK check whenever a newer INPUT_REQUIRED existed, so
+  "ask → answer → ask → answer → PASS, then the pane exits" lost the PASS
+  and relaunched the scenario. It now refreshes the baseline past the
+  repeated INPUT_REQUIRED and then applies the normal newer-verdict check,
+  matching the live-pane branch.

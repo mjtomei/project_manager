@@ -3023,16 +3023,21 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             # The worker may have emitted its follow-up just before the
             # pane died — accept it before treating the attempt as lost.
             # A repeated INPUT_REQUIRED is the worker's latest word: an
-            # earlier PASS in the same turn must not be mistaken for it.
+            # earlier PASS in the same turn must not be mistaken for it, so
+            # move the baseline past it first.  A PASS that follows that
+            # repeated INPUT_REQUIRED is still this attempt's latest word
+            # and must be accepted rather than lost with the pane.
             repeated = _newer_verdict(
                 scenario.transcript_path, (VERDICT_INPUT_REQUIRED,), source)
-            if repeated is None:
-                hit = _newer_verdict(
-                    scenario.transcript_path,
-                    (VERDICT_PASS, VERDICT_NEEDS_WORK), source)
-                if hit is not None:
-                    result.follow_ups[idx] = hit
-                    continue
+            if repeated is not None:
+                _refresh_waiting_source(state, scenario, repeated)
+                result.changed = True
+            hit = _newer_verdict(
+                scenario.transcript_path,
+                (VERDICT_PASS, VERDICT_NEEDS_WORK), source)
+            if hit is not None:
+                result.follow_ups[idx] = hit
+                continue
             # A relaunch gives the live loop a fresh retry budget, and each
             # hold/reopen cycle is a fresh call to _poll_tmux_verdicts.  Cap
             # the relaunches here too, or a worker that asks for input and
@@ -5038,6 +5043,20 @@ def _execute_and_finalize(
         state.completion_processed = False
         state.latest_output = ("QA resumed after INPUT_REQUIRED — "
                                "collecting the follow-up verdict")
+        # Publish the reopened run as in-progress before collecting.  The
+        # status file still carries the INPUT_REQUIRED overall from the held
+        # finalize, and a restart in the collection window (which can last
+        # minutes while a follow-up PASS is verified) would otherwise read
+        # that stale result as final and drop the run before its follow-up
+        # is collected.  Status first: a restart between the two writes then
+        # re-adopts the (safe) held snapshot instead of finalizing.
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           scenario_0=state.scenario_0, error=state._error,
+                           verdict_reasons=state.scenario_verdict_reasons,
+                           waiting_for_input=state.waiting_for_input)
+        _write_resume_file(state, use_containers, concurrency_cap,
+                           queued_indices)
         notify()
 
     state.running = False
