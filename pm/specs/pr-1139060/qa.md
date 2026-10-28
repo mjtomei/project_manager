@@ -68,6 +68,19 @@ User-visible behavior added after `6cb6149c` that fresh scenarios must cover:
 - A stopped run's TUI line reads `QA complete: <verdict> [finalize: skipped — run was stopped]`; a completed run still carries `[finalize: <verdict>]` (b6338490).
 - A merge-triggered `pm tui restart --breadcrumb` mounts the new TUI with `TUI mount: … trigger=merge_restart` in the debug log; an ordinary restart still logs `trigger=initial`. The trigger variable is consumed on mount and is not inherited by panes the TUI spawns (c5d0e0ba).
 
+Refresh on 2026-10-28 at HEAD `bfa7fc55` (merge of master@`89e3c501` as `7bca6ee2`, plus review-loop 8101 i1–i2). Scenarios 83–85 are locked historical evidence; fresh scenarios begin at 86. S83, S84 and S85 PASSed on code `b6338490` with no code change. Sign-off (note-26335a9) then returned the PR with SIGNOFF_IMPL because 11 files conflicted with master. Master had redesigned push proxies as workdir-keyed directories (pr-748e708) and also brought provider-secret env transport (pr-84ebabf), fail-closed captures routing (pr-1e9c117), sync-detected merge integrity (pr-2e06289), task-scoped verdict detection with resume identity (pr-8efa789) and abbreviated broad-push rejection (pr-8cdbe60). The merge kept one proxy ownership model (impl A9). Every earlier runtime PASS ran on pre-merge code, so it is not acceptance for the integrated head. Sign-off asked for reruns of the proxy stories (S14/S25/S39 shape), the launch/setup stories (S27 shape) and final acceptance (S84/S85 shape). It also asked, where cheap, for a before/after reproduction of the original incident on master versus this branch.
+
+User-visible behavior on the integrated head that fresh scenarios must cover:
+- Workdir-keyed proxies: implementation, review and sign-off on the PR workdir share one socket directory, and each QA scenario clone gets its own. A request that names another clone's workdir is refused, never served from the wrong clone. A live proxy is never replaced by a request for a different workdir or branch.
+- Release: a directory is released only after a locked check of the runtime inventory, done by whichever PM process runs it (reaper, pane EXIT trap, restarted TUI, run-end release). When a PR has several directories, the users' actual mounts decide. A released directory is removed together with its discovery link and start lock; master instead kept it until session teardown. Session teardown releases only directories with no runtime users. A launch holds the directory's start lock from proxy start until `run` returns, so a concurrent release cannot stop a proxy that a new container is about to mount.
+- Bounded release cost: with one directory per QA clone, a release reads the PR's container mounts once per decision rather than once per directory or container (d295eb3e, bfa7fc55). A ten-scenario run's releases therefore do not hold the per-PR proxy lock long enough to stall launches (30 s acquisition timeout).
+- Proxy launch failures: a proxy that does not become ready fails container creation as a classified `proxy` launch error with its real cause. The fresh directory it created is removed, and no partial container is left behind.
+- Upgrade from older containers: a container created before the merge that mounts the old tokenless `(session, PR)` directory is refused on reuse. The message names the container and gives a runnable `<runtime> rm -f NAME`. After removal, the next launch recreates the container with a workdir-keyed directory. Cleanup still finds and releases the old directories once unused.
+- Push-proxy option guard: `_long_option_match` now covers both the dangerous options (`--upload-pack`, `--receive-pack`, `--exec`) and the broad push options (`--all`, `--branches`, `--mirror`, `--tags`). An unambiguous or ambiguous prefix is refused, naming the option git would read it as. Look-alikes still work (`--atomic`, `--follow-tags`, `--no-tags`, `-u`, `--`). Proxy git runs with hooks disabled.
+- Provider env transport: a provider secret reaches container workers only as `-e NAME` on runtime exec. It never appears in a pane start command, the debug log or the pane registry. Ownership parsing treats `exec -e NAME … <container>` as a live owner of that container and does not mistake the variable name for the container.
+- Captures routing: a container records its PR as `PM_CAPTURES_PR`. A worker in a PM-created, reused, restarted or recreated container resolves `/pm-captures` for its own PR. A nested throwaway project without the marker falls back to its own host session path.
+- Merged-PR reconciliation through sync: a merge found by the TUI's GitHub sync (startup, periodic or `r`) still marks the PR merged and leads to cleanup of its containers and proxies. When the merge integrity check fails, the held `Merge integrity: …` line and note appear as well. Cleanup still keeps live, retained and human-waiting resources.
+
 User-visible behavior added after `afc151b5` that fresh scenarios must cover:
 - Inventory outage at a full runtime: the run makes one floor launch, then waits for a readable inventory (log "wait for a readable container inventory"). Its settled workers whose release is unconfirmed, and workers a release deliberately kept (INPUT_REQUIRED or viewed), count as held. So INPUT_REQUIRED settlements during the outage do not each admit another launch. Peak at most L+1; after recovery the deferred releases run, the peak returns to at most L and the batch grows back (70cd9492, 1bc65b72).
 - A partial run-end release, or its deferred retry, logs which viewed/INPUT_REQUIRED workers it kept even when it released others (60ccb95e).
@@ -167,6 +180,21 @@ Fresh scenarios 83–85 re-cover them on HEAD `d6061445` (code `b6338490`):
 - workdirs/evidence: all
 - Not rerun, because their code is unchanged since a PASS: cross-process outage admission (S79), deferred whole-run retry (S80), locks/leases (S63), removal races (S76), trust dialog (S75), process trees (S61), popups (S54) and locale (S55).
 
+Fresh scenarios 86–90 re-cover them on HEAD `bfa7fc55` (integrated code):
+- runtime namespace/identity: 88, 89, 90
+- locks/leases (proxy start lock vs. release): 86
+- reaper outcomes: 86, 88, 90
+- retention: 88, 90
+- tmux sockets/clients: 86, 88, 89, 90
+- push proxies (workdir-keyed directories, discovery links, start locks, legacy tokenless directories, option guard, hooks): 86, 87, 88
+- headroom/queues: 90
+- QA resume snapshots and verdict sources: 90
+- provider env and pane commands: 89
+- captures mount (`PM_CAPTURES_PR`): 89
+- GitHub sync merge reconciliation: 88
+- workdirs/evidence: all
+- Not rerun, because their code is unchanged by the merge since a PASS: locale (S55), popups (S54), process trees (S61) and verify-pass toggles (S83). S90 samples them only incidentally.
+
 ## Setup
 
 1. Follow `pm/qa/instructions/tui-manual-test.md`: use a throwaway git project with an initial commit, local bare origin and local backend; add PRs through PM and start its own named tmux session. Run PM commands in panes belonging to the test session, not the controller session. Confirm `pm which` selects this PR's code, overriding inherited `PYTHONPATH` when needed. Use `./install.sh --local` if PM is missing.
@@ -249,6 +277,14 @@ Fresh scenarios 83–85 re-cover them on HEAD `d6061445` (code `b6338490`):
     - A 2 s pre-launch sample can race another process's removal; pair cross-process admission claims with shim ordering or a 0.25 s sampler (S79).
     - `pm pr review` prints "Opened review window"; `pm container status` has no proxy lines (list proxy dirs and process state separately); nested `podman run -d` decoys need `--uts host`.
 
+25. Fixture lessons from 83–85 and the merge:
+    - QA panes call `fake-claude` by name, so link `$R/bin/fake-claude` as well as `claude`. A run that ends ERROR consumes fake entry 0, so set the config again before retrying.
+    - On a PR with earlier QA runs, `t` only focuses its QA window; use `z t`. A run-start reconcile reaps the previous run's kept INPUT_REQUIRED worker.
+    - Gate a "run is live" step on the log line "Running N scenario(s)", not on containers being Up (workers start after concretizers). A watcher for per-poll releases must match "removed [1-9]", because resumed polls log "removed 0".
+    - To provoke an outage without failing launches, make the podman stand-in fail only `ps --filter` (S85).
+    - Proxy directories live under `/tmp/pm-push-proxy-*` as either a readable `<tag>-<pr>-<token>` name or a 16-hex hash with a discovery link. Each has `owner.json`, `proxy.json` and a sibling start lock. `/tmp` is shared by every fixture in a worker, so filter by session tag and record names, inodes and daemon PIDs before and after each step.
+    - Pre-merge code for upgrade and incident stories: `a70331c1` (this branch before the merge) and master `89e3c501`. Install each with `./install.sh --local` from a separate checkout, confirm it with `pm which`, and switch back to HEAD the same way. Never run old code against the controller's runtime.
+
 ## Requirements — user stories
 
 ### R1 — Successful and reworked QA releases its own resources
@@ -267,7 +303,7 @@ Given two PRs, old/new QA attempts and scenarios with identical numbers includin
 Given cleanup and a fresh launch/restart of the same deterministic name are in flight, when a second actor starts the competing action, then one serialized outcome occurs without deleting a newer container or leaving its session attached to a missing container. An old pane's late EXIT cleanup cannot delete its replacement. A retain action or real owner attached before deletion must be respected.
 
 ### R6 — Shared push access survives another worker's exit
-Given implementation/review/QA containers launched by separate processes for one session/PR share a push proxy, when one worker finishes or is reaped, then surviving workers can still push the allowed branch to the disposable origin and disallowed branch pushes remain rejected. Given no remaining container needs the proxy, when cleanup finishes, then the unused daemon/socket is reclaimed; an overlapping new launch keeps or restores usable push access.
+Given implementation/review/QA containers launched by separate processes for one session/PR share a push proxy, when one worker finishes or is reaped, then surviving workers can still push the allowed branch to the disposable origin and disallowed branch pushes remain rejected. Given no remaining container needs the proxy, when cleanup finishes, then the unused daemon/socket is reclaimed; an overlapping new launch keeps or restores usable push access. On the integrated head, the "share" applies to implementation, review and sign-off on the PR workdir; each QA scenario clone has its own directory, and a container can never push another clone's commits.
 
 ### R7 — Startup and periodic reconciliation recover leftovers
 Given expired-grace orphaned containers from merged/closed PRs, dead sessions and abandoned attempts, when the user starts/restarts the TUI, then background cleanup eventually removes leftovers while preserving active/retained resources and host evidence. Given leftovers appear after startup, when the user leaves the TUI running through its ten-minute cleanup interval, then they are reclaimed without another QA run. Navigation and status refresh remain responsive throughout slow cleanup.
@@ -394,4 +430,8 @@ BLOCKED/unsupported is required if the worker cannot obtain real runtime/image/n
     - `pm container status` has no push-proxy lines. Proxy liveness is proven by an allowed push from a surviving container and by the proxy socket directory and process; reap and `session cleanup` print `stopped  push proxy <dir>` for proxies they stop.
     - The run-end release line can read "removed 0, kept K … (kept …)" when per-poll releases already removed the settled workers (note-c4b88dc). Count the earlier per-poll removal lines together with the run-end line.
 
-No unresolved product ambiguities remain. This refresh (d6061445) records planning only; it does not claim runtime validation.
+30. Upgrade with pre-merge containers (impl A9, note-ea47e47). A container that mounts the old tokenless proxy directory is refused on reuse. PM does not re-point it silently. The refusal names the container and a runnable `<runtime> rm -f NAME`, and after that removal the next launch succeeds without onboarding. A Then must expect this refusal, not transparent reuse. Ownership-aware cleanup releases the old directory once no container mounts it.
+31. Proxy directory lifetime differs from master's pr-748e708 spec (which kept directories until teardown). On this head a released directory is removed with its discovery link and start lock. Thens assert that the directory is gone once no container uses it, and that it is still present and serving while any container mounts it. A directory created by master code (with `proxy.json` but no `owner.json`) counts as legacy-owned and is released once unused. An unreadable or malformed `owner.json` is never proof of legacy ownership and is preserved.
+32. Before/after incident reproduction (sign-off gap). Master `89e3c501` is expected to leak containers and to reuse an incomplete container into onboarding; that outcome is the baseline, not a failure of this PR. Acceptance comes only from the HEAD half of that scenario. Record genuine keyring counts for the runtime UID where they can be read, and otherwise mark them unavailable (resolutions 5 and 10).
+
+No unresolved product ambiguities remain. This refresh (bfa7fc55) records planning only; it does not claim runtime validation.
