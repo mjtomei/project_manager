@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T14:13:33.195652+00:00'
+  updated_at: '2026-10-28T15:12:12.698272+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32697,6 +32697,41 @@ prs:
       is). No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-28T14:13:33Z'
     last_edited: '2026-10-28T14:13:33Z'
+  - id: note-8e4583f
+    text: 'Review loop e7e1 i1: three leftovers in the kept recipe scope, all the
+      PR own class. (1) The web-UI teardown could not work from a fresh shell at all
+      — SERVER_PID is a step-1 shell variable, every block is pasted separately, so
+      the block refused ("run the teardown in the shell that started the app") and
+      the app kept holding the port, while re-running step 1 is no remedy because
+      that app answers the port pre-check it added in i8 (verified: pre-fix the app
+      survives with state S). Step 1 now records the pid in $CAPDIR/server.pid (cleared
+      with the other stale outputs first, so the teardown cannot signal a recycled
+      pid) and the teardown falls back to it and removes it; post-fix the fresh-shell
+      teardown exits 0 and the app is gone (state Z — PID 1 does not reap here, so
+      liveness is judged by process state, not kill -0). (2) The Layer 2 protocol
+      block had no guard and reported success while writing nothing: with CAPDIR unset
+      its redirects are /http.log and /sse.log (filesystem root as root, "Permission
+      denied" otherwise) and it still exited 0. It now stops on an unset CAPDIR/APP_URL
+      before the first redirect, and still writes both logs when set (verified both
+      ways). (3) The tmux pm-session readiness failure said "check pm session output"
+      although step 1 runs it as ( pm session >/dev/null 2>&1 ) & — it now says the
+      output was discarded and names a form the worker can read; both render sections
+      mkdir -p ~/.local/bin before the agg download, which otherwise cannot create
+      its own directory and leaves the documented remedy inert. Tests: 6 new/tightened
+      assertions, all failing against the pre-fix recipes except the healthy-path
+      Layer 2 case (checked by restoring the HEAD recipes in place); the fresh-shell
+      teardown test starts a real sleep and reaps it with wait so it does not depend
+      on kill -0. File 91 pass (3 runs); related suites 266 pass; full suite 3932
+      passed, 1 skipped, 14 failed = the 12 test_markdown_render tests (no markdown
+      module in this environment) plus test_git_ops::TestPullRebase::test_keeps_unpushed_merge
+      and test_hook_events::test_installer_writes_standalone_receiver (both reproduce
+      on origin/master); test_merge_publish/test_signoff_integration excluded (push
+      proxy). Evidence /pm-captures/review-e7e1-i1/ (probe.log, pre/post recipe copies,
+      probe scripts). impl.md R14 + Files/verification/evidence and qa.md edge cases
+      updated. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.
+      (2026-10-28)'
+    created_at: '2026-10-28T15:12:12Z'
+    last_edited: '2026-10-28T15:12:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
