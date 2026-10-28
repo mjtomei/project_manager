@@ -111,8 +111,8 @@ def test_forced_message_shown_without_extending_sticky():
 
 def test_autostart_target_changes_are_forced():
     app = MagicMock()
-    app._auto_start_targets = {"pr-x": {"policy": "stop_before_merge"},
-                               "pr-y": {"policy": "stop_before_merge"}}
+    app._auto_start_targets = {"pr-x": {"wait_for_merge": True},
+                               "pr-y": {"wait_for_merge": True}}
     app._auto_start_all = False
     app._data = {"prs": [{"id": "pr-x"}, {"id": "pr-y"}]}
     with patch.object(auto_start, "_sync_enabled"):
@@ -202,7 +202,6 @@ def test_autostart_add_and_all_confirmations_hold():
     app = MagicMock()
     app._auto_start_targets = {}
     app._auto_start_all = False
-    app._stop_before_merge = set()
     app._data = {"prs": [{"id": "pr-x", "status": "pending"}]}
     with patch.object(auto_start, "_sync_enabled"), \
             patch.object(auto_start, "check_and_start", MagicMock()):
@@ -239,7 +238,7 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
     for attr, val in (("_auto_start", False), ("_auto_start_targets", {}),
                       ("_auto_start_all", False), ("_auto_start_run_id", None),
                       ("_auto_start_launching", set()),
-                      ("_stop_before_merge", set()), ("_review_loops", {}),
+                      ("_review_loops", {}),
                       ("_qa_loops", {}), ("_self_driving_qa", {}),
                       ("_pending_merge_prs", set()),
                       ("_merge_input_required_prs", set()),
@@ -264,15 +263,15 @@ def test_starting_message_deferred_by_confirmation_hold(tmp_path):
     assert app._log_held[0] == "Auto-start: starting pr-x"
 
 
-# QA s13 (pr-0b87a97): ``g`` on a stop-before-merge target — the merge's
+# QA s13 (pr-0b87a97): ``g`` on a wait-for-merge target — the merge's
 # own reload pruned the target and logged "target Y merged — removed", but
 # the "Merging Y..." spinner (0.1s ticks) and the merge's result line
 # overwrote it before it painted.
 
 def test_merged_target_message_survives_merge_spinner():
     app, shown = _stub_app()
-    app._auto_start_targets = {"pr-y": {"policy": "stop_before_merge"},
-                               "pr-t": {"policy": "stop_before_merge"}}
+    app._auto_start_targets = {"pr-y": {"wait_for_merge": True},
+                               "pr-t": {"wait_for_merge": True}}
     app._auto_start_all = False
     _log(app, "⠋ Merging pr-y...", capture=False)
     with patch.object(auto_start, "_sync_enabled"):
@@ -292,7 +291,7 @@ def test_last_merged_target_one_line_with_off():
     # A separate "all targets complete — OFF" line overwrote the merged
     # line in the same frame; the last completion is now one message.
     app, shown = _stub_app()
-    app._auto_start_targets = {"pr-y": {"policy": "stop_before_merge"}}
+    app._auto_start_targets = {"pr-y": {"wait_for_merge": True}}
     app._auto_start_all = False
     with patch.object(auto_start, "_disable") as disable:
         auto_start._prune_completed_targets(
@@ -309,8 +308,8 @@ def test_last_merged_target_one_line_with_off():
 
 def test_autostart_remove_and_clear_confirmations_hold():
     app = MagicMock()
-    app._auto_start_targets = {"pr-x": {"policy": "stop_before_merge"},
-                               "pr-y": {"policy": "stop_before_merge"}}
+    app._auto_start_targets = {"pr-x": {"wait_for_merge": True},
+                               "pr-y": {"wait_for_merge": True}}
     app._auto_start_all = False
     app._data = {"prs": [{"id": "pr-x"}, {"id": "pr-y"}]}
     with patch.object(auto_start, "_sync_enabled"), \
@@ -346,8 +345,8 @@ def test_remove_confirmation_survives_merge_spinner():
 
 def test_held_confirmation_not_replaced_by_next_held_line():
     app, shown = _stub_app()
-    app._auto_start_targets = {"pr-w": {"policy": "stop_before_merge"},
-                               "pr-t": {"policy": "stop_before_merge"}}
+    app._auto_start_targets = {"pr-w": {"wait_for_merge": True},
+                               "pr-t": {"wait_for_merge": True}}
     app._auto_start_all = False
     _log(app, "⠋ Merging pr-w...", capture=False)
     _log(app, "Auto-start: pr-z not a target", force=True, hold=3)

@@ -196,7 +196,10 @@ def qa_captures_path(pr_id: str):
     ``/pm-captures``; this command prints that path (because the
     host-side ``~/.pm`` location isn't visible from inside the
     container) so a session can resolve its own captures path without
-    caring whether it runs on the host or inside a container.
+    caring whether it runs on the host or inside a container. The mount
+    is only used for the PR named by ``PM_CAPTURES_PR``; with that marker
+    absent or naming a different PR, the container-local ``~/.pm`` path
+    is printed instead (fail closed — see :func:`pm_core.paths.captures_dir`).
     """
     from pm_core import store
     from pm_core.cli.helpers import _resolve_pr_id, state_root
@@ -210,7 +213,9 @@ def qa_captures_path(pr_id: str):
     path = captures_dir(pr_entry["id"])
     if path is None:
         click.echo(
-            "Error: cannot resolve session tag (not inside a git repo?)",
+            "Error: cannot resolve captures dir: no session tag (not "
+            "inside a git repo?) and no /pm-captures mount owned by this "
+            "PR (PM_CAPTURES_PR)",
             err=True,
         )
         raise click.exceptions.Exit(1)
@@ -541,6 +546,7 @@ End with a summary of which steps work and which don't, then one of:
 
     window_name = f"qa-debug-{instruction_id[:20]}"
 
+    env: dict[str, str] = {}
     if use_containers:
         config = container_mod.load_container_config()
         session_tag = session.removeprefix("pm-") if session else None
@@ -560,14 +566,17 @@ End with a summary of which steps work and which don't, then one of:
             cwd=container_mod._CONTAINER_WORKDIR,
             write_dir=str(clone_path),
             session_type="qa_author",
+            env_out=env,
         )
-        shell_cmd = container_mod.build_exec_cmd(cname, claude_cmd, cleanup=True)
+        shell_cmd = container_mod.build_exec_cmd(
+            cname, claude_cmd, cleanup=True, env=env)
         run_cwd = str(qa_workdir)
     else:
         shell_cmd = build_claude_shell_cmd(
             prompt=prompt,
             cwd=str(clone_path),
             session_type="qa_author",
+            env_out=env,
         )
         run_cwd = str(clone_path)
 
@@ -575,11 +584,11 @@ End with a summary of which steps work and which don't, then one of:
         click.echo(f"Debug: {item['title']}")
         click.echo(f"  Workdir: {qa_workdir}")
         os.chdir(run_cwd)
-        os.execvp("bash", ["bash", "-c", shell_cmd])
+        os.execvpe("bash", ["bash", "-c", shell_cmd], {**os.environ, **env})
     else:
         tmux_mod.new_window_get_pane(
             session, window_name, shell_cmd,
-            cwd=run_cwd, switch=False,
+            cwd=run_cwd, switch=False, env=env,
         )
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")
@@ -658,7 +667,9 @@ To interact with this session, use commands like:
 {body}
 """
 
-    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author")
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=full_prompt, session_type="qa_author",
+                                 env_out=env)
     cwd = str(root.parent) if root.name == "pm" else str(root)
 
     if target_window:
@@ -666,11 +677,13 @@ To interact with this session, use commands like:
         if not win:
             click.echo(f"Target window not found: {target_window}", err=True)
             raise SystemExit(1)
-        pane_id = tmux_mod.split_pane(session, "h", cmd, window=win["id"])
+        pane_id = tmux_mod.split_pane(session, "h", cmd, window=win["id"],
+                                      env=env)
         click.echo(f"Launched {item_id} in window '{target_window}' (pane {pane_id})")
     else:
         window_name = f"qa-{qa_id}"
-        tmux_mod.new_window(session, window_name, cmd, cwd=cwd, switch=False)
+        tmux_mod.new_window(session, window_name, cmd, cwd=cwd, switch=False,
+                            env=env)
         click.echo(f"Launched {item_id} in new window '{window_name}'")
 
 
@@ -714,17 +727,19 @@ def qa_standalone(instruction_id: str):
     click.echo(f"Running standalone QA: {item['title']}")
     click.echo(f"  Workdir: {workdir}")
 
-    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir, session_type="qa_author")
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=workdir,
+                                 session_type="qa_author", env_out=env)
     # Launch as tmux window if in a session, otherwise blocking
     session = tmux_mod.get_session_name() if tmux_mod.in_tmux() else None
     if session:
         window_name = f"qa-{instruction_id}"
-        tmux_mod.new_window(session, window_name, cmd, cwd=workdir)
+        tmux_mod.new_window(session, window_name, cmd, cwd=workdir, env=env)
         click.echo(f"  Launched in tmux window: {window_name}")
     else:
         click.echo("  Running in foreground (no tmux session detected)")
         os.chdir(workdir)
-        os.execvp("bash", ["bash", "-c", cmd])
+        os.execvpe("bash", ["bash", "-c", cmd], {**os.environ, **env})
 
 
 # ---------------------------------------------------------------------------

