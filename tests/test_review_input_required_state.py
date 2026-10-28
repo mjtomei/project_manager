@@ -718,6 +718,40 @@ class TestRestartAdoption:
             state.stop_requested = True
             p.stop()
 
+    def test_follow_up_verdict_resolves_without_a_hook_event(self, env):
+        """A verdict already in the transcript must not depend on an idle
+        hook event: after a restart the event file may hold another event (or
+        none at all) while the follow-up verdict has already landed.  Without
+        the pre-wait transcript read the resumed loop blocks forever on an
+        idle that will never come."""
+        tdir, _ = env
+        pane2 = Pane(tdir, 2)
+        pane2.verdict("INPUT_REQUIRED")
+        pane2.user("option B")
+        pane2.say("Fixed it.\n\n**NEEDS_WORK**")  # no idle: the event is gone
+        hook_events.event_path(pane2.sid).unlink()
+        release3 = threading.Event()
+        panes = {}
+
+        def it3():
+            panes[3] = Pane(tdir, 3)
+            release3.wait(10)
+            return panes[3].verdict("PASS")
+
+        state = _restored(tdir, 2, ["NEEDS_WORK", "INPUT_REQUIRED"])
+        t, mock, p = _start(state, tdir, {3: it3})
+        try:
+            _until(lambda: 3 in panes, what="iteration 3 after gap verdict")
+            assert state.history[1].verdict == "NEEDS_WORK"
+            assert state.input_required is False
+            release3.set()
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            release3.set()
+            state.stop_requested = True
+            p.stop()
+
     def test_restart_with_no_live_pane_clears_wait(self, env):
         """The question's pane is gone: the next iteration owns the work."""
         tdir, pane_alive = env

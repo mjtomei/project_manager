@@ -14,7 +14,9 @@ reads it:
 - TUI tech-tree marker (`tech_tree._get_loop_marker`) → red `⏸N`, and the
   sticky log line in `review_loop_ui._poll_loop_state_inner`.
 - Breadcrumb (`auto_start.save_breadcrumb` / `consume_breadcrumb`) serialises
-  it across merge-triggered TUI restarts.
+  the loop state across merge-triggered TUI restarts.  It still *writes*
+  `input_required`, but the restore no longer publishes it: the saved flag is
+  informational, and only the resumed loop can declare a live wait (R2).
 
 So if the flag is wrong in the loop's state, the CLI, the TUI and the scheduler
 are all wrong together.  The fix belongs in the loop's state, not in formatting.
@@ -124,17 +126,23 @@ R6. **Status reason** (`autostart_state._derive`): while `review.running` and
     `state=running`.  An unresolved wait is unchanged:
     `waiting / review INPUT_REQUIRED (iteration N)`.
 
-R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and the
-    breadcrumb all read `ReviewLoopState.input_required`, R1–R5 make them agree.  No
-    surface computes its own copy.
+R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker all
+    read `ReviewLoopState.input_required` (and the breadcrumb only serialises it
+    for forensics), R1–R5 make them agree.  No surface computes its own copy.
 
 ## Implicit requirements
 
-- The follow-up wait still ends only on a hook-driven idle with a verdict in the
-  current *task scope* (`find_verdict_turn`, R5b).  Detecting a human response
-  changes only the displayed wait state, never the verdict.
-- The breadcrumb keeps writing `input_required`, which is used for the first paint
-  before the resumed thread starts.  The resumed loop reconciles it at once (R2).
+- The follow-up wait still ends only on a verdict in the current *task scope*
+  (`find_verdict_turn`, R5b) — read on the next idle hook event, or straight
+  away when one is already in the transcript at wait start.  Detecting a human
+  response changes only the displayed wait state, never the verdict.
+- The breadcrumb keeps writing `input_required` (forensics and older
+  breadcrumbs), but the restore does **not** publish it: `consume_breadcrumb`
+  builds the restored state with `input_required=False`, and only the resumed
+  loop sets it again, once it has confirmed the pane that asked the question is
+  still live and adoptable (R2).  Publishing the saved flag would report a
+  phantom wait from the TUI mount until the loop thread reached its adopt
+  check.  (Added by 09cadcee after QA S9 story 5.)
 - Old breadcrumbs (`input_required=True` with `history[-1]=INPUT_REQUIRED`) take
   the same R2 path.
 - Stop requests during the wait still exit cleanly with `input_required=False`.
@@ -189,6 +197,24 @@ R7. **Agreement.**  Because the CLI, the TUI runs view, the tech-tree marker and
   won't idle again, so the resumed waiter starts from the current idle event
   (not "newer than now") and accepts it when it is newer than the answer.
   (Added in review.)
+- A verdict already in the transcript when the wait starts is returned
+  immediately, before blocking on a hook event.  The resume path must not
+  depend on the event file still holding an `idle_prompt` — it can hold
+  another event (or none) by the time the resumed loop looks, and waiting for
+  an idle that never comes would leave the loop stuck on "follow-up running".
+  At wait start the task scope's newest verdict is the INPUT_REQUIRED
+  question, so this can only match a verdict emitted after it.
+  (Added in review 484e i1; regression
+  `test_follow_up_verdict_resolves_without_a_hook_event`.)
+- A restored wait is not published until the resume has confirmed it can be
+  adopted.  `consume_breadcrumb` restores the state with `input_required=False`
+  and `run_review_loop_sync` keeps it down until `_adoptable_wait_transcript`
+  succeeds, then sets it so a genuine wait is visible immediately.  Otherwise
+  a restart with a dead pane/transcript reported `waiting / review
+  INPUT_REQUIRED (iteration N)` for the whole adopt check.  (QA S9 story 5;
+  fixed in 09cadcee.)  Residual, documented and not a wait: for the sub-second
+  adopt check the row can read `review iteration N (INPUT_REQUIRED answered;
+  follow-up running)` before the resume reconciles it.
 - The back-scan only counts a human prompt found *after* the INPUT_REQUIRED
   record.  If that record can't be found, the wait stays unanswered, so the
   iteration's own review prompt is never taken as the answer.  (Added in

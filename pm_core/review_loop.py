@@ -305,8 +305,10 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     the user answered (a new question).  An idle event for the same,
     still-unanswered INPUT_REQUIRED turn is ignored, as is a repeated idle
     for the turn the user just answered (Claude has not spoken since, so
-    there is no new question).  Returns None when the pane disappears or a
-    stop is requested.
+    there is no new question).  A verdict already in the transcript when the
+    wait starts is returned at once, so resolution never depends on a hook
+    event that may have been lost across a restart.  Returns None when the
+    pane disappears or a stop is requested.
 
     The verdict comes from :func:`verdict_transcript.find_verdict_turn`,
     which is task-scoped: it crosses non-task wakeups (``/loop`` ticks,
@@ -353,6 +355,20 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     # earlier round can never count as the answer to this one.
     watch = HumanResponseWatch(transcript, VERDICT_INPUT_REQUIRED)
     state.input_required = watch.answered_at is None
+    # The follow-up verdict may already be in the transcript — an answer and
+    # its verdict landing during a TUI restart gap, or an idle hook event
+    # that was lost or overwritten before the resumed waiter looked.  Read it
+    # now instead of blocking for an idle event that will never come.  At
+    # wait start the task scope's newest verdict is the INPUT_REQUIRED
+    # question (the wait is entered right after recording it, or on a
+    # restored/adopted wait whose last verdict is that question), so this can
+    # only match a verdict emitted *after* it.
+    pre = find_verdict_turn(transcript, ALL_VERDICTS)
+    if pre and pre.verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK):
+        _log.info("review_loop: follow-up verdict %s already in transcript",
+                  pre.verdict)
+        state.input_required = False
+        return pre.text or pre.verdict
     # Start from the current idle event, not from now: after a TUI restart
     # the answer and the follow-up verdict may both have landed in the gap,
     # and Claude won't idle again.  An idle older than the answer (e.g. the
