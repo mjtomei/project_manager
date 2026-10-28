@@ -32972,11 +32972,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T09:08:03.676136+00:00'
-  updated_at: '2026-10-13T09:08:03.676136+00:00'
+  updated_at: '2026-10-28T06:54:04.507185+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-06fc503
+    text: 'Related (seen in pr-1139060 QA S82, 2026-10-28): when z t supersedes a
+      run whose PASS was being verified, the stop downgrade marks that scenario INPUT_REQUIRED,
+      the fresh run start reconcile[qa-run-start] removes its container, and THEN
+      the superseded run release logs "QA <pr>/<oldloop> released containers: removed
+      0, kept 0 ... (kept s8 INPUT_REQUIRED)". The "(kept sN ...)" annotation in qa_loop._release_scenario_containers
+      names a container that is already gone (no existence/pane check on the INPUT_REQUIRED
+      keep branch). Log-only; product removal was correct. Evidence /pm-captures/scenarios/82/logs/proj-*.log
+      06:30:34 + 06:30:41.'
+    created_at: '2026-10-28T06:54:04Z'
+    last_edited: '2026-10-28T06:54:04Z'
 - id: pr-c59597f
   plan: bugs
   title: 'Bug: QA planner pane fallback accepts a stale QA_PLAN_START directly followed

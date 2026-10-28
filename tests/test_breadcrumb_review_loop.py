@@ -624,3 +624,36 @@ class TestTuiRestartCommand:
 
         assert result.exit_code == 1
         assert "No TUI pane found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Mount trigger after a merge restart
+# ---------------------------------------------------------------------------
+
+class TestMountTrigger:
+    """The re-exec'd TUI logs trigger=merge_restart although the marker is gone."""
+
+    def _restart(self, tmp_path, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        monkeypatch.delenv("PM_TUI_RESTART_TRIGGER", raising=False)
+        app = _make_app(auto_start=False, target=None)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.pane_ops.restart_app") as restart:
+            ProjectManagerApp.action_restart(app)
+        restart.assert_called_once_with(app)
+
+    def test_merge_restart_survives_marker_deletion(self, tmp_path, monkeypatch):
+        from pm_core.tui.auto_start import mount_trigger
+        (tmp_path / "merge-restart").write_text("")
+        self._restart(tmp_path, monkeypatch)
+        assert not (tmp_path / "merge-restart").exists()
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            assert mount_trigger() == "merge_restart"
+            # Popped, so panes and later restarts do not inherit it.
+            assert mount_trigger() == "initial"
+
+    def test_user_restart_mounts_as_initial(self, tmp_path, monkeypatch):
+        from pm_core.tui.auto_start import mount_trigger
+        self._restart(tmp_path, monkeypatch)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            assert mount_trigger() == "initial"

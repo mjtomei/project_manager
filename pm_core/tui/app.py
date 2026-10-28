@@ -487,9 +487,7 @@ class ProjectManagerApp(App):
         import os
         try:
             from pm_core.tui import auto_start as _auto_start
-            trigger = ("merge_restart"
-                       if _auto_start.has_merge_restart_marker()
-                       else "initial")
+            trigger = _auto_start.mount_trigger()
         except Exception:
             trigger = "initial"
         _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
@@ -1279,10 +1277,13 @@ class ProjectManagerApp(App):
         pane_ops.quit_app(self)
 
     def action_restart(self) -> None:
+        import os
         from pm_core.tui import auto_start
         if auto_start.has_merge_restart_marker():
             auto_start.save_breadcrumb(self)
             _log.info("action_restart: reason=merge_restart_marker")
+            # save_breadcrumb deleted the marker; carry the trigger across exec.
+            os.environ[auto_start.RESTART_TRIGGER_ENV] = "merge_restart"
         else:
             _log.info("action_restart: reason=user")
         pane_ops.restart_app(self)
