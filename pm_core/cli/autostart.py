@@ -197,8 +197,11 @@ def _print_changes(payload: dict) -> None:
                        f"({c.get('from_status')} → in_progress)")
             continue
         if action == "already_waiting":
+            # The turn itself may already be complete (the handoff can be
+            # gated on spec/return state), so name what is being waited for,
+            # not a turn state this line cannot see.
             click.echo(f"already waiting: {c.get('pr_id')} "
-                       f"(implementation turn in progress)")
+                       f"(waiting for its implementation turn)")
             continue
         pol = c.get("policy")
         pol_s = f" ({pol.replace('_', '-')})" if pol else ""
@@ -340,15 +343,15 @@ def autostart_fresh(pr_ids, stop, auto, wait, session, timeout, as_json):
     auto-start to take the changed PR through a fresh review, QA and
     sign-off again.
 
-    The PR is atomically returned to ``in_progress``; obsolete review-loop,
-    QA and sign-off ownership is retired (historical evidence is kept), and
-    the existing implementation session is adopted — never killed or
-    relaunched.  Auto-start then waits for the current implementation turn to
-    finish before starting exactly one fresh review.
+    The PR is atomically returned to `in_progress`; obsolete review-loop, QA
+    and sign-off ownership is retired (historical evidence is kept), and the
+    existing implementation session is adopted — never killed or relaunched.
+    Auto-start then waits for the current implementation turn to finish before
+    starting exactly one fresh review.
 
-    Plain ``pm autostart add`` stays a continuation from the current phase;
-    it never rewinds a PR.  Repeating ``fresh`` while an attempt is already
-    waiting is a no-op.
+    Plain `pm autostart add` stays a continuation from the current phase; it
+    never rewinds a PR.  Repeating `fresh` while an attempt is already waiting
+    is a no-op.
     """
     try:
         chosen = [p for p, on in ((POLICY_STOP, stop), (POLICY_AUTO, auto),

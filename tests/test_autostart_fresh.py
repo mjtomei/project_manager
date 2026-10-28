@@ -1561,6 +1561,7 @@ def cli_project(tmp_path, monkeypatch):
     store.save({"project": {"name": "t", "repo": "/r",
                             "base_branch": "master"},
                 "prs": [_pr(workdir=str(wd)),
+                        _pr("pr-b", workdir=str(wd)),
                         _pr("pr-m", status="merged")]}, pm_dir)
     home = tmp_path / "home"
     home.mkdir()
@@ -1620,6 +1621,40 @@ class TestCli:
             res = _cli(["fresh", "pr-a", "-s", "pm-x"])
         assert res.exit_code == 1
         assert res.output.count("already in implementation") == 1
+
+    def test_partial_failure_prints_a_failed_line(self, cli_project):
+        # A reply can be ok (one PR reset) *and* carry per-PR failures (a PR
+        # that changed underneath the all-or-nothing validation).  Those are
+        # not part of the owner's message, so the CLI must print them itself —
+        # to stderr, without failing the whole command.
+        with patch("pm_core.cli.autostart._request",
+                   return_value={
+                       "ok": True,
+                       "changes": [{"pr_id": "pr-a", "action": "fresh_reset",
+                                    "from_status": "in_review"}],
+                       "handoff": {"pr-a": "waiting"},
+                       "failed": [{"pr_id": "pr-b", "ok": False,
+                                   "error": "terminal_pr",
+                                   "message": "pr-b is already merged"}],
+                       "message": "Auto-start fresh: pr-a: waiting",
+                       "status": {"mode": "targets", "targets": []}}):
+            res = _cli(["fresh", "pr-a", "pr-b", "-s", "pm-x"])
+        assert res.exit_code == 0, res.output
+        assert "fresh: pr-a (in_review → in_progress)" in res.output
+        assert ("failed: pr-b (terminal_pr): pr-b is already merged"
+                in res.output)
+
+    def test_already_waiting_line_names_the_wait(self, cli_project):
+        with patch("pm_core.cli.autostart._request",
+                   return_value={"ok": True,
+                                 "changes": [{"pr_id": "pr-a",
+                                              "action": "already_waiting"}],
+                                 "status": {"mode": "targets",
+                                            "targets": []}}):
+            res = _cli(["fresh", "pr-a", "-s", "pm-x"])
+        assert res.exit_code == 0, res.output
+        assert ("already waiting: pr-a (waiting for its implementation turn)"
+                in res.output)
 
     def test_merged_rejected_before_sending(self, cli_project):
         with patch("pm_core.cli.autostart.trigger_tui_command") as trig:

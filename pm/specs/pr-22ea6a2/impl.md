@@ -727,3 +727,30 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   status row agrees with the handoff.  Pinned by four ``latest_turn_state``
   cases (before/after the request, a tool-use abort, and no fence) and two
   ``handoff_ready`` / reconcile cases.
+
+## Review-iteration notes (1149 i1)
+
+* **Independent corpus re-validation of the handoff signal** — the fresh
+  handoff's authority is `latest_turn_state`, so it was re-measured over every
+  transcript under `~/.claude/projects` (15,164 files): 14,786 read
+  `complete`, 321 `in_progress` (all genuine — a trailing `tool_result` or a
+  submitted prompt), 43 `unknown` (transcripts whose only user/assistant
+  records are injected/meta ones, e.g. a `/exit`-only session).  Real tails
+  are now dominated by non-turn records (`system/turn_duration`, `cost-state`,
+  `atis-latch`, `permission-mode`, `last-prompt`, ...); scanning back past
+  them is what keeps those sessions reading `complete`.  No stall case found.
+* **`pm autostart fresh --help` no longer shows reST markup** — the command
+  docstring used double backticks (``in_progress``, ``pm autostart add``,
+  ``fresh``), which Click prints literally; within `pm autostart` the group and
+  `add` help use single backticks, so the new command body now matches (Python
+  docstrings keep the double form, as elsewhere in the repo; two pre-existing
+  top-level `pm --help` entries still use double backticks).
+* **The `already waiting:` line no longer claims a turn state** — it said
+  "(implementation turn in progress)", which is false when the turn already
+  completed and the handoff is gated on spec/return state; it now names what
+  is being waited for, matching the owner's log line.
+* **The partial-failure CLI contract is pinned** — a reply can be `ok` (one PR
+  reset) and still carry per-PR `failed` entries; `_print_changes` prints
+  those as `failed: <id> (<error>): <message>` without failing the command.
+  `TestCli::test_partial_failure_prints_a_failed_line` and
+  `test_already_waiting_line_names_the_wait` now cover both lines.
