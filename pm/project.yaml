@@ -14561,7 +14561,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T03:15:47.409941+00:00'
+  updated_at: '2026-10-28T03:34:01.330534+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15485,6 +15485,28 @@ prs:
       and the container push exits 1. Captures: /pm-captures/scenarios/7/{story1-review-joins,story2-review-relaunch,story3-signoff-joins,story4-stop-review-signoff,story5-reverse-order}.'
     created_at: '2026-10-28T03:15:47Z'
     last_edited: '2026-10-28T03:15:47Z'
+  - id: note-eb65472
+    text: 'QA S10 follow-up (2026-10-28): re-ran all three stories with asciinema
+      after the review flagged the missing story-1 capture. Story 1 is now recorded
+      end-to-end in the session ops pane: pm pr start + pm pr review, pm pr show prints
+      Workdir, both containers share one socket dir and pid 11952, the review container
+      makes commit 80b737d, both containers push concurrently (both rc 0, one log
+      says Everything up-to-date), ls-remote rc 0, a follow-up push from impl exits
+      0 with upstream tip == workdir HEAD (aa89358), pid unchanged. Story 2 re-run
+      after resetting the fixture to f4075b6: impl rc 1, qa s1 rc 0, qa s2 rc 1; both
+      losers rejected client-side with (fetch first), so the literal git cat-file
+      -e check holds this time (both loser objects absent, winner present); tip ==
+      qa s1 commit, pre-push commit still an ancestor, losers unreachable, each clone
+      holds only its own commit, all three proxies alive with unchanged pids. Note
+      that the earlier run had a server-side ref-lock rejection, which transfers objects
+      before failing, so cat-file -e is timing-dependent - reachability from the branch
+      is the invariant that matters. The fresh-clone literal check refs/heads/<branch>
+      cannot hold for a normal clone (only the checked-out branch gets a local ref);
+      refs/remotes/origin/<branch> is the correct ref and equals the tip. Captures:
+      /pm-captures/scenarios/10/{story1-shared-proxy,story2-concurrent-push,story3-rebase-recovery},
+      all three with recording.cast + recording.mp4.'
+    created_at: '2026-10-28T03:34:01Z'
+    last_edited: '2026-10-28T03:34:01Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
