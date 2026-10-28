@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7824490
+  active_pr: pr-571a13b
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T12:59:33.036894+00:00'
+  updated_at: '2026-10-28T12:59:32.883215+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39004,6 +39004,35 @@ prs:
       in tick loops, one story at a time.'
     created_at: '2026-10-28T11:06:01Z'
     last_edited: '2026-10-28T11:06:01Z'
+  - id: note-8e462ea
+    text: 'S126 refine: 920633fe CONTAINS ca2a0657 (it is not a pre-fix control);
+      the pre-ca2a0657 control is 89914811. Story 4 cannot use PR A: a recorded QA
+      PASS makes auto-start hand A to sign-off (advance_all), never full QA, so use
+      a fresh PR C that reaches qa through its review PASS hop while the CLI run is
+      live. Cross-clone: pm qa run unlinks and rewrites the shared ~/.pm/workdirs/qa/<pr>-cli-<pr>/qa_run.json
+      with its own session_tag, so expect clone 1 to lose [working], and own_run_driven
+      to miss clone 1 own live CLI (REQA launch over it).'
+    created_at: '2026-10-28T11:52:10Z'
+    last_edited: '2026-10-28T11:52:10Z'
+  - id: note-a42ae19
+    text: 'QA S126 RQ56 finding (2026-10-28, host, fake-claude, two clones sharing
+      ~/.pm, HEAD dc8d0f91; captures /pm-captures/scenarios/126, REPORT.md): instruction_run_live
+      reads only the fixed ~/.pm/workdirs/qa/<pr>-cli-<pr>/qa_run.json, which every
+      pm qa run of the PR (any clone) unlinks and rewrites with its own session_tag/owner_pid.
+      So when clone 2 starts a pm qa run of A while clone 1 own run is live, clone
+      1 (a) loses its C-b P qa [working] badge at once (12:24:18, 12:35:34, 12:40:48:
+      [done PASS] for the rest of its live run), and (b) loses the REQA hold: clone
+      1 first auto-sequence tick at a pending SIGNOFF_REQA printed "sign_off: re-qa"
+      and launched qa-run-bg 132657 over clone 1 live pm qa run, killing its qa-<A>-s1
+      window (12:40:49). Master 89e3c501 has no [working] for any pm qa run and launches
+      that REQA run over a live pm qa run even in one clone (pr-d7d4601, note added).
+      The shared workdir also hangs the first clone run on HEAD and master (filed
+      pr-571a13b). Round 1 held: clone 2 pm qa run alone never showed [working] in
+      clone 1. Stories 1-4 and 6 PASS with controls 89914811 (story 1 [done PASS]
+      during the live run) and ca2a0657 (story 6: 9->38 tmux calls/open, median 225->510
+      ms with 30 kept records; HEAD 11->11, 224->252 ms).'
+    created_at: '2026-10-28T12:59:32Z'
+    last_edited: '2026-10-28T12:59:32Z'
   - id: note-a14e4fb
     text: 'S128 refine (HEAD 3110c6f3): /pm-captures/scenarios/125/scripts does not
       exist (S125 scripts lived in /scratch, now gone). Rebuild from /pm-captures/scenarios/113/scripts
@@ -41906,11 +41935,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T08:44:12.086615+00:00'
-  updated_at: '2026-10-28T08:44:12.086615+00:00'
+  updated_at: '2026-10-28T12:59:31.653519+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-9459720
+    text: 'QA S126 (2026-10-28, pr-592e4bd story 5) reproduced this on origin/master
+      89e3c501 in a two-clone setup: A at sign_off with a pending SIGNOFF_REQA, clone
+      1 `pm qa run r126-check --pr A` live (pid 160059, worker NEEDS_WORK delay 240),
+      clone 2 started its own pm qa run 20 s later, then clone 1 first `pm pr auto-sequence
+      A` tick printed "sign_off: re-qa" (12:47:42) and launched qa-run-bg 165103 (new
+      dir <A>-2b061755cf17be61) over both live CLI runs; both CLIs then printed Result:
+      PASS though both workers were configured NEEDS_WORK. pr-592e4bd HEAD dc8d0f91
+      holds this tick for a single-clone live pm qa run (S120/S123), but not once
+      another clone pm qa run rewrote the shared <A>-cli-<A>/qa_run.json (same launch
+      at 12:40:49, qa-run-bg 132657). Captures /pm-captures/scenarios/126/{master-89e3c501,head}/s5r3.'
+    created_at: '2026-10-28T12:59:31Z'
+    last_edited: '2026-10-28T12:59:31Z'
 - id: pr-0ef7f21
   plan: bugs
   title: 'Bug: pm tui view reports a dead TUI pane (blank frame, rc 0) after the TUI
@@ -42051,6 +42093,40 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T10:19:05.147779+00:00'
   updated_at: '2026-10-28T10:19:05.147779+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-571a13b
+  plan: bugs
+  title: 'Bug: a second clone pm qa run of the same PR shares ~/.pm/workdirs/qa/<pr>-cli-<pr>
+    and leaves the first clone run hung (or with a foreign verdict)'
+  branch: pm/pr-571a13b-bug-a-second-clone-pm-qa-run-of-the-same-pr-shares
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/qa.py qa_run: loop_id is the fixed cli-<pr>
+    (qa_loop.instruction_run_loop_id on pr-592e4bd, f"cli-{pr_id}" on master), so
+    every pm qa run of a PR, from any clone sharing ~/.pm, uses the same QA workdir.
+    A second run unlinks/rewrites qa_run.json, re-clones s-1/repo and repoints transcript-s1.jsonl
+    to its own worker, so the first run keeps polling a transcript that is not its
+    own. Repro (QA S126 story 5 isolation, host, fake-claude, two clones of one project
+    sharing HOME, no ticks, no TUI action): clone 1 `pm qa run r126-check --pr A`
+    (qa_scenario NEEDS_WORK delay 150); 20 s later clone 2 `pm qa run r126-check --pr
+    A` (NEEDS_WORK delay 60). Clone 2 ends at +135 s Result NEEDS_WORK; clone 1 is
+    still "Running 1 scenario(s)..." at +480 s (expected ~+170 s) and never ends until
+    Ctrl-C. Same on origin/master 89e3c501 and pr-592e4bd dc8d0f91. With a tick-launched
+    full QA killing qa-<pr>-s1 windows in between, both CLI runs instead printed Result:
+    PASS though both workers were configured NEEDS_WORK (relaunched workers read later
+    config entries). On pr-592e4bd the rewrite also drops clone 1 C-b P [working]
+    badge and its REQA hold (instruction_run_live reads only that shared record).
+    Fix idea: per-session loop id (cli-<pr>-<session tag>) or refuse a second live
+    pm qa run of the PR. Evidence: /pm-captures/scenarios/126/{head,master-89e3c501}/s5iso/,
+    REPORT.md.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T12:58:51.713401+00:00'
+  updated_at: '2026-10-28T12:58:51.713401+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
