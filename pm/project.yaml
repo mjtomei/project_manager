@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T18:59:28.672557+00:00'
+  updated_at: '2026-10-28T19:28:33.587444+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32942,6 +32942,56 @@ prs:
       work stays dropped. (2026-10-28)'
     created_at: '2026-10-28T18:58:47Z'
     last_edited: '2026-10-28T18:59:28Z'
+  - id: note-2a30f98
+    text: 'Review loop e7e1 i8: four leftovers in the kept recipe scope, all the PR
+      own class (a bound that stops bounding, a step that misdiagnoses its own missing
+      input, an unbounded request, a failure path that keeps the earlier attempt output).
+      (1) The CLI stop block used RECORDER_STOP_TIMEOUT directly in `$(( ))`: a non-numeric
+      value (`2m`) makes the arithmetic fail, leaves `deadline` empty, and in an INTERACTIVE
+      shell the block carries on past that error (only a scripted run exits), so the
+      deadline check is always false and the stop wait never ends — the unbounded
+      wait this step exists to remove, reintroduced by the knob the recipe tells workers
+      to raise. Verified live (real tmux 3.2a + asciinema 2.1.0, private TMUX_TMPDIR,
+      a live `rec` session): the pre-fix step-4 block hung until the harness killed
+      it at 20 s; post-fix rc 1 in 0.0 s with "RECORDER_STOP_TIMEOUT must be whole
+      seconds (got ''2m''); e.g. RECORDER_STOP_TIMEOUT=120" and the scaffold server
+      torn down. `RECORDER_STOP_TIMEOUT=2` still times out at its bound with the pane
+      saved, the default still stops at 29.5 s, and a one-shot recording still passes
+      (rc 0, status 0, 142-byte cast). The deadline now reads `10#$stop_timeout` so
+      a leading zero is not octal. (2) The web-UI finalize step guarded an unset CAPDIR
+      but not a set-but-missing one (R15 added that guard to the driver and Layer
+      2 blocks): a wrong path reported "there is no webm to transcode — the driver
+      wrote no video; re-run step 2", an encoder/driver misdiagnosis for a directory
+      that is not there. It now stops with "capture directory … does not exist — create
+      it and run step 1". (3) The `agg` install download was the last unbounded request
+      in the recipes (R6/R16 bounded the readiness polls and the Layer 2 route snapshots
+      for exactly this reason): `curl -fsSL -o` with no deadline hangs on a stalled
+      transfer, and `-o` writes in place, so a dead transfer leaves a partial binary
+      that shadows the image working agg earlier on PATH (the R16 hazard). The block
+      now carries `--connect-timeout 5 --max-time 180`, removes the partial file,
+      and stops with "could not download agg — put a release binary on PATH and re-run
+      the render"; verified with real curl against a closed proxy port (rc 1, message,
+      ~/.local/bin left empty). (4) The driver block cleared this attempt outputs
+      *after* the Playwright resolution check, so that failure exited with the earlier
+      attempt complete webm still in the capture directory for the finalize step (a
+      separate paste) to transcode into "this run". The cleanup now comes immediately
+      after the `cd`, so every step-2 failure path leaves no earlier artifact. Tests:
+      3 new + 2 extended (non-numeric stop bound; bounded agg download with partial-file
+      cleanup, both recipes; finalize with a missing capture dir; resolution-failure
+      cleanup) — all five fail against the pre-fix recipes (checked by restoring HEAD
+      recipes in place, then restoring the post-fix copies). Also fixed a flaky test:
+      `_run_in_interactive_shell` decoded the pty transcript as strict UTF-8, and
+      a readline redraw can split a multi-byte character (the recipes are full of
+      em dashes), which failed `test_web_ui_driver_guard_stops_an_interactive_paste`
+      once in six full-file runs under this container POSIX locale; it now decodes
+      with errors="replace". File 118 pass; related suites 306 pass; full suite 3972
+      passed, 1 skipped, with only the known environment baseline test_git_ops::TestPullRebase::test_keeps_unpushed_merge
+      (reproduces on origin/master; git rc 128 here) and test_merge_publish/test_signoff_integration
+      excluded (the push proxy rejects pushes to master). impl.md R21 + Files/verification/evidence
+      and qa.md R4/edge cases updated. No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-28T19:28:33Z'
+    last_edited: '2026-10-28T19:28:33Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
