@@ -3250,7 +3250,7 @@ def _poll_tmux_verdicts(
                                   "container inventory; %d of this run's container "
                                   "release(s) are deferred (container-max-running)",
                                   state.pr_id, len(_launch_queue), held)
-                    elif not held and _held_logged[0] != -1:
+                    elif floor_taken and not held and _held_logged[0] != -1:
                         _log.info("QA %s: %d queued scenario(s) wait for a readable "
                                   "container inventory; another QA run made this "
                                   "outage's floor launch (container-max-running)",

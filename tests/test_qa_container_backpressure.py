@@ -1035,6 +1035,8 @@ def test_two_runs_share_one_outage_floor_launch(tmp_path, monkeypatch,
     else:
         assert during == [1], "a run holding nothing still makes the floor launch"
         assert floor == {"run": ("pr-aaaa", state.loop_id)}
+        # Its own floor worker keeps it waiting; that is not another run's floor.
+        assert not [m for m in logged if "another QA run" in m], logged
     assert qa_loop._outage_floor == {}, "a readable inventory frees the floor"
     assert launched == [1, 2, 3], "the batch grows back after recovery"
 
