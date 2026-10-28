@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T12:33:54.711180+00:00'
+  updated_at: '2026-10-28T13:10:12.238287+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32593,6 +32593,28 @@ prs:
       work stays dropped.'
     created_at: '2026-10-28T12:33:54Z'
     last_edited: '2026-10-28T12:33:54Z'
+  - id: note-95ab0b8
+    text: 'Review loop 419c i12: three leftovers in the kept recipe scope. (1) Both
+      recipes'' failure paths tore the recorder pane down and then told the worker
+      to inspect it — verified live: the CLI printed "check the pane with tmux -L
+      scaffold capture-pane -p -t rec" and killed the server on the next line ("no
+      server running"), and the tmux readiness timeout did the same to pm-recorder.
+      The pane command now sends asciinema''s own stderr to recorder-stderr.log, each
+      recipe defines dump_pane() to save the pane to recorder-pane.log on a timeout,
+      messages name the file that survives, and both logs are cleared in step 0 with
+      the stale cast. (2) The CLI scaffold documented the \" layer but not the ''
+      layer: -c ''pm pr note add pr-x ''a note'''' ends the pane command early (asciinema
+      exits 2, no cast); the recipe now documents the ''\'''' escape (verified end
+      to end). (3) The web-UI step-1 cleanup omitted http.log/sse.log, so a run that
+      never re-captured the protocol kept the earlier run''s logs as evidence. Tests:
+      +8, 2 tightened; all 10 new/tightened assertions fail against the previous recipes.
+      File 67 pass; related suites 242; full suite 3920 passed / 1 skipped with the
+      two push-proxy-blocked files excluded and the two known baselines deselected.
+      Verified the stderr redirect does not disturb recording (a failed attach still
+      draws its error in the pane and the cast). Evidence /pm-captures/review-419c-i12/.
+      No pm_core/ change.'
+    created_at: '2026-10-28T13:10:12Z'
+    last_edited: '2026-10-28T13:10:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
