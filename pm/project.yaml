@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T04:06:07.828692+00:00'
+  updated_at: '2026-10-28T04:21:02.028324+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32196,6 +32196,28 @@ prs:
       and retire S15/S16/S17/S19 (they test dropped helper/prompt work) in pm/specs/pr-b19db15/qa.md.'
     created_at: '2026-10-28T04:06:07Z'
     last_edited: '2026-10-28T04:06:07Z'
+  - id: note-c17a9ed
+    text: 'Reduction implemented at 6748dd5d (merged master 4b904b60, clean). Exactly
+      note-93f1418: dropped wait-for-job.sh + helper tests, _background_jobs_block
+      and all 3 injections, the QA-child RECIPE_DIR paragraph, the *.sh install in
+      _install_artifact_files, the verifier freshness text (paragraph + FLAGGED stale
+      wording + "present and fresh"), qa_library Shared helpers, and all recipe pgrep/bare-wait/helper
+      text. Both recipes render in the foreground as on master (i5 `|| true` dropped
+      too). pm_core/ is now untouched by this PR. Kept only the real recipe bugs:
+      mkdir -p capture dir, rm -f stale cast, recorder readiness before keys, bounded
+      stop + test -s cast check, CLI scaffold cast path, bounded `until tmux ls` /
+      `until curl` (per-attempt curl bound + server cleanup). New slim tests: tests/test_qa_artifact_recording_recipes.py
+      (16 pass). Live re-verified the two capture-step bugs with real asciinema (missing
+      dir exits 0 writing nothing; stale cast survives/aborts) — evidence at $CAP/impl/post-fix/recipe-fixes/.
+      Full suite 3903 passed; failures are environment-only (push-proxy rejects pushes
+      to master -> test_merge_publish/test_signoff_integration) plus the two known
+      baselines test_git_ops::test_keeps_unpushed_merge and test_hook_events::test_installer_writes_standalone_receiver.
+      impl.md/qa.md rewritten to the reduced scope; qa.md keeps S14/S18/S20 and retires
+      S15/S16/S17/S19. Note: $CAP/impl/post-fix/render-wait/ demonstrates the now-dropped
+      helper and no longer describes this diff; $CAP/impl/pre-fix/repro-selfmatch/
+      remains the original bug report.'
+    created_at: '2026-10-28T04:21:01Z'
+    last_edited: '2026-10-28T04:21:01Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
