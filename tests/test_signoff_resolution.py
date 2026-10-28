@@ -2075,18 +2075,21 @@ def test_malformed_resolution_state_reads_as_absent(w):
         assert isinstance(integration.summary(rec), str)
         # The compact state never carries a malformed *member* through: a
         # non-mapping resolution is dropped and a malformed list member
-        # sanitized.  A truthy non-list ``unresolved`` is the exception — it
-        # is the record's refusal marker, so it survives the rewrite (see
-        # test_a_benign_recheck_does_not_launder_a_malformed_unresolved).
+        # sanitized.  A truthy ``unresolved`` that names no mapping is the
+        # exception — it is the record's refusal marker, so it survives the
+        # rewrite whether or not it is a list (see
+        # test_a_benign_recheck_does_not_launder_a_malformed_unresolved and
+        # ..._unresolved_list).
         compacted = integration.compact(rec)
         if isinstance(bad, dict):
             assert compacted["resolution"]["paths"] == []
-            if isinstance(bad.get("unresolved"), list) \
-                    or not bad.get("unresolved"):
-                assert compacted["resolution"]["unresolved"] == []
-            else:
+            raw_unresolved = bad.get("unresolved")
+            if raw_unresolved \
+                    and not integration.resolution_entries(bad, "unresolved"):
                 assert compacted["resolution"]["unresolved"] \
-                    == bad["unresolved"]
+                    == raw_unresolved
+            else:
+                assert compacted["resolution"]["unresolved"] == []
             assert "applied_merge_sha" not in compacted["resolution"]
         else:
             assert "resolution" not in compacted
@@ -5892,6 +5895,104 @@ def test_a_benign_recheck_does_not_launder_a_malformed_unresolved(w):
     assert restored["resolution_digest"] == clean_digest
     assert signoff.merge_gate_refusal(
         pr_entry(w), restored["head"], "master") is None
+
+
+def test_a_benign_recheck_does_not_launder_a_malformed_unresolved_list(w):
+    """A truthy ``unresolved`` *list* of non-mappings is a refusal too.
+
+    ``pm`` writes a list of mappings, but project.yaml is hand-editable: a
+    list of strings (or of anything else that is not a mapping) cannot name
+    what pm failed to reconcile, and ``resolution_entries`` drops those
+    members.  Every reader tests the value's truthiness (``valid_for``, the
+    merge gate, the router, the prompt), so a compaction that wrote ``[]``
+    would launder the refusal into a clean, approvable resolution on the next
+    routine re-check — the same hole the non-list value has.
+    """
+    rec = _metadata_conflict(w)
+    record_merge(w, rec)
+    clean_digest = pr_entry(w)["integration"]["resolution_digest"]
+    edited = ["pm/project.yaml: both sides changed status differently"]
+
+    def _tamper(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+            list(edited)
+    store.locked_update(w.pm_dir, _tamper)
+    # The edit is refused (its digest no longer describes the record), and it
+    # stays refused after the rewrite below.
+    assert signoff.merge_gate_refusal(pr_entry(w), rec["head"], "master")
+
+    again = integration.check_integration(w.pm_dir, PR)
+    assert again["status"] == integration.UP_TO_DATE
+    stored = pr_entry(w)["integration"]
+    assert stored["resolution"].get("unresolved") == edited
+    refusal = signoff.merge_gate_refusal(pr_entry(w), again["head"], "master")
+    assert refusal, "the re-check must not launder the refusal into a merge"
+
+    # Removing the edit and re-checking recomputes the clean digest, so the
+    # approval bound to it holds again: the edit was refused, not absorbed.
+    def _restore(d):
+        store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = []
+    store.locked_update(w.pm_dir, _restore)
+    restored = integration.check_integration(w.pm_dir, PR)
+    assert restored["resolution_digest"] == clean_digest
+    assert signoff.merge_gate_refusal(
+        pr_entry(w), restored["head"], "master") is None
+
+
+def test_an_unresolved_list_that_names_no_path_is_never_labelled_resolved(w):
+    """A truthy ``unresolved`` list without a string ``path`` refuses every path.
+
+    ``unresolved_paths`` cannot enumerate what such a value failed to
+    reconcile (a list of strings, or of mappings whose ``path`` is not a
+    string), so every recorded path must read as an attempt: the CLI and
+    ``pm pr show`` must not label a path "resolved" while the one-line summary
+    and the prompt say the resolution is unresolved.
+    """
+    append_records(w.wd / "pm", w.repo, ["pr-300"])
+    git(w.wd, "add", ".")
+    git(w.wd, "commit", "-q", "-m", "feature records")
+    append_records(w.base_pm, w.repo, ["pr-250"], status="merged")
+    git(w.repo, "add", ".")
+    git(w.repo, "commit", "-q", "-m", "base records")
+    # A check without ``prepare``: the resolved candidate is *not* applied, so
+    # the stored record stays RESOLVED and the path labels are its outcome.
+    rec = integration.check_integration(w.pm_dir, PR)
+    assert rec["status"] == integration.RESOLVED, rec
+
+    for malformed in (["pm/project.yaml: same field changed"],
+                      [{"conflicts": ["same field changed"]}]):
+        def _tamper(d, value=list(malformed)):
+            store.get_pr(d, PR)["integration"]["resolution"]["unresolved"] = \
+                list(value)
+        store.locked_update(w.pm_dir, _tamper)
+
+        integ = pr_entry(w)["integration"]
+        # The value names no path pm can match, so every recorded path is an
+        # attempt (never labelled resolved).
+        assert integration.unresolved_paths(integ) == {"pm/project.yaml"}
+        assert "unresolved conflicts remain" in integration.summary(integ)
+
+        with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+            r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+        assert r.exit_code == 0, r.output
+        assert "Resolution attempted (NOT resolved): pm/project.yaml" in r.output
+        assert "Resolved: pm/project.yaml" not in r.output
+
+
+def test_a_hand_edited_boolean_count_is_not_a_count():
+    """``True`` is an ``int`` to ``isinstance`` but not a count pm recorded.
+
+    ``base_files_count``/``paths_total``/the per-record counts are
+    hand-editable project.yaml state: a boolean must read as "no count"
+    instead of inventing ``1`` (the prompt's own count reader excludes it
+    explicitly).
+    """
+    assert integration._as_int(True) == 0
+    assert integration._as_int(False) == 0
+    assert integration._as_int("3") == 3
+    record = {"status": "clean", "base_sha": "a" * 40, "head": "b" * 40,
+              "candidate_tree": "c" * 40, "base_files_count": True}
+    assert integration.compact(record)["base_files_count"] == 0
 
 
 def test_a_hand_edited_resolved_from_is_not_rendered_as_a_revision(w):

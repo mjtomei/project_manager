@@ -426,6 +426,14 @@ WHEN the user runs `pm pr show` and `pm pr merge`.
 THEN the malformed parts read as absent, the per-path labels stay honest, and
 the merge gate still requires the evidence statement — never a traceback.
 
+GIVEN an integration record whose hand-edited `unresolved` is a *list* of
+non-mappings (a list of strings, or of mappings with no string `path`).
+WHEN a routine integration re-check rewrites the record, then the user runs
+`pm pr show` and `pm pr merge`.
+THEN the value survives the rewrite (the record still refuses), every recorded
+path is labelled an attempt (never "resolved"), and no approval or merge is
+granted.
+
 GIVEN a `project.yaml` carrying a duplicate id inside a nested list, or a
 duplicate note id hidden behind a malformed member.
 WHEN the user runs `pm pr signoff integrate`.

@@ -816,7 +816,15 @@ def _sha_like(value) -> str | None:
 
 
 def _as_int(value, default: int = 0) -> int:
-    """*value* as an int, or *default* when it is not one (hand-edited state)."""
+    """*value* as an int, or *default* when it is not one (hand-edited state).
+
+    ``True`` is an ``int`` to ``isinstance`` but not a count: the rest of this
+    module (and the prompt's ``base_files_count`` reader) excludes booleans
+    explicitly, and counting a hand-edited ``true`` as 1 would invent a number
+    pm never recorded.
+    """
+    if isinstance(value, bool):
+        return default
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -1572,7 +1580,23 @@ def _compact_resolution(resolution: dict) -> dict:
     if unresolved_total is None and len(unresolved) > _YAML_LIST_LIMIT:
         unresolved_total = len(unresolved)
     if isinstance(raw_unresolved, list) or not raw_unresolved:
-        out["unresolved"] = unresolved[:_YAML_LIST_LIMIT]
+        kept = unresolved[:_YAML_LIST_LIMIT]
+        if raw_unresolved and not kept:
+            # A truthy *list* whose members are not mappings cannot name what
+            # pm failed to reconcile either (``resolution_entries`` drops
+            # them), but it is the same refusal marker the branch below keeps:
+            # ``valid_for``, the merge gate, the router and the prompt read
+            # the value's truthiness.  Writing ``[]`` here would launder the
+            # refusal into a clean, approvable resolution on the next routine
+            # re-check — every check compacts the record — so keep the value
+            # (bounded, with its real length) instead.  A list that still has
+            # mapping entries keeps its truthiness anyway; its malformed
+            # members read as absent, like every other hand-edited member.
+            kept = raw_unresolved[:_YAML_LIST_LIMIT]
+            if unresolved_total is None \
+                    and len(raw_unresolved) > _YAML_LIST_LIMIT:
+                unresolved_total = len(raw_unresolved)
+        out["unresolved"] = kept
         if unresolved_total is not None:
             out["unresolved_total"] = unresolved_total
     else:
@@ -2328,11 +2352,13 @@ def unresolved_paths(record: dict | None) -> set[str]:
     # A malformed ``unresolved`` value cannot name the paths it could not
     # reconcile, but it is still a refusal everywhere else (the merge gate and
     # the router read its truthiness, and the sign-off prompt labels the
-    # attempt "NOT resolved").  Conservatively treat every recorded path as an
-    # attempt so the CLI / launch / ``pm pr show`` cannot claim pm resolved a
-    # path the record itself says is unresolved.
-    unenumerable = bool(resolution.get("unresolved")) \
-        and not isinstance(resolution.get("unresolved"), list)
+    # attempt "NOT resolved").  That covers a truthy non-list value *and* a
+    # truthy list that names no path at all (its members are not mappings, or
+    # their ``path`` is not a string): ``resolution_entries`` drops those, so
+    # reading the list as "nothing unresolved" would let the CLI / launch /
+    # ``pm pr show`` label a path "resolved" while the prompt labels it "NOT
+    # resolved".  Conservatively treat every recorded path as an attempt then.
+    unenumerable = bool(resolution.get("unresolved")) and not paths
     if unenumerable or (
             record.get("status") == CONFLICT
             and not revision_of(resolution.get("applied_merge_sha"))):

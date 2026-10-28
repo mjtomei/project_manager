@@ -700,13 +700,14 @@ tests):
     record and a binding whose `base_sha`/`candidate_tree` is not a string are
     refusals, not `TypeError`s, and the router/driver reads the same
     mapping), `compact`/`_compact_resolution` drop non-mapping and non-string
-    members — except a truthy non-list `unresolved`, which is the record's
-    refusal marker and is kept verbatim: every integration check rewrites the
-    record through `compact`, so dropping it would launder a hand-edited
-    refusal into a clean, approvable resolution on the next routine re-check
-    (and the digest, computed over the compact form, changes with it, so an
-    approval bound to the clean form stops matching) — and
-    `return_awaiting`/`open_return` still answer. The TUI readers follow the
+    members — except a truthy `unresolved` that names no mapping, which is the
+    record's refusal marker and is kept verbatim: a non-list value, and equally
+    a *list* whose members are not mappings (a list of strings), because
+    `resolution_entries` drops those members and writing `[]` would launder the
+    refusal on the next routine re-check (every integration check rewrites the
+    record through `compact`).  The digest is computed over the compact form
+    and changes with it, so an approval bound to the clean form stops matching
+    — and `return_awaiting`/`open_return` still answer. The TUI readers follow the
     same contract: the tech-tree layout signature (run on every render), the
     auto-merge path and the auto-start status snapshot
     (`auto_start.collect_status_inputs`, also run on the TUI event loop — its
@@ -728,7 +729,10 @@ tests):
     so the CLI / sign-off launch / `pm pr show` must not label a path
     "resolved" while the prompt labels it "NOT resolved", and `summary` must
     not claim "resolved by record" for a record whose own `unresolved` is
-    truthy (the summary, the per-path line and the unresolved line agree). A
+    truthy (the summary, the per-path line and the unresolved line agree). The
+    same holds for a truthy `unresolved` *list* that names no path at all (its
+    members are not mappings, or their `path` is not a string): it is equally
+    unenumerable, so every recorded path is an attempt then too. A
     malformed member *inside* a well-formed entry (the
     four id lists, `records`, `path`/`resolver`/`blob`) reads as absent in the
     compact record instead of raising (`list(5)`) or splitting a string into
