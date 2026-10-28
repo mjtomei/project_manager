@@ -221,26 +221,33 @@ def _schedule_rebalance(session_name: str) -> None:
     _log.info("scheduled background rebalance for %d window(s)", len(window_ids))
 
 
-def _resolve_start_session_name() -> str:
-    """Return the pm session name ``pm session`` should attach/create.
+def _known_ambient_session() -> str | None:
+    """Return the ambient pm session only when this HOME knows it.
 
-    Prefers the ambient tmux session so workdir clones and meta workdirs
-    (whose git-root hash differs from the session hosting them) attach to
-    the right session.
-
-    The ambient session is only adopted when **this HOME knows it** — its
-    pane registry exists.  Without that check, a process running under a
+    A pane registry file in the current HOME proves the session belongs to
+    this installation.  Without that check, a process running under a
     different HOME (tests, tooling, a temporary sandbox) that inherits
-    ``$TMUX``/``$TMUX_PANE`` would adopt a foreign session, see an empty
-    registry, conclude the TUI is missing, and respawn a TUI into the
+    ``$TMUX``/``$TMUX_PANE`` would adopt a foreign session — and, seeing an
+    empty registry, conclude its TUI is missing and respawn one into the
     live session.  That is exactly how a smoke test once disturbed the
-    user's live controller.  Falling back to the cwd-derived name instead
-    makes such a process create its own (isolated) session.
+    user's live controller.  The same guard keeps `pm session kill` and
+    `pm session mobile` from targeting a foreign session.
     """
     ambient = _get_current_pm_session()
     if ambient and pane_registry.registry_path(ambient).exists():
         return ambient
-    return _get_session_name_for_cwd()
+    return None
+
+
+def _resolve_start_session_name() -> str:
+    """Return the pm session name ``pm session`` should attach/create.
+
+    Prefers the ambient tmux session (workdir clones and meta workdirs
+    hash differently from the session hosting them) but only when this
+    HOME knows it; otherwise uses the cwd-derived name, which creates an
+    isolated session instead of touching a foreign one.
+    """
+    return _known_ambient_session() or _get_session_name_for_cwd()
 
 
 def _pick_existing_session(candidates: list[str]) -> str:
@@ -734,7 +741,7 @@ def session_kill(start_dir):
         # them).  Never pick a different project's ambient session over a
         # live cwd session.
         candidates = [_get_session_name_for_cwd()]
-        ambient = _get_current_pm_session()
+        ambient = _known_ambient_session()
         if ambient and ambient not in candidates:
             candidates.append(ambient)
         session_name = _pick_existing_session(candidates)
@@ -804,7 +811,7 @@ def session_mobile(force: bool | None):
     making the tool usable on narrow terminals (< 120 cols).
     """
     candidates = [_get_session_name_for_cwd()]
-    ambient = _get_current_pm_session()
+    ambient = _known_ambient_session()
     if ambient and ambient not in candidates:
         candidates.append(ambient)
     session_name = _pick_existing_session(candidates)

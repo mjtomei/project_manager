@@ -369,6 +369,7 @@ class TestStartSessionName:
                             lambda name: tmp_path / f"{name}.json")
 
         # Temporary HOME: no registry for the inherited session.
+        assert session_mod._known_ambient_session() is None
         assert session_mod._resolve_start_session_name() == "pm-fresh"
 
     def test_ambient_session_with_registry_is_adopted(
@@ -383,6 +384,7 @@ class TestStartSessionName:
                             lambda name: tmp_path / f"{name}.json")
         (tmp_path / "pm-live.json").write_text("{}")
 
+        assert session_mod._known_ambient_session() == "pm-live"
         assert session_mod._resolve_start_session_name() == "pm-live"
 
 
