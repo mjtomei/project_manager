@@ -26,7 +26,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Collection
 
 from pm_core import qa_instructions
 from pm_core.paths import configure_logger
@@ -2958,6 +2958,8 @@ def _poll_tmux_verdicts(
     release_retry_at = 0.0
     # Scenarios whose recorded worker pane died this run (see _live_worker_pane).
     dead_workers: set[int] = set()
+    # Last retained count logged as blocking a dequeue (log once per change).
+    _held_logged = [0]
 
     def _launch_next_queued() -> bool:
         """Release settled allocations, then launch one queued scenario.
@@ -3000,9 +3002,23 @@ def _poll_tmux_verdicts(
             # container — including this run's own workers — so the remaining
             # headroom is *additional* capacity, not the total batch. The
             # default (unlimited) path performs no inventory.
-            concurrency_cap = _container_headroom_cap(
-                concurrency_cap, desired_cap, active=active)
-        if concurrency_cap > 0 and active >= concurrency_cap:
+            # This run's settled containers that are still running (kept for
+            # a human, viewed, or release deferred) count against the batch.
+            own = {ident for s in state.scenarios
+                   if s.index in state.scenario_verdicts
+                   and s.index not in pending and s.index not in verifying
+                   for ident in (s.container_id, s.container_name) if ident}
+            concurrency_cap, held = _container_launch_room(
+                concurrency_cap, desired_cap, active=active, own=own)
+        else:
+            held = 0
+        if concurrency_cap > 0 and active + held >= concurrency_cap:
+            if held and held != _held_logged[0]:
+                _log.info("QA %s: %d queued scenario(s) wait for container "
+                          "headroom; %d of this run's container(s) are retained "
+                          "(container-max-running)", state.pr_id,
+                          len(_launch_queue), held)
+            _held_logged[0] = held
             return False
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
@@ -4515,27 +4531,54 @@ def _container_headroom_cap(cap: int, desired: int | None = None,
     — comparing ``active`` directly to the headroom would stall a capped run at
     roughly half the configured concurrency.
     """
+    return _container_launch_room(cap, desired, active=active)[0]
+
+
+def _container_launch_room(cap: int, desired: int | None = None, active: int = 0,
+                           own: Collection[str] = ()) -> tuple[int, int]:
+    """Return ``(batch, held)`` for the next queued launch (one inventory).
+
+    ``own`` names this run's settled scenario containers (IDs or names).
+    ``held`` counts those still running: kept for a human (INPUT_REQUIRED), a
+    viewed window, or a deferred release.  They consume launch capacity like
+    any other container, so the caller launches only while
+    ``active + held < batch``: a retained container is never permission to
+    launch past the limit, and the queued scenario waits for room instead.
+    The at-least-one floor (one launch into a full runtime) applies only to a
+    run that holds no container.  ``batch`` is ``active + held + headroom``
+    capped by ``desired + held``; an unknown inventory is ``(1, 0)``, which
+    launches one at a time (the outage case) and re-clamps on the next poll.
+    """
     from pm_core import container as container_mod
     limit = container_mod.max_running_containers()
     if limit <= 0:
         # No inventory: fall back to the run's desired batch (or the legacy
         # already-clamped value when the caller predates ``desired``).
-        return cap if desired is None else (desired if desired > 0 else 0)
+        return (cap if desired is None else (desired if desired > 0 else 0)), 0
     if desired is None:
         # Legacy callers keep the old clamp semantics.
-        return _clamp_to_container_headroom(cap)
-    running = container_mod.running_container_count()
-    if running is None:
+        return _clamp_to_container_headroom(cap), 0
+    held = 0
+    if own:
+        from pm_core.container_reaper import list_containers
+        inventory = list_containers()
+        running = None if inventory is None else [i for i in inventory if i.running]
+        if running is not None:
+            held = sum(1 for info in running
+                       if info.name in own or (info.id and info.id in own))
+        running_count = None if running is None else len(running)
+    else:
+        running_count = container_mod.running_container_count()
+    if running_count is None:
         # An unreadable inventory is unknown, not zero running containers:
         # launch one at a time and re-clamp on the next poll.
-        return 1
-    # ``active + headroom`` is additional capacity on top of this run's own
-    # workers. Keep it at least one: zero would encode "unlimited" and launch
+        return 1, 0
+    # Keep the batch at least one: zero would encode "unlimited" and launch
     # past a momentarily full runtime instead of waiting for a slot.
-    total = max(1, active + max(0, limit - running))
+    total = max(1, active + held + max(0, limit - running_count))
     if desired > 0:
-        total = min(total, desired)
-    return total
+        total = min(total, desired + held)
+    return total, held
 
 
 def _execute_and_finalize(

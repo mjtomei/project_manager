@@ -586,11 +586,18 @@ crashing `pm container status`.
   the existing queued-scenario mechanism. Settled scenarios release their
   allocations before
   handing slots to queued work (after PASS verification, with the same human,
-  retention and viewed-window exceptions). The cap bounds the launch batch, not
-  the sum of deliberately kept containers: a scenario held for a human or a
-  viewed window keeps its allocation, and queued work still proceeds (at least
-  one scenario always launches) rather than stalling behind a pane that may
-  never close. Resume must not recreate already
+  retention and viewed-window exceptions). A settled scenario
+  that keeps its allocation (held for a human after INPUT_REQUIRED, a viewed
+  window, or a deferred release) still consumes launch capacity (A8): with a
+  readable inventory the run launches the next queued scenario only while
+  `active + this run's still-running settled containers` is below the
+  re-clamped batch. A retained container is never permission to launch past
+  the limit; the queued scenario stays queued until room appears (another
+  process's workers finish, or the retained pane is closed and reclaimed), and
+  the retained container and its evidence are preserved. The at-least-one
+  floor (one launch into a full runtime) applies only to a run that holds no
+  container of its own, and an unreadable inventory still clamps to one
+  (qa.md resolution 19). Resume must not recreate already
   settled workers. Final resume snapshots contain only unattempted queued
   scenarios; older stale queue entries cannot relaunch settled or failed work.
   Failed queued launches leave no worker/verdict and must not strand the remaining queue.
@@ -701,6 +708,15 @@ container cleared it and kept its files.  Running state is not health.
   identity from obsolete names, which a replacement can reuse. QA's rename-safe
   attachment checks cover immutable-ID clients and PM-managed activity locks;
   this exception does not waive other rename or runtime acceptance requirements.
+- A8 *Retained containers and `container-max-running`* — resolved by the user
+  after QA S51 (note-6e8fde3, controller note-c21abc7): "Count retained
+  containers toward the limit." S51 observed A's 4 workers + B + C s1 (kept
+  INPUT_REQUIRED) = 6 = L+1, after which C launched s2 as its floor, peaking
+  at 7 = L+2. Containers retained for INPUT_REQUIRED (and other settled
+  allocations of the run that are still running) consume launch capacity;
+  the run defers the queued launch instead of exceeding the limit, and keeps
+  the retained containers. Replaces the earlier rule that the cap bounded
+  only the launch batch, not deliberately kept containers.
 
 ## 4. Edge cases
 

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pm_core import hook_events, qa_loop, tmux
+from pm_core import container_reaper, hook_events, qa_loop, tmux
 
 
 @pytest.mark.parametrize("verify", [False, True])
@@ -253,15 +253,18 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
     # Spy on the re-clamp: the batch reaching the cap check must be recomputed
     # from the desired size, not left at the start-time clamped value.
-    real_cap = qa_loop._container_headroom_cap
+    real_room = qa_loop._container_launch_room
     reclamps: list[tuple[int | None, int, int]] = []
 
-    def _spy(cap, desired=None, active=0):
-        result = real_cap(cap, desired=desired, active=active)
-        reclamps.append((desired, active, result))
+    def _spy(cap, desired=None, active=0, own=()):
+        result = real_room(cap, desired=desired, active=active, own=own)
+        reclamps.append((desired, active, result[0]))
         return result
 
-    monkeypatch.setattr(qa_loop, "_container_headroom_cap", _spy)
+    monkeypatch.setattr(qa_loop, "_container_launch_room", _spy)
+    # Settled s1's container is gone by then: only the active worker runs.
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: [
+        container_reaper.ContainerInfo(name="pm-t-qa-pr-aaaa-L-s2", running=True)])
     monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
     monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
     ticks = 0
@@ -392,9 +395,16 @@ def test_failed_settled_release_is_retried_so_the_batch_grows_back(
         if ticks >= 6:
             state.stop_requested = True
 
+    def inventory():
+        if outage["polls_left"] > 0:
+            return None  # the outage: the runtime cannot be listed
+        return [container_reaper.ContainerInfo(
+            name=f"pm-t-qa-pr-aaaa-L-s{i}", running=True) for i in sorted(running)]
+
     monkeypatch.setattr(container_mod, "max_running_containers", lambda: 2)
     monkeypatch.setattr(container_mod, "running_container_count",
-                        lambda: len(running))
+                        lambda: None if (inv := inventory()) is None else len(inv))
+    monkeypatch.setattr(container_reaper, "list_containers", inventory)
     monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
     monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
     monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
@@ -418,11 +428,129 @@ def test_failed_settled_release_is_retried_so_the_batch_grows_back(
         lambda: None, queued_scenarios=state.scenarios[2:],
         concurrency_cap=2, desired_cap=2, use_containers=True)
 
-    # While the release is deferred, the two stale workers fill the limit and
-    # the floor admits one queued worker. Once the retried release succeeds,
+    # While the inventory is unreadable the release is deferred and the
+    # unknown count admits one queued worker (the outage floor). Once the retried release succeeds,
     # the batch grows back to the desired two active workers.
     assert running.isdisjoint({1, 2}), "the deferred release must be retried in-run"
     assert launched == [1, 2, 3, 4]
+
+
+def _running(*names):
+    return [container_reaper.ContainerInfo(name=n, id=f"id-{n}", running=True)
+            for n in names]
+
+
+A_WORKERS = [f"pm-a-qa-pr-aaaa-L-s{i}" for i in range(17, 21)]
+B_IMPL = "pm-a-impl-pr-bbbb"
+C1, C2 = "pm-c-qa-pr-cccc-L-s1", "pm-c-qa-pr-cccc-L-s2"
+
+
+def test_a_retained_container_consumes_launch_capacity(monkeypatch):
+    """QA S51: A's 4 workers + B + C s1 (INPUT_REQUIRED, kept for a human)
+    filled container-max-running=5 and C still launched s2 as its
+    at-least-one floor, peaking at 7 = L+2. A retained container is not
+    permission to launch past the limit: C's s2 waits for room."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    inventory = _running(*A_WORKERS, B_IMPL, C1)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: inventory)
+
+    batch, held = qa_loop._container_launch_room(1, desired=4, active=0, own={C1})
+    assert held == 1
+    assert 0 + held >= batch, "C must not launch s2 into a full runtime"
+
+    # Once A's workers are gone there is room again, and C launches.
+    inventory = _running(B_IMPL, C1)
+    batch, held = qa_loop._container_launch_room(1, desired=4, active=0, own={C1})
+    assert (batch, held) == (4, 1) and 0 + held < batch
+
+
+def test_a_run_holding_nothing_keeps_its_floor_launch(monkeypatch):
+    """The floor still admits one launch into a full runtime (L+1) for a run
+    with no container of its own, so a fresh run is never starved."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_reaper, "list_containers",
+                        lambda: _running(*A_WORKERS, B_IMPL))
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 5)
+    assert qa_loop._container_launch_room(1, desired=4, active=0) == (1, 0)
+    # A settled scenario whose container is already released holds nothing.
+    assert qa_loop._container_launch_room(
+        1, desired=4, active=0, own={C1}) == (1, 0)
+
+
+def test_poll_defers_a_queued_launch_behind_a_retained_container(
+        tmp_path, monkeypatch):
+    """QA S51 end to end in the verdict poll: C s1 settles INPUT_REQUIRED and
+    keeps its container; with the runtime full, s2 stays queued (no launch),
+    and it launches once another process's workers free room."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-cccc")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-c-qa-pr-cccc-L-s{i}")
+        for i in (1, 2)
+    ]
+    others = list(A_WORKERS) + [B_IMPL]
+    running = []          # this run's containers still running
+    launched = []
+    polls = {"n": 0, "peak": 0}
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        running.append(scenario.container_name)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])
+
+    def tick(_seconds):
+        polls["n"] += 1
+        polls["peak"] = max(polls["peak"], len(others) + len(running))
+        if polls["n"] == 4:
+            del others[:4]  # A's workers finish and are released
+        if polls["n"] >= 8:
+            state.stop_requested = True
+
+    def release(st, session, *, scenarios=None):
+        return False  # INPUT_REQUIRED is kept for a human: nothing removed
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: len(others) + len(running))
+    monkeypatch.setattr(container_reaper, "list_containers",
+                        lambda: _running(*others, *running))
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(
+        qa_loop, "extract_verdict_from_transcript",
+        lambda path, *a: "INPUT_REQUIRED" if Path(path).stem == "s1" else None)
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
+                        lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-c", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=4, use_containers=True)
+
+    assert state.scenario_verdicts.get(1) == "INPUT_REQUIRED"
+    assert launched == [1, 2], "s2 launches once room is free"
+    assert C1 in running, "the retained container is preserved"
+    # s1's floor launch into the full runtime is L+1 = 6; s2 never ran
+    # alongside A4 + B + the retained s1 (the observed L+2 = 7).
+    assert polls["peak"] == 6, polls
 
 
 def test_queued_scenarios_stay_queued_on_the_dashboard_during_launches(
