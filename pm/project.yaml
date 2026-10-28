@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T01:19:10.859263+00:00'
+  updated_at: '2026-10-28T01:25:19.468524+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11300,6 +11300,23 @@ prs:
       /pm-captures/scenarios/77.'
     created_at: '2026-10-28T01:19:10Z'
     last_edited: '2026-10-28T01:19:10Z'
+  - id: note-00a1df5
+    text: 'QA S74 (2026-10-28, 619ae5c6, nested rootless podman 3.4.4, fake-claude):
+      all Thens PASS live, no code change. Bar mem 8G/40G (pm) 10 s after PR1 start
+      (U = used + growth). At 15g, the 4 refusals had the exact arithmetic text (impl/review/signoff
+      in the L pane, qa-debug on stderr, exit 1), with no containers; the bar showed
+      blocked: qa-debug smoke +3. 1g gave the single-container text, and 99% reserve
+      gave the host-headroom text with the reserve hint. The 40g d on PR2 was admitted;
+      +3 -> +2, and plain bar 600 s after the refusals. Reuse at 1g: s and pm pr start
+      switched, same ID, no Blocked or queue entry. A7: refusal at 1g kept both dead
+      windows, same pane IDs, cmp identical. At 40g, Created -> kill_window -> new_window,
+      with both Closed lines in the pm async exit entries. Shim: max keypress 0.13-0.18
+      s in all modes, hang/fail unmeasurable within 14-16 s, measurement-unavailable
+      refusal, recovery within 14 s. Harness trap: a tmux server started from a tool
+      shell carries global PYTHONPATH=/opt/pm-src into the TUI (old pm, no bar), so
+      set -g PYTHONPATH /workspace before pm session. Captures /pm-captures/scenarios/74.'
+    created_at: '2026-10-28T01:25:19Z'
+    last_edited: '2026-10-28T01:25:19Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
