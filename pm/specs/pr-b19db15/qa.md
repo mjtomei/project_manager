@@ -52,7 +52,15 @@ recording-recipe bugs that any worker following the recipe hits:
   capture directory and a `new-session` that never creates the recorder stop
   the run with their own message instead of being misdiagnosed as a dead
   recorder, the web-UI driver block refuses a capture directory it cannot
-  enter, and a failed web-UI start removes the pid it recorded.
+  enter, and a failed web-UI start removes the pid it recorded;
+- a failure message names a remedy that still exists: the web-UI busy-port
+  refusal says the answering server's pid is no longer in `server.pid` (the
+  cleanup just cleared it) and to find it with `ss -ltnp`, and the Playwright
+  resolution failure offers the global link only when
+  `/usr/lib/node_modules/playwright` exists (otherwise `npm i playwright`).
+  Both recording recipes' produced-files lists name the flow's diagnostics
+  (`recorder.status`, `recorder-stderr.log`, and `recorder-pane.log` when a
+  wait gives up) so the manifest's `## Files` section matches the directory.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.

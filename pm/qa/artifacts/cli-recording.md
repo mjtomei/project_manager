@@ -24,6 +24,11 @@ substitutes the actual captures directory for `<capture-dir>`):
   player library, works offline. H.264/mp4 plays everywhere including
   iOS Safari (VP8/VP9 webm does not decode on iOS). The `.cast` stays
   as the small, exact-replay/grep source.
+- `recorder.status`, `recorder-stderr.log` (and `recorder-pane.log` when a
+  wait gives up) — the no-TTY scaffold's diagnostics: asciinema's own exit
+  status, its error output, and the pane's last screen. They are failure
+  evidence rather than capture artifacts; mention whichever exist in the
+  manifest's `## Files` section.
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
   relevant. Include a `## Files` section listing every non-default

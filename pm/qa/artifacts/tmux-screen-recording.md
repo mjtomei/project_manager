@@ -26,6 +26,11 @@ names):
   plain `<video controls>` element — native pause / scrub, no player
   library, works offline. The `.cast` stays as the small,
   exact-replay/grep source.
+- `recorder.status`, `recorder-stderr.log` (and `recorder-pane.log` when a
+  wait gives up) — the capture flow's diagnostics: asciinema's own exit
+  status, its error output, and the pane's last screen. They are failure
+  evidence rather than capture artifacts; mention whichever exist in the
+  manifest's `## Files` section.
 - `manifest.md` — frontmatter + short prose: workdir path the capture
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.

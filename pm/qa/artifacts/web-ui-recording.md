@@ -95,8 +95,14 @@ rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
 # this run's evidence. `curl` without `-f` on purpose: any HTTP answer,
 # including a 404, means the port is taken.
 if curl -s -o /dev/null --connect-timeout 2 --max-time 5 "$APP_URL/"; then
+    # The cleanup above already removed server.pid, and the server answering
+    # is not necessarily this capture's (another scenario may hold the port),
+    # so this block must not stop it and the teardown has no pid left to read:
+    # name a remedy that works instead of pointing at a teardown that cannot.
     echo "something already answers on $APP_URL — a previous run's server or" \
-        "another scenario holds the port; stop it (or pick another PORT)" >&2
+        "another scenario holds the port. Its pid is no longer in server.pid" \
+        "(this step cleared it): find it with 'ss -ltnp' on the port and stop" \
+        "it, or pick another PORT" >&2
     exit 1
 fi
 
@@ -180,9 +186,13 @@ fi
 # worker gets this error twice (once here, once from the driver) with no
 # indication of what to do about it.
 node -e "import('playwright').then(() => console.log('playwright ok'))" || {
-    echo "playwright does not resolve beside driver.mjs — link the image's" \
-        "global install ('ln -sfn /usr/lib/node_modules node_modules') or run" \
-        "'npm i playwright' here" >&2
+    # The link only helps when the image's global install actually holds the
+    # package; offering it unconditionally sends a worker on a host without
+    # one to a remedy that cannot work (the same hole the guard above closes).
+    echo "playwright does not resolve beside driver.mjs — if" \
+        "/usr/lib/node_modules/playwright exists, link it ('ln -sfn" \
+        "/usr/lib/node_modules node_modules'); otherwise run 'npm i" \
+        "playwright' here" >&2
     exit 1
 }
 CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs

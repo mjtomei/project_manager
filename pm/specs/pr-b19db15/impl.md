@@ -653,6 +653,37 @@ R16. **A remedy must not damage the thing it is meant to fix, and no request
      is recorded in `http.log` as curl's own error with status `000`, so that
      route's failure is the evidence rather than a hang.
 
+R17. **A refusal must name a remedy that still exists, and the produced-files
+   list must match what the flow writes.** Three leftovers of the PR's own
+   class found by review loop e7e1 i4:
+   - **The busy-port refusal pointed at a teardown that cannot work.** Step 1
+     clears a stale `server.pid` *before* the port pre-check, on purpose: the
+     server answering may be another scenario's, so acting on this capture's
+     recorded pid could signal an innocent process. But the refusal said only
+     "stop it (or pick another PORT)", and the documented recovery is the
+     teardown — which now has no pid to read. Verified live with a real local
+     server on the port: the message named neither the manual hunt nor the
+     fact that the pid file is gone. It now says the pid is no longer in
+     `server.pid` and to find it with `ss -ltnp` on the port, so the failure
+     is actionable without the file this step deleted.
+   - **The Playwright resolution failure offered a remedy that cannot work.**
+     The block links the image's global install only when
+     `/usr/lib/node_modules/playwright` exists (R16), but the failure message
+     still said "link the image's global install ('ln -sfn
+     /usr/lib/node_modules node_modules') or run 'npm i playwright' here" — on
+     a host without that package the first suggestion leaves a link that
+     cannot resolve, the same flaw the guard fix was about. The message is now
+     conditional ("if /usr/lib/node_modules/playwright exists, link it …;
+     otherwise run 'npm i playwright' here").
+   - **The produced-files list omitted the flow's diagnostics.** Both
+     recording recipes write `recorder.status` and `recorder-stderr.log` into
+     the capture directory (and `recorder-pane.log` when a wait gives up),
+     while their manifest section asks for "every non-default file the
+     capture produced". A worker following the produced-files list does not
+     know they exist, so the manifest's `## Files` section and the directory
+     disagree. Both lists now name them as failure evidence and say to
+     mention whichever exist in the manifest.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -663,9 +694,9 @@ R16. **A remedy must not damage the thing it is meant to fix, and no request
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), a failed `new-session` is reported as a start failure (R15), and the `agg` install is guarded on `command -v agg` so it cannot replace a working binary (R16) |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15); the `agg` install is guarded on `command -v agg` (R16) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16) |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), a failed `new-session` is reported as a start failure (R15), the `agg` install is guarded on `command -v agg` so it cannot replace a working binary (R16), and the produced-files list names the flow's diagnostics (R17) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15); the `agg` install is guarded on `command -v agg` (R16); the produced-files list names the flow's diagnostics (R17) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15); the Playwright link is conditional on `/usr/lib/node_modules/playwright` so a global directory without the package is not linked, and the Layer 2 route snapshots carry per-request `--connect-timeout`/`--max-time` bounds (R16); the busy-port refusal names the manual pid hunt instead of a teardown whose `server.pid` this step just cleared, and the Playwright resolution failure only offers the link when the package is there (R17) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -695,7 +726,11 @@ R16. **A remedy must not damage the thing it is meant to fix, and no request
    download runs and the file is made executable — the driver block, given a
    global `node_modules` that does not hold `playwright`, stops at its
    resolution check without creating the link, and the Layer 2 route snapshots
-   carry their per-request bounds).
+   carry their per-request bounds; R17's messages: the busy-port refusal names
+   the manual pid hunt and the cleared `server.pid`, the Playwright resolution
+   failure offers the link only when the package exists, and both recording
+   recipes' produced-files lists name `recorder.status`,
+   `recorder-stderr.log` and `recorder-pane.log`).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -877,3 +912,26 @@ R16. **A remedy must not damage the thing it is meant to fix, and no request
   driver block still linked and ran the driver against the image's
   `/usr/lib/node_modules/playwright`, and the Layer 2 block wrote `http.log`
   and `sse.log` against a real local server with the new timeouts in place.
+- Review loop e7e1 i4 verified R17 live in this container. The busy-port
+  refusal was reproduced with a real local HTTP server answering the port
+  (Python `http.server` on 8731) and the recipe's own start block: pre-fix it
+  printed "something already answers on … — a previous run's server or
+  another scenario holds the port; stop it (or pick another PORT)" while the
+  cleanup on the line above had already removed `server.pid`, so the
+  documented recovery (the teardown, which reads that file) could not run and
+  the message did not say so; post-fix the same block exits 1 with "Its pid is
+  no longer in server.pid (this step cleared it): find it with 'ss -ltnp' on
+  the port and stop it, or pick another PORT". The Playwright message was
+  checked by running the driver block against a global `node_modules` that
+  holds no `playwright`: it now offers the link only when
+  `<global>/playwright` exists and otherwise names `npm i playwright`, so the
+  remedy it prints can work on a host without the image's global install.
+  Both produced-files lists now name `recorder.status`,
+  `recorder-stderr.log` and `recorder-pane.log`, matching what the capture
+  flow writes and what the manifest's `## Files` section asks for. Tests: 3
+  new/tightened assertions (the produced-files lists in both recipes, the
+  busy-port refusal's remedy, the resolution message's conditional link) —
+  all four cases fail against the pre-fix recipes (checked by restoring them
+  in place). File 107 pass; related suites (`test_qa_artifact_web_ui_recording.py`,
+  `test_qa_instructions.py`) pass. No `pm_core/` change; the dropped
+  helper/prompt/verifier work stays dropped.

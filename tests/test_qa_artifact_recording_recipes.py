@@ -185,6 +185,27 @@ class TestRecipes:
         assert Path(name).stem in ids
 
     @pytest.mark.parametrize("name", RECIPES)
+    def test_recipe_lists_its_diagnostic_files(self, name):
+        """The flow writes diagnostics the produced-files list never names.
+
+        Both capture flows write ``recorder.status`` and
+        ``recorder-stderr.log`` into the capture directory (and
+        ``recorder-pane.log`` when a wait gives up), while the recipe's
+        manifest section asks for "every non-default file the capture
+        produced". A worker reading only the produced-files list does not
+        know they exist, so the manifest's ``## Files`` section and the
+        directory disagree — the "promised artifact never documented" class
+        this recipe keeps hitting.
+        """
+        section = _recipe_text(name).split(
+            "## What this recipe produces", 1)[1].split("## Capture", 1)[0]
+        for fname in ("recorder.status", "recorder-stderr.log",
+                      "recorder-pane.log"):
+            assert fname in section, (
+                f"{name}: the produced-files list never names {fname}, which "
+                "the capture flow writes into the capture directory")
+
+    @pytest.mark.parametrize("name", RECIPES)
     def test_capture_section_creates_the_capture_dir(self, name):
         """The capture dir must be created before asciinema writes into it.
 
@@ -1571,6 +1592,16 @@ def test_web_ui_driver_links_only_when_playwright_is_there(tmp_path):
     assert r.returncode != 0, (
         "the block ran the driver without a resolvable playwright")
     assert "playwright does not resolve beside driver.mjs" in r.stderr, r.stderr
+    # The link is only a remedy when the global install holds the package;
+    # offering it unconditionally (as the block used to) sends a worker on a
+    # host without one to a fix that cannot work.
+    assert f"{global_dir}/playwright exists" in r.stderr, (
+        "the resolution failure presents the global link as the fix without "
+        "checking that it holds playwright, so a worker without a global "
+        "install is sent to a remedy that cannot work: " + r.stderr)
+    assert "npm i playwright" in r.stderr, (
+        "the resolution failure names no remedy that works without a global "
+        "install: " + r.stderr)
     assert not os.path.lexists(capdir / "node_modules"), (
         "the block linked a global node_modules that does not hold playwright, "
         "so the remedy it prints cannot work and a later `npm i playwright` "
@@ -1672,6 +1703,11 @@ class TestWebUiStartExecution:
             "a port held by another server was accepted as this run's app")
         assert "already answers" in r.stderr, (
             "the recipe does not say why it refused the port: " + r.stderr)
+        assert "ss -ltnp" in r.stderr and "server.pid" in r.stderr, (
+            "the refusal points at a remedy that cannot work: the cleanup "
+            "just deleted server.pid (so the teardown has no pid to read) "
+            "and the answering server may not be this capture's, so the "
+            "message has to name the manual pid hunt: " + r.stderr)
         assert not launched.exists(), (
             "the recipe started the app on a port another server holds")
 
