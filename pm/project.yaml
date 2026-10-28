@@ -34627,6 +34627,21 @@ prs:
       /pm-captures/scenarios/22/ (per-story cast + mp4 + log-pane + qa_status + manifest).'
     created_at: '2026-10-28T17:16:43Z'
     last_edited: '2026-10-28T17:16:43Z'
+  - id: note-70abcf5
+    text: 'Concretizer S24 (early exits): refined steps verified end-to-end at HEAD.
+      Non-obvious mechanics: (1) `pm pr start` refuses a PR not committed on master
+      — after `pm pr add`, run `pm push` and merge the `pm/sync-<ts>` branch first.
+      (2) auto-sequence ticks must run from a pane of the live pm session: the detached
+      `pr qa-run-bg` driver resolves the session via `_get_current_pm_session()` (needs
+      TMUX), so a tick from a plain shell prints `running: qa (launched)` but the
+      driver exits `No pm session found` and writes no qa_status.json — the outside-tmux
+      control asserts only the tick report, not run progress. (3) the missing-spec
+      TUI run still launches interactive Scenario 0 before the spec gate; qa_status.json
+      then has overall INPUT_REQUIRED and the spec-gate error. (4) `pm qa run` reaches
+      the handoff only when a QA spec exists in the workdir (`<workdir>/pm/specs/<pr>/qa.md`),
+      else it stops at the spec gate.'
+    created_at: '2026-10-28T16:13:47Z'
+    last_edited: '2026-10-28T16:13:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
