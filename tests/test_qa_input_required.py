@@ -275,12 +275,43 @@ class TestScanWaitingScenarios:
         assert held_scan.follow_ups[1].verdict == VERDICT_PASS
         assert live_scan.follow_ups[1].verdict == VERDICT_PASS
 
+    def test_repeated_pane_loss_is_capped(self, tmp_path):
+        """Each hold/reopen cycle gives the live loop a fresh retry budget,
+        so the waiting scan caps its own relaunches: a worker that asks for
+        input and then keeps dying must not be relaunched forever."""
+        path = _write(
+            tmp_path / "t.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"))
+        state = _waiting_state(path)
+        source = dict(state.waiting_input_sources[1])
+        with self._patch_pane(False):
+            for _ in range(qa_loop._SCENARIO_MAX_RETRIES):
+                assert _scan_waiting_scenarios(state).dropped == {1}
+                # The live loop "relaunches": back to waiting for a retry.
+                state.waiting_for_input.add(1)
+                state.waiting_input_sources[1] = dict(source)
+                state.scenario_verdicts[1] = VERDICT_INPUT_REQUIRED
+                state.scenarios[0].pane_id = "%1"
+            scan = _scan_waiting_scenarios(state)
+        assert scan.dropped == set()
+        assert 1 not in state.waiting_for_input
+        # Terminal evidence is kept rather than waiting (and relaunching)
+        # forever.
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
     def test_waiting_source_identity_requires_the_same_attempt(self):
         state = _waiting_state("/tmp/x.jsonl")
         scenario = state.scenarios[0]
         source = state.waiting_input_sources[1]
         assert _waiting_source_is_current(state, scenario, source)
         source["session_id"] = "other"
+        assert not _waiting_source_is_current(state, scenario, source)
+        # A relaunched worker can reuse the per-scenario transcript path, so
+        # the session check is what catches it — but a different transcript
+        # is also a different attempt.
+        source["session_id"] = scenario.session_id
+        source["transcript_path"] = "/tmp/y.jsonl"
         assert not _waiting_source_is_current(state, scenario, source)
 
 
@@ -707,3 +738,90 @@ class TestPromptReconciliation:
         assert "INPUT_REQUIRED is **not** final" in prompt
         assert "follow-up verdict" in prompt
         assert "PASS and NEEDS_WORK are final for this run" in prompt
+
+
+# ---------------------------------------------------------------------------
+# TUI tracking of a held run
+# ---------------------------------------------------------------------------
+
+def _poll_app(tmp_path):
+    """Minimal TUI app for poll_qa_state / stop_qa."""
+    from unittest.mock import MagicMock
+
+    from pm_core import store
+
+    pm_dir = tmp_path / "pm"
+    pm_dir.mkdir(exist_ok=True)
+    store.save({"project": {"name": "t", "repo": "/tmp/r",
+                            "base_branch": "master"},
+                "plans": [],
+                "prs": [{"id": "pr-001", "title": "T", "branch": "b",
+                         "status": "qa", "workdir": str(tmp_path / "wd"),
+                         "notes": []}]}, pm_dir)
+    app = MagicMock()
+    app._root = pm_dir
+    app._qa_loops = {}
+    app._resumed_qa_pr_ids = set()
+    app._self_driving_qa = {}
+    app._qa_resume_poll_counter = 1
+    return app
+
+
+def test_poll_qa_state_drops_a_crashed_held_run(tmp_path):
+    """Only a genuine INPUT_REQUIRED result is held.  A run whose thread
+    died (verdict ERROR) must take the normal completion path — otherwise
+    the state stays pinned in ``_qa_loops`` forever and every later ``t``
+    reports "waiting for input" for a run with no watcher."""
+    from pm_core.tui import qa_loop_ui
+
+    app = _poll_app(tmp_path)
+    state = _waiting_state(tmp_path / "t.jsonl")
+    state.qa_workdir = str(tmp_path)
+    state.held = True
+    state.running = False
+    state.latest_verdict = "ERROR"
+    state._ui_complete_notified = True
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    app._qa_loops = {"pr-001": state}
+
+    with patch.object(qa_loop_ui, "_resume_incomplete_qa"), \
+         patch("pm_core.runtime_state.set_action_state"):
+        qa_loop_ui.poll_qa_state(app)
+        qa_loop_ui.poll_qa_state(app)
+
+    assert "pr-001" not in app._qa_loops
+    assert not (tmp_path / "qa_resume.json").exists()
+
+
+def test_stop_qa_requests_stop_on_a_held_run(tmp_path):
+    from pm_core.tui import qa_loop_ui
+
+    app = _poll_app(tmp_path)
+    state = _waiting_state(tmp_path / "t.jsonl")
+    state.running = False
+    state.held = True
+    app._qa_loops = {"pr-001": state}
+
+    qa_loop_ui.stop_qa(app, "pr-001")
+
+    assert state.stop_requested is True
+    app.log_message.assert_called()
+
+
+def test_waiting_suffix_fits_the_status_line():
+    """The "(waiting)" marker must not push a row past the terminal width —
+    a wrapped row shifts the whole qa_status screen."""
+    import re
+
+    from pm_core import qa_status
+
+    status = {
+        "pr_id": "pr-001", "overall": "", "error": "",
+        "scenarios": [{"index": 1, "title": "A fairly long scenario title",
+                       "verdict": VERDICT_INPUT_REQUIRED,
+                       "verdict_reason": "", "waiting_for_input": True}],
+    }
+    out = qa_status._render(status, -1, 24, 80, tick=0)
+    for line in out.splitlines():
+        visible = re.sub(r"\033\[[0-9;?]*[A-Za-z]", "", line)
+        assert len(visible) <= 80, repr(visible)

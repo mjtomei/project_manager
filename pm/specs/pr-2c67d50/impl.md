@@ -308,3 +308,33 @@ covered by tests in `tests/test_qa_input_required.py` /
 - **The hold does not rewrite the snapshot every tick.** It writes only when
   the waiting set changes (repeated INPUT_REQUIRED / dropped attempt), and
   `_execute_and_finalize` writes once when the hold ends.
+
+## 7. Implementation notes (review iteration 2)
+
+- **Reopening publishes `running` before clearing `held`.** `poll_qa_state`
+  drops a state whose completion it has already processed once it sees
+  `running=False` and `held=False`. Setting `held=False` first left a window
+  in which the TUI could observe exactly that and delete the state and the
+  resume snapshot for a run that had just reopened — orphaning it. `running`
+  is now set first; the TUI skips any state that is running.
+- **Only an INPUT_REQUIRED result may be held.** A crashed driver sets
+  `latest_verdict="ERROR"`; if `held` stayed set the TUI kept the state in
+  `_qa_loops` forever with no thread behind it, so every later `t` reported
+  "waiting for input". The TUI held branch now requires
+  `latest_verdict == INPUT_REQUIRED`, and both background-thread crash
+  handlers clear `held`.
+- **Waiting relaunches are capped across hold/reopen cycles.** The live
+  loop's `_SCENARIO_MAX_RETRIES` budget is local to one
+  `_poll_tmux_verdicts` call, and each hold/reopen starts a new one, so a
+  worker that asked for input and then kept dying (user closes the pane,
+  container OOM) was relaunched forever — a fresh full scenario run every
+  cycle. `QALoopState.wait_relaunch_count` (in-memory) caps the total and
+  then records the INPUT_REQUIRED verdict as terminal, matching R4's
+  "retries exhausted → terminal INPUT_REQUIRED".
+- **The attempt-identity check is shared.** `_attempt_is_current()` is the
+  single implementation of the resume identity contract (R3/§2); the
+  waiting variant pins the transcript path on top of
+  `(pr_id, loop_id, scenario, session_id)`.
+- **The `(waiting)` marker fits the status line.** `qa_status._render`
+  reserves the suffix width when any row is waiting; otherwise an 80-column
+  pane wrapped the row and pushed the footer off screen.

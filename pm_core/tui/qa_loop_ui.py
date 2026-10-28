@@ -376,7 +376,10 @@ def poll_qa_state(app) -> None:
             # worker panes for a follow-up.  Keep the state tracked and the
             # resume snapshot on disk so a restart can re-adopt the wait; the
             # held watcher resets the completion flags when it reopens.
-            if state.held:
+            # Only an INPUT_REQUIRED result can be held: a crashed/aborted
+            # run (ERROR) or any other verdict must take the normal path so
+            # the state is not pinned in _qa_loops forever.
+            if state.held and state.latest_verdict == VERDICT_INPUT_REQUIRED:
                 if first_completion:
                     state._ui_complete_notified = True
                     from pm_core import qa_loop

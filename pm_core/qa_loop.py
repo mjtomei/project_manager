@@ -246,6 +246,12 @@ class QALoopState:
     # In-memory cache of (mtime_ns, size) per waiting scenario's transcript,
     # so an unchanged transcript is not re-parsed every poll tick.
     _waiting_scan_cache: dict[int, tuple[int, int]] = field(default_factory=dict)
+    # Relaunches spent on a waiting scenario whose worker pane died without
+    # a follow-up.  In-memory only: the live loop's own retry budget resets
+    # on every hold/reopen cycle, so this caps the total across cycles and
+    # prevents an endless relaunch loop for a worker that asks for input and
+    # then dies.
+    wait_relaunch_count: dict[int, int] = field(default_factory=dict)
     # Set by the TUI when it discards this run (fresh start / manual
     # stop-and-restart) and clears the resume snapshot.  In-memory only: a
     # superseded run must not rewrite the snapshot afterwards, or a later
@@ -1087,6 +1093,28 @@ def mark_completion_processed(state: QALoopState) -> None:
                    state.qa_workdir, exc_info=True)
 
 
+def _attempt_is_current(state: QALoopState, scenario: QAScenario, src: dict,
+                        *, include_transcript: bool = False) -> bool:
+    """True when *src* records the scenario's current worker attempt.
+
+    The resume identity contract: a verdict or waiting source is trusted
+    only for the same run (pr_id, loop_id), scenario and worker session
+    (pr-4a89e52).  Waiting sources additionally pin the transcript path,
+    because a relaunched worker reuses the per-scenario transcript path
+    with a new session.
+    """
+    if (str(src.get("pr_id") or "") != state.pr_id
+            or str(src.get("loop_id") or "") != state.loop_id
+            or src.get("scenario") != scenario.index
+            or str(src.get("session_id") or "")
+            != (scenario.session_id or "")):
+        return False
+    if include_transcript:
+        return (str(src.get("transcript_path") or "")
+                == (scenario.transcript_path or ""))
+    return True
+
+
 def _drop_foreign_verdicts(state: QALoopState) -> None:
     """Drop restored verdicts whose recorded source is not this attempt.
 
@@ -1104,15 +1132,6 @@ def _drop_foreign_verdicts(state: QALoopState) -> None:
     """
     by_index = {s.index: s for s in state.scenarios}
 
-    def _source_is_current(idx: int, src: dict, scenario: QAScenario) -> bool:
-        return (
-            str(src.get("pr_id") or "") == state.pr_id
-            and str(src.get("loop_id") or "") == state.loop_id
-            and src.get("scenario") == idx
-            and str(src.get("session_id") or "")
-            == (scenario.session_id or "")
-        )
-
     if state.scenario_verdict_sources:
         for idx in list(state.scenario_verdicts):
             src = state.scenario_verdict_sources.get(idx)
@@ -1121,7 +1140,7 @@ def _drop_foreign_verdicts(state: QALoopState) -> None:
             scenario = by_index.get(idx)
             if scenario is None:
                 continue
-            if not _source_is_current(idx, src, scenario):
+            if not _attempt_is_current(state, scenario, src):
                 _log.info(
                     "Resume: dropping stale %s verdict for scenario %d "
                     "(source identity changed)",
@@ -1139,9 +1158,8 @@ def _drop_foreign_verdicts(state: QALoopState) -> None:
             state.waiting_for_input.discard(idx)
             state.waiting_input_sources.pop(idx, None)
             continue
-        if (not _source_is_current(idx, src, scenario)
-                or str(src.get("transcript_path") or "")
-                != (scenario.transcript_path or "")):
+        if not _attempt_is_current(state, scenario, src,
+                                   include_transcript=True):
             _log.info(
                 "Resume: dropping waiting scenario %d (attempt superseded)",
                 idx)
@@ -2869,14 +2887,8 @@ def _newer_verdict(transcript_path: str | None,
 def _waiting_source_is_current(state: QALoopState, scenario: QAScenario,
                                source: dict) -> bool:
     """True when a waiting entry still belongs to the scenario's attempt."""
-    return (
-        str(source.get("pr_id") or "") == state.pr_id
-        and str(source.get("loop_id") or "") == state.loop_id
-        and source.get("scenario") == scenario.index
-        and str(source.get("session_id") or "") == (scenario.session_id or "")
-        and str(source.get("transcript_path") or "")
-        == (scenario.transcript_path or "")
-    )
+    return _attempt_is_current(state, scenario, source,
+                               include_transcript=True)
 
 
 def _enter_waiting(state: QALoopState, scenario: QAScenario, hit: VerdictHit,
@@ -2998,10 +3010,9 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             result.changed = True
             continue
 
-        pane_id = scenario.pane_id
-        if pane_id and not tmux_mod.pane_exists(pane_id):
+        if scenario.pane_id and not tmux_mod.pane_exists(scenario.pane_id):
+            # This attempt's worker pane is gone.
             scenario.pane_id = None
-            pane_id = None
             pane_alive = False
         else:
             # No recorded pane id means "unknown", not dead: relaunching
@@ -3022,6 +3033,21 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
                 if hit is not None:
                     result.follow_ups[idx] = hit
                     continue
+            # A relaunch gives the live loop a fresh retry budget, and each
+            # hold/reopen cycle is a fresh call to _poll_tmux_verdicts.  Cap
+            # the relaunches here too, or a worker that asks for input and
+            # then dies (user closes the pane, container OOM) is relaunched
+            # forever — a new full scenario run every cycle.
+            relaunches = state.wait_relaunch_count.get(idx, 0) + 1
+            state.wait_relaunch_count[idx] = relaunches
+            if relaunches > _SCENARIO_MAX_RETRIES:
+                _log.warning(
+                    "Waiting scenario %d worker pane is gone with no "
+                    "follow-up after %d relaunches — recording "
+                    "INPUT_REQUIRED as terminal", idx, relaunches - 1)
+                _clear_waiting(state, idx, drop_verdict=False)
+                result.changed = True
+                continue
             _log.warning("Waiting scenario %d worker pane is gone with no "
                          "follow-up — handing back to the retry path", idx)
             _clear_waiting(state, idx, drop_verdict=True)
@@ -3425,11 +3451,31 @@ def _poll_tmux_verdicts(
                              "head moved (%s..%s) — routing to review",
                              idx, baseline[:12], head[:12])
             _clear_waiting(state, idx)
+            # The scenario made progress; its relaunch budget starts over.
+            state.wait_relaunch_count.pop(idx, None)
             _accept_hit(scenario, hit, override_verdict=override_verdict,
                         override_reason=override_reason)
 
+    def _write_status() -> None:
+        """Publish the current verdicts/verification state for the UI."""
+        with verification_lock:
+            verifying_snapshot = set(verifying)
+        _write_status_file(status_path, state.pr_id, state.scenarios,
+                           state.scenario_verdicts,
+                           scenario_0=state.scenario_0,
+                           verifying_scenarios=verifying_snapshot,
+                           queued_scenarios=_queued_indices,
+                           verification_failures=verification_failures,
+                           verdict_reasons=state.scenario_verdict_reasons,
+                           waiting_for_input=state.waiting_for_input)
+
     # A resumed/held run may already have a follow-up in the transcript.
+    # Accept it before the loop starts — and publish it, because the first
+    # iteration resets ``verdicts_changed`` and the loop may not run at all.
+    verdicts_changed = False
     _poll_waiting()
+    if verdicts_changed:
+        _write_status()
 
     while (pending or verifying or _launch_queue) and not state.stop_requested:
         time.sleep(_POLL_INTERVAL)
@@ -3718,16 +3764,7 @@ def _poll_tmux_verdicts(
             _launch_next_queued()
 
         if verdicts_changed or completed_verifications:
-            with verification_lock:
-                verifying_snapshot = set(verifying)
-            _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts,
-                               scenario_0=state.scenario_0,
-                               verifying_scenarios=verifying_snapshot,
-                               queued_scenarios=_queued_indices,
-                               verification_failures=verification_failures,
-                               verdict_reasons=state.scenario_verdict_reasons,
-                               waiting_for_input=state.waiting_for_input)
+            _write_status()
 
 
 # ---------------------------------------------------------------------------
@@ -4987,15 +5024,20 @@ def _execute_and_finalize(
             break
 
         # A follow-up (or a dropped attempt) needs the live collection loop
-        # again: reopen the run and re-finalize the new result.
+        # again: reopen the run and re-finalize the new result.  Publish
+        # ``running`` *before* clearing ``held`` so the TUI's completion
+        # poll can never observe (not running, not held, old verdict) in
+        # between and drop the reopened run as finished.
         _log.info("QA run for %s reopened after INPUT_REQUIRED wait",
                   state.pr_id)
-        state.held = False
         state.running = True
+        state.held = False
         state.latest_verdict = ""
         state.finalize_verdict = None
         state._ui_complete_notified = False
         state.completion_processed = False
+        state.latest_output = ("QA resumed after INPUT_REQUIRED — "
+                               "collecting the follow-up verdict")
         notify()
 
     state.running = False
@@ -5090,6 +5132,7 @@ def start_qa_background(
         except Exception:
             _log.exception("QA background thread crashed for %s", state.pr_id)
             state.running = False
+            state.held = False
             state.latest_verdict = "ERROR"
             state.latest_output = "QA thread crashed"
             if on_update:
@@ -5121,6 +5164,7 @@ def resume_qa_background(
         except Exception:
             _log.exception("QA resume thread crashed for %s", state.pr_id)
             state.running = False
+            state.held = False
             state.latest_verdict = "ERROR"
             state.latest_output = "QA resume thread crashed"
             if on_update:

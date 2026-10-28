@@ -3061,11 +3061,27 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-18T00:00:00.000000+00:00'
-  updated_at: '2026-03-18T00:00:00.000000+00:00'
+  updated_at: '2026-10-28T07:13:05.244333+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-c8798f4
+    text: 'Cross-PR handoff from pr-2c67d50 (INPUT_REQUIRED continuation, PR #271):
+      scenario workers that emit INPUT_REQUIRED now move into QALoopState.waiting_for_input
+      and their own pane is re-polled for a newer PASS/NEEDS_WORK (baseline = the
+      INPUT_REQUIRED turn line index/timestamp). Only a verdict read from the worker
+      turn via _accept_hit enters that state — a loop-derived INPUT_REQUIRED (trust-blocked,
+      no session, retries exhausted) is still terminal and is NOT re-polled. If this
+      PR redirects a NEEDS_WORK-with-unpushed-changes to INPUT_REQUIRED and wants
+      the user answer in the worker pane to be collected, it must also put the scenario
+      into waiting_for_input; note that _enter_waiting(state, scenario, hit, ...)
+      currently requires a VerdictHit for the baseline, so a loop-derived wait needs
+      a synthetic baseline (e.g. the transcript tail line index) or a variant that
+      accepts hit=None. Reuse _scan_waiting_scenarios/_hold_for_follow_up rather than
+      adding a second poller.'
+    created_at: '2026-10-28T07:13:05Z'
+    last_edited: '2026-10-28T07:13:05Z'
 - id: pr-fe499f2
   plan: plan-qa
   title: Persist generated QA tests across iterations of the QA loop
