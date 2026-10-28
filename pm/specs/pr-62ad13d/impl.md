@@ -95,13 +95,21 @@ Add `--remove` to `pm pr close`:
   needed. `autostart_state._derive` (`pm_core/autostart_state.py:426`) reports
   `closed` as done, and `tui/auto_start.py:491` rejects terminal targets.
 
-### R8 — Closed PRs cannot be started again
+### R8 — Closed PRs cannot be started (or merged) again
 
 - Auto-start: `graph.ready_prs` only selects `pending` PRs; `auto_start` also
   refuses terminal targets. No change needed.
 - Manual `pm pr start`: only `merged` is refused today (`pm_core/cli/pr.py:938`).
   Add a `closed` guard next to it: refuse with exit 1 and point at
   `pm pr edit <id> --status pending` to reopen deliberately.
+- Manual `pm pr merge` (added in review iteration c02f i2): a closed PR must not
+  be publishable either — merging rewrites the closure into `merged` and erases
+  the reason the PR was retired. The guard sits *after* the
+  `--no-signoff-check` / `--propagation-only` recovery branch so recovering a
+  merge that is already published still works if the record was closed
+  meanwhile. This matters more now than before the PR: the retained workdir
+  means `_infer_pr_id`'s cwd match can resolve a closed PR for an id-less
+  `pm pr merge` (its cwd step ignores the status filter).
 
 ### R9 — Closed status is durable across GitHub sync
 
@@ -153,6 +161,12 @@ workdirs are touched.
 12. `pm pr start <closed>`: refused with exit 1.
 13. `sync_from_github` with GitHub OPEN and local `closed`: status stays
     `closed`.
+14. `pm pr merge <closed>`: refused with exit 1 (`reopen` in the message);
+    nothing published; status and workdir intact.
+15. `pm pr merge <closed> --propagation-only`: recovery still runs (R8
+    ordering).
+16. Concurrent `--remove` between load and lock: exit 0, entry stays gone, no
+    exception.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -216,7 +230,8 @@ No **[UNRESOLVED]** ambiguities.
 ## 4. Edge cases
 
 - **Entry vanishes between load and update** (concurrent `--remove`): the
-  `apply` closure no-ops; command still exits 0 with the earlier summary.
+  `apply` closure no-ops; command still exits 0 with the earlier summary
+  (covered by `test_close_noops_when_entry_removed_concurrently`).
 - **`gh` unavailable / unauthenticated**: `SystemExit` swallowed as today →
   warning, status still `closed`, nothing deleted.
 - **GitHub says the PR is already closed/merged**: fake/real `gh` may exit
@@ -226,6 +241,9 @@ No **[UNRESOLVED]** ambiguities.
 - **Closed PR in a plan / dependency graph**: it keeps rendering as closed
   (hidden by default in the tree), dependents stay blocked and are warned
   about; nothing is auto-satisfied.
+- **`pm pr merge` on a closed PR**: refused (R8) unless it is a
+  `--no-signoff-check` / `--propagation-only` recovery of an already-published
+  merge; `pm pr edit --status` is the deliberate reopen path.
 - **`--remove` for a PR with a `merged` status**: record removed; GitHub,
   branch and workdir untouched.
 - **`pr_id` given as `#N` or bare number**: `_require_pr` resolution unchanged.
@@ -237,7 +255,7 @@ No **[UNRESOLVED]** ambiguities.
 ## 5. Files to change
 
 - `pm_core/cli/pr.py` — `pr_close` rewrite (`--remove`, warnings, messages),
-  `pr_start` closed guard.
+  `pr_start` and `pr_merge` closed guards.
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
 - `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN.
 - `pm_core/gh_ops.py` — docstring note only (no signature change).

@@ -2784,6 +2784,18 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
             transcript=transcript, companion=companion)
         return
 
+    # `closed` is a terminal lifecycle record (`pm pr close` keeps it, and the
+    # retained workdir means `_infer_pr_id` can still resolve a closed PR from
+    # its cwd).  Publishing it would rewrite the closure into `merged` and
+    # erase the reason it was retired; reopening is an explicit status edit.
+    # Checked *after* the recovery branch: recovering a merge that is already
+    # published must still work even if the record was closed meanwhile.
+    if pr_entry.get("status") == "closed":
+        click.echo(
+            f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status <status>' to merge it.", err=True)
+        raise SystemExit(1)
+
     # Sign-off gate (record-only): a fresh SIGNOFF_MERGE for the current HEAD
     # bound to a conflict-free integration with the configured base.  A code
     # change after sign-off, a legacy HEAD-only approval or an approval the
@@ -3438,7 +3450,8 @@ def pr_note_delete(pr_id: str, note_id: str):
 @click.option("--keep-branch", is_flag=True,
               help="Deprecated no-op: close never deletes branches")
 @click.option("--remove", is_flag=True, default=False,
-              help="Also delete the registry entry (branch and workdir are kept)")
+              help="Also delete the registry entry (branch and workdir are "
+                   "kept; the GitHub PR is still closed unless --keep-github)")
 def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
              remove: bool):
     """Close a PR without destroying its history.

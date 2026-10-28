@@ -324,6 +324,29 @@ def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):
     assert "closed_at" not in entry
 
 
+def test_close_noops_when_entry_removed_concurrently(tmp_path):
+    """A concurrent `--remove` between load and lock must not raise or
+    resurrect the entry."""
+    project = _make_project(tmp_path)
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        data["prs"] = [p for p in data["prs"] if p["id"] != "pr-001"]
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+            result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    assert "removed concurrently" in result.output
+    assert _load_entry(project["pm_dir"]) is None
+    assert project["workdir"].is_dir()
+
+
 # ---------------------------------------------------------------------------
 # explicit registry-only removal
 # ---------------------------------------------------------------------------
@@ -403,6 +426,57 @@ def test_closed_pr_cannot_be_started(tmp_path):
 
     assert start.exit_code != 0
     assert "closed" in start.output.lower()
+
+
+def _run_merge(pm_dir: Path, tmp_path: Path, *args: str):
+    """Invoke `pm pr merge` with the per-PR lock kept out of ~/.pm."""
+    lock_dir = tmp_path / "workdirs"
+    lock_dir.mkdir(exist_ok=True)
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root", return_value=pm_dir), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch("pm_core.paths.workdirs_base", return_value=lock_dir):
+        return runner.invoke(pr_mod.pr, ["merge", *args])
+
+
+def test_closed_pr_cannot_be_merged(tmp_path):
+    """A closed PR is terminal: merging would rewrite the closure to `merged`."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    with mock.patch.object(pr_mod, "_publish_approved") as publish:
+        result = _run_merge(project["pm_dir"], tmp_path, "pr-001")
+
+    assert result.exit_code != 0
+    assert "closed" in result.output.lower()
+    assert "reopen" in result.output.lower()   # the terminal-status guard
+    assert not publish.called
+    assert _load_entry(project["pm_dir"])["status"] == "closed"
+    assert project["workdir"].is_dir()
+
+
+def test_closed_pr_is_not_auto_selected_for_merge(tmp_path):
+    """The retained workdir means `_infer_pr_id` resolves a closed PR from
+    its cwd (that step ignores the status filter), so an id-less
+    `pm pr merge` run inside it must still be refused by the command."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    with mock.patch.object(pr_mod, "_publish_approved") as publish, \
+         mock.patch.object(Path, "cwd", return_value=project["workdir"]):
+        result = _run_merge(project["pm_dir"], tmp_path)
+
+    assert result.exit_code != 0
+    assert "closed" in result.output.lower()
+    assert not publish.called
+
+
+def test_merge_recovery_still_allowed_for_closed_pr(tmp_path):
+    """--propagation-only finalizes an already-published merge; a local
+    `closed` record must not block that recovery."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    with mock.patch.object(pr_mod, "_recover_completed_merge") as recover:
+        result = _run_merge(project["pm_dir"], tmp_path, "pr-001",
+                            "--propagation-only")
+
+    assert result.exit_code == 0, result.output
+    assert recover.called
 
 
 # ---------------------------------------------------------------------------
