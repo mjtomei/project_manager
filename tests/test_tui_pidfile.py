@@ -125,6 +125,49 @@ def _wait_for(predicate, timeout=2.0):
     return predicate()
 
 
+def _failing_append_open(real_open, *, concurrent=None):
+    """An ``open`` stand-in whose ``ab`` writes 5 bytes then fails.
+
+    Models a full disk (ENOSPC), which the kernel is allowed to do as a
+    *short* write.  *concurrent*, when given, is a line another caller
+    appends to the queue after our handle is opened but before we take
+    the queue lock — the interleaving that makes a stream position
+    captured at open time stale.
+    """
+
+    class _ShortWrite:
+        """Writes a prefix of the line, then fails like a full disk."""
+
+        def __init__(self, real):
+            self._real = real
+
+        def write(self, data):
+            self._real.write(data[:5])
+            self._real.flush()
+            raise OSError(28, "No space left on device")
+
+        def __getattr__(self, name):  # truncate/flush/fileno/tell/close
+            return getattr(self._real, name)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self._real.close()
+            return False
+
+    def fake_open(path, mode="r", *args, **kwargs):
+        f = real_open(path, mode, *args, **kwargs)
+        if mode != "ab":
+            return f
+        if concurrent is not None:
+            with real_open(path, "ab") as other:
+                other.write(concurrent)
+        return _ShortWrite(f)
+
+    return fake_open
+
+
 # ---------------------------------------------------------------------------
 # Parsing
 
@@ -824,40 +867,43 @@ class TestSubmitCommand:
         queue.write_bytes(b"pr qa fresh pr-9\n")
         before = queue.read_bytes()
 
-        real_open = open
-
-        class _ShortWrite:
-            """Writes a prefix of the line, then fails like a full disk."""
-
-            def __init__(self, real):
-                self._real = real
-
-            def write(self, data):
-                self._real.write(data[:5])
-                self._real.flush()
-                raise OSError(28, "No space left on device")
-
-            def __getattr__(self, name):  # truncate/flush/fileno/tell/close
-                return getattr(self._real, name)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                self._real.close()
-                return False
-
-        def fake_open(path, mode="r", *args, **kwargs):
-            f = real_open(path, mode, *args, **kwargs)
-            return _ShortWrite(f) if mode == "ab" else f
-
-        monkeypatch.setattr(helpers, "open", fake_open, raising=False)
+        monkeypatch.setattr(helpers, "open", _failing_append_open(open),
+                            raising=False)
         res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
 
         assert res.ok is False
         assert res.reason == "queue_error"
         assert queue.read_bytes() == before, "partial line must be removed"
         assert pidfile.exists()
+        assert tui.poll() is None  # never signaled
+
+    def test_partial_write_keeps_a_concurrent_callers_line(
+            self, ipc_paths, start_fake_tui, monkeypatch):
+        """The rollback target is the size *under* the lock, not at open.
+
+        ``open(..., "ab")`` pins the stream position when the file is
+        opened, so a line another caller appends between our open and our
+        flock is not reflected in ``tell()``.  Truncating back to that
+        stale offset on a failed write would delete a command the other
+        caller was told was queued (and would extend the file with NULs
+        if a drain had shrunk it in the meantime).
+        """
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        queue.write_bytes(b"pr qa fresh pr-9\n")
+
+        monkeypatch.setattr(
+            helpers, "open",
+            _failing_append_open(open, concurrent=b"review-loop pr-2\n"),
+            raising=False)
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is False
+        assert res.reason == "queue_error"
+        assert queue.read_bytes() == (b"pr qa fresh pr-9\n"
+                                      b"review-loop pr-2\n"), (
+            "the concurrent caller's line must survive our rollback")
         assert tui.poll() is None  # never signaled
 
     def test_empty_pidfile_is_starting_not_stale(self, ipc_paths):

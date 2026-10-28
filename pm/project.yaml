@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T07:54:01.941137+00:00'
+  updated_at: '2026-10-28T08:14:05.276761+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15319,6 +15319,45 @@ prs:
       changed this iteration, so the i3/i6 QA expectations still hold.'
     created_at: '2026-10-28T07:54:01Z'
     last_edited: '2026-10-28T07:54:01Z'
+  - id: note-589c541
+    text: 'Review loop 44be i2 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range/non-UTF-8/empty-argv
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found no defect in the signalling, capability, takeover, or identity
+      logic. One real gap in the queue-append rollback (the I3 invariant) fixed: the
+      truncate target was captured with f.tell() inside the flock, but append mode
+      pins the stream position at open() time, so a line another caller appends between
+      our open and our flock is not reflected there. On a failed write (ENOSPC / short
+      write) the truncate-back therefore deleted that caller successfully queued line
+      (verified: the queue ends up holding only the pre-existing line), and had a
+      concurrent drain shrunk the file in that window, truncate() would have EXTENDED
+      it with NUL bytes. Fixed by taking the end from os.fstat(f.fileno()).st_size
+      under the lock, so the rollback removes exactly our partial bytes. New test
+      interleaves a concurrent append with the failing write (shared _failing_append_open
+      helper, now also used by the i1 partial-write test) and was verified to fail
+      against the pre-fix f.tell() (concurrent caller line truncated away). Spec impl.md
+      I3/test 36 updated. Also verified by probe, no code change: CPython BufferedWriter
+      discards the unwritten remainder when a flush fails, so the i1 truncate-back
+      does reach the raw layer in the real ENOSPC case. Full suite: 3924 passed, 1
+      skipped (pytest 8.4.2; env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace,
+      markdown in the venv). No user-visible message changed this iteration, so the
+      i3/i6 QA expectations still hold. Non-blocking observations left as-is: (a)
+      the startup-refusal message is printed to the pane, but the real pm session
+      has no remain-on-exit, so the pane vanishes and the text lives only in the pm
+      log; (b) helpers.trigger_tui_command is production-dead (kept as the documented
+      bool API; pm/plans/refactor-migration-map.md keeps it as cross-process IPC);
+      (c) autostart._resolve_owner keeps its own liveness+zombie check (spec I1),
+      reports a mid-claim empty pidfile as "stale pidfile" rather than "starting up",
+      and does not remove a dead-pid pidfile (QA refined around that); (d) _atomic_write
+      can leave a hidden .<pidfile>.<pid>.tmp if SIGKILLed mid-publish; (e) a legacy
+      numeric pidfile has no starttime, so its identity rests on the cmdline marker
+      alone; (f) unlink_if_unchanged re-reads then unlinks non-atomically (inherent
+      to a path-based pidfile); (g) owned_by_other treats a non-empty unparseable
+      pidfile as "not owned by another", so a successor caught mid-_write_all could
+      lose the shared queue (unreachable in practice: a single os.write to a regular
+      file is atomic w.r.t. readers).'
+    created_at: '2026-10-28T08:14:05Z'
+    last_edited: '2026-10-28T08:14:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

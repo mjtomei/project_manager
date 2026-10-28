@@ -823,10 +823,15 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
         with open(queue, "ab") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
-                # Append mode: ``tell()`` is the current end of file, and
-                # we hold the lock, so no other appender or drain can move
-                # it.  Keep it so a failed write can be rolled back below.
-                start = f.tell()
+                # The rollback target must be the file's end *as of the
+                # lock*, not as of ``open()``: another appender (or a
+                # drain) can run in between, and append mode pins the
+                # stream position at open time, so ``tell()`` would be
+                # stale.  Truncating back to a stale offset would delete a
+                # line another caller was told was queued (or, after a
+                # drain shrank the file, extend it with NULs).  ``st_size``
+                # under the flock is the authoritative end.
+                start = os.fstat(f.fileno()).st_size
                 try:
                     f.write(line.encode("utf-8"))
                     # Flush to the kernel *before* releasing the lock: the

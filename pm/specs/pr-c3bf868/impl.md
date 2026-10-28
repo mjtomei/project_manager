@@ -137,10 +137,15 @@ I3. The command queue file must exist before caps are published (a caller
     A *partial* line is rolled back too: `_unqueue_line` matches whole
     lines, so it cannot take back a short write (ENOSPC / quota, which
     the kernel is allowed to do) and a later drain would run a truncated
-    command the caller was told was not applied. The append records
-    `f.tell()` (the end of file, stable because we hold the `flock`) and
-    truncates back to it when the write/flush raises — under the same
-    lock, best effort, since the write itself just failed.
+    command the caller was told was not applied. The append records the
+    file's end and truncates back to it when the write/flush raises —
+    under the same lock, best effort, since the write itself just failed.
+    That end must be read *under* the `flock` (`os.fstat(f.fileno()).st_size`),
+    not from `f.tell()`: append mode pins the stream position at
+    `open()` time, so a line another caller appends between our open and
+    our lock is not reflected there, and truncating to it would delete a
+    command that caller was told was queued (or, after a concurrent
+    drain shrank the file, extend it with NULs).
 
 I4. `trigger_tui_reload` keeps its fire-and-forget behavior and its
     `refresh_home` side effect (existing tests assert the kick). It now
@@ -542,6 +547,12 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     Verified to fail before the truncate-back (`b'pr qa fresh
     pr-9\nrevie'` left in the file, which a later drain would have run
     as the command `revie`).
+36. the truncate-back target is the size *under* the lock (I3): the same
+    failing `open` also appends another caller's line between our open
+    and our `flock`, and the test asserts that line survives the
+    rollback. Verified to fail when the target comes from `f.tell()`
+    (captured at open): the concurrent caller's line was truncated away,
+    so a command it was told was queued would never be applied.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;
