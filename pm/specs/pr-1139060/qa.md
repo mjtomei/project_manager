@@ -46,6 +46,17 @@ Refresh on 2026-10-28, HEAD `fb37dc36`, code unchanged since `1bc65b72`: QA loop
 
 Refresh on 2026-10-28, HEAD `06d8aaa6`, code unchanged since `1bc65b72`: QA loop `c8dbe953` locked scenarios 69–73, created their concretizer containers and windows at 23:04 CDT and began concretization. At 23:05:57 a breadcrumb restart of the host TUI (running another PR's PM code) did not resume it, because a run writes `qa_resume.json` only after launch (pre-existing gap, tracked by pr-3201ea8). Auto-start began run `6086ab24`, which killed the stale s69–s73 windows and removed their five containers. Run `b49b38db` superseded that run at 23:09 before it planned. No scenario worker launched, no verdict was produced and no container from these loops is still running. Scenarios 69–73 are therefore locked but unexecuted. Fresh scenarios 74–78 carry them forward unchanged: 74 = 69, 75 = 70, 76 = 71, 77 = 72, 78 = 73. Requirements and resolutions are unchanged.
 
+Refresh on 2026-10-28 at HEAD `6cb6149c` (QA fix from S77, review-loop 7faf i1–i2, and an incidental fix made during this planning pass). Scenarios 74–78 are locked historical evidence; fresh scenarios begin at 79. Results of the 74–78 run (aggregate NEEDS_WORK):
+- S75 (container trust dialog, TUI restart during retry backoff) and S76 (removal-race truthfulness) PASS. The code they cover has not changed since, so they are not rerun.
+- S77 held every Then, but only after fix 1f6c0a5a. Before it, with `qa-verify-pass` off, finalize was skipped forever and "QA complete" never carried `[finalize: …]`. Review 7faf then moved the finalize gate and the stop downgrade onto one helper that uses the run's own snapshot of the setting. This planning pass found that the snapshot was not saved in the resume file, so a TUI restart after toggling the setting relaunched workers for PASSes that had already settled; fixed in 6cb6149c. S77 is rerun and the verification-setting paths get their own scenario.
+- S74 held all product behaviour. It ended INPUT_REQUIRED only because a Then expected C's final verdict to be INPUT_REQUIRED while C's fake also scripted NEEDS_WORK, and NEEDS_WORK outranks INPUT_REQUIRED (resolution 25). It is rerun with a consistent fake.
+- S78 held all product behaviour. It ended INPUT_REQUIRED on three Then wordings (resolution 26). It is rerun as final-head acceptance.
+- Open items remain open, not waived: Docker parity, genuine keyring relief, delegated PID-cgroup pressure and hour-aged lock contention without a 90-minute budget (resolution 20). pr-d022825 tracks the inline dead-worker retry backoff that stalls the poll; that is pre-existing behaviour, not an acceptance criterion here.
+
+User-visible behavior added after `1bc65b72` that fresh scenarios must cover:
+- With `qa-verify-pass` off, a PASS is final as soon as it is emitted. Finalize runs, "QA complete" carries `[finalize: …]`, and a stop never downgrades such a PASS (1f6c0a5a).
+- Each run reads `qa-verify-pass` once and keeps that value for its whole life, including across a TUI restart. Turning the setting on mid-run neither holds finalize nor downgrades that run's PASSes on stop, and after a restart it does not relaunch released workers to verify them. Turning it off mid-run does not cancel verification the run already requires: a PASS still needs verification before finalize, and a stop before verification still downgrades it to INPUT_REQUIRED. A run started after the change uses the new value (4558c4dd, c07609ee, 6cb6149c).
+
 User-visible behavior added after `afc151b5` that fresh scenarios must cover:
 - Inventory outage at a full runtime: the run makes one floor launch, then waits for a readable inventory (log "wait for a readable container inventory"). Its settled workers whose release is unconfirmed, and workers a release deliberately kept (INPUT_REQUIRED or viewed), count as held. So INPUT_REQUIRED settlements during the outage do not each admit another launch. Peak at most L+1; after recovery the deferred releases run, the peak returns to at most L and the batch grows back (70cd9492, 1bc65b72).
 - A partial run-end release, or its deferred retry, logs which viewed/INPUT_REQUIRED workers it kept even when it released others (60ccb95e).
@@ -121,6 +132,18 @@ Fresh scenarios 69–73 carry 64–68 forward, unexecuted, with the same coverag
 
 Fresh scenarios 74–78 carry 69–73 forward, unexecuted, with the same coverage map (74 for 69, 75 for 70, 76 for 71, 77 for 72, 78 for 73).
 
+Fresh scenarios 79–82 re-cover them on HEAD `6cb6149c`:
+- runtime namespace/identity: 79, 82
+- reaper outcomes: 80, 82
+- retention: 79, 80, 82
+- tmux sockets/clients: 80, 81, 82
+- push proxies: 79, 82
+- headroom/queues: 79
+- global settings read by concurrent runs (`qa-verify-pass`): 81
+- QA resume snapshots: 80, 81
+- workdirs/evidence: all
+- Not rerun, because their code is unchanged since a PASS: locks/leases (S63), removal races (S76), trust dialog and retry-backoff restart (S75), process trees (S61), popups (S54) and locale (S55).
+
 ## Setup
 
 1. Follow `pm/qa/instructions/tui-manual-test.md`: use a throwaway git project with an initial commit, local bare origin and local backend; add PRs through PM and start its own named tmux session. Run PM commands in panes belonging to the test session, not the controller session. Confirm `pm which` selects this PR's code, overriding inherited `PYTHONPATH` when needed. Use `./install.sh --local` if PM is missing.
@@ -185,13 +208,22 @@ Fresh scenarios 74–78 carry 69–73 forward, unexecuted, with the same coverag
     - tmux 3.2a `display -t <gone pane>` exits 0. Install a fake-claude stand-in (e.g. one that first shows a trust dialog) by link plus rename-over, never `mv`. Use `setsid nohup` for a long nested `build-base`.
     - Long holds on a busy reaper lock need chained gates: inventory `ps` times out at 30 s and inspect at 60 s.
 
+23. Fixture lessons from 74–78:
+    - Reusable drivers: S59/S74 (two PM processes, outage shim, sampler, `owners.py`), S77 (PATH podman stand-in that fails everything except `info` while a flag file exists, grouped viewers `<S>~8`/`<S>~9`) and S78 (two-PR repeated runs, nogit image). Replace their hard-coded `/scratch/sNN` roots.
+    - Finalize polls for at least 30 s (verdict grace). A runtime fault meant to defer the run-end release must last at least 60 s and begin before the late verdicts, or it clears before the run ends.
+    - The host fake-claude must be on the TUI's PATH. Without it the planner exits and the run ends ERROR.
+    - With `qa-verify-pass` off, PASS settles when it is emitted, so no verifier pane appears. With it on, the verifier is the third pane of the scenario window (after concretizer and worker).
+    - `t` on a PR whose QA window is still open only focuses that window; use `z t` for a fresh run. Plain `t` on a completed QA also only focuses.
+    - A nested `podman build` here needs `--uts host`. Launch decisions by two PM processes can read the same pre-launch sample; record such pairs rather than asserting cross-process admission (resolution 24).
+    - `pm set qa-verify-pass on|off` writes the global setting that every PM process reads; record the time of each toggle against the run's "PASS verdict verification is enabled/disabled" log line.
+
 ## Requirements — user stories
 
 ### R1 — Successful and reworked QA releases its own resources
 Given a container-mode QA run with delayed PASS/NEEDS_WORK then PASS workers and durable evidence, when the user lets the run finish, then disposable scenario containers stop running without waiting for the next run, the verdict/rework history remains visible, and source changes, captures, transcripts and clones remain readable.
 
 ### R2 — Stop and supersede release abandoned work
-Given an active QA run with workers and queued scenarios, when the user stops it, then abandoned workers are released, no stopped/unlaunched worker acquires a fabricated agent verdict, and its evidence remains. A scenario that emitted PASS but whose verification never ran is reported INPUT_REQUIRED, not PASS, and a stopped run opens no finalize pane. Given a stopped or completed attempt with leftover containers, when the user starts another attempt, then the new run starts without waiting serially for the previous attempt's cleanup and old workers are eventually reclaimed.
+Given an active QA run with workers and queued scenarios, when the user stops it, then abandoned workers are released, no stopped/unlaunched worker acquires a fabricated agent verdict, and its evidence remains. A scenario that emitted PASS but whose verification never ran is reported INPUT_REQUIRED, not PASS, and a stopped run opens no finalize pane. "Verification" here follows the run's own `qa-verify-pass` value, read once when the run starts polling and kept across a TUI restart. A run with verification off treats PASS as final: a stop keeps it, and a completed run finalizes. A later toggle affects only runs that start afterwards. Given a stopped or completed attempt with leftover containers, when the user starts another attempt, then the new run starts without waiting serially for the previous attempt's cleanup and old workers are eventually reclaimed.
 
 ### R3 — Human input and discussion survive nondestructive cleanup
 Given a scenario actually awaiting human input, an explicitly retained discussion container and another live PR/session, when the user runs ownership-aware cleanup, then their containers and required proxies remain usable and the preview explains why they are kept. Given a completed scenario viewed by a client in a base or grouped session, when that QA run finalizes, then the viewed scenario remains available for inspection. An aggregate INPUT_REQUIRED status alone does not make every failed or unowned worker immortal.
@@ -316,5 +348,13 @@ BLOCKED/unsupported is required if the worker cannot obtain real runtime/image/n
 23. A release recorded while the runtime identity probe failed carries no runtime domain. It never authorizes removal and `pm container status` shows it only as a diagnostic ("Unverifiable release records … not retried"), never as a retryable failure that makes `pm container reap` exit nonzero. Such records are currently never cleared even after their allocation is gone (S49 open item); that accumulation is tracked separately as pr-a4c4500 and is not an acceptance criterion here. QA does require that the stopped run's containers are actually removed after recovery.
 
 24. S59 open question (note-c91b547): with C holding a container retained for a human, C launched only while the running count was below L. A, which held no container of its own, then made its single at-least-one floor launch, reaching L+1. That matches resolution 21: the L+1 slot belongs to one floor launch by a run that holds nothing, and a run holding a retained container never launches at or above L. No cross-process coordination of the L+1 slot is required. Scenario Thens must not assert that every peak sample has a particular composition; they assert peak at most L+1, that the retaining run never launches at or above L, and that the retained container survives.
+
+25. S74 conflict (note-fdfd4d7): QA's aggregate verdict ranks NEEDS_WORK above INPUT_REQUIRED, a rule that predates this PR. A run with both NEEDS_WORK and INPUT_REQUIRED scenarios ends NEEDS_WORK. Thens must agree with the fake's script: a run that must end INPUT_REQUIRED scripts no NEEDS_WORK.
+26. S78 wording (note-0272a1d):
+    - A PR's rerun numbers its scenarios after the scenario directories that already exist, not after the launches. Expect s11–s20 only when the new run starts after all ten of the previous run's scenarios exist.
+    - Identical scenario numbers collide across PRs (`qa-<A>-s11` and `qa-<B>-s11`), not within one PR. A rerun of a PR kills its own earlier run's windows first, so the overlap to test is A's current run against B's current run.
+    - The final running-container count is stated as the documented kept set: live implementation sessions, retained containers and live INPUT_REQUIRED workers. It is not a baseline plus that set, which would count the baseline's members twice.
+27. A setup failure whose cause is outside PM (for example an image without git) shows the classified runtime error and its real stderr. It need not name a PM command: the recovery is to fix the image or run `pm container set image …`. Keyring, memory, PID, missing-image and timeout causes must still print a runnable PM command (R25).
+28. `qa-verify-pass` is per run (see R2). Where two PRs' runs overlap a toggle, each keeps its own value. QA asserts that no run hangs, skips finalize forever, relaunches a settled worker, or downgrades a PASS its own setting made final.
 
 No unresolved product ambiguities remain. This refresh records planning only; it does not claim runtime validation.
