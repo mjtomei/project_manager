@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-28T00:32:08.290006+00:00'
+  updated_at: '2026-10-28T00:43:29.163339+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36290,6 +36290,24 @@ prs:
       by scenario 6.'
     created_at: '2026-10-28T00:32:08Z'
     last_edited: '2026-10-28T00:32:08Z'
+  - id: note-f6ab894
+    text: 'QA scenario 7 (OpenAI-type provider) PASS at 75d0bc30; captures at /pm-captures/scenarios/7/{cli,tui}.
+      cli = impl + fake-claude via pm pr start (new-window path): #{pane_start_command}
+      is the 0600 env-file wrapper with only the file path; the fake process /proc
+      environ carries OPENAI_API_KEY=canary-84ebabf-do-not-use and OPENAI_BASE_URL=http://127.0.0.1:9/v1
+      exactly; neither value in pane command, pm log (grep exit 1), pane registry,
+      ps argv or tmux show-environment -g/-t; env file removed and nothing under ~/.pm/run
+      contains the canary. tui = review + real claude via pm pr review (split-pane
+      path): start command `cd <workdir> && sh -c "... env file ...; claude --model
+      openai:synth-model ..."` with the cd outside the wrapper; pm log line is the
+      pre-wrap `cd <workdir> && claude --model openai:synth-model`; claude /proc environ
+      has both OPENAI_* values; registry review-claude entry stores the unwrapped,
+      value-free command; env file removed. Each capture has transcript.log + recording.cast
+      + recording.mp4 + manifest.md. These are the two openai stories the sign-off
+      REQA asked for (openai+fake, openai+real); they live under scenarios/7, not
+      scenarios/6.'
+    created_at: '2026-10-28T00:43:29Z'
+    last_edited: '2026-10-28T00:43:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
