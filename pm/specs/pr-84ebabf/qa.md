@@ -238,3 +238,47 @@ Cross-cutting setup for every scenario (user steps):
 * **Real credentials in evidence?** Never. Only synthetic canaries.
 
 No **[UNRESOLVED]** ambiguities.
+
+## QA round 2 — sign-off follow-up (2026-10-27)
+
+Sign-off returned `SIGNOFF_REQA` twice (notes at HEAD `75d0bc30`). Scenarios 1–5
+and the five recorded scenario 6 stories remain valid; scenario 6 is locked, so
+this round adds scenarios 7–9 to record the missing evidence.
+
+Required evidence (sign-off note-a17dac1), synthetic canaries only:
+
+1. **OpenAI-type provider + fake-claude.** The fake process's
+   `/proc/<pid>/environ` has `OPENAI_API_KEY` and `OPENAI_BASE_URL` exactly;
+   neither value appears in `#{pane_start_command}`, `pm log`, the pane
+   registry, `ps -ef` argv, or `tmux show-environment -g`/`-t`; no `env-*.sh`
+   is left in `~/.pm/run/`.
+2. **OpenAI + real claude.** The `pm log` launch line and
+   `#{pane_start_command}` show `--model openai:<model>`, the `cd` prefix stays
+   outside the `sh -c` wrapper, and no key appears; `/proc/<claude pid>/environ`
+   has the `OPENAI_*` values.
+3. **Unset `${VAR}` key.** The process env has `ANTHROPIC_API_KEY=` (empty) and
+   the session starts without error.
+4. **Pane killed before its command runs.** Its `env-*.sh` stays behind with
+   mode `0600` (in a `0700` directory) until the 24 h sweep.
+
+Drivability caveats carried from the scenario 6 concretizer (still true at
+HEAD `75d0bc30`):
+
+* A workdir containing an apostrophe cannot be driven with real claude (the
+  unquoted `$(cat <path>)` prompt reference fails with `sh: Syntax error`); use
+  fake-claude there.
+* A workdir containing a space empties the prompt under real claude; use
+  fake-claude, or record the workdir with `pm pr start --workdir` and observe
+  only cwd / start-command / TUI tracking.
+* `pm pr start --workdir <new>` is ignored for an `in_progress` PR; set it back
+  to `pending` (`pm pr edit <id> --status pending`) before re-recording a
+  workdir.
+* fake-claude returns before the `--model` flag is added, so model-flag
+  assertions need a non-fake launch.
+* The TUI `s` action builds `--transcript {tdir}/...` unquoted; use a plain
+  project root for TUI launches.
+* The `tmux -e NAME` transport was replaced by the 0600 env file in review
+  b1c1 i1; the "Rejected by the implementation" bullet above already reflects
+  the current code. `create_container` `-e NAME=value` remains #249's scope.
+
+No **[UNRESOLVED]** ambiguities.

@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-27T23:06:05.140230+00:00'
+  updated_at: '2026-10-27T23:41:15.285828+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36274,6 +36274,39 @@ prs:
       PASS.
     created_at: '2026-10-27T23:06:05Z'
     last_edited: '2026-10-27T23:06:05Z'
+  - id: note-a17dac1
+    text: 'sign-off 2026-10-27 → SIGNOFF_REQA (QA evidence gap only; code, impl captures
+      and review all hold at e6cebed2-equivalent code, HEAD 75d0bc30, base master@f2650b46
+      clean). Scenario 6 verdict says all nine stories PASS, but /pm-captures/scenarios/6
+      only records 5 (baseline, hostile key, stale sweep in cli/; space + apostrophe
+      workdirs in tui/). No capture anywhere in /pm-captures shows the OpenAI-type
+      provider, which the PR description names explicitly ("keep openai OPENAI_API_KEY
+      the same") and the 19:12 note requires for every provider type (only mocked
+      unit tests cover it). Re-run scenario 6 on the current code and record, with
+      cast+mp4+transcript.log like cli/: (1) openai provider with fake-claude (story
+      4): the fake process /proc environ has OPENAI_API_KEY=canary86-oai-84ebabf and
+      OPENAI_BASE_URL exactly, and neither value is in pane_start_command, pm log,
+      the pane registry, ps -ef argv, tmux show-environment -g/-t, and no env-*.sh
+      is left; (2) openai with real claude (story 5): the pm log launch line and pane_start_command
+      show --model openai:synth-model, the cd prefix outside the sh -c wrapper, and
+      no key, and /proc/<claude pid>/environ has the OPENAI_* values; (3) unset ${VAR}
+      key (story 2): ANTHROPIC_API_KEY= (empty) in the process env, no error; (4)
+      pane killed before its command runs (story 8): its env-*.sh stays behind with
+      mode 0600 until the 24 h sweep. Synthetic canaries only. Scenarios 1–5 and the
+      5 recorded stories of scenario 6 stay valid; there is no need to redo them.'
+    created_at: '2026-10-27T23:20:00Z'
+    last_edited: '2026-10-27T23:20:00Z'
+  - id: note-29e730f
+    text: 'sign-off pass 2, 2026-10-27 → SIGNOFF_REQA again. Nothing changed since
+      note-a17dac1: HEAD 75d0bc30, master@f2650b46 clean, and no new QA capture (scenarios/6
+      files are all dated 23:11 or earlier). QA must still re-run scenario 6 and record
+      the four stories in note-a17dac1: openai + fake-claude, openai + real claude,
+      unset ${VAR} key, pane killed before its command runs. Each needs cast+mp4+transcript.log.
+      Scenarios 1-5 and the 5 recorded S6 stories stay valid. Minor, non-blocking:
+      tests/test_tmux.py TestProviderEnvTransport writes canary env-*.sh files into
+      the real ~/.pm/run (pm_home not redirected to tmp_path). Fix when convenient.'
+    created_at: '2026-10-27T23:41:15Z'
+    last_edited: '2026-10-27T23:41:15Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
