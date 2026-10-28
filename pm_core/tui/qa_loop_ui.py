@@ -541,7 +541,8 @@ def _on_qa_complete(app, state: QALoopState) -> None:
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled
-        (only a fresh SIGNOFF_MERGE then reaches the merge / O stop).
+        (only a fresh SIGNOFF_MERGE then reaches the merge / manual-merge
+        wait).
       - NEEDS_WORK: transition to in_review, rely on auto-start.
     """
     if state._ui_complete_notified:

@@ -226,6 +226,32 @@ class TestPushProxyBranchValidation:
         assert resp["exit_code"] == 1
         assert "rejected" in resp["stderr"]
 
+    # git accepts any unambiguous prefix of a long option; ``--mir`` is the
+    # spelling that mirrored over GitHub in the 2026-10-27 incident.
+    @pytest.mark.parametrize("flag", [
+        "--mir", "--mirr", "--m", "--mirror=1",
+        "--al", "--all=x", "--branches", "--br", "--b",
+        "--ta", "--tag", "--tags=1",
+        "--a", "--t",  # ambiguous to git too — fail closed
+    ])
+    def test_rejects_broad_flag_abbreviations(self, flag, proxy, sock_path):
+        resp = _send_request(sock_path, {"args": ["origin", flag]})
+        assert resp["exit_code"] == 1
+        assert "rejected" in resp["stderr"]
+        assert flag in resp["stderr"]
+
+    @patch("subprocess.run")
+    @pytest.mark.parametrize("flag", [
+        "--atomic", "--follow-tags", "--no-tags", "--force-with-lease",
+        "--set-upstream", "--thin", "-u", "--",
+    ])
+    def test_allows_non_broad_long_flags(self, mock_run, flag, proxy,
+                                         sock_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path,
+                             {"args": [flag, "origin", "pm/pr-123-feature"]})
+        assert resp["exit_code"] == 0, resp["stderr"]
+
     @patch("subprocess.run")
     def test_rejects_undetermined_branch(self, mock_run, proxy, sock_path):
         """When target branch can't be determined, push is rejected (fail-closed)."""
@@ -247,6 +273,19 @@ class TestPushProxyBranchValidation:
         cmd = push_call[0][0][0]
         # cmd is ["git", "-C", <source>, "push", "-u", "origin", "pm/pr-123-feature"]
         assert cmd[3:] == ["push", "-u", "origin", "pm/pr-123-feature"]
+
+
+class TestLongOptionMatch:
+    def test_prefixes_and_values(self):
+        from pm_core.push_proxy import _long_option_match, _BROAD_PUSH_OPTIONS
+        assert _long_option_match("--mir", _BROAD_PUSH_OPTIONS) == "--mirror"
+        assert _long_option_match("--mirror=x", _BROAD_PUSH_OPTIONS) == "--mirror"
+        assert _long_option_match("--bra", _BROAD_PUSH_OPTIONS) == "--branches"
+        assert _long_option_match("--mirrors", _BROAD_PUSH_OPTIONS) is None
+        assert _long_option_match("--no-mirror", _BROAD_PUSH_OPTIONS) is None
+        assert _long_option_match("--", _BROAD_PUSH_OPTIONS) is None
+        assert _long_option_match("-a", _BROAD_PUSH_OPTIONS) is None
+        assert _long_option_match("origin", _BROAD_PUSH_OPTIONS) is None
 
 
 class TestDangerousFlags:
