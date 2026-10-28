@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T06:32:32.592363+00:00'
+  updated_at: '2026-10-28T07:47:14.699840+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38732,6 +38732,23 @@ prs:
       tick transcript (closed them so the tick relaunched).'
     created_at: '2026-10-28T06:32:32Z'
     last_edited: '2026-10-28T06:32:32Z'
+  - id: note-e267ae2
+    text: 'QA S117 (2026-10-28, RQ56 start records, host, all fake-claude, HEAD 5e55b707
+      vs control 9a2dacaa; captures /pm-captures/scenarios/117, REPORT.md, every pane
+      mp4): CODE CHANGE c9ce4f6a needs normal re-review. Stories 1 (provider check
+      before any record; advanced: qa at once after model unset), 2 (lock holds 0.5/1.8/3/10
+      s: record names tick/driver at hold start, driver survives, one workdir), 3
+      (back-to-back pm qa run: per-run pid record, no resume snapshot, full QA via
+      30 s re-check 25.5 s after exit) and 5 (no Recovered completed QA after pm qa
+      run + tui restart) held live; control reproduced S2/S5 defects (S3 control:
+      resumed from CLI snapshot, no full QA). Story 4 finding: signoff_ui REQA hop
+      called start_qa over a live pm qa run, killing its windows (two loops). Fix
+      c9ce4f6a: hop defers via review_loop_ui.defer_reqa_start (pending ''driven''
+      hand-off, kept with auto-start off), post-fix live rerun held (one start after
+      the CLI exits, one sign-off). Full suite 4464 passed, 1 skipped (PATH=/usr/bin:/bin).
+      Filed+closed pr-ed2ebe9.'
+    created_at: '2026-10-28T07:47:14Z'
+    last_edited: '2026-10-28T07:47:14Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -41534,7 +41551,7 @@ prs:
   title: 'Bug: sign-off REQA hop starts QA over a live ''pm qa run'' and kills its
     windows (two QA loops run at once)'
   branch: pm/pr-ed2ebe9-bug-sign-off-reqa-hop-starts-qa-over-a-live-pm-qa-
-  status: pending
+  status: closed
   depends_on: []
   description: 'Location: pm_core/tui/signoff_ui.py, hop == ''qa'' branch (~line 382)
     calls qa_loop_ui.start_qa(app, pr_id) with no qa_loop.run_driven_elsewhere(pr_id)
@@ -41555,8 +41572,14 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T06:46:32.852795+00:00'
-  updated_at: '2026-10-28T06:46:32.852795+00:00'
+  updated_at: '2026-10-28T07:47:05.904421+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-5b6fa4e
+    text: 'Fixed in pr-592e4bd c9ce4f6a (QA S117): the SIGNOFF_REQA hop defers via
+      review_loop_ui.defer_reqa_start while run_driven_elsewhere(pr); post-fix live
+      rerun held (/pm-captures/scenarios/117/post-fix/s4). Closing as fixed there.'
+    created_at: '2026-10-28T07:47:04Z'
+    last_edited: '2026-10-28T07:47:04Z'
