@@ -1416,12 +1416,16 @@ def _launch_review_window_unlocked(data: dict, pr_entry: dict,
     existing = tmux_mod.find_window_by_name(pm_session, window_name)
     sessions_on_review: list[str] = []
     ended_window = None
-    if existing and not fresh and _review_window_ended(
-            pm_session, existing["id"]):
+    if existing and _review_window_ended(pm_session, existing["id"]):
         # The review session ended (e.g. stop-on-idle removed the
         # container and kept the dead pane readable): relaunch.  The
         # window is closed only once the launch is admitted, so a
-        # refused relaunch keeps the transcript readable.
+        # refused relaunch keeps the transcript readable — fresh ones
+        # (review loops) too: no live reviewer is left to stop first.
+        if review_loop:
+            sessions_on_review = tmux_mod.sessions_on_window(
+                pm_session, existing["id"],
+            )
         ended_window = existing
         existing = None
     if existing:

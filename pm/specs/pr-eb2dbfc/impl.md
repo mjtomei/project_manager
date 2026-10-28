@@ -154,12 +154,28 @@ it and relaunch, recreating the container, instead of switching to the
 dead pane (QA S62: `s` on an in_review PR whose impl was stopped on idle).
 The dead window is closed only after the relaunch passes memory
 admission, so a refused relaunch leaves it, and its pane text, in place
-(QA S70).  A window whose dead impl pane sits beside a live companion
+(QA S70).  This holds for review loops too: a loop forces `--fresh`,
+but a dead review window has no live reviewer to stop first, so it is
+closed only once the loop's first review is admitted (review e0a0 i1,
+QA S78).  A *live* window a fresh launch replaces is still killed up
+front, because its container must go before the new one is created.
+A window whose dead impl pane sits beside a live companion
 shell is kept: `s` switches to it (review dc3e).
 `zz d` goes through the TUI's in-flight PR action guard, so pressing it
 while `z d`'s fresh review is still launching is refused ("Busy") rather
 than starting a second `pr review --fresh` that shares the container and
-crosses panes with the first (QA S62).
+crosses panes with the first (QA S62).  Across processes (TUI `s` and a
+shell's `pm pr start`, say), launches of one window are serialized by a
+per-window flock (`~/.pm/locks/window-<session>-<window>.lock`, 90 s,
+then "Busy"), held from the window check through admission, container
+creation and `new_window`; the second launch then finds the first's live
+window and switches to it (QA S78).
+Known limit: stop-on-idle needs the TUI's idle tracking, which follows a
+session's transcript.  Sessions started from a shell (`pm pr start` /
+`pm pr review` without the TUI's hidden `--transcript`) are never
+idle-tracked, so stop-on-idle never removes their containers; they are
+removed when their window is killed or by `pm container cleanup`
+(QA S78).
 
 Two timing and sampling questions came up in QA S38 (review 3f45 i3).
 - **Which removals record a sample.**  Every removal of a *running* pm

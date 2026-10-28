@@ -140,7 +140,7 @@ class TestPrStartDeadWindow:
 
 
 class TestReviewWindowDead:
-    def _launch(self, tmp_path, dead, refuse=False):
+    def _launch(self, tmp_path, dead, refuse=False, review_loop=False):
         _, data = _save_project(tmp_path)
         pr_entry = data["prs"][0]
         wrap = MagicMock(return_value=("wrapped", "ctr"))
@@ -161,7 +161,8 @@ class TestReviewWindowDead:
             # Stop once the window would be created.
             mock_tmux.new_window_get_pane.return_value = None
             try:
-                pr_mod._launch_review_window(data, pr_entry)
+                pr_mod._launch_review_window(data, pr_entry,
+                                             review_loop=review_loop)
             except SystemExit:
                 pass
         return mock_tmux.new_window_get_pane.called, mock_tmux
@@ -176,6 +177,29 @@ class TestReviewWindowDead:
         launched, mock_tmux = self._launch(tmp_path, dead=True, refuse=True)
         assert not launched
         mock_tmux.kill_window.assert_not_called()
+
+    def test_refused_loop_relaunch_keeps_dead_review_window(self, tmp_path):
+        # QA S78 (b): a review loop forces fresh, which killed the stopped
+        # review's window before admission; a refusal then lost it.
+        launched, mock_tmux = self._launch(tmp_path, dead=True, refuse=True,
+                                           review_loop=True)
+        assert not launched
+        mock_tmux.kill_window.assert_not_called()
+
+    def test_admitted_loop_relaunch_closes_dead_review_window(self, tmp_path):
+        launched, mock_tmux = self._launch(tmp_path, dead=True,
+                                           review_loop=True)
+        assert launched
+        mock_tmux.kill_window.assert_called_once_with("pm-sess", "@2")
+        mock_tmux.sessions_on_window.assert_called_once_with("pm-sess", "@2")
+
+    def test_live_review_window_killed_before_fresh_loop(self, tmp_path):
+        # A live reviewer is still stopped up front (its container goes
+        # before the new one is created and admitted).
+        launched, mock_tmux = self._launch(tmp_path, dead=False, refuse=True,
+                                           review_loop=True)
+        assert not launched
+        mock_tmux.kill_window.assert_called_once_with("pm-sess", "@2")
 
     def test_live_review_window_is_switched_to(self, tmp_path):
         launched, mock_tmux = self._launch(tmp_path, dead=False)
