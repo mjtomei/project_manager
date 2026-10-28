@@ -467,16 +467,20 @@ class PaneKilledError(Exception):
 
 
 def _verdict_output_if_present(transcript: str | None) -> str | None:
-    """The verdict output already present in *transcript*, or None."""
+    """The verdict output already present in *transcript*, or None.
+
+    Uses :func:`find_verdict_turn` (pr-8efa789) so a later ``/loop`` wakeup
+    turn cannot hide the verdict from ``parse_review_verdict``.  This is the
+    single verdict reader shared by :func:`_landed_verdict` and the
+    retry/adopt discovery paths.
+    """
     if not transcript:
         return None
     try:
-        from pm_core.verdict_transcript import (
-            extract_verdict_from_transcript, read_latest_assistant_text,
-        )
-        verdict = extract_verdict_from_transcript(transcript, ALL_VERDICTS)
-        if verdict:
-            return read_latest_assistant_text(transcript) or verdict
+        from pm_core.verdict_transcript import find_verdict_turn
+        hit = find_verdict_turn(transcript, ALL_VERDICTS)
+        if hit:
+            return hit.text or hit.verdict
     except Exception:
         _log.debug("review_loop: verdict read from %s failed", transcript,
                    exc_info=True)

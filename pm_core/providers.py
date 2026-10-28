@@ -66,7 +66,13 @@ class ProviderConfig:
     capabilities: list[str] = field(default_factory=list)
 
     def env_vars(self) -> dict[str, str]:
-        """Return environment variables needed to use this provider."""
+        """Return environment variables needed to use this provider.
+
+        Values are resolved (``${VAR}`` references are expanded).  They are
+        for the launched process's environment only: callers must not
+        interpolate them into a shell command string, because that string is
+        logged and kept as the tmux ``#{pane_start_command}``.
+        """
         if self.type in ("claude", "local"):
             env: dict[str, str] = {}
             if self.api_base:

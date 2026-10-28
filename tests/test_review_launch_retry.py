@@ -1556,7 +1556,6 @@ def test_breadcrumb_round_trips_retry_episode(tmp_path):
     app._auto_start_run_id = "run"
     app._review_loops = {PR: state}
     app._root = tmp_path
-    app._stop_before_merge = set()
     app._data = {"prs": []}
     from pm_core.watcher_manager import WatcherManager
     app._watcher_manager = WatcherManager()
@@ -1593,7 +1592,6 @@ def _auto_app(tmp_path, state):
     app._data = {"prs": [{"id": PR, "status": "in_review",
                           "workdir": str(tmp_path)}],
                  "project": {}}
-    app._stop_before_merge = set()
     app._session_name = "pm-test"
     app._review_retry_timer = None
     return app

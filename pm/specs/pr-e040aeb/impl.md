@@ -1154,3 +1154,43 @@ is not noticed until the child returns, so a superseded loop can create a
 review window the replacement then replaces — the old loop's lease is
 already released and it bows out at its next checkpoint, so the new loop is
 unaffected.
+
+## Integration with master (89e3c501)
+
+Sign-off returned the PR as `SIGNOFF_IMPL` for integration only: the behaviour
+was complete, reviewed and live-QA PASS, but merging master@89e3c501e08a
+conflicted in `pm/project.yaml` and `pm_core/review_loop.py`.
+
+1. **Master's verdict reader reaches every adopt/retry path (semantic
+   resolution).** Master (pr-8efa789) switched `_adopt_in_flight_review` to
+   `verdict_transcript.find_verdict_turn`, returning `hit.text or
+   hit.verdict`, so a later `/loop` wakeup turn cannot hide the verdict from
+   `parse_review_verdict`. This PR had moved that read into
+   `_verdict_output_if_present`, the single verdict reader shared by
+   `_landed_verdict` (hence `_poll_adopted_review`, retry discovery and the
+   restart handoff). That helper now calls
+   `find_verdict_turn(transcript, ALL_VERDICTS)` and returns
+   `hit.text or hit.verdict`; the conflict's inline copy in
+   `_adopt_in_flight_review` was dropped in favour of the shared
+   `_poll_adopted_review`, so master's fix is not silently lost on the
+   retry/adopt paths. Verified: master's only change to `review_loop.py`
+   between the merge base and 89e3c501 was that switch.
+2. **`stop_before_merge` removal.** Master (pr-25f4038) removed
+   `app._stop_before_merge` / `POLICY_STOP`; the two stale
+   `app._stop_before_merge = set()` lines in
+   `tests/test_review_launch_retry.py` are gone and nothing in `pm_core/`
+   references the attribute.
+3. **`consume_breadcrumb` keeps both sides.** It still calls master's
+   `autostart_state.targets_from_breadcrumb(data, prs)` (legacy
+   `stop_before_merge` breadcrumbs migrate to wait targets, fail closed) and
+   keeps this PR's ordering: restored review loops are resumed *before* the
+   auto-start scheduler pass, so a re-armed loop's saved budget and remaining
+   backoff survive a restart.
+4. **`pm/project.yaml` (registry/notes 3-way).** Resolved by union: the later
+   `updated_at` per entry, notes merged by id, and every entry added on either
+   side retained (`pr-e040aeb` here; `pr-25f4038`, `pr-16e45ba` and seven
+   others on master). Verified by parsing the merged file: 508 unique PR ids,
+   no duplicates, `pr-e040aeb` byte-identical to this branch's entry,
+   `pr-25f4038`/`pr-16e45ba` identical to master's, no master id missing, and
+   the only differences from master are this branch's own cross-PR notes and
+   their later `updated_at` stamps.
