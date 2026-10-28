@@ -6,6 +6,7 @@ sticky "Review loop done … PASS" message was up, so the TUI never showed
 """
 
 import time
+import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -38,6 +39,57 @@ def _stub_app():
 
 def _log(app, msg, **kw):
     ProjectManagerApp.log_message(app, msg, **kw)
+
+
+@pytest.mark.parametrize("verdict, expected", [
+    ("PASS", "(1/2 consecutive) — restarting QA"),
+    ("NEEDS_WORK", "returning to review"),
+])
+def test_qa_confirmation_visible_over_sticky_review(verdict, expected):
+    from pm_core.qa_loop import QALoopState
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = None
+    app._review_loops = {}
+    app._self_driving_qa = {"pr-001": {"pass_count": 0, "required_passes": 2}}
+    _log(app, "Review loop done for pr-other: PASS", sticky=10)
+    state = QALoopState(pr_id="pr-001", latest_verdict=verdict)
+
+    def followup(*args):
+        app.log_message("Starting follow-up")
+
+    with patch.object(qa_loop_ui, "_record_qa_note"), \
+         patch.object(qa_loop_ui, "_transition_pr_status"), \
+         patch.object(qa_loop_ui, "start_qa", side_effect=followup), \
+         patch.object(qa_loop_ui, "_start_self_driving_review", side_effect=followup):
+        qa_loop_ui._on_qa_complete(app, state)
+
+    assert expected in shown[-1]
+    assert app._log_hold_until > time.monotonic()
+    app._log_hold_until = 0.0  # the three-second confirmation hold expires
+    app._flush_held_log_message()
+    assert shown[-1] == " Starting follow-up"
+
+
+def test_qa_loop_start_visible_during_autostart_confirmation():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    app._self_driving_qa = {}
+    _log(app, "Auto-start: already off", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr", return_value={"id": "pr-001"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_poll_timer"), \
+         patch.object(qa_loop_ui, "_get_qa_pass_count", return_value=3), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_or_stop_qa_loop(app, "pr-001")
+    assert "3 passes required" in shown[-1]
+    _log(app, "Planning QA scenarios...")
+    assert "3 passes required" in shown[-1]
 
 
 def test_plain_message_dropped_while_sticky():
@@ -531,3 +583,92 @@ def test_prefix_timeout_clears_its_own_hint():
     app, shown = _prefix_app()
     ProjectManagerApp._cancel_w_mode(app)
     assert shown[-1] == ""
+
+
+# QA s1 (pr-f094946): ``L`` pressed as auto-QA started landed inside the
+# sticky "Review loop done … PASS" window, so the log pane opened but the
+# TUI never showed "Launched log pane".
+
+def test_launch_pane_confirmation_shown_while_sticky(monkeypatch):
+    from pm_core.tui import pane_ops
+    app, shown = _stub_app()
+    _log(app, "Review loop done: PASS", sticky=10)
+    monkeypatch.setattr(pane_ops, "get_session_and_window",
+                        lambda a: ("sess", "@0"))
+    monkeypatch.setattr(pane_ops.pane_registry, "find_live_pane_by_role",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(pane_ops.pane_registry, "load_registry",
+                        lambda s: {"generation": "1"})
+    monkeypatch.setattr(pane_ops.pane_layout, "preferred_split_direction",
+                        lambda *a: "h")
+    monkeypatch.setattr(pane_ops.pane_layout, "register_and_rebalance",
+                        lambda *a: None)
+    monkeypatch.setattr(pane_ops.tmux_mod, "split_pane", lambda *a, **k: "%8")
+    monkeypatch.setattr(pane_ops.tmux_mod, "select_pane_smart",
+                        lambda *a: None)
+    pane_ops.launch_pane(app, "tail -f log", "log")
+    assert shown[-1] == " Launched log pane"
+    monkeypatch.setattr(pane_ops.pane_registry, "find_live_pane_by_role",
+                        lambda *a, **k: "%8")
+    pane_ops.launch_pane(app, "tail -f log", "log")
+    assert shown[-1] == " Focused existing log pane"
+
+
+def test_new_plan_pane_confirmation_shown_while_sticky():
+    from pm_core.tui import pane_ops
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    _log(app, "Review loop done: PASS", sticky=10)
+    with patch.object(pane_ops.tmux_mod, "in_tmux", return_value=True), \
+         patch.object(pane_ops.tmux_mod, "get_session_name", return_value="sess"), \
+         patch.object(pane_ops.tmux_mod, "find_window_by_name",
+                      side_effect=[None, {"id": "@8"}]), \
+         patch.object(pane_ops.tmux_mod, "new_window_get_pane", return_value="%8"), \
+         patch.object(pane_ops, "_wrap_pane_cmd", return_value="wrapped"), \
+         patch.object(pane_ops.pane_layout, "register_and_rebalance") as register, \
+         patch.object(pane_ops, "_focus_plans_window") as focus:
+        pane_ops._launch_in_plans_window(app, "plan-001", "less plan.md", "plan")
+
+    register.assert_called_once_with(
+        "sess", "@8", [("%8", "plan", "less plan.md")])
+    focus.assert_called_once_with(app, "plan-001")
+    assert shown[-1] == " Launched plan pane"
+
+
+# QA s22 (pr-f094946): a user `t` landing in the gap where a background QA
+# run is accepted but has no window yet answers "QA already running for X".
+# Auto-start's "targets += X" confirmation holds the log line, so the answer
+# was dropped and never painted.
+
+def test_qa_already_running_visible_during_autostart_confirmation():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=True, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
+    _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " QA already running for pr-001"
+    assert state.focus_on_create is True
+
+
+def test_focus_suppressed_answer_visible_over_sticky():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}), \
+         patch.object(qa_loop_ui, "get_pm_session", return_value="pm-x"), \
+         patch("pm_core.tmux.find_window_by_name", return_value="@3"), \
+         patch("pm_core.runtime_state.consume_suppress_switch",
+               return_value=True):
+        qa_loop_ui.focus_or_start_qa(app, "pr-001")
+    assert shown[-1] == " QA window for pr-001 ready (focus suppressed)"

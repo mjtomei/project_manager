@@ -626,3 +626,108 @@ class TestQaRunBgGuard:
         assert result.exit_code == 0, result.output
         # A genuinely qa-eligible PR still drives the loop.
         mock_run.assert_called_once()
+
+
+class TestQaRunBgRuntimeState:
+    """The CLI QA driver must mirror its run into the shared runtime state.
+
+    Only TUI-owned loops mirror themselves, so a run launched by
+    ``pr auto-sequence`` used to leave no ``~/.pm/runtime/<id>.json``: the
+    popup picker could not show its progress and auto-start's
+    ``recorded_qa_verdict`` could not see its verdict (so a concurrent
+    scheduler could relaunch QA for a PR this driver already took to PASS).
+    """
+
+    def test_records_running_then_done_verdict(self, runner, tmp_path):
+        from pm_core import runtime_state
+        pr = _pr("qa")
+        data = _data_with(pr)
+        seen: list[str | None] = []
+
+        def _run(state, *a, **kw):
+            seen.append(runtime_state.get_action_state("pr-001", "qa").get("state"))
+            state.latest_verdict = "PASS"
+
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync", side_effect=_run):
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+
+            assert result.exit_code == 0, result.output
+            # The run was observable in the shared state while it ran ...
+            assert seen == ["running"]
+            # ... and its verdict survives for the popup picker and auto-start.
+            rec = runtime_state.get_action_state("pr-001", "qa")
+            assert rec.get("state") == "done"
+            assert rec.get("verdict") == "PASS"
+            assert (rt / "pr-001.json").exists()
+
+    def test_keeps_pending_suppress_switch(self, runner, tmp_path):
+        from pm_core import runtime_state
+        pr = _pr("qa")
+        data = _data_with(pr)
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync"):
+            runtime_state.request_suppress_switch("pr-001", "qa")
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+
+            assert result.exit_code == 0, result.output
+            rec = runtime_state.get_action_state("pr-001", "qa")
+            # The finished run leaves no [working] entry behind ...
+            assert rec.get("state") is None
+            # ... but the flag belongs to the user's start for this PR, not
+            # to this driver, so it survives.
+            assert rec.get("suppress_switch") is True
+
+    def test_no_verdict_leaves_no_running_entry(self, runner, tmp_path):
+        """A run that aborts without a verdict (the PR merged mid-run) must
+        not leave the picker and home window showing a live QA run."""
+        from pm_core import runtime_state
+        pr = _pr("qa")
+        data = _data_with(pr)
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync"):
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+
+            assert result.exit_code == 0, result.output
+            assert runtime_state.get_action_state("pr-001", "qa") == {}
+
+    def test_failure_marks_action_failed(self, runner, tmp_path):
+        from pm_core import runtime_state
+        pr = _pr("qa")
+        data = _data_with(pr)
+        rt = tmp_path / "runtime"
+        rt.mkdir()
+        with patch("pm_core.runtime_state._runtime_dir", return_value=rt), \
+             patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.signoff.clear_return_awaiting"), \
+             patch("pm_core.qa_loop.run_qa_sync",
+                   side_effect=RuntimeError("boom")):
+            result = runner.invoke(pr_qa_run_bg, ["pr-001"])
+
+            assert result.exit_code == 1
+            rec = runtime_state.get_action_state("pr-001", "qa")
+            assert rec.get("state") == "failed"

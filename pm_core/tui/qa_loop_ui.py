@@ -96,19 +96,24 @@ def focus_or_start_qa(app, pr_id: str) -> None:
                 app.log_message(f"Focused QA window for {pr_id}")
             else:
                 app.log_message(
-                    f"QA window for {pr_id} ready (focus suppressed)")
+                    f"QA window for {pr_id} ready (focus suppressed)",
+                    force=True)
             return
 
     # No existing window — start a new QA session.  qa_loop will
     # consume any suppress_switch flag at its window-creation step.
-    start_qa(app, pr_id)
+    start_qa(app, pr_id, focus=True)
 
 
-def start_qa(app, pr_id: str) -> None:
+def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     """Start a QA session for a PR.
 
     Creates QALoopState, starts background QA thread.
-    Called by auto-start and internal callers (fresh_start, loop start).
+    Called by the user starts ``t`` / ``z t`` (with *focus*) and by
+    scheduler-driven callers: auto-start, review PASS → QA, sign-off REQA
+    and self-driving restarts.  *focus* selects the new QA window; only
+    user-initiated starts pass it, so scheduler-driven starts don't pull
+    attached clients off the TUI.
     """
     if not app._root:
         app.log_message("No project root")
@@ -128,38 +133,74 @@ def start_qa(app, pr_id: str) -> None:
     if pr_id in app._qa_loops:
         existing = app._qa_loops[pr_id]
         if existing.running:
-            app.log_message(f"QA already running for {pr_id}")
+            # A user can ask to view a background run before its first window
+            # exists. Reuse that worker, but retain the explicit focus request;
+            # popup suppression is still consumed at window creation.
+            if focus:
+                existing.focus_on_create = True
+            # A direct answer to the user's start must be visible even when
+            # an auto-start/setup confirmation is holding the log line —
+            # this lands in the gap where the scheduler's "targets +="
+            # confirmation is still sticky (QA s22).
+            app.log_message(f"QA already running for {pr_id}", force=True)
             return
 
     # A sign-off REQA return is now being re-verified.
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(app._root, pr_id, "qa")
 
-    # Transition status to "qa" if currently in_review
-    if pr.get("status") == "in_review":
-        def _set_qa(d):
-            p = store.get_pr(d, pr_id)
-            if p and p.get("status") == "in_review":
-                p["status"] = "qa"
-        try:
-            store.locked_update(app._root, _set_qa)
-        except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
-            app.log_message(f"Error: {e}")
-            _log.warning("start_qa: %s for %s: %s", type(e).__name__, pr_id, e)
-            return
-        app._load_state()
-        _log.info("start_qa: transitioned %s to qa status", pr_id)
+    if not _enter_qa_status(app, pr, "start_qa"):
+        return
 
-    state = QALoopState(pr_id=pr_id)
+    state = QALoopState(pr_id=pr_id, focus_on_create=focus)
 
     def on_update(s: QALoopState):
         # Schedule UI update on the main thread
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
+    _ensure_poll_timer(app)
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def _enter_qa_status(app, pr: dict, caller: str) -> bool:
+    """Transition *pr* to "qa" if it is in_review.
+
+    Returns False (after logging) when project.yaml can't be updated, so
+    the caller doesn't start a run whose status never moved.
+    """
+    if pr.get("status") != "in_review":
+        return True
+    pr_id = pr["id"]
+
+    def _set_qa(d):
+        p = store.get_pr(d, pr_id)
+        if p and p.get("status") == "in_review":
+            p["status"] = "qa"
+    try:
+        store.locked_update(app._root, _set_qa)
+    except (store.StoreLockTimeout, store.ProjectYamlParseError) as e:
+        app.log_message(f"Error: {e}")
+        _log.warning("%s: %s for %s: %s", caller, type(e).__name__, pr_id, e)
+        return False
+    app._load_state()
+    _log.info("%s: transitioned %s to qa status", caller, pr_id)
+    return True
+
+
+def _ensure_poll_timer(app) -> None:
+    """Arm the shared 1 s poll timer that processes QA completion.
+
+    The timer is otherwise armed only by a display refresh that sees an
+    active PR with a workdir, or by a review loop.  A QA start on a PR
+    whose workdir QA itself creates would never have its verdict handled
+    (no self-driving restart, no lifecycle transition) until some
+    unrelated refresh.
+    """
+    from pm_core.tui.review_loop_ui import _ensure_poll_timer as _ensure
+    _ensure(app)
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +244,7 @@ def fresh_start_qa(app, pr_id: str) -> None:
     # Start fresh — run_qa_sync will clean up old windows after capturing
     # which sessions were watching them (for proper session switching).
     app.log_message(f"Fresh QA start for {pr_id}...")
-    start_qa(app, pr_id)
+    start_qa(app, pr_id, focus=True)
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +284,11 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
 
+    # Like start_qa: the first run of a loop on an in_review PR moves it
+    # to qa (restarts go through start_qa, which already does this).
+    if not _enter_qa_status(app, pr, "qa_loop_ui"):
+        return
+
     # Register self-driving QA state
     app._self_driving_qa[pr_id] = {
         "pass_count": 0,
@@ -250,18 +296,19 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     }
 
     # Start a new QA loop
-    state = QALoopState(pr_id=pr_id)
+    state = QALoopState(pr_id=pr_id, focus_on_create=True)
 
     def on_update(s: QALoopState):
         app.call_from_thread(_on_qa_update, app, s)
 
     app._qa_loops[pr_id] = state
+    _ensure_poll_timer(app)
 
     required = app._self_driving_qa[pr_id]["required_passes"]
     passes_label = f" ({required} pass{'es' if required > 1 else ''} required)" if required > 1 else ""
     app.log_message(
         f"[bold]QA loop started[/] for {pr_id}{passes_label} — z t to stop",
-        sticky=3,
+        sticky=3, force=True,
     )
     _log.info("qa_loop_ui: starting QA loop for %s (passes=%d)", pr_id, required)
 
@@ -531,9 +578,13 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                         "press i to sign off"
                     )
             else:
+                # Override any sticky line, then hold the pass count against
+                # start_qa's same-frame "Starting QA for ...".
+                from pm_core.tui import auto_start as _auto_start
                 app.log_message(
                     f"[green]QA PASS[/] for {pr_id} "
-                    f"({sd['pass_count']}/{required} consecutive) — restarting QA"
+                    f"({sd['pass_count']}/{required} consecutive) — restarting QA",
+                    force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
                 )
                 _log.info("QA self-driving: %d/%d passes, restarting QA",
                           sd["pass_count"], required)
@@ -550,19 +601,31 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                     f"[green bold]QA PASS[/] for {pr_id} — press i to sign off"
                 )
     elif verdict == VERDICT_NEEDS_WORK:
-        # Issues found or changes committed → back to review
+        # Issues found or changes committed → back to review.  Override any
+        # sticky line and hold against the same-frame "Review loop started".
+        from pm_core.tui import auto_start as _auto_start
         app.log_message(
-            f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review"
+            f"[yellow bold]QA NEEDS_WORK[/] for {pr_id} — returning to review",
+            force=True, hold=_auto_start.CONFIRM_HOLD_SECONDS,
         )
         _transition_pr_status(app, pr_id, "qa", "in_review")
         # Clear the stale review loop entry from the previous review pass
         app._review_loops.pop(pr_id, None)
-        # Reload in-memory state
+        # Reload in-memory state and repaint, so the tree shows in_review
+        # even when nothing else (auto-start, a review loop) refreshes it.
+        # Not _load_state(): its scheduler hook would duplicate the
+        # check_and_start below.  Preserve its flush-before-reload invariant
+        # so a debouncing navigation write isn't replaced by stale disk state.
         if app._root:
+            wq = getattr(app, "_write_queue", None)
+            if wq is not None:
+                wq.flush_sync()
             try:
                 app._data = store.load(app._root)
             except store.ProjectYamlParseError:
                 pass  # keep existing app._data
+            else:
+                app._update_display()
 
         if sd:
             # Self-driving: reset pass count and directly start review loop
@@ -571,7 +634,6 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             _start_self_driving_review(app, pr_id)
         else:
             # Legacy: rely on auto-start
-            from pm_core.tui import auto_start as _auto_start
             if _auto_start.is_enabled(app):
                 app.run_worker(_auto_start.check_and_start(app))
     elif verdict == VERDICT_INPUT_REQUIRED:
