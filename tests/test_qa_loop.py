@@ -1,6 +1,7 @@
 """Tests for the QA loop orchestration."""
 
 import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -1866,6 +1867,58 @@ class TestScenarioRetryLogic:
     def test_max_retries_constant(self):
         from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
         assert _SCENARIO_MAX_RETRIES == 10
+
+
+class TestPollTmuxVerdictsForkFailure:
+    """A fork failing for lack of PIDs skips one QA poll instead of crashing
+    the QA thread (which ended the run as ERROR with its workers still live)."""
+
+    def _poll(self, tmp_path, pane_exists):
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        with patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.tmux.pane_exists", side_effect=pane_exists), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        return state, relaunch
+
+    @pytest.mark.parametrize("err", [errno.EAGAIN, errno.ENOMEM])
+    def test_fork_failure_skips_one_poll(self, tmp_path, err):
+        calls = []
+
+        def pane_exists(pane):
+            calls.append(pane)
+            if len(calls) == 1:
+                raise OSError(err, os.strerror(err))
+            return True
+
+        state, relaunch = self._poll(tmp_path, pane_exists)
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert len(calls) == 2
+        relaunch.assert_not_called()
+
+    def test_other_errors_still_raise(self, tmp_path):
+        def pane_exists(pane):
+            raise FileNotFoundError(errno.ENOENT, "tmux")
+
+        with pytest.raises(FileNotFoundError):
+            self._poll(tmp_path, pane_exists)
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ Verdicts (shared with review):
   INPUT_REQUIRED — Issues found but not fixed, or ambiguity requiring human judgment.
 """
 
+import errno
 import json
 import os
 import re
@@ -60,6 +61,8 @@ _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
 _SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
+# Waits between retries of a deferred run-end container release (~16 min).
+_RELEASE_RETRY_DELAYS = (15, 30, 60, 120, 240, 480)
 _DEFAULT_VERIFICATION_MAX_RETRIES = 3
 
 
@@ -230,6 +233,9 @@ class QALoopState:
     _error: str = ""
     # Set by qa_loop_ui after the completion callback has run once
     _ui_complete_notified: bool = False
+    # tmux session of a run-end container release that was deferred; the
+    # run's thread retries it after completion (_retry_deferred_release).
+    _deferred_release_session: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -3074,338 +3080,357 @@ def _poll_tmux_verdicts(
                 verification_results.clear()
             break
 
-        # Refresh the resume snapshot each iteration so a TUI restart can
-        # re-enter this loop with up-to-date scenario pane/session state
-        # (queued launches and verdicts both mutate it).
-        _write_resume_file(state, use_containers, concurrency_cap,
-                           _queued_indices, desired_cap=desired_cap)
+        unhandled_verifications: dict = {}
+        try:
+            # Refresh the resume snapshot each iteration so a TUI restart can
+            # re-enter this loop with up-to-date scenario pane/session state
+            # (queued launches and verdicts both mutate it).
+            _write_resume_file(state, use_containers, concurrency_cap,
+                               _queued_indices, desired_cap=desired_cap)
 
-        in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
-        verdicts_changed = False
+            in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
+            verdicts_changed = False
 
-        # Check for completed verifications
-        with verification_lock:
-            completed_verifications = dict(verification_results)
-            verification_results.clear()
+            # Check for completed verifications
+            with verification_lock:
+                completed_verifications = dict(verification_results)
+                unhandled_verifications = dict(completed_verifications)
+                verification_results.clear()
 
-        for scenario_idx, (passed, reason) in completed_verifications.items():
-            verifying.discard(scenario_idx)
-            scenario = next(
-                (s for s in state.scenarios if s.index == scenario_idx), None
-            )
-            if scenario is None:
-                _log.warning("Verification result for unknown scenario %d — ignoring",
-                             scenario_idx)
-                continue
-            if passed:
-                _log.info("Verification passed for scenario %d (%s)",
-                          scenario_idx, scenario.title)
-                state.verified_scenarios.add(scenario_idx)
-                state.latest_output = (
-                    f"Scenario {scenario_idx} ({scenario.title}): "
-                    f"{state.scenario_verdicts[scenario_idx]} (verified)"
+            for scenario_idx, (passed, reason) in completed_verifications.items():
+                verifying.discard(scenario_idx)
+                scenario = next(
+                    (s for s in state.scenarios if s.index == scenario_idx), None
                 )
-                _notify()
-            else:
-                fails = verification_failures.get(scenario_idx, 0) + 1
-                verification_failures[scenario_idx] = fails
-                _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
-                          scenario_idx, scenario.title, fails, reason)
-
-                if fails > verify_max_retries:
-                    # Too many verification failures — mark NEEDS_WORK
-                    _log.warning("Scenario %d failed verification %d times — "
-                                 "marking NEEDS_WORK", scenario_idx, fails)
-                    state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
-                    state.scenario_verdict_reasons[scenario_idx] = (
-                        f"failed verification: {reason}"
-                    )
+                if scenario is None:
+                    _log.warning("Verification result for unknown scenario %d — ignoring",
+                                 scenario_idx)
+                    unhandled_verifications.pop(scenario_idx, None)
+                    continue
+                if passed:
+                    _log.info("Verification passed for scenario %d (%s)",
+                              scenario_idx, scenario.title)
+                    state.verified_scenarios.add(scenario_idx)
                     state.latest_output = (
                         f"Scenario {scenario_idx} ({scenario.title}): "
-                        f"NEEDS_WORK (failed verification: {reason})"
+                        f"{state.scenario_verdicts[scenario_idx]} (verified)"
                     )
-                    verdicts_changed = True
                     _notify()
                 else:
-                    # Send the scenario a follow-up message and put back in pending.
-                    # Use the stored pane_id to target the original scenario
-                    # pane, not the verification pane that may now be pane 0.
-                    pane_id = _live_worker_pane(
-                        session, scenario, scenario_idx in dead_workers)
-                    if pane_id:
-                        followup_msg = (
-                            f"Your verdict was reviewed and flagged: {reason} — "
-                            f"Please re-evaluate this scenario. Make sure you "
-                            f"actually execute the test steps (run commands, "
-                            f"create test files, verify runtime behavior). "
-                            f"Do not just read code. "
-                            f"End with `Reason: <one sentence>` on the "
-                            f"second-to-last line and a new verdict "
-                            f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
-                            f"on the last line."
+                    fails = verification_failures.get(scenario_idx, 0) + 1
+                    verification_failures[scenario_idx] = fails
+                    _log.info("Verification FLAGGED scenario %d (%s), attempt %d: %s",
+                              scenario_idx, scenario.title, fails, reason)
+
+                    if fails > verify_max_retries:
+                        # Too many verification failures — mark NEEDS_WORK
+                        _log.warning("Scenario %d failed verification %d times — "
+                                     "marking NEEDS_WORK", scenario_idx, fails)
+                        state.scenario_verdicts[scenario_idx] = VERDICT_NEEDS_WORK
+                        state.scenario_verdict_reasons[scenario_idx] = (
+                            f"failed verification: {reason}"
                         )
-                        tmux_mod.send_keys(pane_id, followup_msg)
-                        # Send extra Enters to ensure the message is
-                        # submitted — sometimes newlines don't trigger.
-                        for _ in range(2):
-                            time.sleep(1)
-                            tmux_mod.send_keys(pane_id, "")
-                        _log.info("Sent follow-up message to scenario %d pane",
-                                  scenario_idx)
-                        # Clear verdict and put back in pending.  Stamp the
-                        # last-hook-ts to *now* — not 0 — so the next poll
-                        # only re-extracts the verdict after a fresh
-                        # idle_prompt event fires (i.e. the scenario has
-                        # actually responded to the follow-up).  Popping
-                        # the entry instead would accept the stale
-                        # idle_prompt left over from the first verdict and
-                        # re-trigger verification on the same (still PASS)
-                        # transcript turn.
-                        state.scenario_verdicts.pop(scenario_idx, None)
-                        if scenario_idx in state.verified_scenarios:
-                            _log.warning("Scenario %d was in verified_scenarios "
-                                         "when flagged — clearing defensively",
-                                         scenario_idx)
-                            state.verified_scenarios.discard(scenario_idx)
-                        _last_scenario_hook_ts[scenario_idx] = time.time()
-                        pending.add(scenario_idx)
                         state.latest_output = (
                             f"Scenario {scenario_idx} ({scenario.title}): "
-                            f"re-evaluating after verification"
+                            f"NEEDS_WORK (failed verification: {reason})"
                         )
                         verdicts_changed = True
                         _notify()
                     else:
-                        _log.warning("Cannot send follow-up to scenario %d — "
-                                     "window gone, marking INPUT_REQUIRED",
-                                     scenario_idx)
-                        state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
-                        state.scenario_verdict_reasons[scenario_idx] = (
-                            "window gone during PASS verification before a "
-                            "re-checked verdict could be recorded"
-                        )
-                        state.latest_output = (
-                            f"Scenario {scenario_idx} ({scenario.title}): "
-                            f"INPUT_REQUIRED (window gone during verification)"
-                        )
-                        verdicts_changed = True
-                        _notify()
+                        # Send the scenario a follow-up message and put back in pending.
+                        # Use the stored pane_id to target the original scenario
+                        # pane, not the verification pane that may now be pane 0.
+                        pane_id = _live_worker_pane(
+                            session, scenario, scenario_idx in dead_workers)
+                        if pane_id:
+                            followup_msg = (
+                                f"Your verdict was reviewed and flagged: {reason} — "
+                                f"Please re-evaluate this scenario. Make sure you "
+                                f"actually execute the test steps (run commands, "
+                                f"create test files, verify runtime behavior). "
+                                f"Do not just read code. "
+                                f"End with `Reason: <one sentence>` on the "
+                                f"second-to-last line and a new verdict "
+                                f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
+                                f"on the last line."
+                            )
+                            tmux_mod.send_keys(pane_id, followup_msg)
+                            # Send extra Enters to ensure the message is
+                            # submitted — sometimes newlines don't trigger.
+                            for _ in range(2):
+                                time.sleep(1)
+                                tmux_mod.send_keys(pane_id, "")
+                            _log.info("Sent follow-up message to scenario %d pane",
+                                      scenario_idx)
+                            # Clear verdict and put back in pending.  Stamp the
+                            # last-hook-ts to *now* — not 0 — so the next poll
+                            # only re-extracts the verdict after a fresh
+                            # idle_prompt event fires (i.e. the scenario has
+                            # actually responded to the follow-up).  Popping
+                            # the entry instead would accept the stale
+                            # idle_prompt left over from the first verdict and
+                            # re-trigger verification on the same (still PASS)
+                            # transcript turn.
+                            state.scenario_verdicts.pop(scenario_idx, None)
+                            if scenario_idx in state.verified_scenarios:
+                                _log.warning("Scenario %d was in verified_scenarios "
+                                             "when flagged — clearing defensively",
+                                             scenario_idx)
+                                state.verified_scenarios.discard(scenario_idx)
+                            _last_scenario_hook_ts[scenario_idx] = time.time()
+                            pending.add(scenario_idx)
+                            state.latest_output = (
+                                f"Scenario {scenario_idx} ({scenario.title}): "
+                                f"re-evaluating after verification"
+                            )
+                            verdicts_changed = True
+                            _notify()
+                        else:
+                            _log.warning("Cannot send follow-up to scenario %d — "
+                                         "window gone, marking INPUT_REQUIRED",
+                                         scenario_idx)
+                            state.scenario_verdicts[scenario_idx] = VERDICT_INPUT_REQUIRED
+                            state.scenario_verdict_reasons[scenario_idx] = (
+                                "window gone during PASS verification before a "
+                                "re-checked verdict could be recorded"
+                            )
+                            state.latest_output = (
+                                f"Scenario {scenario_idx} ({scenario.title}): "
+                                f"INPUT_REQUIRED (window gone during verification)"
+                            )
+                            verdicts_changed = True
+                            _notify()
+                unhandled_verifications.pop(scenario_idx, None)
 
-        for scenario in state.scenarios:
-            if scenario.index not in pending or not scenario.window_name:
-                continue
-
-            # The concretizer already settled this scenario (rejected, or
-            # blocked at the workspace-trust prompt) and no worker was
-            # launched: keep its recorded reason instead of overwriting it
-            # with "no session id" below.
-            if (not scenario.session_id
-                    and scenario.index in state.scenario_verdicts):
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                _launch_next_queued()
-                continue
-
-            pane_id = _live_worker_pane(session, scenario,
-                                        scenario.index in dead_workers)
-            if pane_id is None:
-                scenario.pane_id = None
-                # Keep retrying this worker rather than adopting another pane
-                # in its window once the relaunch fails.
-                dead_workers.add(scenario.index)
-                retries = retry_counts.get(scenario.index, 0)
-                if retries < _SCENARIO_MAX_RETRIES:
-                    backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
-                    _log.warning(
-                        "Scenario %d window died — retry %d/%d "
-                        "(backoff %.0fs)",
-                        scenario.index, retries + 1,
-                        _SCENARIO_MAX_RETRIES, backoff)
-                    time.sleep(backoff)
-                    if state.stop_requested:
-                        # A stop (e.g. ``z t`` fresh start) killed the
-                        # window; relaunching would orphan a worker.
-                        break
-                    retry_counts[scenario.index] = retries + 1
-                    if _relaunch_scenario_window(
-                        scenario, state, data, pr_data,
-                        session, workdir_path,
-                    ):
-                        # Reset grace period for this retry
-                        grace_start = time.monotonic()
-                        _last_scenario_hook_ts.pop(scenario.index, None)
-                        continue
-                    # Relaunch failed — will retry on next poll iteration
+            for scenario in state.scenarios:
+                if scenario.index not in pending or not scenario.window_name:
                     continue
-                _log.warning("Scenario %d window exited without verdict "
-                             "(retries exhausted)",
-                             scenario.index)
-                # A scenario that never produced a verdict gets INPUT_REQUIRED,
-                # but a recorded launch failure keeps its own reason (nothing
-                # judged it).  A scenario that already has a verdict (a PASS
-                # still awaiting verification) cannot keep it either: its
-                # worker is gone and verification never ran, so reporting PASS
-                # would fabricate coverage the run never established.
-                if (not _is_launch_failure(state, scenario.index)
-                        or scenario.index in state.scenario_verdicts):
-                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                    state.scenario_verdict_reasons.setdefault(
-                        scenario.index,
-                        f"worker exited before any verdict; no recovery after "
-                        f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)",
-                    )
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                _launch_next_queued()
-                continue
 
-            # Workers with no hook event yet may be sitting at the
-            # workspace-trust prompt.  Watch them before the verdict grace
-            # check: the grace only delays verdict polling, and gating the
-            # watch on it would push a blocked worker's failure out to
-            # verdict grace + trust grace after launch.
-            if (pane_id and scenario.session_id
-                    and _hook_events.read_event(scenario.session_id) is None):
-                watch = _trust_watches.get(scenario.index)
-                if watch is None or watch.pane_id != pane_id:
-                    watch = WorkspacePromptWatch(
-                        pane_id, scenario.worktree_path,
-                        transcript_path=scenario.transcript_path)
-                    _trust_watches[scenario.index] = watch
-                blocked = watch.check()
-                if blocked:
-                    _log.warning("Scenario %d worker blocked: %s",
-                                 scenario.index, blocked)
-                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                    state.scenario_verdict_reasons[scenario.index] = (
-                        _TRUST_BLOCKED_PREFIX + blocked)
+                # The concretizer already settled this scenario (rejected, or
+                # blocked at the workspace-trust prompt) and no worker was
+                # launched: keep its recorded reason instead of overwriting it
+                # with "no session id" below.
+                if (not scenario.session_id
+                        and scenario.index in state.scenario_verdicts):
                     pending.discard(scenario.index)
                     verdicts_changed = True
                     _launch_next_queued()
                     continue
 
-            if in_grace:
-                continue
-
-            # Hook-driven gate: require a fresh idle_prompt/Stop event
-            # before doing any pane work.  Scenarios without a session_id
-            # cannot participate in hook-driven polling — mark them
-            # INPUT_REQUIRED so they don't silently stall.
-            if not scenario.session_id:
-                _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
-                             "(hook-driven polling requires one)", scenario.index)
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                state.scenario_verdict_reasons[scenario.index] = (
-                    "no session id registered; verdict could not be polled"
-                )
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                _launch_next_queued()
-                continue
-            ev = _hook_events.read_event(scenario.session_id)
-            ev_ts = float((ev or {}).get("timestamp") or 0)
-            last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
-            if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
-                # No new idle_prompt — skip this scenario this tick.
-                # Stop fires per-turn (not just at session end); relying
-                # on it here would drift from spec R9 and introduce
-                # false turn-boundary signals for multi-turn work.
-                continue
-            _last_scenario_hook_ts[scenario.index] = ev_ts
-
-            # Read verdict straight from the JSONL transcript.  The hook
-            # event is the turn-boundary gate; the transcript is the
-            # source of truth for what the agent actually said.
-            verdict = extract_verdict_from_transcript(
-                scenario.transcript_path, ALL_VERDICTS,
-            )
-
-            # Idle-reminder: when the agent emits idle_prompt without a
-            # verdict, nudge once per _reminder_timeout window.
-            if (verdict is None and _reminder_timeout is not None
-                    and scenario.pane_id):
-                now = time.monotonic()
-                last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
-                if now - last_reminded >= _reminder_timeout:
-                    reminder = (
-                        "Reminder: your verdict must appear alone on its own "
-                        "line — the line must contain only PASS, NEEDS_WORK, "
-                        "or INPUT_REQUIRED with no other text. Please output "
-                        "your verdict now if you have reached a conclusion."
-                    )
-                    tmux_mod.send_keys(pane_id, reminder)
-                    _last_reminder_sent[scenario.index] = now
-                    _log.info(
-                        "Sent verdict-format reminder to scenario %d",
-                        scenario.index,
-                    )
-
-            if verdict:
-                state.scenario_verdicts[scenario.index] = verdict
-                reason = extract_verdict_reason_from_transcript(
-                    scenario.transcript_path,
-                )
-                if reason:
-                    state.scenario_verdict_reasons[scenario.index] = reason
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                _log.info("Scenario %d (%s) verdict: %s",
-                          scenario.index, scenario.title, verdict)
-
-                # Only PASS verdicts need verification — NEEDS_WORK and
-                # INPUT_REQUIRED already indicate problems were found.
-                # Skip re-verification for a PASS that was already verified
-                # before a restart: ``verified_scenarios`` is persisted in
-                # the resume snapshot precisely so a resumed run trusts
-                # prior verification instead of re-spawning a verifier
-                # Claude session for every completed scenario each restart.
-                if (verdict == VERDICT_PASS and verify_enabled
-                        and scenario.index not in state.verified_scenarios):
-                    state.latest_output = (
-                        f"Scenario {scenario.index} ({scenario.title}): "
-                        f"{verdict} — verifying..."
-                    )
-                    _notify()
-
-                    verifying.add(scenario.index)
-                    # pane_output fallback is only consulted when the
-                    # transcript is missing — which it never is in the
-                    # hook-driven path — so pass "" here instead of
-                    # scraping the pane.  Each scenario's verifier pane
-                    # is created once and reused across re-verifications
-                    # by _verify_single_scenario.
-                    t = threading.Thread(
-                        target=_run_verification,
-                        args=(scenario, verdict, ""),
-                        daemon=True,
-                        name=f"qa-verify-{state.pr_id}-{scenario.index}",
-                    )
-                    t.start()
-                else:
-                    state.latest_output = (
-                        f"Scenario {scenario.index} ({scenario.title}): "
-                        f"{verdict}"
-                    )
-                    _notify()
-                    # Scenario fully done — launch next queued if available
+                pane_id = _live_worker_pane(session, scenario,
+                                            scenario.index in dead_workers)
+                if pane_id is None:
+                    scenario.pane_id = None
+                    # Keep retrying this worker rather than adopting another pane
+                    # in its window once the relaunch fails.
+                    dead_workers.add(scenario.index)
+                    retries = retry_counts.get(scenario.index, 0)
+                    if retries < _SCENARIO_MAX_RETRIES:
+                        backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
+                        _log.warning(
+                            "Scenario %d window died — retry %d/%d "
+                            "(backoff %.0fs)",
+                            scenario.index, retries + 1,
+                            _SCENARIO_MAX_RETRIES, backoff)
+                        time.sleep(backoff)
+                        if state.stop_requested:
+                            # A stop (e.g. ``z t`` fresh start) killed the
+                            # window; relaunching would orphan a worker.
+                            break
+                        retry_counts[scenario.index] = retries + 1
+                        if _relaunch_scenario_window(
+                            scenario, state, data, pr_data,
+                            session, workdir_path,
+                        ):
+                            # Reset grace period for this retry
+                            grace_start = time.monotonic()
+                            _last_scenario_hook_ts.pop(scenario.index, None)
+                            continue
+                        # Relaunch failed — will retry on next poll iteration
+                        continue
+                    _log.warning("Scenario %d window exited without verdict "
+                                 "(retries exhausted)",
+                                 scenario.index)
+                    # A scenario that never produced a verdict gets INPUT_REQUIRED,
+                    # but a recorded launch failure keeps its own reason (nothing
+                    # judged it).  A scenario that already has a verdict (a PASS
+                    # still awaiting verification) cannot keep it either: its
+                    # worker is gone and verification never ran, so reporting PASS
+                    # would fabricate coverage the run never established.
+                    if (not _is_launch_failure(state, scenario.index)
+                            or scenario.index in state.scenario_verdicts):
+                        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                        state.scenario_verdict_reasons.setdefault(
+                            scenario.index,
+                            f"worker exited before any verdict; no recovery after "
+                            f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)",
+                        )
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
                     _launch_next_queued()
+                    continue
 
-        # Fill every free slot, including when a dequeued launch failed.
-        # A failed launch has no pending worker to trigger the next dequeue.
-        for _ in range(max(1, len(_launch_queue))):
-            if not _launch_next_queued():
-                break  # batch full or queue drained: stop before re-inventorying
+                # Workers with no hook event yet may be sitting at the
+                # workspace-trust prompt.  Watch them before the verdict grace
+                # check: the grace only delays verdict polling, and gating the
+                # watch on it would push a blocked worker's failure out to
+                # verdict grace + trust grace after launch.
+                if (pane_id and scenario.session_id
+                        and _hook_events.read_event(scenario.session_id) is None):
+                    watch = _trust_watches.get(scenario.index)
+                    if watch is None or watch.pane_id != pane_id:
+                        watch = WorkspacePromptWatch(
+                            pane_id, scenario.worktree_path,
+                            transcript_path=scenario.transcript_path)
+                        _trust_watches[scenario.index] = watch
+                    blocked = watch.check()
+                    if blocked:
+                        _log.warning("Scenario %d worker blocked: %s",
+                                     scenario.index, blocked)
+                        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                        state.scenario_verdict_reasons[scenario.index] = (
+                            _TRUST_BLOCKED_PREFIX + blocked)
+                        pending.discard(scenario.index)
+                        verdicts_changed = True
+                        _launch_next_queued()
+                        continue
 
-        if verdicts_changed or completed_verifications:
+                if in_grace:
+                    continue
+
+                # Hook-driven gate: require a fresh idle_prompt/Stop event
+                # before doing any pane work.  Scenarios without a session_id
+                # cannot participate in hook-driven polling — mark them
+                # INPUT_REQUIRED so they don't silently stall.
+                if not scenario.session_id:
+                    _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
+                                 "(hook-driven polling requires one)", scenario.index)
+                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+                    state.scenario_verdict_reasons[scenario.index] = (
+                        "no session id registered; verdict could not be polled"
+                    )
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _launch_next_queued()
+                    continue
+                ev = _hook_events.read_event(scenario.session_id)
+                ev_ts = float((ev or {}).get("timestamp") or 0)
+                last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
+                if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
+                    # No new idle_prompt — skip this scenario this tick.
+                    # Stop fires per-turn (not just at session end); relying
+                    # on it here would drift from spec R9 and introduce
+                    # false turn-boundary signals for multi-turn work.
+                    continue
+                _last_scenario_hook_ts[scenario.index] = ev_ts
+
+                # Read verdict straight from the JSONL transcript.  The hook
+                # event is the turn-boundary gate; the transcript is the
+                # source of truth for what the agent actually said.
+                verdict = extract_verdict_from_transcript(
+                    scenario.transcript_path, ALL_VERDICTS,
+                )
+
+                # Idle-reminder: when the agent emits idle_prompt without a
+                # verdict, nudge once per _reminder_timeout window.
+                if (verdict is None and _reminder_timeout is not None
+                        and scenario.pane_id):
+                    now = time.monotonic()
+                    last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
+                    if now - last_reminded >= _reminder_timeout:
+                        reminder = (
+                            "Reminder: your verdict must appear alone on its own "
+                            "line — the line must contain only PASS, NEEDS_WORK, "
+                            "or INPUT_REQUIRED with no other text. Please output "
+                            "your verdict now if you have reached a conclusion."
+                        )
+                        tmux_mod.send_keys(pane_id, reminder)
+                        _last_reminder_sent[scenario.index] = now
+                        _log.info(
+                            "Sent verdict-format reminder to scenario %d",
+                            scenario.index,
+                        )
+
+                if verdict:
+                    state.scenario_verdicts[scenario.index] = verdict
+                    reason = extract_verdict_reason_from_transcript(
+                        scenario.transcript_path,
+                    )
+                    if reason:
+                        state.scenario_verdict_reasons[scenario.index] = reason
+                    pending.discard(scenario.index)
+                    verdicts_changed = True
+                    _log.info("Scenario %d (%s) verdict: %s",
+                              scenario.index, scenario.title, verdict)
+
+                    # Only PASS verdicts need verification — NEEDS_WORK and
+                    # INPUT_REQUIRED already indicate problems were found.
+                    # Skip re-verification for a PASS that was already verified
+                    # before a restart: ``verified_scenarios`` is persisted in
+                    # the resume snapshot precisely so a resumed run trusts
+                    # prior verification instead of re-spawning a verifier
+                    # Claude session for every completed scenario each restart.
+                    if (verdict == VERDICT_PASS and verify_enabled
+                            and scenario.index not in state.verified_scenarios):
+                        state.latest_output = (
+                            f"Scenario {scenario.index} ({scenario.title}): "
+                            f"{verdict} — verifying..."
+                        )
+                        _notify()
+
+                        verifying.add(scenario.index)
+                        # pane_output fallback is only consulted when the
+                        # transcript is missing — which it never is in the
+                        # hook-driven path — so pass "" here instead of
+                        # scraping the pane.  Each scenario's verifier pane
+                        # is created once and reused across re-verifications
+                        # by _verify_single_scenario.
+                        t = threading.Thread(
+                            target=_run_verification,
+                            args=(scenario, verdict, ""),
+                            daemon=True,
+                            name=f"qa-verify-{state.pr_id}-{scenario.index}",
+                        )
+                        t.start()
+                    else:
+                        state.latest_output = (
+                            f"Scenario {scenario.index} ({scenario.title}): "
+                            f"{verdict}"
+                        )
+                        _notify()
+                        # Scenario fully done — launch next queued if available
+                        _launch_next_queued()
+
+            # Fill every free slot, including when a dequeued launch failed.
+            # A failed launch has no pending worker to trigger the next dequeue.
+            for _ in range(max(1, len(_launch_queue))):
+                if not _launch_next_queued():
+                    break  # batch full or queue drained: stop before re-inventorying
+
+            if verdicts_changed or completed_verifications:
+                with verification_lock:
+                    verifying_snapshot = set(verifying)
+                _write_status_file(status_path, state.pr_id, state.scenarios,
+                                   state.scenario_verdicts,
+                                   scenario_0=state.scenario_0,
+                                   verifying_scenarios=verifying_snapshot,
+                                   queued_scenarios=_queued_indices,
+                                   verification_failures=verification_failures,
+                                   verdict_reasons=state.scenario_verdict_reasons)
+        except OSError as e:
+            if e.errno not in (errno.EAGAIN, errno.ENOMEM):
+                raise
+            # A fork that fails for lack of processes or memory is transient:
+            # skip the rest of this poll instead of crashing the QA thread,
+            # which would end the run as ERROR and abandon its live workers.
+            # Results this poll took from the verifiers but did not act on
+            # go back, so the next poll still sees them.
             with verification_lock:
-                verifying_snapshot = set(verifying)
-            _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts,
-                               scenario_0=state.scenario_0,
-                               verifying_scenarios=verifying_snapshot,
-                               queued_scenarios=_queued_indices,
-                               verification_failures=verification_failures,
-                               verdict_reasons=state.scenario_verdict_reasons)
+                for idx, result in unhandled_verifications.items():
+                    verification_results.setdefault(idx, result)
+                    verifying.add(idx)
+            _log.warning("QA poll for %s skipped an iteration: %s",
+                         state.pr_id, e)
 
 
 # ---------------------------------------------------------------------------
@@ -4539,6 +4564,7 @@ def _execute_and_finalize(
         if use_containers:
             try:
                 if _release_scenario_containers(state, session):
+                    state._deferred_release_session = session
                     notify()
             except Exception:
                 # Do not replace a polling/persistence error with cleanup's error.
@@ -4805,6 +4831,37 @@ def _release_scenario_containers(state: QALoopState, session: str, *,
     return False
 
 
+def _retry_deferred_release(state: QALoopState) -> None:
+    """Retry a deferred run-end release until the runtime and tmux recover.
+
+    Runs on the finished run's own thread, after its completion was
+    reported: under the PID pressure that defers a release, a new thread
+    could not start.  Nothing else retries it: no poll follows the run's
+    end, and a release deferred because the runtime domain was unknown
+    (podman itself could not fork) is persisted without an identity later
+    reconcile passes can verify, while the run's live panes keep the
+    containers owned.  Each retry repeats the same owner release, so
+    INPUT_REQUIRED, viewed and retained containers are still kept.
+    """
+    session = state._deferred_release_session
+    if not session:
+        return
+    for delay in _RELEASE_RETRY_DELAYS:
+        time.sleep(delay)
+        try:
+            if not _release_scenario_containers(state, session):
+                state._deferred_release_session = ""
+                _log.info("QA %s/%s deferred container release retried",
+                          state.pr_id, state.loop_id)
+                return
+        except Exception:
+            _log.warning("QA %s/%s container release retry failed",
+                         state.pr_id, state.loop_id, exc_info=True)
+    _log.warning("QA %s/%s container release still deferred after %d "
+                 "retries — retry with 'pm container reap'",
+                 state.pr_id, state.loop_id, len(_RELEASE_RETRY_DELAYS))
+
+
 def _note_cleanup(state: QALoopState, note: str) -> None:
     """Append a cleanup note once; queued releases retry it every poll."""
     if note not in state.latest_output:
@@ -4906,6 +4963,7 @@ def start_qa_background(
             state.latest_output = "QA thread crashed"
             if on_update:
                 on_update(state)
+        _retry_deferred_release(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-{state.pr_id}")
     t.start()
@@ -4929,6 +4987,7 @@ def resume_qa_background(
             state.latest_output = "QA resume thread crashed"
             if on_update:
                 on_update(state)
+        _retry_deferred_release(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-resume-{state.pr_id}")
     t.start()

@@ -275,3 +275,70 @@ def test_superseded_run_drops_its_snapshot_instead_of_rewriting_it(
     assert len(snapshots) == 1  # only the pre-poll snapshot
     assert not resume.exists()
     release.assert_called_once_with(state, "pm-t")
+
+
+
+def test_deferred_run_end_release_is_retried(finalize_context, monkeypatch):
+    """A run-end release deferred by a runtime outage (e.g. podman could not
+    fork, so the runtime domain was unknown) is retried until it succeeds:
+    reconcile passes cannot verify that release and the live panes keep the
+    containers owned, so nothing else would remove them."""
+    state, snapshots, release, run = finalize_context
+    monkeypatch.setattr(qa_loop, "_poll_tmux_verdicts", MagicMock())
+    monkeypatch.setattr(qa_loop, "_RELEASE_RETRY_DELAYS", (0, 0, 0, 0))
+    release.side_effect = [True, True, False]
+    run()
+    assert release.call_count == 1  # finalize does not block on retries
+    assert state._deferred_release_session == "pm-t"
+    qa_loop._retry_deferred_release(state)
+    assert release.call_count == 3  # stops after the first success
+    assert state._deferred_release_session == ""
+    for call in release.call_args_list:
+        assert call.args == (state, "pm-t")
+
+
+def test_completed_run_end_release_is_not_retried(finalize_context, monkeypatch):
+    state, snapshots, release, run = finalize_context
+    monkeypatch.setattr(qa_loop, "_poll_tmux_verdicts", MagicMock())
+    monkeypatch.setattr(qa_loop, "_RELEASE_RETRY_DELAYS", (0, 0))
+    run()
+    qa_loop._retry_deferred_release(state)
+    assert release.call_count == 1
+
+
+def test_release_retry_is_bounded(finalize_context, monkeypatch):
+    state, snapshots, release, run = finalize_context
+    monkeypatch.setattr(qa_loop, "_poll_tmux_verdicts", MagicMock())
+    monkeypatch.setattr(qa_loop, "_RELEASE_RETRY_DELAYS", (0, 0))
+    release.return_value = True
+    run()
+    qa_loop._retry_deferred_release(state)
+    assert release.call_count == 3
+
+
+@pytest.mark.parametrize("starter,target", [
+    ("start_qa_background", "run_qa_sync"),
+    ("resume_qa_background", "resume_qa_sync"),
+])
+@pytest.mark.parametrize("crash", [False, True])
+def test_qa_thread_retries_deferred_release_after_completion(
+        monkeypatch, starter, target, crash):
+    """The run's own thread retries after reporting completion: under the
+    PID pressure that defers a release, a new thread could not start."""
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    order = []
+
+    def body(st, *args, **kwargs):
+        st._deferred_release_session = "pm-t"
+        if crash:
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+
+    monkeypatch.setattr(qa_loop, target, body)
+    monkeypatch.setattr(qa_loop, "_RELEASE_RETRY_DELAYS", (0,))
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session: order.append(("release", session)))
+    t = getattr(qa_loop, starter)(state, None, {}, lambda st: order.append("update"))
+    t.join(5)
+    assert order[-1] == ("release", "pm-t")
+    if crash:
+        assert order == ["update", ("release", "pm-t")]
