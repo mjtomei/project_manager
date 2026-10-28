@@ -1107,6 +1107,8 @@ def _format_action_status(pr_id: str, action: str) -> str:
                     else f" [done {v}]" if v
                     else " [done]")
         if state == "failed":
+            if entry.get("retryable"):
+                return " [failed; retryable]"
             return " [failed]"
         return ""
     # start / qa / review / merge: hook-event-derived states from

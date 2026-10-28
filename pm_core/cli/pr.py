@@ -1353,9 +1353,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             home_window.park_if_on(pm_session, existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
+            # The review loop launches this command as a child and discards
+            # its stdout on success, so mirror the user-facing notice into the
+            # log — otherwise a loop-driven launch silently replaces a held or
+            # historical window with no visible trace.
+            _log.info("Killed existing review window '%s'", window_name)
         else:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
+            _log.info("Switched to existing review window '%s'", window_name)
             return
 
     title = pr_entry.get("title", "")
@@ -3724,6 +3730,14 @@ def pr_auto_sequence(pr_id: str):
     if status == "in_review":
         if not pm_session:
             click.echo("paused: no pm tmux session")
+            return
+        # A native review loop (including its bounded failed-launch retries)
+        # owns this PR's review launch; a second --fresh launch here would
+        # kill its window and duplicate the work.  Wait for the loop.
+        from pm_core.review_loop import review_loop_owns_launch
+        _loop_owner = review_loop_owns_launch(pr_id)
+        if _loop_owner:
+            click.echo(f"running: review (owned by {_loop_owner})")
             return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         if verdict and _older_than(
