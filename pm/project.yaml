@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T05:21:09.739340+00:00'
+  updated_at: '2026-10-28T13:52:39.016671+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9285,6 +9285,23 @@ prs:
       spec review OFF. Preserve existing user decisions, source, evidence and drafts.
     created_at: '2026-10-28T05:16:54.801905+00:00'
     last_edited: '2026-10-28T05:16:54.801905+00:00'
+  - id: note-1c4be99
+    text: 'Review i10 (73ac): (1) fixed — a held INPUT_REQUIRED result that finalized
+      while the TUI was down was never noted: _resume_incomplete_qa re-spawns the
+      watcher with running=True, so poll_qa_state could not process the held completion
+      (spec R3 promised it would), losing the QA note when no follow-up ever arrives.
+      Adoption now notes it once and persists completion_processed. (2) incidental
+      fix — pm pr auto-sequence treated (empty overall + no qa window) as a dead run
+      and launched a second QA driver; a reopened held run publishes exactly that
+      tuple, and the duplicate driver stale-window cleanup kills the qa-<id>-s* worker
+      panes the live driver is polling. The tick now checks the run snapshot with
+      resume_owned_elsewhere and reports running: qa; orphaned runs still relaunch.
+      Also: held self-driving runs no longer log "loop paused"; _poll_waiting skips
+      the upstream head lookup once a head move is recorded. Full suite: 4127 passed,
+      1 skipped (12 test_markdown_render failures are the known missing markdown dep,
+      pass with it installed).'
+    created_at: '2026-10-28T13:52:38Z'
+    last_edited: '2026-10-28T13:52:38Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
