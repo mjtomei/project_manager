@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T00:09:54.630322+00:00'
+  updated_at: '2026-10-28T00:11:48.295155+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14590,6 +14590,29 @@ prs:
       diagnostics until a full pass. Evidence /pm-captures/scenarios/53/manifest.md.'
     created_at: '2026-10-28T00:09:54Z'
     last_edited: '2026-10-28T00:09:54Z'
+  - id: note-6aa330a
+    text: 'QA S51 (2026-10-27/28, work/claude-opus-5-5; real rootless Podman 3.4.4
+      private overlay, fake agents, S44 drivers; evidence /pm-captures/scenarios/51/manifest.md).
+      Story1 outage held: peak 6=L+1 only while s1-s4 releases deferred, deferred
+      rm +2.4 s after clear, s6/s7/s8 dequeued before s5 verdict, post-recovery peak
+      5=L, 8 PASS + FINALIZE_DONE. Story2 held: 2 delayed {{.Id}} probes per name
+      for all 8, no launch/identity errors, creation overlap 2, only B left. Story3
+      FIXED 2 bugs: ebba345e - pm container reap kept a young (<LAUNCH_GRACE) container
+      whose launch had already concluded its lease as "launching (no pane yet)" after
+      its window closed; 272e3c52 - parallel removals sharing one push proxy reported
+      it twice ("stopped 2 unused proxy(ies)"). Both verified live post-fix (P2 TUI
+      restarted on fixed code); full suite 4276 passed/2 skipped.'
+    created_at: '2026-10-28T00:11:47Z'
+    last_edited: '2026-10-28T00:11:47Z'
+  - id: note-6e8fde3
+    text: 'S51 OPEN QUESTION (needs human): the A/C overlap peak was 7 = L+2 (A s17-s20
+      + B + C s1 kept INPUT_REQUIRED for a human + C s2 floor launch), 23:48:09-23:49:48.
+      impl.md R8 explicitly allows it (cap bounds the launch batch, not deliberately
+      kept containers; at least one scenario always launches), but the S51 Then says
+      <= L+1. Decide whether kept-for-human containers should block the floor launch,
+      or amend qa.md so the bound is L+1 plus deliberately kept containers.'
+    created_at: '2026-10-28T00:11:48Z'
+    last_edited: '2026-10-28T00:11:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
