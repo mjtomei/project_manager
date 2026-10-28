@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T07:19:13.209983+00:00'
+  updated_at: '2026-10-28T07:55:03.700685+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32315,6 +32315,29 @@ prs:
       excluded. No pm_core/ change. (2026-10-28)'
     created_at: '2026-10-28T07:19:13Z'
     last_edited: '2026-10-28T07:19:13Z'
+  - id: note-94e5af9
+    text: 'Review loop 419c i2: two defects in the kept recipe scope, both reproduced
+      live. (1) The CLI scaffold comment told workers to paste the double-quoted bash
+      -c "..." form, but <command-to-record> sits inside single quotes inside the
+      outer double-quoted new-session argument: the first " ends the outer string,
+      the shell splits the command into stray words, the recorder exits at once and
+      the block fails with "asciinema wrote no cast" (reproduced with real asciinema
+      2.1.0 + tmux 3.2a). The recipe now documents the escaped form (-c ''bash -c
+      \"set -x; cmd-one; cmd-two\"'', plus a note that the outer shell expands $ first);
+      verified end to end (rc 0, cast holds the recorded output). (2) The render steps
+      never cleared this run''s outputs, and ffmpeg leaves an existing output untouched
+      when it fails, so a failed render (agg absent — the pm-dev image state — unreadable
+      cast, failed transcode) ended with the previous run''s recording.mp4, which
+      the manifest/report present as this run''s evidence; a stale intermediate gif
+      did the same for a failed agg. Both recording recipes and web-ui now rm -f this
+      run''s mp4/gif (and the webm before the driver), then test -s the mp4 and exit
+      1 with an actionable message. Tests: 4 new execution-based (scaffold quoting
+      driven through stub tmux/asciinema; render block run with stub agg/ffprobe/ffmpeg;
+      web-ui text), all fail against HEAD recipes. File 29 pass; full suite 3882 passed
+      / 1 skipped with the two env-blocked files excluded and the two known baselines
+      deselected. Evidence /pm-captures/review-419c-i2/. No pm_core/ change. (2026-10-28)'
+    created_at: '2026-10-28T07:55:03Z'
+    last_edited: '2026-10-28T07:55:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
