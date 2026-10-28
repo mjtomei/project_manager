@@ -9238,7 +9238,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/271
   gh_pr_number: 271
   created_at: '2026-03-22T19:31:05.710967+00:00'
-  updated_at: '2026-10-28T17:43:06.877985+00:00'
+  updated_at: '2026-10-28T18:08:02.564739+00:00'
   started_at: '2026-10-28T05:17:08.570120+00:00'
   reviewed_at: null
   merged_at: null
@@ -9388,6 +9388,26 @@ prs:
       installed, real git, PM_HOST_HOME unset).'
     created_at: '2026-10-28T17:43:06Z'
     last_edited: '2026-10-28T17:43:06Z'
+  - id: note-8182cb1
+    text: 'Review ab13 i2: one production fix — `resume_qa_sync`''s three abort paths
+      (no pm session, PR workdir gone, no QA workdir) set running=False/verdict=ERROR
+      but left `held` set and never notified, so a held run adopted after a restart
+      that then failed to resume kept the poll timer armed and made a later `t` report
+      a waiting run nothing was watching; the failure reached only the daemon log
+      (the TUI suppresses _on_qa_complete for an adopted held run whose earlier result
+      was already noted). All three aborts now share one `_abort` helper that clears
+      held, sets a message and notifies, matching the crash handlers. Test: test_resume_abort_stops_advertising_the_held_wait
+      (fails on the old code). Spec R2 step 4 now states the flag-clearing ordering
+      iteration 1 implemented (flags cleared before the pre-finalize snapshot), and
+      §20 records the iteration. Observation, still not changed: a held run''s runtime_state
+      qa action stays "running" for a detached `pm pr qa` driver (iteration 1 said
+      "no waiting action state exists" — a `waiting` state does exist but is hook-derived;
+      writing it directly needs a reopen/reset path the driver thread owns). TUI-driven
+      held runs still show [idle]/[wait] from the live panes. Full targeted suites
+      pass (qa/autostart/signoff: 1088 passed; the only failures are the known env-dependent
+      test_signoff_integration/test_merge_publish git+network cases).'
+    created_at: '2026-10-28T18:08:02Z'
+    last_edited: '2026-10-28T18:08:02Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
