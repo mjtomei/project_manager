@@ -33,23 +33,47 @@ Each scenario builds its own throwaway project (see `tui-manual-test.md`), with:
   have time to break and repair the launch environment between iterations).
 - The TUI started from the test project (`pm session`), auto-start target added
   where the scenario needs it (`pm autostart add <pr> --stop-before-merge`).
+- The local-backend scaffold must be pushed and synced before `pm pr start`
+  (`pm push` then `git merge pm/sync-*` in the main repo), or start fails with
+  "not committed on master yet".
+- The fake-claude stand-in and any broken runtime shim must be on the session
+  PATH when `pm session` starts (the panes inherit it).
+- Auto-start targets are TUI-process state, not project.yaml records: a TUI
+  restart loses them, so re-add after restart when the scenario needs one.
+- Launch artifacts live under `<project>/pm/transcripts/<run_id>/launch-artifacts/`
+  (the `pm/` segment matters).
+- `pm autostart status --json` emits `run_id`, `targets` and `runs` at the TOP
+  level — read `.runs[0].review` and `.targets[0].state`, not `.status.*`.
+- Backoff is 5 s then 10 s between the three attempts; the cooldown before
+  auto-start re-arms is 60 s.
 
 ### Failure injection (user-level, no source edits)
 
-The launch failure is induced the way a user's host would fail, not by mocking:
+The launch failure is induced the way a user's host would fail, not by mocking.
 
 - **Primary — container runtime failure** (matches the reported symptom
   "fails while removing/replacing its container"): put a small `podman` (or
   `docker`) shim early on `PATH` that answers `info` with exit 0 (so
-  `pm container enable` accepts it) and fails `run`/`create` with a chosen
-  message on stderr; then `pm container enable`. Because container mode is a
-  global setting read on every launch, `pm container disable` (or swapping the
-  shim) repairs the environment mid-backoff, and the very next attempt runs
-  Claude on the host with fake-claude.
-- The shim's stderr text selects the classification under test:
-  - `container setup failed: exec format error` → transient, retryable;
-  - `permission denied` (teardown/mount wording) → still retryable;
-  - `unauthorized: authentication required` / `401` → non-retryable.
+  `pm container enable` accepts it) and fails `run`/`create`; then
+  `pm container enable`. Because container mode is a global setting read on
+  every launch, `pm container disable` repairs the environment mid-backoff, and
+  the very next attempt runs Claude on the host with fake-claude.
+- **Classification text does NOT come from the shim's run/create stderr**: pm
+  wraps any container-creation exception in a generic `ContainerError`
+  ("Failed to create container … Is podman running?"), so a shim cannot select
+  the wording the loop classifies. To inject classification text, give the shim
+  an `image inspect` that exits 1 and set the image name via the normal surface:
+  `pm container set image <text>`. The launch child then exits 1 with
+  `Image <text> not found in podman. …`, which the loop does classify:
+  - `permission denied:latest` → retryable (3 attempts);
+  - `process 403 exited` → retryable (3 attempts);
+  - `unauthorized:latest` → non-retryable (1 attempt).
+- **HOLD — live-inducible** (the earlier spec said it was not): clear the
+  fake-claude config, put a `claude` stand-in on the session PATH that prints
+  the workspace-trust dialog and blocks, set
+  `pm set trust-prompt-grace-seconds 10`, and disable container mode during the
+  first backoff (watch `pm log` for "launch attempt 1/3 failed"). The retry
+  then launches the stand-in and the loop reports a hold.
 - **Alternative — workdir unavailable**: move the PR's workdir aside before the
   next iteration launches (the child cannot create the review window and the
   loop raises "review window … not found after launch", also retryable).
@@ -84,7 +108,7 @@ THEN the history holds only the iterations that actually produced verdicts
 
 GIVEN an attempt failed,
 WHEN the user opens the artifact the UI names,
-THEN it lives under `<project>/transcripts/<run>/launch-artifacts/`,
+THEN it lives under `<project>/pm/transcripts/<run_id>/launch-artifacts/`,
   and contains timestamp, PR, iteration, loop id, attempt number, return code,
   the exact launch command, the complete (untruncated) stderr and stdout,
   and a copy of the failed attempt's prompt when one exists (skipped, with a
@@ -111,9 +135,11 @@ THEN the loop ends with an explicit failed-launch outcome (`LAUNCH_FAILED`,
 GIVEN the exhausted failure above,
 WHEN the user runs `pm autostart status` (and `--json`) or opens the runs popup
   (`a`),
-THEN the target is shown as failed with `review launch failed (retryable): …`
-  plus `[artifact: …]`, and the JSON entry carries retryable/attempts/error/
-  artifact,
+THEN the target is shown as failed (`phase: failed`, `state: review`) with
+  `review launch failed (retryable): …` plus the artifact path exactly once
+  (the concise error already names it; the status must not append it again),
+  and the JSON entry carries retryable/attempts/error/artifact (top-level
+  `runs[0].review`),
   and the session/action picker's review row shows a `[failed; retryable]` badge.
 
 ### R5 — Auto-start re-arms the target instead of stranding it
@@ -132,9 +158,15 @@ THEN nothing re-arms it, and the notice says to run `review-loop start` rather
 ### R6 — Cancellation wins over the retry
 
 GIVEN a loop backing off after a failed attempt,
-WHEN the user supersedes it (`zz d`, or the equivalent stop-then-start action),
+WHEN the user cancels it from the review action's fresh mode (`z d`, which
+  stops the loop and opens a fresh one-off review) or supersedes it with a new
+  loop (`zz d`, the stop-then-start loop action),
 THEN the old loop ends `KILLED` (not `LAUNCH_FAILED`), performs no further
-  attempt, is not re-armed, and the new loop's single review window survives.
+  attempt, is not re-armed, and the new review window (fresh review or new
+  loop) is the only one and survives.
+  After the stop, `pm autostart status` reports `review loop ended KILLED`
+  with no retry evidence: `retryable` false, `attempts` 0, empty `error` and
+  `artifact` (a cancelled loop is not retryable).
 
 ### R7 — Concurrent drivers never duplicate or kill each other's launch
 
@@ -174,8 +206,10 @@ THEN it stops after one attempt, reports a non-retryable failure ("needs
 GIVEN a review pane sits at a workspace-trust/permission prompt,
 WHEN the loop observes it,
 THEN the outcome is a hold (`HOLD`) — not a launch failure, not retried — and
-  the status names the prompt rather than an earlier attempt's launch error,
-  with no stale artifact attached.
+  the status reports `review held at a permission prompt: <prompt>` rather than
+  an earlier attempt's launch error, with no stale artifact attached (neither
+  in `pm autostart status` nor in the TUI's "Review loop done" notice), and the
+  target is not re-armed after the cooldown.
 
 ## Edge cases
 
@@ -213,6 +247,30 @@ previous run's verdict or a previous window; the artifact is missing/truncated;
 a cancellation is reported as a launch failure; two drivers produce two review
 windows; or a healthy unrelated review is disturbed.
 
+## Post-QA fixes to verify (f076 i1–i3, after the first QA run)
+
+The first QA pass (scenarios 1–6) produced these fixes; scenarios must verify
+them on the live surfaces, not just in tests:
+
+1. The TUI retry notice for attempt N now reads
+   `Review launch retry for <pr> (attempt N; attempt N-1 failed: …)` — the error
+   is labelled as the previous attempt's, and no notice fires for attempt 1.
+2. A TUI restart mid-retry no longer re-announces the persisted notice
+   (`_ui_notified_retry` round-trips through the breadcrumb; cleared only at an
+   episode boundary or an auto-start re-arm).
+3. `pm autostart status` prints the artifact path once, not twice.
+4. A HOLD's completion notice shows the trust/permission prompt and no
+   `Artifact:` line; status says `review held at a permission prompt`.
+5. A re-armed retry that is running shows `review iteration N`, not
+   `review iteration N (last LAUNCH_FAILED)`.
+6. A cancelled (KILLED) loop reports no retry evidence (`retryable`,
+   `attempts`, `error`, `artifact` all cleared) — this was the one NEEDS_WORK
+   finding of the first QA pass.
+7. A retryable per-attempt `launch failed (rc=…)` logs at WARNING while the
+   loop keeps retrying; ERROR is reserved for auth failures and for giving up.
+8. The `pm session` review row's `[failed; retryable]` badge (previously
+   untested).
+
 ## Ambiguities resolved
 
 1. **"Automatic retry" wording** — the notice promises an automatic retry only
@@ -222,11 +280,12 @@ windows; or a healthy unrelated review is disturbed.
    unconfirmed in the bug report, so scenarios induce a *symptom* (broken
    container runtime / unavailable workdir), which is exactly how the code
    classifies failures.
-3. **HOLD reproduction** — a workspace-trust prompt cannot be produced with the
-   fake-claude stand-in (it never renders the trust dialog), so R9's hold story
-   is verified through the workspace-trust regression tests and the status
-   rendering, not by a live pane. Not treated as a scenario failure if the
-   worker cannot induce it; it must then cite the covering tests.
+3. **HOLD reproduction** — superseded by QA scenario 6: a hold IS live-inducible
+   (see "HOLD — live-inducible" under Failure injection). The fake-claude
+   stand-in never renders the trust dialog, so the scenario swaps in a `claude`
+   stand-in for the retry attempt. If a worker still cannot induce it, it must
+   cite `tests/test_workspace_trust.py` and the status-rendering tests rather
+   than fail the story.
 4. **"Another loop owns the launch"** — a second TUI is expected to report a
    non-retryable stand-down (documented residual), not to adopt the first
    loop's review. Scenarios assert the first loop is unharmed; the second TUI's
