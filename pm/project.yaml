@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T17:36:54.697041+00:00'
+  updated_at: '2026-10-28T18:11:30.140351+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15679,6 +15679,43 @@ prs:
       status panes and qa-X-s1 windows).'
     created_at: '2026-10-28T17:36:54Z'
     last_edited: '2026-10-28T17:36:54Z'
+  - id: note-b2c13cd
+    text: 'S93 refine (code read at 1285ff26): with two QA runs in one TUI during
+      an inventory outage, each run''s poll grants its own floor launch (_blind_launches
+      is per run; the unknown-inventory path in _container_launch_room_known returns
+      (1,0,False) and ignores the other run''s floor). Nothing is released during
+      the outage, so if both runs reach zero active workers the peak is L+2 even before
+      any restart. Resolution 35 promises one floor exception per TUI only for a readable
+      inventory, and resolution 19 is per run, so ''peak ≤ L+1 through the restart''
+      with two runs has no ruling yet. S93 keeps ≤ L+1 as the Then and records each
+      run''s floor launch with timestamps. If S93 sees L+2 from two runs'' floor launches,
+      decide whether the floor should be shared in-process (extend _launch_admission_lock)
+      or the Then should be per run.'
+    created_at: '2026-10-28T16:57:53Z'
+    last_edited: '2026-10-28T16:57:53Z'
+  - id: note-3ee1d97
+    text: 'QA S93 (S90 rerun; tested 1285ff26/a50dade2; real rootless Podman 3.4.4
+      private overlay, unmodified build-base, fake agents; evidence /pm-captures/scenarios/93/manifest.md):
+      NEEDS_WORK, two fixes pushed. (1) 368409a5: two QA runs in one TUI in an inventory
+      outage each made their own floor launch (A s13 17:17:22, B s15 17:17:25), so
+      the peak was 10 = L+2 for 90 s (resolves note-b2c13cd in favour of an in-process
+      shared floor: _outage_floor under _launch_admission_lock, freed by the first
+      readable inventory any run sees; the other run logs "another QA run made this
+      outage''s floor launch"). (2) e96d90eb: that line was logged every poll before
+      any floor launch, so it is now logged only after another run actually made one.
+      Post-fix story 2: one floor launch for the TUI (B s35), peak 9 = L+1 through
+      the breadcrumb restart, no launch from the restart until the fault cleared,
+      deferred releases ran about 3 s after it cleared, B INPUT_REQUIRED s34 kept
+      one ID through the outage, restart and run end, and B waited with "1 of this
+      run''s container(s) are retained". Story 1 (peak 8; the B clamp counted A''s
+      reserved in-flight s5) and story 3 (merge reap removed A impl+signoff, B survived
+      with push rc 0, two B reruns left only B impl) held. Fixture note: the shared
+      fake cursor gives entry 0 to the interactive s0, so cfg2b puts a PASS placeholder
+      first. The _outage_floor claim lingers until a queued-launch decision sees a
+      readable inventory (conservative; never overcommits). Full suite 5108 passed
+      / 3 skipped.'
+    created_at: '2026-10-28T18:11:30Z'
+    last_edited: '2026-10-28T18:11:30Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
