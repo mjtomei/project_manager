@@ -253,7 +253,7 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
     monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
     # Spy on the re-clamp: the batch reaching the cap check must be recomputed
     # from the desired size, not left at the start-time clamped value.
-    real_room = qa_loop._container_launch_room
+    real_room = qa_loop._container_launch_room_known
     reclamps: list[tuple[int | None, int, int]] = []
 
     def _spy(cap, desired=None, active=0, own=()):
@@ -261,7 +261,7 @@ def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
         reclamps.append((desired, active, result[0]))
         return result
 
-    monkeypatch.setattr(qa_loop, "_container_launch_room", _spy)
+    monkeypatch.setattr(qa_loop, "_container_launch_room_known", _spy)
     # Settled s1's container is gone by then: only the active worker runs.
     monkeypatch.setattr(container_reaper, "list_containers", lambda: [
         container_reaper.ContainerInfo(name="pm-t-qa-pr-aaaa-L-s2", running=True)])
@@ -433,6 +433,95 @@ def test_failed_settled_release_is_retried_so_the_batch_grows_back(
     # the batch grows back to the desired two active workers.
     assert running.isdisjoint({1, 2}), "the deferred release must be retried in-run"
     assert launched == [1, 2, 3, 4]
+
+
+def test_outage_admits_one_floor_launch_not_one_per_settled_worker(
+        tmp_path, monkeypatch):
+    """QA S59 story 3: an inventory outage that starts with the runtime full.
+
+    A's s1-s4 + B fill container-max-running=5 when the inventory becomes
+    unreadable. Releases need the same inventory, so each settled worker keeps
+    running. The unknown count admits one floor launch (s5, L+1 = 6, qa.md
+    resolution 19). Before the fix, s5's own settlement admitted s6 as another
+    floor launch while every earlier release was still deferred: 7 = L+2.
+    After recovery the deferred releases complete and the batch grows back.
+    """
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 9)
+    ]
+    running = set()      # this run's containers the runtime still runs
+    launched = []
+    outage = {"polls_left": 5}
+    peak = {"outage": 0, "after": 0}
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        running.add(scenario.index)
+        key = "outage" if outage["polls_left"] > 0 else "after"
+        peak[key] = max(peak[key], 1 + len(running))  # + B's held container
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    for sc in state.scenarios[:4]:
+        launch(sc)  # s1-s4 + B = 5 = L when the outage starts
+
+    def release(st, session, *, scenarios=None):
+        if outage["polls_left"] > 0:
+            return True  # deferred: the inventory is unreadable
+        for sc in scenarios:
+            running.discard(sc.index)
+        return False
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        outage["polls_left"] -= 1
+        if ticks >= 14:
+            state.stop_requested = True
+
+    def inventory():
+        if outage["polls_left"] > 0:
+            return None
+        return _running(B_IMPL, *(f"pm-t-qa-pr-aaaa-L-s{i}" for i in sorted(running)))
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: None if (inv := inventory()) is None else len(inv))
+    monkeypatch.setattr(container_reaper, "list_containers", inventory)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "extract_verdict_from_transcript",
+                        lambda path, *a: "PASS")
+    monkeypatch.setattr(qa_loop, "extract_verdict_reason_from_transcript",
+                        lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[4:],
+        concurrency_cap=4, desired_cap=4, use_containers=True)
+
+    assert peak["outage"] == 6, peak       # one floor launch: L+1, never L+2
+    assert peak["after"] <= 5, peak
+    assert launched == list(range(1, 9)), "the queue drains after recovery"
+    assert not running, "every deferred release completed after recovery"
 
 
 def _running(*names):

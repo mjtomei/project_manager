@@ -3018,6 +3018,9 @@ def _poll_tmux_verdicts(
     dead_workers: set[int] = {s.index for s in state.scenarios if s.worker_died}
     # Last retained count logged as blocking a dequeue (log once per change).
     _held_logged = [0]
+    # Queued launches made while the container inventory was unreadable; reset
+    # once it is readable again (see the re-clamp in _launch_next_queued).
+    _blind_launches = [0]
 
     def _launch_next_queued() -> bool:
         """Release settled allocations, then launch one queued scenario.
@@ -3066,12 +3069,31 @@ def _poll_tmux_verdicts(
                    if s.index in state.scenario_verdicts
                    and s.index not in pending and s.index not in verifying
                    for ident in (s.container_id, s.container_name) if ident}
-            concurrency_cap, held = _container_launch_room(
+            concurrency_cap, held, known = _container_launch_room_known(
                 concurrency_cap, desired_cap, active=active, own=own)
+            if known:
+                _blind_launches[0] = 0
+            elif _blind_launches[0]:
+                # Releases need the same inventory, so while it is unreadable
+                # every settled worker's release is deferred and its container
+                # keeps running. The outage admits one floor launch (qa.md
+                # resolution 19, at most L+1); after it, the settled
+                # containers not yet released count as held, or each further
+                # one-at-a-time launch would add another container (L+2...).
+                held = sum(1 for s in state.scenarios
+                           if s.container_name and s.index in state.scenario_verdicts
+                           and s.index not in pending and s.index not in verifying
+                           and s.index not in released_indices)
         else:
-            held = 0
+            held, known = 0, True
         if concurrency_cap > 0 and active + held >= concurrency_cap:
-            if held and held != _held_logged[0]:
+            if not known:
+                if held and held != _held_logged[0]:
+                    _log.info("QA %s: %d queued scenario(s) wait for a readable "
+                              "container inventory; %d of this run's container "
+                              "release(s) are deferred (container-max-running)",
+                              state.pr_id, len(_launch_queue), held)
+            elif held and held != _held_logged[0]:
                 _log.info("QA %s: %d queued scenario(s) wait for container "
                           "headroom; %d of this run's container(s) are retained "
                           "(container-max-running)", state.pr_id,
@@ -3080,6 +3102,8 @@ def _poll_tmux_verdicts(
             return False
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
+        if not known:
+            _blind_launches[0] += 1
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
         # Launch this single scenario by temporarily swapping state.scenarios
@@ -4595,7 +4619,16 @@ def _container_headroom_cap(cap: int, desired: int | None = None,
 
 def _container_launch_room(cap: int, desired: int | None = None, active: int = 0,
                            own: Collection[str] = ()) -> tuple[int, int]:
-    """Return ``(batch, held)`` for the next queued launch (one inventory).
+    """Return ``(batch, held)``; see :func:`_container_launch_room_known`."""
+    return _container_launch_room_known(cap, desired, active=active, own=own)[:2]
+
+
+def _container_launch_room_known(cap: int, desired: int | None = None,
+                                 active: int = 0, own: Collection[str] = (),
+                                 ) -> tuple[int, int, bool]:
+    """Return ``(batch, held, known)`` for the next queued launch (one inventory).
+
+    ``known`` is False when the running-container inventory was unreadable.
 
     ``own`` names this run's settled scenario containers (IDs or names).
     ``held`` counts those still running: kept for a human (INPUT_REQUIRED), a
@@ -4613,10 +4646,10 @@ def _container_launch_room(cap: int, desired: int | None = None, active: int = 0
     if limit <= 0:
         # No inventory: fall back to the run's desired batch (or the legacy
         # already-clamped value when the caller predates ``desired``).
-        return (cap if desired is None else (desired if desired > 0 else 0)), 0
+        return (cap if desired is None else (desired if desired > 0 else 0)), 0, True
     if desired is None:
         # Legacy callers keep the old clamp semantics.
-        return _clamp_to_container_headroom(cap), 0
+        return _clamp_to_container_headroom(cap), 0, True
     held = 0
     if own:
         from pm_core.container_reaper import list_containers
@@ -4631,13 +4664,13 @@ def _container_launch_room(cap: int, desired: int | None = None, active: int = 0
     if running_count is None:
         # An unreadable inventory is unknown, not zero running containers:
         # launch one at a time and re-clamp on the next poll.
-        return 1, 0
+        return 1, 0, False
     # Keep the batch at least one: zero would encode "unlimited" and launch
     # past a momentarily full runtime instead of waiting for a slot.
     total = max(1, active + held + max(0, limit - running_count))
     if desired > 0:
         total = min(total, desired + held)
-    return total, held
+    return total, held, True
 
 
 def _execute_and_finalize(
