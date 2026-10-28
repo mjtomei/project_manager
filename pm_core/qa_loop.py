@@ -3021,70 +3021,41 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             result.changed = True
             continue
 
+        # This attempt's worker pane: a recorded pane id that is gone means
+        # the attempt is over.  No recorded pane id means "unknown", not
+        # dead: relaunching here would duplicate a worker whose window may
+        # still be alive.
+        pane_alive = True
         if scenario.pane_id and not tmux_mod.pane_exists(scenario.pane_id):
-            # This attempt's worker pane is gone.
             scenario.pane_id = None
             pane_alive = False
-        else:
-            # No recorded pane id means "unknown", not dead: relaunching
-            # here would duplicate a worker whose window may still be alive.
-            pane_alive = True
 
-        if not pane_alive:
-            # The worker may have emitted its follow-up just before the
-            # pane died — accept it before treating the attempt as lost.
-            # A repeated INPUT_REQUIRED is the worker's latest word: an
-            # earlier PASS in the same turn must not be mistaken for it, so
-            # move the baseline past it first.  A PASS that follows that
-            # repeated INPUT_REQUIRED is still this attempt's latest word
-            # and must be accepted rather than lost with the pane.
-            repeated = _newer_verdict(
-                scenario.transcript_path, (VERDICT_INPUT_REQUIRED,), source)
-            if repeated is not None:
-                _refresh_waiting_source(state, scenario, repeated)
-                result.changed = True
-            hit = _newer_verdict(
-                scenario.transcript_path,
-                (VERDICT_PASS, VERDICT_NEEDS_WORK), source)
-            if hit is not None:
-                result.follow_ups[idx] = hit
+        # A dead pane is re-checked every tick, so the stat cache (which
+        # would skip the transcript read below) only applies while the
+        # worker is alive.
+        stamp = None
+        if pane_alive:
+            try:
+                st = os.stat(scenario.transcript_path)
+                stamp = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                stamp = None
+            if stamp is not None and state._waiting_scan_cache.get(idx) == stamp:
                 continue
-            # A relaunch gives the live loop a fresh retry budget, and each
-            # hold/reopen cycle is a fresh call to _poll_tmux_verdicts.  Cap
-            # the relaunches here too, or a worker that asks for input and
-            # then dies (user closes the pane, container OOM) is relaunched
-            # forever — a new full scenario run every cycle.
-            relaunches = state.wait_relaunch_count.get(idx, 0) + 1
-            state.wait_relaunch_count[idx] = relaunches
-            if relaunches > _SCENARIO_MAX_RETRIES:
-                _log.warning(
-                    "Waiting scenario %d worker pane is gone with no "
-                    "follow-up after %d relaunches — recording "
-                    "INPUT_REQUIRED as terminal", idx, relaunches - 1)
-                _clear_waiting(state, idx, drop_verdict=False)
-                result.changed = True
-                continue
-            _log.warning("Waiting scenario %d worker pane is gone with no "
-                         "follow-up — handing back to the retry path", idx)
-            _clear_waiting(state, idx, drop_verdict=True)
-            result.dropped.add(idx)
-            result.changed = True
-            continue
 
-        try:
-            st = os.stat(scenario.transcript_path)
-            stamp = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            stamp = None
-        if stamp is not None and state._waiting_scan_cache.get(idx) == stamp:
-            continue
-
+        # A repeated INPUT_REQUIRED is the worker's latest word and keeps the
+        # scenario waiting: move the baseline past it so an earlier verdict
+        # in the same turn cannot be mistaken for the follow-up.  With a
+        # live pane the next tick re-reads the transcript; with a dead pane
+        # the check below must run now, or a PASS that followed the repeated
+        # INPUT_REQUIRED is lost with the attempt.
         repeated = _newer_verdict(
             scenario.transcript_path, (VERDICT_INPUT_REQUIRED,), source)
         if repeated is not None:
             _refresh_waiting_source(state, scenario, repeated)
             result.changed = True
-            continue
+            if pane_alive:
+                continue
 
         hit = _newer_verdict(
             scenario.transcript_path,
@@ -3098,8 +3069,34 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             result.follow_ups[idx] = hit
             continue
 
-        if stamp is not None:
-            state._waiting_scan_cache[idx] = stamp
+        if pane_alive:
+            if stamp is not None:
+                state._waiting_scan_cache[idx] = stamp
+            continue
+
+        # The worker may have emitted its follow-up just before the pane
+        # died — it was accepted above.  With no follow-up the attempt is
+        # lost, so hand it back to the retry path.  A relaunch gives the
+        # live loop a fresh retry budget and each hold/reopen cycle is a
+        # fresh call to _poll_tmux_verdicts, so cap the relaunches here too:
+        # a worker that asks for input and then keeps dying (user closes the
+        # pane, container OOM) must not be relaunched forever — a new full
+        # scenario run every cycle.
+        relaunches = state.wait_relaunch_count.get(idx, 0) + 1
+        state.wait_relaunch_count[idx] = relaunches
+        if relaunches > _SCENARIO_MAX_RETRIES:
+            _log.warning(
+                "Waiting scenario %d worker pane is gone with no "
+                "follow-up after %d relaunches — recording "
+                "INPUT_REQUIRED as terminal", idx, relaunches - 1)
+            _clear_waiting(state, idx, drop_verdict=False)
+            result.changed = True
+            continue
+        _log.warning("Waiting scenario %d worker pane is gone with no "
+                     "follow-up — handing back to the retry path", idx)
+        _clear_waiting(state, idx, drop_verdict=True)
+        result.dropped.add(idx)
+        result.changed = True
     return result
 
 

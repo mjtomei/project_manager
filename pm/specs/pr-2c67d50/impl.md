@@ -395,4 +395,25 @@ covered by tests in `tests/test_qa_input_required.py` /
   refreshes the baseline instead of accepting the earlier follow-up and the
   run re-finalizes as INPUT_REQUIRED. The re-finalize re-runs the finalize
   pane for the same result (idempotent: it re-verifies pushes and
-  fast-forwards) and the TUI's QA note is de-duplicated by identical text.
+  fast-forwards) and records a second, textually identical QA note — QA
+  notes are appended per completed run (`test_three_qa_runs_three_notes`),
+  so identical text is *not* de-duplicated; the extra note is noise, not a
+  lost result.
+
+## 10. Implementation notes (review iteration 5)
+
+- **The two `_scan_waiting_scenarios` branches share one acceptance path.**
+  The live-pane and pane-death branches had drifted apart once already
+  (iteration 3 fixed a lost PASS behind a repeated INPUT_REQUIRED), so the
+  repeated-INPUT_REQUIRED refresh, the PASS/NEEDS_WORK check and the
+  "never cache an unconsumed follow-up" rule now run once for both. The
+  only branch-specific parts remain: the stat cache applies to a live pane
+  only (a dead pane must be re-checked every tick), a live pane defers the
+  PASS/NEEDS_WORK check to the next tick after a repeated INPUT_REQUIRED,
+  and a dead pane with no follow-up goes through the relaunch cap.
+- **Persistence test covers the whole waiting contract.** The resume
+  round-trip test now also asserts the per-scenario `head` fallback
+  baseline and `input_wait_code_changes`, which force NEEDS_WORK after a
+  resumed run.
+- **Spec correction.** Iteration 4's note claimed the TUI de-duplicates an
+  identical QA note; it does not (see the trade-off above).

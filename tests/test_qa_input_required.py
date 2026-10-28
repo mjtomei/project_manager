@@ -238,6 +238,32 @@ class TestScanWaitingScenarios:
         assert scan.dropped == set()
         assert scan.follow_ups[1].verdict == VERDICT_PASS
 
+    def test_live_pane_collects_a_pass_after_a_repeated_input_required(
+            self, tmp_path):
+        """With the worker still alive, a repeated INPUT_REQUIRED only moves
+        the baseline this tick; the PASS that follows it in the same turn is
+        collected on the next poll."""
+        path = _write(
+            tmp_path / "t.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"),
+            _user("use option B"),
+            _assistant("Reason: need the other secret\nINPUT_REQUIRED",
+                       "turn-ir-2", "2026-05-13T14:10:00.000Z"),
+            # A wakeup (not a new task) delivers the answer, so the repeated
+            # INPUT_REQUIRED and the PASS share one task segment.
+            _user("<task-notification> the secret is in the vault"),
+            _assistant("Reason: blocker resolved\nPASS", "turn-pass",
+                       "2026-05-13T14:33:00.000Z"),
+        )
+        state = _waiting_state(path)
+        with self._patch_pane(True):
+            first = _scan_waiting_scenarios(state)
+            second = _scan_waiting_scenarios(state)
+        assert first.follow_ups == {}
+        assert state.waiting_input_sources[1]["turn_id"] == "turn-ir-2"
+        assert second.follow_ups[1].verdict == VERDICT_PASS
+
     def test_dead_pane_without_a_follow_up_is_dropped_for_relaunch(
             self, tmp_path):
         path = _write(
@@ -620,14 +646,19 @@ class TestWaitingPersistence:
         state.held = True
         state.completion_processed = True
         state.latest_verdict = VERDICT_INPUT_REQUIRED
+        state.input_wait_code_changes = ["aaaa..bbbb"]
         _write_resume_file(state, use_containers=False, concurrency_cap=0)
 
         rebuilt = build_resume_state(_load_resume_file(tmp_path))
         assert rebuilt.waiting_for_input == {1}
         assert rebuilt.waiting_input_sources[1]["line_index"] == 2
+        # The per-scenario head is the fallback baseline for a run with no
+        # planner head; a resume must not lose it.
+        assert rebuilt.waiting_input_sources[1]["head"] == "old-head"
         assert rebuilt.held is True
         assert rebuilt.completion_processed is True
         assert rebuilt.latest_verdict == VERDICT_INPUT_REQUIRED
+        assert rebuilt.input_wait_code_changes == ["aaaa..bbbb"]
 
     def test_superseded_session_drops_waiting_and_verdict(self, tmp_path):
         state = _waiting_state(tmp_path / "t.jsonl")
