@@ -1,6 +1,6 @@
 # pr-e040aeb — QA spec: bounded retry of a failed review-iteration launch
 
-Source of truth for behaviour: `pm/specs/pr-e040aeb/impl.md` (860 lines, incl.
+Source of truth for behaviour: `pm/specs/pr-e040aeb/impl.md` (1,156 lines, incl.
 every review iteration). This spec turns it into user-visible stories.
 
 ## What the user experiences
@@ -46,6 +46,16 @@ Each scenario builds its own throwaway project (see `tui-manual-test.md`), with:
   level — read `.runs[0].review` and `.targets[0].state`, not `.status.*`.
 - Backoff is 5 s then 10 s between the three attempts; the cooldown before
   auto-start re-arms is 60 s.
+- **Restarting the TUI while preserving loop/auto-start state** is
+  `pm tui restart --breadcrumb` (it writes the merge-restart marker, so the
+  restart saves and then consumes the breadcrumb). A plain restart
+  (`ctrl+r` without the marker, or killing the TUI) deliberately loses
+  auto-start targets and review-loop state, so it cannot be used to exercise
+  the resume path.
+- The TUI's own log is the surface for notices: `pm log show` /
+  `pm log grep <re>`, plus the on-screen log line (sticky for ~15 s). The
+  window-replacement notices (`Killed existing review window '<name>'`) are
+  mirrored into that log by the launch child.
 
 ### Failure injection (user-level, no source edits)
 
@@ -359,6 +369,52 @@ Note for test runs:
 patches the process-wide `subprocess.run`; run the suites from a shell that is
 not inside a tmux pane, or an ambient `tmux display-message` lookup can consume
 the "first call fails" slot.
+
+## Third QA pass focus (scenarios 19+, after 1fc4 i1–i2)
+
+The first two QA passes verified R1–R9 broadly. The fixes landed after them are
+**not yet exercised on the live surfaces** and are the focus of this pass:
+
+1. **Markup-hostile child stderr (1fc4 i1).** The retry notice and the
+   failed-completion notice are Rich markup; the launch child's own stderr is
+   now escaped. Live induction: with container mode enabled and a podman shim
+   whose `image inspect` exits 1, set the image to a markup-hostile name via
+   `pm container set image '<text>'` — the child then exits 1 with
+   `Image '<text>' not found in podman. …` and the loop classifies that stderr.
+   `[podman]` (bracketed token) must render verbatim; `[/tmp/pm-review]`
+   (unbalanced closing tag) previously raised `MarkupError` and the whole
+   notice vanished. The artifact must keep the exact stderr either way.
+2. **Every retry attempt is announced (7f38066a).** Attempts that start and die
+   inside one ~1 s poll tick must still be announced — including the final
+   attempt — by announcing the *upcoming* attempt during the backoff. Each
+   attempt is announced exactly once, across restarts and across re-armed
+   episodes.
+3. **The auto-start re-arm is visible (7f38066a).** `Auto-start: retrying
+   review launch for <pr>` must survive the `Review loop resumed …` line
+   `_start_loop` logs in the same tick (held like the `targets +=`
+   confirmation). While the re-armed retry runs, `pm autostart status` reads
+   `review iteration N` with no `(last LAUNCH_FAILED)`.
+4. **A restart that cannot resume must not strand the target (1fc4 i2).** A
+   saved loop whose launch environment refuses to start (unusable transcript
+   dir) must not leave a non-running phantom entry that the scheduler skips:
+   the TUI says it could not resume, drops the entry, and the scheduler starts
+   a fresh loop.
+5. **A lease claimed after a stop is handed back (1fc4 i2).** A supersede
+   (`z d` / `zz d`) landing between the keepalive's stop check and its claim
+   must not leave the replacement waiting out the claim and expiring into a
+   non-retryable `LAUNCH_FAILED`. Repeated supersedes during a backoff must
+   always produce exactly one working replacement loop.
+6. **A restart mid-retry does not re-announce (f076 i1 item 2, re-verify).**
+   Scenario 5 observed the duplicate pre-fix; `_ui_notified_retry` now
+   round-trips through the breadcrumb.
+7. **A PR that leaves review during the backoff.** Merged/closed (terminal)
+   must stop the retry with a closed outcome, not a retryable launch failure,
+   and must not launch another review.
+
+Shared resources to exercise concurrently: the per-PR launch lease in
+`~/.pm/runtime/<pr>.json`, the review window name (`review-<pr>`), the
+per-run transcript dir and `launch-artifacts/` dir, and the single
+`~/.pm/autostart-resume.json` breadcrumb.
 
 ## Known residuals (record as evidence, do not fail a scenario)
 
