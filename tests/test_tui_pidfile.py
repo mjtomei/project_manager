@@ -300,6 +300,42 @@ class TestClaim:
         assert tpf.read_pidfile(path).pid == sibling.pid
         assert sibling.poll() is None
 
+    def test_empty_file_waits_even_after_stale_rounds(self, tmp_path,
+                                                      monkeypatch,
+                                                      start_fake_tui):
+        """The mid-claim wait is keyed on the file being empty, not on the
+        attempt number.
+
+        Two earlier unlink rounds must not eat the budget that gives a
+        peer's just-created (still empty) pidfile its chance to be
+        published; otherwise this process unlinks the peer's file and
+        both TUIs run, each ``publish`` clobbering the other.
+        """
+        path = tmp_path / "tui-pm-test.pid"
+        path.write_text("garbage")  # keeps O_EXCL failing all the way
+        sibling = start_fake_tui()
+        peer = json.dumps({
+            "version": 1, "pid": sibling.pid, "session": SESSION,
+            "started_at": "x", "starttime": tpf.proc_starttime(sibling.pid),
+            "caps": [tpf.CAP_RELOAD, tpf.CAP_COMMAND],
+        })
+        # Two stale (non-empty) rounds, then the peer's empty file, then
+        # the peer's published descriptor.
+        scripted = iter(["garbage", "garbage", "", peer])
+        monkeypatch.setattr(tpf, "read_pidfile_text",
+                            lambda p: next(scripted, peer))
+        unlinked = []
+        monkeypatch.setattr(tpf, "unlink_if_unchanged",
+                            lambda p, raw: unlinked.append(raw) or False)
+        slept = []
+        monkeypatch.setattr(tpf.time, "sleep", lambda s: slept.append(s))
+
+        with pytest.raises(tpf.TuiPidfileConflict):
+            tpf.claim_tui_pidfile(path, SESSION)
+
+        assert unlinked == ["garbage", "garbage"]  # the empty file was kept
+        assert slept == [tpf._CLAIM_RETRY_S]       # and waited for
+
     def test_takes_over_binary_file(self, tmp_path):
         """Undecodable bytes must not crash the startup claim."""
         path = tmp_path / "tui-pm-test.pid"
@@ -620,25 +656,44 @@ class TestUnqueue:
         helpers._unqueue_line(queue, "ours\n")
         assert queue.read_text() == "earlier\n"
 
-    def test_leaves_a_later_appended_line_alone(self, tmp_path):
-        """Another caller's line landed after ours: never truncate it."""
+    def test_removes_our_line_when_a_later_one_follows(self, tmp_path):
+        """A later caller's line must not keep our failed command queued.
+
+        The signal for our line failed, so the user was told it was not
+        applied; a concurrent caller appending after us must not resurrect
+        it by pinning it into the middle of the queue.
+        """
         queue = tmp_path / "q"
         queue.write_text("ours\ntheirs\n")
         helpers._unqueue_line(queue, "ours\n")
-        assert queue.read_text() == "ours\ntheirs\n"
+        assert queue.read_text() == "theirs\n"
 
-    def test_leaves_a_later_line_that_ends_with_ours(self, tmp_path):
-        """A suffix match is not our line: truncating would corrupt it.
+    def test_removes_our_line_and_keeps_a_later_longer_one(self, tmp_path):
+        """Whole-line matching: our line goes, a longer one stays intact.
 
         Command lines are arbitrary text, so a later caller's command can
-        end with ours (``pm qa pr-1`` ends with ``qa pr-1``).  Without the
-        line-boundary check the rollback would slice the tail off that
-        line and leave a mangled command in the queue.
+        end with ours (``pm qa pr-1`` ends with ``qa pr-1``).  A suffix
+        match is not our line: ours is removed by value and the longer
+        line is kept byte-for-byte.
         """
         queue = tmp_path / "q"
         queue.write_text("ours\npm ours\n")
         helpers._unqueue_line(queue, "ours\n")
-        assert queue.read_text() == "ours\npm ours\n"
+        assert queue.read_text() == "pm ours\n"
+
+    def test_leaves_a_line_that_only_ends_with_ours(self, tmp_path):
+        """A suffix of a longer line is not our line: never slice it."""
+        queue = tmp_path / "q"
+        queue.write_text("pm ours\n")
+        helpers._unqueue_line(queue, "ours\n")
+        assert queue.read_text() == "pm ours\n"
+
+    def test_already_drained_line_is_a_noop(self, tmp_path):
+        """The TUI drained our line before the rollback: nothing to do."""
+        queue = tmp_path / "q"
+        queue.write_text("")
+        helpers._unqueue_line(queue, "ours\n")
+        assert queue.read_text() == ""
 
     def test_missing_queue_is_swallowed(self, tmp_path):
         helpers._unqueue_line(tmp_path / "nope", "ours\n")  # no exception

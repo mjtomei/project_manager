@@ -733,39 +733,41 @@ trigger_tui_refresh = trigger_tui_reload
 
 
 def _unqueue_line(queue: Path, line: str) -> None:
-    """Best-effort removal of a line this process just appended.
+    """Best-effort removal of the line this process just appended.
 
     Used when the signal after the append fails: the caller is told the
     command was *not* applied, so it must not sit in the queue waiting
-    for some later drain to execute it.  Safe against concurrent
-    appenders — under the same ``flock`` the appender uses, we only
-    truncate when the file still ends with our exact line at a line
-    boundary, so a *different* line another caller appended after ours is
-    never the one removed — in that case our line stays queued (the
-    rollback is best effort, and leaving a command behind is safer than
-    corrupting someone else's).  Two callers submitting the identical
-    command are indistinguishable by content: at most one copy is rolled
-    back and the other stays queued for its own caller.
+    for some later drain to execute it.  Runs under the same ``flock``
+    the appender and the TUI's drain use, and matches whole lines only:
+    every other line is kept byte-for-byte, and a later command that
+    merely *ends* with ours (``pm qa pr-1`` ends with ``qa pr-1``) is
+    never touched.  The match is the last identical line, so a caller
+    that appended after us cannot be the one removed unless its command
+    is byte-identical to ours — two identical submissions are
+    indistinguishable by content, so at most one copy is rolled back and
+    the other stays queued for its own caller.
     """
     import fcntl
 
-    payload = line.encode()
+    target = line.rstrip("\n").encode()
     try:
         with open(queue, "r+b") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
-                content = f.read()
-                if not content.endswith(payload):
-                    return
-                boundary = len(content) - len(payload)
-                if boundary > 0 and content[boundary - 1:boundary] != b"\n":
-                    # Our payload is merely a suffix of a longer line a
-                    # later caller appended (``pm qa pr-1`` ends with
-                    # ``qa pr-1``): truncating here would corrupt their
-                    # command, so leave the queue alone.
-                    return
+                lines = f.read().split(b"\n")
+                if lines and lines[-1] == b"":
+                    lines.pop()  # trailing newline, not an empty command
+                for i in range(len(lines) - 1, -1, -1):
+                    if lines[i] == target:
+                        del lines[i]
+                        break
+                else:
+                    return  # already drained, or never written
+                remainder = b"".join(entry + b"\n" for entry in lines)
                 f.seek(0)
-                f.truncate(boundary)
+                f.write(remainder)
+                f.flush()
+                f.truncate(len(remainder))
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:

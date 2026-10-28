@@ -109,7 +109,10 @@ I3. The command queue file must exist before caps are published (a caller
     line is appended *before* the signal (signaling first could drain an
     empty queue), and `_unqueue_line` removes it again under the same
     `flock` when the signal fails, so a failure the user is told about is
-    not applied by some later drain.
+    not applied by some later drain. The rollback matches *whole lines by
+    value*, wherever they sit in the file (not just at the tail), so a
+    concurrent caller appending after ours cannot pin our failed command
+    into the queue; every other line is kept byte-for-byte.
 
 I4. `trigger_tui_reload` keeps its fire-and-forget behavior and its
     `refresh_home` side effect (existing tests assert the kick). It now
@@ -156,7 +159,11 @@ A2. *How is "exclusive ownership" made atomic without a lock file?*
     stale-lock pathology. An *empty* file is ambiguous — the peer may be
     between its `O_EXCL` create and its first write — so the claim waits
     `_CLAIM_EMPTY_RETRIES` × `_CLAIM_RETRY_S` (2 × 50 ms) for the peer to
-    publish before treating it as stale. A non-empty unparsable file
+    publish before treating it as stale. That wait is keyed on the file
+    being empty, not on the attempt number: the unlink/takeover rounds
+    have their own attempt budget (`_CLAIM_MAX_ATTEMPTS`), so a peer's
+    just-created file always gets the full wait even after earlier stale
+    rounds. A non-empty unparsable file
     (corrupt/undecodable) is unlinked immediately. (Without the wait, a
     loser could delete the winner's just-created file and both TUIs would
     run, each `publish` overwriting the other's descriptor.)
@@ -290,7 +297,9 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     message instead of spinning (patched grace, pipe stdin).
 12. claim retry (A2): an empty file nobody writes is taken over; an empty
     file a peer fills in within the retry window raises
-    `TuiPidfileConflict` and the peer's descriptor survives.
+    `TuiPidfileConflict` and the peer's descriptor survives; an empty file
+    is still waited for after two stale-file unlink rounds (the wait is
+    keyed on content, not on the attempt number).
 13. identity: a zombie owner is reported as `process is a zombie`;
     `tui_owner_problem` distinguishes `unreadable pidfile` from
     `no pidfile`.
@@ -316,11 +325,12 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     `tui_owner_problem` reports `empty pidfile` (mirrors A2/E3).
 20. a failed signal after the queue append takes the line back
     (`_unqueue_line`), so a reported failure is not applied by a later
-    drain; a *different* line another caller appended after ours is never
-    truncated (two identical submissions are indistinguishable, so at
-    most one copy is rolled back). Rollback matches only at a line
-    boundary: a later command that merely *ends* with ours (`pm qa pr-1`
-    ends with `qa pr-1`) is left intact.
+    drain. The rollback matches whole lines by value, so a later line
+    another caller appended after ours is kept byte-for-byte and ours is
+    still removed (two identical submissions are indistinguishable, so at
+    most one copy is rolled back). A later command that merely *ends*
+    with ours (`pm qa pr-1` ends with `qa pr-1`) is never sliced, and a
+    line the TUI already drained makes the rollback a no-op.
 21. a target that becomes a zombie between validation and the signal:
     `_signal_tui` returns `"process is a zombie"` without sending, and
     `submit_tui_command` reports `stale_pidfile`, removes the pidfile and

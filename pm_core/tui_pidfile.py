@@ -39,6 +39,11 @@ PIDFILE_VERSION = 1
 # many short intervals for a peer to publish before treating it as stale.
 _CLAIM_EMPTY_RETRIES = 2
 _CLAIM_RETRY_S = 0.05
+# Every unlink/takeover round costs one attempt.  The budget leaves room
+# for those rounds *on top of* the empty-file waits, so an empty file is
+# never unlinked early just because earlier rounds used up the attempts
+# (the wait is keyed on the file being empty, not on the attempt number).
+_CLAIM_MAX_ATTEMPTS = _CLAIM_EMPTY_RETRIES + 4
 
 # argv element that identifies the TUI subcommand, plus the entry points
 # that may run it: the console script ``pm``, or any ``pm_core`` module
@@ -416,19 +421,23 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     # Worst case: wait out a mid-claim peer, then unlink a stale file,
-    # then create ours.
-    for attempt in range(_CLAIM_EMPTY_RETRIES + 2):
+    # then create ours.  The empty-file waits get their own budget so
+    # they cannot be consumed by earlier unlink rounds (see
+    # ``_CLAIM_MAX_ATTEMPTS``).
+    empty_waits = 0
+    for _ in range(_CLAIM_MAX_ATTEMPTS):
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
             raw = read_pidfile_text(path)
             existing = parse_pidfile(raw)
             if existing is None:
-                if raw == "" and attempt < _CLAIM_EMPTY_RETRIES:
+                if raw == "" and empty_waits < _CLAIM_EMPTY_RETRIES:
                     # Empty is ambiguous: a peer may have created the file
                     # with O_EXCL and not written its descriptor yet.
                     # Give it a moment to publish, otherwise two racing
                     # TUIs could each take the file over and both run.
+                    empty_waits += 1
                     time.sleep(_CLAIM_RETRY_S)
                     continue
                 # Corrupt, undecodable, or an empty file nobody claimed:
