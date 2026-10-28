@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T19:56:34.581604+00:00'
+  updated_at: '2026-10-28T19:58:06.056280+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37115,6 +37115,47 @@ prs:
       keeps the completed run state), then `pm autostart add`.'
     created_at: '2026-10-28T19:56:34Z'
     last_edited: '2026-10-28T19:56:34Z'
+  - id: note-ed0180a
+    text: 'QA scenario 19 (breadcrumb restart + neutral resuming state): PASS, 5/5
+      stories at d41ed19f, live TUI + interactive stand-in on a throwaway local-backend
+      project (pr-95325c4, second PR pr-6cd925d). (1) Story 1: breadcrumb restart
+      across a live iteration-1 INPUT_REQUIRED wait — four CLI readers (~50ms) caught
+      the adopt check at 19:37:25.044 as state=running, reason "review resuming (iteration
+      1)", resuming=true, input_required=false, follow_up=false; the wait was re-adopted
+      on the same window @4 / pane %5 pid 1913 with the question capture byte-identical,
+      stand-in launch count 1, no new relauncher line, +1 "adopting INPUT_REQUIRED
+      wait for pr-95325c4 iteration 1"; tree marker the live-wait form with spinner,
+      popup WAITING review #1; answering gave running/follow_up in 1.4s (ir=false,
+      fu=true, res=false), tree follow-up marker, ids and launch count unchanged.
+      (2) Story 2: answer+NEEDS_WORK inside the restart gap resolved from the transcript
+      ("follow-up verdict NEEDS_WORK already in transcript", "follow-up verdict=NEEDS_WORK"),
+      one "review_loop: iteration 2 for", one relauncher iteration=2, stand-in counter
+      1->2, no iteration 3, and zero follow_up=true samples. (3) Story 3: seeded stale
+      latched flag (history NEEDS_WORK, input_required true) — 157 samples, 0 waiting
+      / 0 input_required=true / 0 INPUT_REQUIRED reason; resumed at iteration 1, no
+      "adopting" line, iteration 2 reported running with verdict NEEDS_WORK, tree
+      marker 2 never the wait marker, popup RUNNING review #2, iteration-2 window
+      created. (4) Story 4: seeded wait with no pane and no transcript — "INPUT_REQUIRED
+      wait for pr-95325c4 iteration 1 has no live pane; continuing", no adopting line,
+      165 samples with 0 waiting / 0 ir=true / no KILLED, running review #2 (last
+      INPUT_REQUIRED), fresh iteration-2 window, old question not re-posted. (5) Story
+      5: two PRs waiting at once, two readers + popup — stable states agree, the text
+      reader caught B mid-adopt as "review resuming (iteration 1)" while A was already
+      waiting, B untouched (iteration 1, window @15, pane %25 pid 76150, same question,
+      launch count 2 unchanged), both re-adopted with no new relauncher (A 19, B 2),
+      both nodes waiting and both popup rows WAITING review #1 after the restart.
+      No code changes needed. Captures: /pm-captures/scenarios/19/ (tui-breadcrumb-restart/
+      cast+mp4+transcript, harness/stub-claude.py, evidence/ per-story text+JSON sampler
+      logs, tree/popup captures, manifest.md). Two observations, not failures: (a)
+      the TUI log line keeps the last message, so the "INPUT_REQUIRED ... interact
+      with Claude in the review pane" notice (sticky=30) can stay visible after the
+      answer until another message replaces it — it is a log line, not a status/marker
+      surface, and the tree/status/popup all show the follow-up state; (b) with the
+      stand-in script clamped per launch, story 2 iteration 2 asks its own INPUT_REQUIRED
+      about 20s after the NEEDS_WORK settle, so the running/review #2 row was stable
+      for ~22s rather than permanently.'
+    created_at: '2026-10-28T19:58:05Z'
+    last_edited: '2026-10-28T19:58:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
