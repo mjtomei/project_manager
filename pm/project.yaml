@@ -34929,3 +34929,30 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-5d90350
+  plan: bugs
+  title: 'Bug: TUI QA start fails "No pm session found" when a non-pm-named session
+    is grouped with the pm session'
+  branch: pm/pr-5d90350-bug-tui-qa-start-fails-no-pm-session-found-when-a-
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/helpers.py _get_current_pm_session -> tmux.get_session_name()
+    runs `display-message -t $TMUX_PANE #{session_name}`, which returns whichever
+    grouped session tmux picks for the pane. If a user attaches with a standard tmux
+    idiom such as `tmux new-session -t pm-proj-XXXX -s myview` (independent window
+    view on the pm group), the TUI pane resolves to "myview", the pm- prefix check
+    fails, and pressing t logs "[qa_loop] No pm session found" -> QA ERROR (note added
+    to the PR). Repro (QA S58 pr-1139060, 2026-10-28): private-HOME session, recorder
+    `tmux new-session -t pm-proj-2dd72f71 -s s58view`, press t on an in_review PR
+    -> immediate verdict=ERROR. Renaming the grouped session to pm-proj-2dd72f71~9
+    fixed it. Suggested fix: when the resolved name lacks the pm- prefix, fall back
+    to #{session_group} for the pane (base pm session name).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:21:38.022054+00:00'
+  updated_at: '2026-10-28T03:21:38.022054+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
