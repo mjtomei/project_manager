@@ -120,7 +120,13 @@ R4. **Stop by ending the recorded command, then wait on the recorder's real
    stopped, and `test -s` alone would pass on a truncated recording and
    report the run as success (reproduced live: the step-5 block exits 0 with
    a partial cast when the recorder session is gone). The recipe fails that
-   case instead, and skips the detach when both are gone.
+   case instead, and skips the detach when both are gone. The detach itself
+   is the last handle that can race the recorder: a recorder that dies in the
+   gap between that check and the key send makes `tmux send-keys` fail
+   (verified live: "can't find pane", exit 1), after which the stop wait
+   exits at once on the gone session and `test -s` passes on the truncated
+   cast — the same false success through a smaller window. The failed detach
+   is therefore a failure with the same "cast is incomplete" message.
 
 R5. **CLI scaffold writes the cast where the render reads it.** The no-TTY
    scaffold uses `<capture-dir>/<short-name>/recording.cast`, matching every
@@ -165,8 +171,10 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    settle check that keeps a failed attach's error text from counting as a
    drawn TUI, a tmux recorder that is already gone before the detach while
    the target session still exists failing instead of passing on a truncated
-   cast, and the recorder readiness wait carrying its own deadline (the
-   pm-session poll's `deadline` would otherwise satisfy a looser assertion).
+   cast, a detach that itself fails because the recorder vanished in that
+   gap failing the same way, and the recorder readiness wait carrying its own
+   deadline (the pm-session poll's `deadline` would otherwise satisfy a
+   looser assertion).
    The capture flow is also *executed*, not only matched as text
    (`TestCaptureFlowExecution`): each recipe's fenced capture block runs
    against stub `tmux`/`pm` that drive a session table, so the readiness and
@@ -175,10 +183,13 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    fails; tmux completes (and prints no tmux error while stopping the pipe);
    a recorder that exits before drawing fails; a failed attach that drew its
    error text fails; a recorder that died mid-scenario fails on its
-   truncated cast; and a recording that ended with the session itself passes.
+   truncated cast; a detach that fails because the recorder vanished in the
+   check-to-send gap fails; and a recording that ended with the session
+   itself passes.
    Each of those fails when its fix is reverted (checked by mutation: dropping
-   the settle re-check, the mid-scenario branch, the CLI cast check, and the
-   `2>/dev/null` on the pipe stop each fail exactly one case).
+   the settle re-check, the mid-scenario branch, the detach-failure branch,
+   the CLI cast check, and the `2>/dev/null` on the pipe stop each fail
+   exactly one case).
    The render/finalize assertions cover both recording recipes (a failed
    render leaves no mp4/gif and exits non-zero with its message) and the
    web-UI recipe (the pre-driver cleanup drops the previous run's webm, mp4,

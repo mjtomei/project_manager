@@ -184,7 +184,18 @@ if ! tmux has-session -t pm-recorder 2>/dev/null; then
     # Both are gone: the session itself ended, which ended the attach and so
     # the recording. Nothing left to detach; the wait below is a no-op.
 else
-    tmux send-keys -t pm-recorder C-b d
+    # The detach is the last handle that can race the recorder: if it died
+    # between the check above and this key send, `send-keys` fails (the
+    # session, or its pane, is gone), the wait below exits at once, and
+    # `test -s` then passes on the truncated cast — a run reported as a
+    # successful recording although it is not one. Treat the failed detach as
+    # the same failure as above.
+    tmux send-keys -t pm-recorder C-b d || {
+        echo "recorder exited before the detach — the cast is incomplete," \
+            "not a finished recording" >&2
+        tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+        exit 1
+    }
 fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t pm-recorder 2>/dev/null; do

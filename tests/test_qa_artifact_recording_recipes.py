@@ -21,7 +21,9 @@ hits, regardless of how it waits for a background job:
 - the recorder is stopped by ending the recorded command and awaited with a
   bound, and the cast is checked non-empty; the CLI scaffold's bound is
   raisable (`RECORDER_STOP_TIMEOUT`) so a legitimately long one-shot command
-  is not killed at the deadline;
+  is not killed at the deadline, and a tmux recorder that is already gone by
+  the detach (or that dies in the gap before the detach key is sent) fails
+  the run instead of passing on a truncated cast;
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, and the pm-session poll
   waits on the computed session rather than any ``pm-`` session (which would
@@ -626,7 +628,11 @@ case "$sub" in
       [ -f "$STATE/${s%%:*}" ] && exit 0
       echo "can't find session: $s" >&2; exit 1 ;;
   capture-pane) cat "$STATE/pane" 2>/dev/null; exit 0 ;;
-  send-keys)    rm -f "$STATE/$(val -t "$@")"; exit 0 ;;
+  send-keys)
+      s=$(val -t "$@")
+      rm -f "$STATE/$s"
+      [ "$STUB_MODE" = detachfail ] && exit 1
+      exit 0 ;;
   new-session)
       s=$(val -s "$@")
       touch "$STATE/$s"
@@ -680,9 +686,11 @@ def _run_capture_block(name, mode, tmp_path, target=False):
     block = (raw.replace("<capture-dir>", str(capture))
                 .replace("<short-name>", "run")
                 .replace("<command-to-record>", "echo hi"))
-    # Shorten every deadline so the failing cases finish quickly; the recipes'
-    # own bounds are asserted as text above.
-    block = block.replace("+ 30 ))", "+ 2 ))").replace("+ 60 ))", "+ 2 ))")
+    # Shorten every numeric deadline so the failing cases finish quickly; the
+    # recipes' own bounds are asserted as text above. Matching the shape
+    # (rather than the literal ``30``/``60``) keeps the cases fast when a
+    # recipe's bound is retuned, instead of silently waiting it out.
+    block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", block)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_STATE=str(state), STUB_MODE=mode,
                STUB_CAST=str(capture / sub / "recording.cast"))
@@ -747,6 +755,22 @@ class TestCaptureFlowExecution:
             "tmux-screen-recording.md", "midadied", tmp_path, target=True)
         assert r.returncode != 0, (
             "a recorder that died mid-scenario passed on its truncated cast")
+        assert "incomplete" in r.stderr, r.stderr
+
+    def test_tmux_detach_that_fails_is_not_a_finished_recording(self, tmp_path):
+        """The detach itself is the last handle that can race the recorder.
+
+        Step 5 checks the recorder is alive and then sends the detach. If the
+        recorder dies in that gap, ``send-keys`` fails, the stop wait exits at
+        once on the gone session, and ``test -s`` passes on the truncated cast
+        — an incomplete recording reported as a successful one. The failed
+        detach has to fail the run.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "detachfail", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "a detach that failed because the recorder was already gone was "
+            "reported as a finished recording")
         assert "incomplete" in r.stderr, r.stderr
 
     def test_tmux_recording_that_ends_with_the_session_passes(self, tmp_path):

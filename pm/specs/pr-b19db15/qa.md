@@ -98,7 +98,8 @@ session, stop the recorder, and render the cast,
 - a recorder that is already gone before the detach while the pm session it
   was attaching to still exists (it died mid-scenario) fails the run with
   the "cast is incomplete" message instead of rendering a truncated cast as
-  this run's capture;
+  this run's capture, and a detach that itself fails because the recorder
+  vanished in that gap fails the same way;
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files.
 
 ### R3 — Recipe readiness and stop waits are bounded, and stale files are cleared
@@ -148,7 +149,9 @@ run.
   tmux server lost) → the tmux recipe notices the recorder is gone before the
   detach while the pm session it was attaching to still exists, and fails the
   run; `test -s` alone would pass on the truncated cast and report a
-  successful recording.
+  successful recording. A recorder that dies in the gap between that check
+  and the detach key send makes `tmux send-keys` fail, and that failure ends
+  the run with the same message instead of falling through to the cast check.
 - A quiet or long one-shot CLI command is still recording → it must not be
   killed at the readiness or stop deadline; the stop bound is raised with
   `RECORDER_STOP_TIMEOUT` for a long command.
