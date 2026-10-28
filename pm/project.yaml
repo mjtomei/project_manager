@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T16:31:48.618697+00:00'
+  updated_at: '2026-10-28T16:52:52.559398+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32808,6 +32808,39 @@ prs:
       the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-28T16:31:48Z'
     last_edited: '2026-10-28T16:31:48Z'
+  - id: note-5a7f570
+    text: 'Review loop e7e1 i4: three leftovers in the kept recipe scope, all the
+      PR own class (a failure message that points at a remedy that cannot work, and
+      a produced-files list that disagrees with what the flow writes). (1) The web-UI
+      busy-port refusal said only "stop it (or pick another PORT)" although the cleanup
+      on the line above had already deleted server.pid — so the documented recovery
+      (the teardown, which reads that file) could not run, and the answering server
+      may be another scenario''s anyway (which is why the block must not act on this
+      capture''s pid). Verified live with a real local server on the port and the
+      recipe own start block: pre-fix the bare refusal, post-fix "Its pid is no longer
+      in server.pid (this step cleared it): find it with ''ss -ltnp'' on the port
+      and stop it, or pick another PORT" (rc 1, app never launched). (2) The Playwright
+      resolution failure still said "link the image''s global install (ln -sfn /usr/lib/node_modules
+      node_modules) or run npm i playwright here" although the guard above it now
+      links only when /usr/lib/node_modules/playwright exists — so on a host without
+      the package the first suggestion is a remedy that cannot resolve, the exact
+      flaw the i3 guard fixed. The message is conditional now (verified by running
+      the block against a global node_modules that holds no playwright). (3) Both
+      recording recipes write recorder.status and recorder-stderr.log into the capture
+      dir (and recorder-pane.log when a wait gives up) while their "What this recipe
+      produces" lists never named them, although the manifest asks for every non-default
+      file the capture produced — so the manifest and the directory disagree. Both
+      lists now name them as failure evidence and say to mention whichever exist.
+      Tests: 3 new/tightened assertions (the produced-files lists in both recipes,
+      the refusal remedy, the conditional link in the resolution message); all four
+      cases fail against the pre-fix recipes (checked by restoring them in place).
+      File 107 pass; related suites (test_qa_artifact_web_ui_recording.py, test_qa_instructions.py)
+      pass; test_qa_loop.py cannot collect here (no textual module — environment,
+      and the PR touches no pm_core). impl.md R17 + Files/verification/evidence and
+      qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work stays
+      dropped. (2026-10-28)'
+    created_at: '2026-10-28T16:52:52Z'
+    last_edited: '2026-10-28T16:52:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
