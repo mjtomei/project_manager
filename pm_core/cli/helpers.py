@@ -919,24 +919,16 @@ def _get_session_name_for_cwd() -> str:
 def _get_current_pm_session() -> str | None:
     """Return the base pm session name when running inside one.
 
-    Reads the actual session from $TMUX_PANE and strips any grouped-session
-    ~N suffix.  Returns None if not inside tmux or not in a pm- session.
+    Reads the actual session from $TMUX_PANE and resolves it to its pm
+    session: a grouped ``~N`` view or a user's own view of any name
+    (tmux names that view for every pane and popup of the group while its
+    client is the most recently active one, S118/S124).  Returns None if
+    not inside tmux or not in a pm- session.
     """
     if not tmux_mod.in_tmux():
         return None
-    name = tmux_mod.get_session_name()
-    # Strip grouped session suffix
-    if "~" in name:
-        name = name.rsplit("~", 1)[0]
-    if name.startswith("pm-"):
-        return name
-    # Another name grouped with a pm session (a user's own view of it):
-    # tmux names that session for every pane and popup of the group while
-    # its client is the most recently active one (S118).
-    group = tmux_mod.session_group(name) if name else ""
-    if group.startswith("pm-"):
-        return group.rsplit("~", 1)[0] if "~" in group else group
-    return None
+    name = pane_registry.pm_session_name(tmux_mod.get_session_name())
+    return name if name.startswith("pm-") else None
 
 
 def _get_pm_session() -> str | None:

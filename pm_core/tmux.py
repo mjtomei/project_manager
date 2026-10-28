@@ -575,7 +575,10 @@ def current_or_base_session(base: str) -> str:
     """
     if in_tmux():
         current = get_session_name()
-        if current and (current == base or current.startswith(base + "~")):
+        # A user's own view grouped with *base* under any name counts
+        # as the same group (S124).
+        if current and (current == base or current.startswith(base + "~")
+                        or session_group(current) == base):
             # Only return current if it has attached clients — otherwise
             # fall through to find an attached grouped session.
             result = _run(

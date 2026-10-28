@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from pm_core.tmux import (
     has_tmux,
     in_tmux,
@@ -456,16 +458,30 @@ class TestCurrentOrBaseSession:
         assert current_or_base_session("proj") == "proj~2"
 
     @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.session_group", return_value="")
     @patch("pm_core.tmux.list_grouped_sessions", return_value=["proj~1", "proj~2"])
     @patch("pm_core.tmux.get_session_name", return_value="other")
     @patch("pm_core.tmux.in_tmux", return_value=True)
-    def test_finds_attached_grouped(self, mock_in, mock_gsn, mock_lg, mock_run):
+    def test_finds_attached_grouped(self, mock_in, mock_gsn, mock_lg, mock_sg, mock_run):
         """When current session is different, finds an attached grouped session."""
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="0\n"),  # proj~1 not attached
             MagicMock(returncode=0, stdout="1\n"),  # proj~2 attached
         ]
         assert current_or_base_session("proj") == "proj~2"
+        mock_sg.assert_called_once_with("other")
+
+    @pytest.mark.parametrize("view", ["myview", "pm-laptop", "my~view"])
+    @patch("pm_core.tmux.subprocess.run")
+    @patch("pm_core.tmux.session_group", return_value="pm-x")
+    @patch("pm_core.tmux.in_tmux", return_value=True)
+    def test_attached_own_view_in_group(self, mock_in, mock_sg, mock_run, view):
+        """A user's own view grouped with the pm session, under any name,
+        is the session to target while it is attached (S124)."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="1\n")
+        with patch("pm_core.tmux.get_session_name", return_value=view):
+            assert current_or_base_session("pm-x") == view
+        mock_sg.assert_called_once_with(view)
 
 
 # ---------------------------------------------------------------------------

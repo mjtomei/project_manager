@@ -922,7 +922,7 @@ def rebalance_cmd():
         click.echo("Must be run from within a tmux session.", err=True)
         raise SystemExit(1)
 
-    session = tmux_mod.get_session_name()
+    session = pane_registry.pm_session_name(tmux_mod.get_session_name())
     window = tmux_mod.get_window_id(session)
 
     # Check for panes (read-only) then reset user_modified under lock
@@ -1867,7 +1867,7 @@ def _run_picker_command(cmd: str, session: str) -> None:
         # multiple commands across concurrent picker invocations.
         from pm_core.cli.helpers import trigger_tui_command
         tui_cmd = cmd[4:]
-        base = pane_registry.base_session_name(session)
+        base = pane_registry.pm_session_name(session)
         if not trigger_tui_command(base, tui_cmd):
             click.echo("Could not reach the TUI (no pidfile or signal failed).")
             _wait_dismiss()
@@ -1924,7 +1924,7 @@ def _session_pm_argv(session: str, args: list[str]) -> list[str]:
     """
     import sys
     import pm_core
-    tag = _session_tag_from_name(session) or ""
+    tag = _session_tag_from_name(pane_registry.pm_session_name(session)) or ""
     dispatcher_root = str(Path(pm_core.__file__).parent.parent)
     return [sys.executable, "-c", _SESSION_PM_BOOTSTRAP,
             dispatcher_root, tag] + list(args)

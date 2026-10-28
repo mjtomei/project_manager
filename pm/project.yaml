@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T10:43:27.788843+00:00'
+  updated_at: '2026-10-28T10:12:55.185722+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38880,6 +38880,26 @@ prs:
       z t recovers, so the RQ56 text "t starts the re-run" is inaccurate.'
     created_at: '2026-10-28T09:23:07Z'
     last_edited: '2026-10-28T09:23:07Z'
+  - id: note-4c80c16
+    text: 'Refine S124 (HEAD b0579323, tmux 3.2a, live probe): from a grouped view
+      named myview, C-b P/C-b M, splits (one pm-<tag>.json, no myview.json) and picker
+      ●/○ incl. detach/reattach all work. Gaps 89d914a0 missed: (1) C-b x in myview
+      -> after-kill-pane `pm _pane-closed` logs "handle_any_pane_closed: no registry
+      for myview" (get_session_name raw; registry not pruned, no rebalance, a killed
+      TUI would not respawn); (2) C-b R in myview -> "pm rebalance returned 1" (rebalance_cmd
+      loads registry by raw session); (3) `pm session home` typed in myview switches
+      the ~1 client, not myview (tmux.current_or_base_session only knows <base>/<base>~N).
+      RQ47 probe: pm-laptop view -> C-b P/C-b M "Not a pm session."; a split there
+      writes pm-laptop.json, after which C-b P says "No project.yaml found." + "pm
+      popup failed (exit 1)"; pm session home/pm tui restart rc 0 there. my~view ->
+      popups and splits fine (pm_session_name passes the full name to session_group),
+      but `pm session home` from /tmp says "Not inside a pm tmux session." rc 1 (_get_current_pm_session
+      strips ~ before the group lookup). tmux 3.2a rejects the window-resized hook,
+      so resize never runs _window-resized here. Unrelated-session splits write <name>.json
+      (pre-existing on origin/master 89e3c501, global hook). pm qa run writes no runtime
+      qa entry, so the picker never shows [working] for it.'
+    created_at: '2026-10-28T10:12:55Z'
+    last_edited: '2026-10-28T10:12:55Z'
   - id: note-f0bc075
     text: 'Refine S123 (c774b5af): tick _qa_run_driven -> qa_loop.own_run_driven reads
       ONLY qa_resume.json. `pm qa run` writes qa_run.json at start but its first qa_resume.json
@@ -41832,6 +41852,31 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T09:08:37.363689+00:00'
   updated_at: '2026-10-28T09:08:37.363689+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-ee18218
+  plan: bugs
+  title: 'Bug: global after-split-window hook writes ~/.pm/pane-registry/<session>.json
+    for unrelated non-pm tmux sessions'
+  branch: pm/pr-ee18218-bug-global-after-split-window-hook-writes-pm-pane-
+  status: pending
+  depends_on: []
+  description: 'pm session installs global after-split-window/after-new-window hooks
+    (`pm _pane-opened "#{session_name}" ...`). Splitting in any plain tmux session
+    on the same server (e.g. `tmux new-session -s other`, then C-b % twice) writes
+    ~/.pm/pane-registry/other.json (+.lock) with user_modified=true, and every later
+    after-kill-pane in that session runs `_pane-closed` against it. Same on origin/master
+    89e3c501 (found as a pre-existing side note in QA S124 of pr-592e4bd, captures
+    /pm-captures/scenarios/124/{head,post-fix}/s1/cu). Expected: the hook ignores
+    sessions that are not pm sessions or views grouped with one (pane_registry.pm_session_name(session)
+    does not start with pm- / no pm registry), so no stray registry files are created.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T10:54:28.710615+00:00'
+  updated_at: '2026-10-28T10:54:28.710615+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
