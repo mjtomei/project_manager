@@ -126,10 +126,18 @@ run.
   message, and stops the server process it started (no orphan listener);
 - a single blocking `curl` cannot stall the deadline (per-attempt
   connect/max-time bounds);
+- with something already answering on the port (a previous run's server),
+  the step fails at once with the "something already answers …" message and
+  does not start the app — otherwise the readiness wait would pass against
+  that server and the driver would record the wrong app;
 - the Playwright driver starts in the image: `node driver.mjs` resolves
   `playwright` through the recipe's `node_modules` link (without it the run
   dies with `ERR_MODULE_NOT_FOUND`), and the recipe's resolution check
   prints its ok line;
+- with no resolvable Playwright the step stops at its own check with the
+  "playwright does not resolve beside driver.mjs" message (it does not run
+  the driver into a second copy of the error), and a local `npm i playwright`
+  install is left alone (no link created inside it);
 - with an app that does answer, the recipe proceeds and produces its captures.
 
 ## Edge cases
@@ -161,11 +169,17 @@ run.
   `RECORDER_STOP_TIMEOUT` for a long command.
 - The web-UI server accepts the connection but never answers → the per-attempt
   curl bound keeps the deadline meaningful.
+- Something already answers on the web-UI port (a previous run's server, or
+  another scenario on the default port) → the recipe refuses to start rather
+  than let the readiness wait pass against that server and record the wrong
+  app.
 - The web-UI driver is an ES module and the image's Playwright is a *global*
   install advertised through `NODE_PATH`, which ESM ignores → a bare
   `node driver.mjs` fails with `ERR_MODULE_NOT_FOUND: Cannot find package
   'playwright'`; the recipe links the global install as a `node_modules`
-  beside the driver and checks the import before running it.
+  beside the driver (only when there is no local install and the global one
+  exists) and stops at its resolution check, with an actionable message, when
+  the import still does not resolve.
 - A render fails (no `agg`, unreadable cast, failed transcode) in a capture
   directory that already holds a video → the render steps delete this run's
   mp4/gif (and the web-UI webm) first and then check the mp4, so the run ends

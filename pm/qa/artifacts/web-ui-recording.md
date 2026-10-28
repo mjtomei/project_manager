@@ -24,8 +24,8 @@ both — Playwright globally under `/usr/lib/node_modules`, its Chromium
 under `/opt/ms-playwright` — and advertises the global install through
 `NODE_PATH`, which Node's *ES module* resolver ignores. A driver saved as
 `driver.mjs` (an ES module, as below) therefore has to resolve the package
-locally; step 2 shows the one-line fix. Elsewhere install with
-`npm i playwright && npx playwright install --with-deps chromium`.
+locally; step 2 links it beside the driver and checks the import. Elsewhere,
+install with `npm i playwright && npx playwright install --with-deps chromium`.
 
 ## What this recipe produces
 
@@ -71,6 +71,18 @@ mkdir -p "$CAPDIR"
 rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" "${CAPDIR:?}"/*.png
 
+# Fail fast if something is *already* answering on the port. A previous run's
+# server — or another scenario using the same default port — would satisfy the
+# readiness wait below, and the driver would then record *that* app while this
+# run's app never bound the port: a capture of the wrong build, presented as
+# this run's evidence. `curl` without `-f` on purpose: any HTTP answer,
+# including a 404, means the port is taken.
+if curl -s -o /dev/null --connect-timeout 2 --max-time 5 "$APP_URL/"; then
+    echo "something already answers on $APP_URL — a previous run's server or" \
+        "another scenario holds the port; stop it (or pick another PORT)" >&2
+    exit 1
+fi
+
 # Launch the web UI on the chosen port and background it; keep the pid so
 # we can stop it in teardown. Replace APP_START with your app's command.
 APP_START="my-app serve"
@@ -106,8 +118,22 @@ cd "$CAPDIR"                                 # where driver.mjs lives
 # `node driver.mjs` fails at once with "ERR_MODULE_NOT_FOUND: Cannot find
 # package 'playwright'". A node_modules beside the driver that resolves the
 # package fixes it — the image's global install, or `npm i playwright` here.
-ln -sfn /usr/lib/node_modules node_modules
-node -e "import('playwright').then(() => console.log('playwright ok'))"
+# Link only when needed: with no global install `ln -sfn` would leave a
+# *dangling* node_modules that then breaks the `npm i playwright` fallback,
+# and with a local install already in place it would create a nested
+# node_modules/node_modules.
+if [ ! -e node_modules ] && [ -d /usr/lib/node_modules ]; then
+    ln -sfn /usr/lib/node_modules node_modules
+fi
+# Check before running the driver, and stop here on failure: otherwise the
+# worker gets this error twice (once here, once from the driver) with no
+# indication of what to do about it.
+node -e "import('playwright').then(() => console.log('playwright ok'))" || {
+    echo "playwright does not resolve beside driver.mjs — link the image's" \
+        "global install ('ln -sfn /usr/lib/node_modules node_modules') or run" \
+        "'npm i playwright' here" >&2
+    exit 1
+}
 CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs
 ```
 

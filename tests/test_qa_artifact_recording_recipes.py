@@ -25,9 +25,11 @@ hits, regardless of how it waits for a background job:
   the detach (or that dies in the gap before the detach key is sent) fails
   the run instead of passing on a truncated cast;
 - readiness polls (pm session, web-ui server) carry a deadline and an
-  actionable failure instead of hanging forever, and the pm-session poll
-  waits on the computed session rather than any ``pm-`` session (which would
-  also match this recipe's own ``pm-recorder``);
+  actionable failure instead of hanging forever, the pm-session poll waits on
+  the computed session rather than any ``pm-`` session (which would also
+  match this recipe's own ``pm-recorder``), and the web-UI step refuses a
+  port something already answers on (that server would satisfy the poll and
+  the driver would record the wrong app);
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
   run's mp4 (which the manifest would present as this run's evidence); the
@@ -38,7 +40,9 @@ hits, regardless of how it waits for a background job:
   string and leaves asciinema with a broken command;
 - the web-UI driver is an ES module and the image's Playwright is a *global*
   install advertised through ``NODE_PATH``, which ESM's resolver ignores, so
-  the run block links a ``node_modules`` beside the driver before running it.
+  the run block links a ``node_modules`` beside the driver (only when there is
+  no local install) and stops at its own resolution check when the import
+  still does not resolve.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -49,6 +53,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -565,6 +570,31 @@ def _web_ui_driver_block():
     raise AssertionError("web-ui recipe has no block that runs driver.mjs")
 
 
+def _fake_playwright(root):
+    """A fake global Playwright install rooted at ``root`` (``root/playwright``)."""
+    pkg = root / "playwright"
+    pkg.mkdir(parents=True)
+    (pkg / "package.json").write_text(
+        '{"name": "playwright", "type": "module", "exports": "./index.js"}\n')
+    (pkg / "index.js").write_text("export const chromium = {stub: true};\n")
+    return root
+
+
+def _write_driver(capdir):
+    (capdir / "driver.mjs").write_text(
+        'import { chromium } from "playwright";\n'
+        'console.log("driver saw", typeof chromium);\n')
+
+
+def _run_driver_block(capdir, global_dir):
+    """Run the recipe's own driver block against a fake Playwright install."""
+    block = _web_ui_driver_block().replace("/usr/lib/node_modules",
+                                           str(global_dir))
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1")
+    return subprocess.run(["bash"], input=block, env=env,
+                          capture_output=True, text=True, timeout=120)
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_resolves_playwright_beside_it(tmp_path):
     """The driver is an ES module, and ESM ignores the image's ``NODE_PATH``.
@@ -598,27 +628,140 @@ def test_web_ui_driver_resolves_playwright_beside_it(tmp_path):
     # the recipe's own link + run lines. The import only resolves through the
     # link, so a regression here fails the driver exactly as the image does.
     capdir = tmp_path / "cap"
-    fake_global = tmp_path / "global"
     capdir.mkdir()
-    (fake_global / "playwright").mkdir(parents=True)
-    (fake_global / "playwright" / "package.json").write_text(
-        '{"name": "playwright", "type": "module", "exports": "./index.js"}\n')
-    (fake_global / "playwright" / "index.js").write_text(
-        "export const chromium = {stub: true};\n")
-    (capdir / "driver.mjs").write_text(
-        'import { chromium } from "playwright";\n'
-        'console.log("driver saw", typeof chromium);\n')
-
-    script = block.replace("/usr/lib/node_modules", str(fake_global))
-    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1")
-    r = subprocess.run(["bash"], input=script, env=env,
-                       capture_output=True, text=True, timeout=120)
-    assert r.returncode == 0, f"{script}\n{r.stderr}"
+    _write_driver(capdir)
+    r = _run_driver_block(capdir, _fake_playwright(tmp_path / "global"))
+    assert r.returncode == 0, f"{block}\n{r.stderr}"
     assert "playwright ok" in r.stdout, (
         "web-ui recipe's resolution check does not run: " + r.stdout + r.stderr)
     assert "driver saw object" in r.stdout, (
         "web-ui recipe runs driver.mjs without a resolvable playwright: "
         + r.stdout + r.stderr)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_does_not_clobber_a_local_install(tmp_path):
+    """The recipe offers the image's global install *or* a local one.
+
+    The link has to be conditional. With ``node_modules`` already a real
+    directory (a worker ran ``npm i playwright`` as the recipe's "elsewhere"
+    line says), an unconditional ``ln -sfn /usr/lib/node_modules
+    node_modules`` creates ``node_modules/node_modules`` — junk in the capture
+    directory, and with no global install a dangling link *inside* the
+    worker's own install. With no install at all it leaves a dangling
+    ``node_modules`` beside the driver, which then breaks that same
+    ``npm i playwright`` fallback.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    _fake_playwright(capdir / "node_modules")   # the worker's local install
+    r = _run_driver_block(capdir, tmp_path / "no-global-install")
+    assert r.returncode == 0, r.stderr
+    assert "driver saw object" in r.stdout, (
+        "web-ui recipe breaks a local Playwright install: " + r.stdout + r.stderr)
+    entries = sorted(p.name for p in (capdir / "node_modules").iterdir())
+    assert entries == ["playwright"], (
+        "web-ui recipe linked the global install *inside* the worker's local "
+        f"node_modules ({entries})")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
+    """The resolution check has to gate the driver, not just print.
+
+    Without the gate the worker sees the same ``ERR_MODULE_NOT_FOUND`` twice
+    (once from the check, once from the driver) and no statement of what to
+    do; and with no global install an unconditional link would leave a
+    dangling ``node_modules`` in the capture directory.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    r = _run_driver_block(capdir, tmp_path / "missing-global-install")
+    assert r.returncode != 0, (
+        "the recipe ran driver.mjs although its own resolution check failed")
+    assert "playwright does not resolve beside driver.mjs" in r.stderr, (
+        "the resolution failure has no actionable message: " + r.stderr)
+    assert "driver saw" not in r.stdout, (
+        "the recipe ran the driver after its resolution check failed")
+    assert not os.path.lexists(capdir / "node_modules"), (
+        "web-ui recipe left a dangling node_modules beside the driver")
+
+
+_STUB_CURL = r"""
+n=$(cat "$STUB_CURL_COUNT" 2>/dev/null || echo 0)
+n=$((n + 1)); echo "$n" > "$STUB_CURL_COUNT"
+case "$STUB_MODE" in
+  inuse) exit 0 ;;
+  never) exit 7 ;;
+esac
+# Call 1 is the recipe's own "is the port free?" pre-check; the app answers
+# from call 2 on.
+[ "$n" -ge 2 ] && exit 0
+exit 7
+"""
+
+
+def _web_ui_start_block():
+    """The fenced block under ``### 1. Start the UI under test``."""
+    text = _recipe_text("web-ui-recording.md")
+    section = text.split("### 1. Start the UI under test", 1)[1].split(
+        "### 2.", 1)[0]
+    return re.findall(r"```bash\n(.*?)```", section, re.S)[0]
+
+
+def _run_web_ui_start(mode, tmp_path):
+    """Run the web-UI recipe's app-start block with stub pm/curl/my-app."""
+    block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", _web_ui_start_block())
+    bindir = tmp_path / "bin"
+    caps = tmp_path / "captures"
+    for d in (bindir, caps):
+        d.mkdir()
+    launched = tmp_path / "app-launched"
+    _stub_tool(bindir, "pm", f'echo "{caps}"\n')
+    _stub_tool(bindir, "curl", _STUB_CURL)
+    _stub_tool(bindir, "my-app", f'touch "{launched}"\n')
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
+               STUB_MODE=mode, STUB_CURL_COUNT=str(tmp_path / "curl-count"))
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True, timeout=60)
+    return r, launched
+
+
+class TestWebUiStartExecution:
+    """The app-start block: the port pre-check and the bounded readiness wait."""
+
+    def test_start_block_completes(self, tmp_path):
+        r, launched = _run_web_ui_start("ok", tmp_path)
+        assert r.returncode == 0, r.stderr
+        deadline = time.time() + 5
+        while not launched.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        assert launched.exists(), "the recipe never launched the app"
+
+    def test_a_port_already_answering_is_refused(self, tmp_path):
+        """A server already on the port would satisfy the readiness wait.
+
+        The app then never binds it, the poll passes against the *other*
+        server, and the driver records that app while this run produced
+        nothing — a capture of the wrong build presented as this run's
+        evidence (the same "a wait matched the wrong handle" class as the
+        pm-session poll). The recipe fails fast instead.
+        """
+        r, launched = _run_web_ui_start("inuse", tmp_path)
+        assert r.returncode != 0, (
+            "a port held by another server was accepted as this run's app")
+        assert "already answers" in r.stderr, (
+            "the recipe does not say why it refused the port: " + r.stderr)
+        assert not launched.exists(), (
+            "the recipe started the app on a port another server holds")
+
+    def test_a_server_that_never_answers_fails_at_the_deadline(self, tmp_path):
+        r, launched = _run_web_ui_start("never", tmp_path)
+        assert r.returncode != 0, (
+            "a server that never answers was reported as started")
+        assert "did not answer" in r.stderr, r.stderr
 
 
 def test_web_ui_clears_a_previous_video():

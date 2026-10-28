@@ -144,7 +144,14 @@ R6. **Bound the remaining readiness polls, and poll the right handle.** The
    exists and the failure path would never fire. An empty target is rejected
    first because `tmux has-session -t ''` succeeds. The web-UI poll also stops
    the server it started, and bounds each attempt (`--connect-timeout 2
-   --max-time 5`) because a deadline is only consulted between attempts. The
+   --max-time 5`) because a deadline is only consulted between attempts. It
+   also refuses to start at all when something *already* answers on the port:
+   a previous run's server (or another scenario using the same default port)
+   would satisfy the poll, this run's app would never bind, and the driver
+   would record that other app as this run's evidence — the same "the wait
+   matched the wrong handle" bug as the `grep '^pm-'` poll, one layer down.
+   The probe is `curl` without `-f` on purpose: any HTTP answer, including a
+   404, means the port is taken. The
    tmux transcript pipe is attached *without* `-o` (which only opens a pipe
    when none is attached): a pipe left behind by an aborted run would
    otherwise make the step a silent no-op, so no `transcript.log` is ever
@@ -198,7 +205,14 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    web-UI driver's module resolution is executed too: the recipe's own run
    block is driven against a fake global Playwright install, so the link has
    to make the driver's bare `import 'playwright'` resolve (a wrong link
-   target reproduces the image's `ERR_MODULE_NOT_FOUND`).
+   target reproduces the image's `ERR_MODULE_NOT_FOUND`); with a local
+   install already in place the block must not link the global one *inside*
+   it, and with no install at all it must stop at its own resolution check
+   with an actionable message (both fail against the unconditional
+   link-and-continue form). The web-UI app-start block is executed against
+   stub `pm`/`curl`/`my-app` (`TestWebUiStartExecution`): it completes
+   normally, it refuses a port something already answers on (and never
+   starts the app), and a server that never answers fails at its deadline.
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
@@ -249,6 +263,20 @@ R9. **The web-UI driver has to resolve Playwright before it can run.** The
    a page (rc 0), and with a wrong link target the run fails with the same
    `ERR_MODULE_NOT_FOUND` the recipe now documents.
 
+   Two guards make the step safe in the cases the image's own path does not
+   cover. The link is conditional (`[ ! -e node_modules ] && [ -d
+   /usr/lib/node_modules ]`): the recipe offers a *local* `npm i playwright`
+   as the alternative, and an unconditional `ln -sfn` creates a link named
+   after the target's basename *inside* an existing `node_modules` (verified:
+   `node_modules/global` for a substituted target, `node_modules/node_modules`
+   for the image's), and with no global install it leaves a dangling
+   `node_modules` beside the driver that breaks that same fallback. And the
+   resolution check now *gates* the run (`|| { …; exit 1; }`): without it the
+   worker got the same `ERR_MODULE_NOT_FOUND` twice — once from the check,
+   once from the driver — and no statement of what to do about it (verified:
+   the old block continues into the driver after the check fails). Evidence:
+   `/pm-captures/review-419c-i8/`.
+
 ## Non-goals
 
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
@@ -262,7 +290,7 @@ R9. **The web-UI driver has to resolve Playwright before it can run.** The
 |---|---|
 | `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"`, stale render outputs cleared + mp4 checked |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form); stale render outputs cleared + mp4 checked |
-| `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; driver resolves the image's global Playwright through a local `node_modules` (ESM ignores `NODE_PATH`) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump cleared before the driver + mp4 checked; driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
