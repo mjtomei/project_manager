@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T05:53:21.916513+00:00'
+  updated_at: '2026-10-28T06:14:16.882560+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15167,6 +15167,31 @@ prs:
       pane — split a shell pane first.'
     created_at: '2026-10-28T05:53:21Z'
     last_edited: '2026-10-28T05:53:21Z'
+  - id: note-55a6d13
+    text: 'QA scenario 3 (version skew) PASS 2026-10-28: all five triples matched
+      exactly. (1) fixed TUI with pidfile rewritten to caps:["sigusr1"] -> `pm autostart
+      add` prints "does not advertise the command-queue capability; restart the TUI
+      (Ctrl+R) to use it.", exit 2, TUI alive, pidfile untouched, queue 0 bytes. (2)
+      caps:[] -> "has not advertised its signal handlers yet; if it is still starting
+      up, try again in a moment, otherwise restart the TUI (Ctrl+R).", exit 2, same
+      survival. (3) genuine pre-upgrade TUI (/scratch/old-tui @ 0e2cc2db, bare-number
+      pidfile, SIGUSR1 only) -> "predates the command-queue feature; restart the TUI
+      (Ctrl+R) to use it.", exit 2, old TUI (pid 2348) stayed alive and kept rendering;
+      queue 0 bytes. (4) reload path on that old TUI: `pm pr add` -> "Created pr-9c40675:
+      Refactor auth module (now active)", exit 0, board went 2->3 PRs on its own in
+      ~0.5 s, same pid, pidfile unchanged. (5) A/B: pre-fix CLI (/scratch/pre-fix
+      @ origin/master 89e3c501) `pm autostart add --timeout 2` -> old TUI killed (pid
+      2348 Zs <defunct>, TUI window gone, `pm tui view` header only), bare pidfile
+      left behind, exit 2 "owner_timeout ... did not reply within 2s (busy or restarting);
+      the command may still be applied". Captures: /pm-captures/scenarios/3/{01-caps-sigusr1-only,02-caps-empty,03-old-tui-refused-and-reload,04-prefix-cli-kills-old-tui}.
+      Setup notes: venv /tmp/pm-venv + PYTHONPATH=/workspace (pm which -> /workspace/pm_core);
+      worktrees /scratch/old-tui (0e2cc2db) and /scratch/pre-fix (origin/master);
+      TUI cast = asciinema attached to $S:0 from a separate recorder session, switching
+      the session window to a cli window to show CLI output then back (no pipe-pane
+      transcript; transcript.log is an ANSI-stripped replay of the cast). No bugs
+      found; nothing to fix.'
+    created_at: '2026-10-28T06:14:16Z'
+    last_edited: '2026-10-28T06:14:16Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
