@@ -189,35 +189,6 @@ Reference an artifact recipe from a QA scenario by its filename stem
 in the `ARTIFACT:` field (comma-separated when a scenario uses more
 than one recipe).
 
-### Shared helpers
-
-Executable helpers that ship beside the recipes (`*.sh`) are copied
-into the scenario's `qa-artifacts/` directory whenever it installs any
-recipe, so a recipe can invoke the helper sitting next to it (the QA
-library loader only globs `*.md`, so a helper is not listed by
-`pm qa list`). Currently the only one is `wait-for-job.sh`, used by
-the recording recipes for the agg→ffmpeg render step.
-
-Use `wait-for-job.sh` for any renderer or long-running capture step.
-It starts the job as one background process, waits on that job's
-captured PID, bounds the wait, returns the real exit status, and
-requires a fresh (rewritten by this run), non-empty, optionally
-validated artifact before reporting success. The `--validate` step is
-bounded by the same `--timeout`, so a hung validator fails the check
-instead of stalling the worker. It deliberately does not
-poll process names: `until ! pgrep -f "<renderer>"` matches the
-waiting shell's own command line and never ends, and a bare `wait`
-blocks on every child, including a deliberately persistent observer.
-A leftover artifact from an earlier run, or a killed/timed-out wait,
-is not evidence that a capture succeeded. If the helper itself is
-interrupted it stops the job's process group (escalating to SIGKILL
-after a short grace period, and ignoring further signals while it
-cleans up) and exits 130 — a killed wait is reported as a failure,
-never as a finished render. On a timeout or an
-interruption it also SIGKILLs whatever is left in that group, because
-`timeout` exits as soon as its direct child dies and a renderer that
-ignores SIGTERM would otherwise outlive the run.
-
 A minimal example:
 
 ```text
