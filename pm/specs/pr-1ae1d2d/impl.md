@@ -390,6 +390,12 @@ No **[UNRESOLVED]** items.
   therefore quarantines only a captures root that is provably this PR's (not
   the shared mount, or a mount marked with this PR's `PM_CAPTURES_PR`); the
   manifest write still happens, because it is recoverable via `qa_runs/`.
+  The marker is compared with surrounding whitespace stripped, matching the
+  mount decision `paths.captures_dir` makes after #264/pr-1e9c117 (a trailing
+  newline from a shell `export` still grants the mount there, so the guard
+  must agree — otherwise it would refuse to quarantine a tree that
+  `captures_dir` handed us as this PR's, silently disabling R5 for exactly
+  the container case).
 - **Scenario 0 in the manifest-vs-status membership check**: `qa_status.json`
   lists the interactive scenario 0 (display contract, A5) but the manifest
   never does, so the prompt's disagreement warning compares the listings

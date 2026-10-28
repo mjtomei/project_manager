@@ -2032,6 +2032,13 @@ def _captures_root_is_ours(base: Path, pr_id: str) -> bool:
     records as foreign and move them out of ``scenarios/``.  So quarantine
     only a tree that is unambiguously ours; foreign records elsewhere are
     still detected by :func:`captures.audit` and by the PR that owns them.
+
+    The marker is compared with surrounding whitespace stripped, exactly as
+    :func:`pm_core.paths.captures_dir` does (pr-1e9c117/#264): a trailing
+    newline from a shell ``export`` still grants the mount there, so the
+    guard must agree — otherwise it would refuse to quarantine a tree
+    ``captures_dir`` handed us as this PR's, and log that the marker is
+    "unset or naming another PR" when it plainly names this one.
     """
     from pm_core.paths import CAPTURES_PR_ENV, CONTAINER_CAPTURES_MOUNT
     try:
@@ -2039,7 +2046,7 @@ def _captures_root_is_ours(base: Path, pr_id: str) -> bool:
             return True
     except (TypeError, ValueError):
         return True
-    return os.environ.get(CAPTURES_PR_ENV) == pr_id
+    return (os.environ.get(CAPTURES_PR_ENV) or "").strip() == pr_id
 
 
 def _sync_captures_evidence(state: "QALoopState", overall: str = "",

@@ -743,6 +743,30 @@ def test_sync_quarantines_when_the_mount_belongs_to_this_pr(tmp_path,
     assert captures.read_manifest(mount, pr_id="pr-fixture")["run_id"] == "fixturerun"
 
 
+def test_sync_quarantines_when_the_mount_marker_has_whitespace(tmp_path,
+                                                               monkeypatch):
+    """``paths.captures_dir`` strips surrounding whitespace from
+    ``PM_CAPTURES_PR`` before granting the mount (a trailing newline from a
+    shell ``export`` is common), so the ownership guard must strip it too.
+    Comparing the raw value would hand us a mount ``captures_dir`` says is
+    ours and then refuse to quarantine it — silently disabling the defense
+    this PR adds for exactly the container case, while logging that the
+    marker names another PR."""
+    from pm_core import paths, qa_loop
+    mount = tmp_path / "pm-captures"
+    mount.mkdir()
+    _scenario_dir(mount, 3, {"index": 3, "pr_id": "pr-other",
+                             "run_id": "otherrun"})
+    monkeypatch.setattr(paths, "CONTAINER_CAPTURES_MOUNT", str(mount))
+    monkeypatch.setenv(paths.CAPTURES_PR_ENV, "pr-fixture\n")
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: mount)
+
+    qa_loop._sync_captures_evidence(_fixture_state())
+
+    assert not (mount / "scenarios" / "3").exists()
+    assert (mount / "scenarios" / captures.FOREIGN_DIR_NAME / "fixturerun-3").is_dir()
+
+
 # ---------------------------------------------------------------------------
 # Sign-off prompt
 # ---------------------------------------------------------------------------
