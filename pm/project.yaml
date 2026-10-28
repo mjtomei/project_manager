@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T00:27:36.978579+00:00'
+  updated_at: '2026-10-28T00:28:12.217091+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11233,6 +11233,23 @@ prs:
       or check MemAvailable >= 47G right before the raise. Captures /pm-captures/scenarios/67.'
     created_at: '2026-10-28T00:27:36Z'
     last_edited: '2026-10-28T00:27:36Z'
+  - id: note-0300a36
+    text: 'QA S71 (2026-10-28, 17c4a8d2..de44713d, nested rootless podman, two sessions
+      sharing ~/.pm): all 5 stories PASS live, no code change. Race x3: review won
+      every round; losers refused naming own action (+7.1G growth or +8G reserved),
+      impl/review exit=1, signoff exit=0. fifo A1-3,B1-3 (impl refused +8G reserved);
+      drain impl,A1-3,B1-3; rr impl,A1,B1,A2,B2,A3,B3; one per raise at settarget
+      10; the 7th container was held by honest host-headroom refusals (1% reserve,
+      ~45G free) until a finished impl was removed. Lock: pm pr start blocked 35.9
+      s -> lock busy exit=1, head row showed lock busy 36 s into the hold, launch
+      1 s after release. Dead TUI Zsl+/reaped: Queue depth gone at once, B admitted
+      first try, 3 stale removals. Harness: fake qa_scenario peaks are only 3.9G (outer
+      memory.peak), so the E17 big-head story is harness-limited (P 3.8G, drift admitted
+      the head). Seed by podman exec python3 bytearray(6G) in one scenario container,
+      then pm container cleanup --pr -> 7372MB samples, P 7.2G, N 5: impl admitted,
+      head held 80 s. Captures /pm-captures/scenarios/71.'
+    created_at: '2026-10-28T00:28:12Z'
+    last_edited: '2026-10-28T00:28:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
