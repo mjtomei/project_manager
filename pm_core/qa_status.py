@@ -119,6 +119,14 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         for err_line in error.split("\n"):
             lines.append(f"  {_RED}{err_line}{_RESET}")
         lines.append("")
+        # The error block replaces the scenario table, but the run still has a
+        # verdict (e.g. INPUT_REQUIRED when planning produced no plan), and
+        # that is exactly what the user needs to see here — the error text
+        # explains *why* without naming the outcome.
+        if overall:
+            color = _VERDICT_COLORS.get(overall, "")
+            lines.append(f"  Overall: {color}{_BOLD}{overall}{_RESET}")
+            lines.append("")
         lines.append(f"{_DIM}  q: quit{_RESET}")
         padded = [_pad_line(l, cols) for l in lines]
         while len(padded) < rows:
