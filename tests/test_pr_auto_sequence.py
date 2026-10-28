@@ -953,6 +953,29 @@ class TestQaLaunchRecord:
                                            loop_id="abc")
         assert not (records / "pr-001-abc").exists()
 
+    def test_pm_qa_run_is_driven_before_its_snapshot(self, records):
+        """S123: a ``pm qa run`` still refining has a start record but no
+        resume snapshot yet; a REQA tick launched over it.  A live owner of
+        any other run with no snapshot (a TUI that finished it) holds
+        nothing."""
+        import json, subprocess
+        from pm_core.qa_loop import _proc_start_time, own_run_driven
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            for loop_id in ("cli-pr-001", "abc"):
+                (records / f"pr-001-{loop_id}").mkdir(parents=True)
+                (records / f"pr-001-{loop_id}" / "qa_run.json").write_text(
+                    json.dumps({"pr_id": "pr-001", "loop_id": loop_id,
+                                "session_tag": "own", "started_at": 1.0,
+                                "owner_pid": child.pid,
+                                "owner_start": _proc_start_time(child.pid)}))
+            assert own_run_driven("pr-001")
+            (records / "pr-001-cli-pr-001" / "qa_run.json").unlink()
+            assert not own_run_driven("pr-001")
+        finally:
+            child.kill()
+            child.wait()
+
     def test_driver_record_replaces_the_launch_record_only(self, records):
         import json, os
         from pm_core import qa_loop

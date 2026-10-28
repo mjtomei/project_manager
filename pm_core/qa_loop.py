@@ -1339,12 +1339,18 @@ def own_run_started_since(pr_id: str, since: float) -> bool:
 def own_run_driven(pr_id: str) -> bool:
     """True when a run of *pr_id* this pm session launched still has a live
     driver: its resume snapshot names another process that is still
-    running.  The user can close a run's main qa window while its driver
-    goes on to a verdict (S89), so a missing window does not mean nothing
-    drives the run."""
-    for qa_wd, _rec in _own_run_records(pr_id):
+    running, or it is a ``pm qa run`` whose process still runs.  The user
+    can close a run's main qa window while its driver goes on to a verdict
+    (S89), so a missing window does not mean nothing drives the run."""
+    for qa_wd, rec in _own_run_records(pr_id):
         data = _load_resume_file(qa_wd)
         if isinstance(data, dict) and resume_owned_elsewhere(data):
+            return True
+        # A ``pm qa run`` writes its snapshot only once its refiner is done,
+        # but its start record names its process from the start, and that
+        # process exits when the run ends: a REQA landing while it still
+        # refined launched over it and killed its windows (S123).
+        if is_instruction_run(pr_id, qa_wd) and resume_owned_elsewhere(rec):
             return True
     return False
 
