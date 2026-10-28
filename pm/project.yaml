@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T05:04:25.744597+00:00'
+  updated_at: '2026-10-28T05:53:21.916513+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15150,6 +15150,23 @@ prs:
       fresh descriptor.'
     created_at: '2026-10-28T05:04:25Z'
     last_edited: '2026-10-28T05:04:25Z'
+  - id: note-ff5e099
+    text: 'Refiner (scenario 2), verified live in-container: (1) `pm autostart list|add`
+      against a pidfile naming a DEAD pid exits 2 with "Error (owner_unavailable):
+      TUI for session <S> is not running (stale pidfile)" but does NOT remove the
+      file — `_resolve_owner` short-circuits on liveness before `submit_tui_command`
+      runs its identity check. Cleanup happens on the reload path instead (`pm pr
+      add` unlinks it silently) and on the picker path. So QA R5 second THEN ("stale
+      pidfile is removed") holds only for picker/CLI-mutation callers, not `pm autostart`.
+      (2) Quit semantics: Ctrl+C is Textual help_quit (notification "Press ctrl+q
+      to quit the app" only); Ctrl+Q -> quit_app -> `tmux detach-client` (TUI keeps
+      running, pidfile stays). A clean exit that releases pidfile+cmd-queue (on_unmount)
+      is reachable only via SIGINT (`kill -INT <tui-pid>`). Produce the stale state
+      with `kill -9 <pidfile pid>`; `tmux kill-pane` on the TUI pane auto-respawns
+      it via the after-kill-pane hook, and the session dies if the TUI was its only
+      pane — split a shell pane first.'
+    created_at: '2026-10-28T05:53:21Z'
+    last_edited: '2026-10-28T05:53:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
