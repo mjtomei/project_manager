@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T04:35:50.319408+00:00'
+  updated_at: '2026-10-28T05:24:59.612252+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37341,6 +37341,37 @@ prs:
       New test fails on the pre-fix source (verified by reverting it).'
     created_at: '2026-10-28T04:35:50Z'
     last_edited: '2026-10-28T04:35:50Z'
+  - id: note-23cddad
+    text: 'review-loop 4440 i4: two residual hand-edited-state gaps in surfaces this
+      PR touches (no feature-code change — the resolver / sign-off / merge-gate review
+      found no new defect). (1) `pm pr edit`''s note reconciliation split stored notes
+      into "editable" and "kept verbatim" by `_note_text(n) is None`, but the property
+      that matters is whether the template''s bullet *reads back* as the note''s text
+      (the reconciliation matches a stored note to a parsed line by `text`). A note
+      whose `text` is empty and which carries no `created_at` renders as a bare `-
+      ` bullet that parses to nothing, so any save that rebuilt the notes dropped
+      it — and when a *second* empty note (one with a timestamp, which does read back)
+      was present, the single parsed empty bullet matched only one of them, so one
+      was always lost. The same rule fixes content *corruption*: a text ending in
+      a `# <timestamp>`-looking suffix was truncated to its first word(s), and one
+      with trailing whitespace or a newline was rewritten to its trimmed first line.
+      All such notes are now kept verbatim, like the members the template cannot show
+      (pm''s own `pm pr note add` always stamps `created_at`, so the dropped shapes
+      are hand-written). New `_renders_back` parses the bullet line by line, like
+      the template. (2) `TechTree._signature` read `depends_on` directly, so a hand-edited
+      list member that is not an id made the signature tuple unhashable (contradicting
+      its documented "hashable signature") and forced a relayout for a value the layout
+      cannot draw; it now reads through `graph.deps_of`, the same reader `compute_tree_layout`
+      and the edge canvas use, so the spec''s "graph.deps_of is the one reader of
+      depends_on ... for the TUI layout/render" holds. Two new tests, each failing
+      on the pre-fix code (verified by reverting the source). Full suite: 4041 passed,
+      1 skipped (/pm-captures/review-4440-i4/full-suite-final.log; with `markdown`
+      installed and PM_HOST_HOME unset). Also re-verified this iteration that a malformed-state
+      fuzz of every reader (integration records, prompt builders, return text, merge
+      gate, router, `pm pr show`, `contained_base`) raises nothing. Spec R9 item 14
+      updated.'
+    created_at: '2026-10-28T05:24:59Z'
+    last_edited: '2026-10-28T05:24:59Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
