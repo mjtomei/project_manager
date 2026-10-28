@@ -1156,16 +1156,17 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 # in a shell, say) may have opened the window since the
                 # fast path ran.  Re-check under the lock and use that
                 # window: launching here as well would reuse its container
-                # with no admission and open a second window on it.
-                if not fresh:
-                    current = tmux_mod.find_window_by_name(pm_session, window_name)
-                    if current and not tmux_mod.window_panes_dead(
-                            pm_session, current["id"]):
-                        _focus_existing_impl_window(
-                            pm_session, current, window_name, pr_entry,
-                            workdir, use_companion, background)
-                        return
-                    ended_window = current
+                # with no admission and open a second window on it.  This
+                # holds for --fresh too: the fast path already killed any
+                # live window, so a live one now is a just-launched session.
+                current = tmux_mod.find_window_by_name(pm_session, window_name)
+                if current and not tmux_mod.window_panes_dead(
+                        pm_session, current["id"]):
+                    _focus_existing_impl_window(
+                        pm_session, current, window_name, pr_entry,
+                        workdir, use_companion, background)
+                    return
+                ended_window = current
                 # When running in a container, Claude's cwd is /workspace —
                 # transcript symlinks must target where Claude actually writes
                 # (see pr_review for the same pattern).

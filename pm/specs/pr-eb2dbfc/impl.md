@@ -170,7 +170,8 @@ shell's `pm pr start`, say), launches of one window are serialized by a
 per-window flock (`~/.pm/locks/window-<session>-<window>.lock`, 90 s,
 then "Busy"), held from the window check through admission, container
 creation and `new_window`; the second launch then finds the first's live
-window and switches to it (QA S78).
+window and switches to it (QA S78) — `--fresh` starts too, since the fast
+path already killed any live window they replace (review e0a0 i3).
 Known limit: stop-on-idle needs the TUI's idle tracking, which follows a
 session's transcript.  Sessions started from a shell (`pm pr start` /
 `pm pr review` without the TUI's hidden `--transcript`) are never

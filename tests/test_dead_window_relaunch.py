@@ -84,7 +84,8 @@ def _mock_tmux(mock_tmux, dead):
 
 
 class TestPrStartDeadWindow:
-    def _invoke(self, tmp_path, dead, refuse=False, fresh=False):
+    def _invoke(self, tmp_path, dead, refuse=False, fresh=False,
+                windows=None):
         pm_dir, data = _save_project(tmp_path)
         git = MagicMock()
         git.is_git_repo.return_value = False
@@ -105,6 +106,8 @@ class TestPrStartDeadWindow:
              patch("pm_core.paths.get_global_setting", return_value=False), \
              patch("pm_core.home_window.park_if_on"):
             _mock_tmux(mock_tmux, dead)
+            if windows is not None:
+                mock_tmux.find_window_by_name.side_effect = windows
             args = ["start", "pr-001"] + (["--fresh"] if fresh else [])
             result = CliRunner().invoke(pr_mod.pr, args)
         return result, mock_tmux
@@ -151,10 +154,13 @@ class TestPrStartDeadWindow:
         assert "Closed window 'pr-001' (its session has ended)" in result.output
 
     def test_live_window_killed_before_fresh_start(self, tmp_path):
-        # A live session is still stopped up front.
-        result, mock_tmux = self._invoke(tmp_path, dead=False, refuse=True,
-                                         fresh=True)
+        # A live session is still stopped up front (gone under the lock).
+        result, mock_tmux = self._invoke(
+            tmp_path, dead=False, refuse=True, fresh=True,
+            windows=[{"id": "@1", "index": "1", "name": "pr-001"}, None])
+        assert result.exit_code == 1
         assert "Killed existing window 'pr-001'" in result.output
+        assert "Memory governor blocked impl" in result.output
         mock_tmux.kill_window.assert_called_once_with("pm-sess", "@1")
 
     def test_live_window_is_switched_to(self, tmp_path):
@@ -295,7 +301,7 @@ class TestPrStartConcurrentRelaunch:
     gets the launch lock second must find the first's live window there,
     not reuse its container (no admission) and open a second window."""
 
-    def _invoke(self, tmp_path, under_lock_dead, events):
+    def _invoke(self, tmp_path, under_lock_dead, events, fresh=False):
         pm_dir, data = _save_project(tmp_path)
         git = MagicMock()
         git.is_git_repo.return_value = False
@@ -333,12 +339,17 @@ class TestPrStartConcurrentRelaunch:
             mock_tmux.window_panes_dead.side_effect = [True, under_lock_dead]
             mock_tmux.new_window.side_effect = (
                 lambda *a, **k: events.append(("new_window",)))
-            result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+            args = ["start", "pr-001"] + (["--fresh"] if fresh else [])
+            result = CliRunner().invoke(pr_mod.pr, args)
         return result, mock_tmux, wrap, build
 
-    def test_window_relaunched_meanwhile_is_switched_to(self, tmp_path):
+    # --fresh (the sign-off bounce) also keeps a dead window to close after
+    # admission, so it must re-check under the lock the same way.
+    @pytest.mark.parametrize("fresh", [False, True])
+    def test_window_relaunched_meanwhile_is_switched_to(self, tmp_path, fresh):
         events = []
-        result, mock_tmux, wrap, build = self._invoke(tmp_path, False, events)
+        result, mock_tmux, wrap, build = self._invoke(tmp_path, False, events,
+                                                      fresh=fresh)
         assert result.exit_code == 0, result.output
         wrap.assert_not_called()          # no container reuse, no admission
         build.assert_not_called()         # no transcript symlink rewrite
