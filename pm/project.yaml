@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T10:42:52.056885+00:00'
+  updated_at: '2026-10-28T10:43:27.788843+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38892,10 +38892,10 @@ prs:
       QA over a live pm qa run).'
     created_at: '2026-10-28T10:01:26Z'
     last_edited: '2026-10-28T10:01:26Z'
-  - id: note-40ad841
+  - id: note-628d16e
     text: 'QA S123 (2026-10-28, host, all fake-claude, HEAD b0579323 vs control fedcdd01
       vs post-fix; master 9f9449ac for story 3; captures /pm-captures/scenarios/123,
-      REPORT.md, 66 mp4): CODE CHANGE 82a6e1a9 needs normal re-review. Story 1 reproduced
+      REPORT.md, 66 mp4): CODE CHANGE c5af52f0 needs normal re-review. Story 1 reproduced
       the predicted gap: own_run_driven read only qa_resume.json, which pm qa run
       writes after its refiner, so a REQA landing 1.03/2.06/3.05/4.98/9.98 s after
       the CLI started made the hop tick spawn qa-run-bg with a claim, kill the CLI
@@ -38911,7 +38911,7 @@ prs:
       CLI windows). Story 2b as written is not drivable: the TUI never adopts a tick-launched
       sign-off run -> pr-66432ce; 2b was run with the TUI launching sign-off.'
     created_at: '2026-10-28T10:42:51Z'
-    last_edited: '2026-10-28T10:42:51Z'
+    last_edited: '2026-10-28T10:43:27Z'
   - id: note-1e9ce11
     text: 'S122 refine (HEAD b0579323/c774b5af): (1) A plain `pm tui restart` drops
       auto-start (only --breadcrumb keeps it), and the resume scan runs every ~5 s
