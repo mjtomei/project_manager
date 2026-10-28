@@ -36166,7 +36166,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/268
   gh_pr_number: 268
   created_at: '2026-10-26T05:09:15.878235+00:00'
-  updated_at: '2026-10-28T00:43:29.163339+00:00'
+  updated_at: '2026-10-28T00:44:09.422718+00:00'
   started_at: '2026-10-27T19:07:41.620041+00:00'
   reviewed_at: null
   merged_at: null
@@ -36274,6 +36274,25 @@ prs:
       PASS.
     created_at: '2026-10-27T23:06:05Z'
     last_edited: '2026-10-27T23:06:05Z'
+  - id: note-9b6e56e
+    text: 'QA scenario 9 concretizer notes (2026-10-28): (1) "discuss" is NOT in model_config.SESSION_TYPES,
+      so `pm model set discuss provider:X` is rejected. The TUI discuss/Claude pane
+      resolves its provider through get_provider(None) -> PM_PROVIDER / per-session
+      provider file / providers.yaml `default`, so select the discuss provider with
+      `pm provider default <name>` (restore `pm provider default claude` afterwards).
+      (2) Do not export the ${VAR} canaries into the shared tmux server environment:
+      every pane inherits them and the "none of the other canaries" assertion becomes
+      untestable. Pass them command-scoped (`PM_QA_CANARY_IMPL=... pm pr start ...`)
+      so only the provider env transport carries the value into the launched process.
+      (3) Launch impl/review with `--background` (the auto-start mode). Without it,
+      `pm pr start`/`pm pr review` select their new window in the session and pane_ops.launch_pane
+      resolves the TUI window via get_window_id(), so a concurrent `?` then `h` discuss
+      split lands in the impl/review window instead of the TUI window. (4) With fake-claude,
+      build_claude_shell_cmd returns before the cd/--model flags, so each pane_start_command
+      is `sh -c "set -a; . <HOME>/.pm/run/env-XXXXXX.sh; set +a; rm -f <same>; fake-claude
+      --verdict NONE|PASS"` (no leading cd, no --model).'
+    created_at: '2026-10-28T00:20:26Z'
+    last_edited: '2026-10-28T00:20:26Z'
   - id: note-dc1c8f1
     text: 'QA scenario 8 (env-file privacy/lifetime R4 + unset ${VAR}) PASS on 75d0bc30.
       Captures (cast+mp4+transcript.log, synthetic canaries only) in /pm-captures/scenarios/8/.
@@ -36308,6 +36327,23 @@ prs:
       scenarios/6.'
     created_at: '2026-10-28T00:43:29Z'
     last_edited: '2026-10-28T00:43:29Z'
+  - id: note-96c4635
+    text: 'QA scenario 9 (mixed launch surfaces, three providers concurrently) PASS
+      on 75d0bc30. Three panes created ~0.3 s apart through three code paths (pm pr
+      start new window, pm pr review new window, TUI discuss split) each got its own
+      0600 env-*.sh under ~/.pm/run (3 distinct paths seen by a poller, dir 700, none
+      left behind) and its own provider values in /proc/<fake pid>/environ (impl ANTHROPIC_*,
+      review OPENAI_*, discuss ANTHROPIC_*), exactly one canary per process; no canary
+      in any pane_start_command, pm log, ~/.pm/debug, pane registry, tmux show-environment
+      -g/-t or ps argv. Discuss C-d teardown: pane gone in 224 ms, window 0 rebalanced
+      99→200 cols (pane width == window width), handle_pane_exited + deferring rebalance
+      logged, discuss row removed from the registry. Focused regression tests (test_tmux
+      TestProviderEnvTransport + TestProviderEnvReachesRealPane, test_claude_launcher
+      provider-env/TestWriteEnvFile, test_container TestBuildExecCmdProviderEnv, test_provider_integration)
+      25 passed. Evidence: /pm-captures/scenarios/9/{tui,cli} (cast+mp4+transcript.log+manifest).
+      QA workdir: /scratch/pm-s9-1793147411.'
+    created_at: '2026-10-28T00:44:09Z'
+    last_edited: '2026-10-28T00:44:09Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
