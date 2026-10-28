@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T09:37:33.034607+00:00'
+  updated_at: '2026-10-28T09:55:13.478586+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32409,6 +32409,27 @@ prs:
       semantics otherwise; no pm_core/ change. (2026-10-28T09:40:00Z)'
     created_at: '2026-10-28T09:37:32Z'
     last_edited: '2026-10-28T09:37:32Z'
+  - id: note-e23be91
+    text: 'Review loop 419c i6: one leftover in the kept tmux recipe scope, same class
+      as the PR. Step 5 checks the recorder is alive and then sends the detach key;
+      a recorder that dies in that gap makes `tmux send-keys` fail ("can''t find pane",
+      exit 1), after which the bounded stop wait exits at once on the gone session
+      and `test -s` passes on the truncated cast — a successful run reported for an
+      incomplete recording. Verified live with real tmux 3.2a + asciinema 2.1.0: pre-fix
+      recipe exit 0 with the truncated cast accepted, post-fix exit 1 with "recorder
+      exited before the detach — the cast is incomplete, not a finished recording"
+      (transcript pipe stopped first). New execution test (stub mode `detachfail`)
+      fails against the pre-fix recipe; the healthy path was re-verified live after
+      the change (real pm TUI, exit 0, cast+transcript non-empty). Also made the execution
+      harness''s deadline shortening shape-based (`+ N ))` -> `+ 2 ))`) so retuning
+      a recipe bound cannot silently turn the failure cases into 30-60 s waits. Evidence:
+      $CAP/review-419c-i6/ (probe.sh, probe.log, manifest.md). File 40 pass; related
+      suites 215 pass; full suite green apart from the two known baselines (both reproduce
+      on origin/master@89e3c501) and the two push-proxy-blocked files. impl.md R4/R7
+      and qa.md R2/edge cases updated. No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-28T09:55:13Z'
+    last_edited: '2026-10-28T09:55:13Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
