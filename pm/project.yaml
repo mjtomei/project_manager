@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-33b65cd
+  active_pr: pr-70dae74
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -38735,6 +38735,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-70dae74
+  plan: bugs
+  title: 'Bug: pm pr auto-sequence starts implementation outside a window when no
+    pm session is live'
+  branch: pm/pr-70dae74-bug-pm-pr-auto-sequence-starts-implementation-outs
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py pr_auto_sequence: the ''pending'' branch is the
+    only status branch with no ''paused: no pm tmux session'' guard (in_progress/in_review/qa/sign_off
+    all have one), yet it invokes pr_start(background=True), which needs the session
+    to open the impl window. pr_start resolves its own pm_session via _get_pm_session(),
+    which falls back to the cwd-derived name whenever tmux is installed; when tmux_mod.session_exists()
+    is false it skips the tmux branch and falls through to launch_claude(), an interactive
+    foreground claude in the auto-sequence process. Repro: from a plain shell (tmux
+    installed, no pm session), run ''pm pr auto-sequence <pending-pr>'': the workdir/branch/draft
+    PR are created, no impl window opens, an interactive claude starts in the tick''s
+    terminal (or fails without a tty), and the tick prints ''started''; later ticks
+    report ''running: implementation'' with no window. Expected: pause with ''paused:
+    no pm tmux session'' like the other branches (or have pr_start fail loudly instead
+    of falling back to an in-process launch under --background). Found while reviewing
+    pr-62fdd54, which added the same guard for the qa branch.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T14:19:02.893703+00:00'
+  updated_at: '2026-10-28T14:19:02.893703+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
