@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T03:22:48.577521+00:00'
+  updated_at: '2026-10-28T05:12:12.184557+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14851,6 +14851,38 @@ prs:
       build-base; use setsid nohup.'
     created_at: '2026-10-28T02:46:54Z'
     last_edited: '2026-10-28T02:46:54Z'
+  - id: note-50cc747
+    text: 'S77 refine: (1) one tmux client views one window, so ''second client views
+      two windows'' needs two grouped viewers (<S>~8, <S>~9). (2) A TUI prlimit fault
+      cannot defer a NATURAL run end: the poll forks tmux every tick and skips under
+      EAGAIN, so the run only ends after restore. Use a PATH podman shim instead:
+      while a flag file exists, fail every call except ''info'' (keeping the runtime
+      identity prevents an unverifiable record, res 23). (3) pm container reap keeps
+      a container while its pane is alive even after the viewer leaves; the viewed
+      worker is removed only after its window is closed. (4) qa-verify-pass off makes
+      PASS settle at its verdict.'
+    created_at: '2026-10-28T04:23:52Z'
+    last_edited: '2026-10-28T04:23:52Z'
+  - id: note-2d7eba6
+    text: 'QA S77 (fix 1f6c0a5a; real rootless Podman 3.4.4 + tmux TUI, fake agents,
+      PATH podman stand-in failing all but info; evidence /pm-captures/scenarios/77/manifest.md):
+      NEEDS_WORK, all S77 Thens held post-fix. FIXED 1f6c0a5a (pre-existing, also
+      on master): with qa-verify-pass off _run_qa_finalize_pane skipped finalize forever
+      ("PASS verdicts … have not been verified yet"), so QA complete never had [finalize:
+      …]; gate now applies only when verification is enabled. Story 1: run-end line
+      "(kept s8 viewed, s9 INPUT_REQUIRED)" after the other 4 were released; late
+      workers settled in separate polls so removal and kept note were separate lines;
+      reap --dry-run kept both as live-pane owned. Story 2: deferral "container cleanup
+      unavailable: podman is not available (kept s19 INPUT_REQUIRED, s21 viewed, s22
+      viewed)"; ~8 moved off s21 during fault; run-own retry at T1+2 s removed [s24,s21],
+      kept "s19 INPUT_REQUIRED, s22 viewed", then "deferred container release retried";
+      no periodic/manual pass; TUI PID unchanged; status Last cleanup (qa-run-end),
+      no failure/unverifiable sections; close-out reaps as specified. Fixture traps:
+      finalize polls >=30 s (_VERDICT_GRACE_PERIOD) so a 30 s fault starting 10 s
+      before late verdicts clears before run end, use 60 s; host fake-claude must
+      be on PATH ($R/bin symlink) or the planner exits -> ERROR.'
+    created_at: '2026-10-28T05:12:12Z'
+    last_edited: '2026-10-28T05:12:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
