@@ -923,7 +923,29 @@ class TestCLI:
             res = _cli(["status", "--json", "-s", "pm-x"])
         assert res.exit_code == 1
         out = json.loads(res.output)
+        assert out["ok"] is False
         assert (out["error"], out["message"]) == ("internal", "boom")
+
+    def test_status_json_ok_true_on_success(self, project, tmp_path):
+        """A successful status carries ``ok: true`` like the other verbs, and
+        the rest of the object is still the pm.autostart.status/1 document."""
+        import os
+        pidfile = tmp_path / "tui.pid"
+        pidfile.write_text(str(os.getpid()))
+        ok = {"ok": True, "changes": [],
+              "status": {"schema": "pm.autostart.status/1",
+                         "mode": "targets", "targets": [], "runs": []}}
+        with patch("pm_core.cli.autostart._tui_pidfile_for_session",
+                   return_value=pidfile), \
+             patch("pm_core.cli.autostart._request", return_value=ok):
+            res = _cli(["status", "--json", "-s", "pm-x"])
+        assert res.exit_code == 0, res.output
+        out = json.loads(res.output)
+        assert out["ok"] is True
+        assert "error" not in out
+        assert (out["schema"], out["mode"]) == ("pm.autostart.status/1",
+                                                "targets")
+        assert out["targets"] == [] and out["runs"] == []
 
     def test_round_trip_through_tui_handler(self, project, tmp_path):
         """CLI → queue → TUI handle_command → reply file → CLI JSON."""
@@ -951,6 +973,7 @@ class TestCLI:
         assert r1.exit_code == 0, r1.output
         assert sent[1].startswith("autostart add pr-b --auto-merge --reply ")
         status = json.loads(r3.output)
+        assert status["ok"] is True
         assert [(t["pr_id"], t["policy"]) for t in status["targets"]] == [
             ("pr-a", POLICY_STOP), ("pr-b", POLICY_AUTO)]
         assert "removed: pr-a" in r4.output

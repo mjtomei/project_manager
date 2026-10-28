@@ -372,6 +372,9 @@ def autostart_status(session, timeout, as_json):
     Same structured representation (schema pm.autostart.status/1) the TUI
     runs popup (key `a`) renders: phase, running/waiting/paused/failed/
     completed state, reason, review iteration / QA progress, tmux window.
+    ``--json`` also carries an ``ok`` flag, like the other ``pm autostart``
+    verbs: true on success, false (with ``error``/``message``) when the
+    owner reports a failure.
     """
     try:
         payload = _request(session, ["status"], timeout)
@@ -379,11 +382,12 @@ def autostart_status(session, timeout, as_json):
     except _Fail as f:
         _emit_fail(f, as_json)
     if as_json:
-        if not payload.get("ok"):
-            status = {**status, "ok": False, "error": payload.get("error"),
-                      "message": payload.get("message")}
+        status = {**status, "ok": bool(payload.get("ok"))}
+        if not status["ok"]:
+            status.update({"error": payload.get("error"),
+                           "message": payload.get("message")})
         click.echo(json.dumps(status, indent=2, default=sorted))
-        if not payload.get("ok"):
+        if not status["ok"]:
             raise SystemExit(EXIT_INVALID)
         return
     _finish(payload, False, lambda _p: click.echo(format_text(status)))
