@@ -936,6 +936,53 @@ class TestRestartAdoption:
                 "the adopt decision published an answered follow-up")
             assert resuming is False
 
+    def test_adopt_decision_of_an_answered_wait_never_reads_as_waiting(self, env):
+        """A wait the human answered before the restart must not be published
+        as a live wait at the adopt decision.
+
+        R2: the resumed wait's initial waiting/answered state comes from the
+        transcript, not from the recorded INPUT_REQUIRED history.  Assuming
+        the wait first and reading the transcript after showed a phantom
+        ``waiting / review INPUT_REQUIRED (iteration N)`` for a question
+        nobody is waiting on — the false-wait class this PR fixes — for the
+        whole (file-I/O) adopt decision.
+        """
+        tdir, _ = env
+        pane = Pane(tdir, 1)
+        pane.verdict("INPUT_REQUIRED", "Which option?")
+        pane.user("option B")
+        pane.tool("working")
+        state = _restored(tdir, 1, ["INPUT_REQUIRED"])
+        seen = []
+        real_info = rl._log.info
+
+        def spy(msg, *args, **kwargs):
+            if msg.startswith("review_loop: adopting INPUT_REQUIRED wait"):
+                review = autostart_state.review_progress_input(state)
+                seen.append((review["input_required"], review["follow_up"],
+                             review["resuming"]))
+            return real_info(msg, *args, **kwargs)
+
+        with patch.object(rl._log, "info", side_effect=spy):
+            t, mock, p = _start(state, tdir, {})
+            try:
+                # Wait for the adopt decision itself, not a timer: the spy
+                # fires at its log line.
+                _until(lambda: bool(seen), what="the adopt decision")
+                assert mock.call_count == 0
+                assert _status(state)[:2] == (
+                    "running",
+                    "review iteration 1 (INPUT_REQUIRED answered; follow-up running)")
+            finally:
+                state.stop_requested = True
+                p.stop()
+        assert seen, "the adopt decision was never logged"
+        for ir, follow_up, resuming in seen:
+            assert ir is False, (
+                "an answered wait was published as a live human request")
+            assert follow_up is True
+            assert resuming is False
+
     def test_restart_after_answer_shows_follow_up_running(self, env):
         tdir, _ = env
         pane2 = Pane(tdir, 2)
@@ -1225,3 +1272,4 @@ class TestRestartAdoption:
             release4.set()
             state.stop_requested = True
             p.stop()
+

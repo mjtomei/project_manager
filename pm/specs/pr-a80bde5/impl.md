@@ -269,18 +269,27 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   regressions `test_adopting_wait_is_not_reported_as_an_answered_follow_up` and
   `test_restart_adopt_check_never_reads_as_follow_up_running`.)  The two flags
   are written in an order that leaves no observable gap (review e386 i2):
-  when the wait is adoptable, `input_required` is set *before*
-  `_adopting_wait` is cleared; when it is not (dead pane/transcript),
-  `_adopting_wait` stays set until the next iteration has taken over
-  (`state.iteration` advanced), because the recorded INPUT_REQUIRED history
-  entry would otherwise read as an answered wait.  `review_progress_input`
-  reads them in that same order (`_adopting_wait`, then `iteration`, then
-  `input_required`), so a reader that sees the flag cleared is guaranteed to
-  see the wait or the superseding iteration.  Regression
-  `test_adopt_decision_never_reads_as_an_answered_follow_up`.  Residual, not
-  a wait and not repainted: the TUI tech-tree widget keeps its pre-restart
-  frame until the first post-mount paint, which can land after the adopt line;
-  the status/runtime-state publication path never reports a pre-adopt wait.
+  the adopt branch builds the response watch while `_adopting_wait` is still
+  set, publishes what the transcript says (waiting when unanswered,
+  "answered; follow-up running" when the human replied before the restart),
+  and only then clears `_adopting_wait`; when the wait is not adoptable (dead
+  pane/transcript), `_adopting_wait` stays set until the next iteration has
+  taken over (`state.iteration` advanced), because the recorded
+  INPUT_REQUIRED history entry would otherwise read as an answered wait.
+  `review_progress_input` reads the fields in that same order
+  (`_adopting_wait`, then `iteration`, then `input_required`), so a reader
+  that sees the flag cleared is guaranteed to see the state the transcript
+  reported.  Assuming the wait first and reading the transcript after
+  (review e386 i3) published a phantom `waiting / review INPUT_REQUIRED
+  (iteration N)` at the adopt decision for a question the human had already
+  answered — the same false-wait class — for the length of the transcript
+  read; the adopt-time watch removes it.  Regressions
+  `test_adopt_decision_never_reads_as_an_answered_follow_up` and
+  `test_adopt_decision_of_an_answered_wait_never_reads_as_waiting`.  Residual,
+  not a wait and not repainted: the TUI tech-tree widget keeps its
+  pre-restart frame until the first post-mount paint, which can land after the
+  adopt line; the status/runtime-state publication path never reports a
+  pre-adopt wait.
 - The back-scan only counts a human prompt found *after* the INPUT_REQUIRED
   record.  If that record can't be found, the wait stays unanswered, so the
   iteration's own review prompt is never taken as the answer.  (Added in

@@ -304,8 +304,16 @@ def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
 
 
 def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
-                                transcript: str | None = None) -> str | None:
+                                transcript: str | None = None,
+                                watch=None) -> str | None:
     """Wait in the existing review pane for the follow-up to INPUT_REQUIRED.
+
+    ``watch`` is a prebuilt :class:`~pm_core.verdict_transcript.HumanResponseWatch`
+    for *transcript*.  A resumed loop builds it while its adopt check is
+    still running (``_adopting_wait``), so the waiting/answered state it
+    publishes comes from the transcript and not from the recorded
+    INPUT_REQUIRED history; the adopt branch then passes the same watch in
+    rather than reading the transcript twice.
 
     Returns the assistant text of the *verdict turn* once an idle turn
     carries a verdict: PASS / NEEDS_WORK, or INPUT_REQUIRED asked *after*
@@ -363,7 +371,8 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     window_name = _compute_review_window_name(pr_data)
     # The watch anchors on the latest INPUT_REQUIRED turn, so an answer to an
     # earlier round can never count as the answer to this one.
-    watch = HumanResponseWatch(transcript, VERDICT_INPUT_REQUIRED)
+    if watch is None:
+        watch = HumanResponseWatch(transcript, VERDICT_INPUT_REQUIRED)
     state.input_required = watch.answered_at is None
     # The follow-up verdict may already be in the transcript — an answer and
     # its verdict landing during a TUI restart gap, or an idle hook event
@@ -446,18 +455,25 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
 
 def _await_input_resolution(state: ReviewLoopState, pr_data: dict,
                             on_iteration: Callable[[ReviewLoopState], None] | None,
-                            transcript: str | None = None) -> str | None:
+                            transcript: str | None = None,
+                            watch=None) -> str | None:
     """Hold the loop on an INPUT_REQUIRED iteration until its follow-up
     verdict is PASS or NEEDS_WORK; returns it, or None (pane gone / stop).
 
     A follow-up that is INPUT_REQUIRED again is a new question for the
     user — record it and keep waiting on the same pane rather than
     relaunching (which would kill the pane and drop the question).
+
+    ``watch`` is only used for the first round (a resumed loop's adopt-time
+    watch); each repeated question gets a fresh one anchored on that
+    question's turn.
     """
     while True:
         # Reset so each INPUT_REQUIRED round shows a notification.
         state._ui_notified_input = False
-        follow_up_output = _wait_for_follow_up_verdict(pr_data, state, transcript)
+        follow_up_output = _wait_for_follow_up_verdict(pr_data, state,
+                                                       transcript, watch)
+        watch = None
         if follow_up_output is None:
             state.input_required = False
             return None
@@ -554,6 +570,7 @@ def run_review_loop_sync(
                 break
 
             wait_transcript = None
+            wait_watch = None
             if adopt_wait:
                 adopt_wait = False
                 wait_transcript = _adoptable_wait_transcript(
@@ -571,16 +588,25 @@ def run_review_loop_sync(
                     # The next-iteration branch clears it once the new
                     # iteration owns the work.
                     continue
-                # The question is live again.  Publish the wait *before*
-                # clearing ``_adopting_wait``: between the two writes a
-                # status reader would see running + no wait + the recorded
-                # INPUT_REQUIRED history and report "answered; follow-up
-                # running" for a question nobody has answered yet.
-                state.input_required = True
+                # The question is live again.  Its waiting/answered state
+                # comes from the transcript (R2), not from the recorded
+                # INPUT_REQUIRED history: if the human answered before the
+                # restart, assuming the wait first would publish a phantom
+                # "review INPUT_REQUIRED (iteration N)" for a question nobody
+                # is waiting on.  Build the response watch here, while the
+                # resuming flag still covers the state, publish what it says,
+                # and only then clear the flag — ``review_progress_input``
+                # reads ``_adopting_wait`` before ``input_required``, so a
+                # reader can never observe the transient either way.
+                from pm_core.verdict_transcript import HumanResponseWatch
+                wait_watch = HumanResponseWatch(wait_transcript,
+                                                VERDICT_INPUT_REQUIRED)
+                state.input_required = wait_watch.answered_at is None
                 state._adopting_wait = False
                 _log.info("review_loop: adopting INPUT_REQUIRED wait for %s "
-                          "iteration %d (transcript=%s)", state.pr_id,
-                          state.iteration, wait_transcript)
+                          "iteration %d (transcript=%s, %s)", state.pr_id,
+                          state.iteration, wait_transcript,
+                          "unanswered" if state.input_required else "answered")
                 verdict = VERDICT_INPUT_REQUIRED
             else:
                 # A new or adopted in-flight iteration owns the work now.
@@ -651,7 +677,7 @@ def run_review_loop_sync(
             if verdict == VERDICT_INPUT_REQUIRED:
                 _log.info("review_loop: INPUT_REQUIRED — polling for follow-up verdict")
                 verdict = _await_input_resolution(
-                    state, pr_data, on_iteration, wait_transcript)
+                    state, pr_data, on_iteration, wait_transcript, wait_watch)
                 if verdict is None:
                     # Pane died or stop requested
                     if state.stop_requested:

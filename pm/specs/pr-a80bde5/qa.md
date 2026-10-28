@@ -234,9 +234,12 @@ THEN that sample reports `state=running`, reason `review resuming
 (iteration N)`, `review.input_required=false`, `review.follow_up=false`,
 `review.resuming=true` — never `waiting`/INPUT_REQUIRED (nobody is being
 shown the question yet) and never "INPUT_REQUIRED answered; follow-up
-running" (nobody has answered). Once the check finishes, an adoptable wait
-is published as the live `waiting` state on the same pane and iteration, and
-a non-adoptable one is never published as a wait at all.
+running" (nobody has answered). Once the check finishes, an adoptable
+*unanswered* wait is published as the live `waiting` state on the same pane
+and iteration, an adoptable wait the human already answered is published as
+`running` / "INPUT_REQUIRED answered; follow-up running" (never `waiting` —
+the transcript decides, R2), and a non-adoptable one is never published as a
+wait at all.
 
 ## Edge cases
 
@@ -304,8 +307,9 @@ being mistaken for an answered/completed one.
   stays on `follow-up running` after its verdict is already in the transcript.
 - Also FAIL if the resumed adopt check publishes `waiting`/INPUT_REQUIRED or
   "INPUT_REQUIRED answered; follow-up running" instead of `review resuming
-  (iteration N)` (R13), or if a wakeup turn after the answer re-arms the wait
-  (R5c).
+  (iteration N)` (R13), if an adopt decision publishes `waiting` for a wait
+  the human answered before the restart (R13/R2), or if a wakeup turn after
+  the answer re-arms the wait (R5c).
 - Also FAIL if a PASS follow-up followed by a non-task wakeup turn (e.g. a
   `/loop` tick) is recorded as NEEDS_WORK or relaunches an iteration (R5b).
 - The reproduction tests from the diff
