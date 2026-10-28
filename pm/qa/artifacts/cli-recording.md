@@ -136,13 +136,13 @@ rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
       <capture-dir>/<short-name>/recorder-pane.log
-# Failure paths below tear the scaffold server down, so save the pane's last
-# screen into the capture dir first — otherwise the messages that point at
-# the pane point at evidence that no longer exists.
-dump_pane() {
-    tmux -L scaffold capture-pane -p -t rec \
-        > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
-}
+# Failure paths below tear the scaffold server down, so each one saves the
+# pane's last screen into the capture dir first — otherwise the messages that
+# point at the pane point at evidence that no longer exists. The save is
+# written out at each site rather than defined as a function here: step 4 is
+# pasted on its own for an interactive recording (step 3 is what drives the
+# shell, so the block cannot run as one paste), and a function defined in this
+# block does not exist in that shell.
 tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
         -c '<command-to-record>' 2> <capture-dir>/<short-name>/recorder-stderr.log; \
@@ -161,7 +161,8 @@ deadline=$(( $(date +%s) + 30 ))
 until [ -s <capture-dir>/<short-name>/recording.cast ] ||
       ! tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        dump_pane
+        tmux -L scaffold capture-pane -p -t rec \
+            > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
         echo "recorder did not start within 30s — the pane is saved in" \
             "<capture-dir>/<short-name>/recorder-pane.log, asciinema's own" \
             "error (if any) in recorder-stderr.log" >&2
@@ -195,7 +196,8 @@ stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 deadline=$(( $(date +%s) + stop_timeout ))
 while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        dump_pane
+        tmux -L scaffold capture-pane -p -t rec \
+            > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
         echo "recorder did not exit within ${stop_timeout}s — for a longer" \
             "command set RECORDER_STOP_TIMEOUT; an interactive recording" \
             "needs 'exit' in the recorded shell (step 3); the pane is saved" \

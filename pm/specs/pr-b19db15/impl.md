@@ -284,6 +284,21 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    pty* (`script -qec bash`), where the old `: "${VAR:?}"` form let the next
    line run and created `node_modules` in the worker's cwd. All of those fail
    against the previous recipes.
+   R13's leftovers are covered by running the *stop block alone*, the way a
+   worker pasting it into a fresh shell does (`_stop_block`, sharing the
+   stub `tmux`/`pm` harness): a stop timeout must save the pane it names and
+   must not print `command not found` (both recipes, stub mode `stuck`); the
+   tmux both-gone finish must pass with `$TARGET` unset (the stub's
+   `has-session` now models real tmux, where an empty target *succeeds*, which
+   is what made the pre-fix recipe report a legitimate finish as an
+   incomplete recording); and with `pm session name` printing nothing the
+   step must refuse rather than act on an empty target. The web-UI driver
+   block is run with `APP_URL` unset and must stop before the driver, whose
+   fallback would otherwise drive port 8000. All five fail against the
+   previous recipes (checked with the pre-fix recipes in place: `dump_pane:
+   command not found` in both stop blocks, "recorder exited while the TUI was
+   still running" for the unset target, and the driver running on the
+   fallback URL).
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
@@ -414,9 +429,11 @@ R11. **A failure message has to point at evidence that still exists, and the
      tmux recipe's failed-attach error (`can't find session: …`, from the
      recorded `tmux attach`) still reaches the pane and the cast, so the
      pane-content readiness signal is unaffected.
-   - Each recipe defines `dump_pane()`, which saves the pane's last screen to
-     `…/recorder-pane.log`, and the two timeout paths call it before the
-     teardown; their messages name the file. The died-recorder messages name
+   - Each timeout path saves the pane's last screen to
+     `…/recorder-pane.log` before the teardown, and its message names the
+     file (the save is written out at each site rather than shared through a
+     helper function, because the stop step is pasted on its own — R13). The
+     died-recorder messages name
      `recorder-stderr.log` instead, because in those paths the pane is already
      gone and the status/stderr files are what is left. Both files are
      cleared in step 0 with the stale cast (R2), so an earlier run's reason
@@ -474,6 +491,36 @@ R12. **A renderer's exit status is the handle; a promised artifact that was
      connect to its own missed teardown. The teardown now stops with that
      reason, and says to run it in the shell that started the app.
 
+R13. **The stop step is pasted on its own, so it must not depend on shell
+   state from an earlier paste.** A scenario that needs interactive driving
+   cannot paste the whole capture block — step 3 *is* the driving — so step 4
+   of the CLI scaffold and step 5 of the tmux recipe run in a fresh shell
+   (the recipe's own `RECORDER_STOP_TIMEOUT` note says workers paste steps
+   separately). Two things broke there, both the PR's own class:
+   - **A failure message pointing at evidence that does not exist.** The pane
+     save was a `dump_pane()` function defined back in the first block, so
+     the fresh shell printed `bash: dump_pane: command not found` (verified
+     in this container with real tmux 3.2a + asciinema 2.1.0) and the timeout
+     message still claimed "the pane is saved in …/recorder-pane.log" while
+     no file was written. Both recipes now write the `capture-pane`
+     redirection out at each failure site instead of calling a function.
+   - **Acting on a handle the step does not have.** `$TARGET` comes from step
+     1, and `tmux has-session -t ''` *succeeds* (verified, tmux 3.2a), so an
+     unset target made the legitimate "the scenario ended the pm session"
+     finish report "recorder exited while the TUI was still running — the
+     cast is incomplete" (reproduced in the execution harness), and
+     `pipe-pane -t ':0.0'` streamed whatever pane tmux picks as current
+     (returns 0 — verified) instead of the target's. Step 5 now re-derives it
+     (`TARGET=${TARGET:-$(pm session name)}` — the command prints the computed
+     name from cwd, whether or not the session exists) and refuses an empty
+     one with a message naming the fix.
+   - Same class, one variable over: the web-UI driver block's guard checked
+     only `CAPDIR` while its own prose says both variables come from step 1,
+     and the driver falls back to `process.env.APP_URL ||
+     'http://localhost:8000'` — so with `APP_URL` unset the block drove
+     whatever answers on port 8000, exactly what the step-1 busy-port
+     pre-check exists to prevent. The guard now names both.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -484,9 +531,9 @@ R12. **A renderer's exit status is the handle; a promised artifact that was
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11) |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -502,7 +549,9 @@ R12. **A renderer's exit status is the handle; a promised artifact that was
    `'\''` form arrives intact, a failing wait saves the pane where its
    message says it is, asciinema's own stderr lands on disk, and
    the capture flow runs end to end against a stub `tmux`/`pm` for its
-   success and failure paths).
+   success and failure paths, and the stop block runs *on its own* for both
+   recipes so its failure path does not depend on a function or variable
+   from an earlier paste).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -582,3 +631,19 @@ R12. **A renderer's exit status is the handle; a promised artifact that was
   rejects pushes to master) and the two known baselines
   (`test_git_ops::test_keeps_unpushed_merge`,
   `test_hook_events::test_installer_writes_standalone_receiver`) deselected.
+- Review loop 419c i14 verified R13 live in this container (real tmux 3.2a +
+  asciinema 2.1.0, private socket): a real `rec` session running `asciinema
+  rec -c 'sleep 60'`, then the CLI recipe's step-4 block pasted *on its own*
+  in a fresh shell with `RECORDER_STOP_TIMEOUT=3` → rc 1, the message naming
+  `recorder-pane.log`, and the file written (30 bytes of the blank pane the
+  quiet command draws) — the previous recipe printed `bash: dump_pane:
+  command not found` and wrote nothing. `tmux has-session -t ''` was checked
+  against real tmux and returns 0 with or without a live session, which is
+  what turned the tmux both-gone finish into a false "recorder exited while
+  the TUI was still running" when step 5 was pasted alone; `tmux pipe-pane -t
+  ':0.0'` likewise returns 0, targeting whatever pane tmux picks as current.
+  `pm session name` prints the computed name from cwd with no session
+  present (`pm-project_manager-eab0d61a` here), so the re-derivation is safe.
+  File 85 pass (3 runs); related suites 175 pass. All five new assertions
+  fail against the pre-fix recipes (checked by pointing the test module at
+  the previous recipe files).

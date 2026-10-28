@@ -129,9 +129,11 @@ it with the capture dir and base URL in the environment:
 # in an *interactive* shell the `:?` form prints the error, aborts only its
 # own command, and the next line still runs (verified) — it only stops a
 # scripted run.
-if [ -z "${CAPDIR:-}" ]; then
-    echo "CAPDIR is unset — set the placeholders from step 1 first; the" \
-        "node_modules link below would otherwise land in the worker's cwd" >&2
+if [ -z "${CAPDIR:-}" ] || [ -z "${APP_URL:-}" ]; then
+    echo "CAPDIR/APP_URL are unset — set the placeholders from step 1 first;" \
+        "the node_modules link below would otherwise land in the worker's" \
+        "cwd, and the driver falls back to http://localhost:8000, recording" \
+        "whatever answers there as this run's evidence" >&2
     exit 1
 fi
 cd "$CAPDIR"                                 # where driver.mjs lives

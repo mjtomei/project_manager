@@ -1178,11 +1178,16 @@ def _write_driver(capdir):
         'console.log("driver saw", typeof chromium);\n')
 
 
-def _run_driver_block(capdir, global_dir):
-    """Run the recipe's own driver block against a fake Playwright install."""
+def _run_driver_block(capdir, global_dir, app_url="http://localhost:1"):
+    """Run the recipe's own driver block against a fake Playwright install.
+
+    ``app_url=None`` leaves ``APP_URL`` unset, the way a fresh shell has it.
+    """
     block = _web_ui_driver_block().replace("/usr/lib/node_modules",
                                            str(global_dir))
-    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1")
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL=app_url)
+    if app_url is None:
+        env.pop("APP_URL")
     return subprocess.run(["bash"], input=block, env=env,
                           capture_output=True, text=True, timeout=120)
 
@@ -1215,6 +1220,30 @@ def test_web_ui_driver_block_refuses_an_unset_capdir(tmp_path):
         "wrong directory: " + r.stdout)
     assert not os.path.lexists(work / "node_modules"), (
         "the block created a node_modules link in the worker's cwd")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_block_refuses_an_unset_app_url(tmp_path):
+    """An unset APP_URL is not "the default app" — the driver has a fallback.
+
+    ``driver.mjs`` reads ``process.env.APP_URL || 'http://localhost:8000'``,
+    so with ``CAPDIR`` exported but ``APP_URL`` missing the block links,
+    resolves, and drives whatever answers on port 8000: a capture of another
+    app presented as this run's evidence — the same "the wait matched the
+    wrong handle" class as the busy-port pre-check in step 1. The guard names
+    both variables for that reason.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    r = _run_driver_block(capdir, _fake_playwright(tmp_path / "global"),
+                          app_url=None)
+    assert r.returncode != 0, (
+        "the driver block ran with no APP_URL, so the driver fell back to "
+        "http://localhost:8000")
+    assert "APP_URL" in r.stderr, r.stderr
+    assert "driver saw" not in r.stdout, (
+        "the block ran the driver with no APP_URL: " + r.stdout)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
@@ -1453,7 +1482,14 @@ sub=$1; shift
 val() { f=$1; shift; while [ $# -gt 0 ]; do
           if [ "$1" = "$f" ]; then echo "$2"; return; fi; shift; done; }
 case "$sub" in
-  has-session)  [ -f "$STATE/$(val -t "$@")" ] && exit 0 || exit 1 ;;
+  has-session)
+      # Real tmux (3.2a, verified) *succeeds* for `-t ''` — the empty target
+      # matches the current session. Modelling that is what makes an unset
+      # $TARGET visible: the recipe's both-gone branch would fire on a
+      # legitimate finish.
+      s=$(val -t "$@")
+      [ -z "$s" ] && exit 0
+      [ -f "$STATE/$s" ] && exit 0 || exit 1 ;;
   kill-session) rm -f "$STATE/$(val -t "$@")"; exit 0 ;;
   kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder"; exit 0 ;;
   pipe-pane)
@@ -1514,7 +1550,7 @@ exit 0
 _STUB_PM = r"""
 STATE="$STUB_STATE"
 case "$1 $2" in
-  "session name") echo pm-test ;;
+  "session name") echo "${STUB_PM_NAME-pm-test}" ;;
   "session ")     exit 0 ;;
   "tui send")
       case "$STUB_MODE" in
@@ -1528,8 +1564,15 @@ exit 0
 """
 
 
-def _run_capture_block(name, mode, tmp_path, target=False, env_extra=None):
-    """Run a recipe's capture block against stub tmux/pm; return (proc, cast)."""
+def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
+               sessions=(), files=None, state_files=None):
+    """Run one recipe block against stub tmux/pm; return (proc, cast path).
+
+    ``raw`` is the block text as a worker pastes it, ``sessions`` the tmux
+    sessions that already exist when it starts (a stop block runs against the
+    sessions steps 1-3 left behind), ``files`` the capture-dir files and
+    ``state_files`` the stub's own files (``pane``) to seed.
+    """
     capture = tmp_path / "cap"
     state = tmp_path / "state"
     bindir = tmp_path / "bin"
@@ -1539,13 +1582,20 @@ def _run_capture_block(name, mode, tmp_path, target=False, env_extra=None):
     _stub_tool(bindir, "pm", _STUB_PM)
     if target:
         (state / "pm-test").touch()
-    raw = _scaffold_block(_recipe_text(name))
+    for s in sessions:
+        (state / s).touch()
+    for rel, content in (state_files or {}).items():
+        (state / rel).write_text(content)
     # The CLI scaffold writes under <capture-dir>/<short-name>/, the tmux
     # recipe directly under <capture-dir>/.
     sub = ("run/" if "<short-name>/recording.cast" in raw else "")
     block = (raw.replace("<capture-dir>", str(capture))
                 .replace("<short-name>", "run")
                 .replace("<command-to-record>", "echo hi"))
+    for rel, content in (files or {}).items():
+        p = capture / sub / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
     # Shorten every numeric deadline so the failing cases finish quickly; the
     # recipes' own bounds are asserted as text above. Matching the shape
     # (rather than the literal ``30``/``60``) keeps the cases fast when a
@@ -1563,6 +1613,27 @@ def _run_capture_block(name, mode, tmp_path, target=False, env_extra=None):
     r = subprocess.run(["bash"], input=block, env=env,
                        capture_output=True, text=True, timeout=120)
     return r, capture / sub / "recording.cast"
+
+
+def _run_capture_block(name, mode, tmp_path, target=False, env_extra=None):
+    """Run a recipe's whole capture block against stub tmux/pm."""
+    return _run_block(_scaffold_block(_recipe_text(name)), mode, tmp_path,
+                      target=target, env_extra=env_extra)
+
+
+# The block a worker pastes on its own to end the recording: step 4 of the
+# CLI scaffold (step 3 is what drives an interactive shell, so that block
+# cannot run as one paste) and step 5 of the tmux recipe (the scenario's
+# ``pm tui send`` calls sit between it and the recorder start).
+_STOP_MARKERS = {
+    "cli-recording.md": "# 4. Wait (bounded) for asciinema to exit",
+    "tmux-screen-recording.md": "# 5. End the recording",
+}
+
+
+def _stop_block(name):
+    raw = _scaffold_block(_recipe_text(name))
+    return raw[raw.index(_STOP_MARKERS[name]):]
 
 
 class TestCaptureFlowExecution:
@@ -1793,6 +1864,67 @@ class TestCaptureFlowExecution:
         assert "incomplete" in r.stderr, r.stderr
         assert "137" in r.stderr, (
             "the failure does not say how the recorder ended: " + r.stderr)
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_stop_block_pasted_alone_saves_the_pane(self, name, tmp_path):
+        """The stop step runs in a fresh shell, so its failure path must too.
+
+        A scenario that needs interactive driving cannot paste the whole
+        capture block (step 3 *is* the driving), so step 4/5 is pasted on its
+        own. The pane save used to be a function defined back in the first
+        block: verified that the fresh shell printed ``dump_pane: command not
+        found`` and the timeout message named a ``recorder-pane.log`` that was
+        never written — a failure message pointing at evidence that does not
+        exist, which is the bug class this recipe keeps hitting.
+        """
+        sessions = ("rec",) if name.startswith("cli") else ("pm-recorder",)
+        r, cast = _run_block(
+            _stop_block(name), "stuck", tmp_path, target=True,
+            sessions=sessions,
+            files={"recording.cast": '{"version": 2}\n'},
+            state_files={"pane": "TUI drawn\n"},
+            env_extra={"RECORDER_STOP_TIMEOUT": "2"})
+        assert r.returncode != 0, r.stderr
+        assert "did not exit within" in r.stderr, r.stderr
+        assert "command not found" not in r.stderr, (
+            "the stop block depends on a shell function from an earlier "
+            "paste: " + r.stderr)
+        log = cast.parent / "recorder-pane.log"
+        assert log.exists() and "TUI drawn" in log.read_text(), (
+            "the stop failure names recorder-pane.log but nothing was saved "
+            "there")
+
+    def test_tmux_stop_block_rederives_the_target_session(self, tmp_path):
+        """An empty target matches *every* session, so the both-gone branch lies.
+
+        Step 5 is pasted on its own for a driven scenario, so ``$TARGET`` from
+        step 1 is gone. Verified against real tmux 3.2a: ``has-session -t ''``
+        succeeds, so the legitimate "the scenario ended the pm session" finish
+        was reported as "recorder exited while the TUI was still running" —
+        and ``pipe-pane -t ':0.0'`` would stream whatever pane tmux picks as
+        current instead of the target's.
+        """
+        r, cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "midboth", tmp_path,
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"})
+        assert cast.stat().st_size > 0, "the fixture left no cast to misread"
+        assert r.returncode == 0, (
+            "a legitimate finish was rejected because the stop block ran with "
+            "an empty target: " + r.stderr)
+
+    def test_tmux_stop_block_refuses_an_unresolvable_target(self, tmp_path):
+        """With no target at all, say so instead of acting on an empty one."""
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "midboth", tmp_path,
+            files={"recording.cast": '{"version": 2}\n',
+                   "transcript.log": "pane output\n",
+                   "recorder.status": "0\n"},
+            env_extra={"STUB_PM_NAME": ""})
+        assert r.returncode != 0, (
+            "the stop block ran with no target session at all")
+        assert "TARGET is unset" in r.stderr, r.stderr
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

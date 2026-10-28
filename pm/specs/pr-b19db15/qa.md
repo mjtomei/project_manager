@@ -250,6 +250,17 @@ run.
   the stop step times out with the shell still at its prompt, and its failure
   message names the remedy (`exit` in the recorded shell, step 3) rather than
   only `RECORDER_STOP_TIMEOUT`.
+- The stop step is pasted *on its own* (a scenario that needs interactive
+  driving cannot paste the whole block) → both recipes must still save the
+  pane their timeout message names, and the tmux step must re-derive the
+  target session from `pm session name` instead of acting on an empty one:
+  `tmux has-session -t ''` succeeds, which would report a legitimate
+  "the scenario ended the pm session" finish as "recorder exited while the
+  TUI was still running". With no resolvable target the step stops and says
+  so.
+- The web-UI driver block runs with `CAPDIR` set but `APP_URL` missing → it
+  stops instead of letting the driver fall back to
+  `http://localhost:8000` and record whatever answers there.
 - A web-UI driver fails before it produces its outputs in a capture directory
   that already holds them → the driver step clears the previous run's webm,
   mp4, `trace.zip`, `dom.html`, `http.log`, `sse.log` and screenshots first,

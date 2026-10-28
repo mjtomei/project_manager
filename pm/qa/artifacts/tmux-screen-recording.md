@@ -72,13 +72,12 @@ mkdir -p <capture-dir>
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
       <capture-dir>/recorder-pane.log
-# Failure paths below tear the recorder session down, so save the pane's last
-# screen into the capture dir first — otherwise the messages that point at
-# the pane point at evidence that no longer exists.
-dump_pane() {
-    tmux capture-pane -p -t pm-recorder \
-        > <capture-dir>/recorder-pane.log 2>/dev/null || true
-}
+# Failure paths below tear the recorder session down, so each one saves the
+# pane's last screen into the capture dir first — otherwise the messages that
+# point at the pane point at evidence that no longer exists. The save is
+# written out at each site rather than defined as a function here: step 5 is
+# pasted on its own (a scenario that needs interactive driving is not one
+# paste), and a function defined in this block does not exist in that shell.
 
 # 1. Start the canonical pm session. `pm session` (no subcommand)
 #    creates the project's pm session and then attaches; the attach
@@ -156,7 +155,8 @@ while :; do
     tmux capture-pane -p -t pm-recorder 2>/dev/null \
         | grep -q '[^[:space:]]' && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        dump_pane
+        tmux capture-pane -p -t pm-recorder \
+            > <capture-dir>/recorder-pane.log 2>/dev/null || true
         echo "recorder did not come up within 30s — the pane is saved in" \
             "<capture-dir>/recorder-pane.log, asciinema's own error (if any)" \
             "in recorder-stderr.log" >&2
@@ -206,6 +206,18 @@ pm tui send a -s "$TARGET"            # open the picker
 #    when the session is already gone the pipe is gone with it, and
 #    `tmux pipe-pane` would otherwise print "can't find session: …" on a run
 #    that succeeded.)
+#    This step is pasted on its own whenever the scenario is driven
+#    interactively, so re-derive the target session it was given in step 1
+#    rather than acting on an empty one: `tmux has-session -t ''` *succeeds*,
+#    which would turn the legitimate "the scenario ended the pm session"
+#    finish below into "recorder exited while the TUI was still running", and
+#    `pipe-pane -t ':0.0'` would stream whatever pane tmux picks as current.
+TARGET=${TARGET:-$(pm session name)}
+if [ -z "$TARGET" ]; then
+    echo "TARGET is unset and 'pm session name' printed nothing — run this" \
+        "step with pm on PATH, in the project directory" >&2
+    exit 1
+fi
 if ! tmux has-session -t pm-recorder 2>/dev/null; then
     if tmux has-session -t "$TARGET" 2>/dev/null; then
         echo "recorder exited while the TUI was still running — the cast is" \
@@ -235,7 +247,8 @@ fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t pm-recorder 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        dump_pane
+        tmux capture-pane -p -t pm-recorder \
+            > <capture-dir>/recorder-pane.log 2>/dev/null || true
         echo "recorder did not exit within 30s — the pane is saved in" \
             "<capture-dir>/recorder-pane.log" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
