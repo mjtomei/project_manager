@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T16:39:01.421995+00:00'
+  updated_at: '2026-10-28T16:39:58.275046+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36818,6 +36818,33 @@ prs:
       evidence.'
     created_at: '2026-10-28T16:39:01Z'
     last_edited: '2026-10-28T16:39:01Z'
+  - id: note-889e704
+    text: 'QA S15 (repeated questions / prose / noisy transcripts) PASS on 7b153815,
+      live TUI + interactive stand-in. Answer -> running (same window/pane, count
+      unchanged) -> second genuine INPUT_REQUIRED stayed waiting on the same iteration/pane:
+      exactly one "follow-up verdict=INPUT_REQUIRED", a second notice frame trigger,
+      no relaunch, no iteration 2, 8/8 identical samples over 10 s. Breadcrumb restart
+      adopted the live wait (mount trigger=initial + consume_breadcrumb resume + adopting
+      lines; same window/pane; 121/121 post-restart samples waiting, 0 follow-up-running;
+      no new follow-up verdict= or iteration 2) and answering in the same pane cleared
+      it. 8 harness/tool records in the unanswered wait (system-reminder, task-notification,
+      # /loop tick, scheduled firing, [Request interrupted by user], qa_loop nudge,
+      tool_use+tool_result with PASS/yes/INPUT_REQUIRED, empty user record) and user-record
+      records during the running holds never flipped either state or recorded a verdict.
+      A verdict-less prose question waited again with verdict still INPUT_REQUIRED
+      and its answer cleared the wait in ~0.6 s. PASS + "# /loop tick" recorded PASS
+      and stopped (hook-driven follow-up verdict PASS / follow-up verdict=PASS / stopping
+      — verdict=PASS; no NEEDS_WORK, no re-arm, no iteration 2). Evidence: /pm-captures/scenarios/15/tui-input-required/.
+      Harness notes for the next run: this build has no "pm pr review --no-window"
+      (used "pm pr edit --status in_review" to open no window); the second-question
+      notice frame trigger is content-deduped by frame_capture, so a byte-identical
+      screen can show only one trigger even though log_message ran again (judge re-arm
+      by the log_message call / 30 s sticky window); the documented sub-second adopt
+      residual (row reads "answered; follow-up running" between the resumed mount
+      and the adopt gate) was caught once by a 0.6 s sampler in an exploratory run
+      and not in the final 121-sample post-restart window.'
+    created_at: '2026-10-28T16:39:58Z'
+    last_edited: '2026-10-28T16:39:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
