@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T01:57:56.817593+00:00'
+  updated_at: '2026-10-28T02:35:22.655603+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14709,6 +14709,27 @@ prs:
       L+1 fails).'
     created_at: '2026-10-28T01:57:56Z'
     last_edited: '2026-10-28T01:57:56Z'
+  - id: note-0a08b5c
+    text: 'QA S61 (60ccb95e; real rootless Podman 3.4.4 + tmux TUI under a subreaper,
+      fake agents; evidence /pm-captures/scenarios/61/manifest.md). Story1 held: 45
+      s RLIMIT_NPROC starve of TUI 10777 during s20 verification. The PID stayed the
+      same and was never a zombie; TUI stderr was 0 bytes. "_poll_loop_state skipped
+      a tick" and, every 5 s, "QA poll for B skipped an iteration: [Errno 11]" were
+      logged. There was no crash and no ERROR. The flag was the fork failure ("verifier
+      pane disappeared"), attempt 1 only, with one follow-up text in the worker pane.
+      Re-verified in fresh pane %53 as PASS (verified); B completed PASS [finalize:
+      FINALIZE_DONE]. Story2 post-fix: C zz t under the fault was deferred ("viewed
+      windows unavailable"). Without reap or a periodic pass, at T1+22 s reconcile[qa-run-end]
+      removed s7/s9, kept s8 viewed, and logged "deferred container release retried".
+      B IDs and proxy were unchanged; status had no failure or unverifiable entries;
+      reap rc 0. FIXED 60ccb95e: a partial run-end release never named the viewed/INPUT_REQUIRED
+      workers it kept (logged only when nothing else was released). Fixture traps:
+      Scenario 0 (interactive, never polled) consumes the first qa_scenario fake entry.
+      TUI periodic reconcile fires every 600 s from TUI start/restart, so schedule
+      the fault away from it. A soft limit equal to the uid thread count lets forks
+      through when the count dips; use a strict soft limit (100) to force the deferral.'
+    created_at: '2026-10-28T02:35:22Z'
+    last_edited: '2026-10-28T02:35:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
