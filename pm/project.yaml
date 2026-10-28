@@ -29687,7 +29687,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T08:48:23.481064+00:00'
+  updated_at: '2026-10-28T09:11:11.771825+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -29777,6 +29777,23 @@ prs:
       captures under /pm-captures/impl/ unchanged and still representative.'
     created_at: '2026-10-28T08:48:23Z'
     last_edited: '2026-10-28T08:48:23Z'
+  - id: note-1e9b43c
+    text: 'review 53f0 i5: no functional defects in the sync/handoff/route logic.
+      One fix: the handoff guard is shared with `pm qa run` (cli/qa.py sets planning_phase=False,
+      so that path skips the pre-planning sync), yet the i1..i4 wording told the user
+      to "Restart QA: it fast-forwards…" / "returns the diverged branch to review".
+      For `pm qa run` both are false — restarting that command reproduces the same
+      error. Both messages now also name the manual remedy ("or pull the PR branch
+      in the workdir" / "or merge the upstream into the PR branch in the workdir"),
+      and the inaccurate "(they fell out of step after the pre-planning sync)" parenthetical
+      is dropped. Tests updated (test_qa_planner_handoff, test_qa_branch_sync assert
+      the manual remedy is present). Spec R7 refreshed. Full suite: 3389 passed (/usr/bin
+      python3, pytest<9, PATH=/usr/bin:/bin, markdown on PYTHONPATH). Accepted as
+      before: the documented ls-remote/fetch race can let the planner run one step
+      behind (R7 fallback). Bug-fix captures under /pm-captures/impl/ unchanged and
+      still representative (this iteration only changes an error-message remedy).'
+    created_at: '2026-10-28T09:11:11Z'
+    last_edited: '2026-10-28T09:11:11Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high

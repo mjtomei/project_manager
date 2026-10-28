@@ -452,22 +452,28 @@ def _publish_planner_head(workdir_path: str, branch: str) -> str:
             behind = known and _is_ancestor(workdir_path, head, remote)
             # QA synced the workdir before planning (_sync_pr_branch), so
             # either the upstream moved while the planner ran (another
-            # writer pushed) or the sync was bypassed.  The plan was made
-            # against another tree: hold, and let the next run re-sync.
+            # writer pushed) or the sync was bypassed — a single-scenario
+            # ``pm qa run`` has no planning phase, so it never syncs.  The
+            # plan was made against another tree: hold, and let the next
+            # full QA run re-sync.  The pull/merge remedy is the one that
+            # also works for the bypassing command, whose restart alone
+            # would reproduce this error.
             if behind:
                 problem, action = ("is behind",
-                                   "Restart QA: it fast-forwards the PR "
-                                   "workdir before planning again")
+                                   "Restart QA (it fast-forwards the PR "
+                                   "workdir before planning again), or pull "
+                                   "the PR branch in the workdir")
             else:
                 problem, action = ("diverged from",
-                                   "Restart QA: it returns the diverged "
+                                   "Restart QA (it returns the diverged "
                                    "branch to review to merge both "
-                                   "histories (no force-push)")
+                                   "histories, never force-push), or merge "
+                                   "the upstream into the PR branch in the "
+                                   "workdir")
             raise PlannerHandoffError(
                 f"PR branch {branch} {problem} upstream: planner head "
                 f"{head[:12]} in {workdir_path} does not contain {real_url} "
-                f"{branch} at {remote[:12]} (they fell out of step after the "
-                f"pre-planning sync). {action} — scenarios were not "
+                f"{branch} at {remote[:12]}. {action} — scenarios were not "
                 f"launched so none tested a different tree.")
 
     _log.info("planner handoff: publishing %s %s -> %s (upstream was %s)",

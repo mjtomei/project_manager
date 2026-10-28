@@ -114,9 +114,13 @@ R7. **Planner/worker revision consistency.** `pre_plan_head` is taken after
     `_publish_planner_head` + `expected_head` stays: if the upstream moves
     during planning (a lost/active writer, pr-3201ea8) the handoff still
     refuses and no worker launches.  Its "behind" message changes from
-    "Pull the PR branch … and restart QA" to say the upstream moved while
-    planning and that restarting QA refreshes the workdir automatically;
-    "diverged" says restarting QA routes the divergence to review.
+    "Pull the PR branch … and restart QA" to say restarting QA fast-forwards
+    the workdir before planning; "diverged" says restarting QA routes the
+    divergence to review.  Both also name the manual remedy (pull / merge
+    the upstream into the PR branch in the workdir) because the guard is
+    shared with `pm qa run`, whose single-scenario run has no planning
+    phase and therefore never syncs — restarting that command alone would
+    reproduce the error.
 
 R8. **Gates preserved.** No pm-initiated merge to the base branch, no
     change to merge policy / wait-for-merge / spec gates; routing uses the

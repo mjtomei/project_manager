@@ -476,7 +476,8 @@ class TestRunQaSyncBranchSync:
         assert "pinned" not in seen
         assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
         assert _overall(state) == qa_loop.VERDICT_INPUT_REQUIRED
-        assert "Restart QA: it fast-forwards" in state._error
+        assert "it fast-forwards the PR workdir" in state._error
+        assert "or pull the PR branch in the workdir" in state._error
         assert _upstream(s) == moved["sha"]  # never overwritten
         # Restarting QA re-syncs instead of re-planning the stale tree.
         state2, seen2, _ = _run_qa(s)
