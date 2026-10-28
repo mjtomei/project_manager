@@ -11,8 +11,13 @@ recording-recipe bugs that any worker following the recipe hits:
 
 - both recording recipes create the capture directory before recording;
 - both remove a stale cast before recording (the tmux recipe also removes a
-  stale `transcript.log`, which is appended to);
-- both wait (bounded) for the recorder to draw before sending keys;
+  stale `transcript.log`, which is appended to, and attaches its transcript
+  pipe so a leftover pipe cannot silently swallow the new log);
+- both clear a recorder session left by an aborted run before starting a new
+  one (the CLI scaffold clears the session, not the server);
+- both wait (bounded) for the recorder to draw before sending keys; in the
+  tmux recipe a recorder that exits before drawing is a failure, not an early
+  finish;
 - both stop by ending the recorded command and then wait (bounded) on the
   recorder's session handle and check the cast is non-empty;
 - the CLI no-TTY scaffold writes the cast where the render reads it;
@@ -91,10 +96,12 @@ session, stop the recorder, and render the cast,
 **Then** it exits within the stated deadline with an actionable message and
 cleans up (kills the recorder/session) instead of hanging or passing on the
 wrong session; and
-**Given** a cast or transcript left by an earlier run, **When** the capture
-step starts, **Then** the stale files are removed first, so the recorder does
-not abort with "recording already exists", the new cast is this run's, and the
-transcript does not hold two runs.
+**Given** a cast, transcript, or recorder session left by an earlier run,
+**When** the capture step starts, **Then** the stale files and session are
+cleared first, so the recorder does not abort with "recording already exists"
+or "duplicate session", the readiness wait does not pass on the previous
+run's recorder, the new cast is this run's, and the transcript holds only this
+run.
 
 ### R4 — The web-UI recipe's readiness wait is bounded and cleans up
 

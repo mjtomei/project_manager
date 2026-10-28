@@ -9,7 +9,13 @@ hits, regardless of how it waits for a background job:
   step cannot turn a failed recording into a fresh-looking video of the
   previous run (the tmux transcript, which is appended to, is cleared too);
 - the no-TTY scaffold writes the cast where the render step reads it;
-- keys are not sent before the recorder has drawn (they are silently lost);
+- a recorder session left by an aborted run is cleared before starting a new
+  one (with ``kill-session``, not ``kill-server``, which races the server's
+  exit), and the tmux transcript pipe is reattachable so a leftover pipe
+  cannot silently swallow the new log;
+- keys are not sent before the recorder has drawn (they are silently lost),
+  and a tmux recorder that exits before drawing is a failure rather than an
+  early finish;
 - the recorder is stopped by ending the recorded command and awaited with a
   bound, and the cast is checked non-empty;
 - readiness polls (pm session, web-ui server) carry a deadline and an
@@ -79,6 +85,10 @@ class TestRecipes:
             f"{name}: the runnable scaffold never creates the capture dir")
         assert mkdir < block.index("asciinema rec"), (
             f"{name}: the capture dir is created only after recording starts")
+        if "pipe-pane" in block:
+            assert mkdir < block.index("pipe-pane"), (
+                f"{name}: the capture dir is created after the transcript "
+                "pipe opens, so the transcript is lost")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_capture_section_removes_a_stale_cast(self, name):
@@ -133,6 +143,71 @@ class TestRecipes:
         assert target < guard < wait, (
             "the empty-TARGET guard must come before the has-session wait")
 
+    @pytest.mark.parametrize("name,cleanup,start", [
+        ("tmux-screen-recording.md",
+         "kill-session -t pm-recorder", "new-session -d -s pm-recorder"),
+        ("cli-recording.md", "kill-session -t rec", "new-session -d -s rec"),
+    ])
+    def test_stale_recorder_is_cleared_before_start(self, name, cleanup, start):
+        """A leftover recorder from an earlier run must be cleared first.
+
+        ``new-session`` fails with "duplicate session" while the previous
+        run's recorder is still there — and the readiness wait then sees the
+        *old* session, passes at once, and the worker drives the wrong
+        attach client while the cast check fails later with a misleading
+        message. Clearing it up front is what makes a re-run deterministic.
+
+        The CLI scaffold clears the *session*, not the server: killing a
+        server and reconnecting a few milliseconds later races its exit and
+        fails with "server exited unexpectedly" (reproduced ~7 times in 40
+        tight iterations), so `kill-server` belongs only in the teardown
+        paths.
+        """
+        block = _scaffold_block(_recipe_text(name))
+        assert cleanup in block, f"{name}: no stale recorder cleanup"
+        start_at = block.index(start)
+        assert block.index(cleanup) < start_at, (
+            f"{name}: the stale recorder is cleared only after starting a new one")
+        if cleanup == "kill-session -t rec":
+            kill_server = re.search(r"^[^#\n]*kill-server", block, re.M)
+            assert kill_server and kill_server.start() > start_at, (
+                "cli-recording: kill-server before new-session races the "
+                "server's exit; clear the session instead")
+
+    def test_transcript_pipe_can_be_reattached(self):
+        """``pipe-pane -o`` is a silent no-op while a pipe is already attached.
+
+        A pipe left behind by an aborted run would make step 2 do nothing,
+        so ``transcript.log`` is never written and the capture silently
+        loses its transcript while the cast check still passes. Without
+        ``-o`` the pipe is replaced (and the old one closed), which is what
+        a re-run wants.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        pipe = re.search(
+            r"^tmux pipe-pane[^\n]*transcript\.log[^\n]*$", block, re.M)
+        assert pipe, "tmux recipe never streams the transcript"
+        assert " -o " not in pipe.group(0), (
+            "tmux recipe attaches the transcript pipe with -o: a leftover "
+            "pipe from an earlier run silently prevents transcript.log")
+
+    def test_tmux_recorder_exiting_before_it_draws_fails(self):
+        """A recorder that exits before drawing recorded nothing.
+
+        The pane is started *as* the asciinema command, so a session that
+        vanishes during the readiness wait means the attach never ran. The
+        cast it leaves holds asciinema's error rather than the TUI, so
+        carrying on would drive keys into nothing and then report a useless
+        capture as a successful recording.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        seg = block[block.index("new-session -d -s pm-recorder"):
+                    block.index("pm tui send")]
+        assert "! tmux has-session -t pm-recorder" in seg, (
+            "tmux recipe does not notice a recorder that exits before drawing")
+        assert "recorder exited before it drew" in seg
+        assert "exit 1" in seg, "a dead recorder is not reported as a failure"
+
     @pytest.mark.parametrize("name", RECIPES)
     def test_scaffold_block_parses(self, name):
         """The no-TTY scaffold must be runnable shell, not just prose."""
@@ -174,13 +249,21 @@ class TestRecipes:
         finished. ``has-session`` is the recorder's real handle (the pane is
         started *as* the asciinema command), so the wait is bounded and
         name-free.
+
+        Anchored on the *last* ``while ... has-session ... done`` loop: the
+        readiness wait earlier in the block is also a ``has-session`` poll,
+        so a looser assertion would still pass with the stop wait deleted.
         """
         block = _scaffold_block(_recipe_text(name))
-        stop = block[block.index("asciinema rec"):]
-        assert "has-session" in stop, (
-            f"{name}: stop step does not wait for the recorder to exit")
-        assert "deadline" in stop, f"{name}: recorder wait is unbounded"
-        assert "test -s" in stop, f"{name}: the cast is never checked"
+        waits = list(re.finditer(
+            r"^while .*has-session[^\n]*; do$", block, re.M))
+        assert waits, f"{name}: stop step does not wait for the recorder to exit"
+        stop = block[waits[-1].start():]
+        body = stop[:stop.index("\ndone")]
+        assert "deadline" in body, f"{name}: recorder wait is unbounded"
+        assert "exit 1" in body, f"{name}: recorder wait has no failure path"
+        assert "test -s" in stop[len(body):], (
+            f"{name}: the cast is not checked after the recorder exits")
 
     def test_cli_stop_ends_the_recorded_shell(self):
         """Ctrl-C reaches the *recorded* command, not asciinema.
@@ -226,6 +309,10 @@ def test_readiness_waits_are_bounded(name, marker, probe_bound):
     window = text[max(0, idx - 700):idx + 700]
     assert "deadline" in window, f"{name}: unbounded readiness wait"
     assert "exit 1" in window, f"{name}: readiness wait has no failure path"
+    if name == "web-ui-recording.md":
+        assert 'kill "$SERVER_PID"' in window, (
+            "web-ui recipe leaves the server it started running when the "
+            "readiness wait fails")
     if probe_bound:
         line = text[idx:text.index("\n", idx)]
         assert probe_bound in line, (

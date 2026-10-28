@@ -49,19 +49,30 @@ R1. **Create the capture directory before recording.** Both
    a missing `mkdir` looks like a successful capture that does not exist (the
    tmux recipe's `pipe-pane` transcript is lost the same way).
 
-R2. **Remove a stale cast before recording.** Both recipes `rm -f` the cast
-   before starting the recorder. The render step rewrites the `.mp4` from
-   whatever cast is on disk, so without this a recording that wrote nothing
-   still produces a fresh-looking video of the *previous* run (and without
-   `--overwrite`, `asciinema rec` aborts on the existing file and the recorder
-   session dies). The tmux recipe also removes a stale `transcript.log`:
-   `pipe-pane ... "cat >>"` appends, so an earlier run's log would be mixed
-   into this run's evidence.
+R2. **Remove a stale cast before recording, and a stale recorder.** Both
+   recipes `rm -f` the cast before starting the recorder. The render step
+   rewrites the `.mp4` from whatever cast is on disk, so without this a
+   recording that wrote nothing still produces a fresh-looking video of the
+   *previous* run (and without `--overwrite`, `asciinema rec` aborts on the
+   existing file and the recorder session dies). The tmux recipe also removes
+   a stale `transcript.log`: `pipe-pane ... "cat >>"` appends, so an earlier
+   run's log would be mixed into this run's evidence. Both recipes also clear
+   the recorder session an aborted run left behind (`tmux kill-session -t
+   pm-recorder` / `tmux -L scaffold kill-session -t rec`): `new-session` fails
+   with "duplicate session" while it exists, and the readiness wait would
+   then pass on the previous run's recorder. The CLI scaffold clears the
+   session, not the server — `kill-server` followed a few milliseconds later
+   by `new-session` races the server's exit ("server exited unexpectedly",
+   reproduced ~7 times in 40 tight iterations).
 
 R3. **Wait for the recorder to draw before sending keys.** Both recipes have a
    bounded readiness wait on the pane content (and the session still
    existing). Keystrokes sent before asciinema has attached are silently lost,
-   so an immediate `exit`/detach leaves the recorder running.
+   so an immediate `exit`/detach leaves the recorder running. In the tmux
+   recipe a recorder that *exits* before drawing is a failure (the attach
+   could not start; the cast it leaves holds asciinema's error, not the TUI),
+   not a recording that finished early — the CLI scaffold still accepts an
+   early exit, because a one-shot command legitimately ends the pane.
 
 R4. **Stop by ending the recorded command, then wait on the recorder's real
    handle and check the cast.** The tmux recipe detaches the attach client and
@@ -88,14 +99,23 @@ R6. **Bound the remaining readiness polls, and poll the right handle.** The
    exists and the failure path would never fire. An empty target is rejected
    first because `tmux has-session -t ''` succeeds. The web-UI poll also stops
    the server it started, and bounds each attempt (`--connect-timeout 2
-   --max-time 5`) because a deadline is only consulted between attempts.
+   --max-time 5`) because a deadline is only consulted between attempts. The
+   tmux transcript pipe is attached *without* `-o` (which only opens a pipe
+   when none is attached): a pipe left behind by an aborted run would
+   otherwise make the step a silent no-op, so no `transcript.log` is ever
+   written while the cast check still passes. Every tmux failure path stops
+   the pipe before exiting.
 
 R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    asserts the kept recipe behaviour: capture-dir creation in the runnable
    block, stale-cast and stale-transcript removal, scaffold parses, recorder
    readiness before keys, bounded stop + cast check, the CLI `exit` stop, the
    CLI scaffold cast path, the pm-session poll targeting the computed handle
-   (and not `grep '^pm-'`), and the bounded readiness polls.
+   (and not `grep '^pm-'`), the bounded readiness polls (including the
+   web-UI failure path stopping the server it started), clearing a stale
+   recorder session before starting a new one (session, not server, for the
+   CLI scaffold), the transcript pipe being reattachable, and a tmux recorder
+   that exits before drawing failing instead of passing.
 
 ## Non-goals
 

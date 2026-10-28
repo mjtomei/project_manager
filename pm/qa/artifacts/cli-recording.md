@@ -33,7 +33,10 @@ substitutes the actual captures directory for `<capture-dir>`):
 
 Create the capture directory first: `mkdir -p <capture-dir>/<short-name>`,
 and delete any cast an earlier run left there (`rm -f
-<capture-dir>/<short-name>/recording.cast`). `asciinema rec` reports
+<capture-dir>/<short-name>/recording.cast`). The no-TTY scaffold also clears
+a `rec` session an earlier run left behind, since a leftover one makes
+`new-session` fail with "duplicate session: rec" and the readiness wait
+would then pass on the previous run's recorder. `asciinema rec` reports
 "asciicast saved" and exits 0 even when the directory does not exist, so a
 missing `mkdir` looks like a successful capture that wrote nothing — and a
 leftover cast is worse: the render step rewrites the `.mp4` from it, so a
@@ -83,7 +86,12 @@ where the CLI runs.
 #    command, so the pane's lifetime *is* the recording's lifetime: when
 #    asciinema exits, the session ends and step 4's wait can see it. The
 #    capture subdirectory has to exist (and hold no earlier cast) before
-#    asciinema writes into it.
+#    asciinema writes into it. Clear a leftover `rec` session from an
+#    aborted run first — `new-session` fails with "duplicate session: rec"
+#    while it exists — with `kill-session`, not `kill-server`: killing the
+#    server and reconnecting immediately races its exit ("server exited
+#    unexpectedly").
+tmux -L scaffold kill-session -t rec 2>/dev/null || true
 mkdir -p <capture-dir>/<short-name>
 rm -f <capture-dir>/<short-name>/recording.cast
 tmux -L scaffold new-session -d -s rec -x 100 -y 30 \

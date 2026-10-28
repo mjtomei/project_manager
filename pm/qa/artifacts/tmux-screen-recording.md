@@ -44,20 +44,24 @@ recorder pane rendering the attach client rendering the recorder
 pane — endless recursion and a useless cast. Different sessions on
 the same tmux server is enough to break that recursion.
 
-Step 0 of the capture flow runs `mkdir -p <capture-dir>` and clears the
-files an earlier run left there. Both matter: `asciinema rec` reports
-"asciicast saved" and exits 0 even when the directory does not exist, so a
-missing `mkdir` looks like a successful capture that wrote nothing. A
-leftover cast is worse in the other direction: without `--overwrite`,
-`asciinema rec` aborts with "recording already exists", the recorder
-session dies, and the render step then rewrites the `.mp4` from the *old*
-cast — a failed recording that looks like a fresh capture. The transcript
-is appended to, so a stale `transcript.log` would silently mix an earlier
-run into this run's evidence.
+Step 0 of the capture flow clears the recorder session and the files an
+earlier run left behind, then creates the capture directory with
+`mkdir -p <capture-dir>`. All three matter. A leftover `pm-recorder`
+session makes step 3's `new-session` fail with "duplicate session", and the
+readiness wait below would then pass on the *previous* run's attach
+client. `asciinema rec` reports "asciicast saved" and exits 0 even when the
+directory does not exist, so a missing `mkdir` looks like a successful
+capture that wrote nothing. A leftover cast is worse in the other
+direction: without `--overwrite`, `asciinema rec` aborts with "recording
+already exists", the recorder session dies, and the render step then
+rewrites the `.mp4` from the *old* cast — a failed recording that looks
+like a fresh capture. The transcript is appended to, so a stale
+`transcript.log` would silently mix an earlier run into this run's evidence.
 
 ```
-# 0. Create the capture directory and clear what an earlier run left there
-#    before anything writes into it.
+# 0. Clear what an earlier run left behind before anything writes into it:
+#    the recorder session, the capture directory, and the files in it.
+tmux kill-session -t pm-recorder 2>/dev/null || true
 mkdir -p <capture-dir>
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log
 
@@ -89,8 +93,12 @@ until tmux has-session -t "$TARGET" 2>/dev/null; do
     sleep 0.2
 done
 
-# 2. Stream the home pane's scrollback to transcript.log.
-tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
+# 2. Stream the home pane's scrollback to transcript.log. No -o: that only
+#    opens a pipe when none is attached, so a pipe left behind by an aborted
+#    earlier run would make this a silent no-op and no transcript.log would
+#    ever be written. Without it the pipe is replaced (and the old one
+#    closed), so this step is idempotent.
+tmux pipe-pane -t "$TARGET:0.0" "cat >> <capture-dir>/transcript.log"
 
 # 3. Start the recorder session — a separate session on the same
 #    tmux server whose pane runs asciinema wrapping `tmux attach -t
@@ -101,18 +109,26 @@ tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t $TARGET'"
-# Wait (bounded) for the recorder to draw: the detach key in step 5 is
-# lost if the attach client has not started yet. If the recorder exits
-# first (the attach could not start), the session is already gone — step
-# 5's cast check reports that, so this wait must not hang on it.
+# Wait (bounded) for the recorder to draw: the detach key in step 5 (and
+# every key sent below) is lost if the attach client has not started yet.
+# A recorder that *exits* here cannot have recorded the TUI — the
+# attach failed — so that is a failure, not a recording that finished
+# early: the cast it leaves holds asciinema's error, not the session, and
+# treating it as done would report a useless capture as success.
 deadline=$(( $(date +%s) + 30 ))
-until tmux capture-pane -p -t pm-recorder 2>/dev/null \
-        | grep -q '[^[:space:]]' ||
-      ! tmux has-session -t pm-recorder 2>/dev/null; do
+while :; do
+    if ! tmux has-session -t pm-recorder 2>/dev/null; then
+        echo "recorder exited before it drew — check 'asciinema rec' output" >&2
+        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
+        exit 1
+    fi
+    tmux capture-pane -p -t pm-recorder 2>/dev/null \
+        | grep -q '[^[:space:]]' && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
         echo "recorder did not come up within 30s — check" \
             "'tmux capture-pane -p -t pm-recorder'" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
+        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
         exit 1
     fi
     sleep 0.2
@@ -138,12 +154,14 @@ while tmux has-session -t pm-recorder 2>/dev/null; do
         echo "recorder did not exit within 30s — check" \
             "'tmux capture-pane -p -t pm-recorder'" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
+        tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
         exit 1
     fi
     sleep 0.2
 done
 test -s <capture-dir>/recording.cast || {
     echo "asciinema wrote no cast — check the recorder pane" >&2
+    tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
     exit 1
 }
 tmux pipe-pane -t "$TARGET:0.0"       # stop the transcript pipe
