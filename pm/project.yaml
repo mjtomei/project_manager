@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T09:16:19.402974+00:00'
+  updated_at: '2026-10-28T09:42:14.177703+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15462,6 +15462,53 @@ prs:
       still hold.'
     created_at: '2026-10-28T09:16:19Z'
     last_edited: '2026-10-28T09:16:19Z'
+  - id: note-c029dec
+    text: 'Review loop 44be i5 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range/non-UTF-8/empty-argv/exec-window
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found one real gap of the E18/E19 class ("an identity check must
+      never misclassify"), in the claim direction: identity_problem treated a None
+      cmdline read as "cannot tell" and skipped the argv check — but /proc/<pid> also
+      disappears (read fails -> None) when the owner is REAPED between the liveness
+      check and the argv read, so a DEAD owner was reported as "no problem". claim_tui_pidfile
+      then raised TuiPidfileConflict against the dead pid ("another TUI (pid N) already
+      owns session ...; refusing to start a second TUI — stop pid N if it is not visible")
+      and pm _tui could not start until the stale file was deleted by hand — the same
+      failure E18/E19 exist to prevent, from the other side. Fixed by re-checking
+      liveness when the argv read was None; off-procfs platforms still report the
+      pid alive, so they keep degrading to the liveness check and nothing changes
+      there (submit_tui_command / trigger_tui_reload were already safe: _signal_tui
+      re-checks and reports "process is not running"). 3 new tests in TestIdentity:
+      owner reaped mid-check -> "process is not running"; claim_tui_pidfile takes
+      the stale file over instead of raising the conflict; and a live process with
+      a "cannot tell" cmdline still degrades to liveness (pins that non-Linux platforms
+      do not become "stale pidfile"). The first two were verified to fail against
+      a HEAD worktree with the exact pre-fix traceback (TuiPidfileConflict). Spec
+      impl.md E20 + test item 40. Full suite: 3933 passed, 1 skipped (pytest 8.4.2-class
+      venv; env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace, markdown
+      installed). No user-visible message changed on any QA-validated path (the rare
+      race now reports "process is not running" instead of a spurious conflict), so
+      the i3/i6 QA expectations still hold. Non-blocking observations left as-is:
+      (a) the startup-refusal message is printed to the pane, but the real pm session
+      has no remain-on-exit, so the pane vanishes and the text lives only in the pm
+      log; (b) helpers.trigger_tui_command is production-dead (kept as the documented
+      bool API; pm/plans/refactor-migration-map.md keeps it as cross-process IPC);
+      (c) autostart._resolve_owner keeps its own liveness+zombie check (spec I1),
+      reports a mid-claim empty pidfile as "stale pidfile" rather than "starting up",
+      and does not remove a dead-pid pidfile (QA refined around that); (d) _atomic_write
+      can leave a hidden .<pidfile>.<pid>.tmp if SIGKILLed mid-publish; (e) a legacy
+      numeric pidfile has no starttime, so its identity rests on the cmdline marker
+      alone; (f) unlink_if_unchanged re-reads then unlinks non-atomically (inherent
+      to a path-based pidfile); (g) owned_by_other treats a non-empty unparseable
+      pidfile as "not owned by another" (unreachable in practice: a single os.write
+      of the descriptor is atomic w.r.t. readers); (h) qa_loop._proc_stat_fields/_proc_start_time
+      still duplicate tui_pidfile equivalents — consolidating is an out-of-scope refactor;
+      (i) a future v2 pidfile would be parsed as v1 (the version field is informational),
+      so a format change that renames a field would read as unreadable to an older
+      CLI — safe (it only deletes a stale-looking file and reports restart), but worth
+      a version gate if the descriptor format ever changes.'
+    created_at: '2026-10-28T09:42:14Z'
+    last_edited: '2026-10-28T09:42:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
