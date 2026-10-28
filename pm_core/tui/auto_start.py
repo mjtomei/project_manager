@@ -377,14 +377,33 @@ def _adopt_live_qa(app) -> None:
 
 
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize transcript symlinks in the current run directory.
+
+    A review loop that is still running keeps its symlink: the loop polls
+    that path for the follow-up verdict (and for the next iteration's
+    verdict), so replacing it with a frozen copy strands the loop — it can
+    no longer see the turn the user answered, reads the next idle as a new
+    prose question and re-arms the INPUT_REQUIRED wait for a question
+    nobody was asked.  The loop finalizes its own transcripts when it
+    completes (``review_loop_ui._on_complete_from_thread``).
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
     from pm_core.claude_launcher import finalize_transcript
+    live = tuple(
+        f"review-{pr_id}-"
+        for pr_id, state in (getattr(app, "_review_loops", None) or {}).items()
+        if getattr(state, "running", False)
+    )
     for p in tdir.iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
-            finalize_transcript(p)
+        if not (p.is_symlink() and p.suffix == ".jsonl"):
+            continue
+        if live and p.name.startswith(live):
+            _log.info("auto_start: keeping transcript symlink for a running "
+                      "review loop: %s", p)
+            continue
+        finalize_transcript(p)
 
 
 def _disable(app) -> None:
