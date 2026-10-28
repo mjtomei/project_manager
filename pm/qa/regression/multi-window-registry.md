@@ -161,7 +161,7 @@ We create a dummy PR to test this -- no real PRs are needed.
    - Check registry again -- review window entry should be gone or have empty panes
 
 7. Clean up the dummy PR:
-   - `pm pr close <dummy_pr_id> --keep-branch`
+   - `pm pr close <dummy_pr_id> --remove`  (close alone keeps the entry)
    - `rm -rf /tmp/pm-registry-test-workdir`
    - Refresh TUI: `pm tui send r`, wait 1 second
 
@@ -234,7 +234,7 @@ IMPORTANT: Always restore the original state!
 
 1. Ensure the dummy PR from Part 3 was cleaned up:
    - Run `pm pr list` -- the "Registry review test" PR should be gone
-   - If it still exists: `pm pr close <id> --keep-branch`
+   - If it still exists: `pm pr close <id> --remove`
    - `rm -rf /tmp/pm-registry-test-workdir`
 2. Kill any extra panes/windows created during testing
 3. Relaunch panes that were present at the start:

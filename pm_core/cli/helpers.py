@@ -453,6 +453,8 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
     * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
+    * ``closed_at`` — set when the PR is ``closed`` (a retained historical
+      record, not a deletion).
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now
@@ -464,6 +466,8 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
+    elif status == "closed":
+        pr_entry["closed_at"] = now
 
 
 def _canonical_session(session: str) -> str:

@@ -938,6 +938,15 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    if pr_entry.get("status") == "closed":
+        # Closed is a terminal lifecycle record (`pm pr close` keeps it), so a
+        # start would silently resurrect a PR the user retired.  Reopening is
+        # an explicit status edit.
+        click.echo(
+            f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status pending'.", err=True)
+        raise SystemExit(1)
+
     # Determine tmux session name (used for fast-path check and later launch)
     pm_session = _get_pm_session()
 
@@ -3426,12 +3435,22 @@ def pr_note_delete(pr_id: str, note_id: str):
 @pr.command("close")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
-@click.option("--keep-branch", is_flag=True, help="Don't delete the remote branch")
-def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
-    """Close and remove a PR from the project.
+@click.option("--keep-branch", is_flag=True,
+              help="Deprecated no-op: close never deletes branches")
+@click.option("--remove", is_flag=True, default=False,
+              help="Also delete the registry entry (branch and workdir are kept)")
+def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
+             remove: bool):
+    """Close a PR without destroying its history.
 
-    Removes the PR entry from project.yaml. By default also closes the
-    GitHub PR and deletes the remote branch if they exist.
+    Sets the PR's status to ``closed`` and keeps its registry entry — title,
+    description, notes, dependencies, branch, and workdir reference.  The
+    GitHub PR is closed when one exists (unless --keep-github); no branch,
+    workdir, file, or capture is ever deleted by this command.
+
+    Cleanup stays separate: ``pm pr cleanup`` removes a workdir, and
+    ``--remove`` deletes a mistaken registry entry (nothing else).  A merged
+    PR cannot be closed without --remove, so merge history is never rewritten.
 
     If PR_ID is omitted, uses the active PR.
     """
@@ -3447,44 +3466,98 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    display_id = _pr_display_id(pr_entry)
+    old_status = pr_entry.get("status") or "pending"
 
-    # Close GitHub PR if exists
+    if old_status == "merged" and not remove:
+        click.echo(
+            f"PR {display_id} is already merged — closing it would erase the "
+            f"merge record. Use 'pm pr close {pr_id} --remove' to delete the "
+            f"registry entry (branch and workdir are kept).", err=True)
+        raise SystemExit(1)
+
+    # Close the GitHub PR when there is one.  Never delete the branch:
+    # close is non-destructive by contract, so `--delete-branch` is not
+    # passed (the `--keep-branch` flag is a compatibility no-op).  A merged
+    # GitHub PR cannot be closed, so the --remove path skips the call.
     gh_pr_number = pr_entry.get("gh_pr_number")
-    if gh_pr_number and not keep_github:
+    if gh_pr_number and not keep_github and old_status != "merged":
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
             from pm_core import gh_ops
-            result = gh_ops.close_pr(gh_pr_number, delete_branch=not keep_branch)
+            result = gh_ops.close_pr(gh_pr_number)
             if result.returncode == 0:
                 click.echo(f"GitHub PR #{gh_pr_number} closed.")
             else:
                 click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
         except SystemExit:
             # gh_ops.run_gh -> _check_gh() raises SystemExit when gh is missing
-            # or unauthenticated. Don't let that abort the local close/cleanup
-            # (workdir + PR-entry removal below) — warn and continue, preserving
-            # the pre-chokepoint behavior where a raw `gh` failure was tolerated.
+            # or unauthenticated.  The local lifecycle record is still written
+            # below: a GitHub failure never triggers destructive fallback.
             click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+    elif gh_pr_number and keep_github:
+        click.echo(f"Leaving GitHub PR #{gh_pr_number} open (--keep-github).")
 
-    # Remove workdir if exists (filesystem op, safe outside lock)
-    workdir = pr_entry.get("workdir")
-    if workdir and Path(workdir).exists():
-        shutil.rmtree(workdir)
-        click.echo(f"Removed workdir: {workdir}")
-
-    # Remove PR from list and update active_pr under lock
-    target_id = pr_id
-
+    # Record the closure (or drop the entry with --remove) under the lock.
+    # Workdir, branch and every file in the workdir stay untouched — cleanup
+    # is a separate, explicit operation (`pm pr cleanup`, `--resources`).
     def apply(data):
-        data["prs"] = [p for p in (data.get("prs") or []) if p["id"] != target_id]
-        if data.get("project", {}).get("active_pr") == target_id:
-            remaining = data.get("prs") or []
-            data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            return  # removed concurrently — nothing left to close
+        if remove:
+            data["prs"] = [p for p in (data.get("prs") or [])
+                           if p["id"] != pr_id]
+        else:
+            pr["status"] = "closed"
+            _record_status_timestamp(pr, "closed")
+        if data.get("project", {}).get("active_pr") == pr_id:
+            remaining = [
+                p for p in (data.get("prs") or [])
+                if (p.get("status") or "pending") not in ("merged", "closed")
+            ]
+            data["project"]["active_pr"] = (
+                remaining[0]["id"] if remaining else None)
 
-    store.locked_update(root, apply)
-    click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
+    updated = store.locked_update(root, apply)
+
+    if not remove and store.get_pr(updated, pr_id) is None:
+        # Another process removed the entry between our load and the lock.
+        click.echo(f"PR {pr_id} was removed concurrently; nothing to close.",
+                   err=True)
+        trigger_tui_refresh()
+        return
+
+    if remove:
+        click.echo(f"Removed registry entry {pr_id}: "
+                   f"{pr_entry.get('title', '???')} (branch and workdir kept)")
+    else:
+        click.echo(f"Closed {display_id}: {pr_entry.get('title', '???')} "
+                   f"(status: closed)")
+        kept = ["registry entry"]
+        if pr_entry.get("branch"):
+            kept.append(f"branch '{pr_entry['branch']}'")
+        if pr_entry.get("workdir"):
+            kept.append(f"workdir '{pr_entry['workdir']}'")
+        click.echo(f"  Kept: {', '.join(kept)}")
+
+    # A closed PR blocks its dependents forever (only `merged` satisfies a
+    # dependency): name them so the block is visible, but never rewrite them.
+    dependents = [
+        p for p in (updated.get("prs") or [])
+        if pr_id in (p.get("depends_on") or [])
+        and (p.get("status") or "pending") not in ("merged", "closed")
+    ]
+    if dependents:
+        names = ", ".join(
+            f"{_pr_display_id(p)} ({p.get('title', '???')})"
+            for p in dependents)
+        click.echo(
+            f"Warning: {len(dependents)} dependent PR(s) remain blocked by "
+            f"{display_id}: {names}", err=True)
+
     trigger_tui_refresh()
 
 

@@ -366,8 +366,12 @@ def sync_from_github(
             elif gh_state == "CLOSED":
                 new_status = "closed"
             elif gh_state == "OPEN":
-                # Preserve "qa"/"sign_off" — local refinements of in_review
-                if old_status in ("qa", "sign_off"):
+                # Preserve "qa"/"sign_off" — local refinements of in_review —
+                # and the terminal "closed" record.  `pm pr close` is
+                # non-destructive: a PR closed with --keep-github (or whose
+                # `gh pr close` failed) is still closed locally, and a sync
+                # must not silently un-close it.
+                if old_status in ("qa", "sign_off", "closed"):
                     continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:
