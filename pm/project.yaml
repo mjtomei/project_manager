@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T17:23:52.756277+00:00'
+  updated_at: '2026-10-28T18:10:00.459867+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17102,6 +17102,29 @@ prs:
       fails on master behaviour pr-181, unrelated).'
     created_at: '2026-10-28T17:23:52Z'
     last_edited: '2026-10-28T17:23:52Z'
+  - id: note-0db6fa9
+    text: 'Review loop c0c9 i2 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace/out-of-range/non-UTF-8/empty-argv/exec-window
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount,
+      pane discovery) plus the session-scoped restart state. No defect in the pidfile/IPC
+      path. Fixed the session-less hole in the scoping added by QA S22: a caller with
+      no session name (pm _tui outside tmux, or a mount whose tmux lookup failed)
+      treated a marker/breadcrumb naming ANOTHER session as its own and consumed it
+      (resolve_mount_trigger(None) deleted another session''s marker; consume_breadcrumb
+      consumed another session''s breadcrumb). has/clear_merge_restart_marker now
+      treat a scoped marker as not-mine when the caller has no session (unscoped legacy
+      markers still apply); consume_breadcrumb leaves a scoped breadcrumb for its
+      owner whenever the owner does not match (including a session-less mount) and
+      normalizes a ~N suffix on the owner. Separately, consume_breadcrumb called data.get()
+      without checking the parsed JSON is an object, so a corrupt-but-valid breadcrumb
+      ([] / null / bare string) raised AttributeError out of the mount; it is now
+      dropped like any unreadable breadcrumb. 4 new tests in tests/test_breadcrumb_review_loop.py,
+      all verified to fail against the pre-fix implementation. Full suite 4169 passed,
+      1 skipped; the 42F/36E are the container''s pre-existing git/network failures
+      (test_signoff_integration, test_merge_publish, test_sync_merge_integrity, test_git_ops).
+      Relevant modules: 748 passed.'
+    created_at: '2026-10-28T18:10:00Z'
+    last_edited: '2026-10-28T18:10:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
