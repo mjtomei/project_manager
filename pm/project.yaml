@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T03:07:44.623966+00:00'
+  updated_at: '2026-10-28T03:56:54.346984+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15012,6 +15012,36 @@ prs:
       markdown on the path). No user-visible message changed this iteration. (2026-10-28T03:07:14Z)'
     created_at: '2026-10-28T03:07:00Z'
     last_edited: '2026-10-28T03:07:44Z'
+  - id: note-eeb5bb6
+    text: 'Review loop e44d i1 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace
+      races, unqueue rollback, picker spinner abort, autostart dispatch, on_unmount
+      ownership) and found no defect in the signalling, capability, takeover, or queue-rollback
+      logic. One real gap fixed in the pidfile KEY: `pm_core/tui/app.py::current_session_name()`
+      used a bare `tmux display-message -p "#{session_name}"`, which resolves against
+      tmux''s "current client" (most recently active), not the TUI''s own pane. With
+      a second client attached to another pm session the TUI would claim THAT session''s
+      pidfile, and since I8 makes the claim''s session name authoritative for the
+      TUI''s life, every caller (which resolves the session from $TMUX_PANE via _find_tui_pane
+      -> tmux.get_session_name) would then find no pidfile and IPC would be silently
+      dead (autostart: owner_unavailable). Same pitfall _pin_popup_body already pins
+      $S for. current_session_name() now delegates to tmux_mod.get_session_name()
+      (pane-targeted, popup-aware); a failed lookup yields no claim rather than a
+      claim under the wrong key. `_run_shell` stays imported in app.py as a deliberate
+      re-export (tests/test_tui_imports.py::test_app_reexports_run_shell). 3 new tests
+      in TestSessionName (pane-targeted lookup, None outside tmux, None on lookup
+      failure); the pane-targeted one verified to fail against the pre-fix implementation.
+      Spec impl.md I7 + new E17 + test item 30. Cosmetic: named the `result.message
+      or ...` fallback in autostart._request. No user-visible message changed this
+      iteration, so the i3/i6 QA expectations still hold. Non-blocking, left as-is:
+      autostart._resolve_owner still reports a mid-claim empty pidfile as "stale pidfile"
+      rather than "starting" (deliberate, spec I1); helpers.trigger_tui_command remains
+      production-dead (documented bool API); `_atomic_write` can still leave a hidden
+      `.<pidfile>.<pid>.tmp` if SIGKILLed mid-publish. Full suite: 3913 passed, 1
+      skipped (pytest 8.4.2; env -u PM_HOST_HOME PATH=/usr/bin:/bin PYTHONPATH=/workspace,
+      markdown on the path).'
+    created_at: '2026-10-28T03:56:54Z'
+    last_edited: '2026-10-28T03:56:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
