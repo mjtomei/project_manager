@@ -22,8 +22,12 @@ caller-side process-identity validation plus a spinner abort. See
 - The action picker (prefix+P popup) — actions routed as `tui:` commands
   go through the same queue, then the `queued…` spinner
   (`_wait_for_tui_command`).
+- `pm tui view|send|restart` — drive the TUI pane from the CLI; these
+  resolve the pane from the registry (which can be stale) and `restart`
+  can write the shared `~/.pm/merge-restart` marker.
 - On-disk state the user can inspect: `~/.pm/tui-<session>.pid` (now
-  JSON), `~/.pm/tui-<session>.cmd-queue`, `~/.pm/debug/<tag>.log`.
+  JSON), `~/.pm/tui-<session>.cmd-queue`, `~/.pm/merge-restart`,
+  `~/.pm/debug/<tag>.log`.
 
 ## Requirements
 
@@ -204,6 +208,42 @@ caller-side process-identity validation plus a spinner abort. See
   legacy capability refusal, dead-pid cleanup, claim takeover/refusal,
   no-op signal guard) pass against the fixed code
 
+### R17 — `pm tui view|send|restart` never target a dead pane
+
+- **GIVEN** a TUI that has exited while the pane registry still records
+  its old pane as the session's `tui` role
+- **WHEN** the user runs `pm tui view`, `pm tui send …`, or
+  `pm tui restart`
+- **THEN** the command resolves a *live* `pm _tui` pane in the same
+  session when one exists, and otherwise reports "No TUI pane found" with
+  a non-zero exit — never an empty frame with success, never a raw tmux
+  "can't find pane" traceback
+- **THEN** a hand-started TUI that is not yet in the pane registry is
+  still found when the user names its session explicitly (`-s <session>`)
+- **THEN** pane resolution never crosses sessions: a command for one
+  session never targets another session's live TUI (and `pm autostart`
+  keeps reporting the named session's own stale pidfile rather than
+  falling through to another session)
+
+### R18 — Restart preserves state only when asked, and never leaves a stale marker
+
+- **GIVEN** a TUI with auto-start targets (and/or review-loop state) set
+- **WHEN** the user runs `pm tui restart --breadcrumb`
+- **THEN** the TUI restarts in place and `pm autostart list` still shows
+  the targets afterwards
+- **WHEN** the user instead runs a plain `pm tui restart`
+- **THEN** this is the documented *clean* restart: auto-start state is
+  not preserved (`pm autostart list` shows it off), and no
+  `~/.pm/merge-restart` marker is left behind
+- **GIVEN** no live TUI pane (it was killed, or the pane is gone)
+- **WHEN** the user runs `pm tui restart` / `pm tui restart --breadcrumb`
+- **THEN** the command exits non-zero with a "No TUI pane found" message
+  and leaves **no** merge-restart marker, so the next TUI start is a
+  clean start (it does not silently inherit state from a restart that
+  never happened)
+- **THEN** two actors restarting at once still produce exactly one
+  restart, one refreshed pidfile, and at most one consumed marker
+
 ## Setup
 
 All scenarios start from the TUI manual-testing setup: an editable pm
@@ -324,6 +364,17 @@ Partial passes must name the failing THEN clause and attach the evidence.
   `caps` to `[]`, run the command, then restore the descriptor (or restart
   the TUI). The observable is the "has not advertised its signal handlers
   yet" message and the pidfile being kept.
+- **A6 (resolved) — does `pm tui restart` preserve auto-start targets?**
+  No, by design: `pm tui restart --help` documents a plain restart as a
+  *clean* restart ("no state preserved") and only `--breadcrumb` writes
+  the merge-restart marker that `save_breadcrumb`/`consume_breadcrumb`
+  act on. QA scenario 17's story 2 asserted the opposite (plain restart
+  preserving targets) and therefore failed as written — a scenario-spec
+  mismatch, not a product defect. Scenarios must test the documented
+  split: plain restart drops the state, `--breadcrumb` preserves it. If
+  the product should instead preserve targets on a plain restart, that
+  is a separate product decision for another PR; it must not be asserted
+  here.
 
 ## Post-merge context (base `master@89e3c501`, 2026-10-28)
 
@@ -341,3 +392,25 @@ by the merge. Scenarios should therefore re-exercise the round trip on
 the merged build — including a policy flag and a TUI pane that is not in
 the session's active window — since the earlier QA rounds all ran on the
 pre-merge build.
+
+## Post-QA context (pane/restart fixes, 2026-10-28)
+
+After the first post-merge QA round, QA scenario 16 found a stale-pane
+defect (fixed in `b2d9b75b`): `pm tui view`/`send`/`restart` resolved the
+pane from the registry without checking that it was still alive, so a
+dead TUI's leftover `role="tui"` entry produced an empty frame with exit
+0 (`view`) or a raw tmux traceback (`send`). The fix adds
+`helpers._find_live_tui_pane`, used by those three commands only;
+`_find_tui_pane` is deliberately unchanged because `pm autostart` uses it
+to report the *right session's* stale pidfile — moving the liveness check
+inside it made autostart fall through to another session's live TUI.
+
+Review loop `af91` (`3b06d5c5`, `113f26d6`) then tightened two more
+stale-state paths: `trigger_tui_restart` now resolves through
+`_find_live_tui_pane`, writes the `merge-restart` marker only after a
+live pane is found, and removes it if the send fails; and
+`_find_live_tui_pane` with an explicit session but no registry `tui`
+entry now runs the live-pane scan instead of reporting "No TUI pane
+found". These are user-visible (R17/R18) and were not exercised by
+scenarios 1–18, which ran before the fixes. Scenarios 19+ must cover
+them.
