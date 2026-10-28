@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T11:30:46.547094+00:00'
+  updated_at: '2026-10-28T11:42:50.156439+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15553,6 +15553,33 @@ prs:
       (old parser vs v1 JSON pidfile) — always activate /tmp/pm-venv + PYTHONPATH=/workspace.'
     created_at: '2026-10-28T11:30:46Z'
     last_edited: '2026-10-28T11:30:46Z'
+  - id: note-6f4de58
+    text: 'QA scenario 10 (exec-restart window: Ctrl+R / pm tui restart) PASS 2026-10-28
+      on this branch. All five stories held: (1) `pm tui restart && pm pr add "Restart-window
+      add"` -> exit 0, "Created pr-07e931c ... (now active)", TUI redrew the new PR
+      with no manual refresh, pidfile kept pid 1763/starttime 7835531/["sigusr1","sigusr2"],
+      50 ms watcher saw no missing interval, one new `TUI mount: pid=1763` + one new
+      SIGUSR1 line, no stale/foreign strings; (2) `pm autostart list` immediately
+      after restart -> exit 0 baseline both times, queue 0 bytes; (3) picker `t` dispatched
+      mid-restart -> log shows action_restart + picker dispatch + SIGUSR2 + new mount
+      + `queue dispatch ... result=ok` in the same second, spinner `qa: queued…` ->
+      `✓ qa: done (INPUT_REQUIRED)` (the expected QA-spec-missing pause), qa windows
+      exist, PR in qa; (4) second `pm _tui` ~50 ms after C-r -> exact "another TUI
+      (pid 1763) already owns session ... refusing to start a second TUI" and EXIT=2,
+      live TUI kept rendering, one _tui process; (5) 40 `pm pr add` + 40 `pm autostart
+      list` + 5 restarts concurrently -> all rc=0, no forbidden messages, no watcher
+      MISSING, queue 0 bytes, TUI renders 45 PRs. Captures: /pm-captures/scenarios/10/story{1..5}-*.
+      ENVIRONMENT NOTE for future QA on this PR: the QA/planner windows the TUI creates
+      run `fake-claude` with the *TUI process* PATH, which here is /tmp/pm-venv/bin:...
+      and had no fake-claude, so every qa window died instantly (pane status 127)
+      and QA ended ERROR with no window - this looks like a QA-flow failure but is
+      pure setup. Fix before starting the session: ln -s ~/.local/bin/fake-claude
+      /tmp/pm-venv/bin/fake-claude (or put ~/.local/bin on the PATH the session is
+      started with). Also note tmux 3.2a in this container returns empty capture-pane
+      output for a window that has never been the active window - select the window
+      first.'
+    created_at: '2026-10-28T11:42:50Z'
+    last_edited: '2026-10-28T11:42:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
