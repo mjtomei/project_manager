@@ -1400,12 +1400,22 @@ def plan(scope: Scope | None = None) -> Outcome:
 
 # Opportunistic passes skip when another process is already reconciling (it
 # covers them); explicit releases and manual runs wait their turn.
-_SKIP_IF_BUSY = frozenset({"auto", "startup", "periodic", "keyring-pressure"})
+_SKIP_IF_BUSY = frozenset({"auto", "startup", "keyring-pressure"})
+# The periodic pass is the only scheduled full sweep, and the lock holder at
+# its tick is usually a short scoped release (pane exit, QA end) that does not
+# cover late leftovers.  Skipping would delay their reclaim by a whole extra
+# interval, so wait briefly on the TUI's background reaper thread instead.
+_PERIODIC_LOCK_WAIT = 60
 
 
 @runtime_domain_scope()
 def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
-    timeout = 0 if reason in _SKIP_IF_BUSY else 120
+    if reason in _SKIP_IF_BUSY:
+        timeout = 0
+    elif reason == "periodic":
+        timeout = _PERIODIC_LOCK_WAIT
+    else:
+        timeout = 120
     with container_mod._file_lock("reaper", timeout=timeout) as got:
         if not got:
             return Outcome(scope=scope.describe(), skipped=True, dry_run=dry_run)

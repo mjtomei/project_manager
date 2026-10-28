@@ -234,6 +234,32 @@ class TestDurableReleaseIntent:
         out = reaper.reconcile(reason="startup")
         assert out.removed == [NAME]
 
+    def test_periodic_pass_waits_out_a_short_busy_lock(self, fake_env):
+        # A scoped release holding the lock at the TUI's tick must not push
+        # the reclaim of a leftover out by a whole extra interval.
+        import threading
+        fake_env["containers"] = [_info(NAME)]
+        fake_env["panes"] = _owned(NAME)
+        with cm._file_lock("reaper", timeout=0) as got:
+            assert got
+            _release([NAME], reason="auto")  # leftover with a pending release
+        held, done = threading.Event(), threading.Event()
+
+        def hold():
+            with cm._file_lock("reaper", timeout=0):
+                held.set()
+                done.wait(5)
+        t = threading.Thread(target=hold)
+        t.start()
+        held.wait(5)
+        threading.Timer(0.5, done.set).start()
+        try:
+            out = reaper.reconcile(reason="periodic")
+        finally:
+            done.set()
+            t.join()
+        assert not out.skipped and out.removed == [NAME]
+
     def test_failed_removal_is_retried_and_visible(self, fake_env):
         fake_env["containers"] = [_info(NAME), _info(OTHER)]
         fake_env["panes"] = _owned(NAME, OTHER)
