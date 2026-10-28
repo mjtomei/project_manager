@@ -2965,6 +2965,12 @@ def _clear_waiting(state: QALoopState, idx: int,
     and its verification are discarded so the scenario is polled afresh.
     Without it the verdict stays as terminal evidence (the worker can no
     longer be polled).
+
+    ``held`` is deliberately left to the caller.  Clearing one scenario's
+    wait does not end the run's hold while another scenario still waits —
+    the hold loop recomputes it from ``waiting_for_input`` after each scan,
+    and the live loop clears it when it collects a follow-up (the reopened
+    result needs its own finalize).
     """
     state.waiting_for_input.discard(idx)
     state.waiting_input_sources.pop(idx, None)
@@ -2974,7 +2980,6 @@ def _clear_waiting(state: QALoopState, idx: int,
         state.scenario_verdict_sources.pop(idx, None)
         state.scenario_verdict_reasons.pop(idx, None)
         state.verified_scenarios.discard(idx)
-    state.held = False
 
 
 @dataclass
@@ -3128,6 +3133,13 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                           state.pr_id, live.get("status"))
                 return False
         scan = _scan_waiting_scenarios(state)
+        # The hold lasts exactly as long as something is still waiting.  A
+        # scan can clear one scenario terminally (no session/transcript, or
+        # relaunches exhausted) while another still waits; leaving ``held``
+        # False there would make the TUI's completion poll treat the run as
+        # finished, drop it from ``_qa_loops`` and delete the resume snapshot
+        # — orphaning the still-waiting scenario's follow-up.
+        state.held = bool(state.waiting_for_input)
         if scan.changed:
             # A repeated INPUT_REQUIRED (or a dropped attempt) changed the
             # persisted wait; keep the snapshot in step.  Otherwise the
@@ -3432,6 +3444,13 @@ def _poll_tmux_verdicts(
         scan = _scan_waiting_scenarios(state)
         if scan.changed:
             verdicts_changed = True
+        if scan.follow_ups or scan.dropped:
+            # The run is live again: a follow-up needs verification/finalize
+            # and a dropped attempt is handed back to the retry path.  A run
+            # adopted as held must therefore finalize this *new* result
+            # rather than skip the finalize pane as if it were still the
+            # already-finalized held one.
+            state.held = False
         for idx in scan.dropped:
             pending.add(idx)
         for idx, hit in scan.follow_ups.items():

@@ -440,3 +440,29 @@ covered by tests in `tests/test_qa_input_required.py` /
   the finalize pane's push/fast-forward verification);
   `test_resume_completed_snapshot_already_processed_is_not_renoted` covers
   the `completion_processed` guard.
+
+## 12. Implementation notes (review iteration 7)
+
+- **Clearing one waiting attempt must not end the hold for the others.**
+  `_clear_waiting` unconditionally set `held=False`.  A held run can clear
+  one scenario's attempt terminally (no session/transcript left to poll, or
+  its relaunch budget exhausted) while another scenario still waits; the
+  hold loop then kept polling, but the state was published as
+  (`running=False`, `held=False`, `INPUT_REQUIRED`).  The TUI's completion
+  poll reads exactly that as a finished run: it removes the state from
+  `_qa_loops` and deletes the resume snapshot, so the still-waiting
+  scenario's follow-up could never be collected (and a restart in the same
+  window would finalize the stale result instead of re-adopting the hold).
+  `_clear_waiting` now leaves `held` alone; `_hold_for_follow_up` recomputes
+  it from `waiting_for_input` after every scan (so the persisted snapshot
+  matches the real wait), and the live loop's `_poll_waiting` clears it when
+  it collects a follow-up or hands a dropped attempt back to the retry path
+  — that is the case a restored held run must re-finalize.
+- **Test coverage.** `test_terminal_clear_keeps_the_hold_for_other_waiting_scenarios`
+  pins the persisted `held=True` after one of two waiting scenarios is
+  cleared (it fails on the pre-iteration code), and
+  `test_follow_up_reopens_the_waiting_scenario` now starts from `held=True`
+  so it pins the live loop clearing the hold for the reopened result.
+- **Iteration 6 note correction.** The `held=False` on follow-up collection
+  now lives in `_poll_waiting`, not in `_clear_waiting` (see above); the
+  behaviour that note describes is unchanged.

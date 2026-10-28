@@ -463,6 +463,9 @@ class TestPollWaitingInLiveLoop:
                        "2026-05-13T14:33:00.000Z"))
         state = _waiting_state(path)
         state.verified_scenarios = {1}   # must not be inherited
+        # Adopted as a held run: collecting the follow-up must clear the
+        # hold so the reopened result gets its own finalize.
+        state.held = True
 
         with patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", return_value=100), \
@@ -633,6 +636,66 @@ class TestHoldForFollowUp:
              patch("pm_core.qa_loop._write_resume_file"):
             assert qa_loop._hold_for_follow_up(
                 state, pm_root, tmp_path / "status.json", False, 0, set()) is False
+
+    def test_terminal_clear_keeps_the_hold_for_other_waiting_scenarios(
+            self, tmp_path):
+        """Clearing one scenario's attempt (here: no session left to poll)
+        must not end the hold or persist ``held=False`` while another
+        scenario still waits.  The TUI's completion poll would otherwise drop
+        the run from ``_qa_loops`` and delete the resume snapshot, so the
+        remaining scenario's follow-up could never be collected."""
+        a = QAScenario(index=1, title="A", focus="a", window_name="w1",
+                       transcript_path=str(tmp_path / "a.jsonl"),
+                       session_id="")
+        b_path = _write(
+            tmp_path / "b.jsonl", PROMPT,
+            _assistant("Reason: need a decision\nINPUT_REQUIRED", "turn-ir",
+                       "2026-05-13T14:01:00.000Z"))
+        b = QAScenario(index=2, title="B", focus="b", window_name="w2",
+                       pane_id="%2", transcript_path=b_path,
+                       session_id="sid-b")
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.scenarios = [a, b]
+        state.scenario_verdicts = {1: VERDICT_INPUT_REQUIRED,
+                                   2: VERDICT_INPUT_REQUIRED}
+        state.waiting_for_input = {1, 2}
+        state.waiting_input_sources = {
+            1: {"pr_id": "pr-001", "loop_id": state.loop_id, "scenario": 1,
+                "session_id": "",
+                "transcript_path": str(tmp_path / "a.jsonl"),
+                "turn_id": "ir-a", "timestamp": "2026-05-13T14:01:00.000Z",
+                "line_index": 2, "head": None, "reason": "need a decision"},
+            2: {"pr_id": "pr-001", "loop_id": state.loop_id, "scenario": 2,
+                "session_id": "sid-b", "transcript_path": b_path,
+                "turn_id": "ir-b", "timestamp": "2026-05-13T14:01:00.000Z",
+                "line_index": 2, "head": None, "reason": "need a decision"},
+        }
+        state.held = True
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+
+        real_scan = qa_loop._scan_waiting_scenarios
+
+        def _scan_one_tick(s):
+            scan = real_scan(s)
+            s.stop_requested = True   # exit the hold after this tick
+            return scan
+
+        with patch("pm_core.qa_loop._scan_waiting_scenarios",
+                   side_effect=_scan_one_tick), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._write_status_file"):
+            assert qa_loop._hold_for_follow_up(
+                state, None, tmp_path / "status.json", False, 0,
+                set()) is False
+
+        assert state.waiting_for_input == {2}
+        # The published wait still describes a held run: a restart (or the
+        # TUI's next poll) re-adopts it instead of finalizing it as done.
+        snapshot = _load_resume_file(tmp_path)
+        assert snapshot["held"] is True
+        assert snapshot["waiting_for_input"] == [2]
 
 
 # ---------------------------------------------------------------------------
