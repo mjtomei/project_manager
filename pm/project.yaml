@@ -14561,7 +14561,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T01:12:34.634973+00:00'
+  updated_at: '2026-10-28T02:54:22.708062+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15394,6 +15394,32 @@ prs:
       passed, 1 skipped, 0 failed.'
     created_at: '2026-10-28T01:12:34Z'
     last_edited: '2026-10-28T01:12:34Z'
+  - id: note-4f0be23
+    text: 'QA S8 (2026-10-28, container mode, nested podman): PASS at d766d5c4. Registry
+      intact: pm pr list exit 0 / 501 lines / active marker on pr-e102089; pm pr show
+      x3 (Title/Status/Branch, no Workdir); pm pr note list 29 notes, first note-6245c1d,
+      last note-472d7a9, first 28 identical+ordered vs dfa769cb. Tests: both modules
+      238 passed (174 s); repro 1 passed at candidate, 1 failed at base 74462d76 with
+      assert 1 == 3 at tests/test_push_proxy.py:1170 (all three on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Container mode: impl + QA scenario on one PR got distinct workdir-keyed proxies
+      (same pm-push-proxy-<tag>-<pr>- prefix, tokens dbf479b8dca77bac / 46c02c37d67bf3fd),
+      exactly two, impl mount+pid unchanged by the QA start, both ls-remote exit 0,
+      and impl A -> qa B -> impl C each landed its own commit as a fast-forward with
+      neither clone local ref moved by the other push. Teardown (C-c, pm container
+      cleanup --pr, pm session kill) removed both containers, both proxy dirs, and
+      both daemons self-exited within 5 s. HARNESS PREREQUISITE for the next container-mode
+      run (the S5 note is insufficient here): the sandbox ~/.local/bin/git wrapper
+      has HOST_WORKDIR baked to this scenario host workdir and forwards push/fetch/pull/ls-remote
+      to the real host, which cannot resolve a container-local file:// upstream (/tmp/tmp.*/upstream.git)
+      - pm qa run then dies in the planner handoff with "does not appear to be a git
+      repository" / Result: INPUT_REQUIRED. A /tmp/pm-venv/bin/git shim does NOT help:
+      the pm-created pane PATH is ~/.local/bin:/home/pm/.local/share/pm/venv/bin:/usr/local/bin:...
+      and never includes /tmp/pm-venv/bin. What works: back up ~/.local/bin/git and
+      replace it with a shim that execs /usr/bin/git (restore afterwards). That does
+      not affect the containers own /run/pm-push-proxy wrappers. Also pm-dev:latest
+      is not prebuilt - run pm container build-base first (~4 min). Captures: /pm-captures/scenarios/8/{registry-surfaces,pr-notes,container-proxies}.'
+    created_at: '2026-10-28T02:54:22Z'
+    last_edited: '2026-10-28T02:54:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
