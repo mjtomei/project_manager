@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T13:34:42.742319+00:00'
+  updated_at: '2026-10-28T15:14:02.885470+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39377,6 +39377,25 @@ prs:
       the `pm pr sync` copy in `cli/pr.py`, `pm pr cleanup`, `pm pr list --workdirs`).'
     created_at: '2026-10-28T13:34:42Z'
     last_edited: '2026-10-28T13:34:42Z'
+  - id: note-01d39bd
+    text: 'review-loop 7a43 i1: closed two residual gaps, each with a test that fails
+      on the pre-fix code; the resolver / sign-off / merge-gate logic was re-reviewed
+      and found sound. (1) `_launch_review_window` quoted `project.base_branch` with
+      `shell_quote()`, and `shlex.quote(5)` raises `TypeError` — a hand-edited non-string
+      base branch killed the review window on the local backend before it was created;
+      it now reads as the default branch. (2) `auto_start.collect_status_inputs` published
+      `signoff.verdict` as-is, so a hand-edited mapping/list verdict reached the runs
+      popup as "routed {SIGNOFF_MERGE: True} stale (HEAD moved)" while `fresh_recorded_verdict`
+      already reads it as absent; the snapshot now goes through `signoff.verdict_of`.
+      Also filed pr-4ee6b33 (bugs) for the non-mapping top-level `project` crashes
+      found outside this PR scope (integration.target_for / run_check, the CLI readers,
+      store.save) and committed its record so the bug PR can start from master. Full
+      suite: 4183 passed, 1 skipped. Hand-driven fuzz of 3000 random malformed PR
+      states across 17 reader surfaces (summary, valid_for, unresolved_paths, carried,
+      contained_base, return text, evidence lines, sign-off block, invalidated block,
+      merge gate, router, justification, open/awaiting/verdicts): no crash.'
+    created_at: '2026-10-28T15:14:02Z'
+    last_edited: '2026-10-28T15:14:02Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
