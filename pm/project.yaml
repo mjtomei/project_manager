@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T02:35:22.655603+00:00'
+  updated_at: '2026-10-28T02:36:45.579036+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14746,6 +14746,28 @@ prs:
       edit --status qa before each signoff after a review.'
     created_at: '2026-10-28T01:59:51Z'
     last_edited: '2026-10-28T01:59:51Z'
+  - id: note-b9c4ce1
+    text: 'QA S62 (2026-10-28, real rootless Podman 3.4.4 private overlay store, unmodified
+      build-base passed, fake agents; evidence /pm-captures/scenarios/62/manifest.md):
+      NEEDS_WORK, fixed d3d1b4fc. (1) pm pr cleanup --resources removed 2 containers
+      15 ms apart while a pane-exit release listed them; podman ps failed twice ("does
+      not exist in database") and the single retake (5292bea9/71b8f7b8) failed closed
+      -> status false "push proxy …: runtime inventory unavailable; proxy preserved"
+      (cleared only by an unscoped reap; --session reap did not). list_containers
+      now retakes while each failure names a new vanished container (cap 6). Post-fix
+      live: release hit 2 distinct vanished objects and succeeded on attempt 3. (2)
+      review/sign-off --fresh with the old pane release gated at its first podman
+      info: launcher removes the old ID before the release records itself, so fcb5ce9c
+      forget finds nothing and status printed "<name>: owner release pending; retry
+      with pm container reap" (2/2, cleared ~3 s later). Status now hides current-domain
+      owner releases whose captured ID is absent from a complete inventory. Stories
+      2 (reap inventory retake exactly once, proxy stopped once) and 3 (young SIGKILLed
+      F removed, attaching E kept "launching (no pane yet)") held. Fixture: impl/review/signoff
+      fakes get no --session-id, so no transcripts exist under ~/.claude. Full suite
+      4305 passed; test_hook_events installer test fails only with the agent shell
+      PM_HOST_HOME exported (passes under env -i).'
+    created_at: '2026-10-28T02:36:45Z'
+    last_edited: '2026-10-28T02:36:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
