@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-0ef7f21
+  active_pr: pr-7824490
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T09:23:07.306984+00:00'
+  updated_at: '2026-10-28T10:37:36.422523+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38880,6 +38880,38 @@ prs:
       z t recovers, so the RQ56 text "t starts the re-run" is inaccurate.'
     created_at: '2026-10-28T09:23:07Z'
     last_edited: '2026-10-28T09:23:07Z'
+  - id: note-1e9ce11
+    text: 'S122 refine (HEAD b0579323/c774b5af): (1) A plain `pm tui restart` drops
+      auto-start (only --breadcrumb keeps it), and the resume scan runs every ~5 s
+      in a live TUI, so control ab2ac466 adopts a Ctrl-C pm qa run ~2 s after the
+      Ctrl-C (if the PR is in qa and nothing else started), not on a restart. Story
+      2 uses that as the deterministic control. (2) A full QA start kills leftover
+      qa-<pr>/qa-<pr>-sN windows as stale, and a Ctrl-C CLI run shares those names,
+      so "CLI windows untouched" only holds while nothing new starts. (3) The finalize-prompt
+      qa_status pointer only appears past 40 scenarios, so that Then was dropped.
+      The sign-off prompt names $CAP, not a qa_status path. Seeing the sign-off prompt
+      needs a fake config with no _all/signoff plus a stub claude through BASH_ENV.
+      (4) pm qa run always uses scenario index 1, so it may overwrite captures scenarios/1/verdict.md
+      of the full run (record it, possible finding). (5) Tick variant: ticks print
+      `running: qa` until the CLI qa-<pr> window is closed and 180 s have passed since
+      the CLI start.'
+    created_at: '2026-10-28T10:05:43Z'
+    last_edited: '2026-10-28T10:05:43Z'
+  - id: note-81420ee
+    text: 'QA S122 (2026-10-28, host, all fake-claude, HEAD b0579323=c774b5af vs controls
+      ab2ac466/fedcdd01 side by side; captures /pm-captures/scenarios/122, REPORT.md,
+      34 mp4): PASS, no code change. b402464e/c774b5af held: 5 REQA cycles each Ctrl-C
+      a pm qa run -> one Starting QA +0.5 s, one new workdir, 0 Resuming, CLI snapshot
+      sha unchanged, cycle 5 BLOCKED; 5 tui restarts never resume the CLI run (ab2ac466
+      resumed it at Ctrl-C+1 s and took Smoke Check PASS as C QA); z t run resumed
+      exactly once after restart, CLI untouched. d7e65156 held: sign-off prompts (tick
+      relaunch + TUI i) say Overall PASS / Example scenario after a CLI NEEDS_WORK
+      (fedcdd01: NEEDS_WORK / Smoke Check); ticks act on the full run NW for B and
+      launch one full run for B2 (fedcdd01: advanced: sign_off on the CLI PASS). Recorded:
+      pm qa run overwrites captures scenarios/1/verdict.md (index=1, also on master)
+      -> filed pr-7824490.'
+    created_at: '2026-10-28T10:37:36Z'
+    last_edited: '2026-10-28T10:37:36Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -41768,6 +41800,37 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T09:08:37.363689+00:00'
   updated_at: '2026-10-28T09:08:37.363689+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7824490
+  plan: bugs
+  title: 'Bug: pm qa run writes its captures to scenarios/1 and overwrites the full
+    QA run''s scenario 1 verdict that sign-off reads'
+  branch: pm/pr-7824490-bug-pm-qa-run-writes-its-captures-to-scenarios-1-a
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/qa.py qa_run builds QAScenario(index=1), and
+    qa_loop._persist_scenario_verdicts / _write_scenario_capture_file (plus the scenario
+    prompt.md writer) key captures by scenario index under $(pm qa captures-path <pr>)/scenarios/<n>/.
+    A pm qa run therefore overwrites scenarios/1/{verdict.md,scenario.json,prompt.md}
+    of the last full QA run (and the worker is told to save its recordings under the
+    same scenarios/1). Repro (QA S122 story 4, HEAD c774b5af and origin/master the
+    same): full QA run PASS with scenario 1 "Example scenario"; then `pm qa run smoke-check
+    --pr <pr>` -> Result: NEEDS_WORK; `cat $(pm qa captures-path <pr>)/scenarios/1/verdict.md`
+    now reads "# Scenario 1: Smoke Check / NEEDS_WORK". The sign-off prompt (after
+    d7e65156) correctly lists "Scenario 1 — Example scenario: PASS" but tells the
+    sign-off agent to read `$CAP/scenarios/<n>/verdict.md`, which now holds the CLI
+    instruction verdict, so the evidence contradicts the summary. Expected: instruction
+    runs write captures in their own namespace (e.g. scenarios/cli-<instruction>/
+    or a separate cli/ root) and never touch the full run''s scenario dirs. Evidence:
+    /pm-captures/scenarios/122 (pr-592e4bd) head/h4 captures-scenarios-1-verdict.md.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T10:19:05.147779+00:00'
+  updated_at: '2026-10-28T10:19:05.147779+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
