@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-28T21:46:34.457190+00:00'
+  updated_at: '2026-10-28T22:24:04.826085+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4425,6 +4425,29 @@ prs:
       (documented, avoids importing pm_core early).'
     created_at: '2026-10-28T21:46:34Z'
     last_edited: '2026-10-28T21:46:34Z'
+  - id: note-c3b32da
+    text: 'Review loop b972 i2 (commit b282d5ee) applied the i1 lesson to the legacy
+      rollout path and closed two smaller gaps; full suite 4123 passed / 1 skipped.
+      (1) _resolve_session_socket cleared PM_TMUX_SOCKET for a legacy session, so
+      later _tmux_cmd() calls ran without -S and the tmux binary followed $TMUX; from
+      inside another pm pane that named that pane''s private server, the legacy session
+      looked missing and _session_start would have created a duplicate on the wrong
+      server (reachable via the R5b foreign-HOME path). It now exports PM_TMUX_SOCKET=str(default_socket_path())
+      while still returning socket_path=None so nothing is propagated into the session.
+      Verified empirically with a disposable socket that tmux honours $TMUX when no
+      -S is given and reaches the real default server with -S /tmp/tmux-<uid>/default.
+      (2) pm session --print-connect used the unguarded _get_current_pm_session();
+      it now uses _resolve_start_session_name() like pm session itself. (3) pm qa
+      regression -s <session> requires a live TUI pane again (the runner drives that
+      pane); _find_tui_pane still returns the session name for history/frames, and
+      its docstring now says so. Also: clearer uid-refusal message, new tests for
+      the legacy export / uid refusal / _pick_existing_session. Unchanged non-blocking
+      notes: the uid check exists only on pm session, but the other paths fail closed
+      (tmux 0600 socket + server-access ACL) rather than reaching another user''s
+      server; the /tmp/pm-sessions literal stays duplicated in wrapper._mark_tmux_socket
+      and qa_status._tmux_argv by design (no early pm_core import).'
+    created_at: '2026-10-28T22:24:04Z'
+    last_edited: '2026-10-28T22:24:04Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -4438,7 +4461,7 @@ prs:
     qa_verification: provider:deepseek-flash
     qa_finalize: provider:deepseek-flash
     qa_interactive: provider:deepseek-flash
-    signoff: provider:claude-work
+    signoff: provider:claude-work-xhigh-249
     watcher: provider:deepseek-flash
     merge: provider:deepseek-flash
   session_effort:
