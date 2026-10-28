@@ -88,11 +88,16 @@ create/concretize/split); `exec`/`exit` failures retry through
 commits/evidence survive).  Before a `create` retry the previous attempt's
 leftover concretizer window and container are removed (the launcher
 re-clones the scenario dir, and `create_container` would otherwise reuse a
-running same-name container still mounting the deleted clone); the window
-is killed both by its recorded name and by the computed
-`_scenario_window_name(pr_data, index)` — a controller that died mid-launch
-may never have published `window_name`, and a missed window would leave two
-windows with the same name.  No worker ran in them, so no evidence is lost.
+running same-name container still mounting the deleted clone).  Both are
+removed under their *recorded* name and under the deterministic one the
+launcher computes (`_scenario_window_name(pr_data, index)` /
+`qa_container_name(pr_id, loop_id, index, session_tag)`): an attempt that
+died mid-launch may never have published `window_name`, and a create
+attempt that died after `container run` succeeded never publishes
+`container_name` at all — exactly the case the teardown exists for.  A
+missed window would leave two windows with the same name, and a reused
+container would keep serving the deleted clone.  No worker ran in them, so
+no evidence is lost.
 
 R6. **Surface the runtime cause.**  Add
 `container.classify_runtime_error(text, name=None) -> str | None` (the
@@ -114,7 +119,10 @@ Classifier recognises:
     unavailable", "pids limit", "pids.max"; a bare EAGAIN is too generic) →
     "container process (PID) limit exhausted — restart the container
     `<runtime> restart <name>` (files are kept)",
-  - container not running / missing.
+  - container not running / missing (`diagnose_exec_failure` names the
+    container's state or "container <name> not found"; the text classifier
+    itself stays quiet, since a "no such container" line is not a resource
+    cause and its stderr tail is passed through unchanged).
 Unclassified output is passed through (stderr tail).  Container-create
 failures in `_prepare_scenario` record `container create failed: <cause>`
 (classified `CalledProcessError.stderr` / `ContainerError` text) in

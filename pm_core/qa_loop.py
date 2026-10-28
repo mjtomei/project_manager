@@ -2355,9 +2355,13 @@ def _launch_scenarios_in_containers(
         except Exception as exc:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
+            # No container name in the remediation: a create failure usually
+            # means the container was never made, so "restart the container
+            # <name>" (the PID-exhaustion advice) would name something that
+            # does not exist.
             state.scenario_verdict_reasons[scenario.index] = (
                 "container create failed: "
-                + container_mod.launch_error_summary(exc, cname))
+                + container_mod.launch_error_summary(exc))
             return
 
         win_name = _scenario_window_name(pr_data, scenario.index)
@@ -2921,12 +2925,24 @@ def _poll_tmux_verdicts(
                 (scenario.window_name,
                  _scenario_window_name(pr_data, scenario.index))):
             _kill_windows_named(session, name)
-        if use_containers and scenario.container_name:
-            try:
-                container_mod.remove_container(scenario.container_name)
-            except Exception:
-                _log.debug("Could not remove stale container for scenario %d",
-                           scenario.index, exc_info=True)
+        if use_containers:
+            # Same reasoning for the container: a create attempt can die
+            # *after* ``container run`` succeeded (e.g. the setup-sentinel
+            # timeout), so ``container_name`` was never published and the
+            # recorded name is None exactly when the leftover exists.
+            # create_container would then reuse that running container,
+            # which still mounts the clone this retry deletes and re-creates.
+            cnames = (scenario.container_name,
+                      container_mod.qa_container_name(
+                          state.pr_id, state.loop_id, scenario.index,
+                          session_tag=state.session_tag))
+            for cname in dict.fromkeys(n for n in cnames if n):
+                try:
+                    container_mod.remove_container(cname)
+                except Exception:
+                    _log.debug("Could not remove stale container %s for "
+                               "scenario %d", cname, scenario.index,
+                               exc_info=True)
         scenario.window_name = None
         scenario.container_name = None
         scenario.pane_id = None

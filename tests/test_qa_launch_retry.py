@@ -28,6 +28,7 @@ from pm_core.qa_loop import (
     _SCENARIO_MAX_RETRIES,
     _SCENARIO_RETRY_MAX_DELAY,
     _VERDICT_GRACE_PERIOD,
+    _launch_scenarios_in_containers,
     _launch_scenarios_in_tmux,
     _load_resume_file,
     _poll_tmux_verdicts,
@@ -842,10 +843,44 @@ def test_create_retry_tears_down_previous_attempt(tmp_path):
     _run(state, tmp_path, patches, use_containers=True)
 
     assert killed == ["@1", "@3"]
-    assert removed == ["pm-qa-x-1"]
+    # The recorded name and the deterministic one the launcher computes: a
+    # create attempt that dies before publishing ``container_name`` still
+    # leaves a container behind under the computed name.
+    assert removed == [
+        "pm-qa-x-1",
+        container_mod.qa_container_name("pr-x", state.loop_id, 1),
+    ]
     assert seen_at_launch == [(None, None)]
     assert state.launch_retries[1]["kind"] == "create"
     assert state.scenario_verdicts[1] == VERDICT_PASS
+
+
+def test_container_create_failure_records_classified_cause(tmp_path):
+    """A container create failure (#239 keyring EDQUOT, or a host fork storm)
+    records the classified runtime cause so the retry/terminal reason names
+    it — without a "restart the container <name>" hint for a container that
+    was never created."""
+    sc = QAScenario(index=1, title="t", focus="f")
+    state = QALoopState(pr_id="pr-x")
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [sc]
+    exc = subprocess.CalledProcessError(125, ["podman", "run"],
+                                        output="", stderr=PID_STDERR)
+    with patch("pm_core.qa_loop._resolve_qa_model"), \
+         patch("pm_core.qa_loop.create_scenario_workdir",
+               return_value=(tmp_path / "repo", tmp_path / "scratch")), \
+         patch("pm_core.container.load_container_config"), \
+         patch("pm_core.container.create_qa_container", side_effect=exc), \
+         patch("pm_core.container._get_runtime", return_value="podman"):
+        _launch_scenarios_in_containers(
+            state, {}, {"id": "pr-x"}, "sess", None, str(tmp_path),
+            scenarios=[sc], write_status=False)
+
+    reason = state.scenario_verdict_reasons[1]
+    assert reason.startswith("container create failed: ")
+    assert "PID" in reason and "restart the container" in reason
+    assert "pm-qa-pr-x-" not in reason  # no name for a container never made
+    assert sc.window_name is None and sc.container_name is None
 
 
 def test_create_retry_kills_window_by_computed_name(tmp_path):
@@ -882,6 +917,42 @@ def test_create_retry_kills_window_by_computed_name(tmp_path):
 
     assert killed == ["@7", "@8"]
     assert state.launch_retries[2]["kind"] == "create"
+
+
+def test_create_retry_removes_container_that_was_never_published(tmp_path):
+    """A create attempt can die *after* ``container run`` succeeded (e.g. the
+    setup-sentinel timeout), so ``container_name`` was never published.  The
+    retry must still remove the container under its computed name:
+    create_container would otherwise reuse it, and it still mounts the clone
+    the retry deletes and re-creates."""
+    sc = QAScenario(index=1, title="t", focus="f")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    computed = container_mod.qa_container_name("pr-x", state.loop_id, 1)
+    removed: list[str] = []
+
+    def fake_launch(st, data, pr_data, session, repo_root, wd, pm_root=None,
+                    scenarios=None, write_status=True, **kw):
+        st.scenario_verdict_reasons[1] = (
+            "container create failed: setup timed out after 30s")
+
+    def on_tick(clock):
+        if removed:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.container.remove_container",
+              side_effect=removed.append),
+        patch("pm_core.qa_loop._launch_scenarios_in_containers",
+              side_effect=fake_launch),
+    ]
+    _run(state, tmp_path, patches, use_containers=True)
+
+    assert removed == [computed]
+    assert state.launch_retries[1]["kind"] == "create"
+    assert state.launch_retries[1]["cause"] == (
+        "container create failed: setup timed out after 30s")
 
 
 def test_create_failure_exhausts_budget_with_create_label(tmp_path):
