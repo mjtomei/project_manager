@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T11:28:55.638801+00:00'
+  updated_at: '2026-10-28T11:30:46.547094+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15536,6 +15536,23 @@ prs:
       state != Z.'
     created_at: '2026-10-28T11:28:55Z'
     last_edited: '2026-10-28T11:28:55Z'
+  - id: note-74b73d1
+    text: 'QA S12 (many callers, one queue) PASS 2026-10-28. Stories: 4 concurrent
+      `pm autostart add` (P1-P4) all rc 0/empty stderr, targets exactly once; duplicate
+      add race -> one `added:`, one `unchanged:`, exactly 2 complete dispatch+result=ok
+      lines; 2x6 tight loops (24 TUI-routed cmds) all rc 0, 12 targets once each,
+      12 add dispatch lines, no unknown verb/unknown_pr/ok=False; unwritable queue
+      (chmod 0444) -> rc 2 `Could not write to the TUI command queue: [Errno 13] Permission
+      denied: <Q>` for add AND list, no dispatch line, queue 0 bytes, TUI alive/pid
+      unchanged, restore -> added; extra: ENOSPC partial write via a full /dev/shm
+      with the queue symlinked to a 4094-byte file -> rc 2 `[Errno 28]`, file truncated
+      back to 4094 (no stray bytes), no dispatch line. 238 targeted tests pass (tests/test_tui_pidfile.py,
+      test_tui_cmd_queue_startup.py, test_autostart_multi_target.py). Captures: /pm-captures/scenarios/12/{01-concurrent-adds,02-duplicate-add,03-tight-loops,04-unwritable-queue,05-partial-write}.
+      Gotcha for the next run: `pm` invoked from the agent shell without PYTHONPATH=/workspace
+      runs /opt/pm-src (container default) and reports a live TUI as "stale pidfile"
+      (old parser vs v1 JSON pidfile) — always activate /tmp/pm-venv + PYTHONPATH=/workspace.'
+    created_at: '2026-10-28T11:30:46Z'
+    last_edited: '2026-10-28T11:30:46Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
