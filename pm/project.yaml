@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T01:50:54.501120+00:00'
+  updated_at: '2026-10-28T02:15:24.161572+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38462,6 +38462,21 @@ prs:
       (ppid 1).'
     created_at: '2026-10-28T01:50:54Z'
     last_edited: '2026-10-28T01:50:54Z'
+  - id: note-bdc1702
+    text: 'QA S108 (2026-10-28, host, real claude 2.1.312 workers on acme router stub,
+      fake planner/verifier/finalizer/refiner; captures /pm-captures/scenarios/108,
+      REPORT.md): PASS on 239e2f04, no code change. RQ55 worker paths held live. (1)
+      TUI t run: s1 NEEDS_WORK + s2 window died in one tick, one QA stopped (F4) 5
+      s later, stopped qa_status keeps s1 NEEDS_WORK+reason; control 07cc00f3 leaves
+      s1 "" with the same verdict log line. (2) queued launch (cap 1, verify on, F5):
+      stopped status s1 PASS, s2/s3 queued; control 15e2a918 keeps PASS (verifying).
+      (3) same as (1) in a run adopted after pm tui restart; second restart resumes
+      nothing. (4) qa-run-bg driver + in-session and env -u TMUX tick loops: 210 running:
+      qa, 54 one-line Error rc 1, exactly one (relaunched), one new driver/qa dir,
+      relaunched run overall PASS. (5) no-stop cap-1 run: verdicts only move forward
+      on HEAD and 15e2a918 alike.'
+    created_at: '2026-10-28T02:15:24Z'
+    last_edited: '2026-10-28T02:15:24Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
