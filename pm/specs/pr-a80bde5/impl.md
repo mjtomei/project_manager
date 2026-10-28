@@ -120,11 +120,15 @@ R5b. **The follow-up verdict is read task-scoped.**  The waiter resolves the
     as its own follow-up, because the human prompt that answers it is a task
     boundary.
 
-R6. **Status reason** (`autostart_state._derive`): while `review.running` and
-    `verdict == INPUT_REQUIRED` and not `input_required`, the reason is
-    `review iteration N (INPUT_REQUIRED answered; follow-up running)`,
+R6. **Status reason** (`autostart_state._derive`): when `review.running` and
+    not `input_required` and the iteration's last recorded verdict is
+    INPUT_REQUIRED (`review.follow_up=true`), the reason is
+    `review iteration N (INPUT_REQUIRED answered; follow-up running)` with
     `state=running`.  An unresolved wait is unchanged:
-    `waiting / review INPUT_REQUIRED (iteration N)`.
+    `waiting / review INPUT_REQUIRED (iteration N)`.  While a resumed loop is
+    still deciding whether its recorded wait is adoptable
+    (`review.resuming=true`) the reason is `review resuming (iteration N)` —
+    neither a wait nor an answer is true yet (see the adopt-gate edge case).
 
 R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker all
     read `ReviewLoopState.input_required` (and the breadcrumb only serialises it
@@ -212,9 +216,19 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   succeeds, then sets it so a genuine wait is visible immediately.  Otherwise
   a restart with a dead pane/transcript reported `waiting / review
   INPUT_REQUIRED (iteration N)` for the whole adopt check.  (QA S9 story 5;
-  fixed in 09cadcee.)  Residual, documented and not a wait: for the sub-second
-  adopt check the row can read `review iteration N (INPUT_REQUIRED answered;
-  follow-up running)` before the resume reconciles it.
+  fixed in 09cadcee.)  During that check the wait is neither live nor answered,
+  so `run_review_loop_sync` sets `ReviewLoopState._adopting_wait` while the
+  decision is pending and clears it as soon as it is made;
+  `review_progress_input` then reports `resuming=true`,
+  `input_required=false`, `follow_up=false` and the reason reads
+  `review resuming (iteration N)`.  It must never read "INPUT_REQUIRED answered;
+  follow-up running" there, which would claim the user answered a question
+  nobody has been shown yet.  (QA S15 re-evaluation; fixed in 7280536b,
+  regressions `test_adopting_wait_is_not_reported_as_an_answered_follow_up` and
+  `test_restart_adopt_check_never_reads_as_follow_up_running`.)  Residual, not
+  a wait and not repainted: the TUI tech-tree widget keeps its pre-restart
+  frame until the first post-mount paint, which can land after the adopt line;
+  the status/runtime-state publication path never reports a pre-adopt wait.
 - The back-scan only counts a human prompt found *after* the INPUT_REQUIRED
   record.  If that record can't be found, the wait stays unanswered, so the
   iteration's own review prompt is never taken as the answer.  (Added in

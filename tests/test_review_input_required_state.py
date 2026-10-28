@@ -678,12 +678,19 @@ class TestRestartAdoption:
         review = autostart_state.review_progress_input(st)
         assert review["resuming"] is True
         assert review["follow_up"] is False
-        assert _status(st)[:2] == ("running", "review resuming (iteration 2)")
+        state, reason, published = _status(st)
+        assert (state, reason) == ("running", "review resuming (iteration 2)")
+        # The adopt check is published as its own flag, not only as the
+        # reason text: a status reader must not have to parse the string.
+        assert published["resuming"] is True
+        assert published["follow_up"] is False
         # Once the check is over and the pane adopted, the wait is live.
         st._adopting_wait = False
         review = autostart_state.review_progress_input(st)
         assert review["resuming"] is False
         assert review["follow_up"] is True
+        _, _, published = _status(st)
+        assert published["resuming"] is False and published["follow_up"] is True
 
     def test_restart_adopt_check_never_reads_as_follow_up_running(self, env):
         """The sub-second adopt check after a restart must not publish

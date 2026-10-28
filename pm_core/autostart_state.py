@@ -617,6 +617,10 @@ def build_status(inp: dict) -> dict:
                 "running": bool(review.get("running")),
                 "input_required": bool(review.get("input_required")),
                 "follow_up": bool(review.get("follow_up")),
+                # A resumed loop still deciding whether its recorded wait is
+                # adoptable: neither a wait nor an answer.  Published so a
+                # status reader never has to string-match the reason.
+                "resuming": bool(review.get("resuming")),
             } if review else None),
             "qa": ({
                 "planning": bool(qa.get("planning")),
