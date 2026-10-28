@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T02:49:15.822896+00:00'
+  updated_at: '2026-10-28T03:30:17.208596+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26034,6 +26034,27 @@ prs:
       hang) remains subsumed by this PR i2.'
     created_at: '2026-10-28T02:49:15Z'
     last_edited: '2026-10-28T02:49:15Z'
+  - id: note-4d0f6af
+    text: 'Review-loop 9b1b i2 (42666a7f): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), planner stop ordering and the pr-8efa789
+      merge coordination all hold under adversarial tracing. Fixed a documentation
+      drift: three comments still described STOPPED as "a user stop before any plan
+      existed" although a stop during execution that leaves every scenario unverdicted
+      also ends in STOPPED (stopped_clean, i2/73ea40b9) — qa_loop.VERDICT_STOPPED,
+      autostart_state._derive and qa_loop_ui._on_qa_complete now name both phases.
+      Comments only, no behaviour change. Full suite: 3807 passed, 1 skipped; 54F+17E
+      reproduce in the known environment groups (12 markdown-module, 1 hook-installer,
+      39 git-env in test_merge_publish/test_signoff_integration), none in files this
+      PR touches. Residuals unchanged: verdict-recovery-response-timeout (1 h) can
+      retire a silently-busy worker; a poller that starts while its session is already
+      idle (review adoption) is bounded only by overall_timeout/pane death; a recovery
+      nudge can land in a permission hold that begins during an open episode. pr-f2fee05
+      (verifier re-check hang) remains subsumed by this PR i2 change. verify-s10-followup.md
+      stays untracked (scenario-authoring scratch). (2026-10-28)'
+    created_at: '2026-10-28T03:30:17Z'
+    last_edited: '2026-10-28T03:30:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
