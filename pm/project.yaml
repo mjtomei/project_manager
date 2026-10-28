@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T00:51:57.339498+00:00'
+  updated_at: '2026-10-28T01:21:14.132072+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14881,6 +14881,39 @@ prs:
       not two competing TUIs).'
     created_at: '2026-10-28T00:51:57Z'
     last_edited: '2026-10-28T00:51:57Z'
+  - id: note-94a0537
+    text: 'Review loop 4060 i4 (2026-10-28): re-reviewed the whole pidfile/IPC path
+      (claim/takeover, caps gating, pidfd delivery, zombie/empty/binary/whitespace
+      races, picker spinner abort, autostart dispatch, on_unmount ownership) and found
+      no defect in the signalling, capability, or takeover logic. Two robustness gaps
+      fixed: (a) `_unqueue_line` only rolled back a line that was still the queue
+      file''s *suffix*, so a concurrent caller appending after ours pinned our failed
+      command into the queue and a later drain ran a command the user was told was
+      not applied (the i3 rollback invariant). It now matches whole lines by value
+      under the same flock: our line is removed wherever it sits, every other line
+      is kept byte-for-byte, a later command that merely *ends* with ours (`pm qa
+      pr-1` for `qa pr-1`) is never sliced, and a line the TUI already drained makes
+      the rollback a no-op. (b) `claim_tui_pidfile` keyed its mid-claim wait on the
+      attempt index (`attempt < _CLAIM_EMPTY_RETRIES`), so after two stale-file unlink
+      rounds an empty pidfile was unlinked with no wait at all — reopening the two-TUI
+      race A2 closes. The wait is now keyed on the file being empty with its own budget
+      (`_CLAIM_MAX_ATTEMPTS = _CLAIM_EMPTY_RETRIES + 4`), so a peer''s just-created
+      file always gets the full 2 x 50 ms. New tests: our line removed from the middle
+      while a later line survives; suffix-of-a-longer-line never sliced; already-drained
+      no-op; empty-file-after-stale-rounds claim (verified it fails against the pre-fix
+      attempt-indexed wait). Spec impl.md I3/A2/tests 12,20 updated. Full suite: 3892
+      passed, 1 skipped, 1 failed — tests/test_hook_events.py::test_installer_writes_standalone_receiver,
+      which also fails on origin/master (verified in this container; pre-existing,
+      unrelated). Pushed 850c01c6. Non-blocking observations left as-is: `helpers.trigger_tui_command`
+      is production-dead (kept as the documented bool API); `autostart._resolve_owner`
+      keeps its own liveness+zombie checks (spec I1) and reports a mid-claim empty
+      pidfile as "stale pidfile" rather than "starting up"; `_atomic_write` can leave
+      a `.<pidfile>.<pid>.tmp` behind if the process is SIGKILLed mid-publish (hidden
+      name, no `tui-*.pid` glob matches it). Evidence unchanged: /pm-captures/impl/{pre-fix,post-fix,failing-test,live-tui}
+      still accurate — this iteration touches only the queue-rollback path and the
+      claim wait.'
+    created_at: '2026-10-28T01:21:14Z'
+    last_edited: '2026-10-28T01:21:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
