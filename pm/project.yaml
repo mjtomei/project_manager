@@ -31560,6 +31560,23 @@ prs:
       not failed.'
     created_at: '2026-10-28T07:54:07Z'
     last_edited: '2026-10-28T07:54:07Z'
+  - id: note-c5ea6c8
+    text: 'S6/R11 refine (2026-10-28): the merge-window INPUT_REQUIRED hold is not
+      drivable here — a local-backend project never opens a merge-<pr> window (local
+      merges fast-forward the main repo in place; that window exists only for a failed
+      post-merge main-repo update on a remote backend), and fake-claude has no merge-session
+      verdicts. Refined S6 covers: spec_pending ("spec generation awaiting input"),
+      a QA run that ended INPUT_REQUIRED (steady state is the recorded reason "last
+      QA run ended INPUT_REQUIRED (see QA note); press t / z t to re-run QA"; the
+      live "QA INPUT_REQUIRED — answer in QA window" reason paints only for the tick
+      or two before it is recorded), and a signed-off PR held for manual merge (add
+      with --wait-for-merge; fresh SIGNOFF_MERGE). Review answers need the interactive
+      stand-in (/pm-captures/impl/pre-fix/stub-claude.py) installed as claude first
+      on the pm session PATH with fake-claude beside it; fake-claude cannot answer
+      follow-ups. Sign-off needs a real branch commit and real git (PATH=/usr/bin
+      before ~/.local/bin) or SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED.'
+    created_at: '2026-10-28T08:00:02Z'
+    last_edited: '2026-10-28T08:00:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
