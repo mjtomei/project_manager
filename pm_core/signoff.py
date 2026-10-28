@@ -88,9 +88,22 @@ SIGNOFF_VERDICT_STYLES = {
 }
 
 
+def verdict_of(value) -> str | None:
+    """*value* when it is a non-empty verdict string, else ``None``.
+
+    ``project.yaml`` is hand-editable state: a recorded ``verdict`` that is
+    not a string is no verdict, so every reader (the CLI/TUI icons, the
+    driver's freshness check) reads it as absent.  A dict/list value reached
+    ``SIGNOFF_VERDICT_ICONS.get(...)`` / ``x in SIGNOFF_VERDICT_ICONS`` and
+    raised ``TypeError: unhashable type`` out of ``pm pr list``, ``pm pr
+    show``, the home window and the TUI tech tree's every render.
+    """
+    return value if isinstance(value, str) and value else None
+
+
 def signoff_verdict_icon(verdict: str | None) -> str:
     """Return the display icon for a sign-off *verdict* (empty if unknown)."""
-    return SIGNOFF_VERDICT_ICONS.get(verdict or "", "")
+    return SIGNOFF_VERDICT_ICONS.get(verdict_of(verdict) or "", "")
 
 
 def display_signoff_verdict(pr: dict) -> str | None:
@@ -105,7 +118,7 @@ def display_signoff_verdict(pr: dict) -> str | None:
         return latest_signoff_verdict(pr)
     if status in ("in_progress", "in_review", "qa"):
         rec = open_return(pr)
-        return rec.get("verdict") if rec else None
+        return verdict_of(rec.get("verdict")) if rec else None
     return None
 
 
@@ -287,7 +300,10 @@ def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
     integration-aware sign-off against the current base.
     """
     record = _mapping((pr or {}).get("signoff"))
-    verdict = record.get("verdict")
+    # A hand-edited non-string ``verdict`` is no verdict: returning it made
+    # the driver adopt a mapping/list as a fresh decision (and every icon
+    # lookup then raised ``TypeError: unhashable type``).
+    verdict = verdict_of(record.get("verdict"))
     sha = record.get("sha")
     if record.get("invalidated") or is_legacy_approval(record):
         return None
@@ -306,7 +322,7 @@ def latest_signoff_verdict(pr: dict) -> str | None:
     record = _mapping((pr or {}).get("signoff"))
     if record.get("invalidated"):
         return None
-    return record.get("verdict") or None
+    return verdict_of(record.get("verdict"))
 
 
 def invalidate_signoff(root: Path, pr_id: str, reason: str) -> None:

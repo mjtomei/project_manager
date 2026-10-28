@@ -59,7 +59,7 @@ VERDICT_STYLES = {
 # truth shared with `pm pr list`); re-exported here for the node renderer.
 from pm_core.signoff import (  # noqa: E402
     SIGNOFF_VERDICT_ICONS, SIGNOFF_VERDICT_STYLES, latest_signoff_verdict,
-    display_signoff_verdict,
+    display_signoff_verdict, verdict_of,
 )
 
 SPINNER_FRAMES = "◐◓◑◒"
@@ -136,7 +136,8 @@ def _signoff_verdict(pr: dict) -> str | None:
     ``pm_core.signoff``'s readers follow).
     """
     record = pr.get("signoff")
-    return record.get("verdict") if isinstance(record, dict) else None
+    return (verdict_of(record.get("verdict"))
+            if isinstance(record, dict) else None)
 
 
 def compute_neighbors(
