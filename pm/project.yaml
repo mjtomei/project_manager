@@ -38407,6 +38407,39 @@ prs:
       docstring), so the no-leak Then was read as no extra/orphan/test containers.'
     created_at: '2026-10-27T23:21:52Z'
     last_edited: '2026-10-27T23:21:52Z'
+  - id: note-c123cd0
+    text: 'Refine S105 (HEAD 15e2a918): (1) A review-loop iteration whose Claude ends
+      a turn on API errors without a verdict does NOT become ERROR: poll_for_verdict
+      keeps waiting on idle (review_loop ERROR only for launch exceptions; pane gone
+      = KILLED). Same as default provider, so RQ52''s ''ERROR for a review iteration
+      that produced no verdict'' over-states it. S105''s Then asserts no ERROR/route
+      line and continued polling. (2) auto-sequence only drives sign-off from status
+      sign_off/qa (skip_qa makes in_review PASS print ready_to_merge); use ''pm pr
+      edit <id> --status sign_off'' plus a pushed branch commit (else SIGNOFF_MERGE
+      coerced BLOCKED). (3) Unsafe bridge dir prints plain ''provider acme: cannot
+      set up the host route bridge: <dir> is not a directory owned by uid N. Remedy:
+      run pm provider test acme --container ...'' rc 1; no ''ContainerError'' text.
+      (4) Recovery without pm action needs the router back inside Claude Code''s own
+      retry window.'
+    created_at: '2026-10-27T22:09:58Z'
+    last_edited: '2026-10-27T22:09:58Z'
+  - id: note-f4b787e
+    text: 'QA S105 (2026-10-27, host + container, stubs, HEAD 15e2a918; captures /pm-captures/scenarios/105,
+      REPORT.md): PASS, no code change. RQ52 held for every workflow role. A routed
+      for every role: pm pr start, TUI zz d review loop, pm pr review and auto-sequence
+      sign-off ticks (pm pane + plain shell, 42 ticks) all launch with the router
+      down. No refusal, Error: or route line; panes show Claude ECONNREFUSED/ECONNRESET
+      retries; the loop stays at iteration 1 with no verdict. Router restart mid-retry
+      -> PASS / SIGNOFF_MERGE / ready_to_merge with no pm action. B (default provider)
+      only ever hit main; the bridge mount is on A containers only. Spec nit for the
+      next planner: in the S105 story 5 order, `pm pr start A --fresh` / `pm pr review
+      A --fresh` set A to in_progress/in_review before their route failure, so `pm
+      pr signoff A` hits the status gate ("expected qa or sign_off") instead of the
+      route check. Re-run `pm pr edit A --status sign_off` before the signoff step;
+      then it gives the expected single stderr line, rc 1. In this sandbox, pm container
+      build-base fails (sethostname EPERM), so build with `podman build --uts host`.'
+    created_at: '2026-10-27T22:30:07Z'
+    last_edited: '2026-10-27T22:30:07Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
