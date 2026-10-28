@@ -1087,6 +1087,77 @@ class TestPrNoteWritePaths:
         assert "- old -- dashes" in saved["template"]
         assert self._notes(root) == original
 
+    def test_a_noop_editor_save_does_not_launder_the_title_or_description(
+            self, tmp_path):
+        """A no-op save must not rewrite the title/description either.
+
+        The template is ASCII-ized for the editor and the parser restores
+        unicode per content field, so the round-trip is lossy in both
+        directions (a plain hyphen comes back as an en dash, an apostrophe as
+        a left single quote, ``--`` as an em dash).  Comparing the parse
+        against the *stored* value made every save look like an edit and
+        rewrote the field with the laundered text — silently corrupting the
+        PR's title and description on a save that changed nothing.
+        """
+        root = _make_state(tmp_path)
+        data = store.load(root)
+        pr = store.get_pr(data, "pr-001")
+        pr["title"] = "Don't break the -- dash"
+        pr["description"] = 'Uses a - b and "quotes".'
+        store.save(data, root)
+
+        def fake_editor(template, on_save):
+            on_save(template)      # the user saved without changing anything
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "No changes detected." in result.output
+        after = store.get_pr(store.load(root), "pr-001")
+        assert after["title"] == "Don't break the -- dash"
+        assert after["description"] == 'Uses a - b and "quotes".'
+
+    def test_a_real_note_edit_keeps_the_untouched_notes(self, tmp_path):
+        """Adding one note must not rebuild every other note.
+
+        The reconciliation matched a parsed line to a stored note by its
+        ``text``, but the parsed text has been through the template's lossy
+        ASCII round-trip and never equals a stored text containing a plain
+        hyphen, apostrophe or quote.  Every real edit therefore dropped the
+        untouched notes and re-created them: a new id, a fresh
+        ``created_at``, and the laundered text replacing the original.
+        """
+        original = [
+            {"id": "note-a", "text": "don't forget the base",
+             "created_at": "2026-01-01T00:00:00Z",
+             "last_edited": "2026-01-01T00:00:00Z"},
+            {"id": "note-b", "text": "alpha - beta",
+             "created_at": "2026-01-02T00:00:00Z",
+             "last_edited": "2026-01-02T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        def fake_editor(template, on_save):
+            # The user adds one bullet inside the notes section and saves.
+            on_save(template.replace("# Description",
+                                     "- a new handoff note\n# Description"))
+            return 0, True
+
+        with patch("pm_core.editor.run_watched_editor", fake_editor):
+            result = CliRunner().invoke(cli, ["-C", str(root), "pr", "edit",
+                                              "pr-001"])
+        assert result.exit_code == 0, result.output
+        notes = [n for n in self._notes(root) if isinstance(n, dict)]
+        by_id = {n.get("id"): n for n in notes}
+        # The untouched notes survive verbatim: same id, timestamps and text.
+        assert by_id["note-a"] == original[0]
+        assert by_id["note-b"] == original[1]
+        # The new note is added.
+        assert any(n.get("text") == "a new handoff note" for n in notes)
+        assert len(notes) == 3
+
 
 class TestPrNotesHandoffGuidance:
     """The ungated 'PR Notes — Handoff Channel' block must reach every work

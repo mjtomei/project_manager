@@ -862,6 +862,16 @@ tests):
     save is a true no-op: it neither invents an empty note for a member the
     template could not show nor launders the template's lossy unicode
     round-trip (a right quote came back as a left one) into the stored notes.
+    The same rule holds for the fields the template renders beside the notes:
+    the parsed `title` and `description` are compared against the *rendered*
+    form of the stored value (`_rendered_text`), not the stored value itself,
+    and a stored note is matched to a parsed bullet by that rendered form.  A
+    lossy round-trip (a plain hyphen came back as an en dash, an apostrophe as
+    a left single quote) never equals the stored text, so comparing against
+    the stored text made every save look like an edit — a no-op save rewrote
+    the title/description with the laundered text, and any real note edit
+    dropped every untouched note and re-created it with a new id, a fresh
+    `created_at` and the laundered text.
     The notes merge dedupes by a *string* id only, so a
     hand-edited non-hashable id (a list/mapping) reads as unkeyed instead of
     raising `TypeError` out of `merged.get`.  The note commands keep the ids

@@ -99,6 +99,22 @@ def _restore_unicode(text: str) -> str:
     return text
 
 
+def _rendered_text(text: str) -> str:
+    """What the edit template's parser reads back for the content *text*.
+
+    The template is ASCII-ized for the editor (``_to_editor_ascii``) and the
+    parser restores unicode per content field (``_restore_unicode``), so the
+    round-trip is lossy in both directions: a plain hyphen comes back as an en
+    dash, an apostrophe as a left single quote, ``--`` as an em dash.  A
+    stored value therefore never equals its own round-trip, so comparing a
+    parsed field against the *stored* value made every save look like an edit
+    and rewrote it with the laundered text.  Comparing against this form is
+    what makes "the user did not change it" and "the user changed it"
+    distinguishable (see ``_apply_pr_edit``).
+    """
+    return _restore_unicode(_to_editor_ascii(text))
+
+
 def _note_bullet_line(n) -> str:
     """One stored note as the edit template's bullet line.
 
@@ -197,17 +213,27 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         if not pr_entry:
             return
 
-        # Title
+        # Title.  Compared against what the template *renders* for the stored
+        # title, not the stored title itself: the editor's ASCII step and the
+        # parser's unicode restoration are lossy ("Don't" comes back as
+        # "Don‘t", "--" as "—"), so a save that did not touch the title used
+        # to look like an edit and rewrite it with the laundered text.  When
+        # the parse matches the rendered form, the stored value is kept
+        # verbatim.
         if parsed["title"] is not None:
-            if parsed["title"] != pr_entry.get("title", ""):
+            current_title = pr_entry.get("title", "")
+            current_title = (current_title
+                             if isinstance(current_title, str) else "")
+            if parsed["title"] != _rendered_text(current_title):
                 pr_entry["title"] = parsed["title"]
                 changes.append(f"title={parsed['title']}")
 
         # Description.  Hand-edited state: only text has whitespace to strip
-        # (a scalar would raise AttributeError out of the edit path).
+        # (a scalar would raise AttributeError out of the edit path).  Same
+        # rendered-form comparison as the title, so a no-op save is a no-op.
         current_desc = pr_entry.get("description")
         current_desc = current_desc if isinstance(current_desc, str) else ""
-        if parsed["description"] != current_desc.strip():
+        if parsed["description"] != _rendered_text(current_desc.strip()):
             pr_entry["description"] = parsed["description"]
             changes.append("description updated")
 
@@ -276,14 +302,21 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         # neither invent an empty note for each member the template could not
         # show nor launder its lossy unicode round-trip into the stored notes.
         block = "".join(_note_bullet_line(n) + "\n" for n in stored_notes)
-        rendered = [_restore_unicode(_to_editor_ascii(text))
+        rendered = [_rendered_text(text)
                     for text in (_note_bullet_text(line)
                                  for line in block.splitlines())
                     if text is not None]
         if parsed["note_texts"] != rendered:
+            # Keyed by the text the template *renders* for each note, not the
+            # stored text: the round-trip is lossy ("alpha - beta" comes back
+            # as "alpha – beta", "don't" as "don‘t"), so a stored text never
+            # matches its own parse.  Keying by the stored text made any real
+            # edit rebuild every untouched note — a new id, a fresh
+            # ``created_at``, and the laundered text replacing the original.
             old_by_text: dict[str, list] = {}
             for n in current_notes:
-                old_by_text.setdefault(_note_text(n), []).append(n)
+                old_by_text.setdefault(_rendered_text(_note_text(n)),
+                                       []).append(n)
             new_notes = []
             # Every id already stored is a key (``pm pr note edit/delete``
             # look notes up by id, and the integration resolver refuses a
