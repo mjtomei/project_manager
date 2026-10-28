@@ -14,6 +14,7 @@ the report / dashboard / merge gate bind to that run instead of trusting
 """
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -191,6 +192,44 @@ def test_manifest_survives_unreadable_file(tmp_path):
     root = _root(tmp_path)
     (root / captures.MANIFEST_NAME).write_text("{not json", encoding="utf-8")
     assert captures.read_manifest(root, pr_id="pr-x") is None
+
+
+def test_read_manifest_prefers_the_named_run_copy_over_a_newer_one(tmp_path):
+    """Resolution order is root -> ``qa_runs/<run_id>.json`` -> newest run
+    copy.  A caller that names its run must get *that* run's membership, not
+    the most recently written one — otherwise a resume (which re-asserts its
+    own ``loop_id``) could read a later run's membership while its scenario
+    records still name the resumed run (pr-1ae1d2d R1)."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    captures.write_manifest(root, pr_id="pr-x", run_id="run2",
+                            scenarios=[{"index": 2, "title": "two"}])
+    # Remove the root pointer so the fallback path is what answers.
+    (root / captures.MANIFEST_NAME).unlink()
+    # Pin the mtimes: the "newest copy" fallback must not depend on how
+    # quickly the two writes happened.
+    run1_copy = root / captures.RUNS_DIR_NAME / "run1.json"
+    run2_copy = root / captures.RUNS_DIR_NAME / "run2.json"
+    os.utime(run1_copy, (1000, 1000))
+    os.utime(run2_copy, (2000, 2000))
+
+    named = captures.read_manifest(root, pr_id="pr-x", run_id="run1")
+    assert named["run_id"] == "run1"
+    assert [s["index"] for s in named["scenarios"]] == [1]
+    # Without a run id the newest copy wins.
+    assert captures.read_manifest(root, pr_id="pr-x")["run_id"] == "run2"
+
+
+def test_write_manifest_requires_a_pr_and_run(tmp_path):
+    """No manifest without an owner: an empty ``pr_id``/``run_id`` would
+    produce a record no reader can validate (``read_manifest`` treats a
+    manifest naming no PR as absent), so the writer refuses instead."""
+    root = _root(tmp_path)
+    assert captures.write_manifest(root, pr_id="", run_id="run1") is None
+    assert captures.write_manifest(root, pr_id="pr-x", run_id="") is None
+    assert captures.read_manifest(root, pr_id="pr-x") is None
+    assert not (root / captures.RUNS_DIR_NAME).exists()
 
 
 def test_write_manifest_ignores_non_mapping_members(tmp_path):
@@ -917,6 +956,36 @@ def test_signoff_qa_block_warns_when_status_run_differs(tmp_path, monkeypatch):
     head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
     assert "run1" in head and "run2" in head
     assert "Warning" in head
+
+
+def test_signoff_qa_block_warns_when_membership_disagrees(tmp_path,
+                                                          monkeypatch):
+    """A manifest whose scenario set differs from the live status listing is
+    the "a later run replaced this evidence" case: the head must name both
+    sets so the session can see the evidence and the status disagree, rather
+    than trusting whichever it reads first (pr-1ae1d2d R7)."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"},
+                                       {"index": 2, "title": "two"}])
+    status = tmp_path / "qa_status.json"
+    status.write_text(json.dumps({
+        "pr_id": "pr-x", "run_id": "run1", "overall": "PASS",
+        "scenarios": [{"index": 0, "title": "Interactive",
+                       "verdict": "interactive"},
+                      {"index": 1, "title": "one", "verdict": "PASS"},
+                      {"index": 3, "title": "three", "verdict": "PASS"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+
+    assert "disagree" in head
+    # Both sets are named (scenario 0 is excluded from the status side).
+    assert "lists scenarios 1, 2" in head
+    assert "lists 1, 3" in head
 
 
 def test_signoff_qa_block_says_membership_unbound_without_manifest(
