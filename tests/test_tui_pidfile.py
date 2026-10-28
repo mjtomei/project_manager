@@ -646,6 +646,44 @@ class TestSubmitCommand:
         assert not pidfile.exists()
         assert not queue.exists()
 
+    def test_command_is_written_as_one_line(self, ipc_paths, start_fake_tui):
+        """A line break inside a command must not split it in the drain.
+
+        The TUI drains with ``str.splitlines`` while ``_unqueue_line``
+        splits on ``b"\\n"``; if a ``\\r``/``\\x0b``/U+2028 survived in the
+        command, the drain would see two commands and a failed submission
+        could never be rolled back (it would be applied by a later drain).
+        """
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+
+        res = helpers.submit_tui_command(
+            SESSION, "qa pr-1\rpm pr done\x0bX\u2028Y")
+        assert res.ok is True
+
+        raw = queue.read_bytes()
+        assert raw.count(b"\n") == 1
+        assert raw.endswith(b"\n")
+        # What the drain would see, and what the rollback splits on, agree.
+        assert len(raw.decode("utf-8").splitlines()) == 1
+        assert raw.decode("utf-8").rstrip("\n") == "qa pr-1 pm pr done X Y"
+
+    def test_non_ascii_command_is_rolled_back(self, ipc_paths,
+                                              start_fake_tui, monkeypatch):
+        """Writer and rollback must agree byte-for-byte under any locale."""
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        monkeypatch.setattr(helpers, "_signal_tui",
+                            lambda *a, **k: "permission denied")
+
+        res = helpers.submit_tui_command(SESSION, "qa pr-1 — naïve ✓")
+
+        assert res.ok is False
+        assert res.reason == "signal_error"
+        assert queue.read_bytes() == b""
+
 
 class TestUnqueue:
     """Rolling back a queued line after the signal fails."""

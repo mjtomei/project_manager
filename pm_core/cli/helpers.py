@@ -732,6 +732,22 @@ def trigger_tui_reload(session: str | None = None) -> bool:
 trigger_tui_refresh = trigger_tui_reload
 
 
+# Every character ``str.splitlines`` treats as a line boundary.  A queued
+# command must be exactly *one* line: the TUI's drain splits the file with
+# ``splitlines`` while ``_unqueue_line`` splits on ``b"\n"``, so a line
+# break left inside a command would make the drain see several commands
+# and the rollback see one — a submission reported as failed could then
+# never be taken back and would be applied by a later drain.
+_LINE_BREAKS = str.maketrans({
+    c: " " for c in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+})
+
+
+def _queue_line(cmd: str) -> str:
+    """Normalize *cmd* into a single ``\\n``-terminated queue line."""
+    return cmd.strip().translate(_LINE_BREAKS) + "\n"
+
+
 def _unqueue_line(queue: Path, line: str) -> None:
     """Best-effort removal of the line this process just appended.
 
@@ -749,7 +765,7 @@ def _unqueue_line(queue: Path, line: str) -> None:
     """
     import fcntl
 
-    target = line.rstrip("\n").encode()
+    target = line.rstrip("\n").encode("utf-8")
     try:
         with open(queue, "r+b") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -791,12 +807,16 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
     if tui_pidfile.CAP_COMMAND not in desc.caps:
         return _missing_cap_result(session, desc, tui_pidfile.CAP_COMMAND)
     queue = _tui_command_queue_for_session(session)
-    line = cmd.strip().replace("\n", " ") + "\n"
+    line = _queue_line(cmd)
     try:
-        with open(queue, "a") as f:
+        # Binary append: the bytes are then exactly ``_unqueue_line``'s
+        # UTF-8 target (it compares bytes), and a caller whose locale is
+        # not UTF-8 can neither garble the command nor defeat the
+        # rollback below.
+        with open(queue, "ab") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
-                f.write(line)
+                f.write(line.encode("utf-8"))
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:

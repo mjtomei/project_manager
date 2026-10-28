@@ -1418,8 +1418,10 @@ class ProjectManagerApp(App):
             # write+signal so a racing append can't slip a line in
             # between our read and truncate (which would silently drop
             # it — the appender's later SIGUSR2 would then drain an
-            # empty file).
-            with open(queue, "r+") as f:
+            # empty file).  Read as UTF-8 (the appender writes UTF-8
+            # bytes) and never raise on a garbled queue: a bad line must
+            # not escape a signal handler.
+            with open(queue, "r+", encoding="utf-8", errors="replace") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     content = f.read()

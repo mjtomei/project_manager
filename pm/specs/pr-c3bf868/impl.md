@@ -114,6 +114,17 @@ I3. The command queue file must exist before caps are published (a caller
     concurrent caller appending after ours cannot pin our failed command
     into the queue; every other line is kept byte-for-byte.
 
+    One command is exactly one line on both sides of that protocol: the
+    writer (`_queue_line`) replaces every character `str.splitlines`
+    treats as a boundary (`\r`, `\x0b`, `\x0c`, `\x1c`-`\x1e`, `\x85`,
+    U+2028, U+2029) with a space, and appends the line as UTF-8 *bytes*.
+    Without that, a `\r` inside a command would make the drain see two
+    commands while the `b"\n"`-splitting rollback saw one (so a reported
+    failure could never be taken back), and a non-UTF-8 caller locale
+    would make the written bytes differ from the rollback's UTF-8 target.
+    The drain reads UTF-8 with `errors="replace"` so a garbled queue can
+    never raise out of a signal handler.
+
 I4. `trigger_tui_reload` keeps its fire-and-forget behavior and its
     `refresh_home` side effect (existing tests assert the kick). It now
     returns `True` only when SIGUSR1 was actually delivered and `False`
@@ -357,6 +368,13 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
 26. `on_mount` takes its session name from the launcher's claim
     (`_session_for_claim`) so the published descriptor is the claimed one;
     without a claim it falls back to `current_session_name()` (I8).
+27. the queued command is exactly one line for both sides of the
+    protocol (I3): a command containing `\r`, `\x0b` and U+2028 is
+    written as a single `\n`-terminated line whose `splitlines()` length
+    is 1 and whose content is the sanitized command (pre-fix it drained
+    as four commands while the rollback saw one); and a non-ASCII
+    command is rolled back byte-for-byte, proving the writer and
+    `_unqueue_line` agree on UTF-8 regardless of the caller's locale.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;
