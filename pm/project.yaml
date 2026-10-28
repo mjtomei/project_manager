@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T17:53:24.670625+00:00'
+  updated_at: '2026-10-28T18:33:17.850887+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39528,6 +39528,46 @@ prs:
       guard skips).'
     created_at: '2026-10-28T17:53:24Z'
     last_edited: '2026-10-28T17:53:24Z'
+  - id: note-c71da6a
+    text: 'review-loop ef5b i2: closed five residual gaps, each with a test that fails
+      on the pre-fix code; the resolver/apply/merge-gate design was re-reviewed independently
+      (a second pass fuzzed resolve_project_yaml for ours/theirs symmetry over 4000
+      random id-keyed documents — no asymmetric conflict, no asymmetric data, byte-identical
+      repeats) and found sound. (1) integration.valid_for accepted a truthy non-string
+      base_sha/candidate_tree, so a hand-edited record read as a conflict-free check
+      and the driver recorded a SIGNOFF_MERGE the merge gate then refused for a missing
+      binding, instead of the router coercing it to SIGNOFF_BLOCKED with the reason;
+      both revisions now go through revision_of. (2) The UI-cursor exemption took
+      the new base''s value even when a side held a malformed mapping/list, writing
+      it into the merged document (the preservation check exempts that path); a value
+      that is not a string is not a cursor and keeps the normal conflict rule, like
+      the bookkeeping timestamps. (3) compact() bounded a resolution''s paths list
+      without recording the real length, and a sign-off bounce applies the stored
+      (compact) record, so it reconciled only the paths it could see and aborted mid-merge
+      (unexpected conflict in ...) on the first missing one; compact now records paths_total
+      (carried through re-compaction, digest stable) and _apply_resolution refuses
+      a partial resolution up front. (4) The clean apply path checked HEAD only at
+      the top of the locked section; it now re-verifies it immediately before git
+      merge like the resolved path, so a concurrent commit is reported as HEAD_MOVED_APPLYING
+      instead of being merged and refused afterwards by the tree comparison. (5) Incidental,
+      same class as i1''s workdir fix: _resolve_repo_dir passed a hand-edited project.repo
+      straight to Path() (and .get() on a scalar project), and on the merge-detection
+      path the exception is swallowed by the per-PR handler so the merge was finalized
+      WITHOUT the integrity check pr-2e06289 exists to enforce; a non-mapping project
+      / non-string repo now reads as absent (cwd fallback) — the helper is master-owned,
+      fixed here because this PR''s new sync fallback calls it. Assessed and deliberately
+      not changed: the in-lock carry-forward cannot refresh a resolution already carried
+      pre-lock (pm''s own paths cannot produce two resolutions at one HEAD — a merge
+      commit''s parents fix the base); _repo_lock proceeds after its 300 s bound (deliberate,
+      and every pm-internal apply takes it); the libyaml-gated dumper can differ across
+      environments (documented opt-in, refuses safely rather than applying a different
+      tree); lexicographic max of bookkeeping timestamps with mixed UTC offsets (pm
+      writes uniform +00:00; bookkeeping only, no content loss). Full suite: 4339
+      passed, 1 skipped, the 12 test_markdown_render failures are this container''s
+      missing markdown package (4339 + the 6 new tests = the 4345 the previous iteration
+      recorded).'
+    created_at: '2026-10-28T18:33:17Z'
+    last_edited: '2026-10-28T18:33:17Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
