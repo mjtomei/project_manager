@@ -89,3 +89,21 @@ def test_error_without_scenarios_keeps_the_error_only_view():
     # No empty table header / Overall line when there is nothing to show.
     assert "Scenario" not in out
     assert "Overall:" not in out
+
+
+def test_stopped_overall_is_coloured_like_the_other_non_results():
+    """STOPPED is a terminal verdict and must not render as plain text.
+
+    Every other verdict has a colour; an uncoloured ``Overall: STOPPED``
+    reads like a renderer gap rather than the deliberate "no result" state
+    a user stop produces.  Dim matches the other non-results (queued,
+    interactive).
+    """
+    status = {"pr_id": "pr-abc", "scenarios": [], "overall": "STOPPED",
+              "error": ""}
+
+    raw = _render(status, 0, 20, 100)
+
+    overall_line = next(l for l in raw.splitlines() if "Overall:" in l)
+    assert overall_line.split("Overall:", 1)[1].lstrip().startswith("\033[2m")
+    assert "STOPPED" in _plain(status)

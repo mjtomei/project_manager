@@ -53,6 +53,10 @@ _VERDICT_COLORS = {
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
     "queued": _DIM,
+    # A run the user stopped before it produced a result (no plan, no
+    # scenario verdict, or no finalize outcome).  Dim like the other
+    # non-results so it cannot read as a missing/unknown verdict.
+    "STOPPED": _DIM,
     # Sign-off router verdicts (shown when a sign-off verdict surfaces here).
     "SIGNOFF_MERGE": _GREEN,
     "SIGNOFF_REQA": _YELLOW,

@@ -129,7 +129,10 @@ TUI wiring: `NO_VERDICT` icons/styles in `review_loop_ui`, `watcher_ui`,
 Both the review-loop and watcher stop lines escape the error text before it
 reaches the Rich-markup log line (the text is arbitrary — exception messages,
 agent output — and an unescaped `[...]` would be parsed as a style tag and
-dropped from the log line).
+dropped from the log line). The QA status dashboard colours the QA-side
+terminal verdicts (`qa_status._VERDICT_COLORS`), including the `STOPPED`
+teardown state — dim like the other non-results (`queued`, `interactive`),
+so a cancelled run's `Overall:` line cannot read as a renderer gap.
 
 ### R4 — Apply consistently across review, watcher, QA
 
@@ -236,8 +239,15 @@ safe when a caller knows hook refreshes terminate). The count is
 **consecutive**: it restarts whenever a nudge is sent (or a genuinely newer
 turn is seen), so a session that answers every nudge cannot later be retired
 with `no_progress` for a handful of refreshes spread across many turns.
-`retry_prompt` / `resume_request` must be a single line: it is delivered
-through `tmux send-keys`, so embedded newlines would submit partial input.
+`retry_prompt` / `resume_request` are delivered through `tmux send-keys`, so
+embedded newlines would submit partial input. The tracker therefore enforces
+the single-line invariant itself (`MissingOutputRecovery._message`): a
+multi-line or padded request is collapsed with `" ".join(msg.split())` and
+logged, and an *empty* request falls back to the built-in wording rather
+than pressing Enter on whatever is already in the session's input box (a
+queued user draft). This makes the `retry_prompt` knob — which by definition
+carries an original, multi-line prompt — safe to use; the in-tree callers
+still pass the short single-line resume/outcome requests.
 
 `poll_for_verdict` grows the kwargs in R1 and, after a non-matching idle:
 
@@ -541,7 +551,10 @@ unbounded.
   message; output → outcome message that names no specific verdict; every
   built request (outcome / resume / both block variants / the verifier's
   two) is a single `tmux send-keys` line (a newline would submit partial
-  input); a provider error is only recognised on the turn's final line (a
+  input); a caller-supplied multi-line `retry_prompt` is collapsed to one
+  line, and an empty request falls back to the default wording (an empty
+  send would press Enter on a queued draft); a provider error is only
+  recognised on the turn's final line (a
   quoted error line among findings is `no_verdict`); a
   genuine newer turn during settle defers and resets; a hook refresh of the
   same turn defers without resetting and exhausts with `no_progress`

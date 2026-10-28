@@ -354,14 +354,42 @@ class MissingOutputRecovery:
 
     # -- messages -----------------------------------------------------------
 
+    def _default_message(self, kind: str) -> str:
+        if kind == "no_output":
+            return build_resume_request()
+        return build_outcome_request(self.verdicts)
+
     def _message(self, kind: str) -> str:
+        """The recovery request to send, guaranteed to be a single line.
+
+        Every request goes through ``tmux send-keys``, which submits on a
+        newline: a multi-line message would deliver only its first line and
+        leave the rest as typed input in the session.  The in-tree builders
+        already return one line, but ``retry_prompt`` / ``resume_request`` /
+        ``outcome_request`` are arbitrary caller text — a caller re-sending
+        its original (multi-line) prompt would otherwise be truncated — so
+        the invariant is enforced here rather than left to every caller.
+        """
         override = (self._resume_request if kind == "no_output"
                     else self._outcome_request)
         if override is None:
-            if kind == "no_output":
-                return build_resume_request()
-            return build_outcome_request(self.verdicts)
-        return override() if callable(override) else override
+            message = self._default_message(kind)
+        else:
+            message = override() if callable(override) else override
+        if "\n" in message or "\r" in message or message != message.strip():
+            _log.warning("%s: collapsing a multi-line recovery request to a "
+                         "single line (session %s)", self.log_prefix,
+                         self.session_id)
+            message = " ".join(message.split())
+        if not message:
+            # An empty request would press Enter on whatever is already in
+            # the session's input box — a queued user draft.  Fall back to
+            # the built-in wording instead of submitting it.
+            _log.warning("%s: empty recovery request — using the default "
+                         "wording (session %s)", self.log_prefix,
+                         self.session_id)
+            return self._default_message(kind)
+        return message
 
     # -- main entry point ---------------------------------------------------
 
@@ -669,9 +697,11 @@ def poll_for_verdict(
     a recovery message reaches the session (default: tmux ``send-keys``).
 
     Note that a recovery message is delivered through ``tmux send-keys`` as
-    one line: a multi-line *retry_prompt* would submit partial input, which
-    is why the in-tree callers use the short resume/outcome requests (the
-    original prompt is already in the session's context).
+    one line.  A multi-line *retry_prompt* / request is collapsed to a single
+    line by :meth:`MissingOutputRecovery._message` (an embedded newline would
+    submit partial input), but the in-tree callers still use the short
+    resume/outcome requests — the original prompt is already in the
+    session's context.
     """
     from pm_core import tmux as tmux_mod
     from pm_core import hook_events

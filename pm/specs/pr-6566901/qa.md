@@ -48,9 +48,12 @@ from stealing an attached client's focus while user starts still focus the QA
 window; prefers a *running* watcher in the manager's type lookup so the
 watcher toggle cannot start a second instance over the live one; escapes the
 `NO_VERDICT` reason in the review/watcher log lines (a bracketed
-`watcher[<type>]` prefix was being eaten as Rich markup); and recreates a QA
+`watcher[<type>]` prefix was being eaten as Rich markup); recreates a QA
 window that was killed between runs with a live main pane plus a pruned pane
-registry.
+registry; and keeps scenarios still waiting on the concurrency cap visible as
+*queued* on the status dashboard instead of overwriting the status file with
+the current launch batch (a queued row used to render as *pending* and vanish
+until the next rewrite).
 
 ## Setup (cross-cutting)
 
@@ -275,6 +278,15 @@ of starting another run. When instead the planner produces no complete plan,
 Then the loop pauses after one `INPUT_REQUIRED` (no second pass, no review
 loop launched) and the run can be restarted once the planner is fixed.
 
+**R18 — Scenarios waiting on the concurrency cap stay visible as queued.**
+Given a plan with more scenarios than `qa-max-scenarios` allows in flight,
+When the run launches its first batch (and again on every queued relaunch),
+Then the status dashboard lists every scenario: the in-flight ones with their
+live verdict/verifying state, and the ones still waiting on the cap as
+`queued` (not `pending`, not missing), with the progress line counting them;
+as slots free the queued rows dequeue in order and show their own verdicts
+and reasons.
+
 ## Edge cases
 
 * **Idle inside the grace window.** A verdict that arrives before the review
@@ -290,7 +302,14 @@ loop launched) and the run can be restarted once the planner is fixed.
   error is asked to *resume the same task*, not to emit an outcome; partial
   edits and queued input are preserved and completed work is not replayed.
   (Not deterministically drivable with the fake; note it in the report if a
-  pane can be made to end on such a line.)
+  pane can be made to end on such a line.) The *empty turn* half of the same
+  classification is drivable: a fake configured with no preamble text writes
+  an empty assistant turn, which must also be treated as "no output" and get
+  the resume request rather than an outcome request.
+* **Queued rows never disappear.** A scenario still waiting on
+  `qa-max-scenarios` must render as `queued` on the dashboard at launch and
+  on every relaunch — a row that flips to `pending` (or vanishes) is the
+  status-file overwrite defect.
 * **Pane death during recovery.** If the session's pane disappears mid-recovery
   the loop ends (pane-gone path) rather than hanging or raising.
 * **A hook refresh of the same turn** must not extend the settle window
@@ -333,6 +352,15 @@ loop launched) and the run can be restarted once the planner is fixed.
   already be in its next turn.
 * A recovery nudge can land in a permission hold that begins during an open
   episode (queued input).
+* Auto-start's target set is per-TUI-session: the breadcrumb that restores it
+  is only written on a merge-restart, so a plain TUI restart starts with
+  auto-start off. A scenario that needs the scheduler to run after a restart
+  must re-enable auto-start for the PR (the `STOPPED` hold itself lives in
+  runtime state on disk, so it survives the restart). Also, a review loop
+  that ended `NO_VERDICT` is not remembered as "do not retry" once its loop
+  entry is gone (restart): re-enabling auto-start for an `in_review` PR may
+  start a fresh review loop — the same phase retried, not a phase advance,
+  so it is within R8 rather than a failure.
 
 ## Pass / Fail criteria
 
@@ -399,3 +427,28 @@ concurrent run is disturbed.
     per-role reason in the status dashboard and the run's error block. The
     bracketed `watcher[<type>]` prefix is part of the reason text and must
     survive markup rendering.
+13. **Driving the "no output at all" branch.** A fake configured with an
+    explicit per-type entry whose `verdicts` are empty and whose `preamble` is
+    0 writes an empty assistant turn; the recovery classifies that as
+    `no_output` and sends the *resume* request ("…ended without any output
+    (for example a provider connection loss). Resume the same task in this
+    session…"), not the outcome request ("…Re-emit only your own conclusion…
+    exactly one of PASS / NEEDS_WORK / INPUT_REQUIRED…"). Because the fake
+    exits on input, the run then ends on the pane-gone path; assert the
+    request wording plus a bounded end, not a specific exhaustion reason.
+14. **The three settings are global files.** `pm set` writes
+    `~/.pm/settings/<name>`; `pm settings` prints the raw stored value. A
+    non-finite value written straight into that file is *listed* but ignored
+    by the loop (default used), so "the loop is still bounded" is the
+    observable, not a changed listing. `verdict-recovery-max-attempts` bounds
+    nudges, and with the fake the first nudge kills the pane, so an exact
+    "N nudges then exhaustion" count is not observable — assert the
+    *observable* budget effects: a sub-second settle produces a nudge where
+    the default produces none, and `0` restores the unbounded wait.
+15. **Auto-start state and restarts.** Auto-start targets/mode ride a
+    breadcrumb written only on a merge-restart; a plain TUI restart starts
+    with auto-start off. To observe the `STOPPED` hold across a restart,
+    re-enable auto-start for the PR after restarting — the hold is read from
+    runtime state on disk, so it must still apply. (See the Residuals note on
+    a `NO_VERDICT` review loop being retried once its in-memory entry is
+    gone.)

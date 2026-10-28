@@ -227,6 +227,34 @@ class TestMissingOutputRecovery:
 
         assert sent == ["ORIGINAL PROMPT"]
 
+    def test_multi_line_retry_prompt_is_collapsed_to_one_line(self, tmp_path):
+        """The ``retry_prompt`` knob accepts the original prompt verbatim.
+
+        Original prompts are multi-line, and a request is delivered through
+        ``tmux send-keys`` — which submits on a newline.  Sending it
+        unchanged would deliver only the first line and leave the rest as
+        typed input in the session, so the tracker collapses it.
+        """
+        rec, sent = _recovery(
+            tmp_path,
+            resume_request="Review this PR.\n\nRun the tests.\n  Then stop.",
+        )
+        transcript = _transcript_without_assistant(tmp_path)
+
+        rec.handle(str(transcript), ev_ts=1.0)
+
+        assert sent == ["Review this PR. Run the tests. Then stop."]
+
+    def test_empty_request_falls_back_to_the_default_wording(self, tmp_path):
+        """An empty request would press Enter on a queued user draft."""
+        rec, sent = _recovery(tmp_path, outcome_request="")
+        transcript = _transcript_with_assistant(tmp_path, "still thinking")
+
+        rec.handle(str(transcript), ev_ts=1.0)
+
+        assert len(sent) == 1
+        assert "standalone outcome" in sent[0]
+
     def test_exhausts_after_max_attempts(self, tmp_path):
         rec, sent = _recovery(tmp_path, max_attempts=2)
         transcript = _transcript_with_assistant(tmp_path, "still thinking")
