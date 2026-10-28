@@ -955,6 +955,11 @@ def resume_owned_elsewhere(resume_data: dict) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
+    except OverflowError:
+        # ``os.kill`` takes a C int; a corrupt snapshot holding a larger
+        # number raises OverflowError (not OSError) — and such a pid can
+        # never exist, so the run is orphaned and safe to resume.
+        return False
     except OSError:
         return True  # exists, owned by another user
     fields = _proc_stat_fields(pid)

@@ -291,6 +291,18 @@ def test_owner_pid_reused_by_unrelated_process_is_not_owner():
         other.wait()
 
 
+def test_out_of_range_owner_pid_does_not_raise():
+    """A corrupt snapshot must not crash the TUI's resume path.
+
+    ``os.kill`` takes a C int and raises ``OverflowError`` — not an
+    ``OSError`` — for a larger number, which used to escape
+    ``resume_owned_elsewhere``.  Such a pid cannot name a live process, so
+    the run reads as orphaned (resumable) rather than raising.
+    """
+    assert qa_loop.resume_owned_elsewhere({"owner_pid": 10 ** 20}) is False
+    assert qa_loop.resume_owned_elsewhere({"owner_pid": 2 ** 31}) is False
+
+
 def test_non_utf8_comm_on_recycled_pid_does_not_raise(monkeypatch):
     """``/proc/<pid>/stat`` carries 16 process-controlled bytes.
 

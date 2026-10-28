@@ -180,6 +180,11 @@ A2. *How is "exclusive ownership" made atomic without a lock file?*
     (corrupt/undecodable) is unlinked immediately. (Without the wait, a
     loser could delete the winner's just-created file and both TUIs would
     run, each `publish` overwriting the other's descriptor.)
+    Running out of attempts is **not** a conflict: every exhaustion path
+    is "the file never named a live TUI, but we could not remove it" (a
+    live sibling raises `TuiPidfileConflict` on the round that observes
+    it), so it raises `TuiPidfileUnavailable` — an `OSError` subclass —
+    and the TUI runs without external IPC (see E13).
 
 A3. *Where does the "clear error" go?* `pm _tui` redirects stderr to
     `tui-stderr.log`, so a stderr print is not visible in the pane.
@@ -265,6 +270,13 @@ E13. **~/.pm unwritable.** Claim I/O errors (`OSError`) are distinct from
     `TuiPidfileConflict`: the TUI logs a warning and keeps running without
     external IPC (previous behavior for a pidfile write failure), rather
     than refusing to start. `publish` failures are logged and swallowed.
+    The same rule covers the claim *giving up*: a stale pidfile it cannot
+    unlink (read-only `~/.pm`, a file owned by someone else) exhausts the
+    attempt budget without ever naming a live TUI, so it raises
+    `TuiPidfileUnavailable` (an `OSError`, not a conflict) and the TUI
+    runs without external IPC. Callers then read the leftover file as
+    stale and report/remove it, so the failure is visible in the CLI
+    instead of killing the TUI.
 E14. **Startup refusal must not clean up the sibling's files.** `on_unmount`
     removes the pidfile and queue only when this process holds the claim;
     a refused second TUI never unlinks files it does not own. If a
@@ -299,7 +311,12 @@ E16. **The target process's own `/proc` entry can be non-UTF-8.**
     numeric fields after the final `)`, both ASCII, are used). The
     identical latent bug in `pm_core/qa_loop.py::_proc_stat_fields`
     (the QA resume snapshot's recorded owner PID) is fixed the same way
-    — see the PR note for that incidental fix.
+    — see the PR note for that incidental fix. The same "a corrupt
+    snapshot must never raise" rule covers `resume_owned_elsewhere`'s
+    `os.kill(pid, 0)`: an out-of-range `owner_pid` raises
+    `OverflowError`, not `OSError`, and such a pid cannot exist, so it
+    now reads as orphaned (resumable) instead of escaping the TUI's
+    resume path.
 
 E17. **The pidfile key must be *our* pane's session, not tmux's "current
     client".** The pidfile is keyed by session name, and with I8 the
@@ -445,6 +462,16 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     tmux or when the tmux lookup fails. Verified to fail against the
     pre-fix bare-query implementation (which returns `None`/the wrong
     session under the same monkeypatches).
+31. a stale pidfile the claim cannot unlink (E13/A2) exhausts the
+    attempt budget and raises `TuiPidfileUnavailable`, an `OSError` that
+    is *not* a `TuiPidfileConflict`, naming the pidfile path — so the
+    launcher and `_install_reload_signal` log it and run without
+    external IPC instead of refusing to start. Verified to fail against
+    the pre-fix `TuiPidfileConflict` raise.
+32. an out-of-range `owner_pid` in a QA resume snapshot (E16) reads as
+    orphaned instead of raising `OverflowError` out of
+    `resume_owned_elsewhere`. Verified to fail against the pre-fix
+    `os.kill` call.
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;

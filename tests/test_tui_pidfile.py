@@ -414,6 +414,26 @@ class TestClaim:
         assert path.read_bytes() == b"abcdefgh"
         assert chunks == [3, 3, 2]
 
+    def test_unremovable_stale_file_degrades_instead_of_refusing(
+            self, tmp_path, monkeypatch):
+        """A stale file we cannot unlink must not take the TUI down.
+
+        Exhausting the claim rounds on a file that never named a live TUI
+        (an unwritable ``~/.pm``, a file owned by someone else) is not a
+        conflict: refusing to start would kill the whole TUI over a
+        pidfile problem (spec E13).  It is an ``OSError``, which the
+        launcher and ``_install_reload_signal`` log before continuing
+        without external IPC.
+        """
+        path = tmp_path / "tui-pm-test.pid"
+        path.write_text("garbage")
+        monkeypatch.setattr(tpf, "unlink_if_unchanged", lambda p, raw: False)
+        with pytest.raises(tpf.TuiPidfileUnavailable) as exc:
+            tpf.claim_tui_pidfile(path, SESSION)
+        assert isinstance(exc.value, OSError)
+        assert not isinstance(exc.value, tpf.TuiPidfileConflict)
+        assert str(path) in str(exc.value)
+
     def test_publish_updates_caps(self, tmp_path):
         path = tmp_path / "tui-pm-test.pid"
         claim = tpf.claim_tui_pidfile(path, SESSION)

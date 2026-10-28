@@ -95,6 +95,18 @@ class TuiPidfileConflict(RuntimeError):
     """A live TUI already owns the session's pidfile."""
 
 
+class TuiPidfileUnavailable(OSError):
+    """The pidfile could not be taken over; run without external IPC.
+
+    Raised when the claim gives up on a file that never named a live TUI
+    (a stale one it could not unlink, or one a peer keeps recreating).
+    That is *not* a conflict: refusing to start would take the whole TUI
+    down for a pidfile problem (E13), so this is an ``OSError`` — the
+    launcher and ``_install_reload_signal`` log it and continue without
+    external IPC.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Parsing
 
@@ -448,7 +460,10 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
     very process (``exec`` restart).  An *empty* file is first given a
     moment to be filled in by a peer that is between its ``O_EXCL``
     create and its first write; only then is it treated as stale.  A live
-    sibling TUI raises :class:`TuiPidfileConflict`.
+    sibling TUI raises :class:`TuiPidfileConflict`; a file that never
+    named a live TUI but could not be removed raises
+    :class:`TuiPidfileUnavailable` (an ``OSError``), so the caller runs
+    without external IPC instead of refusing to start.
     """
     pid = os.getpid()
     claim = TuiPidfileClaim(
@@ -515,8 +530,14 @@ def claim_tui_pidfile(path: Path, session: str) -> TuiPidfileClaim:
         finally:
             os.close(fd)
         return claim
-    raise TuiPidfileConflict(
-        f"could not claim TUI pidfile {path} for session {session!r}"
+    # Every exhaustion path is "the file never named a live TUI, but we
+    # could not remove it" — a live sibling raises the conflict above on
+    # the round that observes it.  Refusing to start would take the whole
+    # TUI down for a pidfile problem, so degrade to running without
+    # external IPC (E13); callers read the leftover file as stale.
+    raise TuiPidfileUnavailable(
+        f"could not take over TUI pidfile {path} for session {session!r}; "
+        f"continuing without external IPC"
     )
 
 
