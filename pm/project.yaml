@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T20:14:04.137155+00:00'
+  updated_at: '2026-10-28T20:22:39.254982+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -17248,6 +17248,51 @@ prs:
       not in /tmp/pm-venv.'
     created_at: '2026-10-28T20:13:58Z'
     last_edited: '2026-10-28T20:13:58Z'
+  - id: note-b90be69
+    text: 'QA scenario 23 (corrupt restart state) PASS 2026-10-28 on 1755a172, all
+      four triples, no production defect, no code changed. (1) Three corrupt autostart-resume.json
+      variants (bare array; wrong-typed session/run_id/targets/review_loops/watchers;
+      wrong-typed per-entry history) each restart in place: same pid 2766462, both
+      caps, board renders, no traceback in pane or log, breadcrumb deleted not re-read,
+      and `pm autostart list` answers through the TUI (exit 0, "Auto-start: off"/"No
+      auto-start targets.", queue 0 bytes). (2) `pm pr edit --title` after those restarts
+      reloads without restarting: new title on the board with no keypress, exactly
+      one `action: reload (state only)`, no new TUI mount/restart_app, queue 0. (3)
+      Undecodable `~/.pm/merge-restart` (ff fe 00 garbage): both plain restarts complete
+      in place with no traceback, marker absent after the first remount and after
+      the second, and after the SECOND plain restart auto-start is off with no resume-json;
+      rewriting the junk then `pm tui restart --breadcrumb` prints "Wrote merge-restart
+      marker for state persistence", restarts in place, leaves no marker, auto-start
+      still off. (4) Cross-session: B mounts with an A-owned breadcrumb -> B stays
+      off, file left byte-identical naming $SESSION_A, log "leaving breadcrumb for
+      session ... (this session is ...)"; then A mounts -> "Auto-start: targets /
+      pr-1b4c6be wait-for-merge A: Fix database migration", breadcrumb gone, no traceback,
+      and A keeps 2 panes/1 window so the blocked P2 launched nothing. Repro: tests/test_tui_pidfile.py
+      + tests/test_breadcrumb_review_loop.py = 174 passed; corrupt-state subsets 22
+      passed.
+
+
+      NEXT-RUN MECHANICS (important): (a) parallel QA scenarios share the real ~/.pm,
+      and during my first story-4 attempt another scenario''s GIVEN reset (`rm -f
+      ~/.pm/autostart-resume.json`) deleted my cross-session breadcrumb mid-test -
+      B logged "leaving breadcrumb for session pm-pm-A-..." yet the file was gone
+      18 s later, and it is stable when idle, so this is interference, not a product
+      bug. The only reliable way to test these global restart-state files while other
+      scenarios run is an isolated pm home: `HOME=<scratch>/home23b` (pm_home is Path.home()/.pm,
+      no env override) plus a private `PM_TMUX_SOCKET`; start the tmux server from
+      a shell with that HOME exported so panes inherit it. I re-ran all four stories
+      that way. (b) An undecodable merge-restart marker makes the FIRST plain restart
+      deliberately state-preserving (`action_restart: reason=merge_restart_marker`,
+      targets restored); the second plain restart is clean (`reason=user`, auto-start
+      off). That is R19 behaviour - do not "fix" it. (c) ffmpeg/agg are NOT installed
+      on this host; static aarch64 binaries can be copied from another scenario''s
+      /tmp/pm-s*/bin into your own scratch/bin. (d) `tmux send-keys -t pm-recorder
+      C-b d` leaks a stray "d" into the driving pane (seen as ^Gd in its transcript)
+      and broke a command; use `tmux detach-client -s <session>` to stop an asciinema
+      recorder. (e) captures: ~/.pm/sessions/project_manager-5b29c418/captures/pr-c3bf868/scenarios/23/{story1-corrupt-breadcrumbs,story2-pr-edit-reload,story3-corrupt-marker,story4-cross-session-breadcrumb/{partB-owner-B,partA-owner-A}}
+      - each with cast + mp4 + manifest + evidence.txt + transcripts.'
+    created_at: '2026-10-28T20:22:39Z'
+    last_edited: '2026-10-28T20:22:39Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
