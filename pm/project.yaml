@@ -38361,6 +38361,52 @@ prs:
       in pm/stub logs/TUI.'
     created_at: '2026-10-28T00:13:22Z'
     last_edited: '2026-10-28T00:13:22Z'
+  - id: note-87df7ad
+    text: 'S104 refine (2026-10-27, HEAD 15e2a918): after aed14224 the host route
+      bridge is (re)started only by ensure_host_bridge, which runs at a routed container
+      create/recreate (QA scenario create/dequeue, _ensure_scenario_container, impl/review/sign-off)
+      and by `pm provider test <r> --container` once the router answers. `pm provider
+      show` and the TUI provider list are host-only checks and never touch it. A QA
+      worker relaunch into a container that is still running never restarts a dead
+      bridge, and never adds a missing mount. A scenario container created while the
+      bridge dir is unsafe (symlink) gets NO /run/pm-route mount, so its refiner and
+      every relaunch fail `ensure` (rc 3, "socket ... is not mounted") until that
+      container is removed. The next retry then recreates it with the mount. With
+      qa-max-scenarios 1, a killed bridge mid-turn cannot be restarted by "the queued
+      scenario taking the freed slot", because the slot frees only after that worker
+      finishes. So S104 restarts it with `provider test --container` and, separately,
+      kills it during a fake verifier delay so the dequeue restarts it. QA panes have
+      no remain-on-exit, so the ensure stderr disappears with the pane.'
+    created_at: '2026-10-27T22:11:14Z'
+    last_edited: '2026-10-27T22:11:14Z'
+  - id: note-8316400
+    text: 'QA S104 (2026-10-27, container mode podman 3 slirp4netns, real claude 2.1.312
+      vs main + acme router stubs; captures /pm-captures/scenarios/104, REPORT.md):
+      PASS on 15e2a918, no code change. RQ52/RQ54 held live. (1) Router down at t:
+      R refiner showed Claude ECONNRESET retries, router restarted about 30 s later,
+      recovered with no pm action; no route wording anywhere. (2) Bridge killed while
+      R s2 worker held: client-gone, Claude retried, provider test --container restarted
+      the bridge (same path, new birth) and the retry reached the router through the
+      same container. (3) Bridge killed idle: the s2 dequeue restarted it; s1 ensure
+      rc 0. (4) Symlinked bridge dir: s3 container created without the mount, refiner
+      exits with pm route: not mounted, ordinary retry ladder; after restore + podman
+      rm, the retry-3 relaunch recreated it with the mount -> PASS. Stories 2-4 ran
+      on s2 because s1 finished before the hold. Minor: unsafe-mount warnings logged
+      twice (once per routed role in _route_mounts). Scenario containers stay Up after
+      the verdict by design.'
+    created_at: '2026-10-27T22:55:04Z'
+    last_edited: '2026-10-27T22:55:04Z'
+  - id: note-c14565b
+    text: 'QA S104 re-eval (2026-10-27): the verifier flagged run 1 capture (no mp4;
+      the cli cast followed a QA window after pm focus moved its grouped client).
+      I reran the whole scenario on 15e2a918 in the spec story order (scenarios s4-s6,
+      hold armed before t). The cli pane now runs inside asciinema rec, and a decoy
+      grouped client ~a0 absorbs pm focus jumps for the TUI recorder; mp4s were rendered
+      with agg 1.9.0 aarch64. Every Then held again, no code change; captures /pm-captures/scenarios/104
+      (run1/ kept). Scenario containers stay Up after the verdict by design (qa_loop
+      docstring), so the no-leak Then was read as no extra/orphan/test containers.'
+    created_at: '2026-10-27T23:21:52Z'
+    last_edited: '2026-10-27T23:21:52Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
