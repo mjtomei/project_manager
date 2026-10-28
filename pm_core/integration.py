@@ -467,13 +467,37 @@ def _record_action(actions: dict, path: str, kind: str,
         entry["changed"].append(rec_id)
 
 
+def _same(a, b) -> bool:
+    """Whether two parsed YAML values are the *same* value.
+
+    ``==`` is not enough.  ``True == 1 == 1.0`` in Python, but they are three
+    different YAML scalars, and pm writes them differently.  With ``==`` a
+    branch that changed a field to ``1`` and a base that changed it to ``0``
+    looked like "unchanged on the branch" (``1 == True``), so the base's value
+    was taken silently — a real field conflict resolved by side selection, and
+    the preservation check (which compares the same way) did not notice.  The
+    resolver must treat a change of scalar *kind* as a change.
+
+    Containers compare structurally under the same rule, so a nested
+    ``true``/``1`` pair cannot hide inside a record either.
+    """
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _same(x, y) for x, y in zip(a, b))
+    if type(a) is not type(b):
+        return False
+    return a == b
+
+
 def _merge_value(base, ours, theirs, path: str, actions: dict):
     """``(value, conflicts)`` for one position in the document tree."""
-    if ours == theirs:
+    if _same(ours, theirs):
         return ours, []
-    if base is not _MISSING and ours == base:
+    if base is not _MISSING and _same(ours, base):
         return theirs, []
-    if base is not _MISSING and theirs == base:
+    if base is not _MISSING and _same(theirs, base):
         return ours, []
     # Bookkeeping timestamps and pm's UI cursor are scalar by nature, so they
     # are settled before the structural merges: a malformed mapping/list value
@@ -531,7 +555,7 @@ def _merge_dict(base: dict, ours: dict, theirs: dict, path: str, actions: dict):
                 out[key] = value
         elif in_o:
             if in_b:
-                if ours[key] != base[key]:
+                if not _same(ours[key], base[key]):
                     conflicts.append(
                         f"{key_path}: deleted on the new base, changed on the "
                         "PR branch")
@@ -543,7 +567,7 @@ def _merge_dict(base: dict, ours: dict, theirs: dict, path: str, actions: dict):
                 out[key] = ours[key]           # added by the PR branch
         elif in_t:
             if in_b:
-                if theirs[key] != base[key]:
+                if not _same(theirs[key], base[key]):
                     conflicts.append(
                         f"{key_path}: deleted on the PR branch, changed on the "
                         "new base")
@@ -579,8 +603,9 @@ def _merge_id_list(base: list, ours: list, theirs: list, path: str,
                 conflicts.extend(problems)
                 continue
             results[rec_id] = value
-            if in_b and o[rec_id] != b[rec_id] \
-                    and t[rec_id] != b[rec_id] and o[rec_id] != t[rec_id]:
+            if in_b and not _same(o[rec_id], b[rec_id]) \
+                    and not _same(t[rec_id], b[rec_id]) \
+                    and not _same(o[rec_id], t[rec_id]):
                 _record_action(actions, path, "changed", rec_id=rec_id)
             elif not in_b:
                 _record_action(actions, path, "added",
@@ -588,14 +613,14 @@ def _merge_id_list(base: list, ours: list, theirs: list, path: str,
                 _record_action(actions, path, "added",
                                side="new base", rec_id=rec_id)
         elif in_b and in_o:
-            if o[rec_id] == b[rec_id]:
+            if _same(o[rec_id], b[rec_id]):
                 results[rec_id] = _DELETED
                 _record_action(actions, path, "removed", rec_id=rec_id)
             else:
                 conflicts.append(f"{rec_path}: deleted on the new base, "
                                  "changed on the PR branch")
         elif in_b and in_t:
-            if t[rec_id] == b[rec_id]:
+            if _same(t[rec_id], b[rec_id]):
                 results[rec_id] = _DELETED
                 _record_action(actions, path, "removed", rec_id=rec_id)
             else:
@@ -641,13 +666,13 @@ def _preservation_problems(base, side, merged, label: str) -> list[str]:
     problems: list[str] = []
 
     def walk(b, s, m, path: str) -> None:
-        if s == b:
+        if _same(s, b):
             return
         if isinstance(s, dict) and isinstance(m, dict):
             bd = b if isinstance(b, dict) else {}
             for key, value in s.items():
                 key_path = f"{path}.{key}" if path else str(key)
-                if key not in bd or bd[key] != value:
+                if key not in bd or not _same(bd[key], value):
                     if key not in m:
                         problems.append(f"{label} change lost: {key_path}")
                     else:
@@ -664,7 +689,7 @@ def _preservation_problems(base, side, merged, label: str) -> list[str]:
                 rec_id = entry["id"]
                 rec_path = f"{path}[{rec_id}]"
                 if rec_id not in mm:
-                    if rec_id not in bm or bm[rec_id] != entry:
+                    if rec_id not in bm or not _same(bm[rec_id], entry):
                         problems.append(f"{label} record lost: {rec_path}")
                     continue
                 walk(bm.get(rec_id, _MISSING), entry, mm[rec_id], rec_path)
@@ -672,7 +697,7 @@ def _preservation_problems(base, side, merged, label: str) -> list[str]:
                 if rec_id not in {e["id"] for e in s} and rec_id in mm:
                     problems.append(
                         f"{label} record deletion lost: {path}[{rec_id}]")
-        elif s != m:
+        elif not _same(s, m):
             # A bookkeeping timestamp both sides bumped is merged as the
             # later value, so the earlier one is intentionally not carried.
             if _bookkeeping_ts(path) and _merge_bookkeeping_ts(s, m) == m:
@@ -822,12 +847,19 @@ def _as_int(value, default: int = 0) -> int:
     module (and the prompt's ``base_files_count`` reader) excludes booleans
     explicitly, and counting a hand-edited ``true`` as 1 would invent a number
     pm never recorded.
+
+    ``OverflowError`` is caught with the rest: YAML parses ``.inf`` (and
+    ``1e400``) to ``float('inf')``, and ``int(inf)`` raises it — not
+    ``ValueError``.  Without it a single hand-edited count raised out of
+    ``compact`` (and so out of every recorded check, inside the store lock),
+    ``summary`` / ``pm pr show`` and ``_apply_resolution``'s ``paths_total``
+    guard — all of which promise a readable result, never a traceback.
     """
     if isinstance(value, bool):
         return default
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -2095,6 +2127,15 @@ def _record_check(root: Path, pr_id: str, record: dict, *,
     re-check a transient failure of the loser would replace the winner's
     applied record (and drop the approval until another check re-runs it).
     """
+    # The freshly computed record, before the pre-lock carry below mutates it.
+    # The in-lock carry must start from this, not from the pre-lock-carried
+    # record: ``_carry_forward`` only carries onto a record that has no
+    # resolution of its own, so a resolution carried from the pre-lock read
+    # would suppress the one in the record the lock actually found — and a
+    # newer applied resolution (a concurrent apply that landed between the two
+    # reads) would be replaced by an older one, leaving ``base_sha`` and
+    # ``resolved_from`` describing different merges.
+    computed = dict(record)
     try:
         old_pr = store.get_pr(store.load(root), pr_id) or {}
     except Exception:
@@ -2149,7 +2190,13 @@ def _record_check(root: Path, pr_id: str, record: dict, *,
             final["record"] = p.get("integration") or record
             final["stale"] = True
             return
-        merged = _carry_forward(record, p)
+        merged = _carry_forward(dict(computed), p)
+        if not merged.get("resolution") and record.get("resolution"):
+            # The record the lock found carries no resolution, but the
+            # pre-lock read did (a concurrent write replaced it): keep what
+            # was applied rather than dropping the provenance entirely.
+            merged["resolution"] = record["resolution"]
+            merged["resolved_from"] = record.get("resolved_from")
         merged["resolution_digest"] = _resolution_digest(
             merged.get("resolution"))
         p["integration"] = compact(merged)
@@ -2601,11 +2648,15 @@ def _apply_locked(pr: dict, record: dict, workdir: str):
         return None, "a merge is already in progress in the workdir"
     if _out(_git("status", "--porcelain", "--untracked-files=no", cwd=workdir)):
         return None, "workdir has uncommitted changes"
-    base_sha = revision_of(record.get("base_sha"))
+    # Only a git object name may be merged: the value is handed to
+    # ``git merge``, and a hand-edited ref name (``HEAD``, ``master``) would
+    # merge something other than the base revision the record assessed — a
+    # ``git merge HEAD`` is a no-op that would report a successful "apply"
+    # without integrating anything.  A record that cannot name its base is a
+    # refusal, not a crash (this runs unattended at sign-off launch and from
+    # `--apply`, both of which promise a reason, not a traceback).
+    base_sha = _sha_like(record.get("base_sha"))
     if not base_sha:
-        # A partial or hand-edited record cannot name the revision to merge;
-        # refuse instead of crashing (this runs unattended at sign-off launch
-        # and from `--apply`, both of which promise a reason, not a traceback).
         return None, "the integration record has no base revision"
     msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")

@@ -591,6 +591,56 @@ def test_a_reuse_statement_for_another_base_is_not_evidence(w):
         PR, pr_entry(w)["integration"], rec["head"]) is None
 
 
+def test_the_recorded_evidence_is_not_attributed_to_another_base(w):
+    """The evidence block follows the same base rule as the merge gate.
+
+    A statement is only this decision's when the report assessed the same
+    base the check did.  Recording it from a report left over from another
+    base made ``pm pr show`` print a reuse statement the agent wrote about
+    different behaviour-relevant changes — an audit trail that claims more
+    than the decision holds.  (The gate refuses such a MERGE outright; this
+    covers the *recorded* block, which is what a person reads.)
+    """
+    rec = _metadata_conflict(w)
+    stored = integration.binding(pr_entry(w)["integration"])
+
+    write_report(w, rec, base="0" * 40)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=stored)
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reused"] == []
+    assert ev["reason"] is None
+    assert ev["report_base"] is None
+
+    # The same report, written for the base the check assessed, is recorded.
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, rec["head"], "manual",
+        integration=stored)
+    ev = pr_entry(w)["signoff"]["evidence"]
+    assert ev["reused"] == ["review@aaaaaaa", "qa@bbbbbbb"]
+    assert ev["reason"]
+
+
+def test_a_non_string_reviewed_head_does_not_crash_the_evidence_read(w):
+    """``reviewed_head`` reaches the reader from hand-editable state.
+
+    ``record_signoff_verdict`` takes the revision as an argument; a caller
+    that hands it a non-string (an int) made ``.startswith`` raise out of the
+    record write instead of reading it as absent.
+    """
+    rec = _metadata_conflict(w)
+    write_report(w, rec)
+    signoff.record_signoff_verdict(
+        w.pm_dir, PR, SIGNOFF_MERGE, 5, "manual",
+        integration=integration.binding(pr_entry(w)["integration"]))
+    ev = pr_entry(w)["signoff"]["evidence"]
+    # Nothing is attributable to a value that is not a revision.
+    assert ev["reused"] == []
+    assert ev["reason"] is None
+
+
 def test_a_targeted_checks_statement_satisfies_the_reuse_requirement(w):
     """The report may state targeted checks instead of reused evidence.
 
@@ -1062,6 +1112,60 @@ def test_record_check_carries_the_applied_resolution_under_the_lock(
     assert stored["resolution"]["applied_merge_sha"] == applied
 
 
+def test_a_newer_applied_resolution_beats_the_pre_lock_carry(w, monkeypatch):
+    """The in-lock carry starts from the record this check computed.
+
+    ``_record_check`` carries provenance twice: once before the lock (for the
+    caller's view) and once inside it (for what is stored).  The carry only
+    fills a record with no resolution of its own, so a resolution carried from
+    the *pre-lock* read suppressed the newer one in the record the lock
+    actually found: an applied resolution a concurrent apply had recorded was
+    replaced by an older one, leaving ``base_sha`` and ``resolved_from``
+    describing different merges (and a digest bound to the wrong resolution).
+    """
+    rec = _metadata_conflict(w)
+    newer = rec["resolution"]["applied_merge_sha"]
+    older_applied = git(w.wd, "rev-parse", "HEAD^")
+    assert older_applied != newer
+    real_load = store.load
+    calls = {"n": 0}
+
+    def stale_first_load(root, **kwargs):
+        data = real_load(root, **kwargs)
+        if calls["n"] == 0:
+            # The pre-lock read predates the winner's write: it holds an
+            # *earlier* applied resolution (an ancestor of HEAD).
+            p = store.get_pr(data, PR)
+            if p is not None:
+                p["integration"] = dict(
+                    p.get("integration") or {},
+                    resolution={"paths": [{"path": "pm/project.yaml",
+                                           "blob": "1" * 40}],
+                                "unresolved": [],
+                                "applied_merge_sha": older_applied,
+                                "resolved_from": {"head": older_applied,
+                                                  "base_sha": "a" * 40,
+                                                  "merge_base": "b" * 40,
+                                                  "status": "conflict"}})
+        calls["n"] += 1
+        return data
+
+    monkeypatch.setattr(store, "load", stale_first_load)
+    head = git(w.wd, "rev-parse", "HEAD")
+    bare = {"status": integration.UP_TO_DATE, "head": head,
+            "base_sha": rec["base_sha"], "base_branch": "master",
+            "target_repo": str(w.repo),
+            "candidate_tree": rec["candidate_tree"]}
+    out = integration._record_check(w.pm_dir, PR, bare)
+    assert out["resolution"]["applied_merge_sha"] == newer
+    stored = pr_entry(w)["integration"]
+    assert stored["resolution"]["applied_merge_sha"] == newer
+    # The stored digest names the resolution that was kept, so a later
+    # approval binds to the newest applied merge rather than the older one.
+    assert stored["resolution_digest"] == integration._resolution_digest(
+        stored["resolution"])
+
+
 def test_a_transient_recheck_yields_to_the_winners_record_under_the_lock(w):
     """A failed re-check of the branch's current revision is not news.
 
@@ -1411,6 +1515,32 @@ def test_compact_resolution_bounds_records_and_is_idempotent():
     assert integration._compact_resolution(compact) == compact
     assert integration._resolution_digest(resolution) == \
         integration._resolution_digest(compact)
+
+
+def test_a_non_finite_count_reads_as_no_count():
+    """``.inf`` is a hand-editable count YAML parses to a float.
+
+    ``int(float('inf'))`` raises ``OverflowError`` — not ``ValueError`` — so
+    ``_as_int``'s guard missed it and one hand-edited count raised out of
+    ``compact`` (and so out of every recorded integration check, inside the
+    store lock), ``summary`` / ``pm pr show``, and the ``paths_total`` guard
+    ``_apply_resolution`` runs before it touches the workdir.  All of those
+    promise a readable result, never a traceback.
+    """
+    assert integration._as_int(float("inf")) == 0
+    assert integration._as_int(float("-inf")) == 0
+    assert integration._as_int(float("nan")) == 0
+    compact = integration.compact(
+        {"status": integration.CLEAN, "base_files_count": float("inf"),
+         "overlap_total": float("inf")})
+    # Not a count, so the compact record carries no count (the prompt then
+    # omits the "(N file(s))" hint) instead of raising or inventing a number.
+    assert compact.get("base_files_count") in (None, 0)
+    assert integration.summary(
+        {"status": integration.RESOLVED,
+         "resolution": {"paths": [{"path": "pm/project.yaml",
+                                   "records": {"prs": {
+                                       "added_ours": float("inf")}}}]}})
 
 
 def test_a_truncated_path_list_records_its_total_and_apply_refuses_it(w):
@@ -4022,6 +4152,34 @@ def test_a_mapping_valued_bookkeeping_field_is_refused_not_deep_merged():
     assert any("updated_at" in c for c in details["conflicts"])
 
 
+def test_distinct_yaml_scalars_are_not_the_same_value():
+    """``True == 1 == 1.0`` in Python, but they are three different scalars.
+
+    With plain ``==`` a branch that changed a field to ``1`` and a base that
+    changed it to ``0`` looked like "unchanged on the branch" (``1 == True``),
+    so the base's value was taken silently — a real field conflict resolved by
+    side selection, which the preservation check (comparing the same way) did
+    not catch.  pm's own booleans (``libyaml``, ``skip_qa``, …) make the
+    shape reachable from hand-edited state.
+    """
+    def doc(flag) -> str:
+        return yaml.dump({"project": {"name": "p"}, "prs": [
+            {"id": "pr-1", "title": "A", "status": "in_progress",
+             "flag": flag}]})
+
+    for base_f, ours_f, theirs_f in ((True, 1, 0), (1, True, 1.0), (1, 1.0, 2)):
+        merged, details = integration.resolve_project_yaml(
+            doc(base_f), doc(ours_f), doc(theirs_f))
+        assert merged is None, (base_f, ours_f, theirs_f)
+        assert details["conflicts"]
+    # The same scalar kind still merges: one side unchanged, the other changed.
+    merged, _ = integration.resolve_project_yaml(doc(1), doc(1), doc(2))
+    assert yaml.safe_load(merged)["prs"][0]["flag"] == 2
+    merged, _ = integration.resolve_project_yaml(
+        doc(True), doc(False), doc(True))
+    assert yaml.safe_load(merged)["prs"][0]["flag"] is False
+
+
 def test_a_merge_that_loses_a_side_change_is_refused(monkeypatch):
     """The preservation check is the safety net under the merge rules.
 
@@ -4073,6 +4231,26 @@ def test_apply_refuses_a_non_deterministic_resolution(w):
     assert git(w.wd, "rev-parse", "HEAD") == head
     assert git(w.wd, "status", "--porcelain") == ""
     assert "pr-250" not in (w.wd / "pm" / "project.yaml").read_text()
+
+
+def test_apply_refuses_a_base_that_is_not_a_git_object_name(w):
+    """The recorded base is handed straight to ``git merge``.
+
+    A hand-edited ``base_sha`` that is a ref name rather than an object name
+    would merge something other than the base the record assessed — ``git
+    merge HEAD`` is a no-op that reports a successful "apply" without
+    integrating anything — so only an object name counts as a base revision
+    (the same rule every revision interpolated into a command follows).
+    """
+    head = git(w.wd, "rev-parse", "HEAD")
+    for bad in ("HEAD", "master", "origin/master", " --no-verify"):
+        record = {"status": integration.CLEAN, "head": head,
+                  "base_sha": bad, "candidate_tree": "0" * 40,
+                  "base_branch": "master"}
+        merged, err = integration.apply_integration(w.pm_dir, PR, record)
+        assert merged is None and "no base revision" in err, bad
+        assert git(w.wd, "rev-parse", "HEAD") == head
+        assert git(w.wd, "status", "--porcelain") == ""
 
 
 def test_apply_refuses_a_clean_merge_with_another_candidate_tree(w):

@@ -190,7 +190,10 @@ def record_signoff_verdict(root: Path, pr_id: str, verdict: str,
     # that can be slow).  The block itself still needs the PR's previous
     # record, which only the locked read provides.
     qa = qa_evidence(pr_id)
-    report = _report_evidence(pr_id, sha)
+    # The reuse statement is only this decision's when the report assessed the
+    # same base the check did (see ``_report_evidence``).
+    bound = integration if isinstance(integration, dict) else {}
+    report = _report_evidence(pr_id, sha, bound.get("base_sha"))
 
     def _apply(data):
         pr = store.get_pr(data, pr_id)
@@ -430,7 +433,8 @@ def qa_evidence(pr_id: str) -> dict | None:
     return out
 
 
-def _report_evidence(pr_id: str, reviewed_head: str | None) -> dict:
+def _report_evidence(pr_id: str, reviewed_head: str | None,
+                     check_base: str | None = None) -> dict:
     """The reuse statement from a report written for *reviewed_head*.
 
     A statement is only attributed when the report names a HEAD that
@@ -438,11 +442,29 @@ def _report_evidence(pr_id: str, reviewed_head: str | None) -> dict:
     path enforces); a missing or short tag cannot tie the statement to the
     reviewed revision, and a report left by an earlier run must not have its
     words recorded as this decision's.
+
+    The report also names the base it assessed.  A statement made about
+    another base is not evidence for this decision — the base moved, and its
+    behaviour-relevant changes may differ — so, when both the report and the
+    check name a base, they must match (the same rule, and the same minimum,
+    :func:`approval_justification_problem` enforces).  A report that names no
+    base is left to the head rule, exactly as the gate leaves it.
     """
+    from pm_core import integration as integ_mod
     meta = report_meta(pr_id)
     meta_head = (meta.get("head") or "").strip()
-    if not reviewed_head or len(meta_head) < 7 \
-            or not reviewed_head.startswith(meta_head):
+    meta_base = (meta.get("base") or "").strip()
+    # ``reviewed_head`` reaches this from ``record_signoff_verdict``, which
+    # records hand-editable state: a value that is not a revision string is no
+    # revision (``.startswith`` on an int raised out of the record write).
+    attributable = bool(isinstance(reviewed_head, str) and reviewed_head
+                        and len(meta_head) >= 7
+                        and reviewed_head.startswith(meta_head))
+    check_base = integ_mod.revision_of(check_base)
+    if attributable and meta_base and check_base:
+        attributable = (len(meta_base) >= 7
+                        and check_base.startswith(meta_base))
+    if not attributable:
         meta = {}
         meta_head = ""
     reused = (meta.get("evidence") or "").strip()
@@ -506,7 +528,9 @@ def _evidence_block(pr: dict, reviewed_head: str | None,
     if qa is _UNREAD:
         qa = qa_evidence(pr["id"])
     if report is _UNREAD:
-        report = _report_evidence(pr["id"], reviewed_head)
+        # Same base rule as the writer: a statement about another base is not
+        # this decision's evidence.
+        report = _report_evidence(pr["id"], reviewed_head, seen.get("base_sha"))
     if qa:
         changes = list(qa.get("planner_code_changes") or [])
         if len(changes) > _EVIDENCE_LIST_LIMIT:

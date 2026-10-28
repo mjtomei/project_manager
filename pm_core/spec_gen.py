@@ -144,7 +144,16 @@ def _build_spec_prompt(data: dict, pr: dict, phase: str) -> str:
     raw_description = pr.get("description")
     description = raw_description.strip() if isinstance(raw_description, str) \
         else ""
-    base_branch = data.get("project", {}).get("base_branch", "master")
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    # Hand-edited state: a ``base_branch`` that is not a branch name is no
+    # configuration.  It is interpolated into the QA diff instruction below
+    # (``git diff <base>...HEAD``), so a malformed value would tell the agent
+    # to run a command that cannot work — the same fallback
+    # ``_launch_review_window`` applies to its diff pane.
+    base_branch = project.get("base_branch")
+    if not (isinstance(base_branch, str) and base_branch):
+        base_branch = "master"
     workdir = pr.get("workdir", "")
 
     # Gather prior specs for context.  Specs are instructions, so they are

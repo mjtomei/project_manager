@@ -32,6 +32,15 @@ theirs_text)`:
   the other is taken; both changed to the same value is taken; both changed
   differently is a **conflict** (never "theirs wins" as
   `store.merge_3way` does).
+- "The same value" is `_same`, not `==`: `True == 1 == 1.0` in Python, but
+  they are three different YAML scalars and pm writes them differently. With
+  `==` a branch that changed a field to `1` and a base that changed it to `0`
+  read as "unchanged on the branch" (`1 == True`) and the base's value won
+  silently — a real field conflict resolved by side selection, invisible to
+  the preservation check, which compares the same way. Values are equal only
+  when they are the same kind of scalar and equal, and containers compare
+  structurally under the same rule (so a nested `true`/`1` pair cannot hide
+  inside a record).
 - Lists of id-keyed entries (`prs`, `plans`, and nested lists such as notes)
   merge by `id`: independent additions from both sides survive; an entry
   changed on one side only is taken; entries changed on both sides merge field
@@ -251,7 +260,18 @@ published. So the sign-off launch
    A check that *does* produce a new metadata-resolution attempt replaces it
    instead: that attempt describes the current base, and the merge is blocked
    either way (the changed digest / missing candidate tree makes the gate
-   refuse). The ancestry is resolved from the same checkout the check used
+   refuse). The carry runs twice — once before the store lock, for the
+   record the caller gets back, and once inside it, for what is stored — and
+   the in-lock carry starts from the record the check *computed*, not from
+   the pre-lock-carried one. The carry only fills a record with no resolution
+   of its own, so carrying first and then locking let a resolution from the
+   pre-lock read suppress the newer one a concurrent apply had recorded in
+   between: the stored record kept the older `applied_merge_sha` and
+   `resolved_from` while its `base_sha` described the newer merge, and an
+   approval bound its digest to the wrong resolution. When the record the
+   lock finds carries no resolution at all, the pre-lock carry is kept rather
+   than dropping the provenance entirely. The ancestry is resolved from the
+   same checkout the check used
    (the recorded workdir, or the current checkout when that path is not
    visible), so a check run from the fallback does not drop the provenance.
    A check that could not resolve HEAD at all (a transient failure: a broken
@@ -363,7 +383,11 @@ merged base commits as PR changes.
   statement made about another base is not evidence for this decision, and
   the base's behaviour-relevant changes may differ):
   `pm-signoff-evidence` (`stage@sha,…`), `pm-signoff-evidence-reason`,
-  `pm-signoff-checks`, `pm-signoff-candidate`.
+  `pm-signoff-checks`, `pm-signoff-candidate`. The recorded block applies the
+  base rule too, not only the merge gate: a leftover report from an earlier
+  base must not have its reuse statement stored as this decision's and
+  printed by `pm pr show`. A report that names no base is left to the head
+  rule, exactly as the gate leaves it.
 The block's `candidate_tree`/`resolved_from` come from the bound check or,
 failing that, from the PR's stored check only when that check names the
 reviewed HEAD — a check of another revision (or a failed one with no HEAD)
@@ -467,6 +491,11 @@ the branch contains instead of the stale workdir ref. The pane's fallback ref
 (`<base>` for the local backend, `origin/<base>` otherwise) is shell-quoted
 like every other interpolated value: `base_branch` is project.yaml state, and
 an unquoted value with shell metacharacters would run in the pane's shell.
+The QA *spec* prompt's own fallback is guarded the same way: a `base_branch`
+that is not a branch-name string (an int, a list, an empty string) reads as
+absent and falls back to `master`, so a hand-edited value is never
+interpolated into the `git diff <base>...HEAD` instruction it hands the
+agent — the same fallback the review window's diff pane applies.
 
 **Why sign-off is running again.** When the merge gate refuses an approval
 because the base moved (`invalidate_signoff`), the driver clears
@@ -645,10 +674,17 @@ tests):
     Malformed values — a list/dict status or plan parent, a non-mapping
     `project`, and a base `project.yaml` with a non-string record id — are
     refused as readable conflicts rather than raising (and a malformed base
-    entry must not silently drop the behaviour-change summary).
+    entry must not silently drop the behaviour-change summary). A field
+    changed to scalars of *different kinds* on the two sides (`true` vs `1`,
+    `1` vs `1.0`) is a conflict, not "unchanged": `==` conflates them, and
+    with it the branch's change was silently replaced by the base's.
 13. Apply/merge guards: a re-resolution whose blob differs from the recorded
     one is refused and the workdir left untouched (a hand-edited non-string
     `blob` reads as absent rather than raising out of the unattended apply);
+    a recorded `base_sha` that is not a git object name (a ref such as `HEAD`
+    or `master`, or a shell fragment) is refused before anything is merged —
+    the value is handed to `git merge`, and `git merge HEAD` is a no-op that
+    would report a successful "apply" without integrating anything;
     an apply that hits a
     conflict outside the recorded resolution aborts; a clean or re-resolved
     merge whose tree differs from the candidate is aborted before it is
@@ -797,7 +833,13 @@ tests):
     counting it as `1` invents a number pm never recorded), so
     `base_files_count` / `paths_total` / the per-record counts are absent
     rather than one — the same rule the prompt's own `base_files_count`
-    reader applies. The sign-off launch stamp is
+    reader applies. A non-finite float is no count either: YAML parses `.inf`
+    (and `1e400`) to `float('inf')`, and `int(inf)` raises `OverflowError`,
+    which is *not* a `ValueError` — one hand-edited count raised out of
+    `compact` (and so out of every recorded check, inside the store lock),
+    `summary` / `pm pr show`, and the `paths_total` guard `_apply_resolution`
+    runs before it touches the workdir. `_as_int` catches it with the rest.
+    The sign-off launch stamp is
     another: `prepare` can return the *stored* record when a concurrent apply
     won, so `stamp_signoff_launch` receives a hand-editable `base_sha`; a
     non-string value stamps nothing instead of raising `TypeError` out of the

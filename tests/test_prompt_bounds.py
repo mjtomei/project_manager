@@ -1543,6 +1543,27 @@ class TestHandEditedPrText:
             _data(_pr(description="  real description  ")), "pr-x")
         assert "real description" in prompt
 
+    def test_the_spec_prompt_diff_names_a_real_base_branch(self):
+        """A hand-edited ``base_branch`` is no branch name.
+
+        The QA spec prompt interpolates it into ``git diff <base>...HEAD``
+        when the branch does not already contain a base, so a value YAML
+        parses as a non-string (an int) or an empty one would hand the agent
+        a command that cannot work — the same fallback the review window's
+        diff pane applies.
+        """
+        pr = _pr(workdir="/tmp/nowhere")
+        for bad in (5, ["master"], "", None):
+            data = _data(pr)
+            data["project"]["base_branch"] = bad
+            prompt = spec_gen._build_spec_prompt(data, pr, "qa")
+            assert "git diff master...HEAD" in prompt, bad
+            assert f"git diff {bad}...HEAD" not in prompt, bad
+        data = _data(pr)
+        data["project"]["base_branch"] = "develop"
+        assert "git diff develop...HEAD" in spec_gen._build_spec_prompt(
+            data, pr, "qa")
+
     def test_a_non_string_note_text_does_not_crash_the_bounded_renderer(self):
         notes = [{"id": "note-a", "text": "x" * 20000,
                   "created_at": "2026-01-01T00:00:00Z"},

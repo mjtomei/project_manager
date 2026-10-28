@@ -551,6 +551,14 @@ WHEN the user launches the review window (local backend).
 THEN the window opens, the diff pane uses the default base, and the pane shows
 only the PR's own changes.
 
+GIVEN `project.base_branch` hand-edited to a non-string (an int, or an empty
+string) on a PR whose branch does not already contain a base.
+WHEN the user runs `pm pr spec <pr> qa` (or inspects the QA spec prompt it
+builds).
+THEN the diff instruction names the default base (`git diff master...HEAD`),
+not the hand-edited value — the same fallback the review window's diff pane
+uses — and no command interpolates the malformed value.
+
 GIVEN PRs whose `updated_at` was hand-edited to a YAML date (an unquoted date)
 alongside PRs with pm's ISO strings.
 WHEN the user runs `pm pr list --timestamps`.
@@ -561,6 +569,17 @@ THEN both rows render, newest first, without a comparison error.
 - GIVEN a hand-edited non-string verdict and a clean integration check. WHEN the
   user launches sign-off. THEN the window opens and pm does not treat the
   malformed value as a prior decision (no invented prior verdict/revision).
+- GIVEN an integration record whose `base_files_count` (or a resolution id
+  count) was hand-edited to YAML `.inf` (an unquoted non-finite float). WHEN
+  the user runs `pm pr signoff integrate`, `pm pr show`, or launches sign-off.
+  THEN each renders the record with no count, exits 0, and never raises
+  `OverflowError` (which is not a `ValueError`).
+- GIVEN `report.html` names a `pm-signoff-base` other than the base the
+  recorded integration check assessed, while `pm-signoff-head` matches. WHEN
+  the user runs `pm pr signoff record`. THEN the recorded `## Sign-off`
+  evidence block carries no reused-evidence statement from that report (and
+  `pm pr show` prints none) — a statement about another base is not this
+  decision's; a report written for the checked base is still recorded.
 - GIVEN a teammate pushed an unreviewed commit to the PR's remote branch after
   sign-off and merged on GitHub. WHEN the user runs `pm pr merge`. THEN
   publication is refused before anything is published, naming the remote head

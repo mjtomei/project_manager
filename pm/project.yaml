@@ -41107,8 +41107,27 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T19:42:26.469885+00:00'
-  updated_at: '2026-10-28T19:42:26.469885+00:00'
+  updated_at: '2026-10-28T20:59:39.282036+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-fc43ab4
+    text: 'Sibling of the non-mapping-`project` crash, same reader family, found while
+      reviewing pr-5cee3d5 (review-loop 4f1e i3): a hand-edited *non-string* `project.base_branch`
+      (e.g. `base_branch: 5`, or `""`) is interpolated straight into the diff commands
+      the prompts tell agents to run. `pm_core/prompt_gen.py` has 13 `data.get("project",
+      {}).get("base_branch", "master")` sites (lines ~401, 513, 1202, 1777, 1872,
+      2122, 2266, 2435, 2608, 2862, 2976, 3214) and the review / QA-planner / QA-interactive
+      / watcher / bug-fix prompts build `git diff <base_branch>...HEAD` or `git diff
+      origin/<base_branch>...HEAD` from them, so a malformed value hands the agent
+      a command that cannot work (no crash — the same `_diff_base` fallback this PR
+      added sits beside it unguarded). Also in the same family: `pm_core/pr_sync.py:222,354`,
+      `pm_core/qa_loop.py:1712`, `pm_core/cli/helpers.py:791`, `pm_core/cli/pr.py:1413,1513,1777(guarded),1796,3341,3400`.
+      `_launch_review_window` (cli/pr.py ~1796) and `integration.target_for`/`run_check`
+      already fall back to `master`; the prompts do not. `pm_core/spec_gen.py` was
+      fixed for this in pr-5cee3d5 (`_build_spec_prompt` now reads `base_branch` through
+      the same isinstance guard). Best fixed with one shared reader (e.g. `store.project_base_branch(data)`)
+      used by all of these — the same shape as `graph.deps_of`.'
+    created_at: '2026-10-28T20:59:39Z'
+    last_edited: '2026-10-28T20:59:39Z'
