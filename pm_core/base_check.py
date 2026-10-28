@@ -599,10 +599,25 @@ def share_impl_transcript(root: Path, pr_id: str,
         if p == transcript:
             continue
         try:
-            if p.is_symlink() and os.readlink(p) == target:
-                continue
-            if p.is_symlink() or p.exists():
+            if p.is_symlink():
+                if os.readlink(p) == target:
+                    continue
                 p.unlink()
+            elif p.exists():
+                # ``finalize_transcript`` turns a finished session's link into
+                # a real file (a copy that survives Claude pruning) when a run
+                # is finalized.  That copy is evidence, not a stale link: keep
+                # it beside the refreshed link instead of deleting it.  The
+                # suffix falls outside the ``impl-<pr>.jsonl`` pattern, so a
+                # later pass never picks it up again.
+                kept = p.with_name(p.name + ".finalized")
+                n = 1
+                while kept.exists() or kept.is_symlink():
+                    kept = p.with_name(f"{p.name}.finalized.{n}")
+                    n += 1
+                p.rename(kept)
+                _log.info("base_check: kept finalized transcript %s as %s",
+                          p, kept)
             p.symlink_to(target)
         except OSError as e:  # pragma: no cover - best effort
             _log.debug("base_check: refreshing %s failed: %s", p, e)

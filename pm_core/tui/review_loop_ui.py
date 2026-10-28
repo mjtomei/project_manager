@@ -1011,9 +1011,12 @@ def _poll_impl_idle(app) -> None:
                     and base_check.return_awaiting(pr) == "impl"):
                 # Sent back but the rework session has not launched yet: an
                 # idle (old) session is not finished work.  Catch up the
-                # relaunch when no other driver owns it.
+                # relaunch when no other driver owns it (the claim makes this
+                # one owner).  Not gated on auto-start: a manual loop on a PR
+                # outside the auto-start scope is skipped by
+                # ``check_and_start``, and would otherwise strand its rework.
                 _log.info("impl_idle: %s awaiting rework launch", pr_id)
-                if base_ret is not None and not _auto_start.is_enabled(app):
+                if base_ret is not None:
                     _catch_up_base_impl(app, pr_id)
                 tracker.mark_active(pr_id)
                 continue

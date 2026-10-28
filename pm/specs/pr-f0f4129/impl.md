@@ -120,6 +120,9 @@ already drops it because the status is no longer `qa`.
   started by the TUI auto-start catch-up or a manual `pm pr start` also
   refreshes the CLI auto-sequence dir's link — otherwise that driver keeps
   reading the killed session's idle event and its handoff never advances.
+  Only symlinks are re-pointed: a finalized transcript (a real file left by
+  `finalize_transcript` when a run ends) is evidence, so it is kept beside
+  the refreshed link (`<name>.finalized`) rather than deleted.
   A successful launch also clears a previous attempt's `apply_error`. An
   idle notification alone never qualifies: a
   missing idle timestamp (`idle_since is None`, e.g. the pane/tracker could
@@ -185,8 +188,12 @@ already drops it because the status is no longer `qa`.
   rework); `start_qa` / `start_or_stop_qa_loop` refuse to start QA likewise;
   `_poll_impl_idle` evaluates `impl_completion` in a **thread worker**
   (fetch must not block the TUI event loop), logs a wait reason once, and
-  advances only on a genuine completion. `_base_completion_tick` never
-  reaches the git helpers with an empty cwd (they raise, inside the shared
+  advances only on a genuine completion. A base return whose rework never
+  launched is caught up from the idle poll regardless of auto-start (the
+  launch claim keeps one owner; `check_and_start` only drives in-scope PRs,
+  so a manual loop on a non-target PR would otherwise strand its rework).
+  `_base_completion_tick` never reaches the git helpers with an empty cwd
+  (they raise, inside the shared
   poll timer). `_resume_returned_loop` does not start a second loop when one
   is already running for the PR. `review_loop` maps exit code 3 to
   `VERDICT_BASE_CONFLICT` and stops the loop without recording an iteration;

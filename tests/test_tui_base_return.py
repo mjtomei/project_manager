@@ -304,6 +304,41 @@ def test_completion_tick_handles_a_missing_workdir(tmp_path):
     assert "workdir" in why
 
 
+def test_poll_impl_idle_catches_up_base_rework_with_auto_start(tmp_path):
+    """A manual loop's rework still relaunches when auto-start is enabled.
+
+    ``check_and_start`` only drives PRs inside the auto-start scope, so a
+    manual loop on a non-target PR would otherwise strand its ``awaiting``
+    base return: nothing relaunches the implementation and every gate refuses
+    the review.  The launch claim keeps this one owner even when both
+    drivers try.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr("in_progress", base_return=_return(awaiting="impl"))
+    app = _app(tmp_path, [pr])
+    app._session_name = "pm-test"
+    app._pending_merge_prs = set()
+    # Auto-start is enabled but this PR is not one of its targets.
+    app._auto_start = True
+    app._auto_start_all = False
+    app._auto_start_targets = {"pr-other": {}}
+    tracker = app._pane_idle_tracker
+    tracker.is_tracked.return_value = True
+    tracker.is_gone.return_value = False
+    tracker.is_idle.return_value = True
+
+    with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+               return_value="%1"), \
+         patch("pm_core.tui.auto_start.get_transcript_dir",
+               return_value=str(tmp_path)), \
+         patch("pm_core.tui.review_loop_ui._catch_up_base_impl") as catch_up:
+        review_loop_ui._poll_impl_idle(app)
+
+    catch_up.assert_called_once_with(app, "pr-001")
+    tracker.mark_active.assert_called_with("pr-001")
+
+
 # --- raced status repair in the schedulers --------------------------------
 
 def test_auto_start_review_loops_repairs_a_raced_in_review_status(tmp_path):

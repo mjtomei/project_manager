@@ -314,6 +314,34 @@ def test_share_impl_transcript_accepts_a_direct_path(w):
     assert os.readlink(other) == str(real)
 
 
+def test_share_impl_transcript_preserves_a_finalized_copy(w):
+    """A finalized (real-file) transcript is evidence, not a stale link.
+
+    ``finalize_transcript`` replaces a finished session's link with a copy of
+    its JSONL.  Refreshing the link for a relaunch must not delete that copy —
+    it is the self-contained record that survives Claude session pruning.
+    """
+    import os
+    run = w.pm_dir / "transcripts" / "run-old"
+    run.mkdir(parents=True)
+    finalized = run / f"impl-{PR}.jsonl"
+    finalized.write_text('{"old": "session"}\n')
+    fresh = w.tdir / f"impl-{PR}.jsonl"
+    new_target = "/tmp/new-session.jsonl"
+    fresh.symlink_to(new_target)
+
+    base_check.share_impl_transcript(w.pm_dir, PR, fresh)
+
+    # The link follows the new session and the old copy survives beside it.
+    assert os.readlink(finalized) == new_target
+    kept = run / f"impl-{PR}.jsonl.finalized"
+    assert kept.read_text() == '{"old": "session"}\n'
+    # A second pass does not renumber/duplicate the kept copy.
+    base_check.share_impl_transcript(w.pm_dir, PR, fresh)
+    assert kept.read_text() == '{"old": "session"}\n'
+    assert not (run / f"impl-{PR}.jsonl.finalized.1").exists()
+
+
 def test_completion_requires_idle_evidence(w):
     """No idle timestamp is no evidence: an idle notification alone never
     qualifies, so a caller that cannot read the pane's turn must not complete.

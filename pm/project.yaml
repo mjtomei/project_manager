@@ -35789,11 +35789,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-28T20:01:45.534961+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f5475d4
+    text: 'From pr-f0f4129 (base-integration gate): `pm_core.base_check.share_impl_transcript`
+      now runs from `pm pr start` on every implementation launch and re-points every
+      driver''s `transcripts/*/impl-<pr>.jsonl` (TUI run dir + auto-sequence dir)
+      at the new session. It only touches symlinks; a finalized copy (real file from
+      `finalize_transcript`) is renamed to `<name>.finalized` instead of being deleted.
+      The remaining overwrite is in `claude_launcher.build_claude_shell_cmd`, which
+      unlinks whatever exists at the launch transcript path (including a finalized
+      copy) before creating its symlink — that is the piece this PR did not change.'
+    created_at: '2026-10-28T20:01:45Z'
+    last_edited: '2026-10-28T20:01:45Z'
 - id: pr-ccdec71
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
@@ -38526,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T18:05:11.283179+00:00'
+  updated_at: '2026-10-28T19:25:51.580853+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38622,6 +38633,30 @@ prs:
       fixtures.'
     created_at: '2026-10-28T18:05:11Z'
     last_edited: '2026-10-28T18:05:11Z'
+  - id: note-5c29bc5
+    text: 'Review-loop a6f7 i4 fixes (on cb1f9f3b). (1) `share_impl_transcript` is
+      now called by `pm pr start` itself (the single implementation launcher), not
+      only by `base_check.launch_impl`. The TUI auto-start catch-up (`_start_pr_quiet
+      --fresh`) and a manual `pm pr start` wrote their `impl-<pr>.jsonl` symlink into
+      only their own dir, so the CLI auto-sequence dir kept pointing at the killed
+      session — it read that session''s idle event forever and its base-return handoff
+      never advanced ("running: implementation (no idle evidence from the rework session
+      yet)") if the TUI that relaunched it went away. The helper also accepts a direct
+      JSONL path (not just a symlink) and is public now. (2) `clear_return_awaiting`
+      drops a previous attempt''s `apply_error`, so `pm pr show` stops reporting a
+      failure the successful launch replaced. (3) The TUI completion cache is keyed
+      to the idle event it was computed for: a later hook event invalidates the cached
+      verdict instead of reusing it to start a reviewer beside a fresh turn. (4) Removed
+      the dead 2-tuple fallback in `_poll_impl_idle`''s resume loop. Tests: pr_start
+      refresh (real fixture, git/tmux mocked), direct-path sharing, apply_error clearing,
+      cache re-check on a new idle event. Spec R6 updated. Independently reproduced
+      the gate: conflict → exit 3, in_progress, exact HEAD/base pair, one note; after
+      reconciling + clearing awaiting → return resolved, in_review. Full suite: 4140
+      passed, 1 skipped, 13 failed — all pre-existing env (12x test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset).'
+    created_at: '2026-10-28T19:25:51Z'
+    last_edited: '2026-10-28T19:25:51Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
