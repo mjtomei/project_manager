@@ -38537,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T23:08:49.041425+00:00'
+  updated_at: '2026-10-28T23:38:06.022543+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38738,6 +38738,22 @@ prs:
       passed) — unrelated to this PR.'
     created_at: '2026-10-28T23:08:48Z'
     last_edited: '2026-10-28T23:08:48Z'
+  - id: note-4935bfd
+    text: 'Review-loop a6f7 i10 fixes. (1) `pr_review`s `in_review` write now also
+      refuses while an open base return exists, and names which refusal fired: the
+      gate is a network round-trip, so another driver (the TUI completion check, a
+      concurrent gate) can record a conflict return inside that window, and writing
+      in_review then launched a reviewer beside the rework the return had just started.
+      (2) `run_qa_sync` re-checks an open base return after the gate (next to the
+      existing merged/closed re-check) and reports base_returned instead of creating
+      the QA workdir/planner. Tests: a return recorded during the gate at each choke
+      point (test_pr_review_does_not_start_beside_a_return_recorded_during_the_gate,
+      test_qa_run_sync_waits_when_a_return_lands_during_the_gate), both verified to
+      fail without their fix (the QA one reached tmux window creation). Spec R3 +
+      test plan items 18-19 updated. Full suite: 4157 passed, 1 skipped, 0 failed
+      (excluding tests/test_markdown_render.py, which needs the `markdown` package).'
+    created_at: '2026-10-28T23:38:05Z'
+    last_edited: '2026-10-28T23:38:05Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
