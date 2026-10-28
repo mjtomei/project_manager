@@ -38638,6 +38638,20 @@ prs:
       steps inside it (scripts/s2run.sh).'
     created_at: '2026-10-28T04:01:39Z'
     last_edited: '2026-10-28T04:01:39Z'
+  - id: note-0b1b7c7
+    text: 'S111 refine (HEAD 9a2dacaa): code predicts three RQ47 b gaps for the S111
+      run to confirm or clear. (1) qa-run-bg: the first locked_update (_to_qa) uses
+      the default 2 s lock timeout, so a project.yaml hold over 2 s right after spawn
+      kills the driver before qa_run.json and before its running entry. A TUI pass
+      inside a hold under 2 s finds no record, starts its own loop, and the driver
+      then kills that loop''s windows as stale. (2) pm qa run never clears its qa_resume.json.
+      Once the CLI process exits and C is in qa, the TUI resume scan may "Recover
+      completed QA" and treat the one-instruction verdict as C''s full QA result.
+      (3) The kept cli-<pr>/qa_run.json names the first CLI pid, so run_driven_elsewhere
+      is False during a second CLI run. signoff_ui REQA and review->QA hand-offs call
+      start_qa without any live-driver check.'
+    created_at: '2026-10-28T03:05:11Z'
+    last_edited: '2026-10-28T03:05:11Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
