@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T03:29:23.639058+00:00'
+  updated_at: '2026-10-28T03:42:25.815095+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11469,6 +11469,29 @@ prs:
       6g. Captures /pm-captures/scenarios/84.'
     created_at: '2026-10-28T03:29:23Z'
     last_edited: '2026-10-28T03:29:23Z'
+  - id: note-cccff6a
+    text: 'QA S86 (2026-10-28, 17e68cc3 -> a058090f, nested rootless podman, fake-claude):
+      fixed a058090f. After pm tui restart the TUI mints a new manual-<token> transcript
+      run dir, so the idle tracker never re-registered impl/review panes the earlier
+      TUI launched: stop-on-idle never removed them (live: PR5 impl idle at the restart
+      and PR1 policy-off impl stayed Up 5+ min, no Stop-on-idle line). Panes older
+      than the TUI instance (max %N at on_mount) whose session fired a hook are now
+      adopted via pane_transcript_path; post-fix restart removed PR1/PR5 (one line
+      each), PR6 attached keep re-logged, gone containers "not running — nothing to
+      stop", IR review kept, B untouched; restart-1-s-after-idle replay removed after
+      restart. The age gate matters: without it the TUI adopted its own finished review-loop
+      pane and double-stopped it (2 samples). Also: review-loop relauncher stdout
+      now DEBUG-logged ("Closed review window … relaunching" was never observable
+      for zz d). All other Thens held. Supersede: with immediate fake PASS the stale
+      loop stop logs a plain "removed container … (<old>)" (new container already
+      stopping); with review delay 20 s it logs "the name now belongs to a newer container
+      (<new>), which is kept"; new ID never removed in either. Harness: recorder group
+      must be <session>~N (else zz d ERROR "Not in a pm tmux session"); Escape does
+      not close the non-fzf picker (C-c). Full suite: 59 failures identical on clean
+      HEAD (merge_publish/signoff_integration/git_ops env), test_qa_loop test_no_followup_after_stop
+      timing-flaky once. Captures /pm-captures/scenarios/86 (pre-fix/, post-fix/).'
+    created_at: '2026-10-28T03:42:25Z'
+    last_edited: '2026-10-28T03:42:25Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
