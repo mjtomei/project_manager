@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T18:19:58.811705+00:00'
+  updated_at: '2026-10-28T18:59:28.672557+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32906,6 +32906,42 @@ prs:
       work stays dropped. (2026-10-28)'
     created_at: '2026-10-28T18:19:58Z'
     last_edited: '2026-10-28T18:19:58Z'
+  - id: note-315356e
+    text: 'Review loop e7e1 i7: four leftovers in the kept recipe scope, all the PR''s
+      own class. (1) The web-UI finalize step''s `test -s` branch (a renderer that
+      reports success and writes nothing, R12) only printed: verified with the recipe''s
+      own block and a stub ffmpeg that exits 0 after truncating its output — the step
+      exits 1 and leaves a 0-byte recording.mp4 in the capture directory, an output
+      left on a failed step (the recording recipes'' render_fail removes it) that
+      the manifest could list as this run''s video. The branch now removes it; the
+      webm stays for a retry. (2) The CLI recipe''s no-asciinema fallback was `| tee
+      transcript.log` — a relative path, so the transcript lands in the worker''s
+      cwd and the capture directory has none while the manifest lists one (the R5
+      class, one file over). It now names <capture-dir>/<short-name>/transcript.log,
+      and the produced-files list names the file. (3) A failed `pm tui send` in the
+      driving step passed as a legitimate finish: step 5''s both-gone branch is right
+      to accept the scenario ending the pm session itself, but a TUI that dies mid-scenario
+      (a crash) leaves the same end state, so the run passes on a cast that stops
+      before the behaviour under test — the driving step now says so and says to re-run.
+      (4) Same class, one variable over: the driving step used `$TARGET` with no re-derive
+      although it is pasted on its own for a scenario, and `pm tui send -s ''''` is
+      not a no-op — _find_tui_pane falls back to the cwd''s session and then any pm
+      session with a TUI, so the keys can drive a different TUI than the one recorded,
+      with no error. Step 4 now re-derives TARGET=${TARGET:-$(pm session name)} and
+      refuses an empty one, as step 5 does. Considered and rejected: a liveness wait
+      in the web-UI teardown (kill + kill -0) — best-effort signal delivery is the
+      teardown''s job, PID 1 does not reap here, and it would reintroduce the waiting
+      logic the scope decision moved to the watcher. Tests: 5 new (empty-mp4 execution
+      case; fallback path + produced-files entry; the driving-step warning; the two
+      driving-step handle cases executed against the stub pm), all five fail against
+      the pre-fix recipes (checked by pointing the test module at HEAD''s recipes
+      in a scratch copy — no repo file reverted). File 114 pass; related suites 302;
+      full suite 3967 passed, 1 skipped, 94 deselected (push-proxy files plus the
+      two known baselines). Evidence /pm-captures/review-e7e1-i7/. impl.md R20 + Files/verification/evidence
+      and qa.md R1/R2/R4 + edge cases updated. No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped. (2026-10-28)'
+    created_at: '2026-10-28T18:58:47Z'
+    last_edited: '2026-10-28T18:59:28Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
