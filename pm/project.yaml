@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T04:54:22.488277+00:00'
+  updated_at: '2026-10-28T05:20:10.874248+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32238,6 +32238,36 @@ prs:
       semantics elsewhere; no pm_core/ change.'
     created_at: '2026-10-28T04:54:22Z'
     last_edited: '2026-10-28T04:54:22Z'
+  - id: note-a0c386b
+    text: 'Review loop 872e i2: three leftovers in the kept recipe scope, all the
+      same class as the PR (a wait or handle that matches the wrong thing, and stale
+      state passing as fresh evidence). (1) Neither recipe cleared a recorder session
+      left by an aborted run: the next new-session fails with "duplicate session"
+      and the readiness wait then passes on the previous run recorder while the worker
+      drives the wrong client. Step 0 now clears it (tmux kill-session -t pm-recorder
+      / tmux -L scaffold kill-session -t rec). Verified live: with a leftover rec
+      session the pre-fix cli scaffold exits 0 and leaves the stale cast in place
+      (false success); the fixed block records fresh. The cli scaffold clears the
+      session, not the server: kill-server followed a few ms later by new-session
+      races the server exit ("server exited unexpectedly", 7 of 40 tight iterations).
+      (2) The tmux transcript used pipe-pane -o, a silent no-op while a pipe is already
+      attached, so a pipe left by an aborted run meant transcript.log was never written
+      while the cast check still passed; the pipe is now attached without -o (replaces
+      and closes the old one) and every failure path stops it before exiting. (3)
+      In the tmux recipe a recorder that exits before drawing is now an actionable
+      failure ("recorder exited before it drew") instead of an early finish: the cast
+      it leaves holds asciinema error, not the TUI, and the old comment wrongly claimed
+      step 5 cast check would catch it. Tests: 4 new (stale recorder cleared in both
+      recipes, pipe reattachable, tmux early exit fails) plus a stop assertion anchored
+      on the last has-session loop and a web-ui assertion that the readiness failure
+      path kills its server; all 4 new tests fail against the i1 recipes. File 22
+      pass (3 runs); related suites 197 pass. Full suite 3863 passed, 14 failed: 12
+      markdown tests need the missing markdown dep (13/13 pass with it), and test_git_ops::test_keeps_unpushed_merge
+      + test_hook_events::test_installer_writes_standalone_receiver reproduce on origin/master@89e3c501;
+      test_merge_publish/test_signoff_integration deselected (push proxy rejects pushes
+      to master). No pm_core/ change.'
+    created_at: '2026-10-28T05:20:10Z'
+    last_edited: '2026-10-28T05:20:10Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
