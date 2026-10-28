@@ -1502,6 +1502,37 @@ class TestPollLoopNoRouteGating:
         assert {s["index"]: s["verdict"] for s in status["scenarios"]} == {
             1: "PASS", 2: "queued"}
 
+    def test_setup_error_at_relaunch_records_settled_verdicts(
+            self, tmp_path):
+        """S106 class, relaunch path: a verdict settled earlier in the same
+        tick is in the stopped run's qa_status.json when the dead worker's
+        relaunch raises the setup error before the tick's dashboard write."""
+        from pm_core import qa_loop
+        s1 = qa_loop.QAScenario(index=1, title="a", focus="f")
+        s1.window_name, s1.session_id, s1.pane_id = "w1", "sid-1", "%9"
+        s2 = qa_loop.QAScenario(index=2, title="b", focus="f")
+        s2.window_name, s2.session_id = "w2", "sid-2"
+        state = qa_loop.QALoopState(pr_id="pr-1", qa_workdir=str(tmp_path))
+        state.scenarios = [s1, s2]
+        err = ProviderNotFoundError("provider 'x' is not configured")
+        ev = {"event_type": "idle_prompt", "timestamp": time.time() + 1e4}
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
+             patch("pm_core.hook_events.read_event", return_value=ev), \
+             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+                   return_value="PASS"), \
+             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
+                   return_value=""), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=err):
+            with pytest.raises(ProviderNotFoundError, match="'x'"):
+                self._poll(state, tmp_path)
+        status = json.loads((tmp_path / "status.json").read_text())
+        assert {s["index"]: s["verdict"] for s in status["scenarios"]} == {
+            1: "PASS", 2: ""}
+
     def test_launch_status_write_marks_queued(self, tmp_path):
         """The prep-phase dashboard write of a launch batch lists the whole
         run, with queued scenarios as "queued"."""

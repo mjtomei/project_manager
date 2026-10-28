@@ -3312,18 +3312,15 @@ def _poll_tmux_verdicts(
             # and ``pending`` is also empty the loop exits before it
             # sees the result (race condition).
 
-    def _launch_next_queued():
-        """Launch the next queued scenario if concurrency allows."""
-        if not _launch_queue:
-            return
-        # Count currently active (pending + verifying)
-        active = len(pending) + len(verifying)
-        if concurrency_cap > 0 and active >= concurrency_cap:
-            return
-        # A provider setup error stops the run inside this launch, before
-        # the loop's own dashboard write: record the verdicts and
-        # verifications settled so far first, so the stopped run's
-        # qa_status.json does not keep a stale "PASS (verifying)".
+    def _write_dashboard():
+        """Write qa_status.json from the loop's current state.
+
+        Besides the end-of-tick write, it runs where a provider setup
+        error can stop the run mid-tick (before a queued launch, and when
+        a relaunch raises), so the stopped run's status keeps the verdicts
+        and verifications settled so far instead of a stale
+        "PASS (verifying)" (S106).
+        """
         with verification_lock:
             verifying_snapshot = set(verifying)
         _write_status_file(status_path, state.pr_id, state.scenarios,
@@ -3333,6 +3330,18 @@ def _poll_tmux_verdicts(
                            queued_scenarios=_queued_indices,
                            verification_failures=verification_failures,
                            verdict_reasons=state.scenario_verdict_reasons)
+
+    def _launch_next_queued():
+        """Launch the next queued scenario if concurrency allows."""
+        if not _launch_queue:
+            return
+        # Count currently active (pending + verifying)
+        active = len(pending) + len(verifying)
+        if concurrency_cap > 0 and active >= concurrency_cap:
+            return
+        # A provider setup error stops the run inside this launch, before
+        # the tick's own dashboard write: record what has settled first.
+        _write_dashboard()
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
@@ -3554,10 +3563,17 @@ def _poll_tmux_verdicts(
                         # window; relaunching would orphan a worker.
                         break
                     retry_counts[scenario.index] = retries + 1
-                    if _relaunch_scenario_window(
-                        scenario, state, data, pr_data,
-                        session, workdir_path,
-                    ):
+                    try:
+                        relaunched = _relaunch_scenario_window(
+                            scenario, state, data, pr_data,
+                            session, workdir_path,
+                        )
+                    except ProviderNotFoundError:
+                        # The run stops here, before this tick's
+                        # dashboard write (see _write_dashboard).
+                        _write_dashboard()
+                        raise
+                    if relaunched:
                         # Persist the new pane now, not at the next tick:
                         # this tick may still sleep through other dead
                         # scenarios' backoffs, and a TUI death meanwhile
@@ -3740,15 +3756,7 @@ def _poll_tmux_verdicts(
             _launch_next_queued()
 
         if verdicts_changed or completed_verifications:
-            with verification_lock:
-                verifying_snapshot = set(verifying)
-            _write_status_file(status_path, state.pr_id, state.scenarios,
-                               state.scenario_verdicts,
-                               scenario_0=state.scenario_0,
-                               verifying_scenarios=verifying_snapshot,
-                               queued_scenarios=_queued_indices,
-                               verification_failures=verification_failures,
-                               verdict_reasons=state.scenario_verdict_reasons)
+            _write_dashboard()
 
 
 # ---------------------------------------------------------------------------
