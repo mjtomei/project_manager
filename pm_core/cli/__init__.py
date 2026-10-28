@@ -291,7 +291,11 @@ def _list_settings():
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
-            val = "on" if get_global_setting(name) else "off"
+            # An unset boolean is its default: qa-verify-pass defaults on.
+            if get_global_setting_value(name, ""):
+                val = "on" if get_global_setting(name) else "off"
+            else:
+                val = _SETTING_DEFAULTS.get(name, "off")
         else:
             raw = get_global_setting_value(name, "")
             val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
