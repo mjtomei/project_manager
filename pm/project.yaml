@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T20:24:57.471282+00:00'
+  updated_at: '2026-10-28T21:47:35.518772+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33066,6 +33066,39 @@ prs:
       stays dropped.'
     created_at: '2026-10-28T20:24:57Z'
     last_edited: '2026-10-28T20:24:57Z'
+  - id: note-a78cfc5
+    text: 'QA S25 (web-UI recording start/readiness) PASS at 865a88f9 — all 10 scenario
+      triples verified against the PR-head pm/qa/artifacts/web-ui-recording.md; every
+      block was extracted verbatim (only PR_ID/CAPDIR/PORT/APP_START substituted)
+      and each ran in its own bash (fresh shell). (1) Stale outputs incl. page@<hash>.webm
+      and a dead server.pid are cleared; step 1 rc0 in 2.12s on a 2s-bind app; server.pid
+      equals the ss -ltnp listener; teardown from a fresh shell rc0 and a connect
+      is refused (rc7). (2) A hang-at-/ app polls to the deadline (119.89s; 125.11s
+      on a second run, one 5s attempt past it) then rc1 with the readiness message,
+      kills its server and removes server.pid; the teardown afterwards refuses with
+      the "holds no pid" remedy. (3) Decoy on the port -> rc1 in 0.01s with the busy-port
+      message, capture dir emptied first, decoy untouched and still answering, no
+      app launched. (4) 404-at-root -> rc0 in 0.26s (plain curl rc0, curl -sf rc22
+      on the same URL), app not killed, teardown frees the port. (5) Layer 2 rc0 in
+      12.04s: http.log has [HTTP 200] for / and /another-view, curl (28) ... 0 bytes
+      received + [HTTP 000] for /some-view, sse.log has data: tick 1-8. (6) Unusable
+      CAPDIR -> mkdir''s own "Not a directory" plus the guard message, rc1, no listener.
+      (7) Four fresh-shell blocks each rc1 with their own message; /http.log, /sse.log
+      and /recording.mp4 not created; no node_modules link in the cwd. (8) Missing
+      CAPDIR -> driver/finalize/Layer 2 each rc1 with "capture directory ... does
+      not exist". (9) Teardown with no pid -> rc1 with the working remedy. (10) Two
+      workers on one port -> worker 2 rc1 in 0.02s writing no server.pid of its own,
+      worker 1''s app untouched (same pid, still answering), worker 1''s teardown
+      stops only it and frees the port. Evidence /pm-captures/scenarios/25/ (manifest.md,
+      recipe-diff.patch old-vs-head, t1..t10 transcripts + .rc sidecars, scripts/
+      with app + harness + extracted blocks). Container note for the next run: this
+      QA container has NO Playwright/Chromium and NO ffmpeg (/usr/lib/node_modules/playwright
+      and /opt/ms-playwright absent; command -v ffmpeg prints nothing), so the driver
+      and finalize steps can only be exercised to their guards here — the recipe''s
+      Tooling prose says the image ships both. Tests: tests/test_qa_artifact_web_ui_recording.py
+      + tests/test_qa_artifact_recording_recipes.py 149 passed. No repo change.'
+    created_at: '2026-10-28T21:47:35Z'
+    last_edited: '2026-10-28T21:47:35Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
