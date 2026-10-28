@@ -163,7 +163,9 @@ def save_providers(data: dict[str, Any]) -> None:
     onto the target: ``mkstemp`` creates at 0600 regardless of the umask,
     and ``os.replace`` swaps the inode, which also tightens an existing
     permissive file (``write_text`` truncates in place and would leave its
-    mode alone).
+    mode alone).  Swapping the inode also means a symlinked target is
+    replaced by a regular file rather than written through — safer for a
+    credentials file, and intentional.
     """
     import yaml
 
