@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T02:36:45.579036+00:00'
+  updated_at: '2026-10-28T03:12:48.684054+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14768,6 +14768,21 @@ prs:
       PM_HOST_HOME exported (passes under env -i).'
     created_at: '2026-10-28T02:36:45Z'
     last_edited: '2026-10-28T02:36:45Z'
+  - id: note-02a7311
+    text: 'QA S60 (2026-10-28, work/claude-opus-5-5; real rootless Podman 3.4.4, unmodified
+      build-base, fake agents, tmux kill_target gate; evidence /pm-captures/scenarios/60/manifest.md):
+      stories 1 (follow-up refused -> INPUT_REQUIRED window-gone, kept s3), 2 (reminder
+      refused -> retry/relaunch PASS) and 4 (failed+successful relaunch registers
+      W2 not C) held. NEEDS_WORK, two fixes pushed: fd9bbdb4 container QA worker trust
+      dialog naming /workspace was refused when the host also has /workspace (watch
+      now told container=True; partial fix of pr-8c0d680); eac0ccdd TUI restart during
+      dead-worker retry backoff resumed with pane_id null and no dead-worker state,
+      adopted the concretizer by window name and hung (worker_died/worker_retries
+      now in qa_resume). Fixture: tmux 3.2a display -t <gone pane> exits 0 (CMD_FIND_CANFAIL);
+      dash printf has no \x escapes; install a fake-claude stand-in by ln + rename-over,
+      never mv.'
+    created_at: '2026-10-28T03:12:48Z'
+    last_edited: '2026-10-28T03:12:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -31841,7 +31856,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T07:34:49.309576+00:00'
-  updated_at: '2026-10-13T15:56:17.532387+00:00'
+  updated_at: '2026-10-28T03:12:49.696067+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31854,6 +31869,17 @@ prs:
       PR should also give a container-correct remedy.'
     created_at: '2026-10-13T15:56:17Z'
     last_edited: '2026-10-13T15:56:17Z'
+  - id: note-ff58821
+    text: 'Partially fixed from pr-1139060 QA S60 (fd9bbdb4): WorkspacePromptWatch
+      has a container flag; the QA scenario-worker watch passes container=bool(scenario.container_name),
+      so a container dialog on /workspace maps to the mounted workdir even when the
+      host has /workspace. Remaining sites still use the host-path-first rule: loop_shared.poll_for_verdict
+      (container concretizer), pane_idle and review_loop_ui orphan watches, the qa
+      planner watch. They need a caller-known container flag (do not infer it from
+      a podman exec substring in the start command: a host prompt mentioning it would
+      then trust a host /workspace by proxy).'
+    created_at: '2026-10-28T03:12:49Z'
+    last_edited: '2026-10-28T03:12:49Z'
 - id: pr-e835d8f
   plan: bugs
   title: 'Bug: local-backend merge-resolution window runs in the unapproved project
