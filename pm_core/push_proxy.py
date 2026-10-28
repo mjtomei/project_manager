@@ -850,8 +850,13 @@ def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] |
         sock_dir = str(Path(sock_path).parent)
         # Resolve the real directory if sock_dir is a symlink
         real_dir = os.path.realpath(sock_dir)
+        # Whether this call removed anything: a concurrent release of the same
+        # proxy (two of its containers reaped in parallel) finds it gone and
+        # must not report it stopped a second time.
+        stopped = False
         try:
             os.unlink(sock_path)
+            stopped = True
         except FileNotFoundError:
             pass
         except IsADirectoryError:
@@ -861,25 +866,29 @@ def _kill_proxy_socket(sock_path: str, expected_identity: tuple[int, int, int] |
             # reap would retry this failure while the directory kept it alive.
             import shutil
             shutil.rmtree(sock_path, ignore_errors=True)
+            stopped = True
         # Clean up the symlink if sock_dir is one
         if os.path.islink(sock_dir):
             try:
                 os.unlink(sock_dir)
+                stopped = True
             except OSError:
                 pass
         # Retire ownership only after socket removal succeeds, under the same
         # path lock so a replacement cannot publish between these operations.
         try:
             os.unlink(os.path.join(real_dir, _OWNER_FILE))
+            stopped = True
         except FileNotFoundError:
             pass
         # Clean up the real directory
         try:
             os.rmdir(real_dir)
+            stopped = True
         except OSError:
             pass
     sink = stopped_proxy_sink.get()
-    if sink is not None:
+    if sink is not None and stopped:
         sink.append(sock_dir)
 
 

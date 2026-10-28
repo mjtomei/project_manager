@@ -151,6 +151,18 @@ def test_stopping_a_proxy_reports_it_to_the_sink(tmp_path):
     assert not directory.exists()
 
 
+def test_a_proxy_already_stopped_by_another_release_is_reported_once(tmp_path):
+    """QA S51: reaping two containers that shared one proxy printed it twice
+    and counted "stopped 2 unused proxy(ies)" — the second release found it gone."""
+    directory = tmp_path / "pm-push-proxy-tag-pr-aaaa"
+    directory.mkdir()
+    (directory / "push.sock").touch()
+    sock = str(directory / "push.sock")
+    stopped = _collect_stopped(lambda: [push_proxy._kill_proxy_socket(sock)
+                                        for _ in range(2)])
+    assert stopped == [str(directory)]
+
+
 def test_a_kept_proxy_generation_is_not_reported(tmp_path):
     sock = tmp_path / "proxy" / "push.sock"
     sock.parent.mkdir()
