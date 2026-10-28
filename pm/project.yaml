@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T01:07:17.029750+00:00'
+  updated_at: '2026-10-28T01:41:13.371174+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -25965,6 +25965,17 @@ prs:
       re-check hang) remains subsumed by this PR i2. (2026-10-27T23:20:26Z)'
     created_at: '2026-10-27T23:20:26Z'
     last_edited: '2026-10-27T23:20:26Z'
+  - id: note-bce0d4e
+    text: 'Refiner (scenario 9, teardown): verified in code that a stop during QA
+      execution with unverdicted scenarios still aggregates overall INPUT_REQUIRED
+      (tests/test_qa_loop.py::TestStoppedRunAggregation) and _on_qa_complete then
+      records a QA INPUT_REQUIRED note; only per-worker retirement and recovery nudges
+      are stop-guarded. A stop inside qa_finalize returns None (no [finalize: NO_VERDICT])
+      but leaves the pre-finalize PASS as the run verdict. Scenario 9 asserts the
+      clean-teardown / no-note requirement, so an observed INPUT_REQUIRED or PASS
+      terminal line, or a QA note, is a real finding rather than a setup error.'
+    created_at: '2026-10-28T00:45:58Z'
+    last_edited: '2026-10-28T00:45:58Z'
   - id: note-37d3c80
     text: 'QA S11 (watcher NO_VERDICT surface + pane-gone teardown): fixed two defects
       found driving the scenario. (1) In-scope: the new NO_VERDICT stop line interpolated
@@ -25985,6 +25996,17 @@ prs:
       watcher''s `Auto-Start Watcher ...` lines; the backlog still shows them.'
     created_at: '2026-10-28T01:07:16Z'
     last_edited: '2026-10-28T01:07:16Z'
+  - id: note-276eaeb
+    text: 'QA S9 (73ea40b9): a stop during QA execution that leaves every scenario
+      unverdicted now ends the run in STOPPED ("QA stopped during execution", no QA
+      note, finalize skipped) instead of INPUT_REQUIRED + a note; a stop after some
+      verdicts still reports INPUT_REQUIRED (never PASS). Verified live: stop 34 s
+      after both workers launched into their no-verdict episode — no recovery text
+      in either pane, no note, status stays qa, and a following /pr qa fresh plans
+      anew to PASS [finalize: FINALIZE_DONE]. Supersedes note-bce0d4e (pre-fix behaviour).
+      Captures: /pm-captures/scenarios/9/.'
+    created_at: '2026-10-28T01:41:13Z'
+    last_edited: '2026-10-28T01:41:13Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
