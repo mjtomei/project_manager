@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T06:59:31.638903+00:00'
+  updated_at: '2026-10-28T07:50:05.518260+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26136,6 +26136,31 @@ prs:
       pr-f2fee05 (verifier re-check hang) remains subsumed by this PR i2.'
     created_at: '2026-10-28T06:59:31Z'
     last_edited: '2026-10-28T06:59:31Z'
+  - id: note-07e2f05
+    text: 'Review-loop 81f7 i2 (b7a1ba7b): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), planner stop ordering, the _retire_if_exhausted
+      last-chance re-scan and the pr-8efa789 merge coordination all hold under adversarial
+      tracing, and pm/specs/pr-6566901/impl.md matches the shipped code (no [UNRESOLVED]
+      ambiguities). Fixed a documentation drift left by 89fdf570: qa_loop.VERDICT_STOPPED
+      and autostart_state._derive still described STOPPED as "during planning, or
+      during execution before any scenario reported", omitting the finalize-phase
+      teardown (the case with full scenario coverage), and the qa_loop comment said
+      "nothing was determined about the PR" which is untrue when scenarios reported
+      before a finalize stop. Comments only, no behaviour change. Full suite in a
+      clean venv: 3826 passed, 1 skipped; 43 failed + 17 errors all reproduce on the
+      unmodified tree here (test_merge_publish/test_signoff_integration git env, test_git_ops::test_keeps_unpushed_merge
+      on git 2.34.1, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can land in
+      a permission hold that begins during an open episode. pr-f2fee05 (verifier re-check
+      hang) remains subsumed by this PR i2 (note already left on it); pr-8efa789 (post-verdict
+      wakeup turn) is unaffected because the completed-verdict guard returns "completed"
+      before any nudge.'
+    created_at: '2026-10-28T07:50:05Z'
+    last_edited: '2026-10-28T07:50:05Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
