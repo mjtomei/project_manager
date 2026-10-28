@@ -38526,11 +38526,33 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T13:44:04.216828+00:00'
+  updated_at: '2026-10-28T14:50:54.597479+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-225dd0b
+    text: 'Impl ready for review (7483ca55). New `pm_core/base_check.py` wraps `integration.check_integration`
+      as a pre-flight gate. Choke points: `pm pr review` (TUI loop iterations + one-shots;
+      exit 3 -> `review_loop.BaseConflictError` -> `VERDICT_BASE_CONFLICT`, no iteration
+      recorded), `qa_loop.run_qa_sync` (before the QA workdir/Scenario 0/planner),
+      `pr_auto_sequence` (`_launch_review_iteration` + in_progress completion/relaunch),
+      and the TUI scheduler (`_start_loop`, `_auto_start_review_loops/_qa_loops`,
+      `start_qa`). Conflict -> `pr["base_return"]` (pair/stage/conflicts/attempt/awaiting/launch_claim)
+      + in_progress + one claimed impl relaunch; `pr["base_check"]` carries the retry
+      record; a note and `$CAP/integration.json` are the evidence. Completion (`impl_completion`)
+      needs the launch (awaiting cleared), idle settle, no merge/rebase, no tracked
+      edits (untracked + pm project.yaml ignored) and a fresh check that is no longer
+      the conflict; same pair never bounces again, moved-base conflicts supersede
+      (capped, then needs_human). Fetch errors are retryable: writer-launch gate proceeds
+      (fail open, sign-off is authoritative), completion waits. Review loops continue
+      iteration numbering from existing transcripts. Tests: tests/test_base_check.py
+      (real git, 3 stages, concurrency, cap, dirty/pm-state, moved base), tests/test_tui_base_return.py,
+      additions to test_review_loop/test_pr_auto_sequence. Pre/post CLI captures in
+      $CAP/impl/{pre,post}-fix/review-conflict/. Full suite: 4085 passed; only pre-existing
+      env failures (markdown module missing, hook test needs PM_HOST_HOME unset).'
+    created_at: '2026-10-28T14:50:54Z'
+    last_edited: '2026-10-28T14:50:54Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
