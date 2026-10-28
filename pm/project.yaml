@@ -34345,7 +34345,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T12:03:19.306646+00:00'
+  updated_at: '2026-10-28T13:23:08.735194+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34506,6 +34506,17 @@ prs:
       != HOME; 20/20 pass unset).'
     created_at: '2026-10-28T12:03:19Z'
     last_edited: '2026-10-28T12:03:19Z'
+  - id: note-3cb6d22
+    text: 'QA S11 (concurrent writers) PASS: (1) worker app-code push during planning
+      -> handoff refused INPUT_REQUIRED, workdir left at H, upstream kept U1, both
+      remedies in qa_status.json/note; (2) `pr qa fresh` fast-forwarded H->U1 and
+      routed to review with no planner; (3) two simultaneous starts (auto-sequence
+      tick + TUI) both settled PASS at the pm-only head U1B, both planner heads =
+      U1B, planted local-work.txt kept, later tick `advanced: sign_off`; (4) 54 pm-only
+      pushes racing the sync -> sync ff to the observed head, handoff refused INPUT_REQUIRED,
+      all 54 pushed SHAs still ancestors of upstream. Captures: /pm-captures/scenarios/11/.'
+    created_at: '2026-10-28T13:23:08Z'
+    last_edited: '2026-10-28T13:23:08Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
