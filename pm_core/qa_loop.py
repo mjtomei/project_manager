@@ -2913,7 +2913,14 @@ def _poll_tmux_verdicts(
         # re-clones the scenario dir, and create_container would reuse a
         # running same-name container still mounting the deleted clone; a
         # leftover concretizer window would duplicate the window name.
-        _kill_windows_named(session, scenario.window_name)
+        # Kill the computed name too, not only the recorded one: a controller
+        # that died mid-launch may never have published ``window_name``, and
+        # a missed window would leave two windows with the same name for
+        # name-based pane lookup / dashboard navigation to choose between.
+        for name in dict.fromkeys(
+                (scenario.window_name,
+                 _scenario_window_name(pr_data, scenario.index))):
+            _kill_windows_named(session, name)
         if use_containers and scenario.container_name:
             try:
                 container_mod.remove_container(scenario.container_name)

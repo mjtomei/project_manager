@@ -88,11 +88,19 @@ create/concretize/split); `exec`/`exit` failures retry through
 commits/evidence survive).  Before a `create` retry the previous attempt's
 leftover concretizer window and container are removed (the launcher
 re-clones the scenario dir, and `create_container` would otherwise reuse a
-running same-name container still mounting the deleted clone); no worker
-ran in them, so no evidence is lost.
+running same-name container still mounting the deleted clone); the window
+is killed both by its recorded name and by the computed
+`_scenario_window_name(pr_data, index)` — a controller that died mid-launch
+may never have published `window_name`, and a missed window would leave two
+windows with the same name.  No worker ran in them, so no evidence is lost.
 
 R6. **Surface the runtime cause.**  Add
-`container.classify_runtime_error(text) -> str | None` (pure) and
+`container.classify_runtime_error(text, name=None) -> str | None` (the
+optional *name* only feeds the `<runtime> restart <name>` remediation),
+`container.runtime_error_summary(text, name=None) -> str` (classified cause,
+else the last two non-empty stderr lines) and
+`container.launch_error_summary(exc, name=None) -> str` (same, preferring a
+`CalledProcessError`'s stderr/output) alongside
 `container.diagnose_exec_failure(name) -> str` (short-timeout
 `<runtime> inspect` + `<runtime> exec <name> true`, stderr classified).
 Classifier recognises:
@@ -133,8 +141,10 @@ check at prep start; add the check before the worker split and in
 workers.
 
 R8. **Restart preserves results and retry state.**  `QALoopState` gains
-`launch_retries: dict[int, dict]` (attempts, kind, cause, retry_at,
-prior session ids).  `_write_resume_file` persists it and
+`launch_retries: dict[int, dict]` (attempts, kind, cause, retry_at, prior
+session ids, and a `state` of `waiting` / `launching` / `running` /
+`failed` that drives the status display and the "an interrupted launch
+spends an attempt" rule).  `_write_resume_file` persists it and
 `build_resume_state` restores it.  Verdicts / reasons / verified set are
 already persisted.  On resume a scenario with a retry record continues from
 its recorded attempt count and `retry_at` (immediately if past due).  A

@@ -33,6 +33,7 @@ from pm_core.qa_loop import (
     _poll_tmux_verdicts,
     _relaunch_scenario_window,
     _retry_delay,
+    _scenario_window_name,
     _write_resume_file,
     _write_status_file,
     build_resume_state,
@@ -98,8 +99,9 @@ def _run(state, tmp_path, patches, **kw):
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
-        _poll_tmux_verdicts(state, {}, {}, "sess", str(tmp_path),
-                            tmp_path / "qa_status.json", lambda *a: None, **kw)
+        _poll_tmux_verdicts(state, {}, {"id": state.pr_id}, "sess",
+                            str(tmp_path), tmp_path / "qa_status.json",
+                            lambda *a: None, **kw)
 
 
 def _runtime(stderr: str):
@@ -844,6 +846,73 @@ def test_create_retry_tears_down_previous_attempt(tmp_path):
     assert seen_at_launch == [(None, None)]
     assert state.launch_retries[1]["kind"] == "create"
     assert state.scenario_verdicts[1] == VERDICT_PASS
+
+
+def test_create_retry_kills_window_by_computed_name(tmp_path):
+    """A controller that died mid-launch may never have published the
+    scenario's ``window_name``.  The create retry must still kill the leftover
+    window by its computed name, or the relaunch adds a second window with the
+    same name and name-based pane lookup becomes ambiguous."""
+    sc = QAScenario(index=2, title="t", focus="f", window_name="qa-stale")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    computed = _scenario_window_name({"id": "pr-x"}, 2)
+    killed = []
+
+    def fake_launch(st, data, pr_data, session, repo_root, wd, pm_root=None,
+                    scenarios=None, write_status=True, **kw):
+        st.scenario_verdict_reasons[2] = "container create failed: boom"
+
+    def on_tick(clock):
+        if killed:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.list_windows", return_value=[
+            {"id": "@7", "index": "7", "name": "qa-stale"},
+            {"id": "@8", "index": "8", "name": computed}]),
+        patch("pm_core.home_window.park_if_on"),
+        patch("pm_core.tmux.kill_window",
+              side_effect=lambda s, w: killed.append(w)),
+        patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+              side_effect=fake_launch),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert killed == ["@7", "@8"]
+    assert state.launch_retries[2]["kind"] == "create"
+
+
+def test_create_failure_exhausts_budget_with_create_label(tmp_path):
+    """A scenario that never gets a worker pane burns the same bounded
+    budget as an exec/exit failure and ends INPUT_REQUIRED with the
+    "could not be created" label and the launcher's recorded cause."""
+    sc = QAScenario(index=1, title="t", focus="f")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    launches = []
+
+    def fake_launch(st, data, pr_data, session, repo_root, wd, pm_root=None,
+                    scenarios=None, write_status=True, **kw):
+        launches.append(write_status)
+        st.scenario_verdict_reasons[1] = (
+            "container create failed: keyring quota exhausted")
+
+    clock = FakeClock()
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+              side_effect=fake_launch),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert len(launches) == _SCENARIO_MAX_RETRIES
+    assert launches == [False] * _SCENARIO_MAX_RETRIES  # poll thread writes
+    assert state.launch_retries[1]["kind"] == "create"
+    assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+    reason = state.scenario_verdict_reasons[1]
+    assert reason.startswith("worker could not be created")
+    assert "keyring quota exhausted" in reason
 
 
 # ---------------------------------------------------------------------------
