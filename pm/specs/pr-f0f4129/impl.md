@@ -82,13 +82,22 @@ already drops it because the status is no longer `qa`.
   also retires the PR's review window (`_retire_review_window_for_return`),
   mirroring sign-off's bounce, so no reviewer writer is left behind; a
   refused/raced writer start normalizes the status back to `in_progress`
-  (`ensure_impl_status`).
+  (`ensure_impl_status`). A corrupt `base_return` (a string/list from a
+  hand-edited yaml) is treated as "no previous return" rather than raising
+  inside the locked update — otherwise the gate reports "the PR left the
+  phase" and leaves it in review with an unreconcilable base.
 - **R3 — No downstream writer on conflict.** `pr_review` prints a one-line
   stdout status and exits with code **3** (no status write, no review
   window) on `conflict`/`wait`. `run_qa_sync` sets
   `state.base_returned = True` / `base_return_reason` and returns before
   creating the QA workdir, Scenario 0, or the planner. The TUI drops the QA
   loop in `poll_qa_state` with a log line.
+  The gate is a network round-trip inserted between the phase check and the
+  status write / window creation, so both choke points re-check the PR is
+  still eligible afterwards: `pr_review`'s `in_review` write refuses (exit 1,
+  no window) when a concurrent merge/close landed, and `run_qa_sync`
+  re-checks `merged`/`closed` after the gate. Neither may demote a finished
+  PR or start a writer against it.
 - **R4 — Clean integration continues.** `clean` / `up_to_date` / `in_base`
   resolve any open base return and let the caller proceed exactly as before.
   No review/QA reset, no status change, no re-run.
@@ -124,7 +133,11 @@ already drops it because the status is no longer `qa`.
   reading the killed session's idle event and its handoff never advances.
   Only symlinks are re-pointed: a finalized transcript (a real file left by
   `finalize_transcript` when a run ends) is evidence, so it is kept beside
-  the refreshed link (`<name>.finalized`) rather than deleted.
+  the refreshed link (`<name>.finalized`) rather than deleted. The link
+  comparison uses the *resolved* path as well as the literal one, so a
+  transcript handed over relatively (`pm pr start --transcript
+  transcripts/run/impl-<pr>.jsonl`) is never mistaken for another driver's
+  stale copy and renamed out from under its own session.
   A successful launch also clears a previous attempt's `apply_error`. An
   idle notification alone never qualifies: a
   missing idle timestamp (`idle_since is None`, e.g. the pane/tracker could
@@ -202,7 +215,9 @@ already drops it because the status is no longer `qa`.
   strand its rework).
   `_base_completion_tick` never reaches the git helpers with an empty cwd
   (they raise, inside the shared
-  poll timer). `_resume_returned_loop` does not start a second loop when one
+  poll timer), and returns a plain "no project root" verdict instead of
+  passing `None` to `store.load` before the project is loaded.
+  `_resume_returned_loop` does not start a second loop when one
   is already running for the PR. `review_loop` maps exit code 3 to
   `VERDICT_BASE_CONFLICT` and stops the loop without recording an iteration;
   the icon/log path treats it as a clean completion (not ERROR).
@@ -216,7 +231,11 @@ already drops it because the status is no longer `qa`.
 - **R15 — Tests.** Real-git tests for each transition point, the unchanged
   pair, a moved base during the handoff, dirty workdir retention, fetch
   failure, concurrent gates / one owner, restart/late-callback idempotency,
-  and a background-test idle that does not qualify as completion.
+  and a background-test idle that does not qualify as completion. Plus the
+  hardening cases: a corrupt non-dict `base_return`, a relatively-spelled
+  transcript in `share_impl_transcript`, a merge landing during the gate's
+  fetch at the review and QA choke points, and a missing project root in the
+  TUI completion tick.
 
 ## 2. Implicit requirements
 
@@ -333,6 +352,11 @@ No unresolved ambiguities.
 12. `tracked_dirty` ignores only pm's exact state paths (`project.yaml` /
     its lock at the root or under `pm/`); a tracked `sub/pm/project.yaml`
     edit still blocks completion.
+13. a corrupt non-dict `base_return` (a string) still records the return;
+    `share_impl_transcript` leaves a relatively-spelled transcript in place.
+14. a merge landing during the gate's fetch: `pm pr review` does not write
+    `in_review` (exit 1, no window) and `run_qa_sync` does not create the QA
+    workdir.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
@@ -354,8 +378,8 @@ TUI: `_start_loop`/`start_qa`/`_auto_start_review_loops`/
 `_auto_start_qa_loops` refuse with an open return (repairing a raced
 status); `_poll_impl_idle` does not advance on a background-test idle
 (settle/pair/dirty) and does advance after a genuine commit; a missing
-workdir never reaches the git helpers; `_resume_returned_loop` never starts
-a second loop; `poll_qa_state` drops a returned run.
+workdir or project root never reaches the git helpers; `_resume_returned_loop`
+never starts a second loop; `poll_qa_state` drops a returned run.
 
 ## 6. Out of scope
 

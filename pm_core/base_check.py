@@ -194,10 +194,12 @@ def _base_ref(base_branch: str) -> str:
 
 def _stamp(pr: dict, status: str) -> None:
     """Record ``updated_at`` / the status timestamp (cli.helpers' rule)."""
-    now = _now()
-    pr["updated_at"] = now
-    if status == "in_progress" and not pr.get("started_at"):
-        pr["started_at"] = now
+    # Reuse the canonical transition rule rather than re-stating it here: a
+    # status write that drifts from ``pm``'s own transitions (a missing
+    # ``started_at``, a new status-specific timestamp) is invisible until a
+    # reader keys off it.
+    from pm_core.cli.helpers import _record_status_timestamp
+    _record_status_timestamp(pr, status)
 
 
 def _int_or(value, default: int) -> int:
@@ -357,7 +359,12 @@ def return_to_impl(root: Path, pr_id: str, record: dict, stage: str,
             return
         existing = open_return(pr)
         pair = (record.get("head"), record.get("base_sha"))
-        prev = pr.get("base_return") or {}
+        prev = pr.get("base_return")
+        if not isinstance(prev, dict):
+            # A hand-edited/corrupt ``base_return`` (a string, a list) must
+            # not raise here: the exception would surface as "the PR left the
+            # phase" and leave it in review with an unreconcilable base.
+            prev = {}
         same_base = bool(prev.get("verdict")) \
             and prev.get("base_sha") == record.get("base_sha")
         attempt = (_int_or(prev.get("attempt"), 0) + 1) if same_base else 1
@@ -600,7 +607,11 @@ def share_impl_transcript(root: Path, pr_id: str,
         except OSError:  # pragma: no cover - best effort
             continue
     for p in links:
-        if p == transcript:
+        # Compare resolved paths as well: a caller may spell the transcript
+        # relatively (``pm pr start --transcript transcripts/run/impl-x.jsonl``),
+        # and renaming the transcript itself to ``.finalized`` would move the
+        # evidence the caller just handed us.
+        if p == transcript or os.path.realpath(p) == os.path.realpath(transcript):
             continue
         try:
             if p.is_symlink():

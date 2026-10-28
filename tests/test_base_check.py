@@ -343,6 +343,28 @@ def test_share_impl_transcript_preserves_a_finalized_copy(w):
     assert not (run / f"impl-{PR}.jsonl.finalized.1").exists()
 
 
+def test_share_impl_transcript_does_not_move_the_transcript_itself(w, monkeypatch):
+    """A relatively-spelled transcript must not be renamed to ``.finalized``.
+
+    ``pm pr start --transcript transcripts/run-x/impl-pr.jsonl`` hands over a
+    relative path while ``glob`` returns the absolute one, so the transcript
+    itself looks like another driver's stale copy.  Renaming it would move the
+    evidence and leave a broken link in its place.
+    """
+    run = w.pm_dir / "transcripts" / "run-x"
+    run.mkdir(parents=True)
+    real = run / f"impl-{PR}.jsonl"
+    real.write_text('{"evidence": true}\n')
+    monkeypatch.chdir(w.pm_dir)
+
+    base_check.share_impl_transcript(
+        w.pm_dir, PR, f"transcripts/run-x/impl-{PR}.jsonl")
+
+    assert real.is_file() and not real.is_symlink()
+    assert real.read_text() == '{"evidence": true}\n'
+    assert not (run / f"impl-{PR}.jsonl.finalized").exists()
+
+
 def test_completion_requires_idle_evidence(w):
     """No idle timestamp is no evidence: an idle notification alone never
     qualifies, so a caller that cannot read the pane's turn must not complete.
@@ -631,6 +653,22 @@ def test_stale_review_launch_is_refused_while_return_open(w):
     assert res.decision == base_check.WAIT
 
 
+def test_non_dict_base_return_still_records_the_return(w):
+    """A corrupt ``base_return`` (a string, a list) must not raise.
+
+    The gate would otherwise report "the PR left the phase" and leave it in
+    review with an unreconcilable base — the same failure mode the malformed
+    ``attempt`` and null-record tests cover.
+    """
+    set_pr(w, base_return="hand-edited garbage")
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")) as launch:
+        res = gate(w)
+    assert res.decision == base_check.CONFLICT, res.reason
+    assert res.returned
+    launch.assert_called_once()
+    assert pr(w)["base_return"]["attempt"] == 1
+
+
 def test_malformed_attempt_still_records_the_return(w):
     """A corrupt ``attempt`` must not turn the return into a silent no-op.
 
@@ -758,6 +796,58 @@ def test_qa_run_sync_clean_base_continues(w):
             run_qa_sync(state, w.pm_dir, pr(w))
     assert state.base_returned is False
     assert pr(w)["status"] == "qa"
+
+
+def test_qa_run_sync_aborts_when_the_pr_merged_during_the_gate(w):
+    """A merge landing inside the gate's fetch must not start QA.
+
+    The gate is a network round-trip placed after the "as late as possible"
+    merged/closed check; without a re-check a PR merged meanwhile would get a
+    QA workdir and planner window against a finished PR.
+    """
+    from pm_core.qa_loop import QALoopState, run_qa_sync
+    set_pr(w, status="qa")
+    state = QALoopState(pr_id=PR)
+
+    def _merged_during_gate(*_a, **_k):
+        set_pr(w, status="merged")
+        return base_check.GateResult(base_check.PROCEED, base_check.STAGE_QA)
+
+    with patch("pm_core.qa_loop.get_pm_session", return_value="pm-test"), \
+         patch("pm_core.base_check.gate", side_effect=_merged_during_gate), \
+         patch("pm_core.qa_loop.create_qa_workdir") as mk:
+        run_qa_sync(state, w.pm_dir, pr(w))
+    mk.assert_not_called()
+    assert state.running is False
+    assert state.base_returned is False
+    assert state.qa_workdir is None
+
+
+def test_pr_review_does_not_demote_a_pr_merged_during_the_gate(w):
+    """A merge landing inside the gate's fetch must not be undone.
+
+    ``pm pr review`` reads the status, runs the base check (a network
+    round-trip) and then writes in_review.  Without the guard a concurrent
+    merge is overwritten in project.yaml and a reviewer starts against a
+    finished PR.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    set_pr(w, status="in_progress")
+
+    def _merged_during_gate(*_a, **_k):
+        set_pr(w, status="merged")
+        return base_check.GateResult(base_check.PROCEED, base_check.STAGE_REVIEW)
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch("pm_core.base_check.gate", side_effect=_merged_during_gate), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", PR])
+    assert result.exit_code == 1, result.output
+    window.assert_not_called()
+    assert pr(w)["status"] == "merged"
 
 
 def test_prompts_carry_the_return_block(w):

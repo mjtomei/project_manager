@@ -1780,14 +1780,28 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
+    entered = {"ok": False}
+
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
             return
+        # The pre-flight base check above is a network round-trip.  A
+        # concurrent merge/close (e.g. a GitHub sync) landing inside that
+        # window must not be demoted to in_review: it would un-merge the PR
+        # in project.yaml and start a reviewer against a finished PR.
+        if pr.get("status") in ("merged", "closed"):
+            return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
+        entered["ok"] = True
 
     store.locked_update(root, apply)
+    if not entered["ok"]:
+        click.echo(
+            f"PR {_pr_display_id(pr_entry)} moved to another phase during the "
+            f"base check; review not started.", err=True)
+        raise SystemExit(1)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     if no_window:

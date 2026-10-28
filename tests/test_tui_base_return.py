@@ -304,6 +304,20 @@ def test_completion_tick_handles_a_missing_workdir(tmp_path):
     assert "workdir" in why
 
 
+def test_completion_tick_handles_a_missing_project_root(tmp_path):
+    """No project root must not reach ``store.load`` with ``None``."""
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return())
+    app = _app(tmp_path, [pr])
+    app._root = None
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
+    ok, why, _resume = review_loop_ui._base_completion_tick(
+        app, "pr-001", pr, _tracker(old))
+    assert not ok
+    assert "project root" in why
+
+
 def test_completion_tick_recovers_when_the_worker_cannot_start(tmp_path):
     """A worker that cannot be spawned must not leave the tick in flight.
 

@@ -38537,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T21:27:27.955477+00:00'
+  updated_at: '2026-10-28T22:06:24.746342+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38693,10 +38693,29 @@ prs:
       autostart/TUI tests after it landed.'
     created_at: '2026-10-28T21:27:27Z'
     last_edited: '2026-10-28T21:27:27Z'
+  - id: note-b023900
+    text: 'Review-loop a6f7 i8 fixes. (1) `pr_review`''s `in_review` write now refuses
+      (exit 1, no window) when the PR became merged/closed during the pre-flight gate''s
+      fetch — the gate widened a window that could otherwise un-mark a merge in project.yaml
+      and launch a reviewer against a finished PR. (2) `run_qa_sync` re-checks merged/closed
+      after the gate (its "as late as possible" check now precedes a network round-trip).
+      (3) `return_to_impl` treats a non-dict `base_return` (a string/list from a hand-edited
+      yaml) as "no previous return" instead of raising inside the locked update, which
+      the gate reported as "the PR left the phase" and left the PR in review with
+      an unreconcilable base. (4) `share_impl_transcript` compares resolved paths,
+      so a relatively-spelled transcript is not renamed to `.finalized` (moving the
+      evidence) by its own refresh. (5) `_base_completion_tick` reports "no project
+      root" instead of passing None to `store.load`. (6) `_stamp` reuses `cli.helpers._record_status_timestamp`.
+      Tests: non-dict base_return, relative transcript, merge-during-gate at both
+      choke points, missing project root — each verified to fail without its fix.
+      Spec R2/R3/R6/R13/R15 + test plan updated. Full suite: 4152 passed, 1 skipped
+      (test_markdown_render needs the `markdown` package).'
+    created_at: '2026-10-28T22:06:24Z'
+    last_edited: '2026-10-28T22:06:24Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
-    signoff: provider:claude-work
+    signoff: provider:claude-work-xhigh-249
   session_effort:
     signoff: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-f0f4129-check-base-integration-before-review-fb6d03d0

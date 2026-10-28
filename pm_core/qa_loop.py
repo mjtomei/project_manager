@@ -3816,6 +3816,19 @@ def run_qa_sync(
         _log.warning("QA %s: base check failed (retryable): %s; continuing",
                      pr_id, gate.reason)
 
+    # The gate re-reads the base (a network round-trip), so the merged/closed
+    # re-check above is no longer "as late as possible before any QA window".
+    # Re-check here so a merge/close landing during the fetch cannot start a
+    # QA planner and window against a finished PR.
+    data = store.load(pm_root)
+    after_gate = next((p for p in data.get("prs", []) if p.get("id") == pr_id),
+                      None)
+    if (after_gate or {}).get("status") in ("merged", "closed"):
+        _log.info("QA aborted: %s is %s after the base check; not running QA",
+                  pr_id, after_gate.get("status"))
+        state.running = False
+        return state
+
     # Create QA workdir
     if not state.qa_workdir:
         qa_wd = create_qa_workdir(state.pr_id, state.loop_id)

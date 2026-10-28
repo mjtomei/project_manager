@@ -1236,6 +1236,11 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     from pm_core import base_check
     from pm_core.tui import auto_start as _auto_start
 
+    if not app._root:
+        # Every check below (and ``impl_completion``) resolves the project
+        # root; without one there is nothing to verify against.  Report it
+        # rather than letting a ``None`` reach ``store.load``.
+        return False, "no project root", False
     checks = getattr(app, "_base_completion_checks", None)
     if checks is None:
         checks = {}
