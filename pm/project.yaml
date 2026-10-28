@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T05:20:10.874248+00:00'
+  updated_at: '2026-10-28T06:02:06.102167+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32268,6 +32268,29 @@ prs:
       to master). No pm_core/ change.'
     created_at: '2026-10-28T05:20:10Z'
     last_edited: '2026-10-28T05:20:10Z'
+  - id: note-2949465
+    text: 'Review loop 872e i3: three leftovers in the CLI no-TTY scaffold, all the
+      same class as the PR (a wait that fails and destroys the job it is watching).
+      (1) The readiness wait polled pane content, which only appears once the recorded
+      command prints — a quiet command records fine with a blank pane. Verified with
+      the 88904c04 block: `-c ''sleep 45''` failed at 30s ("recorder did not come
+      up within 30s") and killed the recording, although the cast header had been
+      written at ~0.1s. It now waits on the cast file (asciinema''s own handle) and
+      still ends when the session goes away; verified that keys land as soon as the
+      header exists. (2) The stop wait''s fixed 30s bound is a hang detector, not
+      a time limit on the recorded work: `-c ''echo started; sleep 45''` failed with
+      "recorder did not exit within 30s" and left a cast holding only its header.
+      The bound is now `RECORDER_STOP_TIMEOUT` (default 30s) and the failure message
+      names it. (3) `mkdir -p`/`rm -f` the cast were prose-only for the one-command
+      and `bash -c` forms, so a worker pasting those could still render an earlier
+      run''s cast as this run''s capture; they are now a runnable block that precedes
+      every form. Also documented that the placeholder sits inside single quotes (use
+      the double-quoted `bash -c "..."` form). Tests: tests/test_qa_artifact_recording_recipes.py
+      24 pass; the 5 assertions added/tightened fail against 88904c04. Full suite
+      3971 passed, 1 skipped. Evidence: /pm-captures/review-872e-i3/. No change to
+      the tmux or web-ui recipes. (2026-10-28)'
+    created_at: '2026-10-28T06:02:06Z'
+    last_edited: '2026-10-28T06:02:06Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
