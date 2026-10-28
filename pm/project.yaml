@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T10:15:10.735515+00:00'
+  updated_at: '2026-10-28T10:40:40.195877+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32451,6 +32451,32 @@ prs:
       — push proxy). (2026-10-28T10:20:00Z)'
     created_at: '2026-10-28T10:15:10Z'
     last_edited: '2026-10-28T10:15:10Z'
+  - id: note-11658aa
+    text: 'Review loop 419c i8: two leftovers in the kept web-UI recipe scope, both
+      reproduced live, plus one same-class guard. (1) The Playwright link was unconditional:
+      with a local `npm i playwright` in place, `ln -sfn /usr/lib/node_modules node_modules`
+      creates a link named after the target basename *inside* the worker node_modules
+      (verified: `node_modules/global` for a substituted target, `node_modules/node_modules`
+      for the image one), and with no global install it leaves a dangling `node_modules`
+      that breaks that same fallback. Now `[ ! -e node_modules ] && [ -d /usr/lib/node_modules
+      ]`. (2) The resolution check did not gate the run: with no resolvable Playwright
+      the block printed ERR_MODULE_NOT_FOUND and then ran the driver into a second
+      copy of the same error with no actionable message; it now stops the block. (3)
+      New: the app-start step refuses a port something already answers on (`curl`
+      without `-f`), because otherwise the readiness wait is satisfied by that server,
+      this run app never binds, and the driver records the wrong app as this run evidence
+      - the same "wait matched the wrong handle" class as the old `grep ^pm-` poll.
+      Verified live: real listener on the port -> rc 1 with the message and the app
+      never launched; port free -> app launched and the wait runs to its bound; real
+      global Playwright -> `playwright ok`, driver rc 0. Tests: +5 (two driver cases,
+      TestWebUiStartExecution with stub pm/curl/my-app: completes / refuses a busy
+      port / never-answering server fails at its deadline); the three behavioural
+      cases fail against HEAD recipe. New file 46 pass; related suites 221 pass. Full
+      suite 3899 passed, 1 skipped (test_merge_publish, test_signoff_integration and
+      the two known baselines deselected as environment-only). Evidence /pm-captures/review-419c-i8/.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T10:40:40Z'
+    last_edited: '2026-10-28T10:40:40Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
