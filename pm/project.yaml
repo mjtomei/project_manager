@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T05:24:59.612252+00:00'
+  updated_at: '2026-10-28T05:53:48.426013+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37372,6 +37372,24 @@ prs:
       updated.'
     created_at: '2026-10-28T05:24:59Z'
     last_edited: '2026-10-28T05:24:59Z'
+  - id: note-30504bb
+    text: 'review-loop 4440 i5: fixed the edit template''s lossy round-trip in `_apply_pr_edit`
+      (the same function i4 hardened). `pm pr edit` ASCII-izes the template and the
+      parser restores unicode per content field, so a plain hyphen comes back as an
+      en dash, an apostrophe as a left single quote and `--` as an em dash. (1) The
+      parsed title/description were compared against the *stored* value, which never
+      equals its own round-trip, so a no-op save rewrote both with the laundered text
+      ("Don''t break the -- dash" -> "Don‘t break the — dash") — a save that changed
+      nothing corrupted the PR''s canonical fields. (2) The notes reconciliation matched
+      a parsed bullet to a stored note by its `text`, so any real note edit dropped
+      every untouched note and re-created it with a new id, a fresh `created_at` and
+      the laundered text. Both now compare against the rendered form (`_rendered_text`),
+      so a no-op save is a true no-op and an untouched note is reused verbatim. Two
+      new tests drive the real template through the real parser; both fail on the
+      pre-fix code. Full suite 4042 passed, 1 skipped, 1 env-only (hook receiver with
+      PM_HOST_HOME set).'
+    created_at: '2026-10-28T05:53:48Z'
+    last_edited: '2026-10-28T05:53:48Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
