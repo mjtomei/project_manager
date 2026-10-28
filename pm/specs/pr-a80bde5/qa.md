@@ -130,7 +130,11 @@ THEN the reported state does not flip: an unanswered question stays `waiting`,
 an answered one stays `running (… follow-up running)`, and the question is
 recorded exactly once (no repeated notification, no repeated on-iteration
 record, no busy loop). An empty/whitespace-only user record (the user pressed
-Enter on an empty prompt) is not an answer either.
+Enter on an empty prompt) is not an answer either. The
+`[Request interrupted by user…]` marker does not answer a wait, but it does
+end the human's own turn: an idle *after* it with no verdict is a prose
+question (R6), not a wakeup. (Review e386 i2 pinned this preserved
+behaviour.)
 
 R5b. **The follow-up verdict survives a later non-task turn.**
 GIVEN an answered follow-up whose verdict turn is PASS or NEEDS_WORK.
@@ -152,9 +156,13 @@ THEN the wait stays cleared: status remains `running` with the
 `follow_up=true`, the marker stays the working `⟳N`, and no new INPUT_REQUIRED
 notice appears. The wakeup reply is never recorded as a verdict; the real
 follow-up verdict still resolves the wait (a second genuine INPUT_REQUIRED
-after the answer is still a question → R4). A transparent record injected
-around that turn (a system reminder, a local-command echo) does not make it
-a human-started turn: the wait stays cleared just the same.
+after the answer is still a question → R4). Turn ownership is decided by the
+newest record that *opens* an assistant turn: a transparent record injected
+around the wakeup turn (a system reminder, a local-command echo, a compact
+summary, the loop's own nudge, a tool result) does not make it a
+human-started turn, even when it lands *between* the wakeup record and its
+`idle_prompt` — the wait stays cleared just the same. (Review e386 i2;
+`verdict_transcript._opens_assistant_turn`.)
 
 R6. **Prose question after an answer waits again.**
 GIVEN an answered follow-up.
@@ -239,7 +247,15 @@ running" (nobody has answered). Once the check finishes, an adoptable
 and iteration, an adoptable wait the human already answered is published as
 `running` / "INPUT_REQUIRED answered; follow-up running" (never `waiting` —
 the transcript decides, R2), and a non-adoptable one is never published as a
-wait at all.
+wait at all. The switch out of `resuming` leaves no observable gap: the
+adopted wait's waiting/answered state is published before `resuming` clears,
+and when the wait is not adoptable `resuming` stays published until the next
+iteration has taken over (`review.iteration` advanced). No reader may catch a
+running state with no wait and a recorded INPUT_REQUIRED history (which reads
+as "answered; follow-up running" for a question nobody answered) or a
+`waiting` state for a wait the human answered before the restart. (Review
+e386 i2/i3; regressions `test_adopt_decision_never_reads_as_an_answered_follow_up`
+and `test_adopt_decision_of_an_answered_wait_never_reads_as_waiting`.)
 
 ## Edge cases
 
@@ -294,6 +310,16 @@ and verdict are already in the transcript. The resumed wait must resolve from
 the transcript alone, and a still-unanswered wait must still wait rather than
 being mistaken for an answered/completed one.
 
+E11. **Auto-start disabled while a review loop is working.** Turning
+auto-start off (`pm autostart remove` of the last target, or a target
+completing) finalizes the run directory's transcript files. A review loop
+that is still `running` keeps polling its own transcript for the follow-up
+verdict, so it must keep seeing new turns after the disable: an answer plus
+PASS/NEEDS_WORK landing around the disable must still be recorded, and the
+loop must not re-arm a `waiting / review INPUT_REQUIRED` for a question
+nobody was asked (QA scenario 17 story 4; fixed in 07340d38). A loop that has
+already finished is finalized normally.
+
 ## Pass/Fail criteria
 
 - PASS when every Then clause above is observed on the stated surfaces, with
@@ -320,12 +346,20 @@ being mistaken for an answered/completed one.
   `test_wakeup_turn_after_the_answer_does_not_rearm_the_wait`,
   `test_follow_up_verdict_survives_a_local_slash_command`,
   `test_restart_adopt_check_never_reads_as_follow_up_running`,
-  `test_record_with_no_text_is_not_an_answer`; `tests/test_review_loop.py::
+  `test_adopt_decision_never_reads_as_an_answered_follow_up`,
+  `test_adopt_decision_of_an_answered_wait_never_reads_as_waiting`,
+  `test_transparent_records_do_not_rearm_a_wakeup_turn`,
+  `test_wakeup_turn_survives_transparent_records`,
+  `test_interrupt_marker_keeps_the_turn_the_humans`,
+  `test_record_with_no_text_is_not_an_answer`;
+  `tests/test_autostart_disable_transcripts.py` for the running-loop
+  transcript-symlink guard (07340d38); `tests/test_review_loop.py::
   TestInputRequired`) may be run as supporting evidence, but the primary
   evidence is the user-facing behaviour above. The waiter changed again at
-  review baa8 i2/i3 (wakeup-turn guard, local-command transparency) and the
-  status payload gained `review.resuming` at baa8 i1, so run these against
-  the current HEAD.
+  review baa8 i2/i3 (wakeup-turn guard, local-command transparency), the
+  status payload gained `review.resuming` at baa8 i1, and review e386 i2/i3
+  fixed the adopt-decision publish order and made transparent records
+  turn-neutral — so run these against the current HEAD.
 
 ## Ambiguities
 
@@ -360,5 +394,15 @@ Resolved:
 - *A local slash-command echo is transparent* (review baa8 i3): `<command-name>`
   / `<local-command-stdout>` records are neither answers nor task boundaries,
   so a verdict emitted before one is still recorded → E8.
+- *Transparent records never change turn ownership* (review e386 i2): a
+  reminder or local-command echo landing between a wakeup record and its idle
+  does not make the turn human-started, so the idle does not re-arm the wait;
+  the Esc interrupt marker stays the human's own turn (an idle after it is a
+  prose question) → R5/R5c.
+- *The adopt decision publishes what the transcript says* (review e386 i3): a
+  wait the human answered before the restart is published as
+  "answered; follow-up running", never as `waiting` → R13/R2.
+- *A running review loop's transcript is never frozen by an auto-start
+  disable* (incidental fix 07340d38, found by QA S17 story 4) → E11.
 
 No **[UNRESOLVED]** ambiguities.
