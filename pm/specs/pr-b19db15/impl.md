@@ -299,6 +299,18 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
    command not found` in both stop blocks, "recorder exited while the TUI was
    still running" for the unset target, and the driver running on the
    fallback URL).
+   R14's leftovers are covered too: step 1 must record the app's pid in
+   `server.pid` (and clear a stale one first), the teardown must stop a real
+   process whose pid it reads from that file in a *fresh* shell (the test
+   starts `sleep 300` and reaps it with `wait`, so the assertion does not
+   depend on `kill -0`, which a zombie in a non-reaping container satisfies),
+   the teardown must still refuse with neither `SERVER_PID` nor `CAPDIR`, the
+   Layer 2 protocol block must stop before running `curl` with `CAPDIR`/
+   `APP_URL` unset and must still write `http.log` and `sse.log` when they
+   are set, and the tmux pm-session failure must say its output was
+   discarded. All of those fail against the previous recipes except the
+   healthy-path Layer 2 case (verified with the pre-fix recipes in place:
+   `rc=0` with `/http.log: Permission denied`).
 
 R8. **A failed render must not leave the previous run's video, and the
    recorded command must survive the scaffold's quoting.**
@@ -521,6 +533,46 @@ R13. **The stop step is pasted on its own, so it must not depend on shell
      whatever answers on port 8000, exactly what the step-1 busy-port
      pre-check exists to prevent. The guard now names both.
 
+R14. **A handle that has to survive a shell boundary is written down, and a
+   block with no handle stops before it writes somewhere it did not mean.**
+   Two leftovers of the PR's own class found by review loop e7e1 i1, both in
+   `web-ui-recording.md` (plus two small wording/prerequisite fixes):
+   - **The teardown could not work from a fresh shell.** `SERVER_PID` is a
+     shell variable from step 1 and the app is backgrounded, so by the time
+     the teardown block runs (every block in this recipe is pasted into a
+     fresh shell) the variable is gone. Verified in this container: the block
+     refused with "SERVER_PID is unset — run the teardown in the shell that
+     started the app", and the app kept holding the port — while re-running
+     step 1 is not a remedy, because its own app answers the port pre-check
+     the block added in i8 (so the worker's only recovery was an undocumented
+     manual kill). Step 1 now writes the pid to `$CAPDIR/server.pid`
+     (cleared with the other stale outputs first, so the teardown cannot
+     signal a recycled pid) and the teardown falls back to it, then removes
+     it. Verified live: step 1 in one shell records the pid of a live app,
+     and the teardown in a fresh shell (no `SERVER_PID`) exits 0 and the app
+     is gone.
+   - **The Layer 2 protocol block had no guard, and reported success while
+     writing nothing.** With `CAPDIR` unset its redirects are `/http.log` and
+     `/sse.log` — into the filesystem root when the worker is root, and
+     "Permission denied" otherwise — and the block still **exits 0**,
+     because the failing redirects are backgrounded/ignored and the last
+     command succeeds. So a run with no protocol capture at all read as
+     success, the same "silent success" the rest of the recipe fixes.
+     Verified: `rc=0` with both redirects denied. The block now stops on an
+     unset `CAPDIR`/`APP_URL` before the first redirect, like the driver,
+     finalize and teardown blocks; with both set it still writes `http.log`
+     and `sse.log` (verified).
+   - **A failure message pointing at discarded output.** The tmux recipe's
+     pm-session readiness failure said "check 'pm session' output", but step
+     1 runs it as `( pm session >/dev/null 2>&1 ) &` — there is no output to
+     check. It now says the output was discarded and to run `pm session` in a
+     tmux pane (where it has a tty) to see why.
+   - **The `agg` install line could not create its own directory.** `curl -o
+     ~/.local/bin/agg` fails outright when `~/.local/bin` does not exist
+     (`curl` does not create parent directories), which leaves the documented
+     remedy silently inert and the render failing with "is 'agg' installed?".
+     Both render sections `mkdir -p ~/.local/bin` first.
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -531,9 +583,9 @@ R13. **The stop step is pasted on its own, so it must not depend on shell
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13) |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13) |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, and the `agg` install creates `~/.local/bin` first (R14) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -551,7 +603,9 @@ R13. **The stop step is pasted on its own, so it must not depend on shell
    the capture flow runs end to end against a stub `tmux`/`pm` for its
    success and failure paths, and the stop block runs *on its own* for both
    recipes so its failure path does not depend on a function or variable
-   from an earlier paste).
+   from an earlier paste; the web-UI step-1 pid recording and the fresh-shell
+   teardown against a real `sleep` process, the Layer 2 protocol block both
+   ways, and the tmux readiness message).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -647,3 +701,28 @@ R13. **The stop step is pasted on its own, so it must not depend on shell
   File 85 pass (3 runs); related suites 175 pass. All five new assertions
   fail against the pre-fix recipes (checked by pointing the test module at
   the previous recipe files).
+- Review loop e7e1 i1 verified R14 live in this container (bash, stub
+  `curl`/`pm`/`my-app`). The Layer 2 protocol block with `CAPDIR`/`APP_URL`
+  unset → `rc=0` with `/http.log: Permission denied` and `/sse.log:
+  Permission denied` on the pre-fix block (the redirects aimed at the
+  filesystem root and the block still reported success); post-fix → rc 1 with
+  the guard's message, and with both set → rc 0 with `http.log` holding the
+  route snapshot and a non-empty `sse.log`. The teardown: step 1 run in one
+  shell recorded `server.pid` = the pid of a live `sleep 120` app; the
+  pre-fix teardown in a fresh shell (no `SERVER_PID`) refused with "run the
+  teardown in the shell that started the app" and the app kept running
+  (verified), while re-running step 1 is not a remedy because that app
+  answers the port pre-check; post-fix the same fresh shell exits 0 and the
+  app is gone (state `Z` here, because PID 1 does not reap — judged by
+  process state, not `kill -0`). File 91 pass (3 runs); the six new/
+  tightened behavioural assertions fail against the pre-fix recipes, and the
+  healthy-path Layer 2 case passes both ways by design.
+  Full suite (this container): 3932 passed, 1 skipped, 14 failed with only
+  the environment/baseline failures — 12 `test_markdown_render` tests (this
+  environment has no `markdown` module: `ModuleNotFoundError`), plus
+  `test_git_ops::TestPullRebase::test_keeps_unpushed_merge` and
+  `test_hook_events::test_installer_writes_standalone_receiver` (both
+  reproduce on origin/master). `test_merge_publish`/`test_signoff_integration`
+  were excluded (the push proxy rejects pushes to master). Evidence:
+  `/pm-captures/review-e7e1-i1/` (`probe.log`, the pre/post recipe copies and
+  the two probe scripts).

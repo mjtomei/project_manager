@@ -75,9 +75,12 @@ mkdir -p "$CAPDIR"
 # command never executes — even in an interactive shell, unlike the
 # `: "${CAPDIR:?}"` form below. Without it `"$CAPDIR"/*.png` would expand
 # against the filesystem root and the cleanup would target every PNG there.
+# `server.pid` (written below) goes too: a stale one would make the teardown
+# signal whatever process has since reused that pid.
 rm -f "$CAPDIR/recording.webm" "$CAPDIR/recording.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
-      "$CAPDIR/http.log" "$CAPDIR/sse.log" "${CAPDIR:?}"/*.png
+      "$CAPDIR/http.log" "$CAPDIR/sse.log" "$CAPDIR/server.pid" \
+      "${CAPDIR:?}"/*.png
 
 # Fail fast if something is *already* answering on the port. A previous run's
 # server — or another scenario using the same default port — would satisfy the
@@ -96,6 +99,11 @@ fi
 APP_START="my-app serve"
 $APP_START --port "$PORT" &
 SERVER_PID=$!
+# The app outlives this shell, and every block below is pasted into a fresh
+# one, so `$SERVER_PID` is normally gone by the time the teardown runs: write
+# it beside the capture for that step to read. Re-running *this* block is not
+# a remedy for a lost pid — its own app now answers the port pre-check above.
+printf '%s\n' "$SERVER_PID" > "$CAPDIR/server.pid"
 
 # Wait for the server to answer before driving it (no fixed sleep), but
 # bound it: an unbounded poll hangs the worker forever when the app never
@@ -288,6 +296,16 @@ as H.264 requires.)
 Greppable proof of the server contract underneath the rendered demo.
 
 ```bash
+# Both come from step 1, and this block is pasted into a fresh shell: with
+# CAPDIR unset `"$CAPDIR/http.log"` is `/http.log`, so the redirects either
+# write into the filesystem root (as root) or fail — and the block still exits
+# 0, so a run with no protocol capture reads as success. Stop here instead, as
+# the driver, finalize and teardown blocks do.
+if [ -z "${CAPDIR:-}" ] || [ -z "${APP_URL:-}" ]; then
+    echo "CAPDIR/APP_URL are unset — set the placeholders from step 1 first;" \
+        "the redirects below would otherwise aim at the filesystem root" >&2
+    exit 1
+fi
 # http.log — snapshot each route you care about. -sS keeps it quiet but
 # shows errors; -w records the status line per route.
 {
@@ -310,21 +328,35 @@ kill "$SSE_PID" 2>/dev/null || true
 
 ### Teardown
 
-Run this in the same shell as step 1 — `SERVER_PID` comes from there. A
-fresh shell has no `SERVER_PID`, and `kill ""` is a silent no-op, so the app
-would keep running and holding the port; the next run's port pre-check then
-refuses with "something already answers", which looks like someone else's
-server. Stop with that reason instead (an `if … exit 1`, because the
-`: "${SERVER_PID:?}"` form only stops a *scripted* run — in an interactive
-shell it prints the error and the next line still runs).
+Run this after the driver and the protocol layer. The app outlives the shell
+that started it, and every block in this recipe is pasted into a fresh one,
+so `SERVER_PID` from step 1 is normally gone by the time this runs — step 1
+also writes the pid to `server.pid` in the capture directory, which this step
+falls back to. Re-running step 1 is not a remedy for a lost pid: its own app
+now answers the port pre-check. A kill against a pid that no longer exists is
+a silent no-op, so the app would keep holding the port and the *next* run's
+pre-check would refuse with "something already answers", which looks like
+someone else's server. Stop with that reason instead (an `if … exit 1`,
+because the `: "${SERVER_PID:?}"` form only stops a *scripted* run — in an
+interactive shell it prints the error and the next line still runs).
 
 ```bash
+# The pid file lives in the capture directory, so CAPDIR has to be set even
+# when SERVER_PID is.
+if [ -z "${CAPDIR:-}" ]; then
+    echo "CAPDIR is unset — set the placeholders from step 1 first; the pid" \
+        "step 1 recorded is in <capture-dir>/server.pid" >&2
+    exit 1
+fi
+SERVER_PID=${SERVER_PID:-$(cat "$CAPDIR/server.pid" 2>/dev/null)}
 if [ -z "${SERVER_PID:-}" ]; then
-    echo "SERVER_PID is unset — run the teardown in the shell that started" \
-        "the app (step 1); the app keeps the port otherwise" >&2
+    echo "SERVER_PID is unset and $CAPDIR/server.pid holds no pid — find the" \
+        "app's pid (e.g. 'ss -ltnp' for the port) and stop it; it keeps the" \
+        "port otherwise" >&2
     exit 1
 fi
 kill "$SERVER_PID" 2>/dev/null || true
+rm -f "$CAPDIR/server.pid"
 ```
 
 ## Manifest format

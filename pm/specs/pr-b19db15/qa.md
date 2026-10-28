@@ -41,8 +41,12 @@ recording-recipe bugs that any worker following the recipe hits:
   `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
   interactive shell the next line still runs (the `rm` aimed at
   `/recording.mp4`, the driver's link landed `node_modules` in the worker's
-  cwd) — and the teardown refuses an unset `SERVER_PID` instead of silently
-  leaving the app holding the port.
+  cwd) — and the teardown stops *this run's* app from a fresh shell: step 1
+  records the pid in `server.pid` (cleared first), so the block does not
+  depend on a `SERVER_PID` that died with step 1's shell, and it refuses when
+  neither is available instead of silently leaving the app holding the port.
+  The Layer 2 protocol block carries the same guard: with `CAPDIR`/`APP_URL`
+  unset it used to redirect to `/http.log` and `/sse.log` and still exit 0.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -234,14 +238,19 @@ run.
   fails the run on an empty `transcript.log`, instead of declaring success
   with no transcript (a quiet pane leaves a 0-byte file, which `test -s`
   catches).
-- The web-UI finalize, driver, or teardown block is pasted into an
-  *interactive* shell with no `CAPDIR`/`SERVER_PID` → the block stops with its
-  message. The `: "${VAR:?}"` form only stops a scripted run: in an
-  interactive shell it aborts its own command and the next line still runs
-  (verified — the `rm` would have aimed at `/recording.mp4`, and the driver
-  block's link landed `node_modules` in the worker's cwd). A teardown that
-  silently does nothing leaves the app holding the port, which the next run's
-  port pre-check then reports as "something already answers".
+- The web-UI finalize, driver, teardown, or protocol-layer block is pasted
+  into a *fresh* (or *interactive*) shell with no `CAPDIR`/`SERVER_PID` → the
+  block stops with its message. The `: "${VAR:?}"` form only stops a scripted
+  run: in an interactive shell it aborts its own command and the next line
+  still runs (verified — the `rm` would have aimed at `/recording.mp4`, and
+  the driver block's link landed `node_modules` in the worker's cwd). A
+  teardown that silently does nothing leaves the app holding the port, which
+  the next run's port pre-check then reports as "something already answers";
+  the protocol block with no `CAPDIR` redirects to `/http.log` and
+  `/sse.log` and exits 0, reporting success with no capture. In a fresh shell
+  the teardown must still stop the app: step 1 records its pid in
+  `server.pid`, and the block falls back to it (`SERVER_PID` itself does not
+  survive step 1's shell).
 - The web-UI finalize step is run in a fresh shell (no `CAPDIR`) → it stops
   with the "CAPDIR is unset" message instead of aiming its `rm -f` and ffmpeg
   at `/recording.mp4` / `/recording.webm`; with `CAPDIR` set it still produces

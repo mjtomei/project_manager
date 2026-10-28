@@ -272,6 +272,25 @@ class TestRecipes:
         assert target < guard < wait, (
             "the empty-TARGET guard must come before the has-session wait")
 
+    def test_tmux_pm_session_failure_names_evidence_that_exists(self):
+        """The readiness failure must not point at output the block discarded.
+
+        Step 1 backgrounds ``pm session`` with ``>/dev/null 2>&1``, so
+        "check 'pm session' output" sends the worker to output that was
+        thrown away — the same class as the failure messages that named a
+        recorder pane the next line destroyed. The message has to say the
+        output was discarded and name a form the worker can actually read.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        assert "pm session >/dev/null 2>&1" in block, (
+            "the readiness failure's remedy assumes 'pm session' output is "
+            "still available")
+        idx = block.index("did not appear within")
+        window = block[max(0, idx - 200):idx + 300]
+        assert "discarded" in window, (
+            "tmux recipe tells the worker to check 'pm session' output "
+            "although step 1 redirected that output to /dev/null: " + window)
+
     @pytest.mark.parametrize("name,cleanup,start", [
         ("tmux-screen-recording.md",
          "kill-session -t pm-recorder", "new-session -d -s pm-recorder"),
@@ -1071,27 +1090,112 @@ def test_web_ui_failed_transcode_leaves_no_partial_mp4(tmp_path):
         "a failed transcode left its partial mp4 as this run's recording")
 
 
+def _web_ui_capdir(tmp_path):
+    """The capture dir the stubbed step-1 block resolves for itself."""
+    return tmp_path / "captures" / "scenarios" / "1" / "web-ui"
+
+
+def _web_ui_teardown_block():
+    text = _recipe_text("web-ui-recording.md")
+    section = text.split("### Teardown", 1)[1].split("## Manifest", 1)[0]
+    return re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+
+
+def test_web_ui_start_records_the_server_pid(tmp_path):
+    """The app outlives step 1's shell, so the pid has to outlive it too.
+
+    Every block in this recipe is pasted into a fresh shell and the app is
+    backgrounded, so ``$SERVER_PID`` no longer exists when the teardown runs
+    (verified: the teardown refused and the app kept holding the port). Step
+    1 writes the pid beside the capture for the teardown to read.
+    """
+    r, _launched = _run_web_ui_start("ok", tmp_path)
+
+    assert r.returncode == 0, r.stderr
+    pidfile = _web_ui_capdir(tmp_path) / "server.pid"
+    assert pidfile.exists(), (
+        "step 1 never recorded the app's pid, so a fresh-shell teardown has "
+        "no handle to stop")
+    assert pidfile.read_text().strip().isdigit(), pidfile.read_text()
+
+
+def test_web_ui_start_clears_a_stale_server_pid(tmp_path):
+    """A stale pid would let the teardown signal whatever reused it."""
+    capdir = _web_ui_capdir(tmp_path)
+    capdir.mkdir(parents=True)
+    (capdir / "server.pid").write_text("999999\n")
+
+    r, _launched = _run_web_ui_start("ok", tmp_path)
+
+    assert r.returncode == 0, r.stderr
+    assert (capdir / "server.pid").read_text().strip() != "999999", (
+        "step 1 kept a previous run's server.pid, so the teardown would "
+        "signal a recycled pid")
+
+
+def test_web_ui_teardown_uses_the_pid_step_one_recorded(tmp_path):
+    """The teardown has to stop *this* run's app from a fresh shell.
+
+    Verified: pasted into a fresh shell the block refused with "SERVER_PID is
+    unset — run the teardown in the shell that started the app", and the app
+    kept holding the port — while re-running step 1 is not a remedy, because
+    that app answers the port pre-check the block itself added. The pid step 1
+    records is the handle that survives the shell boundary.
+    """
+    app = subprocess.Popen(["sleep", "300"])
+    try:
+        capdir = tmp_path / "cap"
+        capdir.mkdir()
+        (capdir / "server.pid").write_text(f"{app.pid}\n")
+        env = {k: v for k, v in os.environ.items() if k != "SERVER_PID"}
+        env["CAPDIR"] = str(capdir)
+
+        r = subprocess.run(["bash"], input=_web_ui_teardown_block(), env=env,
+                           capture_output=True, text=True, timeout=30)
+
+        assert r.returncode == 0, r.stderr
+        app.wait(timeout=10)   # TimeoutExpired == the app is still running
+        assert not (capdir / "server.pid").exists(), (
+            "the teardown left the pid file behind, so a second run would "
+            "signal a recycled pid")
+    finally:
+        if app.poll() is None:
+            app.kill()
+            app.wait()
+
+
 def test_web_ui_teardown_refuses_an_unset_server_pid(tmp_path):
     """`kill ""` is a silent no-op, so the app keeps holding the port.
 
-    The teardown block is pasted separately from step 1, so a fresh shell has
-    no ``SERVER_PID``. ``kill "" 2>/dev/null || true`` then does nothing at
-    all: the app keeps running and holding the port, and the next run's port
-    pre-check refuses with "something already answers" — a failure the worker
-    cannot connect to its own missed teardown. Same rule as the finalize and
-    driver blocks: a step that cannot do its job says so.
+    With neither ``SERVER_PID`` nor a recorded pid the teardown must stop with
+    that reason: ``kill "" 2>/dev/null || true`` does nothing at all, the app
+    keeps running and holding the port, and the next run's port pre-check
+    refuses with "something already answers" — a failure the worker cannot
+    connect to its own missed teardown. Same rule as the finalize and driver
+    blocks: a step that cannot do its job says so. With no ``CAPDIR`` there is
+    no pid file to read either, so the block stops before aiming a path at the
+    filesystem root.
     """
-    text = _recipe_text("web-ui-recording.md")
-    section = text.split("### Teardown", 1)[1].split("## Manifest", 1)[0]
-    block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
-
+    block = _web_ui_teardown_block()
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
     env = {k: v for k, v in os.environ.items() if k != "SERVER_PID"}
+    env["CAPDIR"] = str(capdir)
+
     r = subprocess.run(["bash"], input=block, env=env,
                        capture_output=True, text=True)
 
     assert r.returncode != 0, (
         "the teardown ran with no SERVER_PID and silently did nothing")
     assert "SERVER_PID" in r.stderr, r.stderr
+
+    env.pop("CAPDIR")
+    r = subprocess.run(["bash"], input=block, env=env,
+                       capture_output=True, text=True)
+
+    assert r.returncode != 0, (
+        "the teardown ran with no CAPDIR, so it read a pid file at the root")
+    assert "CAPDIR" in r.stderr, r.stderr
 
 
 def _run_in_interactive_shell(block, env, cwd=None):
@@ -1368,7 +1472,7 @@ def _run_web_ui_start(mode, tmp_path):
     bindir = tmp_path / "bin"
     caps = tmp_path / "captures"
     for d in (bindir, caps):
-        d.mkdir()
+        d.mkdir(parents=True, exist_ok=True)
     launched = tmp_path / "app-launched"
     _stub_tool(bindir, "pm", f'echo "{caps}"\n')
     _stub_tool(bindir, "curl", _STUB_CURL)
@@ -1442,7 +1546,8 @@ def test_web_ui_clears_a_previous_video():
         "web-ui recipe keeps an earlier run's webm/mp4, so a failed driver "
         "transcodes the previous run into this run's recording")
     for artifact in ("recording.webm", "recording.mp4", "trace.zip",
-                     "dom.html", "http.log", "sse.log", "*.png"):
+                     "dom.html", "http.log", "sse.log", "server.pid",
+                     "*.png"):
         assert artifact in clear, (
             f"web-ui recipe leaves a previous run's {artifact} in place, so a "
             "failed driver presents the earlier run's evidence as this run's")
@@ -1460,6 +1565,62 @@ def test_web_ui_clears_a_previous_video():
         "web-ui recipe only drops the old mp4 after the transcode")
     assert 'test -s "$CAPDIR/recording.mp4"' in finalize_block, (
         "web-ui recipe does not check that the transcode produced the mp4")
+
+
+def _web_ui_layer2_block():
+    """The fenced block under ``## Capture — Layer 2`` (the protocol logs)."""
+    text = _recipe_text("web-ui-recording.md")
+    section = text.split("## Capture — Layer 2: protocol capture", 1)[1]
+    section = section.split("### Teardown", 1)[0]
+    return re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+
+
+def test_web_ui_layer2_block_refuses_an_unset_capdir(tmp_path):
+    """The protocol block is pasted alone too, and its redirects are raw paths.
+
+    Verified: with ``CAPDIR`` unset the block redirects to ``/http.log`` and
+    ``/sse.log`` — into the filesystem root when the worker is root,
+    "Permission denied" otherwise — and *still exits 0*, so a run with no
+    protocol capture reads as a success. The same guard the driver, finalize
+    and teardown blocks carry belongs here, before the first redirect.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "curl-called"
+    _stub_tool(bindir, "curl", f'touch "{called}"\n')
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CAPDIR", "APP_URL")}
+    env["PATH"] = f"{bindir}:{os.environ['PATH']}"
+
+    r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode != 0, (
+        "the protocol block ran with no CAPDIR and reported success")
+    assert "CAPDIR" in r.stderr, r.stderr
+    assert not called.exists(), (
+        "the protocol block ran curl with an unset CAPDIR, so its redirects "
+        "aimed at the filesystem root")
+
+
+def test_web_ui_layer2_block_writes_both_logs(tmp_path):
+    """The guard must not break the step it protects."""
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    _stub_tool(bindir, "curl", 'echo "HTTP 200"\n')
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1",
+               PATH=f"{bindir}:{os.environ['PATH']}")
+
+    r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode == 0, r.stderr
+    assert "GET /" in (capdir / "http.log").read_text(), (
+        "the protocol block wrote no route snapshots")
+    assert (capdir / "sse.log").exists(), (
+        "the protocol block wrote no SSE transcript")
 
 
 # ---------------------------------------------------------------------------

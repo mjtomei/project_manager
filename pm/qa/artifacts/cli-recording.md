@@ -256,10 +256,12 @@ magnitude slower and fragile). The intermediate GIF is discarded.
 Two tools do the two stages. The QA image ships `ffmpeg` but **not**
 `agg`, and the block below fails instead of leaving a missing or stale
 video — so install `agg` first when `command -v agg` prints nothing
-(`~/.local/bin` is on `PATH` in the image; the asset is per architecture,
-verified with agg 1.9.0):
+(`~/.local/bin` is on `PATH` in the image; the install creates it if it is
+missing, since `curl -o` cannot; the asset is per architecture, verified
+with agg 1.9.0):
 
 ```
+mkdir -p ~/.local/bin
 curl -fsSL \
     https://github.com/asciinema/agg/releases/latest/download/agg-$(uname -m)-unknown-linux-gnu \
     -o ~/.local/bin/agg && chmod +x ~/.local/bin/agg
