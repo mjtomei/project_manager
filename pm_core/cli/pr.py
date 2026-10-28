@@ -1583,6 +1583,29 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         click.echo(f"Review window error: {e}")
 
 
+def _retire_review_window_for_return(pr_entry: dict) -> None:
+    """Close the PR's review window when a base return sends it to impl.
+
+    A return must not leave a reviewer writer behind (the review-loop prompt
+    can fix/commit).  Mirrors sign-off's ``retire_signoff_run`` on a bounce;
+    a WAIT/self-heal path never reaches here (the return already retired it).
+    """
+    session = _get_pm_session()
+    if not session or not pr_entry.get("workdir"):
+        return
+    try:
+        from pm_core import home_window
+        window_name = f"review-{_pr_display_id(pr_entry)}"
+        win = tmux_mod.find_window_by_name(session, window_name)
+        if win:
+            home_window.park_if_on(session, win["id"])
+            tmux_mod.kill_window(session, window_name)
+            _log.info("base return: retired review window %s", window_name)
+    except Exception:
+        _log.debug("base return: retiring the review window failed",
+                   exc_info=True)
+
+
 def _review_base_gate(root, pr_entry: dict, *, review_iteration: int,
                       transcript: str | None, review_loop: bool,
                       review_loop_id: str) -> int | None:
@@ -1606,6 +1629,8 @@ def _review_base_gate(root, pr_entry: dict, *, review_iteration: int,
     if res.decision in (base_check.CONFLICT, base_check.WAIT):
         # The return owns the PR: never leave a raced transition in_review.
         base_check.ensure_impl_status(root, pr_entry["id"])
+        if res.decision == base_check.CONFLICT:
+            _retire_review_window_for_return(pr_entry)
         click.echo(f"base_conflict: {res.reason}")
         if res.decision == base_check.CONFLICT:
             click.echo("Review not started — returned to implementation.",
@@ -3722,6 +3747,9 @@ def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
                           transcript=tdir)
     if res.decision in (base_check.CONFLICT, base_check.WAIT):
         base_check.ensure_impl_status(root, pr_id)
+        if res.decision == base_check.CONFLICT:
+            _retire_review_window_for_return(
+                store.get_pr(store.load(root), pr_id) or {})
         return f"base_conflict: {res.reason}"
     if res.decision == base_check.RETRY:
         click.echo(f"note: base check failed (retryable): {res.reason}",

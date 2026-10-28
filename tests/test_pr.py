@@ -354,3 +354,17 @@ def test_focus_review_window_outside_tmux_is_a_noop(tmp_path):
         assert focus(pr) is None
 
     find.assert_not_called()
+
+
+def test_base_return_retires_the_review_window(tmp_path):
+    """A base return must not leave a reviewer writer behind."""
+    from pm_core.cli import pr as pr_mod
+    root, _ = _make_project(tmp_path, status="in_review")
+    pr_entry = _pr(root)
+    win = {"id": "@9", "index": 2, "name": "review-#42"}
+    with mock.patch.object(pr_mod, "_get_pm_session", return_value="pm-test"), \
+         mock.patch.object(tmux_mod, "find_window_by_name", return_value=win), \
+         mock.patch.object(tmux_mod, "kill_window") as kill, \
+         mock.patch("pm_core.home_window.park_if_on"):
+        pr_mod._retire_review_window_for_return(pr_entry)
+    kill.assert_called_once_with("pm-test", "review-#42")

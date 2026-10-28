@@ -149,6 +149,8 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     # implementation has reconciled the base.
     from pm_core import base_check
     if base_check.has_open_return(pr):
+        # Close a raced in_review->qa transition: the return owns the PR.
+        base_check.ensure_impl_status(app._root, pr_id)
         app.log_message(
             f"{pr_id}: base integration rework pending — QA not started",
             force=True)
@@ -297,6 +299,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # A base-conflict return owns the PR: no QA planner yet.
     from pm_core import base_check
     if base_check.has_open_return(pr):
+        base_check.ensure_impl_status(app._root, pr_id)
         app.log_message(
             f"{pr_id}: base integration rework pending — QA not started",
             force=True)
