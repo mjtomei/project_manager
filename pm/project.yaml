@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T16:08:27.593593+00:00'
+  updated_at: '2026-10-28T16:31:25.394271+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16980,6 +16980,46 @@ prs:
       production defect found; no code changed.'
     created_at: '2026-10-28T16:08:27Z'
     last_edited: '2026-10-28T16:08:27Z'
+  - id: note-72b3ad0
+    text: 'QA scenario 20 (2026-10-28) PASS on 9a0f7a3e — restart/breadcrumb semantics:
+      (1) `pm tui restart --breadcrumb` prints "Wrote merge-restart marker for state
+      persistence" + "Sent restart to TUI pane %0"; TUI remounts in place (same pid
+      1612, started_at 15:55:59.584503 -> 16:00:03.319454, caps back to [sigusr1,sigusr2]);
+      autostart list still shows the pr-7405909 wait-for-merge row; board shows "Auto-start:
+      resumed after merge restart"; both ~/.pm/merge-restart and ~/.pm/autostart-resume.json
+      gone; log has exactly one save_breadcrumb: wrote {...targets...}, one action_restart:
+      reason=merge_restart_marker, one consume_breadcrumb: restoring [pr-7405909],
+      remount trigger=initial; add pr-B across the restart exits 0. (2) plain `pm
+      tui restart` prints only "Sent restart to TUI pane ..."; same pid, new started_at,
+      both caps; `pm autostart list -s S` -> "Auto-start: off" + "No auto-start targets."
+      (targets dropped by design); no markers; log action_restart: reason=user with
+      NO save/consume and trigger=initial; add pr-B works. (3) picker qa (pr-0c0a3d0)
+      queued across a breadcrumb restart: picker dispatch route=tui, spinner queued...
+      -> "✓ qa: window qa-pr-0c0a3d0 is open" with NO abort, exactly one qa window
+      pair + one qa workdir, one queue dispatch result=ok, queue empty, pidfile refreshed,
+      marker gone. (4) failed restart: after kill -9 the TUI, `pm tui restart --breadcrumb
+      -s S` exits 1, stderr "No TUI pane found. Is there a pm tmux session running?",
+      stdout empty, and creates NO merge-restart and NO autostart-resume.json; fresh
+      `pm session` -> "TUI pane missing — respawning...", new pid both caps, autostart
+      off/no targets, mount trigger=initial, and the next plain restart logs reason=user
+      (no phantom merge restart). ENVIRONMENT LIMITATION for the next run: this container
+      silently drops SIGSTOP/SIGCONT to any process that is not a descendant of the
+      caller — `kill -STOP $TUI_PID`, `kill -STOP -- -<pgid>`, pidfd_send_signal and
+      signalling from an ancestor shell all return 0 while /proc/<pid>/stat stays
+      S and SigPnd stays 0 (SIGTERM/SIGKILL to the same targets do work; tmux -D start-server
+      does NOT make the TUI stoppable either). The scenario 3 freeze therefore cannot
+      be done; I replaced it with restart-then-key ordering (queue observed non-empty,
+      17 B "pr qa pr-0c0a3d0", during the exec window). Also: after kill -9 the TUI
+      pid stays an unreaped zombie so `kill -0` succeeds — check ps stat=Z, not kill
+      -0. One unexplained note: in my first story-3 attempt the TUI wedged inside
+      restart_app (log: action_restart -> restart_app, then no TUI mount; process
+      in futex wait) after I had hammered that same PID with ~8 blocked SIGSTOP/CONT
+      probes; it did not recur on a clean TUI in two later identical runs, so it looks
+      like an artifact of the blocked-signal probing rather than a product defect
+      — worth a glance if anyone sees a restart that never remounts. Captures: /pm-captures/scenarios/20/story{1,2,3,4}-*
+      (cast + mp4 + transcript.log + manifest).'
+    created_at: '2026-10-28T16:31:25Z'
+    last_edited: '2026-10-28T16:31:25Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
