@@ -39317,6 +39317,19 @@ prs:
     created_at: '2026-10-28T12:02:56Z'
     last_edited: '2026-10-28T12:02:56Z'
     last_edited: '2026-10-28T12:22:35Z'
+  - id: note-fd27427
+    text: 'QA planner 2026-10-28 #2: extended pm/specs/pr-5cee3d5/qa.md with R15 for
+      the reconciled merge-integrity surface (publish, --propagation-only recovery,
+      pm pr sync / sync-github / TUI sync; hand-edited approval reads as absent or
+      renders "?"; unknown is not a mismatch) plus the fake-github stand-in setup
+      (pm fake-github config set; state.json flip for a teammate merge; real git in
+      the remote). Scenarios 39-43 target the post-merge tree: 39 publisher+recovery,
+      40 sync-detected merges, 41 the #250 end-to-end regression on the reconciled
+      tree, 42 the TUI (sign-off launch + sync log/cleanup), 43 concurrent sync/recovery.
+      Traps restated in the spec: /usr/bin git before ~/.local/bin; the TUI needs
+      a pm session tag for fake-github; recovery does not run the merge gate.'
+    created_at: '2026-10-28T10:43:58Z'
+    last_edited: '2026-10-28T10:43:58Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
