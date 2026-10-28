@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T06:13:18.315192+00:00'
+  updated_at: '2026-10-28T06:32:27.743140+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11654,6 +11654,23 @@ prs:
       launches). Captures /pm-captures/scenarios/94.'
     created_at: '2026-10-28T06:13:18Z'
     last_edited: '2026-10-28T06:13:18Z'
+  - id: note-3925b72
+    text: 'QA S98 (2026-10-28, b64c5951, nested rootless podman, fake-claude): all
+      4 stories PASS live, no code change. Impl race x9 (TUI-first lag 0/1/2/4/6,
+      CLI-first +1/+2/+4/+6): 1 new container, 1 window, 1 live pane each; Created
+      before kill_window; loser Switched (subprocess or fast path). Review race x6
+      (TUI lag 0/1/2/4, CLI-first +1/+2): 1 container, 1 Claude + fresh diff pane;
+      CLI ''already in_review'' + Switched. Held flock: CLI Busy 90.9 s rc=1, TUI
+      Error: Busy ~90.5 s exit=1, arrows 0.03-0.05 s, no container, dead window scrollback
+      cmp-identical; post-release s relaunched (first s refused honestly after +5G
+      host drift). Bounce at -3.2/+0.2/+2.1/+4.3/+6.1 s: shell-live -> DEBUG ''Killed
+      existing window'' + old ID gone before new Created; dead race -> one launch,
+      bounce ''already exists (background mode…)'' or shell Switched; every auto_start
+      DEBUG stdout names its path. Audit: every container ID has its Created line
+      (11/7/9), never 2 of a name at once, 0 Reusing/Is podman running/Traceback.
+      Captures /pm-captures/scenarios/98.'
+    created_at: '2026-10-28T06:32:27Z'
+    last_edited: '2026-10-28T06:32:27Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
