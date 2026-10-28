@@ -34357,7 +34357,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T13:46:48.533309+00:00'
+  updated_at: '2026-10-28T14:33:11.975688+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34583,6 +34583,27 @@ prs:
       (not this PR; _poll_tmux_verdicts is untouched by this diff).'
     created_at: '2026-10-28T13:46:48Z'
     last_edited: '2026-10-28T13:46:48Z'
+  - id: note-bf7ad5b
+    text: 'review 7600 i1: no functional defects in the sync/handoff/route logic.
+      Two changes: (1) the ls-remote/fetch-failure and refused-ff holds embedded git''s
+      multi-line stderr verbatim, so the appended remedy read "exists.. Restart QA"
+      (QA S2/S10 had accepted it as cosmetic) and the TUI log line showed only the
+      first line; new qa_loop._one_line flattens git output to one sentence with a
+      single stop (and "unknown error" when git printed nothing) and all three holds
+      use it, with tests asserting the single-line/single-stop shape (the fetch test
+      now reproduces the doubled period). (2) committed the QA spec updates that were
+      sitting uncommitted in the workdir: the post-QA master integration (the moved
+      planner build must keep the provider-env transport) and the auto-sequence "paused:
+      no pm tmux session" guard, so qa.md now describes both shipped behaviours. Incidental,
+      filed separately rather than widening this PR: pr-70dae74 (pr_auto_sequence''s
+      pending branch has no no-session guard; pr_start falls through to an interactive
+      launch_claude). Full suite 4114 passed, 1 skipped, 1 env-only failure (test_hook_events
+      installer: PM_HOST_HOME=/home/matt != HOME=/home/pm; passes unset) — /pm-captures/review-7600-i1/full-suite.txt.
+      Bug-fix captures under $CAP/impl unchanged and still representative (message-only
+      change). Accepted as before: the ls-remote/fetch race can let the planner run
+      one step behind (R7 fallback).'
+    created_at: '2026-10-28T14:33:11Z'
+    last_edited: '2026-10-28T14:33:11Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
