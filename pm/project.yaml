@@ -14561,7 +14561,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T02:57:42.274799+00:00'
+  updated_at: '2026-10-28T03:01:24.609677+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15445,6 +15445,24 @@ prs:
       is a no-op, so reopen without -o for a second transcript.'
     created_at: '2026-10-28T02:57:42Z'
     last_edited: '2026-10-28T02:57:42Z'
+  - id: note-1653ab5
+    text: 'QA S10 (2026-10-28, container mode, nested podman, throwaway file:// fixture):
+      PASS on the workdir-keyed proxy focus. Two containers on one PR workdir shared
+      one socket dir + daemon (impl+review), pushed the same branch concurrently (both
+      rc 0) and a follow-up push advanced upstream; impl + two QA scenario clones
+      each got their own socket dir/daemon (pids 19160/21115/21116) and three simultaneous
+      pushes produced exactly one winner with ordinary git rejections in the two losers;
+      both losers then pull --rebase + push through their unchanged daemons and the
+      branch ends with all three markers. Incidental, out of scope, filed as pr-436d18a:
+      `pm container cleanup --pr <id>` silently removes nothing on podman 3.4.4 (a
+      tab in `podman ps --format` renders as spaces, so the parsed name includes the
+      status; rm fails and is swallowed while the CLI still prints "Removed N"). Also
+      note for future scenario scripts: `git cat-file -e` against the upstream object
+      DB is not a valid "loser commit absent" check (a ref-lock-rejected push has
+      already transferred its objects); use merge-base --is-ancestor against the branch
+      tip, and read refs/remotes/origin/<branch> in a fresh clone, not refs/heads/<branch>.'
+    created_at: '2026-10-28T03:01:24Z'
+    last_edited: '2026-10-28T03:01:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -37212,6 +37230,33 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T23:57:02.733584+00:00'
   updated_at: '2026-10-27T23:57:02.733584+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-436d18a
+  plan: bugs
+  title: 'Bug: pm container cleanup silently removes nothing on podman 3.x (tab in
+    --format renders as spaces)'
+  branch: pm/pr-436d18a-bug-pm-container-cleanup-silently-removes-nothing-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/container.py container_cleanup (lines ~275-300).
+    Repro on podman 3.4.4: `podman ps -a --format "{{.Names}}\t{{.Status}}"` renders
+    the \t as spaces, so `line.split("\t", 1)` never splits and the whole line ("pm-<tag>-impl-<pr>    Up
+    3 minutes ago") is passed to remove_container as the container name. `podman rm
+    -f` then fails with "no container with name or ID ... found", the failure is swallowed
+    (check=False) and the command still prints "Removed N container(s)" while every
+    container keeps running. Observed in QA scenario 10 for pr-748e708: `pm container
+    cleanup --pr pr-ef361dc` reported "Removed 2 container(s)" but both containers
+    were still Up; the debug log (~/.pm/debug/<tag>.log) shows the bogus name in the
+    rm error. Fix: use a delimiter podman actually renders (e.g. {{.Names}}|{{.Status}}
+    or split(None,1)) and count only removals that actually succeeded.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:01:10.948548+00:00'
+  updated_at: '2026-10-28T03:01:10.948548+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
