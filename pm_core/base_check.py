@@ -483,6 +483,10 @@ def clear_return_awaiting(root: Path, pr_id: str) -> None:
         if rec and rec.get("awaiting") == "impl":
             rec["awaiting"] = None
             rec.pop("launch_claim", None)
+            # The failed attempt's error is history now that a launch worked;
+            # leaving it on the record makes `pm pr show` report a stale
+            # failure for the rest of the episode.
+            rec.pop("apply_error", None)
             rec["launched_at"] = _now()
 
     try:
@@ -546,12 +550,13 @@ def launch_impl(root: Path, pr_id: str, transcript_dir: str | Path | None) -> tu
     # pr_start clears awaiting on its successful launch path; make it
     # unconditional so a fast-path return cannot strand the handshake.
     clear_return_awaiting(root, pr_id)
-    _share_impl_transcript(root, pr_id, tdir / f"impl-{pr_id}.jsonl")
+    share_impl_transcript(root, pr_id, tdir / f"impl-{pr_id}.jsonl")
     return True, ""
 
 
-def _share_impl_transcript(root: Path, pr_id: str, transcript: Path) -> None:
-    """Point every driver's ``impl-<pr>.jsonl`` at the relaunched session.
+def share_impl_transcript(root: Path, pr_id: str,
+                          transcript: str | Path | None) -> None:
+    """Point every driver's ``impl-<pr>.jsonl`` at the session just launched.
 
     A relaunch writes its transcript symlink into one directory.  Other
     drivers that were watching the *killed* session (the TUI run dir, the
@@ -559,11 +564,22 @@ def _share_impl_transcript(root: Path, pr_id: str, transcript: Path) -> None:
     session's last ``idle_prompt`` as if the rework session were idle — and
     never see the new session's events at all.  Refreshing them keeps the
     relaunch trackable by whichever driver resumes the handoff.
+
+    ``pm pr start`` (the single implementation launcher) and
+    :func:`launch_impl` call this, so a relaunch started from any driver
+    (TUI auto-start catch-up, a manual ``pm pr start``, the review gate)
+    stays trackable from every transcript dir.  Best effort: never raises.
     """
+    if not transcript:
+        return
+    transcript = Path(transcript)
     try:
         target = os.readlink(transcript)
     except OSError:
-        return
+        # A direct JSONL path (not a symlink) is the target itself.
+        if not transcript.exists():
+            return
+        target = str(transcript)
     base = Path(root) / "transcripts"
     if not base.is_dir():
         return

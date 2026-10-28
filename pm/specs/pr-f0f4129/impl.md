@@ -114,14 +114,22 @@ already drops it because the status is no longer `qa`.
   written by `clear_return_awaiting`): a killed session's last
   `idle_prompt` — still visible through a stale `impl-<pr>.jsonl` symlink in
   another driver's transcript dir — is not the rework session's turn, so the
-  relaunch re-points those symlinks (`_share_impl_transcript`) to keep the
-  new session trackable. An idle notification alone never qualifies: a
+  relaunch re-points those symlinks (`share_impl_transcript`) to keep the
+  new session trackable. That call lives in `pm pr start` (the single
+  implementation launcher) as well as in `launch_impl`, so a relaunch
+  started by the TUI auto-start catch-up or a manual `pm pr start` also
+  refreshes the CLI auto-sequence dir's link — otherwise that driver keeps
+  reading the killed session's idle event and its handoff never advances.
+  A successful launch also clears a previous attempt's `apply_error`. An
+  idle notification alone never qualifies: a
   missing idle timestamp (`idle_since is None`, e.g. the pane/tracker could
   not be read) is *no evidence* and must not skip the settle/relaunch
   guards. The TUI
   runs the network check in a worker thread (throttled to
-  `BASE_CHECK_POLL_SECONDS`, keyed to the return episode); the CLI passes the
-  tracker's idle timestamp so the same settle window applies.
+  `BASE_CHECK_POLL_SECONDS`, keyed to the return episode *and* the idle
+  event it was computed for — a later idle event invalidates the cached
+  verdict); the CLI passes the tracker's idle timestamp so the same settle
+  window applies.
 - **R7 — Idempotent / single owner.** The return is created at most once per
   open episode and never twice for the same unresolved `(head, base_sha)`
   pair (second gate ⇒ `wait`, no new return, no launch). `launch_claim`

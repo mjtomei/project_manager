@@ -178,6 +178,34 @@ def test_completion_tick_runs_the_check_once_and_reports(tmp_path):
     check.assert_called_once()
 
 
+def test_completion_tick_rechecks_after_a_new_idle_event(tmp_path):
+    """A cached verdict belongs to the idle turn it was computed for.
+
+    A later hook event means the implementation did more work, so a cached
+    clean verdict must not start a reviewer beside that fresh turn.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return())
+    app = _app(tmp_path, [pr])
+    app.run_worker.side_effect = lambda fn, **kw: fn()
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 2
+    done = base_check.CompletionResult(True, "clean", resume_loop=False)
+    with patch("pm_core.base_check.git_op_in_progress", return_value=None), \
+         patch("pm_core.base_check.tracked_dirty", return_value=False), \
+         patch("pm_core.base_check.impl_completion",
+               return_value=done) as check:
+        review_loop_ui._base_completion_tick(app, "pr-001", pr, _tracker(old))
+        cached = review_loop_ui._base_completion_tick(
+            app, "pr-001", pr, _tracker(old))
+        assert cached[0] is True
+        # A newer idle event (still settled) must be checked afresh.
+        fresh = review_loop_ui._base_completion_tick(
+            app, "pr-001", pr, _tracker(old + 1))
+    assert not fresh[0] and "checking" in fresh[1]
+    assert check.call_count == 2
+
+
 def test_completion_tick_background_test_is_not_completion(tmp_path):
     """An idle turn whose rework did not change the pair stays pending."""
     from pm_core.tui import review_loop_ui

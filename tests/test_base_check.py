@@ -280,6 +280,40 @@ def test_completion_waits_for_a_launched_rework(w):
     assert "unchanged" in res.reason
 
 
+def test_successful_relaunch_clears_a_stale_apply_error(w):
+    """A failed launch's error must not outlive the launch that worked.
+
+    ``release_impl_claim`` records the failure while ``awaiting`` stays set;
+    a later driver retries and succeeds.  Leaving ``apply_error`` on the
+    record makes ``pm pr show`` report a failure that is no longer true for
+    the rest of the episode.
+    """
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+    set_pr(w, base_return={**pr(w)["base_return"],
+                           "awaiting": "impl",
+                           "apply_error": "spec pending"})
+    base_check.clear_return_awaiting(w.pm_dir, PR)
+    ret = pr(w)["base_return"]
+    assert ret["awaiting"] is None
+    assert "apply_error" not in ret
+
+
+def test_share_impl_transcript_accepts_a_direct_path(w):
+    """A direct JSONL path (not a symlink) is still a valid target."""
+    import os
+    other = w.pm_dir / "transcripts" / "run-b" / f"impl-{PR}.jsonl"
+    other.parent.mkdir(parents=True)
+    other.symlink_to("/nonexistent/old-session.jsonl")
+    real = w.tdir / f"impl-{PR}.jsonl"
+    real.write_text("{}")
+    base_check.share_impl_transcript(w.pm_dir, PR, real)
+    assert os.readlink(other) == str(real)
+    # No transcript at all (a foreground launch) is a no-op.
+    base_check.share_impl_transcript(w.pm_dir, PR, None)
+    assert os.readlink(other) == str(real)
+
+
 def test_completion_requires_idle_evidence(w):
     """No idle timestamp is no evidence: an idle notification alone never
     qualifies, so a caller that cannot read the pane's turn must not complete.

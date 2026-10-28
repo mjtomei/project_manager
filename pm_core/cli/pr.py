@@ -1233,6 +1233,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 clear_return_awaiting(root, pr_id, "impl")
                 from pm_core import base_check
                 base_check.clear_return_awaiting(root, pr_id)
+                # Every driver watching this PR's impl pane (TUI run dir,
+                # CLI auto-sequence dir) must follow the new session: the
+                # relaunch may have come from only one of them, and a stale
+                # symlink makes the others read the killed session's last
+                # idle event (a base-return handoff would never advance).
+                base_check.share_impl_transcript(root, pr_id, transcript)
                 return
             except Exception as e:
                 click.echo(f"Failed to create tmux window: {e}", err=True)

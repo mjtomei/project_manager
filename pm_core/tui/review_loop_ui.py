@@ -1209,9 +1209,7 @@ def _poll_impl_idle(app) -> None:
     # A TUI review loop that was interrupted by a base-conflict return
     # resumes even without auto-start (manual ``zz d`` semantics); a
     # one-shot ``z d`` stays manual.
-    for entry in newly_idle:
-        pr_id = entry[0]
-        resume = entry[2] if len(entry) > 2 else False
+    for pr_id, _pr, resume in newly_idle:
         if resume and pr_id not in started:
             _resume_returned_loop(app, pr_id)
 
@@ -1249,10 +1247,16 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     now = time.monotonic()
     if st.get("in_flight"):
         return False, "checking base integration", False
-    if st.get("at") and now - float(st["at"]) < BASE_CHECK_POLL_SECONDS:
-        return (bool(st.get("ok")), st.get("reason", ""),
-                bool(st.get("resume_loop")))
     idle_since = tracker.idle_since(pr_id)
+    if st.get("at") and now - float(st["at"]) < BASE_CHECK_POLL_SECONDS:
+        # The cached verdict belongs to the idle turn it was computed for: a
+        # later hook event means the implementation did more work, so the
+        # verdict (and its clean workdir/HEAD) must be re-checked rather than
+        # reused to start a reviewer beside a fresh turn.
+        if st.get("idle_since") == idle_since:
+            return (bool(st.get("ok")), st.get("reason", ""),
+                    bool(st.get("resume_loop")))
+        st = {}
     if idle_since is None:
         return False, "not idle", False
     if time.time() - idle_since < base_check.IDLE_SETTLE_SECONDS:
@@ -1277,13 +1281,14 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
                 app._root, pr_id, pr, idle_since=idle_since,
                 transcript_dir=_auto_start.get_transcript_dir(app))
             checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
-                             "episode": episode,
+                             "episode": episode, "idle_since": idle_since,
                              "ok": res.complete, "reason": res.reason,
                              "resume_loop": res.resume_loop}
         except Exception as e:
             _log.warning("base completion check for %s failed: %s", pr_id, e)
             checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
-                             "episode": episode, "ok": False,
+                             "episode": episode, "idle_since": idle_since,
+                             "ok": False,
                              "reason": f"completion check failed: {e}",
                              "resume_loop": False}
 
