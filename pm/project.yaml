@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T15:54:53.571504+00:00'
+  updated_at: '2026-10-28T16:31:48.618697+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32768,6 +32768,46 @@ prs:
       the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-28T15:54:53Z'
     last_edited: '2026-10-28T15:54:53Z'
+  - id: note-3edf4a4
+    text: 'Review loop e7e1 i3: three verified leftovers in the kept recipe scope,
+      all the PR own class. (1) Both recording recipes agg install block was unconditional
+      although its prose said to install only when command -v agg prints nothing —
+      and the bundled Dockerfile now installs agg, so pasting the remedy on a current
+      image replaced it for nothing. Verified live here with real curl: a server that
+      sent Content-Length 100000, 500 bytes of body and then closed made curl -fsSL
+      … -o agg replace a working agg with a 500-byte partial file (rc 18), still executable,
+      and ~/.local/bin comes first in the image PATH — so a failed download shadows
+      the image working binary. The block is now guarded on command -v agg in both
+      recipes (matching its own prose); verified it still installs agg 1.9.0 for real
+      when agg is missing and does nothing when it is present. (2) The web-UI driver
+      linked /usr/lib/node_modules whenever the directory existed, not when the package
+      did: with the dir present and playwright absent it created a link that cannot
+      resolve, then stopped at its own check telling the worker to create that same
+      link (a remedy that cannot work), and the stray link would send a later npm
+      i playwright into the global install. The guard now tests /usr/lib/node_modules/playwright
+      (the image layout; the real block still links and runs the driver here). (3)
+      The Layer 2 protocol block per-route curl had no timeout at all — a route that
+      accepted and never answered blocked the block forever, the unbounded-wait class
+      this PR removes everywhere else (step 1 readiness poll bounds each attempt for
+      that reason). Each route now carries --connect-timeout 2 --max-time 10; a timed-out
+      route is recorded in http.log as curl error with status 000. Tests: +6 (install
+      block executed both ways for both recipes against a stub curl with a hermetic
+      PATH; driver block with a package-less global dir; Layer 2 per-route bounds);
+      the three behavioural ones fail against the pre-fix recipes (checked by restoring
+      them in place), the missing-agg cases pass both ways by design, and the bounds
+      assertion fails with the timeouts removed. Also deduped the finalize-block extraction
+      (_web_ui_finalize_block()) and corrected two stale "the QA image ships no agg"
+      test docstrings. File 105 pass (3 runs); related suites 175 pass; full suite
+      3958 passed, 1 skipped, 94 deselected (test_merge_publish/test_signoff_integration
+      — push proxy — plus the two known baselines, both reproducing on origin/master),
+      run with markdown on the path. Verified the recipes edited blocks live: the
+      guarded agg block downloaded real agg 1.9.0 when missing, the driver block still
+      linked and ran against the image /usr/lib/node_modules/playwright, and the Layer
+      2 block wrote http.log and sse.log against a real local server. impl.md R16
+      + R9/R10/Files/verification/evidence and qa.md updated. No pm_core/ change;
+      the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T16:31:48Z'
+    last_edited: '2026-10-28T16:31:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
