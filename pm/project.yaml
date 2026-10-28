@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T16:12:32.972105+00:00'
+  updated_at: '2026-10-28T16:26:55.259614+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -36704,6 +36704,31 @@ prs:
       logs, debug log, manifest.md).'
     created_at: '2026-10-28T16:12:32Z'
     last_edited: '2026-10-28T16:12:32Z'
+  - id: note-9a43d5c
+    text: 'QA scenario 12 (reported-bug non-reproduction, HEAD dca1b7d7): PASS. Live
+      TUI + interactive stand-in, 5/5 stories. A: wait -> answer -> follow-up NEEDS_WORK
+      -> iteration 2; 50 consecutive status --json samples on iteration 2 all `running
+      / review iteration 2 (last NEEDS_WORK)`, zero `waiting`/INPUT_REQUIRED — the
+      reported bug does not reproduce. B: PASS follow-up with the target removed before
+      it landed -> `review passed; QA transition pending`, verdict PASS, input_required
+      false, green ⟳1✓. C: `pm tui restart --breadcrumb` during a fresh unanswered
+      wait re-adopted the same pane (%14), no --fresh relaunch, iteration stayed 1;
+      the ~0.9 s adoption gap read `running / follow-up running` once then resolved
+      to waiting with no answer; answering after the restart cleared the wait and
+      NEEDS_WORK advanced to iteration 2 with no waiting sample after the answer.
+      Reproduction tests: 23 passed. Evidence: /pm-captures/scenarios/12/. Two observations
+      for whoever reads next: (1) the story-5 restart also started a NEW review loop
+      for B at iteration 1 — B had no live loop in the breadcrumb and sat in in_review
+      with a PASS whose QA transition never fired (it was out of scope when it completed),
+      so the scheduler re-drove it on resume. Not a review-wait regression and out
+      of this PR scope, but it means an out-of-scope PASSed PR is re-reviewed after
+      any TUI restart; worth a look if autostart re-review churn matters. (2) Harness
+      note: fake-claude is NOT passed the review prompt (only --verdict/--session-id),
+      so a stand-in must key the PR off its workdir path (`pm-(pr-[0-9a-f]+)-`) and
+      the iteration off a per-PR launch counter — an adopted wait after a restart
+      does not relaunch, so the counter stays in step. (2026-10-28T16:30:00Z)'
+    created_at: '2026-10-28T16:26:55Z'
+    last_edited: '2026-10-28T16:26:55Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
