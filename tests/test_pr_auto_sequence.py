@@ -469,6 +469,62 @@ class TestQA:
         driven.assert_not_called()      # no episode: no probe, no extra scan
 
 
+    def test_in_progress_run_with_live_owner_is_not_relaunched(
+            self, runner, tmp_path):
+        """A run's status file carries an empty overall for its whole life,
+        so a missing window does not mean the run is dead.  Launching another
+        driver would duplicate scenario workers — and its stale-window
+        cleanup would kill the panes the live driver (e.g. a TUI-held run in
+        its reopen window) is polling."""
+        pr = _pr("qa")
+        qa_dir = tmp_path / "qa-work"
+        qa_dir.mkdir()
+        status_path = qa_dir / "qa_status.json"
+        status_path.write_text('{"overall": ""}')
+        (qa_dir / "qa_resume.json").write_text('{"owner_pid": 1}')
+
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, status_path)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value=None), \
+             patch("pm_core.qa_loop.resume_owned_elsewhere",
+                   return_value=True), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "running: qa"
+        mock_qa.assert_not_called()
+
+    def test_in_progress_run_with_dead_owner_is_relaunched(
+            self, runner, tmp_path):
+        """An orphaned run (its driver died) is still recovered."""
+        pr = _pr("qa")
+        qa_dir = tmp_path / "qa-work"
+        qa_dir.mkdir()
+        status_path = qa_dir / "qa_status.json"
+        status_path.write_text('{"overall": ""}')
+        (qa_dir / "qa_resume.json").write_text('{"owner_pid": 1}')
+
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=_data_with(pr)), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._qa_status_for",
+                   return_value=(None, status_path)), \
+             patch("pm_core.cli.pr.tmux_mod.find_window_by_name",
+                   return_value=None), \
+             patch("pm_core.qa_loop.resume_owned_elsewhere",
+                   return_value=False), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert "running: qa (launched)" in result.output
+        mock_qa.assert_called_once()
+
+
+
 class TestSignOff:
     def test_no_verdict_window_present_running(self, runner, tmp_path):
         pr = _pr("sign_off")

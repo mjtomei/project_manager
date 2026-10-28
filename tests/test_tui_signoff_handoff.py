@@ -576,6 +576,30 @@ def test_reqa_route_keeps_a_running_loop_entry(world_factory):
     assert app.pr()["signoff_return"]["awaiting"] == "qa"
 
 
+def test_reqa_route_retires_held_follow_up_before_owed_run(world_factory, tmp_path):
+    """A fresh REQA supersedes the old input wait without leaving its poller
+    or restart snapshot alive, while still claiming exactly one owed run."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    held = QALoopState(pr_id=PR)
+    held.running = False
+    held.held = True
+    held.qa_workdir = str(tmp_path)
+    snapshot = tmp_path / "qa_resume.json"
+    snapshot.write_text('{"held": true}')
+    app._qa_loops[PR] = held
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False):
+        _poll(app)
+    assert held.stop_requested is True
+    assert held.superseded is True
+    assert not snapshot.exists()
+    assert app._qa_loops.get(PR) is not held
+    sq.assert_called_once_with(app, PR)
+    assert app.pr()["signoff_return"]["launch_claim"]["hop"] == "qa"
+
+
 def test_review_route_restarts_review_loop(world_factory):
     app, w = world_factory(wait=True)
     _qa_pass(app)

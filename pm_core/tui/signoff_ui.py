@@ -322,9 +322,12 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         # a loop that owns the PR.  A running one keeps its entry: popping it
         # would let the owed-REQA start below (and the reconciler) start a
         # second full run over a loop that is still going.
+        from pm_core.tui import qa_loop_ui
         loop = app._qa_loops.get(pr_id)
         if loop is None or not loop.running:
-            app._qa_loops.pop(pr_id, None)
+            # Retire a completed/held run, including its unbounded follow-up
+            # poller and resume snapshot. A live running loop stays protected.
+            qa_loop_ui.discard_qa_state(app._qa_loops.pop(pr_id, None))
         # Drop the finished run's PASS record: it would otherwise read as
         # "QA passed" to the catch-up hand-off before the new run starts.
         try:
@@ -333,7 +336,6 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
         except Exception:
             _log.debug("runtime_state qa clear failed", exc_info=True)
         from pm_core.qa_loop import run_driven_elsewhere
-        from pm_core.tui import qa_loop_ui
         if run_driven_elsewhere(pr_id):
             # A ``pm qa run`` of this PR is live: a new loop's planning
             # retires its windows as stale and runs QA a second time (S117).

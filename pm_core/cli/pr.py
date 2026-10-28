@@ -1353,9 +1353,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             home_window.park_if_on(pm_session, existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
+            # The review loop launches this command as a child and discards
+            # its stdout on success, so mirror the user-facing notice into the
+            # log — otherwise a loop-driven launch silently replaces a held or
+            # historical window with no visible trace.
+            _log.info("Killed existing review window '%s'", window_name)
         else:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
+            _log.info("Switched to existing review window '%s'", window_name)
             return
 
     title = pr_entry.get("title", "")
@@ -3614,6 +3620,28 @@ def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     return data.get("overall") or None, latest
 
 
+def _qa_run_owned_elsewhere(status_path: Path | None) -> bool:
+    """True when another live process still drives the run behind *status_path*.
+
+    The status file carries an empty ``overall`` for the whole duration of a
+    run, so a missing qa window does not prove the run is dead.  The resume
+    snapshot next to it records the driver (owner pid + start time); the same
+    check a restarting TUI uses decides whether the run is orphaned.
+    """
+    if status_path is None:
+        return False
+    import json
+    from pm_core import qa_loop
+    try:
+        data = json.loads(
+            (status_path.parent / "qa_resume.json").read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return qa_loop.resume_owned_elsewhere(data)
+
+
 def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
                              fresh: bool, review_loop: bool = True) -> None:
     """Launch review *iteration* in the background for auto-sequence.
@@ -3724,6 +3752,14 @@ def pr_auto_sequence(pr_id: str):
     if status == "in_review":
         if not pm_session:
             click.echo("paused: no pm tmux session")
+            return
+        # A native review loop (including its bounded failed-launch retries)
+        # owns this PR's review launch; a second --fresh launch here would
+        # kill its window and duplicate the work.  Wait for the loop.
+        from pm_core.review_loop import review_loop_owns_launch
+        _loop_owner = review_loop_owns_launch(pr_id)
+        if _loop_owner:
+            click.echo(f"running: review (owned by {_loop_owner})")
             return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         if verdict and _older_than(
@@ -3857,9 +3893,9 @@ def pr_auto_sequence(pr_id: str):
             )
             return
         if overall is None:
-            # No qa_status.json yet.  Could be a never-started run *or*
-            # a freshly-launched run whose first status write hasn't
-            # landed yet.  Check for the qa tmux window before
+            # No finalized result yet: a never-started run, a freshly
+            # launched run, or a held run reopening after INPUT_REQUIRED.
+            # Check for the qa tmux window before
             # re-launching to avoid stacking duplicate QA subprocesses
             # during the launch→first-write race window.  While the REQA
             # obligation is still unclaimed that window belongs to a run that
@@ -3880,6 +3916,11 @@ def pr_auto_sequence(pr_id: str):
             # ours to duplicate (S117).
             if run_driven_elsewhere(pr_id):
                 click.echo("running: qa (driven elsewhere)")
+                return
+            if _qa_run_owned_elsewhere(_path):
+                # A reopened held run can still have an owner even without
+                # its window. Keep that driver's workers and evidence intact.
+                click.echo("running: qa")
                 return
             # A sign-off REQA's re-run is owed: only one driver may take it.
             from pm_core.signoff import claim_return_launch, return_awaiting
