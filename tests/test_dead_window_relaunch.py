@@ -213,6 +213,124 @@ class TestReviewWindowEnded:
 
 
 # ---------------------------------------------------------------------------
+# Concurrent launches of one window (QA S78: TUI `s` + `pm pr start`)
+# ---------------------------------------------------------------------------
+
+class TestWindowLaunchLock:
+    def test_second_holder_waits_then_gives_up(self, tmp_path, capsys):
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            with pr_mod._window_launch_lock("pm-sess", "pr-001"):
+                with pytest.raises(SystemExit) as exc:
+                    with pr_mod._window_launch_lock("pm-sess", "pr-001",
+                                                    timeout=0.2):
+                        pass
+                # Another window is not blocked.
+                with pr_mod._window_launch_lock("pm-sess", "review-pr-001",
+                                                timeout=0.2):
+                    pass
+            # Released on exit.
+            with pr_mod._window_launch_lock("pm-sess", "pr-001", timeout=0.2):
+                pass
+        assert exc.value.code == 1
+        assert "Busy: another launch of window 'pr-001'" in capsys.readouterr().err
+
+
+class TestPrStartConcurrentRelaunch:
+    """Two starts both see the dead window on the fast path; the one that
+    gets the launch lock second must find the first's live window there,
+    not reuse its container (no admission) and open a second window."""
+
+    def _invoke(self, tmp_path, under_lock_dead, events):
+        pm_dir, data = _save_project(tmp_path)
+        git = MagicMock()
+        git.is_git_repo.return_value = False
+        git.run_git.return_value = MagicMock(returncode=0,
+                                             stdout=yaml.safe_dump(data))
+        wrap = MagicMock(return_value=("wrapped", "ctr"))
+        import contextlib
+
+        @contextlib.contextmanager
+        def lock(session, name):
+            events.append(("lock", session, name))
+            yield
+            events.append(("unlock", session, name))
+
+        with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+             patch.object(pr_mod, "git_ops", git), \
+             patch.object(pr_mod, "prompt_gen"), \
+             patch.object(pr_mod, "find_claude", return_value="claude"), \
+             patch.object(pr_mod, "build_claude_shell_cmd",
+                          return_value="claude ...") as build, \
+             patch.object(pr_mod, "state_root", return_value=pm_dir), \
+             patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
+             patch.object(pr_mod, "_window_launch_lock", lock), \
+             patch("pm_core.container.wrap_claude_cmd", wrap), \
+             patch("pm_core.paths.get_global_setting", return_value=False), \
+             patch("pm_core.home_window.park_if_on"):
+            _mock_tmux(mock_tmux, True)
+            # Dead at the fast path; under the lock, whatever the other
+            # launch left behind.
+            mock_tmux.find_window_by_name.side_effect = [
+                {"id": "@1", "index": "1", "name": "pr-001"},
+                {"id": "@4", "index": "4", "name": "pr-001"},
+                {"id": "@4", "index": "4", "name": "pr-001"},
+            ]
+            mock_tmux.window_panes_dead.side_effect = [True, under_lock_dead]
+            mock_tmux.new_window.side_effect = (
+                lambda *a, **k: events.append(("new_window",)))
+            result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+        return result, mock_tmux, wrap, build
+
+    def test_window_relaunched_meanwhile_is_switched_to(self, tmp_path):
+        events = []
+        result, mock_tmux, wrap, build = self._invoke(tmp_path, False, events)
+        assert result.exit_code == 0, result.output
+        wrap.assert_not_called()          # no container reuse, no admission
+        build.assert_not_called()         # no transcript symlink rewrite
+        mock_tmux.kill_window.assert_not_called()
+        mock_tmux.new_window.assert_not_called()
+        mock_tmux.select_window.assert_called_once_with("pm-sess", "@4")
+        assert "Switched to existing window 'pr-001'" in result.output
+        assert events == [("lock", "pm-sess", "pr-001"),
+                          ("unlock", "pm-sess", "pr-001")]
+
+    def test_still_dead_under_lock_relaunches_inside_lock(self, tmp_path):
+        events = []
+        result, mock_tmux, wrap, _ = self._invoke(tmp_path, True, events)
+        assert result.exit_code == 0, result.output
+        wrap.assert_called_once()
+        mock_tmux.kill_window.assert_called_once_with("pm-sess", "@4")
+        assert events == [("lock", "pm-sess", "pr-001"), ("new_window",),
+                          ("unlock", "pm-sess", "pr-001")]
+
+
+def test_review_launch_runs_under_window_lock(tmp_path):
+    _, data = _save_project(tmp_path)
+    events = []
+    import contextlib
+
+    @contextlib.contextmanager
+    def lock(session, name):
+        events.append(("lock", session, name))
+        yield
+        events.append(("unlock", session, name))
+
+    with patch.object(pr_mod, "tmux_mod") as mock_tmux, \
+         patch.object(pr_mod, "_get_pm_session", return_value="pm-sess"), \
+         patch.object(pr_mod, "_window_launch_lock", lock), \
+         patch.object(pr_mod, "_review_window_ended", return_value=False):
+        _mock_tmux(mock_tmux, False)
+        mock_tmux.find_window_by_name.side_effect = (
+            lambda *a: events.append(("find",) + a) or {"id": "@2"})
+        pr_mod._launch_review_window(data, data["prs"][0])
+    # The fast-path window check happens while the lock is held.
+    assert events == [("lock", "pm-sess", "review-pr-001"),
+                      ("find", "pm-sess", "review-pr-001"),
+                      ("unlock", "pm-sess", "review-pr-001")]
+    mock_tmux.select_window.assert_called_once_with("pm-sess", "@2")
+
+
+# ---------------------------------------------------------------------------
 # TUI s / d fast paths
 # ---------------------------------------------------------------------------
 

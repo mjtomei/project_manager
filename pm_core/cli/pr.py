@@ -965,23 +965,10 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                     home_window.park_if_on(pm_session, existing["id"])
                     tmux_mod.kill_window(pm_session, existing["id"])
                     click.echo(f"Killed existing window '{window_name}'")
-                elif use_companion and not background:
-                    # Add companion pane to existing window if missing
-                    impl_workdir = pr_entry.get("workdir") or workdir
-                    if impl_workdir:
-                        _add_companion_pane(pm_session, existing, impl_workdir, "impl")
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' "
-                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
-                    return
-                elif background:
-                    # Window already exists, nothing to do in background mode
-                    click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
-                    return
                 else:
-                    tmux_mod.select_window(pm_session, existing["id"])
-                    click.echo(f"Switched to existing window '{window_name}' "
-                               f"(session: {tmux_mod.current_or_base_session(pm_session)})")
+                    _focus_existing_impl_window(
+                        pm_session, existing, window_name, pr_entry,
+                        workdir, use_companion, background)
                     return
 
     repo_url = data["project"]["repo"]
@@ -1156,71 +1143,86 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
-            # When running in a container, Claude's cwd is /workspace —
-            # transcript symlinks must target where Claude actually writes
-            # (see pr_review for the same pattern).
-            from pm_core.container import (
-                is_container_mode_enabled as _is_container_enabled,
-                _CONTAINER_WORKDIR,
-            )
-            if _is_container_enabled():
-                _claude_cwd = _CONTAINER_WORKDIR
-                _claude_write_dir = str(work_path)
-            else:
-                _claude_cwd = str(work_path)
-                _claude_write_dir = None
-            # Session-scoped launch config (fake-claude, skip-permissions)
-            # follows the tmux session, not the cwd — run from a PR workdir
-            # (picker / prefix+M popup) the cwd tag names no session.
-            _stag = pm_session.removeprefix("pm-") if pm_session else None
-            cmd = build_claude_shell_cmd(prompt=prompt,
-                                         transcript=transcript,
-                                         cwd=_claude_cwd,
-                                         write_dir=_claude_write_dir,
-                                         model=resolved_model,
-                                         provider=resolved_provider,
-                                         effort=_resolution.effort,
-                                         session_tag=_stag,
-                                         session_type="impl")
-            # Optionally wrap in a container for isolation
-            from pm_core.container import wrap_claude_cmd, ContainerError
-            try:
-                cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
-                                              allowed_push_branch=branch,
-                                              session_tag=_stag, pr_id=pr_id)
-            except ContainerError as e:
-                click.echo(str(e), err=True)
-                raise SystemExit(1)
-            if ended_window:
-                from pm_core import home_window
-                home_window.park_if_on(pm_session, ended_window["id"])
-                tmux_mod.kill_window(pm_session, ended_window["id"])
-                click.echo(f"Closed window '{window_name}' (its session "
-                           f"has ended); relaunching")
-            try:
-                if use_companion:
-                    claude_pane = tmux_mod.new_window_get_pane(
-                        pm_session, window_name, cmd, str(work_path),
-                        switch=not background,
-                    )
-                    if claude_pane:
+            with _window_launch_lock(pm_session, window_name):
+                # A concurrent start of this PR (TUI `s` and `pm pr start`
+                # in a shell, say) may have opened the window since the
+                # fast path ran.  Re-check under the lock and use that
+                # window: launching here as well would reuse its container
+                # with no admission and open a second window on it.
+                if not fresh:
+                    current = tmux_mod.find_window_by_name(pm_session, window_name)
+                    if current and not tmux_mod.window_panes_dead(
+                            pm_session, current["id"]):
+                        _focus_existing_impl_window(
+                            pm_session, current, window_name, pr_entry,
+                            workdir, use_companion, background)
+                        return
+                    ended_window = current
+                # When running in a container, Claude's cwd is /workspace —
+                # transcript symlinks must target where Claude actually writes
+                # (see pr_review for the same pattern).
+                from pm_core.container import (
+                    is_container_mode_enabled as _is_container_enabled,
+                    _CONTAINER_WORKDIR,
+                )
+                if _is_container_enabled():
+                    _claude_cwd = _CONTAINER_WORKDIR
+                    _claude_write_dir = str(work_path)
+                else:
+                    _claude_cwd = str(work_path)
+                    _claude_write_dir = None
+                # Session-scoped launch config (fake-claude, skip-permissions)
+                # follows the tmux session, not the cwd — run from a PR workdir
+                # (picker / prefix+M popup) the cwd tag names no session.
+                _stag = pm_session.removeprefix("pm-") if pm_session else None
+                cmd = build_claude_shell_cmd(prompt=prompt,
+                                             transcript=transcript,
+                                             cwd=_claude_cwd,
+                                             write_dir=_claude_write_dir,
+                                             model=resolved_model,
+                                             provider=resolved_provider,
+                                             effort=_resolution.effort,
+                                             session_tag=_stag,
+                                             session_type="impl")
+                # Optionally wrap in a container for isolation
+                from pm_core.container import wrap_claude_cmd, ContainerError
+                try:
+                    cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
+                                                  allowed_push_branch=branch,
+                                                  session_tag=_stag, pr_id=pr_id)
+                except ContainerError as e:
+                    click.echo(str(e), err=True)
+                    raise SystemExit(1)
+                if ended_window:
+                    from pm_core import home_window
+                    home_window.park_if_on(pm_session, ended_window["id"])
+                    tmux_mod.kill_window(pm_session, ended_window["id"])
+                    click.echo(f"Closed window '{window_name}' (its session "
+                               f"has ended); relaunching")
+                try:
+                    if use_companion:
+                        claude_pane = tmux_mod.new_window_get_pane(
+                            pm_session, window_name, cmd, str(work_path),
+                            switch=not background,
+                        )
+                        if claude_pane:
+                            win = tmux_mod.find_window_by_name(pm_session, window_name)
+                            if win:
+                                _add_companion_pane(pm_session, win, str(work_path), "impl")
+                    else:
+                        tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
+                                            switch=not background)
                         win = tmux_mod.find_window_by_name(pm_session, window_name)
                         if win:
-                            _add_companion_pane(pm_session, win, str(work_path), "impl")
-                else:
-                    tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
-                                        switch=not background)
-                    win = tmux_mod.find_window_by_name(pm_session, window_name)
-                    if win:
-                        tmux_mod.set_shared_window_size(pm_session, win["id"])
-                click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
-                # A sign-off IMPL return is now being worked on.
-                from pm_core.signoff import clear_return_awaiting
-                clear_return_awaiting(root, pr_id, "impl")
-                return
-            except Exception as e:
-                click.echo(f"Failed to create tmux window: {e}", err=True)
-                click.echo("Launching Claude in current terminal...")
+                            tmux_mod.set_shared_window_size(pm_session, win["id"])
+                    click.echo(f"Launched Claude in tmux window '{window_name}' (session: {pm_session})")
+                    # A sign-off IMPL return is now being worked on.
+                    from pm_core.signoff import clear_return_awaiting
+                    clear_return_awaiting(root, pr_id, "impl")
+                    return
+                except Exception as e:
+                    click.echo(f"Failed to create tmux window: {e}", err=True)
+                    click.echo("Launching Claude in current terminal...")
 
     # Fall through: launch interactively in current terminal
     session_key = f"pr:start:{pr_id}"
@@ -1274,6 +1276,58 @@ def _add_companion_pane(pm_session: str, window_info: dict, workdir: str,
     click.echo("Added companion pane.")
 
 
+@contextlib.contextmanager
+def _window_launch_lock(pm_session: str, window_name: str,
+                        timeout: float = 90.0):
+    """Serialize launches of one tmux window across pm processes.
+
+    Held from the window check through admission, container creation and
+    window creation, so two concurrent launches of the same window (TUI
+    key and CLI) cannot both pass a dead or missing window: the second
+    waits, then finds the first's live window.
+    """
+    import fcntl
+    from pm_core.paths import pm_home
+    path = pm_home() / "locks" / f"window-{pm_session}-{window_name}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    click.echo(f"Busy: another launch of window "
+                               f"'{window_name}' is still in progress; "
+                               f"try again.", err=True)
+                    raise SystemExit(1)
+                time.sleep(0.05)
+        yield
+
+
+def _focus_existing_impl_window(pm_session: str, existing: dict,
+                                window_name: str, pr_entry: dict,
+                                workdir: str | None, use_companion: bool,
+                                background: bool) -> None:
+    """Use the live impl window *existing* instead of launching another."""
+    if use_companion and not background:
+        # Add companion pane to existing window if missing
+        impl_workdir = pr_entry.get("workdir") or workdir
+        if impl_workdir:
+            _add_companion_pane(pm_session, existing, impl_workdir, "impl")
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing window '{window_name}' "
+                   f"(session: {tmux_mod.current_or_base_session(pm_session)})")
+    elif background:
+        # Window already exists, nothing to do in background mode
+        click.echo(f"Window '{window_name}' already exists (background mode, no focus change)")
+    else:
+        tmux_mod.select_window(pm_session, existing["id"])
+        click.echo(f"Switched to existing window '{window_name}' "
+                   f"(session: {tmux_mod.current_or_base_session(pm_session)})")
+
+
 def _review_window_ended(pm_session: str, window_id: str) -> bool:
     """True if the review session in *window_id* has ended.
 
@@ -1300,6 +1354,29 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                           review_loop_id: str = "",
                           transcript: str | None = None) -> None:
     """Launch a tmux review window with Claude review + git diff shell."""
+    kwargs = dict(fresh=fresh, background=background,
+                  review_loop=review_loop, review_iteration=review_iteration,
+                  review_loop_id=review_loop_id, transcript=transcript)
+    pm_session = _get_pm_session()
+    if (pm_session and tmux_mod.has_tmux() and tmux_mod.in_tmux()
+            and tmux_mod.session_exists(pm_session)):
+        # One launch of the window at a time (TUI `d` and `pm pr review`
+        # in a shell, say): the second then finds the first's live window
+        # instead of removing its container and opening a second window.
+        window_name = f"review-{_pr_display_id(pr_entry)}"
+        with _window_launch_lock(pm_session, window_name):
+            _launch_review_window_unlocked(data, pr_entry, **kwargs)
+    else:
+        _launch_review_window_unlocked(data, pr_entry, **kwargs)
+
+
+def _launch_review_window_unlocked(data: dict, pr_entry: dict,
+                                   fresh: bool = False,
+                                   background: bool = False,
+                                   review_loop: bool = False,
+                                   review_iteration: int = 0,
+                                   review_loop_id: str = "",
+                                   transcript: str | None = None) -> None:
     if not tmux_mod.has_tmux() or not tmux_mod.in_tmux():
         click.echo("Review window requires tmux.")
         return
