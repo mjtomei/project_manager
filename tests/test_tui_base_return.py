@@ -304,6 +304,58 @@ def test_completion_tick_handles_a_missing_workdir(tmp_path):
     assert "workdir" in why
 
 
+def test_completion_tick_recovers_when_the_worker_cannot_start(tmp_path):
+    """A worker that cannot be spawned must not leave the tick in flight.
+
+    The entry is marked in flight before ``run_worker``; if that raises and
+    the marker is left behind, every later tick reports "checking base
+    integration" and the handoff stalls until a TUI restart.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return())
+    app = _app(tmp_path, [pr])
+    app.run_worker.side_effect = RuntimeError("no worker")
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
+    with patch("pm_core.base_check.git_op_in_progress", return_value=None), \
+         patch("pm_core.base_check.tracked_dirty", return_value=False):
+        review_loop_ui._base_completion_tick(app, "pr-001", pr, _tracker(old))
+    assert app._base_completion_checks["pr-001"]["in_flight"] is False
+    # The next tick reports the recorded failure instead of "checking".
+    ok, why, _resume = review_loop_ui._base_completion_tick(
+        app, "pr-001", pr, _tracker(old))
+    assert not ok
+    assert "could not start" in why
+
+
+def test_autostart_status_names_the_base_rework(tmp_path):
+    """`pm autostart status` must not call an idle rework a review transition."""
+    from pm_core import autostart_state
+
+    pr = {"id": "pr-001", "title": "T", "status": "in_progress"}
+    inp = {"windows": {"pr-001": "@1"}, "impl_idle": {"pr-001": "idle"}}
+
+    pr["base_return"] = {"verdict": "BASE_CONFLICT", "awaiting": "impl",
+                         "resolved_at": None}
+    assert "relaunching implementation" in autostart_state._derive(
+        pr, inp, {}, {})[2]
+
+    pr["base_return"] = {"verdict": "BASE_CONFLICT", "awaiting": None,
+                         "resolved_at": None}
+    assert "reconciling" in autostart_state._derive(pr, inp, {}, {})[2]
+
+    pr["base_return"] = {"verdict": "BASE_CONFLICT", "awaiting": None,
+                         "needs_human": True, "resolved_at": None}
+    phase, state, reason = autostart_state._derive(pr, inp, {}, {})
+    assert (state, "human" in reason) == ("paused", True)
+
+    # A resolved return leaves the normal in_progress reason.
+    pr["base_return"] = {"verdict": "BASE_CONFLICT", "awaiting": None,
+                         "resolved_at": "2026-01-01T00:00:00+00:00"}
+    assert autostart_state._derive(pr, inp, {}, {})[2] == \
+        "impl idle; review transition pending"
+
+
 def test_poll_impl_idle_catches_up_base_rework_with_auto_start(tmp_path):
     """A manual loop's rework still relaunches when auto-start is enabled.
 

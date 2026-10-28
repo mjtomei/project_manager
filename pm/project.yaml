@@ -38537,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T20:31:47.058501+00:00'
+  updated_at: '2026-10-28T21:27:27.955477+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38675,6 +38675,24 @@ prs:
       (idle evidence) remains the normal resolver. (2026-10-28T20:35:00Z)'
     created_at: '2026-10-28T20:31:46Z'
     last_edited: '2026-10-28T20:31:46Z'
+  - id: note-1e0f803
+    text: 'Review-loop a6f7 i7 fixes. (1) `pr_view._run_command_async` allows 360s
+      for `pr review`: the pre-review base gate fetches and relaunches implementation
+      (`pm pr start`, bounded at 300s) inside that subprocess, so the old 300s budget
+      could report a timeout for a conflict that was actually recorded (now matches
+      `review_loop._launch_review_window`). (2) `_base_completion_tick` clears the
+      in-flight marker when `run_worker` cannot be spawned (a leftover marker made
+      every later tick report "checking base integration", stalling the handoff until
+      a restart) and logs one INFO line per distinct completed verdict (spec R13 "logs
+      a wait reason once"). (3) `impl_completion` tolerates a null/corrupt `base_return`
+      (the `resume_loop` read raised, which the guard reported as a failed check on
+      every poll). (4) `autostart_state._derive` names the base rework for an in_progress
+      PR with an open return instead of "impl idle; review transition pending". Tests:
+      null base_return, worker-spawn recovery, autostart status. Spec R6/R13/R14 updated.
+      Full suite: 4146 passed, 1 skipped; the autostart change was validated by 239
+      autostart/TUI tests after it landed.'
+    created_at: '2026-10-28T21:27:27Z'
+    last_edited: '2026-10-28T21:27:27Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

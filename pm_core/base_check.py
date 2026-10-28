@@ -358,8 +358,8 @@ def return_to_impl(root: Path, pr_id: str, record: dict, stage: str,
         existing = open_return(pr)
         pair = (record.get("head"), record.get("base_sha"))
         prev = pr.get("base_return") or {}
-        same_base = (prev.get("base_sha") == record.get("base_sha")
-                     and prev.get("verdict"))
+        same_base = bool(prev.get("verdict")) \
+            and prev.get("base_sha") == record.get("base_sha")
         attempt = (_int_or(prev.get("attempt"), 0) + 1) if same_base else 1
         if existing is not None:
             old_pair = (existing.get("head"), existing.get("base_sha"))
@@ -898,9 +898,12 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
             pr = fresh
         rec = open_return(pr)
         if rec is None:
+            # ``base_return`` may be null in a hand-edited/corrupt
+            # project.yaml; ``or {}`` keeps that from raising inside the
+            # handoff (which would leave the PR permanently "not complete").
+            last = (pr or {}).get("base_return") or {}
             return CompletionResult(True, "no open base return",
-                                    bool((pr or {}).get("base_return", {})
-                                         .get("resume_loop")))
+                                    bool(last.get("resume_loop")))
         resume_loop = bool(rec.get("resume_loop"))
         if rec.get("awaiting") == "impl":
             return CompletionResult(False, "rework session has not launched")

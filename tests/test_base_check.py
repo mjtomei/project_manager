@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -360,6 +361,20 @@ def test_completion_requires_idle_evidence(w):
     # A real idle turn still completes.
     done = completion(w)
     assert done.complete, done.reason
+
+
+def test_completion_tolerates_a_null_base_return(w):
+    """A corrupt ``base_return: null`` must not stall the handoff.
+
+    ``open_return`` already treats a non-dict as "no return"; the
+    ``resume_loop`` read must not then raise (which the outer guard would
+    report as a failed check on every poll, never completing).
+    """
+    set_pr(w, base_return=None)
+    res = base_check.impl_completion(w.pm_dir, PR, pr(w),
+                                     idle_since=time.time())
+    assert res.complete, res.reason
+    assert res.resume_loop is False
 
 
 def test_completion_after_reconciled_base_resolves_the_return(w):

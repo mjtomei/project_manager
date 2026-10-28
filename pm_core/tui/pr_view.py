@@ -878,7 +878,12 @@ async def _run_command_async(app, cmd: str, parts: list[str], working_message: s
             stderr=asyncio.subprocess.PIPE,
         )
 
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+        # A `pr review` runs the pre-review base gate inside this subprocess:
+        # on a conflict it fetches the base and relaunches implementation
+        # (`pm pr start`, itself bounded at 300s).  Keep the budget above that
+        # (matches review_loop._launch_review_window) so a slow relaunch is
+        # not reported as a command timeout instead of the routing it was.
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=360)
         spinner_running = False
         stdout_text = stdout.decode() if stdout else ""
         stderr_text = stderr.decode() if stderr else ""

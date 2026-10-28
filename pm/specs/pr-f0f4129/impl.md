@@ -129,7 +129,9 @@ already drops it because the status is no longer `qa`.
   idle notification alone never qualifies: a
   missing idle timestamp (`idle_since is None`, e.g. the pane/tracker could
   not be read) is *no evidence* and must not skip the settle/relaunch
-  guards. The TUI
+  guards. A null/corrupt `base_return` (hand-edited yaml) is treated as "no
+  return"; the `resume_loop` read must not raise, because the outer guard
+  would report that as a failed check on every poll. The TUI
   runs the network check in a worker thread (throttled to
   `BASE_CHECK_POLL_SECONDS`, keyed to the return episode *and* the idle
   event it was computed for — a later idle event invalidates the cached
@@ -189,11 +191,15 @@ already drops it because the status is no longer `qa`.
   — the handoff only polls `in_progress`, so leaving it would strand the
   rework); `start_qa` / `start_or_stop_qa_loop` refuse to start QA likewise;
   `_poll_impl_idle` evaluates `impl_completion` in a **thread worker**
-  (fetch must not block the TUI event loop), logs a wait reason once, and
-  advances only on a genuine completion. A base return whose rework never
-  launched is caught up from the idle poll regardless of auto-start (the
-  launch claim keeps one owner; `check_and_start` only drives in-scope PRs,
-  so a manual loop on a non-target PR would otherwise strand its rework).
+  (fetch must not block the TUI event loop), logs a wait reason once (one
+  INFO line per distinct completed verdict, so the 5 s poll does not spam
+  the log), and advances only on a genuine completion. If the worker cannot
+  be spawned the in-flight marker is cleared (the next tick reports the
+  failure instead of "checking base integration" forever). A base return
+  whose rework never launched is caught up from the idle poll regardless of
+  auto-start (the launch claim keeps one owner; `check_and_start` only
+  drives in-scope PRs, so a manual loop on a non-target PR would otherwise
+  strand its rework).
   `_base_completion_tick` never reaches the git helpers with an empty cwd
   (they raise, inside the shared
   poll timer). `_resume_returned_loop` does not start a second loop when one
@@ -202,7 +208,11 @@ already drops it because the status is no longer `qa`.
   the icon/log path treats it as a clean completion (not ERROR).
 - **R14 — Inspection.** `pm pr show` prints a `## Base integration return`
   section (verdict, stage, HEAD/base, attempt, reason, conflict paths,
-  apply error) so the handoff is inspectable.
+  apply error) so the handoff is inspectable. `autostart_state._derive`
+  reports the rework for an `in_progress` PR with an open return
+  ("relaunching implementation" / "reconciling the base", `paused` when
+  `needs_human`) instead of the misleading "impl idle; review transition
+  pending".
 - **R15 — Tests.** Real-git tests for each transition point, the unchanged
   pair, a moved base during the handoff, dirty workdir retention, fetch
   failure, concurrent gates / one owner, restart/late-callback idempotency,

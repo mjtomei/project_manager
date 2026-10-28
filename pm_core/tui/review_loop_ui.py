@@ -1276,27 +1276,48 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     if base_check.tracked_dirty(workdir):
         return False, "uncommitted edits remain", False
 
-    checks[pr_id] = {"in_flight": True, "started": now, "episode": episode}
+    # Keep the last logged verdict across the in-flight marker: the 5 s poll
+    # must not re-log an unchanged reason (a new episode or a new idle turn
+    # reset ``st``, so a fresh verdict is logged again).
+    logged = st.get("logged_reason")
+    checks[pr_id] = {**st, "in_flight": True, "started": now,
+                     "episode": episode}
 
     def _run():
+        ok, reason, resume = False, "", False
         try:
             res = base_check.impl_completion(
                 app._root, pr_id, pr, idle_since=idle_since,
                 transcript_dir=_auto_start.get_transcript_dir(app))
-            checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
-                             "episode": episode, "idle_since": idle_since,
-                             "ok": res.complete, "reason": res.reason,
-                             "resume_loop": res.resume_loop}
+            ok, reason, resume = res.complete, res.reason, res.resume_loop
         except Exception as e:
             _log.warning("base completion check for %s failed: %s", pr_id, e)
-            checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
-                             "episode": episode, "idle_since": idle_since,
-                             "ok": False,
-                             "reason": f"completion check failed: {e}",
-                             "resume_loop": False}
+            reason = f"completion check failed: {e}"
+        if not ok and reason != logged:
+            # One INFO line per distinct verdict, so an operator can see why
+            # the handoff is waiting without the poll spamming the log.
+            _log.info("impl_idle: %s base rework not complete: %s",
+                      pr_id, reason)
+        checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
+                         "episode": episode, "idle_since": idle_since,
+                         "ok": ok, "reason": reason, "resume_loop": resume,
+                         "logged_reason": reason}
 
-    app.run_worker(_run, thread=True, exclusive=False,
-                   group=f"base-check-{pr_id}")
+    try:
+        app.run_worker(_run, thread=True, exclusive=False,
+                       group=f"base-check-{pr_id}")
+    except Exception as e:
+        # Never leave the entry in flight: every later tick would report
+        # "checking base integration" and the handoff would stall until a
+        # restart.  Record the failure (throttled like a real check) instead.
+        _log.warning("impl_idle: could not start the base check for %s: %s",
+                     pr_id, e)
+        checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
+                         "episode": episode, "idle_since": idle_since,
+                         "ok": False,
+                         "reason": f"could not start the base check: {e}",
+                         "resume_loop": False,
+                         "logged_reason": f"could not start the base check: {e}"}
     return False, "checking base integration", False
 
 
