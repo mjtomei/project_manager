@@ -162,7 +162,10 @@ be rewritten to assert retention.
 
 - **Lock discipline.** Status mutation happens inside `store.locked_update`
   using the freshly loaded entry; a concurrent `--remove` (entry gone) must not
-  raise — re-check `store.get_pr` inside `apply` and no-op.
+  raise — re-check `store.get_pr` inside `apply` and no-op. The merged guard is
+  re-checked inside `apply` too: a merge landing between the pre-lock load and
+  the lock must not be rewritten to `closed` (the pre-lock refusal message is
+  reused and the command exits 1).
 - **TUI refresh.** Keep `trigger_tui_refresh()` so the TUI reloads; closed PRs
   are already hidden by default (`pm_core/tui/tree_layout.py:172`) and filtered
   from `pm pr list --open` (`pm_core/cli/pr.py:517`).
@@ -201,7 +204,9 @@ be rewritten to assert retention.
 - **A6 — Repeat close on an already `closed` PR?** Resolved: idempotent
   success. The entry stays `closed`; the GitHub close is re-attempted unless
   `--keep-github` (so a close whose `gh` call previously failed can be
-  retried); `updated_at` is refreshed.
+  retried); `updated_at` is refreshed. The original `closed_at` is preserved
+  (only a fresh closure — i.e. from a non-`closed` status — records a new one),
+  so repeated close never rewrites closure history.
 - **A7 — Runtime notice for `--keep-branch`?** Resolved: none; the deprecation
   lives in `--help` (a runtime line would be noise in QA scripts that still
   pass the flag).

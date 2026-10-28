@@ -283,6 +283,7 @@ def test_repeat_close_is_idempotent(tmp_path):
     with _fake_gh() as backend:
         backend.add_pr(head="pm/pr-001")
         first = _run_close(project["pm_dir"], "pr-001")
+        first_entry = _load_entry(project["pm_dir"])
         second = _run_close(project["pm_dir"], "pr-001")
 
     assert first.exit_code == 0, first.output
@@ -291,7 +292,36 @@ def test_repeat_close_is_idempotent(tmp_path):
     assert entry is not None
     assert entry["status"] == "closed"
     assert len(entry["notes"]) == 1
+    # The first closure time is history; a repeat close only touches
+    # updated_at (it re-attempts the GitHub close so a failed one can retry).
+    assert entry["closed_at"] == first_entry["closed_at"]
+    assert entry["updated_at"] >= first_entry["updated_at"]
     assert _snapshot(project["workdir"]) == wd_before
+
+
+def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):
+    """A merge landing between load and the store lock must not become closed."""
+    project = _make_project(tmp_path)
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        # Another process (e.g. `pm pr merge` / a sync) merges the PR after
+        # this command loaded its snapshot but before it takes the lock.
+        data = store.load(root)
+        store.get_pr(data, "pr-001")["status"] = "merged"
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        with mock.patch.object(pr_mod.store, "locked_update", racing_update):
+            result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code != 0
+    assert "merged" in result.output
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "merged"          # merge record preserved
+    assert "closed_at" not in entry
 
 
 # ---------------------------------------------------------------------------

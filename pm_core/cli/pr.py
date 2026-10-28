@@ -18,7 +18,7 @@ import click
 import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
-from pm_core.pr_utils import VALID_PR_STATES
+from pm_core.pr_utils import VALID_PR_STATES, usable_prs
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -3449,7 +3449,8 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     workdir, file, or capture is ever deleted by this command.
 
     Cleanup stays separate: ``pm pr cleanup`` removes a workdir, and
-    ``--remove`` deletes a mistaken registry entry (nothing else).  A merged
+    ``--remove`` deletes a mistaken registry entry (local branch and workdir
+    are kept; the GitHub PR is still closed unless --keep-github).  A merged
     PR cannot be closed without --remove, so merge history is never rewritten.
 
     If PR_ID is omitted, uses the active PR.
@@ -3469,11 +3470,13 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     display_id = _pr_display_id(pr_entry)
     old_status = pr_entry.get("status") or "pending"
 
+    merged_refusal = (
+        f"PR {display_id} is already merged — closing it would erase the "
+        f"merge record. Use 'pm pr close {pr_id} --remove' to delete the "
+        f"registry entry (branch and workdir are kept).")
+
     if old_status == "merged" and not remove:
-        click.echo(
-            f"PR {display_id} is already merged — closing it would erase the "
-            f"merge record. Use 'pm pr close {pr_id} --remove' to delete the "
-            f"registry entry (branch and workdir are kept).", err=True)
+        click.echo(merged_refusal, err=True)
         raise SystemExit(1)
 
     # Close the GitHub PR when there is one.  Never delete the branch:
@@ -3503,25 +3506,44 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
     # Record the closure (or drop the entry with --remove) under the lock.
     # Workdir, branch and every file in the workdir stay untouched — cleanup
     # is a separate, explicit operation (`pm pr cleanup`, `--resources`).
+    merged_concurrently = False
+
     def apply(data):
+        nonlocal merged_concurrently
         pr = store.get_pr(data, pr_id)
         if not pr:
             return  # removed concurrently — nothing left to close
         if remove:
             data["prs"] = [p for p in (data.get("prs") or [])
-                           if p["id"] != pr_id]
+                           if p.get("id") != pr_id]
         else:
+            if (pr.get("status") or "pending") == "merged":
+                # A merge landed between our load and the lock: apply the same
+                # rule as the pre-lock guard instead of rewriting a merge
+                # record into `closed`.
+                merged_concurrently = True
+                return
+            prior_closed_at = (pr.get("closed_at")
+                               if pr.get("status") == "closed" else None)
             pr["status"] = "closed"
             _record_status_timestamp(pr, "closed")
+            if prior_closed_at:
+                # Repeat close is idempotent: updated_at still moves, but the
+                # original closure time is history and is not rewritten.
+                pr["closed_at"] = prior_closed_at
         if data.get("project", {}).get("active_pr") == pr_id:
             remaining = [
-                p for p in (data.get("prs") or [])
+                p for p in usable_prs(data.get("prs"))
                 if (p.get("status") or "pending") not in ("merged", "closed")
             ]
             data["project"]["active_pr"] = (
                 remaining[0]["id"] if remaining else None)
 
     updated = store.locked_update(root, apply)
+
+    if merged_concurrently:
+        click.echo(merged_refusal, err=True)
+        raise SystemExit(1)
 
     if not remove and store.get_pr(updated, pr_id) is None:
         # Another process removed the entry between our load and the lock.
