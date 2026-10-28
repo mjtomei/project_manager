@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T14:51:48.304035+00:00'
+  updated_at: '2026-10-28T15:19:41.321666+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16901,6 +16901,24 @@ prs:
       re-export comment in tui/app.py.'
     created_at: '2026-10-28T14:51:48Z'
     last_edited: '2026-10-28T14:51:48Z'
+  - id: note-840bcdd
+    text: 'QA planner 2026-10-28 (post-fix re-plan, spec 6944af4c): scenarios 19+
+      target the pane/restart fixes that scenarios 1-18 never exercised (they all
+      ran before b2d9b75b + af91). (1) R17: pm tui view/send/restart must resolve
+      only a LIVE pane — a dead registry role="tui" entry must not yield an empty
+      frame/exit 0 or a raw tmux traceback; a hand-started TUI absent from the registry
+      must be found with explicit -s; and pane resolution must never cross sessions
+      (pm autostart must keep reporting the NAMED session''s stale pidfile instead
+      of falling through to another session''s live TUI — do not move the liveness
+      check into _find_tui_pane). (2) R18: plain `pm tui restart` is a documented
+      CLEAN restart (drops autostart targets); only `pm tui restart --breadcrumb`
+      preserves them. This resolves S17 story 2: its Then was wrong, not the product
+      — do not re-assert preservation on a plain restart (spec A6). Also test that
+      a restart which finds no live pane exits non-zero and leaves NO ~/.pm/merge-restart
+      marker, so the next start is clean, and that two simultaneous restarts produce
+      one restart/one marker.'
+    created_at: '2026-10-28T15:19:41Z'
+    last_edited: '2026-10-28T15:19:41Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
