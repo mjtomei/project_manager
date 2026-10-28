@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T01:10:05.765971+00:00'
+  updated_at: '2026-10-28T01:15:47.736536+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11263,6 +11263,30 @@ prs:
       strip them in prompt waiters. Captures /pm-captures/scenarios/73.'
     created_at: '2026-10-28T01:10:05Z'
     last_edited: '2026-10-28T01:10:05Z'
+  - id: note-541a280
+    text: 'S80 refine (619ae5c6): memory_governor/container unchanged since 17c4a8d2;
+      = S72 recipe. Docker absent in pm-dev (stated skip). Wait for build-base before
+      peak stories (storage lock -> snapshot); oddname only after refusal; pm log
+      grep not pm log.'
+    created_at: '2026-10-28T00:57:23Z'
+    last_edited: '2026-10-28T00:57:23Z'
+  - id: note-14e5b3a
+    text: 'QA S80 (2026-10-28, 619ae5c6, nested rootless podman 3.4.4): all 5 stories
+      PASS live, no code change; Docker story SKIPPED (no docker binary). Podman 1.081GB/container
+      -> pm scope "2G" (2 pm terms, other-hog excluded, no ".0"), system 82.3G vs
+      meminfo 82.2G. Peaks 5242 = ceil(5495885824/2^20) via container cleanup, 4 parallel
+      pr cleanup --resources (exactly 4 qa_scenario, no Skipping), pm session kill
+      (sampled 01:06:36 before trap). history 3 kept 3 newest; oddname sha256 unchanged.
+      Snapshots 791/794/775 -> 1.2G (1191) projected: "869M used + 7.2G expected growth
+      + 1.2G projected > 9G target (pm scope)" and with default-projection 512m "868M
+      used + 1.2G projected > 1.9G target (pm scope)". Six suites 410 passed; full
+      4108 passed, 1 env-only (hook installer under PM_HOST_HOME; passes with env
+      -u PM_HOST_HOME). Notes: pm container status has no per-type projection line
+      (projection seen only in refusals); signoff default projection = memory-limit
+      gives growth, set default-projection low for the no-growth form; `set system-memory-default-projection
+      ""` errors "needs a unit, e.g. g" (use off). Captures /pm-captures/scenarios/80.'
+    created_at: '2026-10-28T01:15:47Z'
+    last_edited: '2026-10-28T01:15:47Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
