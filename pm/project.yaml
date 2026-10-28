@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T21:53:02.153408+00:00'
+  updated_at: '2026-10-28T22:30:00.325952+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33197,6 +33197,43 @@ prs:
       by the stub shell; use a printing stub if you want the saved pane to show content.'
     created_at: '2026-10-28T21:53:02Z'
     last_edited: '2026-10-28T21:53:02Z'
+  - id: note-9d4cb80
+    text: 'QA S24 (dead recorders / failed drives / colliding runs), commit 6ebcce64:
+      two silent false passes in the kept tmux recipe, both the PR own class (a completion
+      check that cannot tell its own work from another run). (1) Two runs on ONE pm
+      session, different capture dirs: pipe-pane is per-pane and a later pipe-pane
+      replaces it (why step 2 omits -o), so the second run takes the first transcript
+      pipe — verified live, the first run transcript delta during its final driving
+      step was 0, the help screen landed only in the second run log, and the first
+      run stop still exited 0. (2) Two runs on ONE capture directory: the second run
+      step 0 removes the first run cast/transcript and its recorder overwrites them,
+      so the first run stop detached the second run recorder and read its status/cast
+      as its own — verified live, the first run stop exited 0 with the directory holding
+      only the second run content. Fix: step 2 claims the capture directory in a tmux
+      session option (@pm_capture_dir) before attaching the pipe and refuses a session
+      recording a different directory, or a directory another live pm session records
+      into; step 5 releases the claim; step 2 also re-derives $TARGET (refusing an
+      empty one) like steps 4/5, because tmux -t "" resolves to whatever session tmux
+      considers current (found while testing: the first cut of the guard printed an
+      empty session name). Residual, recorded not hidden: a raw tmux pipe-pane that
+      bypasses step 2 still takes the pipe over (capture shared-pipe-raw-bypass).
+      Tests: 5 new (claim written; second dir on one session refused; dir claimed
+      by another session refused; finished run releases the claim; empty $TARGET refused),
+      stub tmux extended with show-options/set-option/list-sessions; four fail against
+      the pre-fix recipe. File 135 pass; related suites 208 pass. The other eight
+      stories (killed recorder with the TUI alive, asciinema 137, torn-down pane with
+      no status, legitimate finish + render, failed attach, crashed-TUI send, stale
+      video, two-workers collision) still behave as specified. Captures /pm-captures/scenarios/24/
+      (pre-fix/ and post-fix/ cross-linked). ENV notes for future runs here: the container
+      tmux server is shared and its global prefix is C-\ (not C-b), so run on a private
+      server (TMUX_TMPDIR + unset TMUX + a -f config setting C-b); pm session creates
+      a session GROUP (TARGET and TARGET~1), so ending it needs every member, and
+      `tmux kill-session -t TARGET` alone leaves has-session -t TARGET true; no ffmpeg/ffprobe
+      on PATH (a static aarch64 build was at /tmp/ffmpeg-7.0.2-arm64-static); a stale
+      ~/.pm/sessions/<tag>/override redirected pm which to another PR workdir and
+      had to be moved aside.'
+    created_at: '2026-10-28T22:30:00Z'
+    last_edited: '2026-10-28T22:30:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
