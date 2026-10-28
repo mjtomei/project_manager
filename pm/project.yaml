@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T09:10:14.400374+00:00'
+  updated_at: '2026-10-28T09:23:07.306984+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38858,6 +38858,28 @@ prs:
       RQ47 a, fixed here), so master story 2 ran with TMUX set.'
     created_at: '2026-10-28T09:10:14Z'
     last_edited: '2026-10-28T09:10:14Z'
+  - id: note-b55c5fd
+    text: 'QA S119 (2026-10-28, host, all fake-claude, HEAD bc93ffb6 vs control 91b259bd;
+      captures /pm-captures/scenarios/119, REPORT.md, every pane mp4): CODE CHANGE
+      b402464e needs normal re-review. c9ce4f6a held live in all 7 stories: the TUI
+      REQA hop over a live pm qa run logs "Sign-off REQA for <pr> — QA starts once
+      …", leaves the CLI windows alone, and starts exactly one full QA on the 1 s
+      poll after the CLI exits. That held with the target removed (auto-start ON with
+      Z / OFF), after CLI NEEDS_WORK/INPUT_REQUIRED, under a pm edit lock (one "Review
+      PASS … waiting for project.yaml" line, start 0.1 s after Saved), and for two
+      PRs (each waits for its own CLI; out-of-scope B gets "press i", then one signoff
+      on i). The control killed the live CLI s1 at the hop and ran a second loop.
+      FINDING, fixed: after a Ctrl-C pm qa run (no verdict, snapshot kept), the TUI
+      resume scan adopted the CLI one-instruction run as the PR QA ("Resuming QA for
+      <pr> after restart", "Check: PASS", then sign-off) in 2 of 5 runs, in place
+      of the owed full re-run. b402464e: _resume_incomplete_qa skips cli-<pr> snapshots
+      (test_resume_skips_interrupted_pm_qa_run). Post-fix 8/8 live runs held; deterministic
+      demo pre-fix adopts 2 s after Ctrl-C, post-fix nothing in 60 s. Suite 4474 passed.
+      Story 4: z t kills the live CLI s1 (CLI Result INPUT_REQUIRED). Story 7: after
+      a plain restart (pr-db3bf10), t only focuses the leftover qa-<pr> window and
+      z t recovers, so the RQ56 text "t starts the re-run" is inaccurate.'
+    created_at: '2026-10-28T09:23:07Z'
+    last_edited: '2026-10-28T09:23:07Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
