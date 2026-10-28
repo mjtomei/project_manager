@@ -114,6 +114,55 @@ def test_archive_missing_path_is_noop(env):
     assert cl.archive_transcript(env.run / "nope.jsonl") is None
 
 
+def test_launch_survives_an_already_archived_session(env):
+    """A pre-existing archive entry must not leave the canonical in place.
+
+    The archive entry can already exist as a frozen copy (written by an
+    earlier finalize) while the canonical link still points at the same
+    session.  The launch must still replace the canonical, not raise
+    FileExistsError and strand the workflow.
+    """
+    sid = _sid()
+    native = _native(env.cwd, sid, "SESSION")
+    canon = env.run / "impl-pr-abc.jsonl"
+    _link(canon, native)
+    adir = cl.transcript_archive_dir(canon)
+    adir.mkdir()
+    (adir / f"impl-pr-abc.{sid}.jsonl").write_text("SESSION\n")
+
+    cl.build_claude_shell_cmd(prompt="rework", transcript=str(canon),
+                              cwd=str(env.cwd))
+
+    assert canon.is_symlink()
+    assert cl.session_id_from_transcript(canon) != sid
+    # The pre-existing entry is untouched (immutable).
+    assert (adir / f"impl-pr-abc.{sid}.jsonl").read_text() == "SESSION\n"
+
+
+def test_identical_archive_match_is_scoped_to_the_same_stem(env):
+    """A different step's entry is never mistaken for this transcript's copy.
+
+    Frozen files are keyed by mtime+size, so a naive directory-wide match
+    could drop a transcript that was never archived.
+    """
+    canon = env.run / "impl-pr-abc.jsonl"
+    canon.write_text(_record("IMPL CONTENT") + "\n")
+    adir = cl.transcript_archive_dir(canon)
+    adir.mkdir()
+    other = adir / "signoff-pr-abc.deadbeef.jsonl"
+    other.write_text(_record("IMPL CONTENT") + "\n")
+    st = canon.stat()
+    os.utime(other, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    archived = cl.archive_transcript(canon)
+
+    assert archived is not None
+    assert archived.name.startswith("impl-pr-abc.")
+    assert archived != other
+    assert "IMPL CONTENT" in archived.read_text()
+    assert "IMPL CONTENT" in other.read_text()  # untouched
+
+
 def test_frozen_session_is_not_archived_twice(env):
     """Finalize archives the session; a later replacement does not duplicate
     it under a second name."""

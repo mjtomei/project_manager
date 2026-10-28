@@ -987,6 +987,16 @@ def retire_signoff_run(session: str, pr_entry: dict, tdir: Path) -> None:
         tmux_mod.kill_window(session, win["id"])
     transcript = signoff_transcript(tdir, pr_entry["id"])
     archive_transcript(transcript)
+    # Archiving normally moves the transcript away.  If it could not (the
+    # archive dir is unwritable), the consumed verdict must still not be
+    # replayable, so drop the canonical link — its content lives on in
+    # ~/.claude/projects.  A *regular* file is the only copy of its
+    # content, so it is never removed here.
+    try:
+        if transcript.is_symlink():
+            transcript.unlink()
+    except OSError:
+        pass
     stamp = signoff_launch_stamp(transcript)
     try:
         if stamp.is_symlink() or stamp.exists():

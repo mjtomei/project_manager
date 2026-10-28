@@ -947,7 +947,13 @@ def build_claude_shell_cmd(
                 # Archiving failed (e.g. the archive dir is unwritable).
                 # Prefer launching over stalling the workflow; the native
                 # JSONL still exists under ~/.claude/projects.
-                transcript_path.unlink(missing_ok=True)
+                _log.warning("transcript: could not archive %s before "
+                             "reuse", transcript_path)
+            # Archiving normally moves the path away; clear any leftover
+            # (an entry that already existed, or a failed removal) so the
+            # symlink below cannot raise FileExistsError and kill the
+            # launch.
+            transcript_path.unlink(missing_ok=True)
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
@@ -1157,10 +1163,15 @@ def _find_identical_archive(adir: Path, p: Path) -> Path | None:
     the canonical path with the same metadata (``copy2``).  When that
     frozen canonical is later replaced, this keeps the replacement from
     adding a second archive entry for the same session.
+
+    Only entries for the same stem are considered: a different step's
+    transcript must never be mistaken for a copy of this one (the caller
+    drops *p* when a match is found).
     """
+    stem = p.name[:-len(".jsonl")] if p.name.endswith(".jsonl") else p.name
     try:
         st = p.stat()
-        entries = list(adir.glob("*.jsonl"))
+        entries = list(adir.glob(f"{stem}.*.jsonl"))
     except OSError:
         return None
     for cand in entries:
@@ -1190,8 +1201,17 @@ def _move_into_archive(p: Path, dest: Path, raw: str | None) -> bool:
             except FileExistsError:
                 raise
             except OSError:
-                # Filesystem without hard links; copy instead.
-                shutil.copy2(p, dest)
+                # Filesystem without hard links; copy instead.  A partial
+                # copy must not stay behind: archive entries are immutable,
+                # so a truncated one would block every later attempt.
+                try:
+                    shutil.copy2(p, dest)
+                except OSError:
+                    try:
+                        dest.unlink()
+                    except OSError:
+                        pass
+                    raise
     except FileExistsError:
         return False
     except OSError as e:
@@ -1293,8 +1313,11 @@ def _freeze_archive_copy(p: Path, raw: str, target: Path,
         elif dest.exists():
             return dest
         # Write beside the entry and replace atomically, so a crash can
-        # never leave the archive without a copy of a session.
-        tmp = adir / f".{dest.name}.tmp-{os.getpid()}"
+        # never leave the archive without a copy of a session.  The name
+        # is unique per call: two threads of one process can finalize
+        # concurrently (a bulk sweep and a loop's completion), and a
+        # shared temp path would let one replace the other's partial copy.
+        tmp = adir / f".{dest.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         try:
             shutil.copy2(target, tmp)
             os.replace(tmp, dest)
