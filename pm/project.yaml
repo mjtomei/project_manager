@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T00:54:40.715032+00:00'
+  updated_at: '2026-10-28T01:57:56.817593+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -14695,6 +14695,20 @@ prs:
       HEAD. Evidence /pm-captures/scenarios/54/manifest.md'
     created_at: '2026-10-27T23:45:24Z'
     last_edited: '2026-10-27T23:45:24Z'
+  - id: note-85562b7
+    text: 'S59 refine (07b77965): reuse S51 drivers (/pm-captures/scenarios/51/drivers;
+      replace hard-coded /scratch/s51). Code facts: QA scenario panes have no EXIT-trap
+      release (cleanup=False), so a closed INPUT_REQUIRED window is reclaimed only
+      by `pm container reap --pr C`, qa-run-start reconcile or the 10-min TUI periodic
+      reconcile, not within seconds. fake qa_scenario scripted list is per-session-tag
+      launch cursor (~/.pm/sessions/<tag>/fake-claude.state; delete before a run).
+      Prediction for story 3: releases need `ps --filter` inventory, and an unreadable
+      inventory returns (batch 1, held 0), so an outage that starts at a full runtime
+      and spans two sequential floor launches leaves each finished worker running
+      and can reach L+2. That would fail qa.md resolution 19 (a larger excess than
+      L+1 fails).'
+    created_at: '2026-10-28T01:57:56Z'
+    last_edited: '2026-10-28T01:57:56Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
