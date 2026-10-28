@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T16:00:03.709096+00:00'
+  updated_at: '2026-10-28T16:08:27.593593+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16950,6 +16950,36 @@ prs:
       the board evidence in the cast, not transcript.log.'
     created_at: '2026-10-28T16:00:03Z'
     last_edited: '2026-10-28T16:00:03Z'
+  - id: note-3f1dae6
+    text: 'QA scenario 19 PASS 2026-10-28 (4/4 stories, build 9a0f7a3e). (1) Dead
+      TUI pane: kill -9 of the pane process left has-session OK, registry still @0/%0
+      role="tui", pidfile still naming the dead pid; `pm tui view` and `pm tui send
+      g` both exit 1 with "No TUI pane found. Is there a pm tmux session running?"
+      on stderr (stdout empty), no header/frame, and no Traceback/CalledProcessError/can''t-find-pane
+      in ~/.pm/debug/<tag>.log. (2) `pm tui restart` and `pm tui restart --breadcrumb`
+      with no live pane both exit 1 with that message, never print "Sent restart to
+      TUI pane ...", and ~/.pm/merge-restart is absent before/after (registry + pidfile
+      byte-unchanged) — the af91 i2 marker fix holds. (3) Explicit-session discovery:
+      a hand-started TUI in a NON-active window (`tmux new-window -d ... "pm _tui"`
+      -> %6) was found by the FIRST `pm tui view -s $S` before it mounted ([Session:
+      $S, Pane: %6], RC=0); settled view printed the 3-PR frame; `pm tui send "?"
+      -s $S` -> "Sent keys ''?'' to TUI pane %6" + Keyboard Shortcuts, Escape closed
+      it; exactly one live _tui pane and pidfile pid == its pane_pid. (4) No cross-session
+      fall-through: in B (TUI dead) `pm autostart list` exits 2 "Error (owner_unavailable):
+      TUI for session pm-testB-... is not running (stale pidfile)", `pm tui view`
+      exits 1 no-pane; explicit -s variants identical; A''s own `pm autostart list`
+      exits 0 "Auto-start: off"/"No auto-start targets."; B pidfile sha256+mtime unchanged.
+      Tests: tests/test_cli_helpers.py -k "FindLiveTuiPane or TriggerTuiRestart" 11
+      passed; test_cli_helpers.py+test_tui_pidfile.py 180 passed. Captures /pm-captures/scenarios/19/story{1..4}-*.
+      Run mechanics for the next run: use `tmux list-panes -s -t $S` (plain -t lists
+      only the active window); one recorder can attach to only one session, so story
+      4 A-side evidence is transcript-driverA.log; `capture-pane` on a never-active
+      -d window needs select-window first; and in this container `pm session` aborts
+      with "Refusing to install pm''s Claude Code hooks" until ~/.claude/settings.json
+      hook commands are rewritten from /home/matt to $HOME (PM_HOST_HOME unset). No
+      production defect found; no code changed.'
+    created_at: '2026-10-28T16:08:27Z'
+    last_edited: '2026-10-28T16:08:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
