@@ -11891,7 +11891,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T14:04:45.247690+00:00'
+  updated_at: '2026-10-28T14:05:49.656201+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15574,6 +15574,48 @@ prs:
       fails while live /tmp/pm-push-proxy-* dirs exist.'
     created_at: '2026-10-28T14:04:45Z'
     last_edited: '2026-10-28T14:04:45Z'
+  - id: note-b90e171
+    text: 'Refine S88 (bfa7fc55, code-traced): (1) closing a window runs the pane
+      EXIT trap, which removes the container on a70331c1 (release_on_exit) and on
+      master 89e3c501 (trap podman rm -f). A pre-merge container only survives for
+      the reuse refusal or the reaper if its pane process group is SIGKILLed. (2)
+      pm container reap --dry-run returns before the proxy sweep, so it never lists
+      proxy dirs; only the real reap prints stopped  push proxy. (3) A malformed owner.json
+      is skipped silently by list_shared_proxies, with no line printed. (4) The proxy
+      rejects local-path origins, so use file:// origins (and file:// clone of the
+      fake-github remote.git). (5) Master containers lack /tmp/.pm-setup-complete,
+      so HEAD treats their reuse as incomplete. Reap them, do not reuse them.'
+    created_at: '2026-10-28T13:15:43Z'
+    last_edited: '2026-10-28T13:15:43Z'
+  - id: note-40ef2b5
+    text: 'QA S88 (6672efdc; fix 93220139; real rootless Podman 3.4.4, unmodified
+      build-base, fake agents/fake GitHub; evidence /pm-captures/scenarios/88/manifest.md):
+      NEEDS_WORK, fixed 93220139. pm container reap printed a swept proxy as its failure
+      key (stopped  push proxy <tag>/<pr>[/token]) instead of its directory, so the
+      upgrade reap of the a70331c1 tokenless dir did not name the dir (spec qa.md
+      29/430). New push_proxy.proxy_key_dir() maps keys to dirs; regression tests
+      in test_proxy_cleanup_outcomes.py. Everything else held: a70331c1 reuse refusal
+      + printed rm -f + recreate (unpushed commit/edit kept, proxied push); master-era
+      review container reap (dry-run no change; B dir/lock/daemon gone; malformed
+      C owner.json/socket/daemon untouched, C pushes); startup GitHub sync merged
+      D/E, one Merge integrity note held ~6 s, D impl+QA containers and both proxy
+      dirs removed in reconcile[startup], E retained + F IR worker untouched and proxied,
+      latency 69-110 ms, D hashes intact.'
+    created_at: '2026-10-28T14:05:48Z'
+    last_edited: '2026-10-28T14:05:48Z'
+  - id: note-2f7af99
+    text: 'S88 OPEN QUESTION (Then wording): the story-3 Then says D removal reason
+      shows in pm container status "Last cleanup". That slot is last-pass only; E
+      retained impl pane-exit release waits for the reaper lock and runs ~6 s after
+      the startup pass (pane-exit: removed 0, kept 1), so with E window open as the
+      Given requires, Last cleanup never ends on the D removal. Reason is in reconcile[startup]
+      in ~/.pm/debug/<tag>.log; the TUI "Container cleanup: removed 2..." line is
+      hidden by the sticky integrity hold and never shown. Also: fake-claude IR (line
+      verdict) shows no question body. Next rerun: reword the Then or decide whether
+      no-op passes should keep the previous Last cleanup / show the hidden cleanup
+      line after the hold.'
+    created_at: '2026-10-28T14:05:49Z'
+    last_edited: '2026-10-28T14:05:49Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
