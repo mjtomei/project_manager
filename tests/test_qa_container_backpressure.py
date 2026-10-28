@@ -800,6 +800,20 @@ def test_unreadable_inventory_counts_every_reservation(monkeypatch):
     assert qa_loop._inflight_unlisted() == 0
 
 
+def test_reservation_listed_but_not_running_still_counts(monkeypatch):
+    """A reserved name the inventory lists as created (``run`` in progress)
+    or as a stale exited allocation is not in the running count yet, so it
+    must still count as in flight."""
+    listed = [_info("created", running=False), _info("up")]
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: list(listed))
+    token = qa_loop._reserve_launches(["created", "up", "absent"])
+    try:
+        assert qa_loop._inflight_unlisted() == 2
+        assert qa_loop._inflight_unlisted(listed) == 2
+    finally:
+        qa_loop._release_launches(token)
+
+
 def test_queued_launch_reserves_its_name_only_while_creating(tmp_path, monkeypatch):
     """The poll reserves the dequeued scenario's container name before the
     launch starts and releases it once the launch returns (also on failure)."""

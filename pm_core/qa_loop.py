@@ -4875,10 +4875,13 @@ def _release_launches(token: object | None) -> None:
 
 
 def _inflight_unlisted(inventory=None) -> int:
-    """Reserved launches the runtime inventory does not list yet.
+    """Reserved launches the runtime inventory does not list as running yet.
 
     Reads the inventory only while a reservation exists; an unreadable one
-    counts every reservation.
+    counts every reservation.  The inventory lists every state, but only a
+    running container is in the running count: a reserved name listed as
+    created (``run`` in progress) or as a stale exited allocation about to
+    be recreated is still capacity in flight.
     """
     with _launch_admission_lock:
         reserved = set().union(*_inflight_launches.values())
@@ -4889,7 +4892,7 @@ def _inflight_unlisted(inventory=None) -> int:
         inventory = list_containers()
         if inventory is None:
             return len(reserved)
-    return len(reserved - {info.name for info in inventory})
+    return len(reserved - {info.name for info in inventory if info.running})
 
 
 def _clamp_to_container_headroom(cap: int) -> int:
