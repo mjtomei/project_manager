@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T07:21:37.625878+00:00'
+  updated_at: '2026-10-28T08:39:03.483338+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37420,6 +37420,23 @@ prs:
       Full suite 4046 passed, 1 skipped.'
     created_at: '2026-10-28T07:21:37Z'
     last_edited: '2026-10-28T07:21:37Z'
+  - id: note-57e66c8
+    text: 'Scenario 33 concretization (2026-10-28): refined. QA corrections: (1) the
+      timestamp-suffix note must be HAND-WRITTEN with no created_at; a note added
+      via pm pr note add always gets created_at, and the template strips only the
+      final # <ts> suffix, so a pm-added suffixed note round-trips fine and is NOT
+      unrepresentable. (2) Dropped the 4th story integration bullet: pm pr signoff
+      integrate fetches the target repo through the sandbox git wrapper, which forwards
+      the fetch to the host, so a container-local test project path is not visible
+      and the check fails with "does not appear to be a git repository". The record-id
+      resolver property is covered by tests/test_pr_notes.py and tests/test_signoff_resolution.py.
+      (3) The TUI edit action runs pm pr edit <id> in a split pane whose cwd is the
+      tmux server start dir: start pm session from TEST_DIR and set EDITOR via tmux
+      setenv -t <session> EDITOR <script>. (4) Editing a note text in the template
+      intentionally yields a new note id and fresh created_at; untouched notes keep
+      id/text/created_at.'
+    created_at: '2026-10-28T08:39:03Z'
+    last_edited: '2026-10-28T08:39:03Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
