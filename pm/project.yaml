@@ -15311,6 +15311,22 @@ prs:
       with its push still working.'
     created_at: '2026-10-28T00:20:51Z'
     last_edited: '2026-10-28T00:20:51Z'
+  - id: note-430b16a
+    text: 'Concretizer (scenario 6), 2026-10-27: container names embed the session
+      tag verbatim and podman rejects [ ] * ? in names ("names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*").
+      So a glob-bearing project dir can never launch a container-mode session: pm
+      pr start starts the shared push proxy, then podman run --name pm-<tag>-impl-<pr>
+      fails with the generic "Is podman running?" ContainerError, leaving the hashed
+      proxy dir + long-name discovery link + lock in /tmp. Scenario 6 story 3 is driven
+      from exactly that state: pm session kill must sweep all three via the glob-escaped
+      tag discovery-link glob while a sibling session proxy stays live (verified end-to-end
+      at HEAD). Container names are not sanitized here; if that is wanted it is a
+      separate fix. Sandbox notes: run pm container build-base from the throwaway
+      project dir after nested_podman:true (~3 min under nested podman); the sandbox
+      ~/.local/bin/git wrapper must not precede /usr/bin in PATH for host-side pm
+      commands, since it forwards push/fetch/pull/ls-remote to the host workdir.'
+    created_at: '2026-10-27T23:32:42Z'
+    last_edited: '2026-10-27T23:32:42Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -36476,6 +36492,42 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T20:41:33.365173+00:00'
   updated_at: '2026-10-27T20:41:33.365173+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-40c855a
+  plan: bugs
+  title: 'Bug: container-mode launch fails for project dirs with characters podman
+    rejects in names (e.g. [ ])'
+  branch: pm/pr-40c855a-bug-container-mode-launch-fails-for-project-dirs-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py create_container() builds the container
+    name as pm-<session_tag>-impl-<pr_id>; the session tag embeds the repo directory
+    name verbatim (pm_core/paths.py get_session_tag: {dir_name}-{md5[:8]}).
+
+
+    Repro: project dir s6c-[xyz]-long-project-name-forcing-a-hashed-socket-dir with
+    nested_podman: true, container mode enabled and a pm session running. `pm pr start
+    <pr> --background` starts the shared push proxy, then podman create fails: "names
+    must match [a-zA-Z0-9][a-zA-Z0-9_.-]*: invalid argument" (any of [ ] * ? in the
+    dir name). pm surfaces the generic ContainerError "Failed to create container
+    pm-<tag>-impl-<pr>. Is podman running? Disable container mode with ''pm container
+    disable'' to run without containers.", so the real cause is invisible, and the
+    push proxy it started first is left in /tmp until `pm session kill`.
+
+
+    Expected: either sanitize/encode the container name (keeping it unique and mapped
+    back for cleanup/adoption) or fail with an explicit "invalid container name" error
+    before starting the proxy. Scenario 6 story 3 of the pr-748e708 QA run exercises
+    the leftover-proxy cleanup; the naming limitation itself is out of that PR''s
+    scope.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:57:02.733584+00:00'
+  updated_at: '2026-10-27T23:57:02.733584+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
