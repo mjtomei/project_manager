@@ -2888,6 +2888,7 @@ def _poll_tmux_verdicts(
                               _launch_queue[0].index, reason)
                 _mem_wait_reason = reason
                 return False
+        last_mem_reason = _mem_wait_reason
         _mem_wait_reason = ""
         scenario = _launch_queue.pop(0)
         _queued_indices.discard(scenario.index)
@@ -2903,6 +2904,16 @@ def _poll_tmux_verdicts(
         status_extra = {"queued_scenarios": set(_queued_indices),
                         "verifying_scenarios": _verifying_now,
                         "verification_failures": dict(verification_failures)}
+        # Scenarios that were waiting for memory still are while this one
+        # launches (nothing has freed memory for them), unless this launch
+        # fills the last concurrency slot: then they wait on the cap and
+        # read queued (QA S83).
+        if last_mem_reason and _launch_queue and (
+                concurrency_cap <= 0 or active + 1 < concurrency_cap):
+            waiting = {sc.index for sc in _launch_queue}
+            status_extra["memory_waiting_scenarios"] = waiting
+            status_extra["verdict_reasons"] = {
+                i: f"waiting for memory: {last_mem_reason}" for i in waiting}
         try:
             if use_containers:
                 # The launch blocks on the refiner: keep the scenarios

@@ -922,7 +922,7 @@ def note_pre_existing_panes(app) -> None:
     from pm_core import tmux as tmux_mod
     try:
         result = tmux_mod._run(tmux_mod._tmux_cmd(
-            "list-panes", "-a", "-F", "#{pane_id}"), text=True)
+            "list-panes", "-a", "-F", "#{pane_id}"), text=True, timeout=5)
         nums = [int(p[1:]) for p in result.stdout.split()
                 if p[1:].isdigit()]
     except Exception:

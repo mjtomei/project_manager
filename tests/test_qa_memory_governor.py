@@ -352,6 +352,26 @@ class TestQueuedAdmission:
         assert [s.index for s in scenarios] == [2, 3, 4]
         assert extra["queued_scenarios"] == {3, 4}
 
+    @pytest.mark.parametrize("cap,waiting", [(0, {3, 4}), (3, {3, 4}),
+                                             (1, None)])
+    def test_admitted_head_launch_keeps_memory_waiting_rows(
+            self, tmp_path, cap, waiting):
+        """Regression (QA S83): while a head admitted after a refusal
+        launched, the scenarios behind it read "queued" although they were
+        still waiting for memory.  They keep waiting_memory and the last
+        reason, unless the launch takes the last concurrency slot (then
+        they wait on the cap: queued)."""
+        queued = [_scenario(i, launched=False) for i in (2, 3, 4)]
+        state = _state(list(queued))
+        with _governor():
+            _drive(tmp_path, state, queued=queued, cap=cap, max_sleeps=2,
+                   mem_wait_reason="earlier refusal", mem_attempt_at=0.0)
+        _, extra = _drive.launch_status[0]
+        assert extra.get("memory_waiting_scenarios") == waiting
+        if waiting:
+            assert extra["verdict_reasons"] == {
+                i: "waiting for memory: earlier refusal" for i in waiting}
+
     def test_run_qa_sync_initial_launch_keeps_queued_on_status(self):
         """The initial batch launch writes the whole run, with the queued
         and memory-waiting scenarios (run_qa_sync wiring)."""

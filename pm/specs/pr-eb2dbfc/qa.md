@@ -131,7 +131,7 @@ Code: `pm_core/memory_governor.py:compute_memory_status()`, `format_memory_statu
 Removal (`rm -f`) after capturing stats; the bind-mounted workdir keeps project state.  Unchanged from the April implementation.
 
 ### A2: `waiting_memory` vs `queued`
-`waiting_memory` only when the governor refused the head of the queue; scenarios waiting for a concurrency slot show `queued`.
+`waiting_memory` only when the governor refused the head of the queue; scenarios waiting for a concurrency slot show `queued`.  While an admitted head launches (clone + create + refiner, ~16 s), the scenarios behind it keep `waiting_memory` and the last refusal reason, unless that launch takes the last concurrency slot, in which case they read `queued` (QA S83, review fa1b i1).
 
 ### A3: Retry timing
 At most every 15 s while waiting (each attempt measures runtime stats); immediately after a scenario finishes if no attempt is pending.

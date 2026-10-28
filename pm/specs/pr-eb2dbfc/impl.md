@@ -185,7 +185,16 @@ Each still-idle session is then re-checked once.  A stop the restart
 cut off is redone, and an attached shell is reported again.  Panes
 newer than the TUI instance are never adopted: its own review-loop
 iterations are stopped by the loop, and shell-started sessions stay
-untracked (QA S86).
+untracked (QA S86).  An older pane is adopted whoever launched it: a
+shell-started session that predates the restart is indistinguishable
+from a TUI-launched one (both name their session in the start command),
+so after a restart it is idle-tracked and stop-on-idle may remove it
+(review fa1b i1, accepted).  A review-loop iteration cut off by the
+restart is likewise tracked as a standalone review (loops are not
+resumed).
+QA scenarios: while an admitted queued head launches, the scenarios
+behind it keep `waiting_memory` and the last refusal reason unless the
+launch takes the last concurrency slot (QA S83, review fa1b i1).
 
 Two timing and sampling questions came up in QA S38 (review 3f45 i3).
 - **Which removals record a sample.**  Every removal of a *running* pm
