@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T16:52:52.559398+00:00'
+  updated_at: '2026-10-28T17:43:40.902350+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32841,6 +32841,43 @@ prs:
       dropped. (2026-10-28)'
     created_at: '2026-10-28T16:52:52Z'
     last_edited: '2026-10-28T16:52:52Z'
+  - id: note-9c36e83
+    text: 'Review loop e7e1 i5: two leftovers in the kept recipe scope, both the PR
+      own class (a job whose completion cannot be told from a death, and stale evidence
+      the flow never clears), reproduced live in this container with real Playwright
+      (chromium-1223, node 22.22.2). (1) The web-UI driver exit status was unchecked:
+      step 2 ended on `node driver.mjs` and the finalize step (pasted separately)
+      transcoded whatever webm was on disk, so a failed driver surfaced one block
+      later as "ffmpeg failed on the driver webm" — a misdiagnosis that sends the
+      worker to the encoder — and a retry that failed after an earlier attempt had
+      left a webm was finalized from that earlier attempt (verified: a driver that
+      fails through its own .catch leaves an empty capture dir, and ffmpeg then says
+      "No such file or directory"). The block now stops with "the driver failed —
+      this run video, trace and screenshots are incomplete; do not finalize this attempt".
+      (2) Playwright auto-named video was never cleared: the driver renames its video
+      onto recording.webm, so step 1 removed only that name; a driver that dies before
+      the rename can leave `page@<hash>.webm`, and the one run that left it (3,341
+      bytes, ffprobe duration=0.04) was a valid, playable partial recording (whether
+      the browser finalizes it is timing-dependent; I could not reproduce it on demand,
+      so the fix is defensive). Step 1 now clears "${CAPDIR:?}"/*.webm and step 2
+      clears this attempt own *.webm/trace.zip/dom.html/*.png before the driver, because
+      that block is pasted on its own when a driver is adapted and retried. The deterministic
+      half is the cleanup gap: seeding that file, HEAD step-1 rm leaves it and the
+      *.webm glob removes it. Tests: +1 execution case (a driver that resolves Playwright
+      then throws must fail with its own message and leave none of the earlier attempt
+      four files) and a tightened cleanup assertion; both fail against the pre-fix
+      recipe (checked by restoring HEAD recipe in place). File 108 pass; related suites
+      (test_qa_artifact_web_ui_recording, test_qa_instructions, test_qa_loop, test_markdown_render)
+      pass. Full suite 3963 passed, 1 skipped, 92 deselected (test_merge_publish/test_signoff_integration
+      — push proxy rejects pushes to master). Evidence /pm-captures/review-e7e1-i5/
+      (pre/post recipe copies, probe logs, the observed auto-named webm). Considered
+      and rejected: a hard check on an empty sse.log — sse.log is documented as conditional
+      (HTTP-only captures run the same block) and an empty log is honest evidence,
+      so the check would misfire; noted here so the next iteration does not re-add
+      it. impl.md R18 + Files/verification/evidence and qa.md edge cases updated.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-28T17:43:40Z'
+    last_edited: '2026-10-28T17:43:40Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
