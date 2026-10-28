@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T05:48:51.853094+00:00'
+  updated_at: '2026-10-28T05:54:51.071236+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11592,6 +11592,21 @@ prs:
       reserve 0g shows (reserve 1M). Captures /pm-captures/scenarios/91.'
     created_at: '2026-10-28T05:48:51Z'
     last_edited: '2026-10-28T05:48:51Z'
+  - id: note-cf7a8d0
+    text: 'QA S100 (2026-10-28, b64c5951, nested rootless podman 3.4.4, pm-dev aarch64):
+      all stories PASS live, no code change; Docker SKIPPED (no docker binary). Scope:
+      podman 4.81-4.89GB SI per container (outer cgroup) -> pm "9G" = 2x~4591 MiB,
+      other-hog excluded; system 65.8/65.2G vs meminfo 65.5/65.2G. Peaks = ceil(outer
+      memory.peak/2^20): cleanup --pr 5863, 4 parallel pr cleanup --resources exactly
+      4x5907 (json.tool ok, no Skipping), session kill impl+signoff 6174 with Recording
+      stats 05:49:15 before remove_container 05:49:16. History 4->3 kept newest +
+      2 newest. oddname ctr: Removing/Removed 1, rc 0, stats sha256 identical, no
+      Recording line. Snapshots 2559/2559/2562 -> 3.8G: 9g refused / 10g admitted;
+      default 1500m 7g/8g; off + memory-limit 6g 12g/13g; refusals rc=1, no ctr/window;
+      controls torn down unsampled. Filed pr-e8025cf (remove_container logs ERROR
+      on the expected inspect "no such object"). Captures /pm-captures/scenarios/100.'
+    created_at: '2026-10-28T05:54:50Z'
+    last_edited: '2026-10-28T05:54:50Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
@@ -37184,6 +37199,32 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-27T22:10:32.796891+00:00'
   updated_at: '2026-10-27T22:10:32.796891+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e8025cf
+  plan: bugs
+  title: remove_container logs ERROR "podman inspect ... no such object" on every
+    successful removal
+  branch: pm/pr-e8025cf-remove-container-logs-error-podman-inspect-no-such
+  status: pending
+  depends_on: []
+  description: 'pm_core/container.py remove_container waits for the container to be
+    gone by polling `_run_runtime("inspect", target, check=False)`; _run_runtime logs
+    at ERROR for any non-zero rc, so the expected "no such object" that ends the loop
+    (and the follow-up inspect -f {{.Id}} for the push-proxy check) writes "ERROR
+    [container] container runtime failed (rc=125): podman inspect <name> / stderr:
+    Error: error inspecting object: no such object" to pm log after every pm session
+    kill / cleanup. Repro: pm container cleanup --pr <id> on a running pm container,
+    then pm log grep "runtime failed". Seen in QA S100 of pr-eb2dbfc (pre-existing
+    since 01c3da79). Fix: let check=False callers that expect failure suppress the
+    ERROR (e.g. quiet=True -> DEBUG).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T05:54:33.736992+00:00'
+  updated_at: '2026-10-28T05:54:33.736992+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
