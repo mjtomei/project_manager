@@ -1413,6 +1413,41 @@ def test_compact_resolution_bounds_records_and_is_idempotent():
         integration._resolution_digest(compact)
 
 
+def test_a_truncated_path_list_records_its_total_and_apply_refuses_it(w):
+    """``compact`` bounds ``paths``; an apply from the stored record refuses.
+
+    A resolution has one path entry per conflicted file, so more than
+    ``_YAML_LIST_LIMIT`` is unusual — but the stored list is what a sign-off
+    bounce applies from, and reconciling only the paths it can see would abort
+    mid-merge ("unexpected conflict in …") on the first missing one.  The
+    record says how many it describes, and the apply refuses up front.
+    """
+    limit = integration._YAML_LIST_LIMIT
+    paths = [{"path": f"d{i}/project.yaml", "resolver": "r", "blob": "b" * 40}
+             for i in range(limit + 1)]
+    record = {"status": integration.RESOLVED, "head": "a" * 40,
+              "base_sha": "b" * 40, "candidate_tree": "c" * 40,
+              "resolution": {"paths": paths, "unresolved": []}}
+    compact = integration.compact(record)
+    assert len(compact["resolution"]["paths"]) == limit
+    assert compact["resolution"]["paths_total"] == limit + 1
+    # Re-compacting keeps the total, so the digest stays stable.
+    assert integration.compact(compact)["resolution"]["paths_total"] == limit + 1
+    assert integration._resolution_digest(
+        integration.compact(compact)["resolution"]) == \
+        integration._resolution_digest(compact["resolution"])
+    # The apply refuses the partial resolution instead of aborting mid-merge.
+    merged, err = integration._apply_resolution(
+        compact, str(w.wd), git(w.wd, "rev-parse", "HEAD"),
+        git(w.repo, "rev-parse", "master"), "Integrate master")
+    assert merged is None
+    assert "covers only" in err, err
+    # A complete record is unaffected (the launch path applies it).
+    full = dict(record, resolution={"paths": paths[:2], "unresolved": []})
+    assert integration._compact_resolution(full["resolution"]).get(
+        "paths_total") is None
+
+
 def test_resolution_id_lists_name_what_they_omit():
     """A truncated id list records its real total and the prompt says so.
 
@@ -2710,6 +2745,28 @@ def test_valid_for_reads_a_malformed_record_as_absent():
     assert integration.valid_for(None, "a" * 40) is False
 
 
+def test_valid_for_rejects_a_non_string_revision():
+    """A truthy non-string revision is not a candidate (hand-edited state).
+
+    ``valid_for`` gates the router's ``SIGNOFF_MERGE`` coercion, so a record
+    whose ``base_sha``/``candidate_tree`` is a mapping must not read as a
+    conflict-free check: the driver would otherwise record an approval the
+    merge gate refuses for a missing binding, instead of coercing to
+    ``SIGNOFF_BLOCKED`` with the reason.
+    """
+    head, base, tree = "a" * 40, "b" * 40, "c" * 40
+    ok = {"status": integration.CLEAN, "head": head, "base_sha": base,
+          "candidate_tree": tree}
+    assert integration.valid_for(ok, head)
+    assert not integration.valid_for(dict(ok, base_sha={"sha": base}), head)
+    assert not integration.valid_for(dict(ok, candidate_tree=[tree]), head)
+    assert not integration.valid_for(dict(ok, base_sha=5), head)
+    # The router coerces on the same reading.
+    verdict, reason = signoff.effective_verdict(
+        signoff.SIGNOFF_MERGE, dict(ok, base_sha={"sha": base}), head)
+    assert verdict == signoff.SIGNOFF_BLOCKED and reason
+
+
 def test_a_malformed_dependency_list_does_not_fail_the_behaviour_summary(
         monkeypatch):
     """A hand-edited ``depends_on``/``prs`` is not a summary failure.
@@ -3820,6 +3877,29 @@ def test_the_pm_ui_cursor_is_bookkeeping_but_project_fields_are_not():
     assert any("active_pr" in c for c in details["conflicts"]), details
 
 
+def test_a_malformed_ui_cursor_is_a_conflict_not_a_side_selection():
+    """A cursor that is not a string is malformed state, not a selection.
+
+    Taking it would write the malformed value into the merged document, and
+    the preservation check exempts this path — so a value that is not a
+    cursor keeps the normal conflict rule (like the bookkeeping timestamps),
+    on either side.
+    """
+    base = ("project:\n  name: p\n  active_pr: pr-1\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    ours = ("project:\n  name: p\n  active_pr: {bad: 1}\n"
+            "prs:\n- id: pr-1\n  status: pending\n")
+    theirs = ("project:\n  name: p\n  active_pr: pr-2\n"
+              "prs:\n- id: pr-1\n  status: pending\n")
+    merged, details = integration.resolve_project_yaml(base, ours, theirs)
+    assert merged is None
+    assert any("active_pr" in c for c in details["conflicts"]), details
+    # The malformed value on the *new base* side is refused the same way.
+    merged, details = integration.resolve_project_yaml(base, theirs, ours)
+    assert merged is None
+    assert any("active_pr" in c for c in details["conflicts"]), details
+
+
 def test_the_ui_cursor_does_not_block_the_real_metadata_resolution(w):
     """The real #250 trigger carries pm's cursor on both sides.
 
@@ -4128,6 +4208,36 @@ def test_apply_refuses_when_head_moved_under_the_resolution(w):
         record, str(w.wd), "0" * 40, base, "Integrate master")
     assert merged is None and "HEAD moved" in err
     assert git(w.wd, "rev-parse", "HEAD") == head
+
+
+def test_a_clean_apply_rechecks_head_immediately_before_merging(w, monkeypatch):
+    """The clean path re-verifies HEAD before the merge, like the resolved one.
+
+    A commit landing between ``_apply_locked``'s HEAD check and ``git merge``
+    would be integrated instead of the revision the candidate describes.  The
+    tree comparison would refuse it afterwards, but naming the race is honest
+    (and the resolved path already does it).
+    """
+    head = git(w.wd, "rev-parse", "HEAD")
+    base = git(w.repo, "rev-parse", "master")
+    real_git = integration._git
+    seen = {"head_reads": 0}
+
+    def spy(*args, cwd=None):
+        if args == ("rev-parse", "HEAD") and str(cwd) == str(w.wd):
+            seen["head_reads"] += 1
+            if seen["head_reads"] == 2:
+                # Another actor commits between the check and the merge.
+                commit(w.wd, "race.txt", "race\n", "concurrent commit")
+        return real_git(*args, cwd=cwd)
+
+    monkeypatch.setattr(integration, "_git", spy)
+    pr = {"id": PR, "branch": BRANCH, "workdir": str(w.wd)}
+    record = {"status": integration.CLEAN, "head": head, "base_sha": base,
+              "base_branch": "master", "candidate_tree": "0" * 40}
+    merged, err = integration._apply_locked(pr, record, str(w.wd))
+    assert merged is None and err == integration.HEAD_MOVED_APPLYING
+    assert seen["head_reads"] == 2
 
 
 def test_apply_refuses_a_record_without_a_base_revision(w):

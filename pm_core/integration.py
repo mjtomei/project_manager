@@ -474,8 +474,14 @@ def _merge_value(base, ours, theirs, path: str, actions: dict):
         return None, [f"{path or '<root>'}: changed differently on both sides"]
     if path in _UI_STATE_PATHS:
         # Both sides moved pm's own UI cursor (see ``_UI_STATE_PATHS``): the
-        # new base's value is the shared state.
-        return theirs, []
+        # new base's value is the shared state.  A value that is not a string
+        # is not a cursor (hand-edited state), so it keeps the normal conflict
+        # rule like the bookkeeping timestamps above — taking it would write a
+        # malformed selection into the merged document and the preservation
+        # check exempts this path.
+        if isinstance(ours, str) and isinstance(theirs, str):
+            return theirs, []
+        return None, [f"{path or '<root>'}: changed differently on both sides"]
     if isinstance(ours, dict) and isinstance(theirs, dict):
         if base is _MISSING:
             return None, [f"{path or '<root>'}: added on both sides with "
@@ -1525,7 +1531,21 @@ def _compact_resolution(resolution: dict) -> dict:
         if records_total is not None:
             item["records_total"] = records_total
         paths.append(item)
+    raw_paths_total = resolution.get("paths_total")
+    paths_total = (raw_paths_total
+                   if isinstance(raw_paths_total, int)
+                   and not isinstance(raw_paths_total, bool)
+                   else 0)
     out["paths"] = paths[:_YAML_LIST_LIMIT]
+    if max(paths_total, len(paths)) > len(out["paths"]):
+        # ``paths`` is the one list ``compact`` truncates without recording a
+        # remainder (a resolution covers one entry per conflicted file, so in
+        # practice a single ``pm/project.yaml``).  Say how many the record
+        # describes: an apply that reads the *stored* record (a bounce) then
+        # refuses a partial resolution instead of aborting mid-merge on the
+        # first path it cannot find.  Carried through re-compaction so the
+        # digest stays stable.
+        out["paths_total"] = max(paths_total, len(paths))
     raw_unresolved = resolution.get("unresolved")
     unresolved = resolution_entries(resolution, "unresolved")
     unresolved_total = resolution.get("unresolved_total")
@@ -2239,11 +2259,21 @@ def binding(record: dict | None) -> dict | None:
 
 
 def valid_for(record: dict | None, head: str | None) -> bool:
-    """Whether *record* is a mergeable integration check of *head*."""
+    """Whether *record* is a mergeable integration check of *head*.
+
+    ``project.yaml`` is hand-editable state: a ``base_sha``/``candidate_tree``
+    that is not a revision string cannot name what the check merged or
+    produced, so it reads as absent — the same rule the merge gate and every
+    reader apply.  A truthy non-string value (a mapping) used to pass here, so
+    the driver recorded a ``SIGNOFF_MERGE`` the gate then refused for a
+    missing binding instead of the router coercing it to ``SIGNOFF_BLOCKED``
+    with the reason.
+    """
     record = _mapping(record)
     if not (record and head and record.get("head") == head
             and record.get("status") in MERGEABLE
-            and record.get("base_sha") and record.get("candidate_tree")):
+            and revision_of(record.get("base_sha"))
+            and revision_of(record.get("candidate_tree"))):
         return False
     if record.get("status") == RESOLVED:
         resolution = resolution_of(record)
@@ -2544,6 +2574,12 @@ def _apply_locked(pr: dict, record: dict, workdir: str):
     # before it is committed, so the workdir is left exactly as it was.
     # ``--no-commit`` is what makes that possible: after a plain ``git merge``
     # the commit already exists and only a destructive reset could undo it.
+    # HEAD is re-verified immediately before the merge, like the resolved path
+    # (``_apply_resolution``): the caller checked it, but another process may
+    # have moved it since, and a merge would then integrate the new HEAD
+    # instead of the revision the candidate describes.
+    if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
+        return None, HEAD_MOVED_APPLYING
     no_hooks = ("-c", "core.hooksPath=/dev/null")
     m = _git(*no_hooks, "-c", "rerere.enabled=false", "merge", "--no-commit",
              "--no-ff", base_sha, cwd=workdir)
@@ -2588,6 +2624,17 @@ def _apply_resolution(record: dict, workdir: str, head: str, base_sha: str,
     recorded = {p.get("path"): p
                 for p in resolution_entries(resolution, "paths")
                 if isinstance(p.get("path"), str) and p.get("path")}
+    # ``compact`` bounds the stored path list and records the real length when
+    # it truncated (``paths_total``).  An apply that reads the *stored* record
+    # — a sign-off bounce — would otherwise reconcile only the paths it can
+    # see and abort mid-merge ("unexpected conflict in …") on the first one it
+    # cannot.  Refuse up front with the real reason; the launch path applies
+    # the uncompacted record and is unaffected.
+    recorded_total = _as_int(resolution.get("paths_total"))
+    if recorded_total > len(recorded):
+        return None, ("the recorded resolution covers only "
+                      f"{len(recorded)} of {recorded_total} conflicted files; "
+                      "re-run sign-off so it applies the full resolution")
     if _out(_git("rev-parse", "HEAD", cwd=workdir)) != head:
         # Re-check right before touching the worktree: the caller verified
         # HEAD, but another process may have moved it since.

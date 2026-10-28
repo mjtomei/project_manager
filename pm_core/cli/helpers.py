@@ -670,11 +670,21 @@ def _resolve_repo_dir(root: Path, data: dict) -> Path:
     Used when a command needs to run tools (like ``gh``) against the
     target repo.  Returns the parent of an internal pm/ dir, otherwise
     falls back to the repo URL (if it's a local path) or cwd.
+
+    ``project.yaml`` is hand-editable state: a ``project`` that is not a
+    mapping, or a ``repo`` that is not a path string, is no checkout
+    (``Path(5)`` raised ``TypeError`` and a scalar ``project`` raised
+    ``AttributeError``), so it falls back to cwd like an unset one.  This runs
+    on the merge-detection path (``pm_core.pr_sync``), where an exception is
+    swallowed by the per-PR handler and the merge is finalized without the
+    integrity check — the silent finalize pr-2e06289 exists to prevent.
     """
     if store.is_internal_pm_dir(root):
         return root.parent
-    repo_url = data.get("project", {}).get("repo", "")
-    if repo_url and Path(repo_url).is_dir():
+    project = data.get("project")
+    project = project if isinstance(project, dict) else {}
+    repo_url = project.get("repo")
+    if isinstance(repo_url, str) and repo_url and Path(repo_url).is_dir():
         return Path(repo_url)
     return Path.cwd()
 

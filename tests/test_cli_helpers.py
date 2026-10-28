@@ -13,6 +13,7 @@ from pm_core.cli.helpers import (
     _pr_id_sort_key,
     _record_status_timestamp,
     _resolve_pr_id,
+    _resolve_repo_dir,
 )
 
 
@@ -423,3 +424,37 @@ class TestPrListTimestamps:
         assert result.exit_code == 0, result.output
         assert "pr-001" in result.output
         assert "pr-002" in result.output
+
+
+# ---------------------------------------------------------------------------
+# _resolve_repo_dir
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRepoDir:
+    """``project``/``repo`` are hand-edited state: a bad value is no repo."""
+
+    def test_a_malformed_project_or_repo_falls_back_to_cwd(
+            self, tmp_path, monkeypatch):
+        """A scalar ``project``/``repo`` must not raise out of the caller.
+
+        ``Path(5)`` raised ``TypeError`` and a non-mapping ``project`` raised
+        ``AttributeError``.  On the merge-detection path the exception is
+        swallowed by the per-PR handler, so the merge was finalized WITHOUT the
+        merge-integrity check — the silent finalize pr-2e06289 prevents.
+        """
+        monkeypatch.chdir(tmp_path)
+        root = tmp_path / "pm"          # not an internal pm/ dir (no .git)
+        assert _resolve_repo_dir(root, {"project": 5}) == tmp_path
+        assert _resolve_repo_dir(root, {"project": ["x"]}) == tmp_path
+        assert _resolve_repo_dir(root, {"project": {"repo": 5}}) == tmp_path
+        assert _resolve_repo_dir(
+            root, {"project": {"repo": ["x"]}}) == tmp_path
+        assert _resolve_repo_dir(root, {}) == tmp_path
+
+    def test_a_local_repo_path_is_still_used(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_repo_dir(tmp_path / "pm",
+                                 {"project": {"repo": str(repo)}}) == repo

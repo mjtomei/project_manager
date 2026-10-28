@@ -131,7 +131,11 @@ appear in `removed` (the delta shows it), which names whole records only.
 `compact` keeps at most 20 ids per list and records the real length in
 `<key>_total` (preserved across re-compaction so the digest stays stable);
 the sign-off prompt and `pm pr signoff integrate` list a prefix and say
-"… N more" from that total rather than dropping ids silently.
+"… N more" from that total rather than dropping ids silently. The `paths`
+list itself is bounded at `_YAML_LIST_LIMIT` and records `paths_total` when
+it truncated: a sign-off bounce applies the *stored* (compact) record, so a
+partial resolution must be refused up front (`_apply_resolution`) rather
+than abort mid-merge on the first path it cannot find.
 `summary()` renders resolved candidates ("conflicts with master@… resolved by
 record (N added from PR, M from base)", counting nested records) and failed
 resolutions.
