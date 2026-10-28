@@ -34357,7 +34357,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T14:33:11.975688+00:00'
+  updated_at: '2026-10-28T17:16:44.030834+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34604,6 +34604,29 @@ prs:
       one step behind (R7 fallback).'
     created_at: '2026-10-28T14:33:11Z'
     last_edited: '2026-10-28T14:33:11Z'
+  - id: note-af99929
+    text: 'QA S22 (unsafe workdirs hold before planning) INPUT_REQUIRED: all nine
+      holds fired and changed nothing (wrong checkout, detached HEAD, local-only repo,
+      dirty conflict, untracked blocker, unreachable remote, stopped rebase, dirty
+      divergence, still-diverged after review) — each wrote overall=INPUT_REQUIRED,
+      opened no qa-<PR> window, left heads/tree byte-identical and added a matching
+      note; story 8s route wrote NEEDS_WORK + qa_branch_sync and story 9 held instead
+      of re-routing. Two Then mismatches block a PASS. (1) Story 6 requires `pm log
+      grep "Could not refresh the upstream PR branch"` to print exactly one line;
+      it prints 2 per run (re-measured live at 17:15:58): `WARNING [qa_loop] QA sync
+      hold ...` and `INFO [tui] log: QA [pr]: QA held before planning ...`. Every
+      pm message is recorded twice (emitting module + TUI log-pane mirror); each line
+      is one sentence with a single stop (no `exists..`, no embedded newline) and
+      `--source qa_loop` / `--source tui` each return exactly one, so the message
+      shape is right but the line count the Then specifies is not. (2) Story 8: `pm
+      pr list` read immediately after the diverged route printed [pending] (the committed
+      project.yaml value — the fixture status: in_review is an uncommitted bootstrap
+      edit the route rewrites from the committed base); a re-read seconds later showed
+      [in_review] and the log has `Transitioned pr-95325c4: qa -> in_review`. No product
+      change made: the dual logging is uniform, pre-existing and outside R6. Captures:
+      /pm-captures/scenarios/22/ (per-story cast + mp4 + log-pane + qa_status + manifest).'
+    created_at: '2026-10-28T17:16:43Z'
+    last_edited: '2026-10-28T17:16:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
