@@ -15698,7 +15698,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T13:55:42.438132+00:00'
+  updated_at: '2026-10-28T14:17:05.694137+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -16820,45 +16820,55 @@ prs:
       venv needs `pip install "pytest<9"` to run the PR tests.'
     created_at: '2026-10-28T13:43:43Z'
     last_edited: '2026-10-28T13:43:43Z'
-  - id: note-5082bc3
-    text: 'QA S17 (2026-10-28, merged build d3ac60c6+) PASS, 5/5 stories. Evidence
-      /pm-captures/scenarios/17/story{1..5}-*. (1) Frozen TUI + picker QA queued ->
-      thaw+`pm tui restart` while spinner up: no tui_gone, spinner resolves window_open,
-      PR->qa, pidfile refreshed (same pid 1679/starttime 8790927, newer started_at,
-      both caps), one TUI. (2) Two `pm autostart add --wait-for-merge --timeout 15`
-      + restart in the same second: both exit 0 "added:", no hang, one dispatch line
-      each, queue 0, one TUI. CAVEAT: the scenario Then "autostart list shows one
-      target per PR" only holds with the STATE-PRESERVING restart (`pm tui restart
-      --breadcrumb`); a plain `pm tui restart` is a documented clean restart that
-      drops session-scoped autostart targets (same on origin/master; see `pm tui restart
-      --help`). With --breadcrumb the targets are restored exactly once each (mode
-      targets, wait_for_merge). (3) Queued picker QA + cgroup.kill: spinner spins
-      ~4 s then "✗ qa: the TUI is no longer running (process is a zombie); the command
-      may not have been applied" + Press q/Esc/Enter (log reason=tui_gone); queue
-      keeps the line (17 B); a new TUI started <60 s later drains it exactly once
-      (queue dispatch result=ok), PR->qa, queue 0. (4) Same but TUI left down 71 s:
-      startup logs "discarding stale queued commands on startup: [pr qa pr-767177b]",
-      PR stays in_review, no qa window, no Starting QA line, queue 0. (5) Restart
-      + concurrent `pm pr edit --title` (Updated ...), picker dispatch (applied),
-      and a second `pm _tui` split into the live TUI window -> verbatim "another TUI
-      (pid N) already owns session ...; refusing to start a second TUI" + RC=2; pidfile
-      never deleted/reported foreign (same pid/starttime, newer started_at, both caps);
-      board renders and shows the renamed title. Repro: tests/test_tui_pidfile.py
-      130 passed; tests/test_tui_cmd_queue_startup.py 5 passed. Filed incidental pre-existing
-      bug pr-1b170f4 (non-fresh picker actions short-circuit on a stale runtime_state
-      "done", so a re-run QA shows "✓ done" while still queued and can mask the tui_gone
-      abort). Next-run gotchas: (a) the TUI pane start command is `"pm _tui"` (quoted),
-      so the recipe awk `$2 ~ /_tui/` matches nothing — resolve TUI_PANE by pane_pid
-      == pidfile pid; (b) the picker holds its pane stdin in the foreground, so a
-      SECOND pane must issue the thaw+restart concurrently; (c) after a TUI pane dies
-      `pm session` respawns a window named python3 (known pr-3951487); (d) all pm
-      commands must run from $TEST_DIR (from /workspace they target the real project);
-      (e) agg is not installed — the raw aarch64 v1.9.0 release binary works; (f)
-      a re-run QA on a PR with a previous QA verdict short-circuits the spinner instantly
-      (pr-1b170f4) — use a PR that has never run QA when the queued-spinner state
-      is the evidence.'
+  - id: note-36c299e
+    text: 'QA S17 CORRECTED (2026-10-28, merged build d3ac60c6+, re-run at 14:06-14:16Z).
+      Verdict is NOT a clean pass: story 2s specified Then FAILS for its specified
+      When, and the case is reported as a scenario-spec mismatch. Stories 1,3,4,5
+      pass. Evidence (every capture now has transcript.log + manifest + mp4): /pm-captures/scenarios/17/story{1..5}-*.
+      (1) PASS, stronger ordering: picker QA queued while the TUI is frozen (17 B,
+      PR in_review); `pm tui restart` is issued WHILE STILL FROZEN (14:06:28.495)
+      and 2 s later the pidfile is byte-identical, the queue is still 17 B and the
+      PR is still in_review => nothing could be applied before the restart was initiated.
+      Thaw -> pidfile started_at 14:06:35.717850 (same pid 5531/starttime 8874822,
+      both caps), queue drained exactly once, PR->qa; no tui_gone; `q` dismissed the
+      still-spinning spinner without cancelling (spinner exit: reason=keypress). (2)
+      FAIL as written: two `pm autostart add --wait-for-merge --timeout 15` (pr-30515be
+      / pr-1250f4a) + plain `pm tui restart` at 14:10:30.49/.59 -> both callers exit
+      0 "added:", one dispatch each, queue 0, board renders, one TUI, pidfile refreshed;
+      BUT `pm autostart list --json` then reports mode "off", targets [] instead of
+      one wait_for_merge entry per PR. Cause: autostart targets are session-scoped
+      and `pm tui restart` (no --breadcrumb) is a documented CLEAN restart (`pm tui
+      restart --help`; same on origin/master: save_breadcrumb is gated on the merge-restart
+      marker). The When/Then pair is internally inconsistent; only `pm tui restart
+      --breadcrumb` preserves the targets (observed separately, not a substitute).
+      This needs a product/spec decision (either the scenario should use --breadcrumb,
+      or plain restart should preserve targets). (3) PASS: queued picker QA + cgroup.kill
+      -> ~4 s grace -> "✗ qa: the TUI is no longer running (process is a zombie|process
+      is not running); the command may not have been applied" + Press q/Esc/Enter
+      (reason=tui_gone); queue keeps 17 B; a new TUI <60 s later drains it exactly
+      once (pr-a4312cb -> qa, qa windows @33/@34, queue 0). (4) PASS: same, TUI left
+      down 73 s -> "discarding stale queued commands on startup: [pr qa pr-f48865c]",
+      PR stays in_review, 0 qa windows, no Starting QA line, queue 0. (5) PASS: restart
+      + concurrent `pm pr edit --title` ("Updated pr-6cd925d: title=Renamed during
+      restart"), picker dispatch (✓ reason=window_open, pr-3a5f933 -> qa), and a second
+      `pm _tui` split into the live TUI window -> verbatim "another TUI (pid 13009)
+      already owns session ...; refusing to start a second TUI" + RC=2; pidfile never
+      deleted/foreign (same pid/starttime, newer started_at, both caps); board renders
+      "Renamed during rest…". Repro tests: tests/test_tui_pidfile.py 130 passed; tests/test_tui_cmd_queue_startup.py
+      5 passed. Incidental pre-existing bug filed as pr-1b170f4 (non-fresh picker
+      actions short-circuit on a stale runtime_state done, so a re-run QA shows a
+      done verdict while still queued). Next-run gotchas: (a) the TUI pane start command
+      is "pm _tui" (quoted) so the recipe awk $2 ~ /_tui/ matches nothing - resolve
+      TUI_PANE by pane_pid == pidfile pid; (b) the picker holds its pane stdin in
+      the foreground, so the thaw/restart must come from a SECOND pane; (c) after
+      a TUI pane dies `pm session` respawns a window named python3 (known pr-3951487);
+      (d) run all pm commands from $TEST_DIR; (e) agg is not installed - the raw aarch64
+      v1.9.0 binary works; (f) a re-run QA on a PR with a prior verdict short-circuits
+      the spinner instantly (pr-1b170f4) - use a never-QA-d PR for queued-spinner
+      evidence; (g) the recipe transcript.log comes from `tmux pipe-pane -t <recorded
+      pane> -o "cat >> .../transcript.log"` - remember it for every capture.'
     created_at: '2026-10-28T13:55:42Z'
-    last_edited: '2026-10-28T13:55:42Z'
+    last_edited: '2026-10-28T14:17:05Z'
   - id: note-451fa17
     text: 'QA scenario 16 (pane discovery) found and fixed a stale-pane defect: after
       a TUI exits, the pane registry keeps its role="tui" entry until the next heal_registry,
