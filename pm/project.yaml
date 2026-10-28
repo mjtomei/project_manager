@@ -35958,11 +35958,32 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-10-28T06:48:18.266006+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-64cdbe3
+    text: 'QA S6 (2026-10-28, 2nd pass, HEAD 42a7471d): two scenario Thens do not
+      match the product; neither is a defect in this PR. (1) Story 1: `pm autostart
+      list` with no running TUI exits 2 with `owner_unavailable` instead of printing
+      `Auto-start: off` / `No auto-start targets.` — list is owner-mediated; `_request`/`autostart_list`
+      are identical to base 450a6362, and offline listing would need the persisted
+      target/resume state. (2) Story 5: Alpha`s row never shows `fresh autostart:
+      implementation window missing; relaunching` "immediately after the command"
+      — the fresh reset and the `pm pr start --background` that recreates the pane
+      are the same scheduler pass (same second in the TUI log); six status queries
+      fired with the reply all already show `waiting for the current implementation
+      turn after feedback`. The reason string is correct: it appeared on Alpha`s row
+      when the pane was closed (`missing-window/recording-c.cast`) and resolved on
+      the next scheduler pass (`-d.cast`), and on Epsilon`s row for ~5 s while its
+      spec block delayed the relaunch. Everything else in scenario 6 passed (stage-specific
+      rejections, all-or-nothing multi-PR, merge-in-flight refusal, spec_pending block,
+      repeat-fresh no-op with attempt=1, exactly one review window per PR). Captures:
+      /pm-captures/scenarios/6/. Verdict INPUT_REQUIRED pending a decision on whether
+      to amend the two Thens or change the product.'
+    created_at: '2026-10-28T06:48:18Z'
+    last_edited: '2026-10-28T06:48:18Z'
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
