@@ -405,6 +405,17 @@ def _fetch_upstream_commit(workdir: str | Path, url: str, branch: str,
                         f"refs/heads/{branch}")
 
 
+def _one_line(msg: str | None, default: str = "unknown error") -> str:
+    """Flatten git output into one sentence ending in a single full stop.
+
+    git's stderr spans lines and normally ends with a full stop ("… and the
+    repository exists."), so embedding it verbatim produced a multi-line hold
+    whose appended remedy read "exists.. Restart QA".
+    """
+    text = " ".join((msg or "").split()).rstrip(".")
+    return f"{text}." if text else default
+
+
 def _remote_branch_sha(workdir: str | Path, url: str, branch: str) -> str | None:
     """Return the sha of *branch* at *url* (``None`` if absent)."""
     r = _git_capture(workdir, "ls-remote", url, f"refs/heads/{branch}")
@@ -644,8 +655,9 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
     try:
         upstream = _remote_branch_sha(workdir_path, real_url, branch)
     except PlannerHandoffError as exc:
-        return hold(f"Could not refresh the upstream PR branch: {exc}. "
-                    "Restart QA once the remote is reachable.", local=local)
+        return hold(f"Could not refresh the upstream PR branch: "
+                    f"{_one_line(str(exc))} Restart QA once the remote is "
+                    "reachable.", local=local)
     # Report both heads on every sync: what the upstream has (e.g. a lost
     # worker's push, pr-3201ea8) must never be hidden by a no-op sync.
     _log.info("QA sync: %s in %s at %s; %s has %s", branch, workdir_path,
@@ -665,10 +677,10 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
                 f"with it (the fetched head is not {upstream[:12]}). "
                 "Restart QA to synchronize with the new head.",
                 local=local, upstream=upstream)
-        msg = " ".join((fetch.stderr or fetch.stdout).split())
+        msg = _one_line(fetch.stderr or fetch.stdout)
         return hold(
             f"Could not fetch {branch} at {upstream[:12]} from "
-            f"{real_url}: {msg}. Restart QA once the remote is reachable.",
+            f"{real_url}: {msg} Restart QA once the remote is reachable.",
             local=local, upstream=upstream)
 
     if _is_ancestor(workdir_path, upstream, local):
@@ -701,12 +713,11 @@ def _sync_pr_branch(workdir_path: str, branch: str) -> BranchSync:
     ff = _git_capture(workdir_path, "merge", "--ff-only", "--quiet", upstream)
     head = _rev_parse(workdir_path, f"refs/heads/{branch}")
     if ff.returncode != 0 or head != upstream:
-        msg = " ".join((ff.stderr or ff.stdout).split())
+        msg = _one_line(ff.stderr or ff.stdout)
         return hold(
             f"{where} (behind only), but the fast-forward was refused, "
-            f"so nothing was changed: {msg or 'unknown error'}. Commit, "
-            "stash, move or remove the conflicting local files, then "
-            "restart QA.",
+            f"so nothing was changed: {msg} Commit, stash, move or remove "
+            "the conflicting local files, then restart QA.",
             local=local, upstream=upstream)
     _log.info("QA sync: fast-forwarded %s in %s %s -> %s",
               branch, workdir_path, local[:12], upstream[:12])

@@ -197,6 +197,10 @@ class TestSyncPrBranch:
         assert "fast-forward was refused" in sync.detail
         assert "new.py" in sync.detail
         assert "move or remove" in sync.detail
+        # git's refusal spans lines and ends without a stop: the hold stays
+        # one sentence and does not read "Aborting.. Commit".
+        assert "\n" not in sync.detail
+        assert "Aborting. Commit, stash, move or remove" in sync.detail
         assert _head(s) == s["L"]
         assert (s["wd"] / "new.py").read_text() == "mine\n"
 
@@ -302,6 +306,11 @@ class TestSyncPrBranch:
             sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
         assert sync.outcome == "hold"
         assert "Could not refresh the upstream" in sync.detail
+        # git's stderr is multi-line and ends with a full stop; the hold is
+        # one sentence with one stop, not "exists.. Restart QA".
+        assert "\n" not in sync.detail
+        assert ".." not in sync.detail
+        assert ". Restart QA once the remote is reachable." in sync.detail
 
     def test_failed_fetch_holds_with_the_git_error(self, repos):
         """ls-remote succeeded but the fetch did not (auth, network drop):
@@ -310,13 +319,20 @@ class TestSyncPrBranch:
         s = repos
         _worker_push(s)
         failed = subprocess.CompletedProcess(
-            ["git", "fetch"], 128, "", "fatal: could not read from remote")
+            ["git", "fetch"], 128, "",
+            "fatal: could not read from remote repository.\n\n"
+            "Please make sure you have the correct access rights\n"
+            "and the repository exists.")
         with patch.object(qa_loop, "_fetch_upstream_commit",
                           return_value=failed):
             sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
         assert sync.outcome == "hold"
         assert "Could not fetch" in sync.detail
-        assert "could not read from remote" in sync.detail
+        assert "could not read from remote repository" in sync.detail
+        assert "\n" not in sync.detail
+        assert "exists.." not in sync.detail
+        assert "exists. Restart QA once the remote is reachable." \
+            in sync.detail
         assert _head(s) == s["L"]
 
     def test_upstream_moved_during_fetch_holds(self, repos):

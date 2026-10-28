@@ -30,6 +30,21 @@
   (retiring any recorded sign-off); anything unsafe becomes a specific
   INPUT_REQUIRED hold. It never merges divergent histories, resets or
   force-pushes. Every exit before scenarios writes an `overall` verdict.
+- **Integration with master (post-QA merge).** The branch merged
+  `master@89e3c501`. Master had moved the QA planner's command build to
+  carry provider environment variables out-of-band
+  (`build_claude_shell_cmd(..., env_out=…)` collects them and the tmux pane
+  receives them via `env=`; they are never interpolated into the logged
+  command string). This PR moved that build *after* the pre-planning sync,
+  so the resolved build must keep the provider transport. A planner that
+  starts without the configured provider env, or a secret that shows up in
+  the visible command/log, is a regression of that integration.
+- **Driver guard added after the first QA round.** `pm pr auto-sequence`
+  used to launch a detached QA driver even with no pm tmux session; the
+  driver exits "No pm session found" and writes no `qa_status.json`, so
+  every tick re-launched it and reported `running: qa (launched)` forever.
+  The `qa` branch now pauses with `paused: no pm tmux session`, matching the
+  other status branches.
 
 ## Requirements
 
@@ -148,6 +163,11 @@ marked running, and `pm pr auto-sequence` reports the routed outcome
 (`qa: needs_work, returning to review` / `paused: input_required (qa)`)
 rather than `running: qa` forever.
 
+**Given** a PR in `qa` and no pm tmux session running, **when** the user runs
+`pm pr auto-sequence <pr>`, **then** it reports `paused: no pm tmux session`
+and launches no detached QA driver (which would die immediately and write no
+`qa_status.json`), instead of reporting `running: qa (launched)` every tick.
+
 ### R8 — The planner/worker revision stays pinned; the handoff guard stays
 
 **Given** a successful sync, **when** planning completes, **then** the
@@ -170,6 +190,16 @@ the PR branch in the workdir), not only "restart QA".
 **Given** a QA run already executing scenarios, **when** the TUI restarts and
 resumes it, **then** the pre-planning sync does not run again and the
 scenarios keep testing the pinned revision.
+
+### R9 — The post-sync planner launch keeps the provider transport
+
+**Given** a project whose `qa_planning` session resolves to a configured
+provider that needs environment variables (a provider entry with an API-key
+env var in `~/.pm/providers.yaml`), **when** the user starts QA on a stale
+workdir, **then** the planner pane starts with those provider environment
+variables present in its process environment, the plan is produced against
+the synced head, and the provider's secret values do not appear in the
+visible command string, the pane's start command, or the pm log.
 
 ## Setup (user steps)
 
@@ -225,7 +255,11 @@ auto-sequence` output, or the workdir/upstream git state). It fails when:
 - imported application code reaches planning/sign-off while the old review
   or sign-off evidence stays adoptable;
 - a hold message does not name a remedy the user can actually perform for
-  the surface they are on.
+  the surface they are on;
+- the planner starts without the configured provider environment after the
+  sync, or a provider secret is printed into the command string / log;
+- `pm pr auto-sequence` keeps reporting `running: qa` (or relaunching a
+  doomed detached driver) when no pm session exists.
 
 ## Ambiguities (resolved)
 
