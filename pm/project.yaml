@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T10:40:40.195877+00:00'
+  updated_at: '2026-10-28T11:06:44.503147+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -32477,6 +32477,49 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-28T10:40:40Z'
     last_edited: '2026-10-28T10:40:40Z'
+  - id: note-453da85
+    text: 'Review loop 419c i9: three leftovers in the kept recipe scope, all the
+      same class (a step that cannot do its job must say so, and must not act on a
+      handle it does not have). (1) The QA image ships ffmpeg but NOT agg (verified:
+      `command -v agg` is empty here), and i2 made a missing renderer a hard failure
+      — but neither recording recipe named agg as a prerequisite or said how to get
+      it, so "render produced no mp4 — check agg is installed" had no remedy in the
+      recipe (qa.md carries the install rule; the reusable recipe did not). Both render
+      sections now carry the per-architecture release-binary install (agg-$(uname
+      -m)-unknown-linux-gnu from asciinema/agg latest) and say not to substitute a
+      different renderer. Verified live: the line installs agg 1.9.0, and the recipe
+      own render block turns a cast into an h264 mp4 with it; without agg the same
+      block exits 1 with its message and leaves no mp4. (2) The CLI scaffold is pasted
+      as one block and step 3 is comments, so a worker pasting it whole for the -c
+      bash form waits out the stop bound with the shell at its prompt; the stop failure
+      named only RECORDER_STOP_TIMEOUT, which for an interactive recording just makes
+      the same failure slower. It now also names the actual remedy (exit in the recorded
+      shell, step 3) — verified live with RECORDER_STOP_TIMEOUT=2 (rc 1, new message).
+      (3) The web-UI finalize step i2 `rm -f "$CAPDIR/recording.mp4"` was unguarded
+      while step 1 guards its png glob with ${CAPDIR:?} for exactly this reason; blocks
+      are pasted separately, so a fresh shell had no CAPDIR and the rm/ffmpeg aimed
+      at /recording.mp4 and /recording.webm. It now stops with : "${CAPDIR:?...}"
+      first — verified live (rc 1 with the message, stub ffmpeg not called, no /recording.mp4)
+      and still transcodes + drops the webm when CAPDIR is set. Tests: +5 (2 renderer-prerequisite
+      cases, the CLI stop message, the finalize block executed both ways); the first
+      four fail against the previous recipes, the fifth pins that the guard does not
+      break the transcode. _render_block now picks the render block by content (`agg
+      --idle-time-limit`) because the render section holds a second fenced block.
+      New file 51 pass (3 runs); related suites 198 pass. Full suite 3892 passed /
+      1 skipped / 14 failed: the 12 markdown tests are the missing markdown dep (13/13
+      pass with it installed, re-checked after this change), and test_git_ops::test_keeps_unpushed_merge
+      + test_hook_events::test_installer_writes_standalone_receiver are the known
+      baselines (both reproduce on origin/master@89e3c501); test_merge_publish/test_signoff_integration
+      deselected (push proxy rejects pushes to master). Live: CLI one-shot and interactive
+      forms + render re-run end to end against the changed recipes. Evidence /pm-captures/review-419c-i9/
+      (probe.sh, probe.log, manifest.md). impl.md R10 + R7/Files and qa.md updated.
+      Still open, not fixed here: the CLI one-shot form has no handle that distinguishes
+      "the command finished" from "asciinema died mid-recording" (both end the pane
+      and leave a non-empty cast), unlike the tmux recipe where the target session
+      still exists — recording asciinema own exit status through the pane command
+      would be the fix if that is wanted.'
+    created_at: '2026-10-28T11:06:44Z'
+    last_edited: '2026-10-28T11:06:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
