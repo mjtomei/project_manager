@@ -1,0 +1,243 @@
+"""Cancellation during preparation must not launch or retain new QA workers."""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from pm_core import container, container_reaper, qa_loop, tmux
+
+
+
+def _as_hit(fn):
+    """Adapt a verdict-string stub to ``find_verdict_turn`` (pr-8efa789)."""
+    from pm_core.verdict_transcript import VerdictHit
+
+    def hit(*args):
+        verdict = fn(*args)
+        return VerdictHit(verdict, verdict) if verdict else None
+    return hit
+
+@pytest.mark.parametrize("stage", [
+    "clone", "create", "concretizer-command", "concretize", "reject", "worker-command",
+])
+@pytest.mark.parametrize("containers", [True, False])
+@pytest.mark.parametrize("queued", [False, True])
+def test_cancelled_preparation_does_not_launch_or_record_verdict(tmp_path, monkeypatch, stage, containers, queued):
+    if stage == "create" and not containers:
+        pytest.skip("host workers have no container allocation")
+    state = qa_loop.QALoopState(pr_id="pr-aaaa", session_tag="t", loop_id="L")
+    state.qa_workdir = str(tmp_path)
+    scenario = qa_loop.QAScenario(index=1, title="s1", focus="")
+    state.scenarios = [scenario]
+    clone = tmp_path / "s1" / "clone"
+    clone.mkdir(parents=True)
+
+    def clone_workdir(*args, **kwargs):
+        if stage == "clone":
+            state.stop_requested = True
+        return clone, clone.parent / "scratch"
+
+    def create(**kwargs):
+        kwargs["allocation_identity"].update(id="cid", generation="epoch")
+        if stage == "create":
+            state.stop_requested = True
+        return "cid"
+
+    def concretize(*args, **kwargs):
+        if stage in {"concretize", "reject"}:
+            state.stop_requested = True
+        return None, "needs a human" if stage == "reject" else None
+
+    def concretizer_command(*args, **kwargs):
+        if stage == "concretizer-command":
+            state.stop_requested = True
+        return "concretizer"
+
+    def worker_command(*args, **kwargs):
+        if stage == "worker-command":
+            state.stop_requested = True
+        return "worker", str(clone)
+
+    monkeypatch.setattr(qa_loop, "create_scenario_workdir", clone_workdir)
+    monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
+    monkeypatch.setattr(container, "load_container_config", MagicMock())
+    allocation = MagicMock(side_effect=create)
+    monkeypatch.setattr(container, "create_qa_container", allocation)
+    monkeypatch.setattr(qa_loop, "_build_concretize_cmd", concretizer_command)
+    monkeypatch.setattr(qa_loop, "_concretize_scenario", concretize)
+    monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd", worker_command)
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    window = MagicMock(return_value="%5")
+    split = MagicMock(return_value="%6")
+    monkeypatch.setattr(tmux, "new_window_get_pane", window)
+    monkeypatch.setattr(tmux, "split_pane_at", split)
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: None)
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: set())
+    release = MagicMock(return_value=container_reaper.Outcome())
+    monkeypatch.setattr(container_reaper, "release_containers", release)
+
+    launch = (qa_loop._launch_scenarios_in_containers if containers
+              else qa_loop._launch_scenarios_in_tmux)
+    if not queued:
+        launch(state, {}, {"id": state.pr_id}, "pm-t", None, str(clone))
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {"id": state.pr_id}, "pm-t", str(clone),
+        tmp_path / "status.json", lambda: None, use_containers=containers,
+        queued_scenarios=[scenario] if queued else [], concurrency_cap=1)
+    qa_loop._release_scenario_containers(state, "pm-t")
+
+    split.assert_not_called()
+    assert not state.scenario_verdicts
+    if stage == "clone" or not containers:
+        allocation.assert_not_called()
+        release.assert_not_called()
+    else:
+        release.assert_called_once_with(
+            [scenario.container_name], reason="qa-run-end", owner_release=True,
+            expected_ids={scenario.container_name: "cid"},
+            expected_generations={scenario.container_name: "epoch"})
+    if stage in {"clone", "create", "concretizer-command"}:
+        window.assert_not_called()
+
+
+@pytest.mark.parametrize("stage", ["before", "create", "command"])
+def test_cancelled_retry_does_not_attach_worker(tmp_path, monkeypatch, stage):
+    state = qa_loop.QALoopState(pr_id="pr-aaaa", session_tag="t", loop_id="L")
+    state.qa_workdir = str(tmp_path)
+    scenario = qa_loop.QAScenario(
+        index=1, title="s1", focus="", container_name="pm-t-qa-pr-aaaa-L-s1",
+        container_id="old-id", container_generation="old-epoch",
+        worktree_path=str(tmp_path), window_name="qa-pr-aaaa-s1")
+    state.scenarios = [scenario]
+    state.stop_requested = stage == "before"
+
+    def create(**kwargs):
+        kwargs["allocation_identity"].update(id="new-id", generation="new-epoch")
+        if stage == "create":
+            state.stop_requested = True
+        return "new-id"
+
+    def command(*args, **kwargs):
+        state.stop_requested = True
+        return "worker", str(tmp_path)
+
+    monkeypatch.setattr(qa_loop, "_resolve_qa_model", MagicMock())
+    monkeypatch.setattr(container, "is_container_mode_enabled", lambda: True)
+    monkeypatch.setattr(container, "_runtime_available", lambda: True)
+    monkeypatch.setattr(container, "load_container_config", MagicMock())
+    allocation = MagicMock(side_effect=create)
+    monkeypatch.setattr(container, "create_qa_container", allocation)
+    monkeypatch.setattr(qa_loop, "_build_scenario_run_cmd", command)
+    window = MagicMock(return_value="%6")
+    monkeypatch.setattr(tmux, "new_window_get_pane", window)
+    monkeypatch.setattr(tmux, "pane_window_id", lambda *a: None)
+    monkeypatch.setattr(qa_loop, "_viewed_window_ids", lambda *a: set())
+    release = MagicMock(return_value=container_reaper.Outcome())
+    monkeypatch.setattr(container_reaper, "release_containers", release)
+
+    assert not qa_loop._relaunch_scenario_window(
+        scenario, state, {}, {"id": state.pr_id}, "pm-t", str(tmp_path))
+    window.assert_not_called()
+    assert not state.scenario_verdicts
+    assert not state.scenario_verdict_reasons
+    if stage == "before":
+        allocation.assert_not_called()
+    else:
+        assert scenario.container_id == "new-id"
+        assert scenario.container_generation == "new-epoch"
+        qa_loop._release_scenario_containers(state, "pm-t")
+        release.assert_called_once_with(
+            [scenario.container_name], reason="qa-run-end", owner_release=True,
+            expected_ids={scenario.container_name: "new-id"},
+            expected_generations={scenario.container_name: "new-epoch"})
+
+
+def test_concretizer_poll_observes_cancellation(monkeypatch, tmp_path):
+    from pm_core import claude_launcher
+
+    scenario = qa_loop.QAScenario(index=1, title="s1", focus="")
+    stopped = False
+
+    def poll(*args, **kwargs):
+        nonlocal stopped
+        stop_check = kwargs.get("stop_check")
+        assert stop_check is not None
+        assert not stop_check()
+        stopped = True
+        assert stop_check()
+        return None
+
+    monkeypatch.setattr(claude_launcher, "transcript_path_for", lambda *a: tmp_path / "log")
+    monkeypatch.setattr(qa_loop, "poll_for_verdict", poll)
+    assert qa_loop._concretize_scenario(
+        scenario, {}, {}, "%5", "sid", str(tmp_path),
+        stop_check=lambda: stopped) == (None, None)
+
+
+@pytest.mark.parametrize("verifier_outcome", ["stopped", "verified"])
+def test_stop_during_pass_verification_neither_flags_nor_messages_worker(
+        tmp_path, monkeypatch, verifier_outcome):
+    """A stop landing while a PASS is being verified leaves it unverified.
+
+    The verifier poll returns no verdict once it sees the stop, and the verdict
+    poll may be mid-sleep when that happens. Treating the empty result as a FLAG
+    sent a follow-up to the worker after the stop and dropped its PASS, so the
+    stopped run reported the scenario as verdictless and released its container
+    instead of downgrading the PASS to INPUT_REQUIRED.
+    """
+    from pm_core import hook_events
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    scenario = qa_loop.QAScenario(
+        index=1, title="s1", focus="", window_name="qa-s1", pane_id="%1",
+        session_id="sid-1", transcript_path=str(tmp_path / "s1.jsonl"))
+    state.scenarios = [scenario]
+    deferred = []
+
+    class DeferredThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            deferred.append(self)
+
+    def verify(*args, **kwargs):
+        if verifier_outcome == "stopped":
+            assert kwargs["stop_check"]()
+            return False, "verifier pane disappeared", "%9"
+        return True, "", "%9"
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 6, "the poll must end once stopped"
+        if deferred:
+            # The stop and the verifier's return both land during this sleep.
+            state.stop_requested = True
+            thread = deferred.pop()
+            thread.target(*thread.args)
+
+    send_keys = MagicMock()
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", DeferredThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_verify_single_scenario", verify)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(tmux, "send_keys", send_keys)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=[], concurrency_cap=0,
+        use_containers=False)
+
+    send_keys.assert_not_called()
+    assert state.scenario_verdicts[1] == qa_loop.VERDICT_PASS
+    assert (1 in state.verified_scenarios) == (verifier_outcome == "verified")

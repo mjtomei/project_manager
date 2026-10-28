@@ -21,6 +21,15 @@ only when it matches the proxy's own workdir and falls back to
 another clone is rejected explicitly — a failed push must never silently
 run against a different workdir.
 
+Lifetime: each socket directory carries an ``owner.json`` (session, PR,
+workdir and runtime domain) written before its daemon starts.  A shared
+proxy is released — socket, directory, discovery link and start lock — only
+once the runtime reports no container, in any pm process and any state,
+still mounting it, checked under the PR's cross-process proxy lock that a
+launching container holds until it exists (:func:`release_proxy_decision`).
+In-process references only say that *this* process still has users.  A
+per-container proxy is released with its container.
+
 Protocol (newline-delimited JSON over Unix socket):
   Request:  {"cmd": "push|fetch|pull|ls-remote", "args": ["origin", "branch"],
              "workdir": "/host/path/to/clone"}
@@ -31,11 +40,14 @@ Legacy requests without ``cmd`` are treated as push (backward compat).
 """
 
 import contextlib
+import contextvars
+import errno
 import fcntl
 import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import stat
@@ -46,6 +58,8 @@ import threading
 import time
 from pathlib import Path
 
+from pm_core.container import ContainerError
+from pm_core.git_ops import NO_HOOKS_ARGS
 from pm_core.paths import configure_logger
 
 _log = configure_logger("pm.push_proxy")
@@ -54,12 +68,27 @@ _SOCKET_DIR_PREFIX = "pm-push-proxy-"
 _CONTAINER_SOCKET_DIR = "/run/pm-push-proxy"
 _CONTAINER_SOCKET_PATH = f"{_CONTAINER_SOCKET_DIR}/push.sock"
 _METADATA_NAME = "proxy.json"
+# Who may release a socket directory: session/PR (empty for per-container
+# proxies), workdir and runtime domain.  Written by the starter before the
+# daemon exists; read by cleanup in any pm process.
+_OWNER_FILE = "owner.json"
 # A real sidecar is a few hundred bytes; anything larger is not ours.
 _METADATA_MAX_BYTES = 64 * 1024
 
+# Neutralise repo-configured hooks on every host-side git invocation the proxy
+# makes. The workdir is container-writable, so ``.git/hooks/pre-push`` (or
+# ``core.hooksPath``) is container-authored code that would otherwise run on
+# the host — the same escape ``--upload-pack``/``--exec`` are blocked for.
+# Shared with pm's own workdir git calls (:data:`git_ops.NO_HOOKS_ARGS`).
+_NO_HOOKS = list(NO_HOOKS_ARGS)
 
-class PushProxyError(RuntimeError):
-    """The push proxy could not be started or made ready."""
+
+class PushProxyError(ContainerError):
+    """The push proxy could not be started or made ready.
+
+    A :class:`ContainerError`, so launch and cleanup paths that classify
+    container failures (and keep them retryable) treat it like any other.
+    """
 
 
 class PushProxyConflict(PushProxyError):
@@ -151,6 +180,26 @@ def resolve_real_origin(repo_path: str, remote: str = "origin") -> str | None:
         # Follow the chain
         workdir = local
     return None
+
+
+@contextlib.contextmanager
+def _socket_lifecycle_lock(socket_path: str):
+    """Serialize bind/unlink, including late shutdown in an old daemon."""
+    from pm_core.container import _file_lock
+    key = hashlib.sha256(os.path.realpath(socket_path).encode()).hexdigest()
+    with _file_lock(f"proxy-socket-{key}", timeout=10) as locked:
+        if not locked:
+            raise ContainerError(f"Push proxy socket lifecycle lock unavailable: {socket_path}")
+        yield
+
+
+def _socket_identity(path: str) -> tuple[int, int, int] | None:
+    """The published socket generation at *path* (inode alone can be reused)."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino, st.st_ctime_ns)
 
 
 def _metadata_path(sock_path: str) -> str:
@@ -278,7 +327,9 @@ class PushProxy:
         self._server_socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._sock_ino: int | None = None
+        # (st_dev, st_ino, st_ctime_ns) of the socket we bound: an inode alone
+        # can be reused by a replacement bound after ours was unlinked.
+        self._socket_identity: tuple[int, int, int] | None = None
         # True only once bind() succeeded.  A start() that raised before
         # that point owns no socket and must not unlink one on stop().
         self._bound = False
@@ -293,36 +344,40 @@ class PushProxy:
         # Ensure parent directory exists
         Path(self.socket_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Never steal a live socket.  Two daemons racing to unlink→bind is
-        # how a proxy for one workdir used to replace another's.
-        if os.path.exists(self.socket_path) and proxy_is_alive(self.socket_path):
-            _log.warning("Push proxy socket already served; not replacing: %s",
-                         self.socket_path)
-            return False
+        # Bind/unlink share a path-keyed lock with every other daemon and
+        # stop path, so a delayed old shutdown cannot remove the socket a
+        # replacement just bound.
+        with _socket_lifecycle_lock(self.socket_path):
+            # Never steal a live socket.  Two daemons racing to unlink→bind
+            # is how a proxy for one workdir used to replace another's.
+            if (os.path.exists(self.socket_path)
+                    and proxy_is_alive(self.socket_path)):
+                _log.warning("Push proxy socket already served; not "
+                             "replacing: %s", self.socket_path)
+                return False
 
-        # Clean up stale socket (docker may have created a directory here)
-        _unlink_socket_file(self.socket_path)
+            # Clean up stale socket (docker may have created a directory here)
+            _unlink_socket_file(self.socket_path)
 
-        self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server_socket.bind(self.socket_path)
-        self._bound = True
-        # Make socket world-writable so the container user can connect
-        os.chmod(self.socket_path, 0o777)
-        try:
-            self._sock_ino = os.stat(self.socket_path).st_ino
-        except OSError:
-            self._sock_ino = None
-        # Record the served workdir/branch so start_push_proxy can refuse a
-        # mismatched reuse instead of silently replacing this daemon.
-        _write_metadata(self.socket_path, self.workdir, self.allowed_branch)
-        # A small backlog matters: the handler serves one request at a time
-        # (a push can run for up to two minutes), and ``proxy_is_alive``
-        # probes connect without sending.  With a backlog of 1 a single
-        # queued probe made the next connect block until the 2 s timeout,
-        # so a *busy but live* proxy looked dead and callers replaced it —
-        # the very failure this keying change exists to prevent.
-        self._server_socket.listen(16)
-        self._server_socket.settimeout(2.0)
+            self._server_socket = socket.socket(socket.AF_UNIX,
+                                                socket.SOCK_STREAM)
+            self._server_socket.bind(self.socket_path)
+            self._bound = True
+            # Make socket world-writable so the container user can connect
+            os.chmod(self.socket_path, 0o777)
+            self._socket_identity = _socket_identity(self.socket_path)
+            # Record the served workdir/branch so start_push_proxy can refuse
+            # a mismatched reuse instead of silently replacing this daemon.
+            _write_metadata(self.socket_path, self.workdir,
+                            self.allowed_branch)
+            # A small backlog matters: the handler serves one request at a
+            # time (a push can run for up to two minutes), and
+            # ``proxy_is_alive`` probes connect without sending.  With a
+            # backlog of 1 a single queued probe made the next connect block
+            # until the 2 s timeout, so a *busy but live* proxy looked dead
+            # and callers replaced it.
+            self._server_socket.listen(16)
+            self._server_socket.settimeout(2.0)
 
         self._thread = threading.Thread(
             target=self._serve_loop, daemon=True,
@@ -339,22 +394,19 @@ class PushProxy:
         A daemon that lost its path to another daemon must not unlink the
         replacement's socket or metadata.
         """
-        if self._sock_ino is None:
+        if self._socket_identity is None:
             # We could not stat our own socket at bind time; nothing better
             # to compare against, so keep the historical cleanup behaviour.
             return True
-        try:
-            return os.stat(self.socket_path).st_ino == self._sock_ino
-        except OSError:
-            # Missing or unreadable: do *not* treat "missing" as permission
-            # to unlink.  A daemon exits when its socket was removed (a
+        # Missing or unreadable compares unequal: do *not* treat "missing" as
+        # permission to unlink.  A daemon exits when its socket was removed (a
             # shared stop unlinks it and keeps the directory), and a restart
             # for the same workdir can bind a fresh socket at the same path
             # in the window between this stat and the unlink that follows.
             # Reporting "not owned" leaves that replacement alone; anything
             # of ours is already gone, and the metadata sidecar is best-effort
             # (a later start rewrites it, session teardown removes it).
-            return False
+        return _socket_identity(self.socket_path) == self._socket_identity
 
     def socket_is_current(self) -> bool:
         """True while the socket at our path is still the one we bound.
@@ -363,14 +415,14 @@ class PushProxy:
         current", which is what the serve and main loops need: both must
         stop when the path is gone *or* has been rebound by another daemon.
         """
-        if self._sock_ino is None:
+        if self._socket_identity is None:
             # Could not stat our own socket at bind time — fall back to the
             # plain existence check the daemon used before inode tracking.
             return os.path.exists(self.socket_path)
-        try:
-            return os.stat(self.socket_path).st_ino == self._sock_ino
-        except OSError:
-            return False
+        return _socket_identity(self.socket_path) == self._socket_identity
+
+    # The name the reaper-era daemon loop used for the same check.
+    owns_socket = socket_is_current
 
     def stop(self) -> None:
         """Stop the proxy and clean up the socket."""
@@ -391,13 +443,14 @@ class PushProxy:
             _log.info("Push proxy never bound; leaving %s in place",
                       self.socket_path)
             return
-        if not self._owns_socket_path():
-            _log.info("Push proxy socket replaced or already removed; "
-                      "leaving it in place: %s", self.socket_path)
-            return
-        # Same shapes as the other teardown paths (a directory left by
-        # docker at a bind-mounted socket path must not raise here).
-        _unlink_socket_file(self.socket_path)
+        with _socket_lifecycle_lock(self.socket_path):
+            if not self._owns_socket_path():
+                _log.info("Push proxy socket replaced or already removed; "
+                          "leaving it in place: %s", self.socket_path)
+                return
+            # Same shapes as the other teardown paths (a directory left by
+            # docker at a bind-mounted socket path must not raise here).
+            _unlink_socket_file(self.socket_path)
         try:
             os.unlink(_metadata_path(self.socket_path))
         except OSError:
@@ -409,6 +462,30 @@ class PushProxy:
             # ``os.unlink`` would (``_kill_proxy_socket`` ignores it too).
             pass
         _log.info("Push proxy stopped: %s", self.socket_path)
+
+    def _retire_socket(self) -> None:
+        """Unlink this daemon's published socket so a repair can replace it.
+
+        Used when the acceptor can no longer serve (e.g. ``EMFILE``): leaving
+        the bound socket in place would make ``proxy_is_alive`` keep reporting
+        a healthy proxy while every client hangs on ``recv``.  Best effort —
+        this runs on the daemon thread, so an unavailable lifecycle lock must
+        not escape and kill it with a traceback.
+        """
+        try:
+            with _socket_lifecycle_lock(self.socket_path):
+                if not self.socket_is_current():
+                    return  # a replacement already published its own socket
+                try:
+                    os.unlink(self.socket_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    _log.warning("Push proxy could not retire %s",
+                                 self.socket_path, exc_info=True)
+        except Exception:
+            _log.warning("Push proxy could not retire %s: lifecycle lock "
+                         "unavailable", self.socket_path, exc_info=True)
 
     def _serve_loop(self) -> None:
         """Accept connections and handle push requests."""
@@ -424,7 +501,19 @@ class PushProxy:
                 conn, _ = self._server_socket.accept()
             except socket.timeout:
                 continue
-            except OSError:
+            except OSError as exc:
+                if self._stop.is_set():
+                    break
+                if exc.errno == errno.ECONNABORTED:
+                    # A client aborted between poll and accept: recoverable.
+                    continue
+                # The acceptor can no longer serve (EMFILE/ENFILE/EBADF/...).
+                # Retire the socket so readiness probes fail and the next
+                # launch repairs it, instead of leaving a bound-but-dead
+                # socket that reports healthy and hangs every client.
+                _log.warning("Push proxy acceptor failed at %s: %s; retiring",
+                             self.socket_path, exc)
+                self._retire_socket()
                 break
 
             try:
@@ -536,8 +625,11 @@ class PushProxy:
                         "stderr": f"git-proxy: unknown command '{cmd}'\n"}
         conn.sendall((json.dumps(response) + "\n").encode())
 
-    @staticmethod
-    def _check_dangerous_flags(args: list[str], cmd_name: str) -> dict | None:
+    # Long options git will resolve to a program-executing behaviour.
+    _DANGEROUS_GIT_OPTIONS = ("--upload-pack", "--receive-pack", "--exec")
+
+    @classmethod
+    def _check_dangerous_flags(cls, args: list[str], cmd_name: str) -> dict | None:
         """Reject flags that could execute arbitrary programs on the host.
 
         ``--upload-pack``, ``--receive-pack``, and ``--exec`` tell git to
@@ -545,14 +637,23 @@ class PushProxy:
         to /workspace (bind-mounted rw) and reference it here to escape
         the container sandbox.  Block these unconditionally.
 
+        git's option parser accepts any unambiguous *prefix* of a long
+        option, so ``--upl=/workspace/evil.sh`` (and even ``--e=``) is the
+        same escape as ``--upload-pack=…`` and must be rejected too (see
+        :func:`_long_option_match`).  ``--rec…``/``--ref…`` are not
+        prefixes of ``--receive-pack``, so ordinary options still pass.
+
         Returns an error response dict if a dangerous flag is found, or
         None if args are safe.
         """
         for arg in args:
             # Match both --flag=value and --flag (next arg is value)
-            stripped = arg.split("=", 1)[0] if "=" in arg else arg
-            if stripped in ("--upload-pack", "--receive-pack", "--exec"):
-                msg = (f"git-proxy: rejected — '{stripped}' is not allowed "
+            matched = _long_option_match(arg, cls._DANGEROUS_GIT_OPTIONS)
+            if matched is not None:
+                stripped = arg.split("=", 1)[0]
+                shown = (stripped if stripped == matched
+                         else f"{stripped} (abbreviation of {matched})")
+                msg = (f"git-proxy: rejected — '{shown}' is not allowed "
                        f"in {cmd_name} (security restriction)\n")
                 _log.warning("Proxy rejected dangerous flag: %s in %s",
                              stripped, cmd_name)
@@ -631,7 +732,13 @@ class PushProxy:
         before this is called.
         """
         source = caller_workdir or self.workdir
-        cmd = ["git", "-C", source, "push"] + push_args
+        # The workdir is container-writable, and ``git push`` runs the
+        # repo's pre-push hook — a container could drop
+        # ``.git/hooks/pre-push`` and have it execute on the host, which is
+        # exactly the sandbox escape ``_check_dangerous_flags`` exists to
+        # block. Disable hooks (the command-line ``-c`` outranks the repo
+        # config); the proxy needs none of them.
+        cmd = ["git", "-C", source, *_NO_HOOKS, "push"] + push_args
         _log.info("Push proxy push: %s", cmd)
         try:
             result = subprocess.run(
@@ -666,7 +773,9 @@ class PushProxy:
             return danger
 
         workdir = caller_workdir or self.workdir
-        cmd = ["git", git_cmd] + args
+        # ``git pull`` runs repo hooks (e.g. post-merge) from this
+        # container-writable workdir; see ``_NO_HOOKS``.
+        cmd = ["git", *_NO_HOOKS, git_cmd] + args
         _log.info("Git proxy executing read cmd: %s (in %s)", cmd, workdir)
         try:
             result = subprocess.run(
@@ -1278,16 +1387,83 @@ def _start_proxy_subprocess(sock_path: str, workdir: str,
 
     # Wait for the socket to appear and become connectable.  Five seconds
     # covers a slow fork/import without leaving a broken container behind.
-    for _ in range(50):
-        if os.path.exists(sock_path) and proxy_is_alive(sock_path):
-            _log.info("Push proxy subprocess started: pid=%d socket=%s "
-                      "workdir=%s branch=%s",
-                      proc.pid, sock_path, workdir, allowed_branch)
-            return True
-        time.sleep(0.1)
-    _log.warning("Push proxy subprocess (pid=%d) did not become ready "
-                 "at %s within 5s", proc.pid, sock_path)
-    return False
+    # Bound by a real deadline: each probe can block for its 2 s connect
+    # timeout, so a fixed iteration count would hold the caller's locks for
+    # far longer than this reports.  A failed or interrupted launch must not
+    # leave a detached child that can publish its socket after container and
+    # proxy cleanup have already finished, so the child is reaped first.
+    ready = False
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            # Check the child before the socket: a stale socket at the path
+            # (repair path) could still answer while the freshly spawned
+            # child already exited without publishing.
+            if proc.poll() is not None:
+                _log.warning("Push proxy subprocess (pid=%d) exited (rc=%s) "
+                             "before publishing %s",
+                             proc.pid, proc.returncode, sock_path)
+                return False
+            if os.path.exists(sock_path) and proxy_is_alive(sock_path):
+                ready = True
+                _log.info("Push proxy subprocess started: pid=%d socket=%s "
+                          "workdir=%s branch=%s",
+                          proc.pid, sock_path, workdir, allowed_branch)
+                return True
+            time.sleep(0.1)
+        _log.warning("Push proxy subprocess (pid=%d) did not become ready "
+                     "at %s within 5s", proc.pid, sock_path)
+        return False
+    finally:
+        if not ready:
+            _reap_child(proc)
+
+
+def _reap_child(proc: subprocess.Popen) -> None:
+    """Terminate (if still running) and wait for a proxy child that failed."""
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        else:
+            proc.wait(timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+        _log.warning("Push proxy subprocess (pid=%d) could not be reaped",
+                     proc.pid, exc_info=True)
+
+
+@contextlib.contextmanager
+def _discard_if_unpublished(sock_dir: str, fresh: bool,
+                            link: str | None = None):
+    """Remove the socket directory a failed start created, under its lock.
+
+    A start that fails before its daemon publishes (readiness timeout,
+    owner record or stale-socket failure) would otherwise leave an empty
+    directory, its owner record and start lock behind — nothing mounts a
+    directory this start just created, so it is not anyone's to keep.  A
+    directory that existed before (possibly mounted by a live container) is
+    left alone.  The original failure is always re-raised.
+    """
+    try:
+        yield
+    except BaseException:
+        if fresh:
+            sock_path = os.path.join(sock_dir, "push.sock")
+            try:
+                if not proxy_is_alive(sock_path):
+                    _kill_proxy_socket(sock_path, remove_dir=True,
+                                       lock_held=True)
+                    if (link and os.path.islink(link)
+                            and not os.path.exists(link)):
+                        os.unlink(link)
+            except (OSError, ContainerError):
+                _log.warning("Could not discard unpublished push proxy "
+                             "directory %s", sock_dir, exc_info=True)
+        raise
 
 
 def start_push_proxy(container_name: str, workdir: str,
@@ -1334,7 +1510,10 @@ def start_push_proxy(container_name: str, workdir: str,
 
         # Serialise check-and-spawn across processes: two containers on the
         # same workdir must not race unlink→bind and kill each other.
-        with _start_lock(sock_dir):
+        fresh = not os.path.lexists(sock_dir)
+        long_link = f"/tmp/{_SOCKET_DIR_PREFIX}{session_tag}-{pr_id}-{token}"
+        with _start_lock(sock_dir), \
+                _discard_if_unpublished(sock_dir, fresh, long_link):
             # (Re)create the directory and its long-name discovery symlink
             # under the lock.  ``_start_lock`` made the directory; a sweep
             # that ran between the path computation above and this lock can
@@ -1343,6 +1522,13 @@ def start_push_proxy(container_name: str, workdir: str,
             # to sweep — losing it would leak a live proxy past teardown.
             sock_dir = _shared_sock_dir(session_tag, pr_id, token)
             sock_path = os.path.join(sock_dir, "push.sock")
+            # A socket (live or dead) may still be mounted by another
+            # runtime's containers, whose users this process cannot
+            # inventory: never share, repair or re-own it.
+            if not _owner_domain_matches(sock_dir):
+                raise PushProxyError(
+                    "Existing shared push proxy belongs to a different or "
+                    "unverifiable runtime; refusing cross-runtime reuse")
             # Reuse if an existing proxy is alive on this socket
             if os.path.exists(sock_path) and proxy_is_alive(sock_path):
                 meta = _read_metadata(sock_path)
@@ -1386,7 +1572,9 @@ def start_push_proxy(container_name: str, workdir: str,
                         f"stale push proxy metadata at {sock_path} records "
                         f"workdir '{stale_workdir}', not requested "
                         f"'{workdir}' (workdir token collision)")
-            if not _unlink_socket_file(sock_path):
+            with _socket_lifecycle_lock(sock_path):
+                removed = _unlink_socket_file(sock_path)
+            if not removed:
                 # The stale entry cannot be removed, so the daemon could not
                 # bind over it.  Fail as a proxy error naming the path
                 # instead of letting the readiness wait time out (and
@@ -1396,6 +1584,9 @@ def start_push_proxy(container_name: str, workdir: str,
                     f"could not remove stale push proxy socket at {sock_path} "
                     f"(workdir={workdir})")
 
+            # Publish ownership before the daemon exists, so a cleanup pass
+            # can always map this directory back to its session/PR/runtime.
+            _write_owner_file(sock_dir, session_tag, pr_id, workdir)
             if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
                 raise PushProxyError(
                     f"push proxy did not become ready at {sock_path} "
@@ -1416,14 +1607,31 @@ def start_push_proxy(container_name: str, workdir: str,
     sock_path = os.path.join(sock_dir, "push.sock")
     # _start_lock creates the directory and reports an unusable name (a
     # squatted file, a symlink, another user's dir) as a PushProxyError.
-    with _start_lock(sock_dir):
+    fresh = not os.path.lexists(sock_dir)
+    with _start_lock(sock_dir), _discard_if_unpublished(sock_dir, fresh):
+        if not _owner_domain_matches(sock_dir):
+            raise PushProxyError(
+                "Existing unshared push proxy belongs to a different or "
+                "unverifiable runtime; refusing cross-runtime reuse")
+        # A renamed allocation can still mount this name's directory; a
+        # fresh start must not replace a socket another allocation uses.
+        # (A directory with no socket or owner record was never published.)
+        if ((os.path.lexists(sock_path)
+             or os.path.lexists(os.path.join(sock_dir, _OWNER_FILE)))
+                and unshared_proxy_in_use(sock_path)):
+            raise PushProxyError(
+                f"Push proxy directory for '{container_name}' is still "
+                f"mounted by another allocation")
         # Remove stale socket before spawning (see above for why we handle
         # the directory-at-the-socket-path case).
-        if not _unlink_socket_file(sock_path):
+        with _socket_lifecycle_lock(sock_path):
+            removed = _unlink_socket_file(sock_path)
+        if not removed:
             raise PushProxyError(
                 f"could not remove stale push proxy socket at {sock_path} "
                 f"(workdir={workdir})")
 
+        _write_owner_file(sock_dir, "", "", workdir)
         if not _start_proxy_subprocess(sock_path, workdir, allowed_branch):
             raise PushProxyError(
                 f"push proxy did not become ready at {sock_path} "
@@ -1441,9 +1649,23 @@ def start_push_proxy(container_name: str, workdir: str,
     return sock_path
 
 
+# While set, every proxy _kill_proxy_socket() stops is appended (by socket
+# directory), so a caller removing containers can report the proxies that
+# went with them (their release paths differ: unshared, shared, legacy).
+stopped_proxy_sink: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "stopped_proxy_sink", default=None)
+
+
 def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
-                       lock_held: bool = False) -> bool:
+                       lock_held: bool = False,
+                       expected_identity: tuple[int, int, int] | None = None
+                       ) -> bool:
     """Stop a subprocess proxy by removing its socket (triggers exit).
+
+    With *expected_identity* only that captured socket generation is
+    stopped: a replacement bound at the same path since is left alone (and
+    reported as not stopped).  A socket that is already gone still has its
+    ownership metadata retired — callers hold the launch/user guards.
 
     Returns True when the socket was stopped, False when the path was
     refused (a non-proxy directory, a foreign-owned directory, a discovery
@@ -1493,25 +1715,43 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             return False
     except OSError:
         pass  # already gone — the unlinks below are no-ops
-    # Docker creates a *directory* at a bind-mounted socket path that did
-    # not exist (older pm versions mounted the socket file itself).  A
-    # container can also make the entry unremovable; the helper reports
-    # that instead of raising, so one bad directory cannot abort a sweep.
-    stopped = _unlink_socket_file(sock_path)
-    # Metadata describes the daemon we just stopped.  If the socket could
-    # not be removed the daemon is still serving it, so leave its sidecar.
-    if stopped:
-        try:
-            os.unlink(os.path.join(real_dir, _METADATA_NAME))
-        except OSError:
-            pass
+    # Whether this call removed anything: a concurrent release of the same
+    # proxy (two of its containers reaped in parallel) finds it gone and
+    # must not report it stopped a second time.
+    removed_any = False
+    with _socket_lifecycle_lock(sock_path):
+        if expected_identity is not None:
+            current = _socket_identity(sock_path)
+            if current is not None and current != expected_identity:
+                return False
+        existed = os.path.lexists(sock_path)
+        # Docker creates a *directory* at a bind-mounted socket path that did
+        # not exist (older pm versions mounted the socket file itself).  A
+        # container can also make the entry unremovable; the helper reports
+        # that instead of raising, so one bad directory cannot abort a sweep.
+        stopped = _unlink_socket_file(sock_path)
+        removed_any = existed and stopped
+        # Metadata describes the daemon we just stopped, and the ownership
+        # record says who may release it.  If the socket could not be removed
+        # the daemon is still serving it, so keep both for a retry.  They are
+        # retired under the same path lock, so a replacement cannot publish
+        # between these operations.
+        if stopped:
+            for meta in (_METADATA_NAME, _OWNER_FILE):
+                try:
+                    os.unlink(os.path.join(real_dir, meta))
+                    removed_any = True
+                except OSError:
+                    pass
     if not remove_dir:
+        _report_stopped(sock_dir, removed_any)
         return stopped
     # Clean up the real directory and its start lock.  The rmdir can fail: a
     # container writes into the bind-mounted socket directory, and an
     # unremovable socket or sidecar stays behind too.
     try:
         os.rmdir(real_dir)
+        removed_any = True
     except OSError:
         pass
     # Remove the long-name discovery link only when its directory is gone.
@@ -1534,105 +1774,906 @@ def _kill_proxy_socket(sock_path: str, remove_dir: bool = True,
             pass
     else:
         _clear_lock_file(real_dir + ".lock")
+    _report_stopped(sock_dir, removed_any)
     return stopped
 
 
-def _stop_shared_proxy_socket(key: str, sock_dir: str,
-                              sock_path: str) -> None:
-    """Unlink a shared proxy's socket once no container references it.
+def _report_stopped(sock_dir: str, removed_any: bool) -> None:
+    sink = stopped_proxy_sink.get()
+    if sink is not None and removed_any:
+        sink.append(sock_dir)
 
-    Runs under the per-directory start lock so a concurrent
-    :func:`start_push_proxy` that just reused (and re-referenced) this
-    socket cannot have it unlinked from under it — the same S18 failure
-    (a container left pointing at a dead socket) through a different
-    door.  When the lock is busy, or a reference reappeared, the socket
-    is left for session teardown, exactly like any other unreferenced
-    proxy.
+
+def _legacy_shared_sock_dir_path(session_tag: str, pr_id: str) -> str:
+    """Socket directory of a shared proxy from before workdir keying.
+
+    Containers created then still mount it, so cleanup must keep finding
+    (and releasing) these directories.  Pure computation.
     """
-    # A socket directory derived from the key is never legitimately a
-    # symlink, so one planted at its name in world-writable /tmp must not be
-    # followed: _start_lock would resolve it and create/lock ``<target>.lock``
-    # at a path another user chose.  Unlink the link (never its target) and
-    # leave the directory to the sweep.  The same guard _stop_socket_under_lock
-    # applies before taking the lock.
-    if _drop_foreign_discovery_link(sock_dir):
-        return
-    if not os.path.isdir(sock_dir):
-        return  # nothing on disk left to stop
+    long_name = f"{session_tag}-{pr_id}"
+    long_dir = f"/tmp/{_SOCKET_DIR_PREFIX}{long_name}"
+    if len(f"{long_dir}/push.sock") <= 107:
+        return long_dir
+    dir_hash = hashlib.sha256(long_name.encode()).hexdigest()[:16]
+    return f"/tmp/{_SOCKET_DIR_PREFIX}{dir_hash}"
+
+
+def _pr_dir_candidates(session_tag: str, pr_id: str) -> list[str]:
+    """Socket directories a (session, PR) pair may own, found by name.
+
+    Workdir-keyed directories with readable names, plus the pre-keying
+    directory.  Hashed workdir-keyed directories have no readable name; they
+    are found through their owner record (:func:`list_shared_proxies`).
+    """
+    base = f"/tmp/{_SOCKET_DIR_PREFIX}{glob.escape(session_tag)}-{glob.escape(pr_id)}"
+    found = set(glob.glob(base + "-" + "[0-9a-f]" * 16))
+    found.add(_legacy_shared_sock_dir_path(session_tag, pr_id))
+    return sorted(found)
+
+
+def _read_owner(sock_dir: str) -> tuple[str, dict | None]:
+    """Read a socket directory's ownership record.
+
+    Returns ``("missing", None)`` when there is none (a legacy directory),
+    ``("invalid", None)`` when one exists but cannot be trusted, else
+    ``("ok", record)``.  The directory is bind-mounted *writable* into
+    containers, so — like :func:`_read_metadata` — never follow a symlink,
+    never block on a planted FIFO, and only read a bounded regular file.
+    An unreadable or malformed record is never reinterpreted as a missing
+    legacy one.
+    """
+    path = os.path.join(sock_dir, _OWNER_FILE)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return "missing", None
+    except OSError:
+        return "invalid", None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > _METADATA_MAX_BYTES:
+            return "invalid", None
+        with os.fdopen(fd, encoding="utf-8") as f:
+            fd = -1  # fdopen owns it now
+            data = json.loads(f.read(_METADATA_MAX_BYTES))
+    except (OSError, ValueError):
+        return "invalid", None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    return ("ok", data) if isinstance(data, dict) else ("invalid", None)
+
+
+def runtime_domain() -> dict | None:
+    """Identify the runtime storage this process can actually inventory.
+
+    An empty inventory is meaningful only for proxies created in this domain.
+    Legacy owners or unavailable runtime info must never authorize a sweep.
+    """
+    from pm_core import container as cm
+    try:
+        result = cm._run_runtime("info", "--format", "{{json .}}",
+                                 check=False, timeout=10)
+        if result.returncode != 0:
+            return None
+        info = json.loads(result.stdout)
+        runtime = cm._get_runtime()
+        if "podman" in runtime:
+            store = info.get("store") or info.get("Store") or {}
+            host = info.get("host") or info.get("Host") or {}
+            graph = store.get("graphRoot") or store.get("GraphRoot")
+            run = store.get("runRoot") or store.get("RunRoot")
+            hostname = host.get("hostname") or host.get("Hostname")
+            if not (graph and run and hostname):
+                return None
+            return {"runtime": "podman", "graph_root": graph, "run_root": run,
+                    "hostname": hostname,
+                    "endpoint": os.environ.get("CONTAINER_HOST", ""),
+                    "connection": os.environ.get("CONTAINER_CONNECTION", "")}
+        daemon = info.get("ID") or info.get("Id")
+        return {"runtime": "docker", "daemon_id": daemon} if daemon else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError, TypeError):
+        return None
+
+
+def _owner_domain_matches(sock_dir: str) -> bool:
+    """Known foreign domains cannot share or release one another's sockets."""
+    status, owner = _read_owner(sock_dir)
+    if status == "missing":
+        return True  # legacy direct lifecycle behavior
+    if status != "ok":
+        return False  # unreadable existing metadata is not proof of legacy ownership
+    domain = owner.get("runtime_domain")
+    if domain is None:
+        return "runtime_domain" not in owner  # only pre-domain records are legacy
+    from pm_core.container_reaper import _runtime_domain
+    return domain == _runtime_domain()
+
+
+def _write_owner_file(sock_dir: str, session_tag: str, pr_id: str,
+                      workdir: str) -> None:
+    """Record a proxy's runtime and, for shared proxies, its session/PR.
+
+    Hashed socket dirs can't be mapped back to their tag/PR by name; the
+    reaper reads this to decide whether any container still needs the proxy.
+    Unshared proxies use empty session/PR fields and are not globally swept.
+    The temp file comes from ``mkstemp`` (see :func:`_write_metadata` for
+    why a predictable name in this container-writable directory is unsafe).
+    """
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    if domain is None:
+        raise PushProxyError("Cannot record push proxy owner: runtime identity unavailable")
+    temporary = None
+    try:
+        fd, temporary = tempfile.mkstemp(dir=sock_dir, prefix=".owner-")
+        with os.fdopen(fd, "w") as stream:
+            json.dump({"session_tag": session_tag, "pr_id": pr_id,
+                       "workdir": workdir, "runtime_domain": domain}, stream)
+        os.replace(temporary, Path(sock_dir, _OWNER_FILE))
+        temporary = None
+    except OSError as exc:
+        raise PushProxyError(f"Cannot record push proxy owner in {sock_dir}: {exc}") from exc
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+
+
+_LEGACY_NAME_RE = re.compile(
+    rf"{re.escape(_SOCKET_DIR_PREFIX)}(.+)-(pr-[0-9a-f]+)(?:-([0-9a-f]{{16}}))?$")
+
+
+def list_shared_proxies() -> list[dict]:
+    """Shared proxy socket dirs on disk.
+
+    Each entry: ``session_tag``, ``pr_id``, ``token`` (the workdir token, or
+    None for a directory from before workdir keying), ``sock_dir`` and
+    ``sock_path`` (both resolved), ``link`` (the long discovery name, when
+    the directory is hashed) and ``runtime_domain``.
+
+    Entries whose owner can't be determined are skipped (left alone), as are
+    planted discovery links, foreign-owned directories and directories whose
+    location does not match the identity they claim.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    parent = os.path.realpath("/tmp")
+    for d in sorted(glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}*")):
+        if d.endswith(".lock") or _is_foreign_discovery_link(d):
+            continue
+        real = os.path.realpath(d)
+        if real in seen or not os.path.isdir(real) or not _is_proxy_dir(real, parent):
+            continue
+        try:
+            if os.stat(real).st_uid != os.getuid():
+                continue
+        except OSError:
+            continue
+        status, owner = _read_owner(real)
+        if status == "invalid":
+            # An unreadable or malformed record is not a missing legacy one:
+            # fabricating an owner from the directory name would report (and
+            # let a future caller act on) an identity nobody verified.
+            continue
+        if status == "missing":
+            # Legacy dir without owner file: only the readable long name
+            # (the dir itself, or the symlink to a hashed dir) says whose it
+            # is.  A per-container proxy dir (``pm-push-proxy-<container
+            # name>``, e.g. an untagged ``pm-impl-pr-…``) has the same shape
+            # but serves only its own container — never treat it as shared.
+            from pm_core.container import parse_container_name
+            base = os.path.basename(d)
+            owner = None
+            if parse_container_name(base[len(_SOCKET_DIR_PREFIX):]) is None:
+                m = _LEGACY_NAME_RE.match(base)
+                if m:
+                    owner = {"session_tag": m.group(1), "pr_id": m.group(2)}
+        if not isinstance(owner, dict):
+            continue
+        tag, pr_id = owner.get("session_tag"), owner.get("pr_id")
+        if not (isinstance(tag, str) and tag and isinstance(pr_id, str) and pr_id):
+            continue
+        # The directory must sit where its claimed identity puts it, so a
+        # record copied (or planted) elsewhere cannot steer a release.
+        token = None
+        workdir = owner.get("workdir")
+        if isinstance(workdir, str) and workdir:
+            candidate = _workdir_token(workdir)
+            if os.path.realpath(_shared_sock_dir_path(tag, pr_id, candidate)) == real:
+                token = candidate
+        if token is None and status == "missing":
+            m = _LEGACY_NAME_RE.match(os.path.basename(d))
+            if m and m.group(3) and os.path.realpath(
+                    _shared_sock_dir_path(tag, pr_id, m.group(3))) == real:
+                token = m.group(3)
+        if token is None and os.path.realpath(
+                _legacy_shared_sock_dir_path(tag, pr_id)) != real:
+            continue
+        link = None
+        for candidate in (f"/tmp/{_SOCKET_DIR_PREFIX}{tag}-{pr_id}"
+                          + (f"-{token}" if token else ""),):
+            if os.path.islink(candidate) and os.path.realpath(candidate) == real:
+                link = candidate
+        seen.add(real)
+        out.append({"session_tag": tag, "pr_id": pr_id, "token": token,
+                    "sock_dir": real, "sock_path": os.path.join(real, "push.sock"),
+                    "link": link, "runtime_domain": owner.get("runtime_domain")})
+    return out
+
+
+def proxy_key(proxy: dict) -> str:
+    """Stable display/failure key for a :func:`list_shared_proxies` entry."""
+    key = f"{proxy['session_tag']}/{proxy['pr_id']}"
+    return f"{key}/{proxy['token']}" if proxy.get("token") else key
+
+
+def proxy_key_dir(key: str) -> str | None:
+    """Socket directory a :func:`proxy_key` names, or None for other keys.
+
+    Pure computation, so it still answers after the directory is gone. A
+    ``tag/pr`` key is from before workdir keying and names the legacy dir.
+    """
+    parts = key.split("/")
+    if len(parts) == 3 and all(parts):
+        return _shared_sock_dir_path(*parts)
+    if len(parts) == 2 and all(parts):
+        return _legacy_shared_sock_dir_path(*parts)
+    return None
+
+
+PROXY_RELEASED = "released"      # stopped (or already absent): nothing pending
+PROXY_IN_USE = "in-use"          # a live container still needs it (definitive)
+PROXY_UNAVAILABLE = "unavailable"  # runtime inventory unreadable: retry later
+PROXY_UNDETERMINED = "undetermined"  # not evaluated: busy lock / foreign owner
+
+
+def _socket_dir_mounts(info: dict) -> set[str]:
+    return {os.path.realpath(mount.get("Source", ""))
+            for mount in info.get("Mounts") or []
+            if mount.get("Destination") == _CONTAINER_SOCKET_DIR}
+
+
+def _inspect_batch(names: list[str]) -> list[dict] | None:
+    """Inspect every one of *names* in a single runtime call.
+
+    Returns None when the batch cannot be trusted (one of them vanished
+    since the inventory, a malformed or incomplete answer); the caller then
+    falls back to one inspect per name, which tells absence from failure.
+    A timeout is raised: retrying name by name would only wait longer.
+    """
+    from pm_core import container as cm
+    try:
+        result = cm._run_runtime("inspect", *names, check=False, timeout=30)
+        if result.returncode != 0:
+            return None
+        rows = json.loads(result.stdout)
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(rows, list) or len(rows) != len(names)
+            or not all(isinstance(row, dict) for row in rows)):
+        return None
+    return rows
+
+
+def _mounted_socket_dirs(names: set[str]) -> set[str] | None:
+    """Real paths of the socket directories *names* bind-mount; None when unknown.
+
+    Each workdir (every QA scenario clone) has its own socket directory, so
+    a release checks directories against all of the PR's other containers.
+    That runs under the PR's proxy lock, which launches and the other
+    releases wait on: one batched inspect for the whole set (shared by every
+    directory one decision evaluates) instead of one per container and
+    directory keeps a large run-end release from queueing the lock past its
+    timeout.
+    """
+    ordered = sorted(names)
+    mounted: set[str] = set()
+    try:
+        rows = _inspect_batch(ordered) if len(ordered) > 1 else None
+        if rows is not None:
+            for info in rows:
+                mounted |= _socket_dir_mounts(info)
+            return mounted
+        for name in ordered:
+            try:
+                info = _proxy_container_info(name)
+            except ContainerError:
+                return None
+            if info is not None:  # None: removed since the inventory
+                mounted |= _socket_dir_mounts(info)
+    except subprocess.TimeoutExpired:
+        return None
+    except (AttributeError, TypeError):
+        return None
+    return mounted
+
+
+def _release_shared_dir(proxy: dict, users: set[str], sibling_dirs: int,
+                        mounted_dirs=None) -> str:
+    """Release one shared socket directory unless a container still needs it.
+
+    Caller holds the PR's cross-process proxy lock.  *users* are the PR's
+    containers (any state).  When this is the PR's only socket directory
+    every user mounts it, so any user keeps it; otherwise the users' actual
+    mounts decide (an implementation container must not pin each QA clone's
+    proxy, nor a QA clone the implementation proxy).  *mounted_dirs*
+    returns those mounts (see :func:`_mounted_socket_dirs`), so one decision
+    over several directories inspects the users once.
+    """
+    sock_dir, sock_path = proxy["sock_dir"], proxy["sock_path"]
+    if not _owner_domain_matches(sock_dir):
+        return PROXY_UNDETERMINED
+    if users:
+        if sibling_dirs <= 1:
+            return PROXY_IN_USE
+        mounted = (mounted_dirs() if mounted_dirs is not None
+                   else _mounted_socket_dirs(users))
+        if mounted is None:
+            return PROXY_UNAVAILABLE
+        if os.path.realpath(sock_dir) in mounted:
+            return PROXY_IN_USE
+    # The start lock keeps a concurrent start of this exact directory (which
+    # may not have created its container yet) from losing its socket.
     with _start_lock(sock_dir, blocking=False) as locked:
         if not locked:
-            _log.info("Proxy start in flight; leaving socket for teardown: "
-                      "%s", sock_path)
+            return PROXY_UNDETERMINED
+        tag, pr_id, token = proxy["session_tag"], proxy["pr_id"], proxy.get("token")
+        key = (_shared_proxy_key(tag, pr_id, token) if token
+               else f"{tag}\0{pr_id}")
+        with _proxy_lock:
+            for cname in _proxy_refs.pop(key, set()):
+                _container_to_proxy_key.pop(cname, None)
+            _active_proxies.pop(key, None)
+        if not _kill_proxy_socket(sock_path, remove_dir=True, lock_held=True):
+            # Keep the ownership record (the kill does) so the next pass
+            # finds this proxy and retries; report it rather than claim a
+            # release while the daemon still serves the socket.
+            raise PushProxyError(f"could not remove push proxy socket {sock_path}")
+        if os.path.isdir(sock_dir) and not os.path.islink(sock_dir):
+            # A container can leave entries in the bind-mounted directory,
+            # so the plain rmdir fails.  No container uses it any more (the
+            # runtime said so under the PR's proxy lock), so remove it whole.
+            shutil.rmtree(sock_dir, ignore_errors=True)
+            if os.path.lexists(sock_dir):
+                _log.warning("Proxy directory %s survived removal; keeping "
+                             "its discovery link", sock_dir)
+    link = proxy.get("link")
+    if link and os.path.islink(link) and not os.path.lexists(sock_dir):
+        try:
+            os.unlink(link)
+        except OSError:
+            pass
+    _log.info("Stopped unused shared push proxy for %s", proxy_key(proxy))
+    return PROXY_RELEASED
+
+
+def release_proxy_decision(session_tag: str, pr_id: str,
+                           exclude: "set[str] | frozenset[str]" = frozenset(),
+                           sock_dir: str | None = None) -> str:
+    """Classify (and release when unused) a PR's shared proxies.
+
+    With *sock_dir* only that socket directory is evaluated; otherwise every
+    directory of the (session, PR) pair is, and the least settled answer is
+    returned.  ``PROXY_IN_USE`` is a *definitive* answer from the runtime
+    (any container, any state, any pm process), checked under the
+    cross-process proxy lock that ``create_container`` holds from proxy
+    start until its container exists — so a concurrent launch can't lose its
+    proxy.  Only ``IN_USE`` and ``RELEASED`` say there is no pending work;
+    ``UNAVAILABLE`` must stay retryable and ``UNDETERMINED`` (lock busy,
+    foreign/unreadable owner record) is neither a release nor proof of use,
+    so callers must not clear an earlier failure for it.
+    """
+    from pm_core import container as container_mod
+    # A socket directory derived from a key is never legitimately a foreign
+    # link: one planted in world-writable /tmp is unlinked (never followed).
+    if sock_dir is not None and _drop_foreign_discovery_link(sock_dir):
+        return PROXY_UNDETERMINED
+    with container_mod.proxy_lock(session_tag, pr_id, timeout=30) as locked:
+        if not locked:
+            return PROXY_UNDETERMINED
+        dirs = [p for p in list_shared_proxies()
+                if p["session_tag"] == session_tag and p["pr_id"] == pr_id]
+        targets = dirs
+        if sock_dir is not None:
+            real = os.path.realpath(sock_dir)
+            targets = [p for p in dirs if p["sock_dir"] == real]
+            if not targets and os.path.isdir(real):
+                # A directory exists but this pass cannot attribute it (an
+                # unreadable or foreign owner record): neither released nor
+                # proof of use.
+                return PROXY_UNDETERMINED
+        if sock_dir is None:
+            # A directory of this PR whose owner record is unreadable or
+            # malformed is not listed; it is neither released nor proof of
+            # use, so say so instead of reporting nothing left to do.
+            listed = {p["sock_dir"] for p in dirs}
+            if any(os.path.isdir(d) and not _is_foreign_discovery_link(d)
+                   and os.path.realpath(d) not in listed
+                   for d in _pr_dir_candidates(session_tag, pr_id)):
+                if not targets:
+                    return PROXY_UNDETERMINED
+                unattributed = True
+            else:
+                unattributed = False
+        else:
+            unattributed = False
+        if not targets:
+            return PROXY_RELEASED
+        users = container_mod.containers_for_pr(session_tag, pr_id)
+        if users is None:
+            return PROXY_UNAVAILABLE
+        users = users - set(exclude)
+        mounts: list = []
+
+        def mounted_dirs() -> set[str] | None:
+            if not mounts:
+                mounts.append(_mounted_socket_dirs(users))
+            return mounts[0]
+
+        decisions = [_release_shared_dir(p, users, len(dirs), mounted_dirs)
+                     for p in targets]
+        if unattributed:
+            decisions.append(PROXY_UNDETERMINED)
+    for decision in (PROXY_UNAVAILABLE, PROXY_UNDETERMINED, PROXY_IN_USE):
+        if decision in decisions:
+            return decision
+    return PROXY_RELEASED
+
+
+def release_proxy_if_unused(session_tag: str, pr_id: str,
+                            exclude: "set[str] | frozenset[str]" = frozenset(),
+                            sock_dir: str | None = None) -> bool | None:
+    """Stop the shared (session, PR) proxy if no container still uses it.
+
+    Returns True when stopped, False when still in use (or this pass could not
+    evaluate it: busy lock, foreign/unreadable owner record), None when the
+    runtime couldn't be queried (nothing done).  See
+    :func:`release_proxy_decision` for the exact classification.
+    """
+    decision = release_proxy_decision(session_tag, pr_id, exclude, sock_dir)
+    if decision == PROXY_RELEASED:
+        return True
+    if decision == PROXY_UNAVAILABLE:
+        return None
+    return False
+
+
+def _proxy_container_info(name: str) -> dict | None:
+    """Read authoritative proxy mounts, distinguishing absence from failed inspection."""
+    from pm_core import container as cm
+    try:
+        result = cm._run_runtime("inspect", name, check=False, timeout=10)
+        if result.returncode != 0:
+            if cm._container_absent(result.stderr or ""):
+                return None
+            raise ContainerError(f"Cannot inspect mounted push proxy for '{name}'")
+        rows = json.loads(result.stdout)
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            raise ValueError("incomplete container mount inspection")
+        return rows[0]
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as exc:
+        raise ContainerError(f"Cannot inspect mounted push proxy for '{name}': {exc}") from exc
+
+
+def validate_shared_proxy_mount(name: str, session_tag: str, pr_id: str,
+                                workdir: str) -> None:
+    """Do not repair an unrelated host socket while reusing an old allocation."""
+    from pm_core import container as cm
+    info = _proxy_container_info(name)
+    try:
+        if info is None:
+            raise ValueError("container absent")
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        if labels.get(cm.LABEL_MANAGED) == "1" and (
+                labels.get(cm.LABEL_SESSION) != session_tag or labels.get(cm.LABEL_PR) != pr_id):
+            raise ValueError("container belongs to a different session/PR")
+        expected = os.path.realpath(
+            _shared_sock_dir_path(session_tag, pr_id, _workdir_token(workdir)))
+        mounts = [m for m in info.get("Mounts") or []
+                  if m.get("Destination") == _CONTAINER_SOCKET_DIR]
+        if len(mounts) == 1 and os.path.realpath(mounts[0].get("Source", "")) == \
+                os.path.realpath(_legacy_shared_sock_dir_path(session_tag, pr_id)):
+            # *name* is the immutable id; give the user a runnable command.
+            current = str(info.get("Name") or name).lstrip("/")
+            raise ValueError("it mounts a push proxy directory from before "
+                             "workdir-keyed proxies; once no session uses it, "
+                             f"remove it ('{cm._get_runtime()} rm -f {current}') "
+                             "so the next launch recreates it")
+        if len(mounts) != 1 or os.path.realpath(mounts[0].get("Source", "")) != expected:
+            raise ValueError("shared socket directory is missing or belongs to another allocation")
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ContainerError(f"Cannot verify mounted push proxy for '{name}': {exc}") from exc
+
+
+def mounted_unshared_proxy(name: str) -> tuple[str, str, str] | None:
+    """Resolve the authoritative unshared mount, even when its socket is absent."""
+    from pm_core import container as cm
+    try:
+        info = _proxy_container_info(name)
+        if info is None:
+            return None
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        current_name = (info.get("Name") or name).lstrip("/")
+        parsed = cm.parse_container_name(current_name)
+        if labels.get(cm.LABEL_MANAGED) != "1" and parsed is None:
+            return None
+        managed = labels.get(cm.LABEL_MANAGED) == "1"
+        session_tag = labels.get(cm.LABEL_SESSION) if managed else parsed.session_tag
+        pr_id = labels.get(cm.LABEL_PR) if managed else parsed.pr_id()
+        if session_tag and pr_id:
+            return None  # shared sockets are released through runtime-user checks
+        for mount in info.get("Mounts") or []:
+            source = Path(mount.get("Source", ""))
+            if (mount.get("Destination") != _CONTAINER_SOCKET_DIR
+                    or not source.name.startswith(_SOCKET_DIR_PREFIX + cm.CONTAINER_PREFIX)):
+                continue
+            path = str(source / "push.sock")
+            original_name = source.name[len(_SOCKET_DIR_PREFIX):]
+            current_name = (info.get("Name") or name).lstrip("/")
+            return original_name, path, current_name
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, AttributeError) as exc:
+        raise ContainerError(f"Cannot inspect mounted push proxy for '{name}': {exc}") from exc
+    return None
+
+
+def capture_unshared_proxy(name: str) -> tuple[str, str, tuple[int, int, int], str] | None:
+    """Capture the mounted socket generation before deleting its container."""
+    mount = mounted_unshared_proxy(name)
+    if mount is None:
+        return None
+    original, path, current = mount
+    try:
+        st = os.stat(path)
+        identity = (st.st_dev, st.st_ino, st.st_ctime_ns)
+    except FileNotFoundError:
+        identity = (0, 0, 0)  # mount is authoritative even without a socket
+    except OSError as exc:
+        # An unverifiable socket generation cannot authorize cleanup. Defer
+        # removal with a classified error (retried later) instead of unlinking
+        # a socket we cannot identify or, worse, reporting success while
+        # stranding the socket and its proxy daemon.
+        raise ContainerError(
+            f"Cannot capture the mounted push proxy generation at {path}: "
+            f"{exc}") from exc
+    return original, path, identity, current
+
+
+def repair_unshared_proxy(name: str, workdir: str, allowed_branch: str) -> str:
+    """Repair the socket actually mounted by an existing allocation."""
+    from pm_core import container as cm
+    mount = mounted_unshared_proxy(name)
+    if mount is None:
+        raise ContainerError(f"Cannot verify mounted push proxy for '{name}'")
+    original, path, current = mount
+    sock_dir = str(Path(path).parent)
+    if not _owner_domain_matches(sock_dir):
+        raise PushProxyError("Existing unshared push proxy belongs to a different or "
+                             "unverifiable runtime; refusing cross-runtime reuse")
+    guard = (cm.launch_lock(original, timeout=0) if original != current
+             else contextlib.nullcontext(True))
+    with guard as locked:
+        if not locked:
+            raise ContainerError(f"Push proxy owner '{original}' is being launched")
+        with _start_lock(sock_dir):
+            if not proxy_is_alive(path):
+                if original != current and cm.current_container_id(original) != "":
+                    raise ContainerError(f"Cannot repair another allocation's proxy '{original}'")
+                _write_owner_file(sock_dir, "", "", workdir)
+                if not _start_proxy_subprocess(path, workdir, allowed_branch):
+                    raise PushProxyError(
+                        f"push proxy did not become ready at {path} "
+                        f"(workdir={workdir}, branch={allowed_branch})")
+        return path
+
+
+def _unshared_release_path(proxy) -> Path:
+    from pm_core import container as cm, container_reaper
+    key = hashlib.sha256(json.dumps(
+        [container_reaper._runtime_domain(), proxy], sort_keys=True).encode()).hexdigest()
+    return cm.container_state_dir() / "proxy-releases" / f"{key}.json"
+
+
+def defer_unshared_release(proxy, name: str = "") -> Path:
+    """Persist socket identity before attempting post-removal cleanup."""
+    from pm_core import container as cm, container_reaper
+    domain = container_reaper._runtime_domain()
+    if domain is None:
+        raise ContainerError("Cannot record unshared proxy release: runtime domain unknown; "
+                             "preserving container for cleanup retry")
+    path = _unshared_release_path(proxy)
+    labels = {}
+    if name:
+        try:
+            inspected = cm._run_runtime("inspect", name, check=False, timeout=10)
+            if inspected.returncode != 0:
+                raise ContainerError(f"Cannot record proxy ownership for '{name}'")
+            rows = json.loads(inspected.stdout)
+            if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+                raise ValueError("incomplete container inspection")
+            labels = (rows[0].get("Config") or {}).get("Labels") or {}
+            if not isinstance(labels, dict):
+                labels = {}
+        except (OSError, subprocess.TimeoutExpired, ValueError, TypeError,
+                AttributeError) as exc:
+            # Callers expect ContainerError from a failed removal; a raw probe
+            # timeout or malformed inspection would bypass their retry path.
+            raise ContainerError(
+                f"Cannot record proxy ownership for '{name}': {exc}") from exc
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".release-")
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump({"proxy": proxy, "runtime_domain": domain,
+                           "session_tag": labels.get("pm.session_tag"),
+                           "pr_id": labels.get("pm.pr_id")}, stream)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+    except OSError as exc:
+        # The record must exist before the container is deleted; a full or
+        # unwritable state dir defers removal (preserving the allocation for a
+        # retry) and must not escape as a raw OSError.
+        raise ContainerError(
+            f"Cannot record unshared proxy release: {exc}") from exc
+    return path
+
+
+def retry_unshared_releases(scope, failures: dict[str, str]) -> list[str]:
+    """Retry only captured, domain-bound releases; never sweep arbitrary sockets."""
+    from pm_core import container as cm, container_reaper
+    domain = container_reaper._runtime_domain()
+    released = []
+    if domain is None:
+        return released
+    for record in (cm.container_state_dir() / "proxy-releases").glob("*.json"):
+        key = f"unshared {record.stem}"
+        try:
+            data = json.loads(record.read_text())
+        except (OSError, ValueError) as exc:
+            # A record we cannot parse names no allocation we could release.
+            # Reporting it as a retryable failure would leave `pm container
+            # reap` failing on every pass with no way to clear it.
+            _log.warning("ignoring unreadable push-proxy release record %s: %s",
+                         record, exc)
+            continue
+        proxy = data.get("proxy") if isinstance(data, dict) else None
+        if not (isinstance(proxy, (list, tuple)) and len(proxy) == 4):
+            _log.warning("ignoring malformed push-proxy release record %s", record)
+            continue
+        original, path, identity, current = proxy
+        if not (isinstance(original, str) and isinstance(path, str)
+                and isinstance(current, str)
+                and isinstance(identity, (list, tuple)) and len(identity) == 3
+                and all(isinstance(part, int) and not isinstance(part, bool)
+                        for part in identity)):
+            _log.warning("ignoring malformed push-proxy release record %s", record)
+            continue
+        try:
+            if data.get("runtime_domain") != domain:
+                continue
+            parsed = cm.parse_container_name(original)
+            if scope.names is not None and not {original, current} & scope.names:
+                continue
+            tag = data.get("session_tag") or (parsed.session_tag if parsed else None)
+            pr_id = data.get("pr_id") or (parsed.pr_id() if parsed else None)
+            if scope.session_tag and tag != scope.session_tag:
+                continue
+            if scope.pr_id and pr_id != scope.pr_id:
+                continue
+            with cm.launch_lock(current, timeout=0) as locked:
+                if not locked:
+                    failures[f"push proxy {key}"] = "unshared proxy cleanup deferred: owner lock busy"
+                    continue
+                # Even if the socket was replaced, never inspect/delete by a
+                # stale name without checking the captured socket generation.
+                current_identity = _socket_identity(path)
+                # A missing socket does not retire owner.json. Retry the
+                # guarded metadata cleanup too, rather than losing the request.
+                same = current_identity is None or current_identity == tuple(identity)
+                if same:
+                    owner = cm.current_container_id(current)
+                    if owner is None:
+                        raise ContainerError("unshared proxy cleanup deferred: owner identity unknown")
+                    # Reusing the captured name does not imply using this
+                    # socket: a renamed replacement may mount a distinct proxy.
+                    # The locked release helper checks actual mounted users.
+                    if not release_captured_unshared_proxy((original, path, tuple(identity), current)):
+                        failures[f"push proxy {key}"] = "unshared proxy cleanup deferred: another owner or launch remains"
+                        continue
+                record.unlink(missing_ok=True)
+                released.append(key)
+        except Exception as exc:
+            failures[f"push proxy {key}"] = str(exc)
+    return released
+
+
+def unshared_proxy_in_use(path: str) -> bool:
+    """A renamed allocation may still mount another name's socket directory."""
+    from pm_core import container as cm
+    # Do not filter by source volume: Podman 3.x only promises volume names
+    # and mount destinations, which can omit bind-mounted users of this path.
+    try:
+        listing = cm._run_runtime("ps", "-aq", check=False, timeout=30)
+        if listing.returncode != 0:
+            raise ContainerError("Cannot inventory mounted push proxy users")
+        ids = listing.stdout.split()
+        if not ids:
+            return False
+        inspected = cm._run_runtime("inspect", "--format", "{{json .Mounts}}",
+                                    *ids, check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Removal callers expect ContainerError from a failed cleanup and retry
+        # it; a raw probe timeout would escape after the container was already
+        # removed and be reported as an unrelated failure.
+        raise ContainerError(
+            f"Cannot inventory mounted push proxy users: {exc}") from exc
+    rows = inspected.stdout.splitlines()
+    if inspected.returncode != 0 or len(rows) != len(ids):
+        raise ContainerError("Cannot inspect mounted push proxy users")
+    directory = os.path.realpath(str(Path(path).parent))
+    try:
+        for row in rows:
+            mounts = json.loads(row)
+            if mounts is None:
+                # Go renders a container with no explicit mounts as ``null``
+                # (Podman), not ``[]``. Treat it as empty rather than failing
+                # the whole inventory — one such container would otherwise make
+                # every unshared-proxy cleanup retry fail permanently.
+                continue
+            if not isinstance(mounts, list):
+                raise ValueError("invalid mounts")
+            if any(os.path.realpath(mount.get("Source", "")) == directory
+                   for mount in mounts):
+                return True
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ContainerError("Cannot inspect mounted push proxy users") from exc
+    return False
+
+
+def release_captured_unshared_proxy(
+        proxy: tuple[str, str, tuple[int, int, int], str]) -> bool:
+    """Release a captured mount without stealing its original name's proxy."""
+    from pm_core import container as cm
+    original_name, path, identity, current_name = proxy
+    if not _owner_domain_matches(str(Path(path).parent)):
+        return False
+
+    def _kill() -> None:
+        # The container was already removed, so a socket/owner-file failure
+        # must stay a classified, retryable cleanup error (the durable release
+        # record is preserved) rather than escape as a raw OSError that the
+        # caller would report as a failed removal of a container that is gone.
+        try:
+            stopped = _kill_proxy_socket(path, expected_identity=identity)
+        except OSError as exc:
+            raise ContainerError(
+                f"Cannot release push proxy socket at {path}: {exc}") from exc
+        if not stopped and _socket_identity(path) == tuple(identity):
+            # Still the captured socket: it could not be removed (a replaced
+            # one is not ours and is correctly left alone).
+            raise ContainerError(f"Cannot release push proxy socket at {path}")
+
+    if original_name == current_name:
+        # The caller already holds this allocation's launch lock. Its socket
+        # may nevertheless remain mounted by a previously renamed allocation.
+        if unshared_proxy_in_use(path):
+            return False
+        _kill()
+        return True
+    # Rename gives the old pathname a second potential owner. Serialize with
+    # launch of the original name, and do not trust a socket captured after a
+    # replacement has already published it. Never wait while holding the other
+    # allocation's lock (two renamed allocations could otherwise deadlock).
+    with cm.launch_lock(original_name, timeout=0) as locked:
+        if not locked:
+            return False
+        current = cm.current_container_id(original_name)
+        if current is None:
+            raise ContainerError(f"Cannot verify proxy owner '{original_name}' after removal")
+        # A separately created allocation can be renamed onto the original
+        # name while mounting its own distinct proxy. The locked name check
+        # excludes unknown identity; actual mounts decide whether this captured
+        # directory still has users, including any original-name replacement.
+        if unshared_proxy_in_use(path):
+            return False
+        _kill()
+        return True
+
+
+def forget_unshared_proxy(container_name: str, socket_path: str) -> None:
+    """Drop local bookkeeping without touching an allocation's mounted socket."""
+    with _proxy_lock:
+        if (_container_to_proxy_key.get(container_name) == container_name
+                and _active_proxies.get(container_name) == socket_path):
+            _container_to_proxy_key.pop(container_name, None)
+            _active_proxies.pop(container_name, None)
+
+
+def _stop_unshared_proxy(container_name: str) -> None:
+    """Stop a per-container proxy once no allocation still mounts it.
+
+    A per-container proxy (no session tag or PR, e.g. qa-debug or legacy
+    untagged containers) serves only its own container, but a renamed
+    allocation may still mount this name's directory.
+    """
+    sock_dir = os.path.join(tempfile.gettempdir(),
+                            f"{_SOCKET_DIR_PREFIX}{container_name}")
+    sock_path = os.path.join(sock_dir, "push.sock")
+    # A per-container socket directory is never legitimately a symlink, so
+    # one planted at its name in world-writable /tmp must not be followed:
+    # _start_lock would resolve it and create/lock ``<target>.lock`` at a
+    # path another user chose.  Unlink the link (never its target).
+    if _drop_foreign_discovery_link(sock_dir):
+        return
+    if not os.path.isdir(sock_dir) or os.path.islink(sock_dir):
+        return  # nothing on disk left to stop
+    # A concurrent start of this container's proxy owns the socket until it
+    # releases the lock.
+    with _start_lock(sock_dir, blocking=False) as locked:
+        if not locked:
             return
         with _proxy_lock:
-            if _proxy_refs.get(key):
-                _log.info("Proxy re-referenced during stop; leaving it: %s",
-                          sock_path)
-                return
-        _kill_proxy_socket(sock_path, remove_dir=False)
+            if container_name in _container_to_proxy_key:
+                return  # re-registered by a concurrent start
+            _active_proxies.pop(container_name, None)
+        if not _owner_domain_matches(sock_dir):
+            return
+        if ((os.path.lexists(sock_path)
+             or os.path.lexists(os.path.join(sock_dir, _OWNER_FILE)))
+                and unshared_proxy_in_use(sock_path)):
+            return
+        # lock_held=True: we own this directory's start lock, so the lock
+        # file must be unlinked here (the LOCK_NB probe in _clear_lock_file
+        # would see our own lock and skip it).
+        _kill_proxy_socket(sock_path, remove_dir=True, lock_held=True)
 
 
 def stop_push_proxy(container_name: str) -> None:
     """Stop and clean up the push proxy for a container.
 
-    For shared proxies the proxy is only stopped when the last container
-    referencing it is removed, and the socket *directory* is kept so any
-    container still bind-mounting it survives (a later start recreates the
-    socket in place).  Session teardown removes the directories.
+    For shared proxies the proxy is only stopped when no container — in this
+    process or any other — still uses its socket directory (see
+    :func:`release_proxy_if_unused`); in-process references only say *this*
+    process still has users.  When the runtime can't be queried, keep the
+    proxy for a later reconcile.
     """
     with _proxy_lock:
         key = _container_to_proxy_key.pop(container_name, None)
-        if key is None:
-            return
-
-        shared = "\0" in key
-        # Shared proxy path — decrement refcount
-        if shared:
+        local_refs_left = False
+        if key is not None and "\0" in key:
             refs = _proxy_refs.get(key)
             if refs is not None:
                 refs.discard(container_name)
-                if refs:
-                    return  # Other containers still using this proxy
-                del _proxy_refs[key]
+                local_refs_left = bool(refs)
+                if not refs:
+                    del _proxy_refs[key]
 
-        _active_proxies.pop(key, None)
+    if key is None:
+        # Not started by this process — derive the shared key from the name.
+        from pm_core.container import parse_container_name
+        parsed = parse_container_name(container_name)
+        pid = parsed.pr_id() if parsed else None
+        if parsed and parsed.session_tag and pid:
+            release_proxy_if_unused(parsed.session_tag, pid)
+        _stop_unshared_proxy(container_name)
+        return
 
-    # Derive the socket path from the key and remove it to stop the
-    # subprocess proxy (the __main__ loop exits when socket disappears).
-    if shared:
+    if "\0" in key:
+        if local_refs_left:
+            return  # this process still has a container on the proxy
         parts = key.split("\0")
         if len(parts) != 3:
             return  # malformed key — nothing safe to derive
         stag, pid, token = parts
-        sock_dir = _shared_sock_dir_path(stag, pid, token)
-        sock_path = os.path.join(sock_dir, "push.sock")
-        _stop_shared_proxy_socket(key, sock_dir, sock_path)
-    else:
-        # Legacy key = container_name
-        sock_dir = os.path.join(tempfile.gettempdir(),
-                                 f"{_SOCKET_DIR_PREFIX}{key}")
-        sock_path = os.path.join(sock_dir, "push.sock")
-        # A per-container socket directory is never legitimately a symlink,
-        # so one planted at its name in world-writable /tmp must not be
-        # followed: _start_lock would resolve it and create/lock
-        # ``<target>.lock`` at a path another user chose.  Unlink the link
-        # (never its target); the directory sweep handles the rest.
-        if _drop_foreign_discovery_link(sock_dir):
-            return
-        if not os.path.isdir(sock_dir):
-            return  # nothing on disk left to stop
-        # Same guard as the shared path: a concurrent start of this
-        # container's proxy owns the socket until it releases the lock.
-        with _start_lock(sock_dir, blocking=False) as locked:
-            if not locked:
-                return
-            with _proxy_lock:
-                if container_name in _container_to_proxy_key:
-                    return  # re-registered by a concurrent start
-            # lock_held=True: we own this directory's start lock, so the
-            # lock file must be unlinked here (the LOCK_NB probe in
-            # _clear_lock_file would see our own lock and skip it).
-            _kill_proxy_socket(sock_path, remove_dir=True, lock_held=True)
+        # Local references cannot prove that another process has no users.
+        # Unknown runtime inventory leaves the shared proxy for a later pass.
+        release_proxy_if_unused(stag, pid,
+                                sock_dir=_shared_sock_dir_path(stag, pid, token))
+        return
+
+    # Legacy key = container_name: this proxy serves only this container.
+    _stop_unshared_proxy(key)
 
 
 def _is_proxy_dir(path: str, parent: str) -> bool:
@@ -1792,9 +2833,16 @@ def stop_all_proxies() -> None:
 
 
 def stop_session_proxies(session_tag: str) -> int:
-    """Stop all push proxies belonging to a session.
+    """Release unused shared proxies for this exact session/runtime.
 
-    Returns the number of proxies stopped.
+    Session container removal can fail or race a new launch. Never unlink its
+    sockets unconditionally afterwards; the locked runtime inventory is the
+    authority, not the caller's earlier cleanup result or local references.
+    Per-container proxies are released by their container's removal.
+
+    Returns the number of proxies stopped.  A hashed socket directory is
+    reachable through two spellings (its discovery link and the hashed
+    path); :func:`list_shared_proxies` collapses them, so each is counted once.
     """
     prefix = f"{session_tag}\0"
     with _proxy_lock:
@@ -1807,46 +2855,31 @@ def stop_session_proxies(session_tag: str) -> int:
             for cname in _proxy_refs.pop(k, set()):
                 _container_to_proxy_key.pop(cname, None)
 
-    # Candidate sockets: the on-disk glob (works after a restart, when the
-    # registry is empty) plus paths derived from this process's keys (works
-    # even when the long-name symlink is missing — the hashed directory does
-    # not match the ``{tag}-*`` glob, so a lost symlink would otherwise leak
-    # a live proxy past teardown).
-    #
-    # The tag is escaped: it is derived from a directory name, so it may
-    # contain glob metacharacters.  Unescaped, a tag like ``repo[1]-abcd``
-    # would match nothing of its own (leaking its proxies past teardown) and
-    # could match — and delete — another session's ``repo1-abcd-…`` directory.
-    pattern = f"/tmp/{_SOCKET_DIR_PREFIX}{glob.escape(session_tag)}-*"
-    socks = set(glob.glob(pattern + "/push.sock"))
-    for k in keys_to_remove:
-        parts = k.split("\0")
-        if len(parts) == 3:
-            socks.add(os.path.join(_shared_sock_dir_path(*parts), "push.sock"))
+    # A long discovery name pointing anywhere but its own hashed directory
+    # was planted (or is stale): unlink the link itself, never its target.
+    # The tag is escaped: it may contain glob metacharacters.
+    for path in glob.glob(f"/tmp/{_SOCKET_DIR_PREFIX}{glob.escape(session_tag)}-*"):
+        _drop_foreign_discovery_link(path)
 
-    # Kill sockets matching the session tag.  A directory whose start lock
-    # is held is left alone: a container is creating that proxy right now,
-    # and the dir sweep below will leave it for the next teardown.
-    #
-    # A hashed socket directory is reachable through two spellings — the
-    # long-name discovery symlink (the glob) and the hashed path (the
-    # registry) — and both resolve to the same socket.  Collapse them by
-    # real directory first: otherwise a directory that survives the first
-    # stop (a container can leave an entry in the bind mount, so the
-    # per-socket rmdir fails) is stopped — and counted — a second time.
-    seen_dirs: set[str] = set()
+    from pm_core.container_reaper import _runtime_domain, runtime_domain_scope
     count = 0
-    for sock in sorted(socks):
-        real_dir = os.path.realpath(os.path.dirname(sock))
-        if real_dir in seen_dirs:
-            continue
-        seen_dirs.add(real_dir)
-        if _stop_socket_under_lock(sock):
-            count += 1
-
-    # Remove directories even when their socket was already stopped (shared
-    # stops keep the directory for live container mounts).
-    _remove_proxy_dirs(pattern)
+    with runtime_domain_scope():
+        domain = _runtime_domain()
+        if domain is None:
+            return 0
+        for proxy in list_shared_proxies():
+            # Unknown/legacy domains are preserved: this runtime's empty
+            # inventory says nothing about another runtime's users.
+            if (proxy["session_tag"] != session_tag
+                    or proxy.get("runtime_domain") != domain):
+                continue
+            try:
+                if release_proxy_if_unused(session_tag, proxy["pr_id"],
+                                           sock_dir=proxy["sock_dir"]):
+                    count += 1
+            except ContainerError:
+                _log.warning("Could not release session proxy %s",
+                             proxy_key(proxy), exc_info=True)
 
     if count:
         _log.info("Stopped %d session proxy(ies) for %s", count, session_tag)
@@ -1971,14 +3004,17 @@ if __name__ == "__main__":
 
     _sock, _workdir, _branch = _sys.argv[1], _sys.argv[2], _sys.argv[3]
     proxy = PushProxy(_sock, _workdir, _branch)
+
+    # Install handlers before publishing a usable socket: callers may stop or
+    # replace the daemon as soon as its readiness probe succeeds.
+    import signal as _signal
+    _stop = threading.Event()
+    _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
+    _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
     if not proxy.start():
         # Another daemon already serves this socket; do not steal it.
         _sys.exit(0)
 
     # Block until the socket is removed/replaced or we get a signal
-    import signal as _signal
-    _stop = threading.Event()
-    _signal.signal(_signal.SIGTERM, lambda *_: _stop.set())
-    _signal.signal(_signal.SIGINT, lambda *_: _stop.set())
     _wait_for_socket_exit(proxy, _stop)
     proxy.stop()

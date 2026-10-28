@@ -1,0 +1,1069 @@
+"""Queued QA work releases settled allocations rather than accumulating them."""
+
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from pm_core import container_reaper, hook_events, qa_loop, tmux
+
+
+
+def _as_hit(fn):
+    """Adapt a verdict-string stub to ``find_verdict_turn`` (pr-8efa789)."""
+    from pm_core.verdict_transcript import VerdictHit
+
+    def hit(*args):
+        verdict = fn(*args)
+        return VerdictHit(verdict, verdict) if verdict else None
+    return hit
+
+@pytest.mark.parametrize("verify", [False, True])
+@pytest.mark.parametrize("failed_second", [False, True])
+def test_queue_releases_completed_containers_before_next_launch(
+        tmp_path, monkeypatch, verify, failed_second):
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 5)
+    ]
+    live = set()
+    peak = 0
+    launched = []
+    released = []
+
+    def launch(scenario):
+        nonlocal peak
+        launched.append(scenario.index)
+        if failed_second and scenario.index == 2:
+            qa_loop._record_launch_failure(state, scenario, "runtime unavailable")
+            return
+        live.add(scenario.index)
+        peak = max(peak, len(live))
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])
+
+    def release(state, session, *, scenarios=None, kept_indices=None):
+        for scenario in scenarios or state.scenarios:
+            if scenario.index not in live:
+                continue
+            assert state.scenario_verdicts[scenario.index] == qa_loop.VERDICT_PASS
+            if verify:
+                assert scenario.index in state.verified_scenarios
+            live.remove(scenario.index)
+            released.append(scenario.index)
+        return False
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 12, "queued launch failures must not strand the remaining queue"
+
+    class ImmediateThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: verify)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    # The queued-launch path re-clamps only when container-max-running is
+    # configured; keep this test off the host's real setting and inventory.
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_verify_single_scenario",
+                        lambda *a, **k: (True, "verified", "%99"))
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, use_containers=True)
+
+    assert launched == [1, 2, 3, 4]
+    assert peak == 1
+    assert 1 in released and 3 in released
+    if failed_second:
+        assert 2 not in state.scenario_verdicts
+        assert qa_loop._is_launch_failure(state, 2)
+
+
+def test_unknown_running_count_does_not_disable_the_cap(monkeypatch):
+    """An unavailable inventory must not read as "zero running containers".
+
+    ``running_container_count`` returns None when the runtime cannot be
+    inventoried — exactly the pressure the cap protects against.  Treating
+    that as 0 launched a full batch.  Clamping to one still starts queued
+    work and re-clamps on the next poll.
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    assert qa_loop._clamp_to_container_headroom(4) == 1
+    assert qa_loop._clamp_to_container_headroom(0) == 1
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
+    assert qa_loop._clamp_to_container_headroom(4) == 3
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 3)
+    assert qa_loop._clamp_to_container_headroom(4) == 1
+
+
+def test_poll_reclamps_container_headroom_before_a_queued_launch(
+        tmp_path, monkeypatch):
+    """The poll re-clamps the batch with a fresh count before each launch.
+
+    A cap clamped at run start from an unreadable inventory is one; leaving it
+    there would serialize the rest of the run after the runtime recovered.
+    """
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 3)
+    ]
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])
+    reclamps = []
+
+    def reclamp(cap):
+        reclamps.append(cap)
+        return 1
+
+    class ImmediateThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(qa_loop, "_clamp_to_container_headroom", reclamp)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 12, "the verdict poll must terminate"
+
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None, kept_indices=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, use_containers=True)
+
+    assert reclamps, "the poll must re-clamp with a fresh running count"
+    assert launched == [1, 2]
+
+
+def test_unlimited_cap_costs_no_inventory_per_launch(monkeypatch):
+    """The default (container-max-running=0) path performs no inventory."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 0)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: pytest.fail("no inventory expected"))
+    assert qa_loop._container_headroom_cap(3) == 3
+
+
+def test_reclamp_grows_a_reduced_batch_back_to_the_desired_size(monkeypatch):
+    """Re-clamping the already-clamped batch could only keep or lower it.
+
+    A batch reduced to one by an unreadable inventory (or a momentarily full
+    runtime) must grow back to the run's batch once slots are free, otherwise
+    the rest of the run stays serialized.
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 0)
+    assert qa_loop._container_headroom_cap(1, desired=4) == 4
+    assert qa_loop._container_headroom_cap(1, desired=0) == 4  # unlimited desired
+    # No desired batch (older callers): unchanged behaviour.
+    assert qa_loop._container_headroom_cap(1) == 1
+
+
+def test_poll_reclamps_from_the_desired_batch_not_the_clamped_one(
+        tmp_path, monkeypatch):
+    """The poll re-clamps the total batch from the run's original size.
+
+    The run starts with ``concurrency_cap=1`` (an unreadable inventory clamps
+    to one) and ``desired_cap=3``. With one worker running the fresh headroom
+    is ``limit - running = 3`` more, so the total batch is the desired 3 and a
+    queued scenario launches. Re-clamping the already-clamped ``1`` could only
+    keep or lower it, so the run would stay serialized.
+    """
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 3)
+    ]
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])
+
+    class ImmediateThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    # The one running container is this run's active worker.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
+    # Spy on the re-clamp: the batch reaching the cap check must be recomputed
+    # from the desired size, not left at the start-time clamped value.
+    real_room = qa_loop._container_launch_room_known
+    reclamps: list[tuple[int | None, int, int]] = []
+
+    def _spy(cap, desired=None, active=0, own=()):
+        result = real_room(cap, desired=desired, active=active, own=own)
+        reclamps.append((desired, active, result[0]))
+        return result
+
+    monkeypatch.setattr(qa_loop, "_container_launch_room_known", _spy)
+    # Settled s1's container is gone by then: only the active worker runs.
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: [
+        container_reaper.ContainerInfo(name="pm-t-qa-pr-aaaa-L-s2", running=True)])
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 12, "the verdict poll must terminate"
+
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None, kept_indices=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=3, use_containers=True)
+
+    # concurrency_cap started at 1 (unreadable inventory), but the fresh
+    # headroom (limit 4, 1 running) makes the total batch 3, so the queued
+    # scenario launches instead of the run staying serialized.
+    assert launched == [1, 2]
+    assert reclamps, "the poll must re-clamp with a fresh running count"
+    assert reclamps[0][0] == 3, "the re-clamp starts from the desired batch"
+    assert reclamps[0][2] == 3, "one active worker + 3 headroom = the desired batch"
+
+
+def test_reclamp_counts_this_runs_active_workers_as_headroom(monkeypatch):
+    """``container-max-running`` counts this run's workers, so the batch is
+    ``active + remaining headroom`` — not the headroom compared to ``active``.
+
+    Comparing ``active`` directly to the headroom would stall a capped run at
+    roughly half the configured concurrency.
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    # Three running containers, all this run's active workers: one slot left.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 3)
+    assert qa_loop._container_headroom_cap(1, desired=4, active=3) == 4
+    # A momentarily full runtime leaves no room to launch.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 4)
+    assert qa_loop._container_headroom_cap(1, desired=4, active=2) == 2
+    # Unknown inventory still launches one at a time.
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    assert qa_loop._container_headroom_cap(4, desired=4, active=2) == 1
+
+
+@pytest.mark.parametrize("verdict", ["PASS", "NEEDS_WORK", "INPUT_REQUIRED"])
+def test_resume_does_not_relaunch_settled_scenarios(tmp_path, monkeypatch, verdict):
+    scenario = qa_loop.QAScenario(
+        index=1, title="done", focus="", window_name="qa-s1", pane_id="%1",
+        session_id="completed-worker")
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [scenario]
+    state.scenario_verdicts = {1: verdict}
+    state.verified_scenarios.add(1)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: False)
+    monkeypatch.setattr(qa_loop.time, "sleep", lambda seconds: None)
+    relaunch = MagicMock(return_value=False)
+    monkeypatch.setattr(qa_loop, "_relaunch_scenario_window", relaunch)
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json", lambda: None)
+    relaunch.assert_not_called()
+    assert state.scenario_verdicts == {1: verdict}
+
+
+def test_failed_settled_release_is_retried_so_the_batch_grows_back(
+        tmp_path, monkeypatch):
+    """A settled worker whose release failed (e.g. during an inventory outage)
+    is retried on a later poll rather than only at run end.
+
+    ``container-max-running`` counts every running pm container, including
+    this run's settled-but-unreleased workers. Marking a failed release as
+    done left those containers counted against the headroom for the rest of
+    the run, so after the runtime recovered the re-clamp kept the queue
+    serialized (one worker at a time) instead of growing back.
+    """
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 6)
+    ]
+    running = set()      # containers the runtime still runs (this run only)
+    launched = []
+    outage = {"polls_left": 2}
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        running.add(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    for sc in state.scenarios[:2]:
+        launch(sc)
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        if outage["polls_left"] > 0:
+            return True  # deferred: inventory unreadable, containers survive
+        for sc in scenarios:
+            running.discard(sc.index)
+        return False
+
+    # Workers 1 and 2 settle on the first poll; later workers stay verdictless
+    # so the run's progress is decided by how far the batch grows back.
+    verdict_for = {1: "PASS", 2: "PASS"}
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        outage["polls_left"] -= 1
+        if ticks >= 6:
+            state.stop_requested = True
+
+    def inventory():
+        if outage["polls_left"] > 0:
+            return None  # the outage: the runtime cannot be listed
+        return [container_reaper.ContainerInfo(
+            name=f"pm-t-qa-pr-aaaa-L-s{i}", running=True) for i in sorted(running)]
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 2)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: None if (inv := inventory()) is None else len(inv))
+    monkeypatch.setattr(container_reaper, "list_containers", inventory)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(
+        qa_loop, "find_verdict_turn",
+        _as_hit(lambda path, *a: verdict_for.get(int(Path(path).stem[1:]))))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[2:],
+        concurrency_cap=2, desired_cap=2, use_containers=True)
+
+    # While the inventory is unreadable the release is deferred and the
+    # unknown count admits one queued worker (the outage floor). Once the retried release succeeds,
+    # the batch grows back to the desired two active workers.
+    assert running.isdisjoint({1, 2}), "the deferred release must be retried in-run"
+    assert launched == [1, 2, 3, 4]
+
+
+def test_outage_admits_one_floor_launch_not_one_per_settled_worker(
+        tmp_path, monkeypatch):
+    """QA S59 story 3: an inventory outage that starts with the runtime full.
+
+    A's s1-s4 + B fill container-max-running=5 when the inventory becomes
+    unreadable. Releases need the same inventory, so each settled worker keeps
+    running. The unknown count admits one floor launch (s5, L+1 = 6, qa.md
+    resolution 19). Before the fix, s5's own settlement admitted s6 as another
+    floor launch while every earlier release was still deferred: 7 = L+2.
+    After recovery the deferred releases complete and the batch grows back.
+    """
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 9)
+    ]
+    running = set()      # this run's containers the runtime still runs
+    launched = []
+    outage = {"polls_left": 5}
+    peak = {"outage": 0, "after": 0}
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        running.add(scenario.index)
+        key = "outage" if outage["polls_left"] > 0 else "after"
+        peak[key] = max(peak[key], 1 + len(running))  # + B's held container
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    for sc in state.scenarios[:4]:
+        launch(sc)  # s1-s4 + B = 5 = L when the outage starts
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        if outage["polls_left"] > 0:
+            return True  # deferred: the inventory is unreadable
+        for sc in scenarios:
+            running.discard(sc.index)
+        return False
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        outage["polls_left"] -= 1
+        if ticks >= 14:
+            state.stop_requested = True
+
+    def inventory():
+        if outage["polls_left"] > 0:
+            return None
+        return _running(B_IMPL, *(f"pm-t-qa-pr-aaaa-L-s{i}" for i in sorted(running)))
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: None if (inv := inventory()) is None else len(inv))
+    monkeypatch.setattr(container_reaper, "list_containers", inventory)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn",
+                        _as_hit(lambda path, *a: "PASS"))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[4:],
+        concurrency_cap=4, desired_cap=4, use_containers=True)
+
+    assert peak["outage"] == 6, peak       # one floor launch: L+1, never L+2
+    assert peak["after"] <= 5, peak
+    assert launched == list(range(1, 9)), "the queue drains after recovery"
+    assert not running, "every deferred release completed after recovery"
+
+
+def test_outage_counts_containers_kept_for_a_human_as_held(
+        tmp_path, monkeypatch):
+    """An outage admits one floor launch; a settled worker kept for a human
+    (INPUT_REQUIRED) keeps running, so it must hold the queue like a deferred
+    release. Before the fix the kept worker counted as released: every
+    INPUT_REQUIRED settlement admitted another blind launch (L+2, L+3...)."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 5)
+    ]
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])  # s1 + others fill container-max-running
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        for sc in scenarios:  # every settled worker awaits a human: kept
+            kept_indices.add(sc.index)
+        return False
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 12:
+            state.stop_requested = True
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: None)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn",
+                        _as_hit(lambda path, *a: "INPUT_REQUIRED"))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=4, use_containers=True)
+
+    assert launched == [1, 2], "one floor launch, then wait for the inventory"
+
+
+def _running(*names):
+    return [container_reaper.ContainerInfo(name=n, id=f"id-{n}", running=True)
+            for n in names]
+
+
+A_WORKERS = [f"pm-a-qa-pr-aaaa-L-s{i}" for i in range(17, 21)]
+B_IMPL = "pm-a-impl-pr-bbbb"
+C1, C2 = "pm-c-qa-pr-cccc-L-s1", "pm-c-qa-pr-cccc-L-s2"
+
+
+def test_a_retained_container_consumes_launch_capacity(monkeypatch):
+    """QA S51: A's 4 workers + B + C s1 (INPUT_REQUIRED, kept for a human)
+    filled container-max-running=5 and C still launched s2 as its
+    at-least-one floor, peaking at 7 = L+2. A retained container is not
+    permission to launch past the limit: C's s2 waits for room."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    inventory = _running(*A_WORKERS, B_IMPL, C1)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: inventory)
+
+    batch, held = qa_loop._container_launch_room(1, desired=4, active=0, own={C1})
+    assert held == 1
+    assert 0 + held >= batch, "C must not launch s2 into a full runtime"
+
+    # Once A's workers are gone there is room again, and C launches.
+    inventory = _running(B_IMPL, C1)
+    batch, held = qa_loop._container_launch_room(1, desired=4, active=0, own={C1})
+    assert (batch, held) == (4, 1) and 0 + held < batch
+
+
+def test_a_run_holding_nothing_keeps_its_floor_launch(monkeypatch):
+    """The floor still admits one launch into a full runtime (L+1) for a run
+    with no container of its own, so a fresh run is never starved."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_reaper, "list_containers",
+                        lambda: _running(*A_WORKERS, B_IMPL))
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 5)
+    assert qa_loop._container_launch_room(1, desired=4, active=0) == (1, 0)
+    # A settled scenario whose container is already released holds nothing.
+    assert qa_loop._container_launch_room(
+        1, desired=4, active=0, own={C1}) == (1, 0)
+
+
+def test_poll_defers_a_queued_launch_behind_a_retained_container(
+        tmp_path, monkeypatch):
+    """QA S51 end to end in the verdict poll: C s1 settles INPUT_REQUIRED and
+    keeps its container; with the runtime full, s2 stays queued (no launch),
+    and it launches once another process's workers free room."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-cccc")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-c-qa-pr-cccc-L-s{i}")
+        for i in (1, 2)
+    ]
+    others = list(A_WORKERS) + [B_IMPL]
+    running = []          # this run's containers still running
+    launched = []
+    polls = {"n": 0, "peak": 0}
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        running.append(scenario.container_name)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(state.scenarios[0])
+
+    def tick(_seconds):
+        polls["n"] += 1
+        polls["peak"] = max(polls["peak"], len(others) + len(running))
+        if polls["n"] == 4:
+            del others[:4]  # A's workers finish and are released
+        if polls["n"] >= 8:
+            state.stop_requested = True
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        return False  # INPUT_REQUIRED is kept for a human: nothing removed
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 5)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: len(others) + len(running))
+    monkeypatch.setattr(container_reaper, "list_containers",
+                        lambda: _running(*others, *running))
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(
+        qa_loop, "find_verdict_turn",
+        _as_hit(lambda path, *a: "INPUT_REQUIRED" if Path(path).stem == "s1" else None))
+    
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-c", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=4, use_containers=True)
+
+    assert state.scenario_verdicts.get(1) == "INPUT_REQUIRED"
+    assert launched == [1, 2], "s2 launches once room is free"
+    assert C1 in running, "the retained container is preserved"
+    # s1's floor launch into the full runtime is L+1 = 6; s2 never ran
+    # alongside A4 + B + the retained s1 (the observed L+2 = 7).
+    assert polls["peak"] == 6, polls
+
+
+def test_queued_scenarios_stay_queued_on_the_dashboard_during_launches(
+        tmp_path, monkeypatch):
+    """Launch-time status writes keep the not-yet-launched queue visible.
+
+    The launchers rewrite the dashboard while workers prepare. Without the
+    run's queued set those writes dropped the "queued" label (and the initial
+    batch's write dropped the queued scenarios entirely) until a verdict
+    happened to rewrite the status.
+    """
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 5)
+    ]
+    seen = []
+
+    def launch(st, *a, _status_scenarios=None, _queued_indices=None, **k):
+        seen.append(([s.index for s in _status_scenarios], set(_queued_indices)))
+        sc = st.scenarios[0]
+        sc.window_name = f"qa-s{sc.index}"
+        sc.pane_id = f"%{sc.index}"
+        sc.session_id = f"sid-{sc.index}"
+        sc.transcript_path = str(tmp_path / f"s{sc.index}.jsonl")
+        state.scenario_verdicts[sc.index] = "PASS"
+
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 0)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", lambda s: None)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None, kept_indices=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers", launch)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+    
+    state.scenarios[0].window_name = "qa-s1"
+    state.scenarios[0].pane_id = "%1"
+    state.scenarios[0].session_id = "sid-1"
+    state.scenarios[0].transcript_path = str(tmp_path / "s1.jsonl")
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, use_containers=True)
+
+    assert seen == [([1, 2, 3, 4], {3, 4}), ([1, 2, 3, 4], {4}),
+                    ([1, 2, 3, 4], set())]
+
+
+def _info(name, running=True):
+    return container_reaper.ContainerInfo(name=name, id=f"id-{name}", running=running)
+
+
+def test_other_runs_dequeued_launch_counts_before_its_container_exists(monkeypatch):
+    """S90: two QA runs in one PM process. Run A has dequeued s8 (8 running
+    → 9) but its container does not exist yet; run B's headroom check must not
+    see 8 and fill the same slot (10 = L+1 with neither making a floor launch).
+    """
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 9)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 8)
+    listed = [_info(f"pm-t-other-{i}") for i in range(8)]
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: list(listed))
+    # Without a reservation, B (2 active) may grow to 3.
+    assert qa_loop._container_launch_room_known(2, desired=4, active=2) == (3, 0, True)
+    token = qa_loop._reserve_launches(["pm-t-qa-pr-a-L-s8"])
+    try:
+        batch, held, known = qa_loop._container_launch_room_known(2, desired=4, active=2)
+        assert (batch, held, known) == (2, 0, True), "A's in-flight launch is in use"
+        assert qa_loop._clamp_to_container_headroom(4) == 1
+        # Once A's container exists it is counted once, not twice.
+        listed.append(_info("pm-t-qa-pr-a-L-s8"))
+        monkeypatch.setattr(container_mod, "running_container_count", lambda: 9)
+        assert qa_loop._container_launch_room_known(2, desired=4, active=2)[0] == 2
+    finally:
+        qa_loop._release_launches(token)
+    assert qa_loop._inflight_launches == {}
+    # A run holding nothing still gets its single floor launch into a full runtime.
+    assert qa_loop._container_launch_room_known(1, desired=4, active=0)[0] == 1
+
+
+def test_unreadable_inventory_counts_every_reservation(monkeypatch):
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: None)
+    token = qa_loop._reserve_launches(["a", "b"])
+    try:
+        assert qa_loop._inflight_unlisted() == 2
+    finally:
+        qa_loop._release_launches(token)
+    assert qa_loop._inflight_unlisted() == 0
+
+
+def test_reservation_listed_but_not_running_still_counts(monkeypatch):
+    """A reserved name the inventory lists as created (``run`` in progress)
+    or as a stale exited allocation is not in the running count yet, so it
+    must still count as in flight."""
+    listed = [_info("created", running=False), _info("up")]
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: list(listed))
+    token = qa_loop._reserve_launches(["created", "up", "absent"])
+    try:
+        assert qa_loop._inflight_unlisted() == 2
+        assert qa_loop._inflight_unlisted(listed) == 2
+    finally:
+        qa_loop._release_launches(token)
+
+
+def test_queued_launch_reserves_its_name_only_while_creating(tmp_path, monkeypatch):
+    """The poll reserves the dequeued scenario's container name before the
+    launch starts and releases it once the launch returns (also on failure)."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa", loop_id="L", session_tag="t")
+    state.scenarios = [qa_loop.QAScenario(index=i, title=f"s{i}", focus="")
+                       for i in range(1, 3)]
+    seen = []
+
+    def launch(st, *a, **k):
+        scenario = st.scenarios[0]
+        seen.append(set().union(*qa_loop._inflight_launches.values()))
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    launch(MagicMock(scenarios=[state.scenarios[0]]))
+    seen.clear()
+
+    class ImmediateThread:
+        def __init__(self, target, args, **kwargs):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 4)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: 1)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: [])
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        assert ticks < 12, "the verdict poll must terminate"
+
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, *, scenarios=None, kept_indices=None: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers", launch)
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", _as_hit(lambda *a: "PASS"))
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios[1:],
+        concurrency_cap=1, desired_cap=2, use_containers=True)
+
+    assert seen == [{container_mod.qa_container_name("pr-aaaa", "L", 2, session_tag="t")}]
+    assert qa_loop._inflight_launches == {}
+
+
+@pytest.mark.parametrize("holds", [True, False])
+def test_resumed_poll_does_not_repeat_the_outage_floor_launch(
+        tmp_path, monkeypatch, holds):
+    """S90: the pre-restart poll made the outage's one floor launch (F) and F
+    settled during the outage; a breadcrumb restart then resumed the run with
+    H kept for a human and the other releases deferred. The resumed poll had
+    no record of the floor launch and made another one (L2+2). A resumed poll
+    holding settled or kept containers waits for a readable inventory; one
+    that holds nothing still gets its single floor launch."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state._resumed = True
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 5)
+    ]
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    if holds:
+        for sc in state.scenarios[:3]:
+            launch(sc)
+        # H (s1) waits for a human; s2 and the floor worker s3 settled PASS.
+        state.scenario_verdicts = {1: "INPUT_REQUIRED", 2: "PASS", 3: "PASS"}
+        queued = state.scenarios[3:]
+    else:
+        queued = state.scenarios
+    launched.clear()
+
+    def release(st, session, *, scenarios=None, kept_indices=None):
+        for sc in scenarios:
+            if st.scenario_verdicts.get(sc.index) == "INPUT_REQUIRED":
+                kept_indices.add(sc.index)
+        return True  # the inventory is unreadable: cleanup deferred
+
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        if ticks >= 8:
+            state.stop_requested = True
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 8)
+    monkeypatch.setattr(container_mod, "running_container_count", lambda: None)
+    monkeypatch.setattr(container_reaper, "list_containers", lambda: None)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers", release)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    # Running workers report nothing new.
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=queued,
+        concurrency_cap=1, desired_cap=3, use_containers=True)
+
+    if holds:
+        assert launched == [], "no second floor launch while holding containers"
+    else:
+        assert launched == [1], "a run holding nothing keeps its floor launch"
+
+
+@pytest.mark.parametrize("other_run_floor", [True, False])
+def test_two_runs_share_one_outage_floor_launch(tmp_path, monkeypatch,
+                                                other_run_floor):
+    """S93: two QA runs in one TUI during an inventory outage at a full runtime.
+    Both drained to no active worker while their settled workers' releases
+    were deferred, and each made its own floor launch: 10 = L+2. The floor is
+    one per process (qa.md resolution 35): once another run made this
+    outage's floor launch, this run waits for a readable inventory, and the
+    first readable inventory frees the floor again."""
+    from pm_core import container as container_mod
+    state = qa_loop.QALoopState(pr_id="pr-aaaa")
+    state.scenarios = [
+        qa_loop.QAScenario(index=i, title=f"s{i}", focus="",
+                           container_name=f"pm-t-qa-pr-aaaa-L-s{i}")
+        for i in range(1, 4)
+    ]
+    logged = []
+    monkeypatch.setattr(qa_loop._log, "info",
+                        lambda msg, *a, **k: logged.append(msg % a))
+    if other_run_floor:
+        monkeypatch.setitem(qa_loop._outage_floor, "run", ("pr-bbbb", "L"))
+    launched = []
+
+    def launch(scenario):
+        launched.append(scenario.index)
+        scenario.window_name = f"qa-s{scenario.index}"
+        scenario.pane_id = f"%{scenario.index}"
+        scenario.session_id = f"sid-{scenario.index}"
+        scenario.transcript_path = str(tmp_path / f"s{scenario.index}.jsonl")
+
+    outage = {"polls_left": 6}
+    ticks = 0
+
+    def tick(_seconds):
+        nonlocal ticks
+        ticks += 1
+        outage["polls_left"] -= 1
+        if ticks == 5:
+            seen["outage"] = (list(launched), dict(qa_loop._outage_floor))
+        if ticks >= 10:
+            state.stop_requested = True
+
+    seen = {}
+
+    def inventory():
+        return None if outage["polls_left"] > 0 else _running(B_IMPL)
+
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 8)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: None if (inv := inventory()) is None else len(inv))
+    monkeypatch.setattr(container_reaper, "list_containers", inventory)
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    monkeypatch.setattr(qa_loop, "_VERDICT_GRACE_PERIOD", 0)
+    monkeypatch.setattr(qa_loop, "_POLL_INTERVAL", 0)
+    monkeypatch.setattr(qa_loop.time, "sleep", tick)
+    monkeypatch.setattr(qa_loop, "_write_resume_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_write_status_file", MagicMock())
+    monkeypatch.setattr(qa_loop, "_release_scenario_containers",
+                        lambda st, session, **k: False)
+    monkeypatch.setattr(qa_loop, "_launch_scenarios_in_containers",
+                        lambda st, *a, **k: launch(st.scenarios[0]))
+    monkeypatch.setattr(tmux, "pane_exists", lambda p: True)
+    monkeypatch.setattr(hook_events, "read_event",
+                        lambda sid: {"event_type": "idle_prompt", "timestamp": 1})
+    # Launched workers stay busy; only the floor and the recovery matter here.
+    monkeypatch.setattr(qa_loop, "find_verdict_turn", lambda *a: None)
+
+    qa_loop._poll_tmux_verdicts(
+        state, {}, {}, "pm-t", str(tmp_path), tmp_path / "status.json",
+        lambda: None, queued_scenarios=state.scenarios,
+        concurrency_cap=1, desired_cap=3, use_containers=True)
+
+    during, floor = seen["outage"]
+    if other_run_floor:
+        assert during == [], "the other run's floor launch is this outage's only one"
+        assert floor == {"run": ("pr-bbbb", "L")}
+        waits = [m for m in logged
+                 if "another QA run made this outage's floor launch" in m]
+        assert len(waits) == 1, waits
+    else:
+        assert during == [1], "a run holding nothing still makes the floor launch"
+        assert floor == {"run": ("pr-aaaa", state.loop_id)}
+        # Its own floor worker keeps it waiting; that is not another run's floor.
+        assert not [m for m in logged if "another QA run" in m], logged
+    assert qa_loop._outage_floor == {}, "a readable inventory frees the floor"
+    assert launched == [1, 2, 3], "the batch grows back after recovery"
+
+
+def test_reservation_turning_running_between_listings_is_not_missed(monkeypatch):
+    """The no-own headroom paths take two listings (running count, then the
+    reservations' inventory).  A reserved container that turns running
+    between them must be counted at least once: read in the other order it
+    was in neither (not running for the count, running so not in flight),
+    and another run could take its slot."""
+    from pm_core import container as container_mod
+    monkeypatch.setattr(container_mod, "max_running_containers", lambda: 9)
+    others = [_info(f"pm-t-other-{i}") for i in range(8)]
+    calls = [0]
+
+    def snapshot():
+        # The reserved container starts running right after the first listing.
+        calls[0] += 1
+        return others + [_info("pm-t-qa-pr-a-L-s8", running=calls[0] > 1)]
+
+    monkeypatch.setattr(container_reaper, "list_containers", snapshot)
+    monkeypatch.setattr(container_mod, "running_container_count",
+                        lambda: sum(i.running for i in snapshot()))
+    token = qa_loop._reserve_launches(["pm-t-qa-pr-a-L-s8"])
+    try:
+        assert qa_loop._container_launch_room_known(2, desired=4, active=2)[0] == 2
+        calls[0] = 0
+        assert qa_loop._clamp_to_container_headroom(4) == 1
+    finally:
+        qa_loop._release_launches(token)

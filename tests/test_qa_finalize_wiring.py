@@ -102,7 +102,10 @@ def test_run_qa_finalize_pane_returns_none_when_window_missing(
 
 # --- (g) -----------------------------------------------------------------
 
-def test_run_qa_finalize_pane_returns_none_when_pass_unverified(tmp_path):
+def test_run_qa_finalize_pane_returns_none_when_pass_unverified(tmp_path,
+                                                                monkeypatch):
+    from pm_core import qa_loop
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
     state = QALoopState(pr_id="x")
     state.scenario_verdicts = {1: "PASS"}
     state.verified_scenarios = set()
@@ -110,6 +113,48 @@ def test_run_qa_finalize_pane_returns_none_when_pass_unverified(tmp_path):
     assert _run_qa_finalize_pane(
         state, {}, "pm-test", "qa", str(tmp_path),
     ) is None
+
+
+def test_run_qa_finalize_pane_does_not_gate_when_verification_disabled(
+        tmp_path, monkeypatch):
+    """With qa-verify-pass off nothing is ever verified and a PASS is final,
+    so the unverified-PASS gate must not skip finalize (QA S77)."""
+    from pm_core import qa_loop
+    from pm_core import tmux as tmux_mod
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    looked_up = []
+    monkeypatch.setattr(tmux_mod, "find_window_by_name",
+                        lambda *a, **kw: looked_up.append(a) or None)
+    state = QALoopState(pr_id="x")
+    state.scenario_verdicts = {1: "PASS", 2: "INPUT_REQUIRED"}
+    state.verified_scenarios = set()
+    assert _run_qa_finalize_pane(
+        state, {}, "pm-test", "qa", str(tmp_path),
+    ) is None
+    assert looked_up == [("pm-test", "qa")], \
+        "finalize should proceed past the gate to find its window"
+
+
+def test_unverified_passes_uses_the_poll_snapshot_of_verification(monkeypatch):
+    """A mid-run qa-verify-pass toggle must not change what finalize waits on:
+    the poll never verified PASSes while the setting was off, so turning it on
+    later must not hold finalize (or downgrade them on stop) forever."""
+    from pm_core import qa_loop
+    state = QALoopState(pr_id="x")
+    state.scenario_verdicts = {1: "PASS", 2: "PASS"}
+    state.verified_scenarios = {2}
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: True)
+    state.verify_pass_enabled = False
+    assert qa_loop._unverified_passes(state) == []
+
+    monkeypatch.setattr(qa_loop, "_is_verification_enabled", lambda: False)
+    state.verify_pass_enabled = True
+    assert qa_loop._unverified_passes(state) == [1]
+
+    # Before the poll has run, the live setting decides.
+    state.verify_pass_enabled = None
+    assert qa_loop._unverified_passes(state) == []
 
 
 # --- (h) wiring test, textual-assertion fallback -------------------------

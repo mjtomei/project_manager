@@ -43,6 +43,9 @@ from pm_core.tui._shell import _run_shell_async
 _log = configure_logger("pm.tui.auto_start")
 
 _MERGE_RESTART_MARKER = "merge-restart"
+# save_breadcrumb consumes the marker before the TUI re-execs, so the new
+# process learns why it restarted from this variable (see mount_trigger).
+RESTART_TRIGGER_ENV = "PM_TUI_RESTART_TRIGGER"
 _BREADCRUMB_FILE = "autostart-resume.json"
 _REPLY_MAX_AGE = 600  # seconds
 # How long a "targets +=" / "ON (all …)" confirmation holds the log line
@@ -158,6 +161,19 @@ def has_merge_restart_marker() -> bool:
     return (pm_home() / _MERGE_RESTART_MARKER).exists()
 
 
+def mount_trigger() -> str:
+    """Why this TUI process mounted: ``"merge_restart"`` or ``"initial"``.
+
+    A merge restart re-execs after save_breadcrumb deleted the marker, so
+    action_restart hands the trigger over in RESTART_TRIGGER_ENV; it is
+    popped here so panes this TUI spawns do not inherit it.
+    """
+    handed_over = os.environ.pop(RESTART_TRIGGER_ENV, "")
+    if handed_over == "merge_restart" or has_merge_restart_marker():
+        return "merge_restart"
+    return "initial"
+
+
 def save_breadcrumb(app) -> None:
     """Save state to a breadcrumb file for resumption after restart.
 
@@ -223,7 +239,7 @@ def save_breadcrumb(app) -> None:
             data["watchers"] = watchers_data
 
     if not data:
-        _log.debug("save_breadcrumb: nothing to persist, skipping")
+        _log.info("save_breadcrumb: nothing to persist, skipping")
         return
 
     breadcrumb = pm_home() / _BREADCRUMB_FILE

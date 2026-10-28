@@ -1,0 +1,287 @@
+"""Host-side git in a container-writable workdir must not run its hooks.
+
+A PR workdir is bind-mounted read-write into containers, so ``.git/hooks/*``
+is container-authored code.  Any host-side pm git command that runs a hook
+from that directory (``merge``, ``push``, ``commit``, ``checkout``,
+``pull``, any ref update — ``fetch``/``update-ref`` fire
+``reference-transaction`` — and even ``status``, which rewrites a stale
+index and fires ``post-index-change``) would execute it with the host user's credentials — the same
+sandbox escape the push proxy blocks for container-initiated git.  pm's own
+operations pass ``no_hooks=True`` (``-c core.hooksPath=/dev/null``).
+
+The merge and push stories are real-git tests: the planted hook writes a
+marker, so a regression makes the marker appear.  They only ever talk to
+local repositories under ``tmp_path`` (pushes target an absolute bare-repo
+path, never a named or network remote) and run the real ``git`` binary with
+an isolated environment: inside a pm container the ``git`` on PATH is the
+push-proxy wrapper, which would forward the test's pushes to the live host
+proxy.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from unittest import mock
+
+import pytest
+
+from pm_core import git_ops, integration
+from pm_core.cli import pr as pr_mod
+
+PR = "pr-001"
+BRANCH = "feature"
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def commit(cwd: Path, name: str, text: str, msg: str) -> str:
+    (cwd / name).write_text(text)
+    git(cwd, "add", name)
+    git(cwd, "commit", "-q", "-m", msg)
+    return git(cwd, "rev-parse", "HEAD")
+
+
+def plant_hook(repo: Path, name: str, marker: Path) -> None:
+    """Install an executable hook that records that it ran."""
+    hook = repo / ".git" / "hooks" / name
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    hook.chmod(0o755)
+
+
+_REAL_GIT_DIRS = ("/usr/bin", "/bin", "/usr/local/bin")
+
+
+def _is_real_git(path: str) -> bool:
+    """False for pm's in-container push-proxy wrapper (a shell script)."""
+    try:
+        with open(path, "rb") as stream:
+            return b"git wrapper" not in stream.read(256)
+    except OSError:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def _env(tmp_path, monkeypatch):
+    real = next((d for d in _REAL_GIT_DIRS
+                 if _is_real_git(os.path.join(d, "git"))), None)
+    if real is None:
+        pytest.skip("no real git binary; refusing to use a proxy wrapper")
+    monkeypatch.setenv("PATH", f"{real}:/usr/bin:/bin")
+    assert _is_real_git(shutil.which("git") or "")
+    # Never inherit a repository binding or the user's git configuration.
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    for k, v in {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}.items():
+        monkeypatch.setenv(k, v)
+    yield
+
+
+def _repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-q", "-b", "master")
+    return path
+
+
+# ---------------------------------------------------------------------------
+# run_git / helper plumbing
+# ---------------------------------------------------------------------------
+
+class TestRunGitNoHooks:
+    @mock.patch("pm_core.git_ops.subprocess.run")
+    @mock.patch("pm_core.git_ops.log_shell_command")
+    def test_no_hooks_prepends_the_flag(self, _log, run):
+        run.return_value = mock.MagicMock(returncode=0)
+        git_ops.run_git("push", "origin", no_hooks=True)
+        assert run.call_args[0][0] == [
+            "git", "-c", "core.hooksPath=/dev/null", "push", "origin"]
+
+    @mock.patch("pm_core.git_ops.subprocess.run")
+    @mock.patch("pm_core.git_ops.log_shell_command")
+    def test_default_keeps_the_command_unchanged(self, _log, run):
+        run.return_value = mock.MagicMock(returncode=0)
+        git_ops.run_git("status")
+        assert run.call_args[0][0] == ["git", "status"]
+
+    @mock.patch("pm_core.git_ops.run_git")
+    def test_checkout_branch_forwards_no_hooks(self, run):
+        run.return_value = mock.MagicMock(returncode=0)
+        git_ops.checkout_branch(Path("/tmp/wd"), "b", create=True, no_hooks=True)
+        assert run.call_args_list
+        assert all(c.kwargs.get("no_hooks") is True for c in run.call_args_list)
+
+    @mock.patch("pm_core.git_ops.run_git")
+    def test_pull_rebase_forwards_no_hooks(self, run):
+        run.return_value = mock.MagicMock(returncode=0)
+        git_ops.pull_rebase(Path("/tmp/wd"), no_hooks=True)
+        assert run.call_args.kwargs["no_hooks"] is True
+
+    def test_qa_planner_handoff_git_capture_no_hooks(self, monkeypatch, tmp_path):
+        """Every planner hand-off git call runs in the container-writable PR
+        workdir, so the helper is hookless without being asked."""
+        from pm_core import qa_loop
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(qa_loop.subprocess, "run", fake_run)
+        qa_loop._git_capture(tmp_path, "push", "origin", "ref")
+        assert seen["cmd"] == ["git", "-c", "core.hooksPath=/dev/null",
+                               "push", "origin", "ref"]
+
+
+# ---------------------------------------------------------------------------
+# Real-git stories
+# ---------------------------------------------------------------------------
+
+class TestWorkdirHooksDoNotRun:
+    def test_apply_integration_merge_skips_workdir_hooks(self, tmp_path):
+        repo = _repo(tmp_path / "wd")
+        commit(repo, "a.txt", "a", "base")
+        git(repo, "checkout", "-q", "-b", BRANCH)
+        head = commit(repo, "b.txt", "b", "branch work")
+        git(repo, "checkout", "-q", "master")
+        base_sha = commit(repo, "c.txt", "c", "base moved")
+        git(repo, "checkout", "-q", BRANCH)
+
+        marker = tmp_path / "hook-ran"
+        plant_hook(repo, "post-merge", marker)
+        plant_hook(repo, "pre-merge-commit", marker)
+
+        data = {"project": {"name": "p", "base_branch": "master"},
+                "prs": [{"id": PR, "branch": BRANCH, "workdir": str(repo)}],
+                "plans": []}
+        record = {"status": integration.CLEAN, "head": head,
+                  "base_sha": base_sha, "base_branch": "master",
+                  "candidate_tree": None}
+
+        merged, reason = integration.apply_integration(
+            tmp_path, PR, record, data=data)
+
+        assert reason is None, reason
+        assert merged == git(repo, "rev-parse", "HEAD")
+        assert git(repo, "rev-parse", "HEAD^1") == head
+        assert git(repo, "rev-parse", "HEAD^2") == base_sha
+        assert not marker.exists(), (
+            "the container-writable workdir's merge hooks ran on the host")
+
+    def test_publish_vanilla_push_skips_workdir_hooks(self, tmp_path):
+        remote = tmp_path / "target.git"
+        git(tmp_path, "init", "-q", "--bare", str(remote))
+        wd = _repo(tmp_path / "wd")
+        base_sha = commit(wd, "a.txt", "a", "base")
+        # An absolute local path: never a named remote the git on PATH could
+        # resolve elsewhere.
+        git(wd, "push", "-q", str(remote), "master:refs/heads/master")
+        merge_sha = commit(wd, "b.txt", "b", "merged work")
+
+        marker = tmp_path / "hook-ran"
+        plant_hook(wd, "pre-push", marker)
+
+        pr_mod._publish_vanilla(tmp_path, {"id": PR}, str(wd), str(remote),
+                                "master", base_sha, merge_sha)
+
+        assert git(remote, "rev-parse", "refs/heads/master") == merge_sha
+        assert not marker.exists(), (
+            "the container-writable workdir's pre-push hook ran on the host")
+
+    def test_integration_fetch_base_skips_reference_transaction(self, tmp_path):
+        """Not only merges run hooks: every ref update in the workdir fires
+        ``reference-transaction``, and the integration check's fetch +
+        ``update-ref`` runs on every sign-off routing pass."""
+        target = _repo(tmp_path / "target")
+        base_sha = commit(target, "a.txt", "a", "base")
+        wd = _repo(tmp_path / "wd")
+        commit(wd, "w.txt", "w", "workdir root")
+
+        marker = tmp_path / "hook-ran"
+        plant_hook(wd, "reference-transaction", marker)
+
+        sha, err = integration.fetch_base(str(wd), str(target), "master")
+
+        assert err is None, err
+        assert sha == base_sha
+        assert git(wd, "rev-parse", integration.BASE_REF) == base_sha
+        assert not marker.exists(), (
+            "the workdir's reference-transaction hook ran on the host")
+
+    def test_publish_local_update_ref_skips_reference_transaction(self, tmp_path):
+        main = _repo(tmp_path / "main")
+        base_sha = commit(main, "a.txt", "a", "base")
+        git(main, "checkout", "-q", "-b", "other")
+        wd = tmp_path / "wd"
+        git(tmp_path, "clone", "-q", str(main), str(wd))
+        git(wd, "checkout", "-q", "-b", BRANCH, "origin/master")
+        merge_sha = commit(wd, "b.txt", "b", "merged work")
+
+        marker = tmp_path / "hook-ran"
+        plant_hook(wd, "reference-transaction", marker)
+
+        data = {"project": {"name": "p", "repo": str(main)}, "prs": [],
+                "plans": []}
+        pr_mod._publish_local(data, tmp_path / "state", {"id": PR}, str(wd),
+                              "master", base_sha, merge_sha)
+
+        assert git(main, "rev-parse", "refs/heads/master") == merge_sha
+        # The workdir's own base ref is fast-forwarded too (another update-ref).
+        assert git(wd, "rev-parse", "refs/heads/master") == merge_sha
+        assert not marker.exists(), (
+            "the workdir's reference-transaction hook ran on the host")
+
+    @staticmethod
+    def _stale_index_workdir(tmp_path: Path, marker: Path) -> Path:
+        """A workdir whose index is stale, as after a container edit: the
+        next ``status`` rewrites it and so fires ``post-index-change``."""
+        wd = _repo(tmp_path / "wd")
+        commit(wd, "a.txt", "a", "base")
+        plant_hook(wd, "post-index-change", marker)
+        f = wd / "a.txt"
+        st = f.stat()
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        return wd
+
+    def test_workdir_is_dirty_skips_post_index_change(self, tmp_path):
+        """``pm pr start``/``pr list --workdirs``/``pr cleanup`` probe the PR
+        workdir with ``status``."""
+        marker = tmp_path / "hook-ran"
+        wd = self._stale_index_workdir(tmp_path, marker)
+        # Sanity: the planted hook does fire for a plain status here.
+        git(wd, "status", "--porcelain")
+        assert marker.exists()
+        marker.unlink()
+        self._stale_again(wd)
+
+        assert pr_mod._workdir_is_dirty(wd) is False
+        assert not marker.exists(), (
+            "the workdir's post-index-change hook ran on the host")
+
+    def test_planner_handoff_status_skips_post_index_change(self, tmp_path):
+        from pm_core import qa_loop
+        marker = tmp_path / "hook-ran"
+        wd = self._stale_index_workdir(tmp_path, marker)
+        git(wd, "checkout", "-q", "-b", BRANCH)
+        marker.unlink(missing_ok=True)
+        self._stale_again(wd)
+
+        # No real upstream: the hand-off returns after its status probe.
+        assert qa_loop._publish_planner_head(str(wd), BRANCH) == git(
+            wd, "rev-parse", "HEAD")
+        assert not marker.exists(), (
+            "the workdir's post-index-change hook ran on the host")
+
+    @staticmethod
+    def _stale_again(wd: Path) -> None:
+        f = wd / "a.txt"
+        st = f.stat()
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))

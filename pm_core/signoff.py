@@ -503,7 +503,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # mounted host path via write_dir.
         from pm_core.container import (
             is_container_mode_enabled, _CONTAINER_WORKDIR,
-            wrap_claude_cmd, ContainerError, remove_container, _make_container_name,
+            wrap_claude_cmd, ContainerError, discard_unowned_container, _make_container_name,
         )
         if is_container_mode_enabled():
             _claude_cwd = _CONTAINER_WORKDIR
@@ -525,15 +525,20 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             env_out=env)
 
         branch = pr_entry.get("branch", "")
+        _cname = ""
+        allocation_identity: dict[str, str] = {}
         if is_container_mode_enabled():
-            remove_container(_make_container_name(f"signoff-{pr_id}"))
             _stag = pm_session.removeprefix("pm-") if pm_session else None
+            # Discard the previous allocation only when it has no live or
+            # retained owner. Use the same tagged name as wrap_claude_cmd.
+            discard_unowned_container(_make_container_name(f"signoff-{pr_id}", _stag))
             try:
                 claude_cmd, _cname = wrap_claude_cmd(
                     claude_cmd, workdir, label=f"signoff-{pr_id}",
                     allowed_push_branch=branch,
                     session_tag=_stag,
-                    pr_id=pr_id,
+                    pr_id=pr_id, kind="signoff",
+                    allocation_identity=allocation_identity,
                     env=env)
             except ContainerError as e:
                 print(str(e))
@@ -543,6 +548,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
         # moves exactly the sessions that were watching the old window.
         switch = not background
 
+        claude_pane = ""
         try:
             # Single pane — the sign-off agent reads captures and writes
             # report.html directly; the report carries the diff inline and
@@ -551,7 +557,19 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                 pm_session, window_name, claude_cmd, workdir, switch=switch,
                 env=env)
             if not claude_pane:
+                # new_window_get_pane returns None when it cannot find the
+                # window or list its panes *after* tmux created the window and
+                # started the session in it.  Treat an existing window as
+                # launched (pr_start uses the same guard) instead of reporting
+                # failure and releasing a container a live pane may own.
+                if tmux_mod.find_window_by_name(pm_session, window_name):
+                    print(f"Opened sign-off window '{window_name}' "
+                          f"(pane lookup failed; the session may still be starting).")
+                    return
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
+                discard_unowned_container(
+                    _cname, container_id=allocation_identity.get("id"),
+                    generation=allocation_identity.get("generation"))
                 return
 
             wid_result = subprocess.run(
@@ -581,8 +599,13 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
 
             print(f"Opened sign-off window '{window_name}'")
         except Exception as e:
-            _log.warning("Failed to launch sign-off window: %s", e)
-            print(f"Sign-off window error: {e}")
+            detail = tmux_mod.launch_error_detail(e)
+            _log.warning("Failed to launch sign-off window: %s", detail)
+            print(f"Sign-off window error: {detail}")
+            if not claude_pane:
+                discard_unowned_container(
+                    _cname, container_id=allocation_identity.get("id"),
+                    generation=allocation_identity.get("generation"))
     finally:
         _launch_lock_f.close()
 

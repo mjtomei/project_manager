@@ -119,8 +119,10 @@ def config() -> None:
 
 def _resolve_tag(tag: str | None) -> str:
     """Return *tag* or the current session's tag, erroring if neither resolves."""
+    from pm_core.cli.helpers import _get_current_pm_session
     from pm_core.paths import get_session_tag
-    resolved = tag or get_session_tag()
+    session = _get_current_pm_session() if not tag else None
+    resolved = tag or (session.removeprefix("pm-") if session else get_session_tag())
     if not resolved:
         raise click.ClickException(
             "No session tag: run this inside a pm session or pass --tag.")

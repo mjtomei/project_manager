@@ -1,5 +1,7 @@
 """Tests for the QA loop orchestration."""
 
+import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -1057,6 +1059,32 @@ class TestPollTriggersQA:
         mock_qa.assert_not_called()
 
 
+class TestPollLoopStateForkFailure:
+    """A fork failing for lack of PIDs skips the poll tick instead of crashing the TUI."""
+
+    def test_eagain_skips_tick(self):
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+
+        with patch("pm_core.tui.review_loop_ui._poll_loop_state_inner",
+                   side_effect=BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")):
+            _poll_loop_state(MagicMock())
+
+    def test_enomem_skips_tick(self):
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+
+        with patch("pm_core.tui.review_loop_ui._poll_loop_state_inner",
+                   side_effect=OSError(errno.ENOMEM, "Cannot allocate memory")):
+            _poll_loop_state(MagicMock())
+
+    def test_other_errors_still_raise(self):
+        from pm_core.tui.review_loop_ui import _poll_loop_state
+
+        with patch("pm_core.tui.review_loop_ui._poll_loop_state_inner",
+                   side_effect=FileNotFoundError(errno.ENOENT, "tmux")):
+            with pytest.raises(FileNotFoundError):
+                _poll_loop_state(MagicMock())
+
+
 # ---------------------------------------------------------------------------
 # Self-driving QA: NEEDS_WORK → review → QA loop
 # ---------------------------------------------------------------------------
@@ -1711,14 +1739,12 @@ class TestScenarioRetryLogic:
         state.scenarios = [scenario]
         state.scenario_verdicts = {}
 
-        call_count = 0
+        # The first relaunched pane dies too; the second one stays alive.
+        relaunched = iter(["%41", "%42"])
 
-        def pane_side_effect(session, win_name):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 2:
-                return None  # Window dead for first 2 polls
-            return "%42"  # Window alive after relaunch
+        def relaunch_side_effect(sc, *args, **kwargs):
+            sc.pane_id = next(relaunched)
+            return True
 
         status_path = tmp_path / "status.json"
 
@@ -1730,8 +1756,9 @@ class TestScenarioRetryLogic:
                       "timestamp": _time.time() + 1000,
                       "session_id": scenario.session_id}
 
-        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_side_effect), \
-             patch("pm_core.qa_loop._relaunch_scenario_window", return_value=True) as mock_relaunch, \
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch_side_effect) as mock_relaunch, \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", side_effect=[
                  0,    # grace_start
@@ -1745,7 +1772,7 @@ class TestScenarioRetryLogic:
              patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=VerdictHit("PASS", "PASS")), \
              patch("pm_core.tmux.capture_pane", return_value="PASS"), \
-             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.pane_exists", side_effect=lambda pane: pane == "%42"), \
              patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
 
             _poll_tmux_verdicts(
@@ -1831,8 +1858,13 @@ class TestScenarioRetryLogic:
 
         status_path = tmp_path / "status.json"
 
-        relaunch_results = [False, True]  # Fail first, succeed second
-        pane_results = [None, None, "%42"]  # Dead, dead, alive
+        relaunch_results = iter([False, True])  # Fail first, succeed second
+
+        def relaunch_side_effect(sc, *args, **kwargs):
+            ok = next(relaunch_results)
+            if ok:
+                sc.pane_id = "%42"  # the relaunched worker's pane
+            return ok
 
         # monotonic calls: grace_start, then per-poll in_grace check,
         # plus grace_start reset on successful relaunch
@@ -1850,8 +1882,9 @@ class TestScenarioRetryLogic:
                       "timestamp": _time.time() + 1000,
                       "session_id": scenario.session_id}
 
-        with patch("pm_core.qa_loop._get_scenario_pane", side_effect=pane_results), \
-             patch("pm_core.qa_loop._relaunch_scenario_window", side_effect=relaunch_results) as mock_relaunch, \
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop._relaunch_scenario_window",
+                   side_effect=relaunch_side_effect) as mock_relaunch, \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.monotonic", side_effect=monotonic_vals), \
              patch("pm_core.hook_events.read_event", return_value=fake_event), \
@@ -1880,6 +1913,250 @@ class TestScenarioRetryLogic:
     def test_max_retries_constant(self):
         from pm_core.qa_loop import _SCENARIO_MAX_RETRIES
         assert _SCENARIO_MAX_RETRIES == 10
+
+
+class TestPollTmuxVerdictsForkFailure:
+    """A fork failing for lack of PIDs skips one QA poll instead of crashing
+    the QA thread (which ended the run as ERROR with its workers still live)."""
+
+    def _poll(self, tmp_path, pane_exists):
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        with patch("pm_core.qa_loop._relaunch_scenario_window") as relaunch, \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
+             patch("pm_core.tmux.pane_exists", side_effect=pane_exists), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        return state, relaunch
+
+    @pytest.mark.parametrize("err", [errno.EAGAIN, errno.ENOMEM])
+    def test_fork_failure_skips_one_poll(self, tmp_path, err):
+        calls = []
+
+        def pane_exists(pane):
+            calls.append(pane)
+            if len(calls) == 1:
+                raise OSError(err, os.strerror(err))
+            return True
+
+        state, relaunch = self._poll(tmp_path, pane_exists)
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert len(calls) == 2
+        relaunch.assert_not_called()
+
+    def test_fork_failure_during_flag_counts_it_once(self, tmp_path):
+        """A flag handed back by a failed fork is not counted twice.
+
+        One retry is allowed: the first flag sends a follow-up (its pane
+        lookup hits EAGAIN once), the re-check passes.  Counting the
+        handed-back flag again would exhaust the retry and mark NEEDS_WORK.
+        """
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        calls = []
+
+        def pane_exists(pane):
+            calls.append(pane)
+            # The second lookup is the follow-up's (the first is the poll's).
+            if len(calls) == 2:
+                raise OSError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+            return True
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
+             patch("pm_core.tmux.pane_exists", side_effect=pane_exists), \
+             patch("pm_core.tmux.send_keys"), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=1), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=[(False, "flagged", None), (True, "", None)]):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert 1 in state.verified_scenarios
+
+    def test_fork_failure_after_followup_sends_it_once(self, tmp_path):
+        """A fork failing on the extra Enters does not resend the follow-up.
+
+        The follow-up (with its own Enter) is already delivered; handing the
+        flag back would re-send it to the worker on the next poll.
+        """
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        sent = []
+
+        def send_keys(pane, keys):
+            sent.append(keys)
+            if keys == "" and sent.count("") == 1:
+                raise OSError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=1), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=[(False, "flagged", None), (True, "", None)]):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        followups = [k for k in sent if k.startswith("Your verdict was reviewed")]
+        assert len(followups) == 1
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert 1 in state.verified_scenarios
+
+    def _run_flagged_once(self, tmp_path, send_keys):
+        """Poll one PASS that verification flags once, then passes."""
+        import itertools
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        fake_event = {"event_type": "idle_prompt", "timestamp": 10 ** 10,
+                      "session_id": scenario.session_id}
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", return_value=fake_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=VerdictHit("PASS", "PASS")), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=True), \
+             patch("pm_core.qa_loop._get_verification_max_retries", return_value=1), \
+             patch("pm_core.qa_loop._verify_single_scenario",
+                   side_effect=[(False, "flagged", None), (True, "", None)]):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        return state
+
+    def test_refused_followup_is_window_gone_not_run_error(self, tmp_path):
+        """tmux refusing the follow-up (pane exited after the liveness check)
+        settles the scenario as window-gone instead of ending the QA run."""
+        import subprocess
+
+        def send_keys(pane, keys):
+            raise subprocess.CalledProcessError(
+                1, ["tmux"], stderr=b"can't find pane: %41")
+
+        state = self._run_flagged_once(tmp_path, send_keys)
+        assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+        assert "window gone" in state.scenario_verdict_reasons[1]
+
+    def test_refused_extra_enter_keeps_reevaluation(self, tmp_path):
+        """The follow-up carries its own Enter: a refused extra Enter neither
+        ends the run nor stops the scenario's re-evaluation."""
+        import subprocess
+        sent = []
+
+        def send_keys(pane, keys):
+            sent.append(keys)
+            if keys == "" and sent.count("") == 1:
+                raise subprocess.CalledProcessError(1, ["tmux"], stderr="gone")
+
+        state = self._run_flagged_once(tmp_path, send_keys)
+        followups = [k for k in sent if k.startswith("Your verdict was reviewed")]
+        assert len(followups) == 1
+        assert state.scenario_verdicts[1] == VERDICT_PASS
+        assert 1 in state.verified_scenarios
+
+    def test_refused_reminder_does_not_end_run(self, tmp_path):
+        """The verdict-format nudge is best effort: a pane that exited after
+        its liveness check refuses it, and the run keeps polling."""
+        import itertools
+        import subprocess
+        from pm_core.qa_loop import _poll_tmux_verdicts
+
+        scenario = QAScenario(index=1, title="Test", focus="t")
+        scenario.window_name = "qa-test-s1"
+        scenario.pane_id = "%41"
+        scenario.session_id = "sid-1"
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [scenario]
+        stamps = itertools.count(10 ** 10)
+
+        def read_event(sid):
+            return {"event_type": "idle_prompt", "timestamp": next(stamps),
+                    "session_id": sid}
+
+        refused = []
+
+        def send_keys(pane, keys):
+            refused.append(keys)
+            raise subprocess.CalledProcessError(
+                1, ["tmux"], stderr=b"can't find pane: %41")
+
+        with patch("pm_core.qa_loop._relaunch_scenario_window"), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.time.monotonic",
+                   side_effect=itertools.count(0, 100)), \
+             patch("pm_core.hook_events.read_event", side_effect=read_event), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=[None, VerdictHit("NEEDS_WORK", "NEEDS_WORK")]), \
+             patch("pm_core.qa_loop._get_verdict_reminder_timeout",
+                   return_value=1), \
+             patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys", side_effect=send_keys), \
+             patch("pm_core.qa_loop._is_verification_enabled", return_value=False):
+            _poll_tmux_verdicts(state, {}, {}, "sess", "/tmp/work",
+                                tmp_path / "status.json", lambda *a: None)
+        assert refused and refused[0].startswith("Reminder:")
+        assert state.scenario_verdicts[1] == "NEEDS_WORK"
+
+    def test_other_errors_still_raise(self, tmp_path):
+        def pane_exists(pane):
+            raise FileNotFoundError(errno.ENOENT, "tmux")
+
+        with pytest.raises(FileNotFoundError):
+            self._poll(tmp_path, pane_exists)
 
 
 class TestPollVerdictsAfterLoopWakeup:

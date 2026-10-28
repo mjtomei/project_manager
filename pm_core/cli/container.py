@@ -1,5 +1,7 @@
 """Container isolation CLI commands."""
 
+import subprocess
+
 import click
 
 from pm_core.cli.helpers import state_root, _get_pm_session
@@ -35,11 +37,103 @@ def container_status():
     click.echo(f"Memory limit:    {cfg.memory_limit}")
     click.echo(f"CPU limit:       {cfg.cpu_limit}")
 
+    if runtime_ok:
+        from pm_core.container import keyring_summary, pids_pressure
+        from pm_core.container_reaper import list_containers
+        # One inventory (two ``ps`` + an ``inspect`` of every container)
+        # serves both the running count and the PID-pressure filter.
+        inventory = list_containers()
+        if inventory is not None:
+            click.echo(f"Running pm containers: {sum(i.running for i in inventory)}")
+        keyring = keyring_summary()
+        if keyring:
+            click.echo(f"Kernel keyring:  {keyring}")
+        if inventory is not None:
+            for name, pids, limit in pids_pressure(0.8, inventory=inventory):
+                click.echo(f"PID pressure:    {name} at {pids}/{limit} — "
+                           f"'pm container restart {name}' clears it")
+    # Persisted failures and pending releases remain useful even when the
+    # runtime executable is unavailable. They must not disappear with metrics.
+    _echo_reaper_state(runtime_ok, inventory if runtime_ok else None)
+
     if enabled and not runtime_ok:
         click.echo(
             f"\nWarning: Container mode is enabled but {cfg.runtime} is not available.",
             err=True,
         )
+
+
+def _echo_reaper_state(runtime_ok: bool = True, inventory=None) -> None:
+    from pm_core import container_reaper
+    # Each helper below resolves the runtime identity with its own `info`
+    # probe. One status invocation used to run that probe 4-5 times; reuse a
+    # single successful answer for the whole report. When the availability
+    # probe already failed, report the identity as unknown without probing
+    # again: against a hung runtime every helper otherwise waited out its own
+    # timeout (about 50 s for one status).
+    with container_reaper.runtime_domain_scope(runtime_unavailable=not runtime_ok):
+        state = container_reaper.last_state()
+        if state.get("last_run"):
+            import time as _time
+            when = _time.strftime("%Y-%m-%d %H:%M:%S",
+                                  _time.localtime(state["last_run"]))
+            click.echo(f"Last cleanup:    {when} ({state.get('last_reason', '')}): "
+                       f"{state.get('last_summary', '')}")
+        failures = container_reaper.pending_failures()
+        # An owner release of a still-retained allocation is deferred, not
+        # failed: reap keeps it until the retention is released, so retrying
+        # cannot help.
+        deferred = {
+            name: failures.pop(name) for name, info in list(failures.items())
+            if info.get("owner_release")
+            and container_reaper.is_retained(name, str(info.get("id") or ""))}
+        if inventory is not None:
+            # A retained allocation removed since (e.g. by pm pr cleanup) has
+            # nothing left to release; its records are pruned by the next full
+            # pass, so don't list it as still waiting on the retention.
+            present = container_reaper.inventory_has(inventory)
+            deferred = {name: info for name, info in deferred.items()
+                        if present(name, info.get("id"))}
+            # Likewise a pending owner release (this runtime's record) of an
+            # allocation already removed by ID: review/sign-off --fresh can
+            # remove the old allocation before the old pane's release records
+            # itself (S62), and a retry has nothing left to do.
+            for name, info in list(failures.items()):
+                if (info.get("owner_release") and info.get("runtime_domain")
+                        and info.get("id") and not present(name, info["id"])):
+                    failures.pop(name)
+        if deferred:
+            click.echo("Released while retained (removed once "
+                       "'pm container retain --release' drops the retention):")
+            for name in sorted(deferred):
+                click.echo(f"  {name}")
+        # A release recorded while the runtime identity was unavailable can
+        # never authorize cleanup (and full passes deliberately preserve it),
+        # so a reap retry cannot clear it either. Show it as what it is — a
+        # diagnostic.
+        unverifiable = {name: info for name, info in failures.items()
+                        if info.get("unverifiable_release")}
+        for name in unverifiable:
+            failures.pop(name)
+        if unverifiable:
+            click.echo("Unverifiable release records (recorded without a runtime "
+                       "identity; diagnostic only, not retried by 'pm container reap'):")
+            for name, info in sorted(unverifiable.items()):
+                click.echo(f"  {name}: allocation {info.get('id') or 'unknown'}")
+        if failures:
+            click.echo(f"Cleanup failures ({len(failures)}) — retry with 'pm container reap':")
+            for name, info in sorted(failures.items()):
+                click.echo(f"  {name}: {info.get('error', '')}")
+        diagnostics = container_reaper.unavailable_runtime_diagnostics()
+        if diagnostics:
+            click.echo("Saved cleanup diagnostics (runtime identity unavailable; "
+                       "records may belong to other runtimes). Restore the runtime, "
+                       "then retry with 'pm container reap':")
+            for source, name, error in diagnostics:
+                click.echo(f"  [{source}] {name}: {error}")
+        retained = container_reaper.local_retained_names(inventory)
+        if retained:
+            click.echo(f"Retained:        {', '.join(retained)}")
 
 
 @container_group.command("enable")
@@ -272,13 +366,18 @@ on top.
 @click.option("--pr", "pr_id", default=None, help="Filter by PR ID")
 def container_cleanup(pr_id: str | None):
     """Remove stale pm containers."""
-    from pm_core.container import _run_runtime, remove_container, CONTAINER_PREFIX
+    from pm_core.container import _run_runtime, remove_containers, CONTAINER_PREFIX
 
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
-        "--format", "{{.Names}}\t{{.Status}}",
-        check=False, timeout=30,
-    )
+    try:
+        result = _run_runtime(
+            "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
+            "--format", "{{.Names}}\t{{.Status}}",
+            check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # A missing/hung runtime is a diagnostic, not a traceback.
+        click.echo(f"Failed to list containers: {exc}", err=True)
+        raise SystemExit(1)
     if result.returncode != 0:
         click.echo("Failed to list containers.", err=True)
         raise SystemExit(1)
@@ -288,15 +387,211 @@ def container_cleanup(pr_id: str | None):
         click.echo("No pm containers found.")
         return
 
-    removed = 0
+    names = []
     for line in lines:
-        parts = line.split("\t", 1)
+        parts = line.split(None, 1)
         name = parts[0].strip()
         status = parts[1].strip() if len(parts) > 1 else ""
-        if pr_id and pr_id not in name:
+        # The name filter matches substrings — never touch e.g. "npm-cache".
+        if not name.startswith(CONTAINER_PREFIX):
+            continue
+        # Match the exact PR-id token, not a substring: ``--pr pr-ab`` must not
+        # remove ``pr-abc``'s containers. Names embed ``-<pr_id>-`` or end with
+        # ``-<pr_id>``.
+        if pr_id and not (f"-{pr_id}-" in name or name.endswith(f"-{pr_id}")):
             continue
         click.echo(f"  Removing: {name} ({status})")
-        remove_container(name)
-        removed += 1
+        names.append(name)
 
-    click.echo(f"Removed {removed} container(s).")
+    removed, failures = remove_containers(names)
+    for name, err in sorted(failures.items()):
+        click.echo(f"  FAILED:   {name}: {err}", err=True)
+    click.echo(f"Removed {len(removed)} container(s).")
+    if failures:
+        raise SystemExit(1)
+
+
+def echo_reap_outcome(outcome) -> None:
+    """Print a reconcile preview/outcome: one line per container, then a summary."""
+    for d in outcome.decisions:
+        action = d.action
+        if not outcome.dry_run:
+            if d.info.name in outcome.removed:
+                action = "removed"
+            elif d.info.name in outcome.failures:
+                action = "FAILED"
+        state = "running" if d.info.running else (d.info.status or "stopped")
+        click.echo(f"  {action:<8} {d.info.name} [{state}] — {d.reason}")
+        if d.info.name in outcome.failures:
+            click.echo(f"           {outcome.failures[d.info.name]}")
+    listed = {d.info.name for d in outcome.decisions}
+    for name, error in outcome.failures.items():
+        if name not in listed:
+            click.echo(f"  FAILED   {name}: {error}")
+    from pm_core.push_proxy import proxy_key_dir
+    for proxy in outcome.proxies_stopped:
+        click.echo(f"  stopped  push proxy {proxy}")
+    # The sweep reports failure keys; show the directory it stopped instead.
+    for key in outcome.proxies_released:
+        click.echo(f"  stopped  push proxy {proxy_key_dir(key) or key}")
+    for name, pids, limit, why in outcome.pid_pressure:
+        click.echo(f"  WARNING  {name} at {pids}/{limit} PIDs ({why}) — run "
+                   f"'pm container restart {name}' once its session is done")
+    click.echo(outcome.summary())
+
+
+def run_reap(scope, dry_run: bool) -> None:
+    """Shared body of ``pm container reap`` and ``pm session cleanup``."""
+    from pm_core import container_reaper
+    outcome = container_reaper.reconcile(
+        scope, dry_run=dry_run, reason="dry-run" if dry_run else "manual")
+    if outcome.error or outcome.skipped:
+        click.echo(outcome.summary(), err=True)
+        raise SystemExit(1)
+    if not outcome.decisions and not outcome.proxies_released:
+        click.echo(f"No pm containers in scope ({outcome.scope}).")
+    else:
+        click.echo(f"Scope: {outcome.scope}")
+    echo_reap_outcome(outcome)
+    if outcome.failures:
+        raise SystemExit(1)
+
+
+@container_group.command("reap")
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Only show what would be removed and why")
+@click.option("--pr", "pr_id", default=None, help="Only this PR's containers")
+@click.option("--session", "session_tag", default=None,
+              help="Only containers of this session tag")
+@click.option("--include-retained", is_flag=True, default=False,
+              help="Also remove containers marked with 'pm container retain'")
+def container_reap(dry_run: bool, pr_id: str | None, session_tag: str | None,
+                   include_retained: bool):
+    """Remove leaked pm containers that nothing owns any more.
+
+    A container is kept while a live tmux pane runs in it, while it is being
+    launched, or when it was retained with 'pm container retain'.  Everything
+    else in scope (finished runs, merged/closed PRs, dead sessions) is
+    removed, and push proxies no container uses are stopped.  Workdirs,
+    captures and transcripts live on the host and are not touched.
+    """
+    from pm_core import container_reaper
+    run_reap(container_reaper.Scope(pr_id=pr_id, session_tag=session_tag,
+                                    include_retained=include_retained),
+             dry_run)
+
+
+@container_group.command("retain")
+@click.argument("name")
+@click.option("--release", is_flag=True, default=False,
+              help="Drop the retention so cleanup may remove it again")
+@click.option("--note", default="", help="Why the container is kept")
+def container_retain(name: str, release: bool, note: str):
+    """Keep container NAME out of automatic cleanup (e.g. for a discussion)."""
+    from pm_core import container_reaper
+    from pm_core import container as container_mod
+    if release:
+        # Resolving the current id inspects the runtime; an outage must not
+        # crash the command or silently claim the marker was absent.
+        try:
+            removed = container_reaper.unretain(name)
+        except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:
+            click.echo(f"Cannot release retention for {name}: {exc}", err=True)
+            raise SystemExit(1)
+        if removed:
+            click.echo(f"Released {name}; cleanup may remove it once unowned.")
+        else:
+            click.echo(f"{name} was not retained.")
+        return
+    try:
+        name = container_reaper.retain_current(name, note)
+    except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1)
+    click.echo(f"Retained {name}. Release with 'pm container retain --release {name}'.")
+
+
+@container_group.command("restart")
+@click.argument("name")
+@click.option("--force", is_flag=True, default=False,
+              help="Restart even though a live tmux pane still uses it")
+def container_restart(name: str, force: bool):
+    """Restart container NAME in place to clear PID/memory exhaustion.
+
+    Every process inside is ended (including a Claude session running
+    there); the container's files, mounts and setup are kept.  Refuses while
+    a live pane uses the container unless --force.
+    """
+    from pm_core import container as container_mod
+    from pm_core import container_reaper
+    try:
+        name = container_mod.canonical_container_name(name)
+    except (container_mod.ContainerError, OSError, subprocess.TimeoutExpired) as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1)
+    before = (container_mod.pids_usage() or {}).get(name)
+    missing_host_setup = False
+    with container_mod.launch_lock(name, timeout=60) as locked:
+        if not locked:
+            click.echo(f"{name} is being launched right now; try again.", err=True)
+            raise SystemExit(1)
+        # Pin the allocation the ownership check inspects: an external runtime
+        # client can replace/rename the name without taking PM's launch lock,
+        # and restart must not act on a container it never ownership-checked.
+        try:
+            target_id = container_mod.current_container_id(name)
+        except OSError as e:
+            click.echo(f"Cannot verify {name} before restart: {e}", err=True)
+            raise SystemExit(1)
+        if target_id is None:
+            click.echo(f"Cannot verify {name} before restart; retry once the "
+                       f"runtime is responsive.", err=True)
+            raise SystemExit(1)
+        if not target_id:
+            click.echo(f"No container named {name} to restart.", err=True)
+            raise SystemExit(1)
+        # A launch may have attached its pane while we waited for the lock.
+        try:
+            owners = ([] if force
+                      else container_reaper.live_owner_panes(name, target_id))
+            if not force and container_mod.recent_launch(
+                    name, container_reaper.LAUNCH_GRACE, target_id) and not (
+                    container_mod.restart_lease_only(
+                        name, container_reaper.LAUNCH_GRACE, target_id)):
+                click.echo(f"{name} is awaiting attachment; retry after its launch lease "
+                           "expires, or use --force only when it is safe to end the session.", err=True)
+                raise SystemExit(1)
+        except (container_mod.ContainerError, OSError) as e:
+            click.echo(f"{e}. Retry once ownership can be checked, or use --force "
+                       "only when it is safe to end the session.", err=True)
+            raise SystemExit(1)
+        if owners:
+            click.echo(f"{name} is in use by live pane(s) {', '.join(owners)}; "
+                       f"restarting would end that session. Re-run with --force "
+                       f"once it is safe.", err=True)
+            raise SystemExit(1)
+        try:
+            container_mod.restart_container(name, container_id=target_id)
+        except container_mod.ContainerLaunchError as e:
+            if e.kind != "incomplete":
+                click.echo(str(e), err=True)
+                raise SystemExit(1)
+            # The restart itself succeeded and kept the filesystem; only the
+            # host-side completion marker is missing. Every container created
+            # before that marker existed lacks one, so reporting a failed
+            # restart here would contradict the very remedy the PID/keyring
+            # messages print. The next launch finishes the idempotent step.
+            missing_host_setup = True
+        except container_mod.ContainerError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
+    after = (container_mod.pids_usage() or {}).get(name)
+
+    def fmt(usage):
+        return f"{usage[0]}/{usage[1]}" if usage else "?"
+    click.echo(f"Restarted {name} (PIDs {fmt(before)} → {fmt(after)}).")
+    if missing_host_setup:
+        click.echo(
+            f"Note: {name} has no host-side setup completion marker "
+            f"({container_mod.SETUP_COMPLETE_SENTINEL}); the next launch finishes "
+            f"that step in place. Its files and mounts are intact.")

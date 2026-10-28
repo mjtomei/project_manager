@@ -30,6 +30,28 @@ def _isolated_claude_config(tmp_path_factory, monkeypatch):
                        str(tmp_path_factory.mktemp("claude-config")))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_container_state(tmp_path_factory, monkeypatch):
+    """Keep container lifecycle state (locks, retain markers, reaper log)
+    out of the real ``~/.pm/containers``, and give each test a fresh
+    launch-concurrency semaphore."""
+    from pm_core import container
+    monkeypatch.setenv("PM_CONTAINER_STATE_DIR",
+                       str(tmp_path_factory.mktemp("container-state")))
+    monkeypatch.setattr(container, "_create_semaphore", None)
+    from pm_core import container_reaper
+    monkeypatch.setattr(container_reaper, "_runtime_domain",
+                        lambda: {"runtime": "test", "id": "isolated"}, raising=False)
+    # The host's real keyring may be near quota; that must not trigger a
+    # pre-launch reap inside unit tests.
+    monkeypatch.setattr(container, "_KEY_USERS_FILE",
+                        "/nonexistent/pm-test-key-users")
+    # A floor launch left claimed by an earlier test's unreadable inventory
+    # must not hold this test's queue.
+    from pm_core import qa_loop
+    monkeypatch.setattr(qa_loop, "_outage_floor", {})
+
+
 @pytest.fixture
 def fake_github():
     """Install a pure-metadata FakeGitHubBackend as the `gh` transport.

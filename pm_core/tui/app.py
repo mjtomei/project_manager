@@ -482,9 +482,7 @@ class ProjectManagerApp(App):
         import os
         try:
             from pm_core.tui import auto_start as _auto_start
-            trigger = ("merge_restart"
-                       if _auto_start.has_merge_restart_marker()
-                       else "initial")
+            trigger = _auto_start.mount_trigger()
         except Exception:
             trigger = "initial"
         _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
@@ -544,6 +542,10 @@ class ProjectManagerApp(App):
             self.run_worker(self._write_queue.run(), exclusive=False)
         # Background sync interval: 5 minutes for automatic PR sync
         self._sync_timer = self.set_interval(300, self._background_sync)
+        # Reclaim leaked containers (finished runs, merged PRs, dead
+        # sessions) every 10 minutes, on the reaper's own thread.
+        self._container_reap_timer = self.set_interval(
+            600, self._kick_container_reconcile)
         # Run heavier startup tasks (heal_registry, tmux bindings) in a
         # background thread so they don't block input processing.
         self.run_worker(self._deferred_startup(), exclusive=False)
@@ -584,6 +586,40 @@ class ProjectManagerApp(App):
                 _register_tmux_bindings(self._session_name)
         except Exception:
             pass
+        self._kick_container_reconcile(reason="startup")
+
+    def _kick_container_reconcile(self, reason: str = "periodic") -> None:
+        """Queue a background container reconcile (never blocks the event loop).
+
+        Removals and failures are surfaced in the log line; failures stay
+        recorded for ``pm container status`` and are retried next pass.
+        """
+        try:
+            from pm_core.container import is_container_mode_enabled
+            if not is_container_mode_enabled():
+                return
+            from pm_core import container_reaper
+        except Exception:
+            return
+
+        def _report(outcome) -> None:
+            if outcome.failures or outcome.error:
+                msg = (f"Container cleanup: {outcome.summary()} — retry with "
+                       f"'pm container reap'")
+            elif outcome.pid_pressure:
+                name, pids, limit, _why = outcome.pid_pressure[0]
+                msg = (f"Container {name} at {pids}/{limit} PIDs — "
+                       f"'pm container restart {name}' once its session is done")
+            elif outcome.removed:
+                msg = f"Container cleanup: {outcome.summary()}"
+            else:
+                return
+            try:
+                self.call_from_thread(self.log_message, msg)
+            except Exception:
+                _log.info("%s", msg)
+
+        container_reaper.reconcile(wait=False, reason=reason, on_done=_report)
 
     def on_resize(self) -> None:
         """Update layout orientation and recompute tree when terminal is resized."""
@@ -1242,10 +1278,13 @@ class ProjectManagerApp(App):
         pane_ops.quit_app(self)
 
     def action_restart(self) -> None:
+        import os
         from pm_core.tui import auto_start
         if auto_start.has_merge_restart_marker():
             auto_start.save_breadcrumb(self)
             _log.info("action_restart: reason=merge_restart_marker")
+            # save_breadcrumb deleted the marker; carry the trigger across exec.
+            os.environ[auto_start.RESTART_TRIGGER_ENV] = "merge_restart"
         else:
             _log.info("action_restart: reason=user")
         pane_ops.restart_app(self)

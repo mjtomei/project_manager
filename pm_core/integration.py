@@ -74,7 +74,15 @@ BINDING_KEYS = ("target_repo", "base_branch", "base_sha", "candidate_tree",
 
 
 def _git(*args: str, cwd) -> subprocess.CompletedProcess:
-    return git_ops.run_git(*args, cwd=cwd, check=False)
+    """Host-side git, always with repository hooks disabled.
+
+    Nearly every call runs in the container-writable PR workdir (or its
+    candidate worktree, which shares that ``.git``), and not only the merge
+    runs hooks there: ``fetch``/``update-ref`` fire ``reference-transaction``
+    and ``worktree add`` fires ``post-checkout``.  pm's integration plumbing
+    needs no hooks (see :data:`pm_core.git_ops.NO_HOOKS_ARGS`).
+    """
+    return git_ops.run_git(*args, cwd=cwd, check=False, no_hooks=True)
 
 
 def _out(r) -> str:
@@ -246,9 +254,8 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
     tmp = Path(tempfile.mkdtemp(prefix="pm-integrate-"))
     # A unique basename gives a unique admin dir (.git/worktrees/<name>).
     wt = tmp / f"candidate-{secrets.token_hex(4)}"
-    no_hooks = ("-c", "core.hooksPath=/dev/null")
     try:
-        add = _git(*no_hooks, "worktree", "add", "--detach", "--quiet",
+        add = _git("worktree", "add", "--detach", "--quiet",
                    str(wt), head, cwd=workdir)
         if add.returncode != 0:
             return None, [], f"candidate worktree failed: {_detail(add)}"
@@ -256,7 +263,7 @@ def _worktree_merge_locked(workdir: str, head: str, base_sha: str):
         # replayed resolution would make the candidate depend on local
         # history (with rerere.autoUpdate it stages the replayed paths, so a
         # conflict surfaces as an unexplained "candidate merge failed").
-        m = _git(*no_hooks, "-c", "rerere.enabled=false",
+        m = _git("-c", "rerere.enabled=false",
                  "-c", "user.name=pm", "-c", "user.email=pm@localhost",
                  "merge", "--no-commit", "--no-ff", "--no-edit", base_sha, cwd=wt)
         if m.returncode == 0:

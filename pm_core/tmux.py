@@ -35,6 +35,17 @@ def _run(*args, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(*args, **kwargs)
 
 
+def launch_error_detail(error: Exception | str) -> str:
+    """Keep captured tmux stderr in launcher diagnostics (including byte output)."""
+    detail = str(error)
+    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+        stderr = error.stderr
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        detail += f": {stderr.strip()}"
+    return detail
+
+
 # ``cd <dir> && `` prefix produced by build_claude_shell_cmd.  It is kept
 # outside the env wrapper so pane_start_command parsing (transcript/cwd
 # recovery in claude_launcher.pane_transcript_path) still sees it.
@@ -243,13 +254,23 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
     ``_wrap_cmd_env``).
     """
     target = f"{session}:"
-    _run_with_env(
-        _tmux_cmd("new-window", "-d", "-t", target, "-n", name, "-c", cwd,
-                  cmd),
+    result = _run_with_env(
+        _tmux_cmd("new-window", "-d", "-P", "-F",
+                  "#{window_id} #{window_index} #{pane_id}",
+                  "-t", target, "-n", name, "-c", cwd, cmd),
         env,
-        check=True,
+        check=True, text=True,
     )
-    win = find_window_by_name(session, name)
+    # Use the window tmux just created: another window may already carry
+    # *name* (a QA scenario relaunch shares its name with the concretizer's
+    # surviving window), and a name lookup returns the first one.
+    created = result.stdout.split() if isinstance(result.stdout, str) else []
+    if len(created) == 3 and created[2].startswith("%"):
+        win = {"id": created[0], "index": created[1], "name": name}
+        pane = created[2]
+    else:
+        win = find_window_by_name(session, name)
+        pane = None
     _log.info("new_window_get_pane: session=%s name=%s id=%s index=%s switch=%s",
               session, name,
               (win or {}).get("id"), (win or {}).get("index"), switch)
@@ -263,6 +284,8 @@ def new_window_get_pane(session: str, name: str, cmd: str, cwd: str,
         )
         _log.info("new_window_get_pane: select-window target=%s:%s rc=%d",
                   current, win["index"], result.returncode)
+    if pane:
+        return pane
     # Discover the pane ID
     panes = get_pane_indices(session, win["index"])
     if panes:
@@ -730,6 +753,26 @@ def pane_exists(pane_id: str) -> bool:
         text=True,
     )
     return result.returncode == 0
+
+
+def pane_gone(pane_id: str) -> bool:
+    """True only when the server answered and *pane_id* is not among its panes.
+
+    ``pane_exists`` and ``pane_window_id`` cannot tell a removed pane from a
+    failed query (unreachable server, timeout, malformed output); callers that
+    must keep a resource on any doubt need this positive "gone" answer.
+    """
+    try:
+        result = _run(_tmux_cmd("list-panes", "-a", "-F", "#{pane_id}"),
+                      text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    ids = result.stdout.split()
+    if not ids or not all(p.startswith("%") for p in ids):
+        return False
+    return pane_id not in ids
 
 
 def pane_window_id(pane_id: str) -> str | None:

@@ -1067,10 +1067,11 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     else:
         if is_git:
             click.echo(f"Updating {work_path}...")
-            git_ops.pull_rebase(work_path)
+            # The PR workdir is container-writable: run its hooks never.
+            git_ops.pull_rebase(work_path, no_hooks=True)
 
         click.echo(f"Checking out branch {branch}...")
-        git_ops.checkout_branch(work_path, branch, create=True)
+        git_ops.checkout_branch(work_path, branch, create=True, no_hooks=True)
 
     # For GitHub backend: push branch and create draft PR if not already set
     backend_name = data["project"].get("backend", "vanilla")
@@ -1082,10 +1083,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
 
         # Create empty commit so the branch has something to push
         commit_msg = f"Start work on: {title}\n\nPR: {pr_id}"
-        git_ops.run_git("commit", "--allow-empty", "-m", commit_msg, cwd=work_path)
+        git_ops.run_git("commit", "--allow-empty", "-m", commit_msg,
+                        cwd=work_path, no_hooks=True)
 
         click.echo(f"Pushing branch {branch}...")
-        push_result = git_ops.run_git("push", "-u", "origin", branch, cwd=work_path, check=False)
+        push_result = git_ops.run_git("push", "-u", "origin", branch,
+                                      cwd=work_path, check=False, no_hooks=True)
         if push_result.returncode != 0:
             click.echo(f"Warning: Failed to push branch: {push_result.stderr}", err=True)
         else:
@@ -1176,28 +1179,41 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                                          session_type="impl",
                                          env_out=env)
             # Optionally wrap in a container for isolation
-            from pm_core.container import wrap_claude_cmd, ContainerError
+            from pm_core.container import (
+                wrap_claude_cmd, ContainerError, discard_unowned_container,
+            )
+            allocation_identity: dict[str, str] = {}
             try:
                 cmd, _cname = wrap_claude_cmd(cmd, str(work_path), label=f"impl-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_stag, pr_id=pr_id,
+                                              kind="impl",
+                                              allocation_identity=allocation_identity,
                                               env=env)
             except ContainerError as e:
                 click.echo(str(e), err=True)
                 raise SystemExit(1)
+            window_created = False
             try:
                 if use_companion:
                     claude_pane = tmux_mod.new_window_get_pane(
                         pm_session, window_name, cmd, str(work_path),
                         switch=not background, env=env,
                     )
-                    if claude_pane:
-                        win = tmux_mod.find_window_by_name(pm_session, window_name)
-                        if win:
-                            _add_companion_pane(pm_session, win, str(work_path), "impl")
+                    if not claude_pane:
+                        # A window that exists (pane lookup failed) may
+                        # already run Claude in the container — keep it.
+                        window_created = bool(
+                            tmux_mod.find_window_by_name(pm_session, window_name))
+                        raise RuntimeError(f"no pane returned for '{window_name}'")
+                    window_created = True
+                    win = tmux_mod.find_window_by_name(pm_session, window_name)
+                    if win:
+                        _add_companion_pane(pm_session, win, str(work_path), "impl")
                 else:
                     tmux_mod.new_window(pm_session, window_name, cmd, str(work_path),
                                         switch=not background, env=env)
+                    window_created = True
                     win = tmux_mod.find_window_by_name(pm_session, window_name)
                     if win:
                         tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -1207,7 +1223,25 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
                 clear_return_awaiting(root, pr_id, "impl")
                 return
             except Exception as e:
-                click.echo(f"Failed to create tmux window: {e}", err=True)
+                detail = tmux_mod.launch_error_detail(e)
+                if window_created:
+                    # The Claude pane exists (a later step such as the
+                    # companion split failed) — keep its container.
+                    click.echo(f"Launched Claude in tmux window '{window_name}' "
+                               f"(setup warning: {detail})", err=True)
+                    from pm_core.signoff import clear_return_awaiting
+                    clear_return_awaiting(root, pr_id, "impl")
+                    return
+                click.echo(f"Failed to create tmux window: {detail}", err=True)
+                # Pane discovery can fail after tmux attached the worker.
+                # Do not remove it or launch a duplicate host worker when
+                # ownership is live/unknown or cleanup could not finish.
+                if _cname and not discard_unowned_container(
+                        _cname, container_id=allocation_identity.get("id"),
+                        generation=allocation_identity.get("generation")):
+                    click.echo("Container preserved; check the existing session before retrying.",
+                               err=True)
+                    raise SystemExit(1)
                 click.echo("Launching Claude in current terminal...")
 
     # Fall through: launch interactively in current terminal
@@ -1401,26 +1435,28 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                                          session_type="review",
                                          env_out=env)
     # Optionally wrap in a container for isolation.
-    # Always remove any existing container for this review before creating a
-    # new one.  The previous session's bash EXIT trap runs "docker rm -f"
-    # asynchronously after its pane is killed; if wrap_claude_cmd runs while
-    # that rm is still in flight it will "reuse" the dying container, then
-    # the old trap's rm completes and kills the new session mid-init.
-    # Removing it here (synchronously) closes that race regardless of whether
-    # an existing tmux window was found above.
+    # Prefer a fresh allocation after the old window closed, but preserve
+    # retained/live owners if pane discovery failed. Verified reuse renews
+    # the cleanup generation so a delayed old EXIT cannot kill this launch.
     branch = pr_entry.get("branch", "")
-    from pm_core.container import wrap_claude_cmd, ContainerError, remove_container, is_container_mode_enabled, _make_container_name
-    if is_container_mode_enabled():
-        remove_container(_make_container_name(f"review-{pr_id}"))
+    from pm_core.container import (
+        wrap_claude_cmd, ContainerError, discard_unowned_container,
+        is_container_mode_enabled, _make_container_name,
+    )
     # session_tag drives the captures bind-mount so the review
     # container's /pm-captures points at the same per-PR captures dir
     # the impl and QA containers use (lets a reviewer read pre/post-fix
     # captures and scenario captures from inside their pane).
+    if is_container_mode_enabled():
+        # The tagged name is the one wrap_claude_cmd will create/reuse.
+        discard_unowned_container(_make_container_name(f"review-{pr_id}", _review_stag))
+    allocation_identity: dict[str, str] = {}
     try:
         claude_cmd, _cname = wrap_claude_cmd(claude_cmd, workdir, label=f"review-{pr_id}",
                                               allowed_push_branch=branch,
                                               session_tag=_review_stag,
-                                              pr_id=pr_id,
+                                              pr_id=pr_id, kind="review",
+                                              allocation_identity=allocation_identity,
                                               env=env)
     except ContainerError as e:
         click.echo(str(e), err=True)
@@ -1432,6 +1468,7 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
     # window.  Background mode is used by auto-start to avoid stealing focus.
     switch = not review_loop and not background
 
+    claude_pane = ""
     try:
         # Build the diff pane command first.  We use git --no-pager
         # and pipe through less ourselves so that quitting the pager
@@ -1496,6 +1533,9 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
                 window_name, pm_session,
             )
             click.echo(f"Review window: failed to create tmux window '{window_name}'.")
+            discard_unowned_container(
+                _cname, container_id=allocation_identity.get("id"),
+                generation=allocation_identity.get("generation"))
             return
 
         # Explicit cwd: without -c tmux starts the split in the calling
@@ -1503,6 +1543,8 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         claude_pane = tmux_mod.split_pane_at(diff_pane, "h", claude_cmd,
                                              background=True, cwd=workdir,
                                              env=env)
+        if not claude_pane:
+            raise RuntimeError(f"no worker pane returned for '{window_name}'")
 
         # Register review panes under the review window (multi-window safe).
         # Derive window ID from the pane we just created rather than
@@ -1549,8 +1591,13 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
         from pm_core.signoff import clear_return_awaiting
         clear_return_awaiting(state_root(), pr_entry["id"], "review")
     except Exception as e:
-        _log.warning("Failed to launch review window: %s", e)
-        click.echo(f"Review window error: {e}")
+        detail = tmux_mod.launch_error_detail(e)
+        _log.warning("Failed to launch review window: %s", detail)
+        click.echo(f"Review window error: {detail}")
+        if not claude_pane:
+            discard_unowned_container(
+                _cname, container_id=allocation_identity.get("id"),
+                generation=allocation_identity.get("generation"))
 
 
 @pr.command("review")
@@ -1929,6 +1976,16 @@ def _finalize_merge(root, pr_entry: dict, pr_id: str,
             kill_pr_windows(session, pr_entry)
     except Exception:
         pass
+
+    # Reclaim the merged PR's containers (impl/review/sign-off/QA) without
+    # holding up the merge; ownership checks keep anything still live.
+    try:
+        from pm_core.container import is_container_mode_enabled
+        if is_container_mode_enabled():
+            from pm_core import container_reaper
+            container_reaper.spawn_detached_reap(pr_id=pr_id)
+    except Exception:
+        _log.debug("detached container reap for %s failed", pr_id, exc_info=True)
 
     # Finalize merge transcript if provided
     if transcript:
@@ -2317,12 +2374,15 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     pr_id = pr_entry["id"]
     repo_dir = str(_resolve_repo_dir(root, data))
     ref = f"refs/pm/merge/{pr_id}"
-    git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False)
+    # update-ref fires reference-transaction: no hooks in the PR workdir.
+    git_ops.run_git("update-ref", ref, merge_sha, cwd=workdir, check=False,
+                    no_hooks=True)
     # Into the same private ref on the main repo side, not FETCH_HEAD: a
     # concurrent fetch there (a user, an agent) would overwrite FETCH_HEAD.
     fetch = git_ops.run_git("fetch", "--no-tags", workdir, f"+{ref}:{ref}",
                             cwd=repo_dir, check=False)
-    git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False)
+    git_ops.run_git("update-ref", "-d", ref, cwd=workdir, check=False,
+                    no_hooks=True)
     fetched = _ref(repo_dir, ref)
     # The merge commit stays reachable from the base once published; the
     # private ref is not needed after this check.
@@ -2376,7 +2436,7 @@ def _publish_local(data: dict, root: Path, pr_entry: dict, workdir: str,
     if wd_head != base_branch and (
             old is None or integration.is_ancestor(workdir, old, merge_sha)):
         git_ops.run_git("update-ref", f"refs/heads/{base_branch}", merge_sha,
-                        cwd=workdir, check=False)
+                        cwd=workdir, check=False, no_hooks=True)
 
 
 def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
@@ -2395,7 +2455,7 @@ def _publish_vanilla(root: Path, pr_entry: dict, workdir: str,
         "push", "--porcelain", target_repo,
         f"{merge_sha}:refs/heads/{base_branch}",
         f"--force-with-lease=refs/heads/{base_branch}:{base_sha}",
-        cwd=workdir, check=False)
+        cwd=workdir, check=False, no_hooks=True)
     if push.returncode != 0:
         now = integration.remote_ref(workdir, target_repo,
                                      f"refs/heads/{base_branch}")
@@ -2464,7 +2524,7 @@ def _publish_github(root: Path, pr_entry: dict, workdir: str,
         lease = f"--force-with-lease=refs/heads/{branch}:{remote_head or ''}"
         push = git_ops.run_git("push", target_repo,
                                f"{head}:refs/heads/{branch}", lease,
-                               cwd=workdir, check=False)
+                               cwd=workdir, check=False, no_hooks=True)
         if push.returncode != 0:
             click.echo(f"Could not push the approved head to {branch}: "
                        f"{git_ops.git_detail(push)}", err=True)
@@ -3025,8 +3085,13 @@ def pr_import_github(gh_state: str):
 
 
 def _workdir_is_dirty(work_path: Path) -> bool:
-    """Check if a workdir has uncommitted changes."""
-    result = git_ops.run_git("status", "--porcelain", cwd=work_path, check=False)
+    """Check if a workdir has uncommitted changes.
+
+    No hooks: ``status`` refreshes a stale index and fires
+    ``post-index-change`` from the container-writable workdir.
+    """
+    result = git_ops.run_git("status", "--porcelain", cwd=work_path,
+                             check=False, no_hooks=True)
     return bool(result.stdout.strip())
 
 
@@ -3205,6 +3270,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         if summary["registry_windows"]:
             click.echo(f"  registry: {', '.join(summary['registry_windows'])}")
         trigger_tui_refresh()
+        if summary.get("container_failures"):
+            click.echo("Container cleanup incomplete; retry with 'pm container reap'.", err=True)
+            raise SystemExit(1)
         return
 
     if prune:

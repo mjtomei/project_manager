@@ -1,7 +1,7 @@
 """Tear down all live resources for a PR across implementation, review, and QA."""
 
 from pm_core import container as container_mod
-from pm_core import pane_registry, push_proxy
+from pm_core import pane_registry
 from pm_core import runtime_state
 from pm_core import tmux as tmux_mod
 from pm_core.cli.helpers import _pr_display_id, kill_pr_windows
@@ -33,20 +33,29 @@ def _candidate_window_names(display_id: str, session: str) -> list[str]:
     return base
 
 
-def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
+def cleanup_pr_resources(session: str | None, pr: dict, *,
+                         background_containers: bool = False) -> dict:
     """Remove every live resource for *pr*.
 
-    Kills tmux windows, removes QA containers (and their push-proxy sockets
-    via remove_container), and prunes the pane registry. Safe to call when
-    no resources exist. Returns a summary dict::
+    Kills tmux windows, removes the PR's containers (and their push-proxy
+    sockets via remove_container), and prunes the pane registry. Safe to
+    call when no resources exist. Returns a summary dict::
 
         {"windows": [...], "containers": [...], "registry_windows": [...],
-         "sockets": [...]}
+         "runtime_state": bool, "container_failures": {name: error}}
+
+    Push-proxy sockets are released by ``remove_container`` itself; the
+    summary no longer reports them separately.
+
+    *background_containers* (automatic callers on the TUI event loop) hands
+    the containers to a background, PR-scoped reconcile instead: removal
+    doesn't block the caller, and retained containers are kept.  The
+    summary's ``containers`` is then empty.
     """
     pr_id = pr["id"]
     display_id = _pr_display_id(pr)
     summary = {"windows": [], "containers": [], "registry_windows": [],
-               "sockets": [], "runtime_state": False}
+               "runtime_state": False, "container_failures": {}}
 
     if session:
         try:
@@ -55,21 +64,22 @@ def cleanup_pr_resources(session: str | None, pr: dict) -> dict:
             _log.warning("kill_pr_windows failed: %s", e)
 
     session_tag = session.removeprefix("pm-") if session else None
-    try:
-        summary["containers"] = container_mod.cleanup_pr_containers(
-            pr_id, session_tag=session_tag)
-    except Exception as e:  # pragma: no cover
-        _log.warning("cleanup_pr_containers failed: %s", e)
-
-    # Best-effort socket cleanup for any container we found (remove_container
-    # already calls stop_push_proxy, but cover the case where a socket lingers
-    # without its container).
-    for cname in summary["containers"]:
+    if background_containers:
+        from pm_core import container_reaper
+        container_reaper.reconcile(
+            container_reaper.Scope(pr_id=pr_id, session_tag=session_tag),
+            wait=False, reason="pr-cleanup")
+    else:
         try:
-            push_proxy.stop_push_proxy(cname)
-            summary["sockets"].append(cname)
-        except Exception:
-            pass
+            summary["containers"] = container_mod.cleanup_pr_containers(
+                pr_id, session_tag=session_tag, failures=summary["container_failures"])
+        except Exception as e:
+            summary["container_failures"]["container cleanup"] = str(e)
+            _log.warning("cleanup_pr_containers failed: %s", e)
+
+    # remove_container already released each container's push proxy. Never
+    # stop them again here: a concurrent launch may have installed a
+    # replacement by now.
 
     if session:
         try:
@@ -104,4 +114,9 @@ def format_summary(summary: dict) -> str:
         parts.append(f"{len(summary['containers'])} container(s)")
     if summary["registry_windows"]:
         parts.append(f"{len(summary['registry_windows'])} registry entry(s)")
+    failures = summary.get("container_failures") or {}
+    if failures:
+        details = "; ".join(f"{name}: {error}" for name, error in failures.items())
+        parts.append(f"{len(failures)} container cleanup failure(s) ({details}); "
+                     "retry with pm container reap")
     return ", ".join(parts) if parts else "nothing to clean"

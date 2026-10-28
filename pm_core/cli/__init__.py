@@ -261,7 +261,8 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds",
+                 "container-launch-concurrency", "container-max-running"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -277,6 +278,8 @@ _SETTING_DEFAULTS = {
     "qa-verdict-reminder-timeout": "(unset)",
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
     "spec-mode": "prompt",
+    "container-launch-concurrency": "4",
+    "container-max-running": "0",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
 
@@ -288,7 +291,11 @@ def _list_settings():
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
-            val = "on" if get_global_setting(name) else "off"
+            # An unset boolean is its default: qa-verify-pass defaults on.
+            if get_global_setting_value(name, ""):
+                val = "on" if get_global_setting(name) else "off"
+            else:
+                val = _SETTING_DEFAULTS.get(name, "off")
         else:
             raw = get_global_setting_value(name, "")
             val = raw if raw else _SETTING_DEFAULTS.get(name, "(unset)")
@@ -336,6 +343,12 @@ def set_cmd(setting, value):
                                   workspace-trust prompt before pm fails it (default 120)
 
       spec-mode            Spec generation mode: auto, review, or prompt (default: prompt)
+
+      container-launch-concurrency  Max containers created at once per pm process
+                                    (default 4; applies to newly started processes)
+
+      container-max-running  Cap on running pm containers when QA batches scenario
+                             launches (0 = unlimited, default 0)
     """
     if setting in _LIST_ALIASES:
         _list_settings()
@@ -655,6 +668,9 @@ COMMANDS
   pm container set <key> <val>   Configure container image, memory, cpu
   pm container build             Launch Claude to build project-specific image
   pm container cleanup           Remove stale pm containers
+  pm container reap [--dry-run]  Remove containers nothing owns any more
+  pm container retain <name>     Keep a container out of automatic cleanup
+  pm container restart <name>    Restart in place to clear PID/memory pressure
 
   pm bench models               List models on local inference backend
   pm bench exercises            List available benchmark exercises

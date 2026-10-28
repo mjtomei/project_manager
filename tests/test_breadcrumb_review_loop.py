@@ -167,6 +167,19 @@ class TestSaveBreadcrumbReviewLoops:
 
         assert not (tmp_path / "autostart-resume.json").exists()
 
+    def test_nothing_to_persist_is_logged_at_info(self, tmp_path):
+        """The merge-restart path leaves a trace in the INFO debug log even
+        when there is nothing to persist."""
+        app = _make_app(auto_start=False)
+        (tmp_path / "merge-restart").touch()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+                patch("pm_core.tui.auto_start._log") as log:
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(app)
+
+        log.info.assert_any_call("save_breadcrumb: nothing to persist, skipping")
+
     def test_saves_manual_loop_without_auto_start(self, tmp_path):
         """A manually-started review loop is saved even without auto-start."""
         state = _make_running_state("pr-001", iteration=2)
@@ -611,3 +624,36 @@ class TestTuiRestartCommand:
 
         assert result.exit_code == 1
         assert "No TUI pane found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Mount trigger after a merge restart
+# ---------------------------------------------------------------------------
+
+class TestMountTrigger:
+    """The re-exec'd TUI logs trigger=merge_restart although the marker is gone."""
+
+    def _restart(self, tmp_path, monkeypatch):
+        from pm_core.tui.app import ProjectManagerApp
+        monkeypatch.delenv("PM_TUI_RESTART_TRIGGER", raising=False)
+        app = _make_app(auto_start=False, target=None)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.pane_ops.restart_app") as restart:
+            ProjectManagerApp.action_restart(app)
+        restart.assert_called_once_with(app)
+
+    def test_merge_restart_survives_marker_deletion(self, tmp_path, monkeypatch):
+        from pm_core.tui.auto_start import mount_trigger
+        (tmp_path / "merge-restart").write_text("")
+        self._restart(tmp_path, monkeypatch)
+        assert not (tmp_path / "merge-restart").exists()
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            assert mount_trigger() == "merge_restart"
+            # Popped, so panes and later restarts do not inherit it.
+            assert mount_trigger() == "initial"
+
+    def test_user_restart_mounts_as_initial(self, tmp_path, monkeypatch):
+        from pm_core.tui.auto_start import mount_trigger
+        self._restart(tmp_path, monkeypatch)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
+            assert mount_trigger() == "initial"

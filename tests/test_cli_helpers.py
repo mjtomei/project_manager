@@ -336,8 +336,9 @@ class TestEnsureWorkdir:
             dest.mkdir(parents=True, exist_ok=True)
             calls["clone"] = (src, dest, branch)
 
-        def fake_checkout(wd, branch, create=False):
+        def fake_checkout(wd, branch, create=False, no_hooks=False):
             calls["checkout"] = (wd, branch, create)
+            calls["checkout_no_hooks"] = no_hooks
 
         def fake_run_git(*args, cwd=None, check=True, **kw):
             from types import SimpleNamespace
@@ -356,6 +357,8 @@ class TestEnsureWorkdir:
         assert pr_entry["workdir"] == result
         assert "clone" in calls
         assert "checkout" in calls
+        # The workdir is container-writable: its hooks never run on the host.
+        assert calls["checkout_no_hooks"] is True
 
     def test_returns_none_when_no_workdir_set(self, tmp_path):
         """When workdir is None/empty, returns None (no branch to clone)."""

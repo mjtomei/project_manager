@@ -60,6 +60,21 @@ def _sweep_proxy_state():
                 pass
 
 
+@pytest.fixture(autouse=True)
+def _no_container_users(monkeypatch):
+    """Stand in for an empty runtime inventory.
+
+    Shared proxies are released only once the runtime reports no container
+    still using them (any pm process); these tests exercise the socket and
+    directory mechanics, so the inventory says "no users".  Tests of the
+    in-use paths override these.
+    """
+    monkeypatch.setattr("pm_core.container.containers_for_pr",
+                        lambda tag, pr_id: set())
+    monkeypatch.setattr("pm_core.push_proxy.unshared_proxy_in_use",
+                        lambda path: False)
+
+
 @pytest.fixture
 def sock_path(tmp_path):
     return str(tmp_path / "test.sock")
@@ -103,6 +118,40 @@ def _send_raw(sock_path: str, payload: bytes) -> dict:
     return json.loads(data.decode())
 
 
+class TestPushProxyDisablesContainerAuthoredHooks:
+    """The workdir is container-writable, so its git hooks must not run here.
+
+    ``git push`` runs ``.git/hooks/pre-push`` and ``git pull`` runs hooks such
+    as ``post-merge``.  A container can write both, which would execute
+    container-authored code on the host — the escape ``_check_dangerous_flags``
+    exists to prevent.
+    """
+
+    @patch("subprocess.run")
+    def test_push_disables_hooks(self, mock_run, proxy, sock_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        resp = _send_request(sock_path,
+                             {"args": ["origin", "pm/pr-123-feature"]})
+        assert resp["exit_code"] == 0
+        push_call = [c for c in mock_run.call_args_list
+                     if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
+        assert len(push_call) == 1
+        cmd = push_call[0][0][0]
+        assert cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+
+    @patch("subprocess.run")
+    def test_read_commands_disable_hooks(self, mock_run, proxy, sock_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        for cmd_name in ("fetch", "pull", "ls-remote"):
+            mock_run.reset_mock()
+            resp = _send_request(sock_path,
+                                 {"cmd": cmd_name, "args": ["origin"]})
+            assert resp["exit_code"] == 0, cmd_name
+            cmd = mock_run.call_args_list[0][0][0]
+            assert cmd[:4] == ["git", "-c", "core.hooksPath=/dev/null", cmd_name], (
+                f"{cmd_name} must disable hooks: {cmd}")
+
+
 class TestPushProxyBranchValidation:
     def test_rejects_wrong_branch(self, proxy, sock_path):
         resp = _send_request(sock_path, {"args": ["origin", "main"]})
@@ -134,7 +183,8 @@ class TestPushProxyBranchValidation:
                      if c[0][0][:2] == ["git", "-C"] and "push" in c[0][0]]
         assert len(push_call) == 1
         cmd = push_call[0][0][0]
-        assert cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
+        assert cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+        assert cmd[5:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_allows_force_push_plus_prefix(self, mock_run, proxy, sock_path):
@@ -272,7 +322,8 @@ class TestPushProxyBranchValidation:
         assert len(push_call) == 1
         cmd = push_call[0][0][0]
         # cmd is ["git", "-C", <source>, "push", "-u", "origin", "pm/pr-123-feature"]
-        assert cmd[3:] == ["push", "-u", "origin", "pm/pr-123-feature"]
+        assert cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+        assert cmd[5:] == ["push", "-u", "origin", "pm/pr-123-feature"]
 
 
 class TestLongOptionMatch:
@@ -327,6 +378,46 @@ class TestDangerousFlags:
         resp = _send_request(sock_path,
                              {"cmd": "ls-remote", "args": ["--upload-pack=/evil"]})
         assert resp["exit_code"] == 1
+
+
+    @pytest.mark.parametrize("cmd", ["push", "fetch", "pull", "ls-remote"])
+    @pytest.mark.parametrize("flag", [
+        "--upl", "--upload-p", "--upload-pac", "--receive-p",
+        "--receive-pac", "--e", "--ex", "--exe",
+    ])
+    def test_rejects_abbreviated_dangerous_flags(self, proxy, sock_path, cmd, flag):
+        """git accepts any unambiguous prefix of a long option.
+
+        ``--upl=/workspace/evil.sh`` runs the container-written script on the
+        host exactly like ``--upload-pack=``, so the exact-name check is not
+        enough (verified against real git: ``git fetch --upl=<script>``
+        executes the script).
+        """
+        resp = _send_request(sock_path, {"cmd": cmd,
+                                         "args": [f"{flag}=/workspace/evil.sh"]})
+        assert resp["exit_code"] == 1, resp
+        assert "rejected" in resp["stderr"]
+        assert "security restriction" in resp["stderr"]
+
+    def test_abbreviated_flag_names_the_full_option(self, proxy, sock_path):
+        resp = _send_request(sock_path,
+                             {"cmd": "fetch",
+                              "args": ["--upl=/workspace/evil.sh"]})
+        assert "abbreviation of --upload-pack" in resp["stderr"]
+
+    @pytest.mark.parametrize("args", [
+        ["--recurse-submodules=no", "origin", "pm/pr-123-feature"],
+        ["--refetch"],
+        ["-u", "origin", "pm/pr-123-feature"],
+        ["--", "origin", "pm/pr-123-feature"],
+    ])
+    def test_ordinary_options_are_not_treated_as_dangerous(self, args):
+        """The prefix rule must not swallow options that merely look similar."""
+        assert PushProxy._check_dangerous_flags(args, "push") is None
+
+    def test_exact_dangerous_options_are_still_rejected(self):
+        for flag in ("--upload-pack", "--receive-pack", "--exec"):
+            assert PushProxy._check_dangerous_flags([flag, "/evil"], "push")
 
 
 class TestPushProxyProtocol:
@@ -407,6 +498,10 @@ class TestPushProxyLifecycle:
              patch("pm_core.push_proxy.proxy_is_alive", return_value=True), \
              patch("pm_core.push_proxy.os.path.exists", return_value=True):
             mock_popen.return_value = MagicMock(pid=12345)
+            # A live child: the readiness loop checks the child before the
+            # socket, so an unset poll() (a truthy MagicMock) would look like
+            # an exited child.
+            mock_popen.return_value.poll.return_value = None
             _start_proxy_subprocess(sock, "/workdir", "pm/pr-x")
 
         assert mock_popen.called
@@ -637,7 +732,7 @@ class TestPushProxyLifecycle:
         proxy = PushProxy(sock_path, "/w", "branch")
         proxy.start()
         try:
-            proxy._sock_ino = None  # stat failed at bind time
+            proxy._socket_identity = None  # stat failed at bind time
             assert proxy.socket_is_current()
             os.unlink(sock_path)
             assert not proxy.socket_is_current()
@@ -959,7 +1054,8 @@ class TestCallerWorkdir:
         assert len(push_calls) == 1
         push_cmd = push_calls[0][0][0]
         assert push_cmd[2] == str(workdir)
-        assert push_cmd[3:] == ["push", "origin", "pm/pr-123-feature"]
+        assert push_cmd[3:5] == ["-c", "core.hooksPath=/dev/null"]
+        assert push_cmd[5:] == ["push", "origin", "pm/pr-123-feature"]
 
     @patch("subprocess.run")
     def test_fetch_uses_proxy_workdir(self, mock_run, proxy, sock_path,
@@ -1300,7 +1396,28 @@ class TestWorkdirKeyedProxies:
         assert push_proxy_mod.proxy_is_alive(s_impl2)
         assert push_proxy_mod.proxy_is_alive(s_qa)
 
-    def test_shared_stop_keeps_socket_dir(self, tmp_path, live_proxies):
+    def test_shared_stop_keeps_socket_while_a_container_uses_it(
+            self, tmp_path, live_proxies, monkeypatch):
+        """Another pm process's container still on the PR keeps the proxy.
+
+        In-process references cannot prove other processes have no users:
+        the runtime inventory decides, so a stop by the last local user
+        leaves the socket and its directory alone while one remains.
+        """
+        impl = self._workdir(tmp_path, "impl")
+        sock = self._start("impl-wd", impl)
+        sock_dir = os.path.dirname(sock)
+        monkeypatch.setattr("pm_core.container.containers_for_pr",
+                            lambda tag, pr_id: {"other-process-impl"})
+
+        stop_push_proxy("impl-wd")
+
+        assert push_proxy_mod.proxy_is_alive(sock)
+        assert os.path.isdir(sock_dir)
+
+    def test_shared_stop_releases_unused_socket_dir(self, tmp_path,
+                                                    live_proxies):
+        """With no container left, the socket, directory and lock go."""
         impl = self._workdir(tmp_path, "impl")
         sock = self._start("impl-wd", impl)
         sock_dir = os.path.dirname(sock)
@@ -1308,74 +1425,97 @@ class TestWorkdirKeyedProxies:
         stop_push_proxy("impl-wd")
 
         assert not os.path.exists(sock)
-        # The directory is kept so a container bind-mount stays valid.
-        assert os.path.isdir(sock_dir)
+        # No container mounts it any more (the runtime said so under the
+        # PR's proxy lock), so nothing needs the directory either.
+        assert not os.path.lexists(sock_dir)
+        assert not os.path.lexists(os.path.realpath(sock_dir) + ".lock")
+
+    def test_shared_stop_keeps_a_sibling_workdir_proxy_in_use(
+            self, tmp_path, live_proxies, monkeypatch):
+        """A QA clone's container pins only the proxy it mounts."""
+        impl = self._workdir(tmp_path, "impl")
+        qa = self._workdir(tmp_path, "qa-s1")
+        s_impl = self._start("impl-wd", impl)
+        s_qa = self._start("qa-wd", qa)
+        monkeypatch.setattr("pm_core.container.containers_for_pr",
+                            lambda tag, pr_id: {"qa-wd"})
+        monkeypatch.setattr(
+            push_proxy_mod, "_proxy_container_info",
+            lambda name: {"Mounts": [{
+                "Destination": push_proxy_mod._CONTAINER_SOCKET_DIR,
+                "Source": os.path.dirname(s_qa)}]})
+
+        stop_push_proxy("impl-wd")
+
+        assert not os.path.exists(s_impl)
+        assert push_proxy_mod.proxy_is_alive(s_qa)
+
+    def test_pr_wide_release_inspects_users_once(
+            self, tmp_path, live_proxies, monkeypatch):
+        """A removal by a process that did not start the container evaluates
+        every socket dir of the PR under its proxy lock; the users' mounts
+        are read once for all of them, not once per directory."""
+        dirs = [os.path.dirname(self._start(f"qa-wd{i}",
+                                            self._workdir(tmp_path, f"qa-s{i}")))
+                for i in range(3)]
+        monkeypatch.setattr("pm_core.container.containers_for_pr",
+                            lambda tag, pr_id: {"user-a", "user-b"})
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            rows = [{"Mounts": [{"Destination": push_proxy_mod._CONTAINER_SOCKET_DIR,
+                                 "Source": dirs[0]}]}, {"Mounts": []}]
+            return subprocess.CompletedProcess([], 0, stdout=json.dumps(rows),
+                                               stderr="")
+
+        monkeypatch.setattr("pm_core.container._run_runtime", run)
+
+        decision = push_proxy_mod.release_proxy_decision(self.TAG, self.PR)
+
+        assert decision == push_proxy_mod.PROXY_IN_USE
+        assert calls == [("inspect", "user-a", "user-b")]
+        assert os.path.isdir(dirs[0])
+        assert not any(os.path.lexists(d) for d in dirs[1:])
 
     def _key_for(self, workdir):
         return push_proxy_mod._shared_proxy_key(
             self.TAG, self.PR, push_proxy_mod._workdir_token(str(workdir)))
 
-    def test_shared_stop_kills_an_unreferenced_socket(self, tmp_path,
-                                                      live_proxies):
-        """The guarded stop path still stops a proxy nothing references."""
+    def test_release_stops_an_unreferenced_socket(self, tmp_path,
+                                                  live_proxies):
+        """The guarded release still stops a proxy nothing uses."""
         impl = self._workdir(tmp_path, "impl")
         sock = self._start("impl-wd", impl)
         sock_dir = os.path.dirname(sock)
-        key = self._key_for(impl)
-        with push_proxy_mod._proxy_lock:
-            push_proxy_mod._proxy_refs.pop(key, None)
 
-        push_proxy_mod._stop_shared_proxy_socket(key, sock_dir, sock)
+        decision = push_proxy_mod.release_proxy_decision(
+            self.TAG, self.PR, sock_dir=sock_dir)
 
+        assert decision == push_proxy_mod.PROXY_RELEASED
         assert not push_proxy_mod.proxy_is_alive(sock)
-        assert os.path.isdir(sock_dir)  # R6: dir kept for the mount
+        assert not os.path.lexists(sock_dir)
 
-    def test_shared_stop_skips_a_socket_re_referenced_mid_stop(
+    def test_release_skips_when_a_start_holds_the_lock(
             self, tmp_path, live_proxies):
-        """A start that reused the socket during the stop must keep it alive.
-
-        The stopping container's reference is already gone when the kill
-        runs; a concurrent start can register a new container on the same
-        key in that window.  Unlinking then would leave the new container
-        with a dead socket (the S18 failure through another door).
-        """
-        impl = self._workdir(tmp_path, "impl")
-        sock = self._start("impl-wd", impl)
-        key = self._key_for(impl)
-        with push_proxy_mod._proxy_lock:
-            push_proxy_mod._proxy_refs.pop(key, None)
-            # Simulate the concurrent start re-registering a container.
-            push_proxy_mod._proxy_refs.setdefault(key, set()).add("late-wd")
-
-        push_proxy_mod._stop_shared_proxy_socket(
-            key, os.path.dirname(sock), sock)
-
-        assert push_proxy_mod.proxy_is_alive(sock)
-
-    def test_shared_stop_skips_when_a_start_holds_the_lock(
-            self, tmp_path, live_proxies):
-        """A start in flight owns the decision; teardown leaves it alone."""
+        """A start in flight owns the decision; release leaves it alone."""
         impl = self._workdir(tmp_path, "impl")
         sock = self._start("impl-wd", impl)
         sock_dir = os.path.dirname(sock)
-        key = self._key_for(impl)
-        with push_proxy_mod._proxy_lock:
-            push_proxy_mod._proxy_refs.pop(key, None)
 
         with push_proxy_mod._start_lock(sock_dir, blocking=False) as locked:
             assert locked
-            push_proxy_mod._stop_shared_proxy_socket(key, sock_dir, sock)
+            decision = push_proxy_mod.release_proxy_decision(
+                self.TAG, self.PR, sock_dir=sock_dir)
+            assert decision == push_proxy_mod.PROXY_UNDETERMINED
             assert push_proxy_mod.proxy_is_alive(sock)
 
-    def test_shared_stop_does_not_resurrect_a_removed_dir(self, tmp_path):
-        """Teardown must not create the directory (and lock) it is sweeping.
+    def test_release_does_not_resurrect_a_removed_dir(self, tmp_path):
+        """Release must not create the directory (and lock) it is sweeping.
 
-        ``_stop_shared_proxy_socket`` checks ``isdir`` and then takes the
-        start lock; ``_start_lock`` used to ``makedirs`` unconditionally, so
-        a sweep that removed the directory in that window made the stop
-        recreate an empty directory plus a lock file — state the stop did
-        not find, and which nothing removes again until the next teardown
-        (a shared stop deliberately keeps its directory).
+        The release lists the directory and then takes its start lock; a
+        sweep that removed the directory in that window must not make the
+        release recreate an empty directory plus a lock file.
         """
         sock_dir = str(tmp_path / "gone-dir")
         os.makedirs(sock_dir)
@@ -1383,21 +1523,24 @@ class TestWorkdirKeyedProxies:
 
         @contextlib.contextmanager
         def sweep_before_lock(path, blocking=True):
-            # The caller's isdir check saw the directory; a sweep removes it
+            # The caller's listing saw the directory; a sweep removes it
             # just before the lock is taken.
             shutil.rmtree(path, ignore_errors=True)
             with real_lock(path, blocking=blocking) as locked:
                 yield locked
 
+        proxy = {"session_tag": "tag", "pr_id": "pr", "token": "tok",
+                 "sock_dir": sock_dir,
+                 "sock_path": os.path.join(sock_dir, "push.sock"),
+                 "link": None}
         try:
             with patch("pm_core.push_proxy._start_lock", sweep_before_lock):
-                push_proxy_mod._stop_shared_proxy_socket(
-                    "tag\0pr\0tok", sock_dir,
-                    os.path.join(sock_dir, "push.sock"))
+                decision = push_proxy_mod._release_shared_dir(proxy, set(), 1)
+            assert decision == push_proxy_mod.PROXY_UNDETERMINED
             assert not os.path.exists(sock_dir), (
-                "teardown recreated a proxy directory a sweep had removed")
+                "release recreated a proxy directory a sweep had removed")
             assert not os.path.exists(os.path.realpath(sock_dir) + ".lock"), (
-                "teardown created a start lock for a directory it did not find")
+                "release created a start lock for a directory it did not find")
         finally:
             shutil.rmtree(sock_dir, ignore_errors=True)
             try:
@@ -1405,7 +1548,7 @@ class TestWorkdirKeyedProxies:
             except OSError:
                 pass
 
-    def test_shared_stop_does_not_follow_a_planted_symlinked_dir(
+    def test_release_does_not_follow_a_planted_symlinked_dir(
             self, tmp_path):
         """A symlink planted at the socket-dir name must not be followed.
 
@@ -1417,16 +1560,14 @@ class TestWorkdirKeyedProxies:
         victim = tmp_path / "victim"
         victim.mkdir()
         workdir = self._workdir(tmp_path, "impl")
-        key = self._key_for(workdir)
         sock_dir = push_proxy_mod._shared_sock_dir_path(
             self.TAG, self.PR, push_proxy_mod._workdir_token(str(workdir)))
         os.symlink(str(victim), sock_dir)
-        with push_proxy_mod._proxy_lock:
-            push_proxy_mod._proxy_refs.pop(key, None)
 
-        push_proxy_mod._stop_shared_proxy_socket(
-            key, sock_dir, os.path.join(sock_dir, "push.sock"))
+        decision = push_proxy_mod.release_proxy_decision(
+            self.TAG, self.PR, sock_dir=sock_dir)
 
+        assert decision == push_proxy_mod.PROXY_UNDETERMINED
         assert not os.path.exists(str(victim) + ".lock"), (
             "the start lock was taken through the planted symlink")
         assert not os.path.islink(sock_dir)
@@ -1644,12 +1785,21 @@ class TestWorkdirKeyedProxies:
         sock = self._start("impl-wd", impl)
         sock_dir = os.path.dirname(sock)
 
-        stop_push_proxy("impl-wd")
-        assert os.path.isdir(sock_dir)  # kept for live container mounts
-        # The start lock lives next to the directory, so the shared stop
-        # leaves it behind too; session teardown must clear both.
-        assert os.path.exists(sock_dir + ".lock")
+        monkeypatch = pytest.MonkeyPatch()
+        try:
+            # Another pm process still has a container on the PR: the stop
+            # keeps the directory (and the start lock next to it).
+            monkeypatch.setattr("pm_core.container.containers_for_pr",
+                                lambda tag, pr_id: {"other-process-impl"})
+            stop_push_proxy("impl-wd")
+            assert os.path.isdir(sock_dir)  # kept for live container mounts
+            assert os.path.exists(sock_dir + ".lock")
+            assert stop_session_proxies(self.TAG) == 0
+            assert os.path.isdir(sock_dir)
+        finally:
+            monkeypatch.undo()
 
+        # Once the runtime reports no user, session teardown clears both.
         stop_session_proxies(self.TAG)
         assert not os.path.exists(sock_dir)
         assert not os.path.exists(sock_dir + ".lock")
@@ -2708,3 +2858,107 @@ class TestIntegrationFetchPull:
 
         finally:
             proxy.stop()
+
+
+class TestValidateSharedProxyMount:
+    """Reuse accepts only the mount of *this* workdir's keyed directory."""
+
+    def _inspect(self, source, labels=None):
+        from pm_core import container as cm
+        labels = labels if labels is not None else {
+            cm.LABEL_MANAGED: "1", cm.LABEL_SESSION: "tag", cm.LABEL_PR: "pr-1"}
+        return {"Config": {"Labels": labels},
+                "Mounts": [{"Destination": push_proxy_mod._CONTAINER_SOCKET_DIR,
+                            "Source": source}]}
+
+    def _validate(self, info, workdir="/w"):
+        with patch.object(push_proxy_mod, "_proxy_container_info", return_value=info):
+            push_proxy_mod.validate_shared_proxy_mount("cid", "tag", "pr-1", workdir)
+
+    def test_accepts_this_workdirs_directory(self):
+        own = push_proxy_mod._shared_sock_dir_path(
+            "tag", "pr-1", push_proxy_mod._workdir_token("/w"))
+        self._validate(self._inspect(own))
+
+    def test_refuses_another_workdirs_directory(self):
+        other = push_proxy_mod._shared_sock_dir_path(
+            "tag", "pr-1", push_proxy_mod._workdir_token("/other"))
+        with pytest.raises(push_proxy_mod.ContainerError, match="another allocation"):
+            self._validate(self._inspect(other))
+
+    def test_pre_workdir_keying_mount_asks_for_removal(self):
+        """A pre-merge container keeps its tokenless mount: report it instead of
+        silently re-pointing its git wrapper at a different directory."""
+        legacy = push_proxy_mod._legacy_shared_sock_dir_path("tag", "pr-1")
+        info = {**self._inspect(legacy), "Name": "/pm-tag-impl-pr-1"}
+        with patch("pm_core.container._get_runtime", return_value="podman"), \
+                pytest.raises(push_proxy_mod.ContainerError,
+                              match="before workdir-keyed proxies.*"
+                                    r"'podman rm -f pm-tag-impl-pr-1'"):
+            self._validate(info)
+
+    def test_refuses_another_sessions_container(self):
+        from pm_core import container as cm
+        own = push_proxy_mod._shared_sock_dir_path(
+            "tag", "pr-1", push_proxy_mod._workdir_token("/w"))
+        info = self._inspect(own, {cm.LABEL_MANAGED: "1", cm.LABEL_SESSION: "x",
+                                   cm.LABEL_PR: "pr-1"})
+        with pytest.raises(push_proxy_mod.ContainerError, match="different session/PR"):
+            self._validate(info)
+
+
+class TestMountedByBatchesInspect:
+    """A release checks a socket dir against all of the PR's other containers
+    under the PR proxy lock: one batched inspect, not one per container."""
+
+    def _row(self, source):
+        return {"Mounts": [{"Destination": push_proxy_mod._CONTAINER_SOCKET_DIR,
+                            "Source": source}]}
+
+    def _result(self, rc=0, rows=None, stderr=""):
+        return subprocess.CompletedProcess(
+            [], rc, stdout=json.dumps(rows) if rows is not None else "",
+            stderr=stderr)
+
+    def test_one_inspect_for_every_user(self, tmp_path):
+        mine, other = str(tmp_path / "mine"), str(tmp_path / "other")
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            return self._result(rows=[self._row(other), self._row(mine),
+                                      self._row(other)])
+
+        with patch("pm_core.container._run_runtime", side_effect=run), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=AssertionError("per-name inspect")):
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b", "c"}) == {
+                os.path.realpath(mine), os.path.realpath(other)}
+        assert calls == [("inspect", "a", "b", "c")]
+
+    def test_failed_batch_falls_back_per_name(self, tmp_path):
+        """A container removed since the inventory fails the batch; per-name
+        inspection tells that absence apart from a runtime failure."""
+        mine = str(tmp_path / "mine")
+        infos = {"a": None, "b": self._row(mine)}
+        with patch("pm_core.container._run_runtime",
+                   return_value=self._result(rc=125, stderr="no such container a")), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=lambda name: infos[name]):
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b"}) == {
+                os.path.realpath(mine)}
+
+    def test_incomplete_batch_falls_back_per_name(self, tmp_path):
+        mine = str(tmp_path / "mine")
+        with patch("pm_core.container._run_runtime",
+                   return_value=self._result(rows=[self._row(mine)])), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=push_proxy_mod.ContainerError("down")):
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b"}) is None
+
+    def test_batch_timeout_is_unknown(self, tmp_path):
+        with patch("pm_core.container._run_runtime",
+                   side_effect=subprocess.TimeoutExpired("podman", 30)), \
+                patch.object(push_proxy_mod, "_proxy_container_info",
+                             side_effect=AssertionError("per-name inspect")):
+            assert push_proxy_mod._mounted_socket_dirs({"a", "b"}) is None

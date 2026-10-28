@@ -1,7 +1,7 @@
 """Tests for the sign-off step module (pm_core/signoff.py)."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from pm_core import signoff
 from pm_core.signoff import (
@@ -673,7 +673,8 @@ class TestWindowLaunchWorkdir:
     """
 
     def _launch(self, tmp_path, *, transcript=None, existing=None,
-                head="abc"):
+                head="abc", container=False, missing_pane=False, launch_error=None,
+                window_after_launch=None):
         from types import SimpleNamespace
         from contextlib import ExitStack
         from unittest.mock import MagicMock
@@ -688,14 +689,26 @@ class TestWindowLaunchWorkdir:
         pr_entry = {"id": "pr-001", "title": "T", "status": "sign_off",
                     "branch": "pm/pr-001", "workdir": str(workdir)}
 
-        new_window = MagicMock(return_value="cl_pane")
+        new_window = MagicMock(return_value=None if missing_pane else "cl_pane",
+                               side_effect=launch_error)
         with ExitStack() as es:
             p = es.enter_context
             p(patch("pm_core.tmux.has_tmux", return_value=True))
             p(patch("pm_core.tmux.in_tmux", return_value=True))
             p(patch("pm_core.cli.helpers._get_pm_session", return_value="pm-x"))
             p(patch("pm_core.tmux.session_exists", return_value=True))
-            p(patch("pm_core.tmux.find_window_by_name", return_value=existing))
+            find_window = MagicMock(return_value=existing)
+            if window_after_launch is not None:
+                # The pre-launch check sees nothing; the window exists once
+                # tmux created it, even though the pane lookup then fails.
+                seen = {"n": 0}
+
+                def _find(*args, **kwargs):
+                    seen["n"] += 1
+                    return None if seen["n"] == 1 else window_after_launch
+
+                find_window.side_effect = _find
+            p(patch("pm_core.tmux.find_window_by_name", find_window))
             p(patch("pm_core.tmux.select_window"))
             p(patch("pm_core.paths.workdirs_base", return_value=wdirs))
             p(patch("pm_core.signoff.head_sha", return_value=head))
@@ -709,7 +722,13 @@ class TestWindowLaunchWorkdir:
             p(patch("pm_core.claude_launcher.build_claude_shell_cmd",
                     return_value="CLAUDE_CMD"))
             p(patch("pm_core.container.is_container_mode_enabled",
-                    return_value=False))
+                    return_value=container))
+            def wrap(*args, allocation_identity, **kwargs):
+                allocation_identity.update(id="original-id", generation="original-generation")
+                return "EXEC", "pm-x-signoff-pr-001"
+            p(patch("pm_core.container.wrap_claude_cmd", side_effect=wrap))
+            self.safe_discard = p(patch("pm_core.container.discard_unowned_container"))
+            self.unsafe_discard = p(patch("pm_core.container.discard_container"))
             p(patch("pm_core.tmux.new_window_get_pane", new_window))
             p(patch("pm_core.tmux.set_shared_window_size"))
             p(patch("pm_core.tmux.switch_sessions_to_window"))
@@ -731,6 +750,39 @@ class TestWindowLaunchWorkdir:
                 data, pr_entry, background=True,
                 transcript=str(transcript) if transcript else None)
         return new_window, workdir
+
+    def test_failed_pane_discovery_uses_ownership_checked_cleanup(self, tmp_path):
+        self._launch(tmp_path, container=True, missing_pane=True)
+        self.unsafe_discard.assert_not_called()
+        assert self.safe_discard.call_args_list == [
+            call("pm-x-signoff-pr-001"),
+            call("pm-x-signoff-pr-001", container_id="original-id",
+                 generation="original-generation")]
+
+    def test_pane_discovery_failure_with_a_window_is_success(self, tmp_path, capsys):
+        """new_window_get_pane can fail *after* tmux started the session.
+
+        Reporting that as a failed launch printed an error and released a
+        container a live pane may own.  The window is the proof of success
+        (``pr_start`` uses the same guard).
+        """
+        self._launch(tmp_path, container=True, missing_pane=True,
+                     window_after_launch={"id": "@7", "index": 7,
+                                          "name": "signoff-pr-001"})
+        out = capsys.readouterr().out
+        assert "Opened sign-off window" in out
+        assert "failed to create tmux window" not in out
+        # Only the pre-launch discard ran; the allocation is kept.
+        assert self.safe_discard.call_args_list == [call("pm-x-signoff-pr-001")]
+
+    def test_launch_error_preserves_tmux_stderr(self, tmp_path, capsys):
+        import subprocess
+        self._launch(tmp_path, container=True, launch_error=subprocess.CalledProcessError(
+            1, ["tmux", "new-window"], stderr=b"can't find session: pm-x"))
+        assert "can't find session: pm-x" in capsys.readouterr().out
+        self.safe_discard.assert_called_with(
+            "pm-x-signoff-pr-001", container_id="original-id",
+            generation="original-generation")
 
     def test_window_creation_uses_workdir_cwd(self, tmp_path):
         new_window, workdir = self._launch(tmp_path)

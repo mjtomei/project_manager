@@ -1,0 +1,1851 @@
+"""Ownership-aware cleanup of leaked pm containers and push proxies.
+
+Every *running* rootless-podman container holds kernel session-keyring keys;
+leaked containers from finished runs, merged PRs and dead sessions exhaust
+the keyring quota until no new container can ``run``/``exec``.  This module
+decides which containers are still owned and removes the rest.
+
+A container is **owned** — never removed here — when any of:
+
+1. a live tmux pane has its exact name (or id) in its start command
+   or current process tree, on the tmux server recorded in its
+   ``pm.tmux_socket`` label, the default server, the current server, or the
+   shared-session socket for its tag;
+2. it is explicitly retained (``pm container retain``);
+3. it is being launched: its per-name launch lock is held, its launch lease
+   is live, or it was created less than ``LAUNCH_GRACE`` seconds ago and its
+   launch has not yet attached (concluded its lease).
+
+Everything else in scope is removed (bounded parallel), after re-checking
+ownership under the container's launch lock so a concurrent launch/restart
+can't lose a live container.  Shared push proxies are stopped only when the
+runtime reports no container left for their session + PR.
+
+The same :func:`reconcile` backs the automatic passes (TUI startup and
+periodic, QA run start, pre-launch keyring relief) and the manual
+``pm container reap`` / ``pm session cleanup`` commands.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import contextvars
+import hashlib
+import json
+import os
+import re
+import subprocess
+import tempfile
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable
+
+from pm_core import container as container_mod
+from pm_core.paths import configure_logger
+
+_log = configure_logger("pm.container_reaper")
+
+LAUNCH_GRACE = 120  # seconds a fresh container may exist without a pane
+REMOVE_WORKERS = 4
+_TERMINAL_PR_STATES = ("merged", "closed")
+
+
+def _unlink_state_file(path: Path, what: str) -> None:
+    """Drop one of our own state records; never fail the pass for it.
+
+    A marker left behind by another user (``sudo pm``) or a directory in its
+    place raises OSError.  Pruning runs after removals but before the outcome
+    is persisted, so an escaping error would discard the whole pass — the
+    removals already done and their failures would never be recorded.  Keep
+    the record instead and let a later pass retry it.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        _log.warning("could not prune %s %s: %s", what, path, exc)
+
+
+# ---------------------------------------------------------------------------
+# Retention markers
+# ---------------------------------------------------------------------------
+
+def _retain_dir() -> Path:
+    return container_mod.container_state_dir() / "retain"
+
+
+def _retention_path(name: str, container_id: str = "") -> Path:
+    if container_id:
+        # Names may change through the runtime; retention follows this ID in
+        # its runtime store, not a mutable name or an ID cloned into another store.
+        domain = json.dumps(_runtime_domain(), sort_keys=True)
+        key = hashlib.sha256(f"{domain}\0{container_id}".encode()).hexdigest()
+        return _retain_dir() / f"{key}.json"
+    return _retain_dir() / name
+
+
+# An immutable ContextVar value keeps nested calls in one lifecycle operation
+# cheap without sharing mutable caches across threads or retaining stale daemon
+# identities between operations. Unknown identities are deliberately not cached,
+# except in a scope opened after the runtime already failed (see below).
+_domain_cache = contextvars.ContextVar("container_runtime_domain", default=None)
+_UNKNOWN_DOMAIN = "runtime-unavailable"
+
+
+@contextlib.contextmanager
+def runtime_domain_scope(*, runtime_unavailable: bool = False):
+    """Reuse successful runtime identity probes only within this operation.
+
+    *runtime_unavailable* is for read-only reports whose own availability
+    probe just failed: the identity is unknown for the whole operation, so the
+    helpers must not each wait out another probe timeout against a hung
+    runtime.  Never use it for an operation that may delete anything.
+    """
+    if _domain_cache.get() is not None:
+        yield
+        return
+    token = _domain_cache.set(
+        (_UNKNOWN_DOMAIN, None) if runtime_unavailable else (None, None))
+    try:
+        yield
+    finally:
+        _domain_cache.reset(token)
+
+
+def _runtime_domain() -> dict | None:
+    from pm_core.push_proxy import runtime_domain
+    cached = _domain_cache.get()
+    if cached is None:
+        return runtime_domain()
+    if cached[0] == _UNKNOWN_DOMAIN:
+        return None
+    # Runtime selection and config/connection environment may change even in
+    # a nested operation. Do not reuse another store's identity in that case.
+    key = (container_mod._get_runtime(), os.getcwd(), tuple(sorted(os.environ.items())))
+    if cached[0] == key:
+        return dict(cached[1])
+    domain = runtime_domain()
+    if domain is not None:
+        _domain_cache.set((key, dict(domain)))
+    else:
+        _domain_cache.set((None, None))
+    return domain
+
+
+def _retain_record(name: str, container_id: str = "") -> dict | None:
+    try:
+        rec = json.loads(_retention_path(name, container_id).read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {}
+    return rec if isinstance(rec, dict) else {}
+
+
+def is_retained(name: str, container_id: str = "") -> bool:
+    """True when *name* is retained — and, when both ids are known, only for
+    the very container that was retained: a replacement launched later
+    under the same name is not."""
+    rec = _retain_record(name, container_id) if container_id else None
+    if rec is None:
+        rec = _retain_record(name)  # pre-identity-key marker
+    if rec is None and not container_id:
+        return name in retained_names()
+    if rec is None and container_id:
+        # Compatibility with name+ID keyed markers from before rename support.
+        domain = _runtime_domain()
+        return any(r.get("id") == container_id
+                   and (domain is None or r.get("runtime_domain") in (None, domain))
+                   for _, r in _retention_records())
+    if rec is None:
+        return False
+    domain = rec.get("runtime_domain")
+    current_domain = _runtime_domain() if domain is not None else None
+    if current_domain is not None and domain != current_domain:
+        return False
+    rec_id = str(rec.get("id") or "")
+    return not rec_id or not container_id or rec_id == container_id
+
+
+def _write_retention(name: str, note: str, container_id: str) -> None:
+    d = _retain_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    _retention_path(name, container_id).write_text(json.dumps(
+        {"name": name, "note": note, "at": int(time.time()), "id": container_id,
+         "runtime_domain": _runtime_domain()}))
+
+
+def retain(name: str, note: str = "", container_id: str = "") -> None:
+    with container_mod.launch_lock(name) as locked:
+        if not locked:
+            raise container_mod.ContainerError(f"Cannot retain '{name}': lifecycle lock unavailable")
+        _write_retention(name, note, container_id)
+
+
+def retain_current(name: str, note: str = "") -> str:
+    """Inspect and retain atomically with respect to launch/removal."""
+    name = container_mod.canonical_container_name(name)
+    with container_mod.launch_lock(name) as locked:
+        if not locked:
+            raise container_mod.ContainerError(f"Cannot retain '{name}': lifecycle lock unavailable")
+        cid = container_mod.current_container_id(name)
+        if not cid:
+            raise container_mod.ContainerError(
+                f"No container named {name}, or its identity is unknown; cannot retain.")
+        _write_retention(name, note, cid)
+    return name
+
+
+def _retention_records() -> list[tuple[Path, dict]]:
+    records = []
+    try:
+        paths = list(_retain_dir().glob("*"))
+    except FileNotFoundError:
+        return records
+    for path in paths:
+        try:
+            rec = json.loads(path.read_text())
+            if isinstance(rec, dict):
+                records.append((path, {"name": path.name, **rec}))
+        except (OSError, ValueError):
+            records.append((path, {"name": path.name}))
+    return records
+
+
+def unretain(name: str) -> bool:
+    domain = _runtime_domain()
+    if domain is None:
+        # Without an identity we cannot tell this runtime's marker from
+        # another store's, so silently reporting "not retained" while the
+        # marker stays behind would be a lie the caller cannot detect.
+        raise container_mod.ContainerError(
+            "Cannot release retention: the runtime identity is unavailable; "
+            "retry once the runtime is responsive")
+    removed = False
+    records = _retention_records()
+    # A stale same-name marker may belong to a removed allocation while the
+    # current container was retained under its old name before a rename.
+    cid = container_mod.current_container_id(name)
+    for path, rec in records:
+        if rec.get("name") != name and (not cid or rec.get("id") != cid):
+            continue
+        recorded = rec.get("runtime_domain")
+        if recorded is not None and recorded != domain:
+            continue
+        path.unlink(missing_ok=True)
+        removed = True
+    return removed
+
+
+def retained_names() -> list[str]:
+    """Names of retained containers; markers with no usable name are skipped.
+
+    A hand-edited or corrupt marker can carry a non-string ``name``.  It must
+    not crash ``pm container status`` (``", ".join(...)``) or ``sorted`` on a
+    mixed set — the marker itself is left for a human.
+    """
+    return sorted({rec["name"] for _, rec in _retention_records()
+                   if isinstance(rec.get("name"), str) and rec["name"]})
+
+
+def inventory_has(inventory: "list[ContainerInfo]"):
+    """Return ``present(name, cid)`` for display filters over a complete inventory.
+
+    A record bound to an allocation ID matches only that ID (a same-name
+    replacement is a different allocation); an unbound record matches by name.
+    """
+    ids = {info.id for info in inventory if info.id}
+    names = {info.name for info in inventory}
+    return lambda name, cid=None: str(cid) in ids if cid else name in names
+
+
+def local_retained_names(inventory: "list[ContainerInfo] | None" = None) -> list[str]:
+    """Retained names that belong to the current runtime, for display.
+
+    Markers live in the shared state dir and record the runtime domain they
+    were set in. Another store's marker names a container this runtime does
+    not have, so ``pm container status`` must not list it as retained here;
+    while the identity is unknown, domain-stamped markers are shown with the
+    saved diagnostics instead. With a complete *inventory*, a marker whose
+    container is gone (pruned only by the next full pass) is not listed
+    either. Display only: cleanup still honours every marker through
+    :func:`is_retained`.
+    """
+    records = [rec for _, rec in _retention_records()
+               if isinstance(rec.get("name"), str) and rec["name"]]
+    if inventory is not None:
+        present = inventory_has(inventory)
+        records = [rec for rec in records if present(rec["name"], rec.get("id"))]
+    domain = (_runtime_domain()
+              if any(rec.get("runtime_domain") is not None for rec in records) else None)
+    return sorted({rec["name"] for rec in records
+                   if rec.get("runtime_domain") in (None, domain)})
+
+
+def _prune_retain_markers(inventory: dict[str, str], since: float) -> None:
+    """Drop retention markers whose container is gone or was replaced.
+
+    *inventory* maps every existing pm container name to its id (full
+    passes only), so a marker can't outlive the container it was set on.
+    Markers written at or after *since* (the pass's listing time) are kept:
+    they may name a container launched after the listing.
+    """
+    domain = _runtime_domain()
+    if domain is None:
+        return
+    existing_ids = set(inventory.values())
+    for path, rec in _retention_records():
+        if rec.get("runtime_domain") != domain:
+            continue  # another runtime's absence proves nothing about this marker
+        name = rec["name"]
+        if not isinstance(name, str):
+            continue  # a marker we cannot key; leave it for a human
+        marker_id = rec.get("id")
+        if marker_id is not None and not isinstance(marker_id, str):
+            continue
+        if marker_id in existing_ids or not marker_id and name in inventory:
+            continue
+        try:
+            # "at" has whole-second resolution, so compare against the
+            # truncated listing time (errs on keeping the marker).
+            if float(rec.get("at") or 0) >= int(since):
+                continue
+        except (TypeError, ValueError):
+            pass
+        _unlink_state_file(path, "retention marker")
+
+
+# ---------------------------------------------------------------------------
+# Durable, identity-bound owner releases
+# ---------------------------------------------------------------------------
+
+def _release_dir() -> Path:
+    return container_mod.container_state_dir() / "release"
+
+
+def restart_generation(name: str) -> str | None:
+    try:
+        return container_mod.cleanup_generation(name)
+    except OSError:
+        return None
+
+
+def allocation_generation(name: str, cid: str) -> str | None:
+    """Use the ID epoch after renames; preserve legacy name-only generations.
+
+    A container created before the ID epoch existed has no identity-keyed
+    marker, so its generation lives under the name it was released with.  That
+    marker only speaks for this allocation while the name still resolves to it:
+    once a replacement holds the name, the marker belongs to the replacement
+    and saying otherwise would make the record look stale (and be pruned).
+    """
+    try:
+        path = container_mod._identity_generation_path(cid)
+        if path.exists():
+            return path.read_text().strip()
+        current = container_mod.current_container_id(name)
+        if current is None:
+            return None  # unanswered identity probe: unknown, not stale
+        if current and current != cid:
+            # A replacement holds the recorded name, so its marker says
+            # nothing about this allocation.  A restart or reuse of *this*
+            # allocation would have written an identity epoch (returned
+            # above), so its own legacy generation is still the empty one.
+            return ""
+        return restart_generation(name)
+    except OSError:
+        return None
+
+
+def capture_identity(name: str) -> tuple[str, str] | None:
+    try:
+        cid = container_mod.current_container_id(name)
+        generation = restart_generation(name)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (cid, generation) if cid and generation is not None else None
+
+
+def _record_release(name: str, cid: str, generation: str, reason: str) -> None:
+    directory = _release_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    # Runtime names/IDs are normally safe; hash unusual input instead of
+    # letting an alias or malformed state escape the release directory.
+    domain = _runtime_domain()
+    domain_key = hashlib.sha256(json.dumps(domain, sort_keys=True).encode()).hexdigest()[:16]
+    key = f"{name}@{cid}-{domain_key}"
+    if generation:
+        key += "-" + hashlib.sha256(generation.encode()).hexdigest()[:16]
+    if len(key) > 220 or not re.fullmatch(r"[A-Za-z0-9_.@-]+", key):
+        key = hashlib.sha256(key.encode()).hexdigest()
+    fd, temp = tempfile.mkstemp(dir=directory, prefix=".release-")
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump({"name": name, "id": cid, "generation": generation,
+                       "at": time.time(), "reason": reason,
+                       "runtime_domain": domain, "domain_required": True}, stream)
+        os.replace(temp, directory / f"{key}.json")
+    finally:
+        Path(temp).unlink(missing_ok=True)
+
+
+def _release_records() -> list[tuple[Path, dict]]:
+    records = []
+    for path in _release_dir().glob("*.json"):
+        try:
+            rec = json.loads(path.read_text())
+            if (isinstance(rec, dict) and isinstance(rec.get("name"), str)
+                    and rec["name"] and isinstance(rec.get("id"), str) and rec["id"]
+                    and isinstance(rec.get("generation"), str)
+                    and isinstance(rec.get("at"), (int, float))):
+                records.append((path, rec))
+        except (OSError, ValueError):
+            pass
+    return records
+
+
+def _current_release_records() -> list[tuple[Path, dict]]:
+    """Only this runtime's releases may override live ownership.
+
+    Preserve legacy unscoped records, but new unknown-domain requests are
+    diagnostic only. They cannot grant cleanup authority in any runtime.
+    """
+    domain = _runtime_domain()
+    return [(path, rec) for path, rec in _release_records()
+            if (rec.get("runtime_domain") is not None
+                and rec["runtime_domain"] == domain)
+            or (rec.get("runtime_domain") is None and not rec.get("domain_required"))]
+
+
+def pending_releases() -> dict[str, dict]:
+    return {rec["name"]: rec for _, rec in sorted(
+        _current_release_records(), key=lambda item: item[1].get("at", 0))}
+
+
+def forget_releases_of_removed(cid: str) -> None:
+    """Drop pending owner releases of an allocation just proven gone by ID.
+
+    A pane's exit release that overlaps a replacing launch (review/sign-off
+    ``--fresh``) is deferred while the launcher holds the launch lock; the
+    launcher then removes that exact allocation. Its record names no
+    remaining work, but status would report "owner release pending" until
+    some later pass happened to prune it.
+    """
+    matches = [(path, rec) for path, rec in _release_records() if rec["id"] == cid]
+    if not cid or not matches:
+        return
+    domain = _runtime_domain()
+    for path, rec in matches:
+        if domain is not None and rec.get("runtime_domain") == domain:
+            _unlink_state_file(path, "owner release")
+
+
+def _prune_releases(out: "Outcome", scope: "Scope", since: float) -> None:
+    infos = out.inventory if out.inventory is not None else [d.info for d in out.decisions]
+    inventory = {info.name: info for info in infos}
+    by_id = {info.id: info for info in infos}
+    domain = _runtime_domain()
+    for path, rec in _release_records():
+        if domain is None or rec.get("runtime_domain") != domain:
+            continue
+        if rec.get("at", 0) >= since:
+            continue
+        info = by_id.get(rec["id"]) or inventory.get(rec["name"])
+        # A filtered decision list cannot establish absence: the allocation
+        # may have been renamed outside this scope. Use the unfiltered snapshot.
+        absent = info is None and (out.inventory is not None or scope == Scope())
+        if absent:
+            # The label-first inventory cannot see an unlabeled allocation
+            # renamed to a non-pm name; confirm the captured ID is really gone
+            # before pruning its release. Unknown state preserves the record.
+            try:
+                remaining = container_mod.current_container_id(rec["id"])
+            except Exception:
+                remaining = None
+            if remaining != "":
+                continue
+        stale = info is not None and (
+            info.id != rec["id"] or
+            allocation_generation(rec["name"], info.id) not in (None, rec["generation"]))
+        if absent or stale or info is not None and info.name in out.removed:
+            _unlink_state_file(path, "owner release")
+
+
+# ---------------------------------------------------------------------------
+# Container inventory
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ContainerInfo:
+    name: str
+    id: str = ""
+    running: bool = False
+    status: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
+    session_tag: str | None = None
+    pr_id: str | None = None
+    kind: str | None = None
+    loop_id: str | None = None
+    created: float | None = None
+
+    @property
+    def tmux_socket(self) -> str:
+        return self.labels.get(container_mod.LABEL_TMUX_SOCKET, "")
+
+    @property
+    def project_root(self) -> str:
+        return self.labels.get(container_mod.LABEL_PROJECT, "")
+
+
+def _info_from(name: str, cid: str, running: bool, status: str,
+               labels: dict[str, str]) -> ContainerInfo | None:
+    managed = labels.get(container_mod.LABEL_MANAGED) == "1"
+    parsed = container_mod.parse_container_name(name)
+    if not managed and parsed is None:
+        return None  # not a pm container
+    info = ContainerInfo(name=name, id=cid, running=running, status=status,
+                         labels=labels)
+    if managed:
+        info.session_tag = labels.get(container_mod.LABEL_SESSION) or None
+        info.pr_id = labels.get(container_mod.LABEL_PR) or None
+        info.kind = labels.get(container_mod.LABEL_KIND) or None
+        info.loop_id = labels.get(container_mod.LABEL_LOOP) or None
+        try:
+            info.created = float(labels.get(container_mod.LABEL_CREATED, ""))
+        except ValueError:
+            info.created = None
+    if parsed is not None:
+        info.session_tag = info.session_tag or parsed.session_tag
+        info.kind = info.kind or parsed.kind
+        info.pr_id = info.pr_id or parsed.pr_id()
+        if info.loop_id is None and parsed.kind == "qa" and info.pr_id:
+            rest = parsed.rest[len(info.pr_id) + 1:]
+            m = re.match(r"(.+)-s\d+$", rest)
+            info.loop_id = m.group(1) if m else None
+    return info
+
+
+def list_containers() -> list[ContainerInfo] | None:
+    """All pm containers (any state), or None when the runtime is unavailable."""
+    # A container removed between the listing and the inspect (a concurrent
+    # cleanup) fails the inspect batch. That is not a runtime failure: take
+    # the whole inventory again. A cleanup removing several containers can
+    # race consecutive listings (S62: pr cleanup removed two A containers
+    # 15 ms apart under a pane's exit release), so keep retaking while each
+    # failure names a container not already seen vanishing. A repeated or
+    # any other failure still fails closed.
+    seen: set[str] = set()
+    for _ in range(_INVENTORY_ATTEMPTS):
+        vanished: list[str] = []
+        inventory = _list_containers_once(vanished)
+        if inventory is not None or not vanished:
+            return inventory
+        if any(v in seen for v in vanished):
+            return None
+        seen.update(vanished)
+    return None
+
+
+_INVENTORY_ATTEMPTS = 6
+
+
+def _list_containers_once(vanished: list[str]) -> list[ContainerInfo] | None:
+    names: dict[str, None] = {}
+    # A managed allocation may have been renamed. Labels remain authoritative
+    # for its ownership and shared proxy; the name query also includes legacy
+    # unlabeled containers. Never accept a partial inventory from either query.
+    for managed in (False, True):
+        selector = (f"label={container_mod.LABEL_MANAGED}=1" if managed
+                    else f"name={container_mod.CONTAINER_PREFIX}")
+        try:
+            ps = container_mod._run_runtime(
+                "ps", "-a", "--filter", selector,
+                "--format", "{{.Names}}", check=False, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if ps.returncode != 0:
+            # Podman 3.x ps itself fails ("container … does not exist in
+            # database: no such container") when one is removed mid-listing.
+            if container_mod._container_absent(ps.stderr or ""):
+                vanished.append((ps.stderr or "").strip())
+            return None
+        for line in (ps.stdout or "").splitlines():
+            name = line.strip()
+            if name and (managed or name.startswith(container_mod.CONTAINER_PREFIX)):
+                names[name] = None
+    if not names:
+        return []
+    # _inspect rechecks the managed label/name rather than trusting runtime
+    # substring filters, and rejects missing or malformed rows.
+    return _inspect(list(names), timeout=60, vanished=vanished)
+
+
+_INSPECT_FMT = ("{{.Name}}\t{{.Id}}\t{{.State.Running}}\t{{.State.Status}}\t"
+                "{{json .Config.Labels}}")
+
+
+def _inspect(names: list[str], timeout: int,
+             vanished: list[str] | None = None) -> list[ContainerInfo] | None:
+    """ContainerInfo for *names*, or None if the inventory is incomplete.
+
+    Missing rows are not proof of absence: full reconciles use this inventory
+    to prune retention and failure records, so a failed inspect must fail closed.
+    When the runtime explicitly reports a missing object, the failure is noted
+    in *vanished* so a caller can retake its listing.
+    """
+    try:
+        insp = container_mod._run_runtime("inspect", "--format", _INSPECT_FMT,
+                                          *names, check=False, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if insp.returncode != 0:
+        # A vanished container can fail the batch too; never guess whether
+        # missing rows mean removal or runtime failure.
+        if vanished is not None and container_mod._container_absent(insp.stderr or ""):
+            vanished.append((insp.stderr or "").strip())
+        return None
+    out: list[ContainerInfo] = []
+    seen: set[str] = set()
+    for line in (insp.stdout or "").splitlines():
+        # Podman 3.x renders template tabs through a tabwriter as spaces.
+        # Only the labels JSON may contain whitespace within a field.
+        parts = line.split(None, 4)
+        if len(parts) < 5:
+            return None
+        name = parts[0].lstrip("/").strip()
+        try:
+            labels = json.loads(parts[4])
+        except ValueError:
+            return None
+        if labels is None:
+            labels = {}  # unlabeled legacy container
+        if not isinstance(labels, dict):
+            return None
+        info = _info_from(name, parts[1].strip(), parts[2].strip() == "true",
+                          parts[3].strip(), {str(k): str(v) for k, v in labels.items()})
+        if info is not None and name not in seen:
+            out.append(info)
+        seen.add(name)
+    # Ownership lookups may pass a container ID or /name; inspect returns its
+    # canonical name. Require every requested row without rejecting aliases.
+    return out if len(seen) == len(set(names)) else None
+
+
+# ---------------------------------------------------------------------------
+# tmux pane ownership
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Server:
+    key: str            # cache key
+    args: list[str]     # tmux socket args (-S path / -L name)
+    socket_file: str    # path whose existence tells "server could exist"
+
+
+def _server_for_socket(path: str) -> _Server:
+    return _Server(key=f"S:{path}", args=["-S", path], socket_file=path)
+
+
+def _default_server() -> _Server:
+    uid = os.getuid()
+    tmpdir = os.environ.get("TMUX_TMPDIR") or "/tmp"
+    return _Server(key="L:default", args=["-L", "default"],
+                   socket_file=os.path.join(tmpdir, f"tmux-{uid}", "default"))
+
+
+def _servers_for(info: ContainerInfo) -> list[_Server]:
+    servers: list[_Server] = []
+    if info.tmux_socket:
+        servers.append(_server_for_socket(info.tmux_socket))
+    servers.append(_default_server())
+    for env_sock in (os.environ.get("PM_TMUX_SOCKET", ""),
+                     os.environ.get("TMUX", "").split(",", 1)[0]):
+        if env_sock:
+            servers.append(_server_for_socket(env_sock))
+    if info.session_tag:
+        try:
+            from pm_core.paths import shared_socket_path
+            servers.append(_server_for_socket(str(shared_socket_path(info.session_tag))))
+        except Exception:
+            pass
+    uniq: dict[str, _Server] = {}
+    for s in servers:
+        uniq.setdefault(os.path.realpath(s.socket_file) if s.socket_file else s.key, s)
+    return list(uniq.values())
+
+
+@dataclass
+class _PaneSnapshot:
+    """``None`` panes means the server exists but couldn't be queried."""
+    # (pane_id, session, start_cmd plus pane-process attachment targets)
+    panes: list[tuple[str, str, str]] | None
+
+
+class _PaneCache:
+    def __init__(self) -> None:
+        self._cache: dict[str, _PaneSnapshot] = {}
+
+    def get(self, server: _Server, fresh: bool = False) -> _PaneSnapshot:
+        if not fresh and server.key in self._cache:
+            return self._cache[server.key]
+        snap = _query_server(server)
+        self._cache[server.key] = snap
+        return snap
+
+
+def _query_server(server: _Server) -> _PaneSnapshot:
+    if server.socket_file:
+        try:
+            os.stat(server.socket_file)
+        except FileNotFoundError:
+            return _PaneSnapshot(panes=[])  # no server → no panes
+        except OSError:
+            return _PaneSnapshot(panes=None)  # inaccessible is not absent
+    env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+    try:
+        # ':' is printable ASCII, so it survives tmux's format output in every
+        # locale. A control character (tab) is rewritten to '_' unless the
+        # client is UTF-8, which would make every row malformed and report
+        # every container as ownership-unknown in a C locale. tmux rewrites
+        # ':' inside session names, so the separator is unique; the start
+        # command is last, so any ':' of its own stay in the final field.
+        # ``errors="replace"`` keeps an undecodable byte in some pane's start
+        # command from raising out of this probe. tmux escapes non-printable
+        # bytes today, but that is not a documented guarantee; a raw
+        # UnicodeDecodeError here would abort the whole pass (and traceback
+        # out of ``pm container restart``) instead of leaving ownership
+        # unknown. Names and pane IDs are ASCII, so a replaced byte cannot
+        # hide an owner.
+        r = subprocess.run(
+            ["tmux", *server.args, "list-panes", "-a", "-F",
+             "#{pane_dead}:#{pane_id}:#{session_name}:#{pane_pid}:#{pane_start_command}"],
+            capture_output=True, text=True, errors="replace", timeout=5, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return _PaneSnapshot(panes=None)
+    if r.returncode != 0:
+        err = (r.stderr or "").lower()
+        if "no server running" in err or ("error connecting" in err
+                                          and "no such file" in err):
+            return _PaneSnapshot(panes=[])
+        return _PaneSnapshot(panes=None)
+    panes = []
+    for line in r.stdout.splitlines():
+        parts = line.split(":", 4)
+        if len(parts) != 5 or parts[0] not in {"0", "1"}:
+            return _PaneSnapshot(panes=None)
+        if parts[0] == "1":
+            continue
+        if not parts[3].isdigit() or int(parts[3]) <= 0:
+            return _PaneSnapshot(panes=None)
+        panes.append((parts[1], parts[2], int(parts[3]), parts[4]))
+    if not panes:
+        return _PaneSnapshot(panes=[])
+    # The pane may start a script or an ordinary shell and only later exec
+    # into a container. Inspect its current descendants too, once per server
+    # snapshot (and again at the locked removal recheck). Never infer absence
+    # from a failed/truncated process query or a vanished pane root.
+    processes = _pane_process_commands([pid for _p, _s, pid, _c in panes])
+    if processes is None:
+        return _PaneSnapshot(panes=None)
+    return _PaneSnapshot(panes=[
+        (pane, session, "\n".join([
+            command, *(_runtime_owner_target(cmd) for cmd in processes[pid])]))
+        for pane, session, pid, command in panes
+    ])
+
+
+def _runtime_owner_target(command: str) -> str:
+    """Match the attachment target, not container names in an exec payload."""
+    words = command.split()
+    if not words or os.path.basename(words[0]) not in {"podman", "docker"}:
+        return ""
+    words = words[1:]
+    # ps args is flattened, not shell-quoted argv. Do not try to parse arbitrary
+    # global option values: preserve ambiguous runtime clients conservatively.
+    if words and words[0].startswith("-"):
+        return command
+    if words and words[0] == "container":
+        words = words[1:]
+    if not words or words[0] not in {"exec", "attach"}:
+        return ""
+    verb, words = words[0], words[1:]
+    flags = {"--interactive", "--tty", "--detach", "--privileged"} if verb == "exec" else {
+        "--no-stdin", "--sig-proxy"}
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            index += 1
+            break
+        if not word.startswith("-"):
+            break
+        if word in flags or (verb == "exec" and re.fullmatch(r"-[dit]+", word)):
+            index += 1
+            continue
+        # PM's Docker exec uses -u pm. User/group tokens cannot contain spaces;
+        # other option values (paths, env, detach keys) stay conservative.
+        if verb == "exec" and (word in {"-u", "--user"} or word.startswith("--user=")):
+            if "=" in word:
+                user = word.split("=", 1)[1]
+            else:
+                index += 1
+                user = words[index] if index < len(words) else ""
+            if re.fullmatch(r"[A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)?", user):
+                index += 1
+                continue
+        # PM passes provider environment by name only (``-e NAME``; the
+        # runtime reads the value from its own environment), so every PM exec
+        # carries these. A bare variable name cannot contain spaces;
+        # ``NAME=value`` can, once ps flattens argv, and stays conservative.
+        if verb == "exec" and (word in {"-e", "--env"} or word.startswith("--env=")):
+            if "=" in word:
+                var = word.split("=", 1)[1]
+            else:
+                index += 1
+                var = words[index] if index < len(words) else ""
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", var):
+                index += 1
+                continue
+        return command
+    if index < len(words) and re.fullmatch(r"/?[A-Za-z0-9][A-Za-z0-9_.-]*", words[index]):
+        return words[index]  # Everything after this is the in-container command.
+    return command
+
+
+def _pane_process_commands(pids: list[int]) -> dict[int, list[str]] | None:
+    try:
+        # ``errors="replace"``: this dumps *every* host process's argv, so on a
+        # platform whose ps does not escape non-printable bytes a single
+        # process with a non-UTF-8 argument would raise UnicodeDecodeError and
+        # abort the whole ownership check (the pass errors out;
+        # ``pm container restart`` tracebacks) instead of reporting what it can
+        # see. Container names are ASCII, so a replaced byte cannot hide an
+        # owner.
+        result = subprocess.run(
+            ["ps", "-ax", "-ww", "-o", "pid=,ppid=,stat=,args="],
+            capture_output=True, text=True, errors="replace", timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    commands: dict[int, str] = {}
+    children: dict[int, list[int]] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) != 4 or not parts[0].isdigit() or not parts[1].isdigit():
+            return None
+        pid, parent = int(parts[0]), int(parts[1])
+        if parts[2].startswith("Z"):
+            continue
+        commands[pid] = parts[3]
+        children.setdefault(parent, []).append(pid)
+    if any(pid not in commands for pid in pids):
+        return None
+    by_pane: dict[int, list[str]] = {}
+    for root in pids:
+        pending = [root]
+        seen: set[int] = set()
+        by_pane[root] = []
+        while pending:
+            pid = pending.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            by_pane[root].append(commands[pid])
+            pending.extend(children.get(pid, []))
+    return by_pane
+
+
+def _token_re(token: str) -> re.Pattern:
+    return re.compile(r"(?<![A-Za-z0-9_.-])" + re.escape(token)
+                      + r"(?![A-Za-z0-9_.-])")
+
+
+def _owner_panes(info: ContainerInfo, cache: _PaneCache,
+                 fresh: bool = False, *, qualify_foreign: bool = False) -> tuple[list[str], bool]:
+    """(owning pane ids, indeterminate) for *info*.
+
+    Strict handoffs accept bare pane IDs only on the caller's tmux server.
+    Other servers can reuse those IDs, so retain their socket identity.
+    """
+    local_socket = os.path.realpath(
+        container_mod._current_tmux_socket() or _default_server().socket_file)
+    pats = [_token_re(info.name)]
+    if info.id:
+        pats.append(_token_re(info.id))
+    owners: list[str] = []
+    indeterminate = False
+    try:
+        if container_mod.activity_owner(info.name, info.id):
+            owners.append("interactive client")
+    except (container_mod.ContainerError, OSError):
+        indeterminate = True
+    for server in _servers_for(info):
+        snap = cache.get(server, fresh=fresh)
+        if snap.panes is None:
+            indeterminate = True
+            continue
+        for pane_id, _sess, cmd in snap.panes:
+            matched = any(p.search(cmd) for p in pats)
+            if not matched and re.fullmatch(r"[0-9a-f]{64}", info.id):
+                # Runtime clients accept ID prefixes too. Only attachment
+                # targets (or conservatively ambiguous runtime argv) may claim
+                # a prefix; arbitrary historical shell payloads must not.
+                # A matching prefix protects every possible allocation rather
+                # than guessing uniqueness from a scoped inventory.
+                lines = cmd.splitlines()
+                targets = [_runtime_owner_target(lines[0]), *lines[1:]] if lines else []
+                matched = any(re.fullmatch(r"[0-9a-f]{1,63}", word)
+                              and info.id.startswith(word)
+                              for target in targets for word in target.split())
+            if matched:
+                socket = os.path.realpath(server.socket_file)
+                owner = (f"{socket}:{pane_id}" if qualify_foreign and socket != local_socket
+                         else pane_id)
+                # Grouped sessions list the same pane once per session.
+                if owner not in owners:
+                    owners.append(owner)
+    return owners, indeterminate
+
+
+def live_owner_panes(name: str, container_id: str = "", *, strict: bool = False) -> list[str]:
+    """Live tmux panes started for container *name* (fresh query).
+
+    The container's own labels are consulted so the tmux server it was
+    launched from (``pm.tmux_socket``) is searched even when that isn't
+    this process's server. Raises ContainerError when ownership cannot be
+    established; destructive recovery must not interpret unknown as unowned.
+    Strict lookups qualify foreign-server pane IDs so a local concretizer
+    exception cannot authorize a different server's identically numbered pane.
+    """
+    if not strict and container_mod.activity_owner(name):
+        return ["interactive client"]
+    found = _inspect([container_id or name], timeout=10)
+    if not found:
+        raise container_mod.ContainerError(
+            f"Container '{name}' ownership unknown: could not inspect ownership metadata")
+    info = found[0]
+    if info.session_tag is None:
+        parsed = container_mod.parse_container_name(name)
+        if parsed:
+            info.session_tag = parsed.session_tag
+    owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True,
+                                         qualify_foreign=strict)
+    if indeterminate and (strict or not owners):
+        raise container_mod.ContainerError(
+            f"Container '{name}' ownership unknown: tmux server unreachable or pane process inspection unavailable")
+    return owners
+
+
+def _session_alive(tag: str, cache: _PaneCache) -> bool | None:
+    info = ContainerInfo(name="", session_tag=tag)
+    sess = f"pm-{tag}"
+    unknown = False
+    for server in _servers_for(info):
+        snap = cache.get(server)
+        if snap.panes is None:
+            unknown = True
+            continue
+        if any(s == sess or s.startswith(sess + "~") for _p, s, _c in snap.panes):
+            return True
+    return None if unknown else False
+
+
+# ---------------------------------------------------------------------------
+# PR status lookup
+# ---------------------------------------------------------------------------
+
+class _PrStatus:
+    def __init__(self) -> None:
+        self._by_root: dict[str, dict[str, str]] = {}
+        self._by_session: dict[str, str] = {}
+        self._current_root: str | None = None
+
+    def _session_root(self, tag: str) -> str:
+        """Project root recorded for session *tag* by `pm session`, or "".
+
+        Not :func:`paths.get_session_pm_root`: its ``session_dir`` creates
+        the directory, and *tag* comes from arbitrary container names.
+        """
+        if tag not in self._by_session:
+            root = ""
+            try:
+                from pm_core.paths import sessions_dir
+                recorded = (sessions_dir() / tag / "pm_root").read_text().strip()
+                if recorded and Path(recorded).exists():
+                    root = recorded
+            except (OSError, ValueError):
+                pass
+            self._by_session[tag] = root
+        return self._by_session[tag]
+
+    def _load(self, root: str) -> dict[str, str]:
+        if root not in self._by_root:
+            statuses: dict[str, str] = {}
+            try:
+                from pm_core.store import load
+                data = load(Path(root), validate=False)
+                for pr in data.get("prs") or []:
+                    if pr.get("id"):
+                        statuses[pr["id"]] = pr.get("status") or ""
+            except Exception:
+                pass
+            self._by_root[root] = statuses
+        return self._by_root[root]
+
+    def status(self, info: ContainerInfo) -> str | None:
+        if not info.pr_id:
+            return None
+        root = info.project_root
+        if not root and info.session_tag:
+            # Unlabeled (legacy) containers name their session; its project,
+            # not the caller's cwd, records the PR (e.g. `pm session cleanup`
+            # from a grouped session whose pane sits in another project).
+            root = self._session_root(info.session_tag)
+        if not root:
+            if self._current_root is None:
+                self._current_root = container_mod._current_project_root()
+            root = self._current_root
+        if not root:
+            return None
+        return self._load(root).get(info.pr_id)
+
+
+# ---------------------------------------------------------------------------
+# Decisions + reconcile
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Scope:
+    pr_id: str | None = None
+    session_tag: str | None = None
+    kinds: set[str] | None = None
+    loop_id: str | None = None
+    names: set[str] | None = None
+    include_retained: bool = False
+    # The run that owns these containers is releasing them: its own panes
+    # don't count as owners and the launch grace doesn't apply (retention
+    # and in-flight launches still do).
+    owner_release: bool = False
+    expected_ids: dict[str, str] = field(default_factory=dict)
+    expected_generations: dict[str, str] = field(default_factory=dict)
+
+    def matches(self, info: ContainerInfo) -> bool:
+        if (self.names is not None and info.name not in self.names
+                and not (self.owner_release and info.id in self.expected_ids.values())):
+            return False
+        if self.pr_id and info.pr_id != self.pr_id:
+            return False
+        if self.session_tag and info.session_tag != self.session_tag:
+            return False
+        if self.kinds and info.kind not in self.kinds:
+            return False
+        if self.loop_id and info.loop_id != self.loop_id:
+            return False
+        return True
+
+    def describe(self) -> str:
+        bits = []
+        if self.session_tag:
+            bits.append(f"session {self.session_tag}")
+        if self.pr_id:
+            bits.append(f"PR {self.pr_id}")
+        if self.kinds:
+            bits.append("kind " + "/".join(sorted(self.kinds)))
+        if self.loop_id:
+            bits.append(f"QA loop {self.loop_id}")
+        if self.names is not None:
+            bits.append(f"{len(self.names)} named container(s)")
+        if self.owner_release:
+            bits.append("released by owner")
+        return ", ".join(bits) or "all pm containers"
+
+
+def _is_full_scope(scope: "Scope") -> bool:
+    """True when *scope* covers every pm container on this runtime.
+
+    ``include_retained`` is a retention policy, not a filter: a pass with
+    ``--include-retained`` and no PR/session still has the complete
+    inventory, so it must prune retention markers, launch-lock files and
+    stale failure records like any other full pass.
+    """
+    return (scope.names is None and scope.pr_id is None
+            and scope.session_tag is None and scope.loop_id is None
+            and not scope.kinds and not scope.owner_release)
+
+
+@dataclass
+class Decision:
+    info: ContainerInfo
+    action: str  # "remove" | "keep"
+    reason: str
+    # Released by the run that launched it: its own panes don't keep it.
+    released: bool = False
+    release_generation: str | None = None
+    release_name: str = ""  # original name for pre-ID generation compatibility
+    # Push-proxy sockets stopped together with this container's removal.
+    proxies_stopped: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Outcome:
+    scope: str = ""
+    decisions: list[Decision] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    failures: dict[str, str] = field(default_factory=dict)
+    release_refused: dict[str, str] = field(default_factory=dict)
+    # Failed removals of containers their run released (retried as released).
+    released_failures: set[str] = field(default_factory=set)
+    proxies_released: list[str] = field(default_factory=list)
+    # Per-container push proxies stopped with the containers removed above.
+    proxies_stopped: list[str] = field(default_factory=list)
+    # Proxies this pass reached a definitive answer for (released, or proven
+    # still in use). A failure recorded for one of them earlier is resolved.
+    proxies_checked: list[str] = field(default_factory=list)
+    # The pass enumerated the shared proxies (full scope, runtime identity
+    # available): only then may an earlier whole-sweep failure be cleared.
+    proxy_sweep_ran: bool = False
+    # Kept containers near their PID limit: (name, pids, limit, reason kept).
+    pid_pressure: list[tuple[str, int, int, str]] = field(default_factory=list)
+    running_before: int | None = None
+    running_after: int | None = None
+    keyring_before: str = ""
+    keyring_after: str = ""
+    error: str = ""
+    skipped: bool = False
+    dry_run: bool = False
+    # Unfiltered successful inventory, used to prove absence when pruning
+    # releases even if decisions are scoped to a name that was reused.
+    inventory: list[ContainerInfo] | None = field(default=None, repr=False)
+
+    @property
+    def to_remove(self) -> list[Decision]:
+        return [d for d in self.decisions if d.action == "remove"]
+
+    def summary(self) -> str:
+        if self.skipped:
+            return "container cleanup already running elsewhere — skipped"
+        if self.error:
+            return f"container cleanup unavailable: {self.error}"
+        kept = len([d for d in self.decisions if d.action == "keep"])
+        if self.dry_run:
+            head = f"would remove {len(self.to_remove)}, keep {kept}"
+        else:
+            head = (f"removed {len(self.removed)}, kept {kept}, "
+                    f"failed {len(self.failures)}")
+        stopped = len(self.proxies_released) + len(self.proxies_stopped)
+        if stopped:
+            head += f", stopped {stopped} unused proxy(ies)"
+        counts = []
+        if self.running_before is not None:
+            after = ("" if self.running_after is None or self.dry_run
+                     else f" → {self.running_after}")
+            counts.append(f"running {self.running_before}{after}")
+        if self.keyring_before:
+            after = ("" if not self.keyring_after or self.dry_run
+                     else f" → {self.keyring_after}")
+            counts.append(f"keyring {self.keyring_before}{after}")
+        if self.pid_pressure:
+            head += f", {len(self.pid_pressure)} near PID limit"
+        return head + (f" ({'; '.join(counts)})" if counts else "")
+
+
+def _decide(info: ContainerInfo, scope: Scope, cache: _PaneCache,
+            prs: _PrStatus, now: float,
+            pending_release: dict[str, tuple[str, str | None]] | None = None,
+            release_records: list[dict] | None = None) -> Decision:
+    if scope.owner_release and info.name in scope.expected_ids:
+        if info.id != scope.expected_ids[info.name]:
+            return Decision(info, "keep", "replaced since owner release")
+        generation = restart_generation(info.name)
+        if generation != scope.expected_generations.get(info.name):
+            return Decision(info, "keep", "restarted or generation unknown since owner release")
+    if is_retained(info.name, info.id) and not scope.include_retained:
+        return Decision(info, "keep", "explicitly retained (pm container retain)")
+    if container_mod.launch_in_progress(info.name):
+        return Decision(info, "keep", "launch in progress")
+    releases = release_records or []
+    matching = [rec for rec in releases if rec["id"] == info.id]
+    if matching:
+        for rec in matching:
+            generation = allocation_generation(rec["name"], info.id)
+            if generation is None:
+                return Decision(info, "keep", "cleanup generation unknown")
+            if generation == rec["generation"]:
+                return Decision(info, "remove", "released by its run", released=True,
+                                release_generation=generation,
+                                release_name=rec["name"])
+    pending = (pending_release or {}).get(info.name)
+    if (not releases and pending is not None and pending[0]
+            and info.id and pending[0] == info.id and pending[1] is not None):
+        # Its run already let it go but the removal failed; the run's panes
+        # are still exec'd into it and would otherwise "own" it forever.  Keep
+        # the recorded generation so the locked removal still refuses a
+        # container that was reused since (that writes a new generation).
+        return Decision(info, "remove", "released by its run (retrying failed removal)",
+                        released=True, release_generation=pending[1])
+    owners, indeterminate = _owner_panes(info, cache)
+    if owners:
+        return Decision(info, "keep", f"owned by live pane {', '.join(owners)}")
+    try:
+        attaching = container_mod.recent_launch(info.name, LAUNCH_GRACE, info.id)
+    except OSError:
+        return Decision(info, "keep", "launch lease unreadable — ownership unknown")
+    # A young container whose launch already attached is not "launching": once
+    # its pane is gone (closed by the user) it is as abandoned as an old one.
+    young = (info.created is not None and now - info.created < LAUNCH_GRACE
+             and not (info.id and container_mod.launch_concluded(info.id, info.created)))
+    if attaching or young:
+        return Decision(info, "keep", "launching (no pane yet)")
+    if indeterminate:
+        # Unknown beats merged: a pane we can't see may still be in use.
+        # The next pass retries.
+        return Decision(info, "keep", "tmux server unreachable or pane process inspection unavailable — ownership unknown")
+    status = prs.status(info)
+    if status in _TERMINAL_PR_STATES:
+        return Decision(info, "remove", f"PR {info.pr_id} is {status}, no owning pane")
+    if info.session_tag:
+        alive = _session_alive(info.session_tag, cache)
+        if alive is False:
+            return Decision(info, "remove", f"tmux session pm-{info.session_tag} gone")
+    what = "QA run finished or superseded" if info.kind == "qa" else "attempt ended"
+    return Decision(info, "remove", f"no owning pane ({what})")
+
+
+def _remove_checked(d: Decision, scope: Scope) -> tuple[bool, str]:
+    """Remove *d* after re-checking ownership under its launch lock."""
+    info = d.info
+    with container_mod.launch_lock(info.name, timeout=0) as free:
+        if not free:
+            return False, "skipped: launch started concurrently"
+        if is_retained(info.name, info.id) and not scope.include_retained:
+            return False, "skipped: retained concurrently"
+        if info.id:
+            # A relaunch between plan() and now replaced the container under
+            # the same name; its pane may not exist yet, so the pane re-check
+            # below can't protect it. Check the name before deleting the ID;
+            # the runtime may rename/replace it without taking PM's lock.
+            try:
+                current = container_mod.current_container_id(info.name)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                # Raising here would abort the whole pass and lose the
+                # record of removals already done; fail just this one.
+                return False, f"error: could not re-check container id: {e}"
+            if current is None:
+                return False, "error: container identity unknown during removal re-check"
+            if current and current != info.id:
+                return False, "skipped: replaced by a newer launch"
+            if current == "":
+                # Missing by name does not prove the allocation is gone: an
+                # external runtime rename can race the inventory. Keep its
+                # release until a fresh pass acquires the new name's lock.
+                try:
+                    remaining = container_mod.current_container_id(info.id)
+                except (OSError, subprocess.TimeoutExpired) as e:
+                    return False, f"error: could not re-check allocation id: {e}"
+                if remaining is None:
+                    return False, "error: allocation identity unknown after name disappeared"
+                if remaining:
+                    return False, "skipped: container renamed since inventory"
+        if d.release_generation is not None:
+            generation = allocation_generation(d.release_name or info.name, info.id)
+            if generation is None:
+                return False, "error: cleanup generation unknown during removal re-check"
+            if generation != d.release_generation:
+                return False, "skipped: container restarted since owner release"
+        if not d.released:
+            try:
+                if container_mod.recent_launch(info.name, LAUNCH_GRACE, info.id):
+                    return False, "skipped: new owner attaching"
+            except OSError:
+                return False, "skipped: launch lease unreadable — ownership unknown"
+            owners, indeterminate = _owner_panes(info, _PaneCache(), fresh=True)
+            if owners:
+                return False, f"skipped: pane {', '.join(owners)} attached concurrently"
+            if indeterminate:
+                return False, "skipped: tmux server unreachable or pane process inspection unavailable — ownership unknown"
+        try:
+            if not info.id:
+                return False, "error: missing captured container id"
+            from pm_core import push_proxy
+            token = push_proxy.stopped_proxy_sink.set(d.proxies_stopped)
+            try:
+                container_mod.remove_container(info.name, container_id=info.id)
+            finally:
+                push_proxy.stopped_proxy_sink.reset(token)
+        except Exception as e:
+            return False, f"error: {e}"
+    return True, ""
+
+
+_LOCK_FILE_MAX_AGE = 3600
+
+
+def _prune_lock_files(inventory: set[str]) -> None:
+    """Drop launch-lock files of containers that no longer exist.
+
+    One file is created per launched container name (QA names embed the
+    loop id), so without pruning they accumulate forever.  A file is only
+    unlinked while we hold its lock and once it is old enough that no
+    launch of that name can still be starting.
+    """
+    lock_dir = container_mod.container_state_dir() / "locks"
+    try:
+        entries = list(lock_dir.glob("container-*.lock"))
+    except OSError:
+        return
+    now = time.time()
+    for path in entries:
+        name = path.name[len("container-"):-len(".lock")]
+        if name in inventory:
+            continue
+        try:
+            if now - path.stat().st_mtime < _LOCK_FILE_MAX_AGE:
+                continue
+        except OSError:
+            continue
+        with container_mod.launch_lock(name, timeout=0) as free:
+            if free:
+                _unlink_state_file(path, "launch lock")
+
+
+def spawn_detached_reap(pr_id: str | None = None,
+                        session_tag: str | None = None) -> None:
+    """Run ``pm container reap`` for a scope in a detached process.
+
+    For short-lived CLI paths (e.g. a merge) that must not wait for
+    removals nor leave a daemon thread to be killed at exit.
+    """
+    import sys
+    cmd = [sys.executable, "-m", "pm_core.wrapper", "container", "reap"]
+    if pr_id:
+        cmd += ["--pr", pr_id]
+    if session_tag:
+        cmd += ["--session", session_tag]
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        _log.warning("could not spawn detached reap for %s", pr_id, exc_info=True)
+
+
+def _proxy_failure_actionable(key: str) -> bool:
+    """False when a recorded ``push proxy`` failure names nothing left to retry.
+
+    A shared proxy whose directory disappeared (daemon retirement, /tmp
+    cleanup) or a captured unshared release whose record was already consumed
+    can never be released again, so keeping its failure would leave
+    ``pm container reap`` failing forever. Unknown shapes stay visible.
+    """
+    target = key[len("push proxy "):]
+    if target.startswith("unshared "):
+        stem = target[len("unshared "):]
+        return (container_mod.container_state_dir() / "proxy-releases"
+                / f"{stem}.json").exists()
+    from pm_core import push_proxy
+    try:
+        sock_dir = push_proxy.proxy_key_dir(target)
+    except (OSError, ValueError):
+        return True
+    return sock_dir is None or os.path.exists(sock_dir)
+
+
+def _release_unused_proxies(scope: Scope, failures: dict[str, str],
+                            checked: list[str] | None = None
+                            ) -> tuple[list[str], bool]:
+    """Release unused proxies; append definitively-evaluated keys to *checked*.
+
+    Returns ``(released, enumerated)``.  *enumerated* is False when this pass
+    never listed the shared proxies (the runtime identity probe came back
+    unknown), so a caller must not treat the pass as having swept them.
+
+    Only a definitive answer — released, or proven still in use by a live
+    container — means there is no pending work, so only those clear an
+    earlier failure.  An unanswered inventory stays a retryable failure; a
+    proxy this pass could not evaluate (busy lock, foreign/unreadable owner
+    record) is neither released nor cleared.
+    """
+    from pm_core import push_proxy
+    released = push_proxy.retry_unshared_releases(scope, failures)
+    # The sweep's own probe decides whether it enumerated anything; the
+    # caller must not re-probe and infer it.
+    domain = push_proxy.runtime_domain()
+    if domain is None:
+        return released, False
+    for prox in push_proxy.list_shared_proxies():
+        if prox.get("runtime_domain") != domain:
+            continue
+        if scope.session_tag and prox["session_tag"] != scope.session_tag:
+            continue
+        if scope.pr_id and prox["pr_id"] != scope.pr_id:
+            continue
+        key = push_proxy.proxy_key(prox)
+        try:
+            decision = push_proxy.release_proxy_decision(
+                prox["session_tag"], prox["pr_id"], sock_dir=prox["sock_dir"])
+            if decision == push_proxy.PROXY_RELEASED:
+                released.append(key)
+            elif decision == push_proxy.PROXY_UNAVAILABLE:
+                failures[f"push proxy {key}"] = "runtime inventory unavailable; proxy preserved"
+            elif decision == push_proxy.PROXY_IN_USE and checked is not None:
+                checked.append(key)
+            # PROXY_UNDETERMINED: this pass could not evaluate it, so an
+            # earlier failure stays visible and retryable.
+        except Exception as exc:
+            failures[f"push proxy {key}"] = str(exc)
+            _log.warning("proxy release for %s failed", prox, exc_info=True)
+    return released, True
+
+
+@runtime_domain_scope()
+def plan(scope: Scope | None = None) -> Outcome:
+    """Classify containers in *scope* without changing anything."""
+    scope = scope or Scope()
+    out = Outcome(scope=scope.describe(), dry_run=True)
+    infos = list_containers()
+    if infos is None:
+        out.error = f"{container_mod._get_runtime()} is not available"
+        return out
+    out.inventory = infos
+    cache, prs, now = _PaneCache(), _PrStatus(), time.time()
+    # name -> (captured id, recorded generation or None).  The generation is
+    # what makes the retry safe: a container reused after the failed release
+    # has a new one, and must not be removed by the old request.
+    pending_release = {
+        n: (str(f.get("id") or ""), f.get("generation"))
+        for n, f in pending_failures().items()
+        if isinstance(f, dict) and f.get("owner_release")}
+    releases: dict[str, list[dict]] = {}
+    for _, rec in _current_release_records():
+        releases.setdefault(rec["id"], []).append(rec)
+    for info in infos:
+        if scope.matches(info):
+            out.decisions.append(_decide(info, scope, cache, prs, now,
+                                         pending_release, releases.get(info.id)))
+    return out
+
+
+# Opportunistic passes skip when another process is already reconciling (it
+# covers them); explicit releases and manual runs wait their turn.
+_SKIP_IF_BUSY = frozenset({"auto", "startup", "keyring-pressure"})
+# The periodic pass is the only scheduled full sweep, and the lock holder at
+# its tick is usually a short scoped release (pane exit, QA end) that does not
+# cover late leftovers.  Skipping would delay their reclaim by a whole extra
+# interval, so wait briefly on the TUI's background reaper thread instead.
+_PERIODIC_LOCK_WAIT = 60
+
+
+@runtime_domain_scope()
+def _run(scope: Scope, dry_run: bool, reason: str) -> Outcome:
+    if reason in _SKIP_IF_BUSY:
+        timeout = 0
+    elif reason == "periodic":
+        timeout = _PERIODIC_LOCK_WAIT
+    else:
+        timeout = 120
+    with container_mod._file_lock("reaper", timeout=timeout) as got:
+        if not got:
+            return Outcome(scope=scope.describe(), skipped=True, dry_run=dry_run)
+        listed_at = time.time()
+        out = plan(scope)
+        out.dry_run = dry_run
+        if out.error:
+            return out
+        out.running_before = sum(info.running for info in out.inventory)
+        out.keyring_before = container_mod.keyring_summary()
+        if dry_run:
+            if scope.names is None:
+                _note_pid_pressure(out)
+            return out
+        targets = out.to_remove
+        if targets:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=min(REMOVE_WORKERS, len(targets))) as ex:
+                # Each worker inherits the successful inventory-time probe,
+                # but gets its own context so nested changes cannot race peers.
+                futures = [(d, ex.submit(contextvars.copy_context().run,
+                                         _remove_checked, d, scope)) for d in targets]
+                # One broken worker must not discard the pass's other
+                # removals and failures; record it as that target's failure.
+                results = []
+                for d, future in futures:
+                    try:
+                        results.append((d, future.result()))
+                    except Exception as exc:
+                        _log.warning("container removal for %s failed", d.info.name,
+                                     exc_info=True)
+                        results.append((d, (False, f"error: {exc}")))
+            for d, (ok, msg) in results:
+                out.proxies_stopped.extend(d.proxies_stopped)
+                if ok:
+                    out.removed.append(d.info.name)
+                elif msg.startswith("error:"):
+                    out.failures[d.info.name] = msg[len("error: "):]
+                    if d.released:
+                        out.released_failures.add(d.info.name)
+                else:
+                    d.action, d.reason = "keep", msg
+        try:
+            out.proxies_released, swept = _release_unused_proxies(
+                scope, out.failures, out.proxies_checked)
+            # Only a full pass that actually enumerated the proxies may clear
+            # an earlier whole-sweep failure. Report what the sweep did, not a
+            # second identity probe that can disagree with it.
+            out.proxy_sweep_ran = swept and _is_full_scope(scope)
+        except Exception as exc:
+            out.failures["push proxy sweep"] = str(exc)
+            _log.warning("proxy sweep failed", exc_info=True)
+        out.running_after = container_mod.running_container_count()
+        out.keyring_after = container_mod.keyring_summary()
+        if scope.names is None:
+            _note_pid_pressure(out)
+        full_pass = _is_full_scope(scope)
+        inventory = {d.info.name for d in out.decisions}
+        _prune_releases(out, scope, listed_at)
+        _record(out, scope, reason, inventory=inventory if full_pass else None,
+                observed_at=listed_at)
+        if full_pass:
+            # A container this pass removed has no lock to keep: excluding it
+            # lets an old lock file go now instead of on a later pass.
+            _prune_lock_files(inventory - set(out.removed))
+            _prune_retain_markers({d.info.name: d.info.id for d in out.decisions
+                                   if d.info.name not in out.removed},
+                                  since=listed_at)
+        if out.removed or out.failures:
+            _log.info("reconcile[%s] %s: %s — removed=%s failures=%s", reason,
+                      out.scope, out.summary(), out.removed, out.failures)
+        return out
+
+
+def _note_pid_pressure(out: Outcome) -> None:
+    """Flag kept containers close to their PID limit.
+
+    Unowned exhausted containers were just removed like any leftover; an
+    owned one may hold a live session, so it is reported (with the restart
+    command) rather than restarted behind the user's back.
+
+    Reuses the pass's own inventory (``out.inventory``) instead of listing
+    every container again: ``pids_pressure`` only needs the managed-name set,
+    and every row it reports must also be a kept decision — so a container
+    this pass removed (or one created after its inventory) cannot change the
+    outcome.
+    """
+    kept = {d.info.name: d.reason for d in out.decisions
+            if d.action == "keep" and d.info.running}
+    if not kept:
+        return
+    try:
+        hot = container_mod.pids_pressure(inventory=out.inventory)
+    except Exception:
+        _log.debug("PID usage probe failed", exc_info=True)
+        return
+    out.pid_pressure = [(n, c, lim, kept[n]) for n, c, lim in hot if n in kept]
+    for n, c, lim, why in out.pid_pressure:
+        _log.warning("container %s at %d/%d PIDs (%s)", n, c, lim, why)
+
+
+_bg_lock = threading.Lock()
+_bg_running = False
+_bg_queue: list[tuple[Scope, bool, str, Callable[[Outcome], None] | None]] = []
+
+
+def reconcile(scope: Scope | None = None, *, dry_run: bool = False,
+              wait: bool = True, reason: str = "auto",
+              on_done: Callable[[Outcome], None] | None = None) -> Outcome | None:
+    """Remove unowned pm containers in *scope* (default: everything).
+
+    ``wait=False`` queues the pass for one background daemon thread per
+    process (identical pending requests are coalesced, distinct scopes are
+    all run) and returns None.  Never raises; problems are reported in the
+    returned :class:`Outcome`.
+    """
+    scope = scope or Scope()
+
+    def _go() -> Outcome:
+        try:
+            out = _run(scope, dry_run, reason)
+        except Exception as e:  # pragma: no cover - defensive
+            _log.warning("reconcile failed", exc_info=True)
+            out = Outcome(scope=scope.describe(), error=str(e))
+        if on_done:
+            try:
+                on_done(out)
+            except Exception:
+                _log.debug("reconcile on_done failed", exc_info=True)
+        return out
+
+    if wait:
+        return _go()
+
+    global _bg_running
+    with _bg_lock:
+        if not any(q[0] == scope and q[1] == dry_run and q[3] is None
+                   for q in _bg_queue) or on_done is not None:
+            _bg_queue.append((scope, dry_run, reason, on_done))
+        if _bg_running:
+            return None
+        _bg_running = True
+
+    threading.Thread(target=_drain_bg_queue, daemon=True,
+                     name="pm-container-reaper").start()
+    return None
+
+
+def _drain_bg_queue() -> None:
+    global _bg_running
+    while True:
+        with _bg_lock:
+            if not _bg_queue:
+                _bg_running = False
+                return
+            scope, dry_run, reason, on_done = _bg_queue.pop(0)
+        reconcile(scope, dry_run=dry_run, wait=True, reason=reason,
+                  on_done=on_done)
+
+
+@runtime_domain_scope()
+def release_containers(names: list[str], *, reason: str = "release",
+                       wait: bool = True,
+                       owner_release: bool = False,
+                       expected_ids: dict[str, str] | None = None,
+                       expected_generations: dict[str, str] | None = None) -> Outcome | None:
+    """Release specific containers a run no longer needs.
+
+    By default goes through the full ownership checks, so a container a
+    human is still using (live pane) is kept.  ``owner_release=True`` is for
+    the run that launched them: its own panes are being ended on purpose.
+    It must supply the captured container IDs and recovery generations; these
+    are persisted before inventory/locking so a later pass can retry safely.
+    Missing identity falls back to ordinary ownership checks, never name-only
+    force removal. Retention and an in-flight launch defer the request, and a
+    refusal is reported only while the allocation survives the pass (kept, or
+    its removal failed) — a container those checks removed anyway is done.
+    """
+    if not names:
+        return Outcome(scope="no containers")
+    refused = {}
+    if owner_release:
+        for name in names:
+            cid = (expected_ids or {}).get(name)
+            generation = (expected_generations or {}).get(name)
+            if not cid or generation is None:
+                refused[name] = "owner release requires captured id and generation"
+                continue
+            try:
+                _record_release(name, cid, generation, reason)
+                if _runtime_domain() is None:
+                    refused[name] = "runtime domain unknown; owner release needs an identity-verified retry"
+            except OSError as exc:
+                refused[name] = f"could not persist owner release: {exc}"
+        if refused:
+            _log.warning("Owner release refused: %s", refused)
+    out = reconcile(Scope(names=set(names), owner_release=owner_release,
+                          expected_ids=dict(expected_ids or {}),
+                          expected_generations=dict(expected_generations or {})),
+                    wait=wait, reason=reason)
+    if out is not None:
+        # A refusal is only pending work while the allocation is still there.
+        # The ordinary ownership checks can remove an unowned container anyway
+        # (e.g. an old resume snapshot without a captured id), and reporting
+        # that as "cleanup deferred" would contradict the removal it made.
+        if out.error or out.skipped:
+            out.release_refused.update(refused)
+        else:
+            pending = {d.info.name for d in out.decisions if d.action == "keep"}
+            pending |= set(out.failures)
+            out.release_refused.update(
+                {n: why for n, why in refused.items() if n in pending})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Persisted outcome (failures stay visible and retryable)
+# ---------------------------------------------------------------------------
+
+def _state_file() -> Path:
+    domain = _runtime_domain()
+    if domain is None:
+        return container_mod.container_state_dir() / "reaper.json"
+    key = hashlib.sha256(json.dumps(domain, sort_keys=True).encode()).hexdigest()[:16]
+    return container_mod.container_state_dir() / f"reaper-{key}.json"
+
+
+def last_state() -> dict:
+    """Persisted outcome, or ``{}`` when missing or not the shape we wrote.
+
+    A hand-edited or truncated file must not abort a pass that already removed
+    containers (``_record_locked`` reads every failure entry as a dict) or crash
+    ``pm container status`` (which formats ``last_run`` as a timestamp).
+    """
+    try:
+        state = json.loads(_state_file().read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(state, dict):
+        return {}
+    failures = state.get("failures")
+    state["failures"] = ({name: value for name, value in failures.items()
+                          if isinstance(value, dict)}
+                         if isinstance(failures, dict) else {})
+    last_run = state.get("last_run")
+    try:
+        stamp = None if last_run is None else float(last_run)
+    except (TypeError, ValueError):
+        stamp = None
+    # ``time.localtime`` raises TypeError/ValueError/OverflowError for
+    # strings, NaN/inf and absurd values; drop anything unusable.
+    if stamp is None or not 0 < stamp < 1e12:
+        state.pop("last_run", None)
+    else:
+        state["last_run"] = stamp
+    return state
+
+
+def unavailable_runtime_diagnostics() -> list[tuple[str, str, str]]:
+    """Display-only records from scoped stores when runtime identity is unknown.
+
+    Do not use these for planning or state merges: they may belong to different
+    runtimes. Keep each source distinct even when container names are identical.
+    """
+    if _runtime_domain() is not None:
+        return []
+    rows = []
+    for path in sorted(container_mod.container_state_dir().glob("reaper-*.json")):
+        try:
+            state = json.loads(path.read_text())
+            for name, failure in state.get("failures", {}).items():
+                rows.append((path.name, name, str(failure.get("error", ""))))
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+    for _, rec in _release_records():
+        if rec.get("runtime_domain") is not None:
+            source = json.dumps(rec["runtime_domain"], sort_keys=True)
+            rows.append((source, rec["name"],
+                         f"owner release pending for allocation {rec['id']}"))
+    for _, rec in _retention_records():
+        if rec.get("runtime_domain") is not None and isinstance(rec.get("name"), str) and rec["name"]:
+            source = json.dumps(rec["runtime_domain"], sort_keys=True)
+            rows.append((source, rec["name"], "retained (kept out of cleanup)"))
+    return rows
+
+
+def _record(out: Outcome, scope: Scope, reason: str,
+            inventory: set[str] | None = None, *, observed_at: float | None = None) -> None:
+    """Persist the outcome; *inventory* (full-scope passes) prunes failures
+    for containers that no longer exist."""
+    # Explicit bulk cleanup also publishes outcomes. Serialize the read/merge/
+    # replace with ordinary reconcile so one process cannot erase the other's
+    # failed removals or race on the temporary file.
+    with container_mod._file_lock("reaper-state", timeout=30) as locked:
+        if not locked:
+            out.failures["cleanup state"] = "cleanup outcome lock unavailable; retry with pm container reap"
+            return
+        _record_locked(out, scope, reason, inventory, observed_at)
+
+
+def _scoped_state_exists() -> bool:
+    try:
+        return any(container_mod.container_state_dir().glob("reaper-*.json"))
+    except OSError:
+        return False
+
+
+def _record_locked(out: Outcome, scope: Scope, reason: str,
+                   inventory: set[str] | None = None,
+                   observed_at: float | None = None) -> None:
+    domain = _runtime_domain()
+    if domain is None and _scoped_state_exists():
+        # Unknown identity cannot fall back to the legacy unscoped store once
+        # scoped state exists: entries written there are never pruned and are
+        # invisible to every later pass.  Report the lost outcome instead.
+        out.failures["cleanup state"] = (
+            "runtime identity unavailable; cleanup outcome not persisted — "
+            "retry with pm container reap")
+        _log.warning("cleanup outcome not persisted: runtime identity unavailable")
+        return
+    prev = last_state()
+    failures = dict(prev.get("failures") or {})
+    if inventory is not None and domain is not None:
+        failures = {k: v for k, v in failures.items()
+                    if k in inventory or k.startswith("push proxy ")
+                    or observed_at is not None and v.get("at", 0) >= observed_at}
+        # Only a full pass can prove a proxy is gone for good; drop its
+        # failure instead of retrying it forever. Newer failures stay.
+        failures = {k: v for k, v in failures.items()
+                    if not k.startswith("push proxy ")
+                    or observed_at is not None and v.get("at", 0) >= observed_at
+                    or _proxy_failure_actionable(k)}
+    for proxy in out.proxies_released:
+        failures.pop(f"push proxy {proxy}", None)
+    # A proxy this pass reached a definitive answer for — released, or proven
+    # still in use — has no pending work, so an earlier transient failure for
+    # it is resolved. A newer concurrent failure is preserved.
+    for proxy in out.proxies_checked:
+        key = f"push proxy {proxy}"
+        previous = failures.get(key)
+        if (previous and observed_at is not None
+                and previous.get("at", 0) >= observed_at):
+            continue
+        failures.pop(key, None)
+    if out.proxy_sweep_ran and "push proxy sweep" not in out.failures:
+        failures.pop("push proxy sweep", None)
+    for d in out.decisions:
+        if domain is None:
+            continue  # unknown inventory domain cannot retire legacy failures
+        previous = failures.get(d.info.name, {})
+        if observed_at is not None and previous.get("at", 0) >= observed_at:
+            continue  # a bulk result newer than this inventory is not stale
+        if (d.info.name in out.removed or
+                previous.get("id") and previous["id"] != d.info.id or
+                previous.get("owner_release") and
+                allocation_generation(d.info.name, d.info.id)
+                not in (None, previous.get("generation", ""))):
+            failures.pop(d.info.name, None)
+    ids = {d.info.name: d.info.id for d in out.decisions}
+    for name, err in out.failures.items():
+        if observed_at is not None and failures.get(name, {}).get("at", 0) >= observed_at:
+            continue
+        failures[name] = {"error": err, "at": time.time(), "reason": reason}
+        if ids.get(name):
+            failures[name]["id"] = ids[name]
+        if name in out.released_failures:
+            failures[name]["owner_release"] = True
+            decision = next((d for d in out.decisions if d.info.name == name), None)
+            if decision and decision.release_generation is not None:
+                failures[name]["generation"] = decision.release_generation
+    state = {
+        "last_run": int(time.time()),
+        "last_reason": reason,
+        "last_scope": out.scope,
+        "last_summary": out.summary(),
+        "removed": out.removed,
+        "failures": failures,
+    }
+    try:
+        f = _state_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, indent=1))
+        os.replace(tmp, f)
+    except OSError as exc:
+        out.failures["cleanup state"] = f"could not persist cleanup outcome: {exc}"
+        _log.warning("could not record reaper state", exc_info=True)
+
+
+def pending_failures() -> dict[str, dict]:
+    failures = dict(last_state().get("failures") or {})
+    for name, rec in pending_releases().items():
+        failures.setdefault(name, {**rec, "owner_release": True,
+                                   "error": "owner release pending; retry with pm container reap"})
+    for _, rec in _release_records():
+        if rec.get("domain_required") and rec.get("runtime_domain") is None:
+            # Inert by design: it never authorizes removal in any runtime, and
+            # pruning preserves it because its domain can't be matched. It is a
+            # diagnostic, not a failure a retry can clear.
+            failures.setdefault(rec["name"], {**rec, "owner_release": False,
+                "unverifiable_release": True,
+                "error": "owner release was recorded without a runtime identity; "
+                         "kept as a diagnostic only"})
+    return failures

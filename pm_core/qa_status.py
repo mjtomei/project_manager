@@ -23,6 +23,7 @@ import re
 import select
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -108,22 +109,31 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     scenarios = status.get("scenarios", [])
     overall = status.get("overall", "")
     error = status.get("error", "")
+    err_start, err_chunks = 0, []
 
-    lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
+    lines.append(f"{_BOLD}{_truncate(f'QA Status: {pr_id}', cols)}{_RESET}")
     lines.append("")
 
-    # Show error block if present (spec missing, no scenarios, etc.)
+    # Show error block if present (spec missing, no scenarios, launch
+    # failures, etc.).  A run that has scenarios keeps its table below the
+    # error: a launch failure is reported alongside the verdicts the other
+    # scenarios reached, and must not hide them.
     if error:
         lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
         lines.append("")
+        # Wrap to the pane: a terminal-wrapped line takes extra rows and
+        # scrolls the header off the top of the full-height render.
+        err_width = max(cols - 2, 10)
+        err_start = len(lines)
         for err_line in error.split("\n"):
-            lines.append(f"  {_RED}{err_line}{_RESET}")
+            for chunk in textwrap.wrap(err_line, err_width,
+                                       break_on_hyphens=False) or [""]:
+                err_chunks.append(chunk)
+                lines.append(f"  {_RED}{chunk}{_RESET}")
         lines.append("")
-        lines.append(f"{_DIM}  q: quit{_RESET}")
-        padded = [_pad_line(l, cols) for l in lines]
-        while len(padded) < rows:
-            padded.append(" " * cols)
-        return _CLEAR_SCREEN + "\n".join(padded)
+        if not scenarios:
+            lines.append(f"{_DIM}{_truncate('  q: quit', cols)}{_RESET}")
+            return _finish(lines, rows, cols, err_start, err_chunks)
 
     # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
     title_width = max(cols - 28, 10)
@@ -190,16 +200,44 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         total = sum(1 for s in scenarios if s.get("verdict") != "interactive")
         queued = sum(1 for s in scenarios if s.get("verdict") == "queued")
         verifying = sum(1 for s in scenarios if "(verifying" in s.get("verdict", ""))
-        progress = f"  {_DIM}Progress: {done}/{total} scenarios complete"
+        progress = f"  Progress: {done}/{total} scenarios complete"
         if verifying:
             progress += f" ({verifying} verifying)"
         if queued:
             progress += f" ({queued} queued)"
-        progress += f"{_RESET}"
-        lines.append(progress)
+        lines.append(f"{_DIM}{_truncate(progress, cols)}{_RESET}")
 
     lines.append("")
-    lines.append(f"{_DIM}  j/k: navigate  Enter: go to window  q: quit{_RESET}")
+    hint = _truncate("  j/k: navigate  Enter: go to window  q: quit", cols)
+    lines.append(f"{_DIM}{hint}{_RESET}")
+    return _finish(lines, rows, cols, err_start, err_chunks)
+
+
+def _finish(lines: list[str], rows: int, cols: int, err_start: int,
+            err_chunks: list[str]) -> str:
+    """Fit *lines* to the pane and return the full-screen render.
+
+    The render is redrawn from the top of the pane, so more lines than
+    rows scroll the header and the error block off screen.  A short pane
+    first loses the key hint, then the blank spacer lines, then the tail
+    of the error text (the kept part ends in an ellipsis; the whole error
+    stays in qa_status.json), and only then is the bottom clipped.
+    """
+    if rows > 0 and len(lines) > rows:
+        err_end = err_start + len(err_chunks)
+        tagged = [("err" if err_start <= i < err_end else "", l)
+                  for i, l in enumerate(lines[:-1]) if l != ""]
+        over = len(tagged) - rows
+        if over > 0 and err_chunks:
+            keep = max(1, len(err_chunks) - over)
+            if keep < len(err_chunks):
+                width = max(cols - 2, 10)
+                kept = err_chunks[:keep]
+                kept[-1] = _truncate(kept[-1] + "\u2026", width)
+                first = next(i for i, (k, _) in enumerate(tagged) if k == "err")
+                tagged[first:first + len(err_chunks)] = [
+                    ("err", f"  {_RED}{chunk}{_RESET}") for chunk in kept]
+        lines = [l for _, l in tagged][:rows]
 
     # Pad each line to full width to clear stale content from previous renders
     padded = [_pad_line(l, cols) for l in lines]

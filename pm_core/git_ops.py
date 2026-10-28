@@ -78,12 +78,23 @@ def is_git_repo(path: Path) -> bool:
     return result.returncode == 0
 
 
-def run_git(*args: str, cwd: Optional[str | Path] = None, check: bool = True) -> subprocess.CompletedProcess:
+# ``git -c`` arguments that disable repository hooks for one invocation.  A PR
+# workdir is bind-mounted read-write into containers, so ``.git/hooks/*`` and a
+# repo-configured ``core.hooksPath`` are container-authored code: any hook a
+# host-side pm git command runs from there executes with host credentials, the
+# same sandbox escape the push proxy blocks for container-initiated pushes.
+# pm's own git operations need no hooks.
+NO_HOOKS_ARGS = ("-c", "core.hooksPath=/dev/null")
+
+
+def run_git(*args: str, cwd: Optional[str | Path] = None, check: bool = True,
+            no_hooks: bool = False) -> subprocess.CompletedProcess:
     """Run a git command and return result.
 
-    Logs to TUI log file if running under TUI.
+    Logs to TUI log file if running under TUI.  Pass ``no_hooks=True`` when
+    *cwd* is a container-writable workdir (see :data:`NO_HOOKS_ARGS`).
     """
-    cmd = ["git", *args]
+    cmd = ["git", *NO_HOOKS_ARGS, *args] if no_hooks else ["git", *args]
     log_shell_command(cmd, prefix="git")
     result = subprocess.run(
         cmd,
@@ -151,41 +162,50 @@ def configure_dual_remote(workdir: str | Path, local_source: str,
             cwd=workdir)
 
 
-def checkout_branch(workdir: Path, branch: str, create: bool = False) -> None:
+def checkout_branch(workdir: Path, branch: str, create: bool = False, *,
+                    no_hooks: bool = False) -> None:
     """Checkout or create a branch.
 
     Handles repos with no remote (local backend) and empty repos
-    gracefully by falling back to local branch operations.
+    gracefully by falling back to local branch operations.  ``no_hooks``
+    follows :func:`run_git` (a container-writable workdir).
     """
     if create:
         # Check if branch exists locally first
-        local_check = run_git("rev-parse", "--verify", branch, cwd=workdir, check=False)
+        local_check = run_git("rev-parse", "--verify", branch, cwd=workdir,
+                              check=False, no_hooks=no_hooks)
         if local_check.returncode == 0:
-            run_git("checkout", branch, cwd=workdir)
+            run_git("checkout", branch, cwd=workdir, no_hooks=no_hooks)
             return
         # Check if branch exists on remote (may fail if no remote)
-        result = run_git("ls-remote", "--heads", "origin", branch, cwd=workdir, check=False)
+        result = run_git("ls-remote", "--heads", "origin", branch, cwd=workdir,
+                         check=False, no_hooks=no_hooks)
         if result.returncode == 0 and result.stdout.strip():
-            run_git("fetch", "origin", branch, cwd=workdir)
-            run_git("checkout", branch, cwd=workdir)
+            run_git("fetch", "origin", branch, cwd=workdir, no_hooks=no_hooks)
+            run_git("checkout", branch, cwd=workdir, no_hooks=no_hooks)
         else:
             # Create new local branch; use --orphan for empty repos
-            create_result = run_git("checkout", "-b", branch, cwd=workdir, check=False)
+            create_result = run_git("checkout", "-b", branch, cwd=workdir,
+                                    check=False, no_hooks=no_hooks)
             if create_result.returncode != 0:
                 # May fail if HEAD is invalid (empty repo) — try orphan branch
-                run_git("checkout", "--orphan", branch, cwd=workdir)
+                run_git("checkout", "--orphan", branch, cwd=workdir,
+                        no_hooks=no_hooks)
     else:
-        run_git("checkout", branch, cwd=workdir)
+        run_git("checkout", branch, cwd=workdir, no_hooks=no_hooks)
 
 
-def pull_rebase(workdir: Path) -> subprocess.CompletedProcess:
+def pull_rebase(workdir: Path, *, no_hooks: bool = False) -> subprocess.CompletedProcess:
     """Pull with rebase, keeping local merge commits.
 
     ``--rebase=merges``: a plain ``--rebase`` linearizes an unpushed merge
     (e.g. pm's sign-off integration of the base into the PR branch), replaying
-    every base commit onto the branch as a new commit.
+    every base commit onto the branch as a new commit.  ``no_hooks`` follows
+    :func:`run_git` (a container-writable workdir; ``git pull`` runs
+    ``post-merge``).
     """
-    return run_git("pull", "--rebase=merges", cwd=workdir, check=False)
+    return run_git("pull", "--rebase=merges", cwd=workdir, check=False,
+                   no_hooks=no_hooks)
 
 
 def commit_and_push(workdir: Path, message: str, files: Optional[list[str]] = None) -> None:

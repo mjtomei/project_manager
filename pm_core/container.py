@@ -38,12 +38,21 @@ Requirements:
     Select the runtime via ``pm container set runtime podman`` (default: docker).
 """
 
+import contextlib
+import contextvars
+import datetime
+import functools
+import fcntl
+import hashlib
+import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +65,24 @@ _log = configure_logger("pm.container")
 class ContainerError(RuntimeError):
     """Raised when container creation fails and container mode is enabled."""
     pass
+
+
+class ContainerLaunchError(ContainerError):
+    """A container could not be created, set up, or reused.
+
+    ``kind`` classifies the cause (``keyring``, ``memory``, ``pids``,
+    ``image``, ``timeout``, ``config``, ``proxy``, ``incomplete``,
+    ``runtime``) and ``stderr`` keeps the runtime's own error text so the
+    launcher can show the real cause instead of a generic guess.
+    """
+
+    def __init__(self, message: str, *, kind: str = "runtime",
+                 stderr: str = "", name: str = "", stage: str = "") -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.stderr = stderr
+        self.name = name
+        self.stage = stage
 
 # Default settings
 DEFAULT_IMAGE = "pm-dev:latest"
@@ -128,8 +155,8 @@ def _nested_podman_enabled() -> bool:
     /proc masks) and should only apply to projects that genuinely need it.
     """
     try:
-        from pm_core.store import find_project_root, load
-        data = load(find_project_root(), validate=False)
+        from pm_core.store import load
+        data = load(_active_project_root(), validate=False)
         return bool(data.get("project", {}).get("nested_podman", False))
     except Exception:
         return False
@@ -203,16 +230,27 @@ def _get_dockerfile_path() -> Path:
 
 
 def _host_git_identity() -> tuple[str, str]:
-    """Return (name, email) from the host's global git config, or empty strings."""
+    """Return (name, email) from the host's git config, or empty strings.
+
+    The user's own (global) config wins; the system config is the fallback,
+    so a host whose identity lives only in /etc/gitconfig does not bake
+    empty GIT_AUTHOR_*/GIT_COMMITTER_* into the image.  Those env vars
+    override every gitconfig in the container, so empty values make every
+    commit there fail with "empty ident name".  Repository-local config is
+    deliberately not consulted: the image is shared by all projects.
+    """
     def _read(key: str) -> str:
-        try:
-            r = subprocess.run(
-                ["git", "config", "--global", key],
-                capture_output=True, text=True, timeout=5,
-            )
-            return r.stdout.strip() if r.returncode == 0 else ""
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return ""
+        for scope in ("--global", "--system"):
+            try:
+                r = subprocess.run(
+                    ["git", "config", scope, key],
+                    capture_output=True, text=True, timeout=5,
+                )
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                return ""
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        return ""
     return _read("user.name"), _read("user.email")
 
 
@@ -267,16 +305,20 @@ _build_lock = threading.Lock()
 # Cached image-existence results. When many QA scenarios launch in
 # parallel, each one's ``create_container`` call invokes ``image_exists``
 # concurrently; under load, ``podman image inspect`` hits the 10 s
-# subprocess timeout and reports false negatives, so scenarios spuriously
-# fail with "image not found".  Coalesce concurrent callers onto a
-# single inspect and cache the result for a short TTL.
-_image_exists_cache: dict[str, tuple[float, bool]] = {}
+# subprocess timeout.  Coalesce concurrent callers onto a single inspect
+# and cache the result for a short TTL.  A timeout is cached as unknown
+# (None), never as "missing": an unanswered check is not evidence the
+# image is gone, and reporting it as missing aborted real QA launches.
+_image_exists_cache: dict[str, tuple[float, bool | None]] = {}
 _image_exists_lock = threading.Lock()
 _IMAGE_EXISTS_TTL = 30.0
 
 
-def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
+def image_exists(tag: str = DEFAULT_IMAGE) -> bool | None:
     """Check if the container image exists locally.
+
+    Returns ``None`` when the runtime did not answer in time — presence is
+    unknown, so callers must not report the image as missing.
 
     Thread-safe and cached for ``_IMAGE_EXISTS_TTL`` seconds.  The lock is
     held across the subprocess call so N concurrent callers collapse onto
@@ -295,9 +337,12 @@ def image_exists(tag: str = DEFAULT_IMAGE) -> bool:
                 [runtime, "image", "inspect", tag],
                 capture_output=True, timeout=10,
             )
-            exists = result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+            exists: bool | None = result.returncode == 0
+        except FileNotFoundError:
             exists = False
+        except subprocess.TimeoutExpired:
+            _log.warning("Image check for %s timed out — presence unknown", tag)
+            exists = None
         _image_exists_cache[tag] = (time.monotonic(), exists)
         return exists
 
@@ -365,13 +410,503 @@ def _run_runtime(*args: str, check: bool = True,
     return result
 
 
+def current_container_id(name: str) -> str | None:
+    """Full id of the container now holding *name*; "" if none, None if unknown.
+
+    An inspect the runtime does not answer in time is unknown, not absent —
+    a raised timeout here used to abort a launch that merely raced other
+    containers' ``run`` calls.
+    """
+    try:
+        result = _run_runtime("inspect", "-f", "{{.Id}}", name,
+                              check=False, timeout=10)
+    except subprocess.TimeoutExpired:
+        _log.warning("Identity check for %s timed out — ownership unknown", name)
+        return None
+    if result.returncode == 0:
+        return result.stdout.strip() or None
+    return "" if _container_absent(result.stderr or "") else None
+
+
+def _container_absent(error: str) -> bool:
+    """Only an explicit missing-object diagnostic proves absence, not socket ENOENT."""
+    low = error.lower()
+    return ("no such container" in low or "no such object" in low
+            or "no container with" in low and "found" in low)
+
+
 def container_is_running(name: str) -> bool:
     """Return True if a container with *name* exists and is running."""
     result = _run_runtime(
         "inspect", "-f", "{{.State.Running}}", name,
         check=False, timeout=10,
     )
-    return result.returncode == 0 and result.stdout.strip() == "true"
+    if result.returncode == 0 and result.stdout.strip() in ("true", "false"):
+        return result.stdout.strip() == "true"
+    error = (result.stderr or "").strip()
+    if _container_absent(error):
+        return False
+    raise launch_error(name, classify_runtime_error(error),
+                       error or "runtime returned an unknown running state",
+                       stage="inspect existing container")
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle state: locks, ownership labels, launch slots
+# ---------------------------------------------------------------------------
+
+# Written by the in-container setup script once git/user setup is done.
+_READY_SENTINEL = "/tmp/.pm-ready"
+# Written by the host only after the post-setup steps (``~/.pm`` ownership,
+# ``.claude.json`` copy) succeeded.  Reuse requires this, not _READY_SENTINEL:
+# a container whose setup timed out before the config copy has the first
+# sentinel but would launch Claude into onboarding.
+SETUP_COMPLETE_SENTINEL = "/tmp/.pm-setup-complete"
+
+# Ownership labels (identical syntax under docker and podman).
+LABEL_MANAGED = "pm.managed"
+LABEL_SESSION = "pm.session_tag"
+LABEL_PR = "pm.pr_id"
+LABEL_KIND = "pm.kind"
+LABEL_LOOP = "pm.loop_id"
+LABEL_SCENARIO = "pm.scenario"
+LABEL_ATTEMPT = "pm.attempt"
+LABEL_CREATED = "pm.created"
+LABEL_PROJECT = "pm.project_root"
+LABEL_TMUX_SOCKET = "pm.tmux_socket"
+
+_DEFAULT_LAUNCH_CONCURRENCY = 4
+
+
+def container_state_dir() -> Path:
+    """Directory for container lifecycle state (locks, retain markers, reaper log).
+
+    ``PM_CONTAINER_STATE_DIR`` overrides it (tests, isolated QA homes).
+    """
+    env = os.environ.get("PM_CONTAINER_STATE_DIR")
+    if env:
+        return Path(env)
+    return Path(os.path.expanduser("~")) / ".pm" / "containers"
+
+
+def _lock_path(key: str) -> Path:
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+    if len(safe) > 200:
+        safe = safe[:150] + "-" + hashlib.sha256(key.encode()).hexdigest()[:16]
+    return container_state_dir() / "locks" / f"{safe}.lock"
+
+
+@contextlib.contextmanager
+def _file_lock(key: str, *, timeout: float | None = None):
+    """Exclusive cross-process lock (flock) on *key*.
+
+    Yields True only when acquired.  ``timeout=0`` is a non-blocking try;
+    timeout or an unavailable lock file yields False.  Lifecycle operations
+    must not proceed without the exclusion that protects launches and owners.
+    """
+    path = _lock_path(key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        _log.warning("lock %s unavailable; operation skipped", path, exc_info=True)
+        yield False
+        return
+    acquired = False
+    try:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # The reaper unlinks stale lock files while holding them; a
+                # lock won on such an unlinked inode doesn't exclude whoever
+                # opens the recreated path — reopen and try again.
+                try:
+                    current = os.stat(path).st_ino
+                except FileNotFoundError:
+                    current = None
+                except OSError:
+                    # Cannot verify the locked inode; treat the lock as
+                    # unavailable instead of proceeding without the exclusion.
+                    _log.warning("lock %s unavailable; operation skipped", path,
+                                 exc_info=True)
+                    break
+                if current != os.fstat(fd).st_ino:
+                    try:
+                        new_fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o600)
+                    except OSError:
+                        # The lock file vanished or became unwritable between
+                        # the flock and the reopen; fail closed (do not proceed
+                        # unlocked) rather than escape as a raw OSError.
+                        _log.warning("lock %s unavailable; operation skipped",
+                                     path, exc_info=True)
+                        break
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                    os.close(fd)
+                    fd = new_fd
+                    continue
+                acquired = True
+                break
+            except BlockingIOError:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(fd)
+
+
+def launch_lock(name: str, *, timeout: float | None = 300):
+    """Per-container-name lock held by create/reuse and by the reaper's delete."""
+    return _file_lock(f"container-{name}", timeout=timeout)
+
+
+def launch_in_progress(name: str) -> bool:
+    """True when a launch currently holds *name*'s launch lock.
+
+    Probes without creating a lock file for names never launched here.
+    """
+    if not _lock_path(f"container-{name}").exists():
+        return False
+    with launch_lock(name, timeout=0) as free:
+        return not free
+
+
+def proxy_lock(session_tag: str, pr_id: str, *, timeout: float | None = 120):
+    """Per shared-proxy lock: held from proxy start until the container exists,
+    and while deciding whether an unused proxy can be stopped."""
+    return _file_lock(f"proxy-{session_tag}-{pr_id}", timeout=timeout)
+
+
+_create_semaphore: threading.BoundedSemaphore | None = None
+_create_semaphore_lock = threading.Lock()
+
+
+def _int_setting(name: str, default: int) -> int:
+    """Integer global setting; *default* when unset, invalid or unreadable."""
+    from pm_core.paths import get_global_setting_value
+    try:
+        return int(get_global_setting_value(name, str(default)))
+    except (ValueError, OSError):
+        return default
+
+
+def _launch_concurrency() -> int:
+    val = _int_setting("container-launch-concurrency", _DEFAULT_LAUNCH_CONCURRENCY)
+    return val if val > 0 else _DEFAULT_LAUNCH_CONCURRENCY
+
+
+def _create_slot() -> threading.BoundedSemaphore:
+    """Process-wide bound on concurrent container creates (run + setup).
+
+    Sized from ``container-launch-concurrency`` on first use; a changed
+    setting applies to processes started afterwards.
+    """
+    global _create_semaphore
+    with _create_semaphore_lock:
+        if _create_semaphore is None:
+            _create_semaphore = threading.BoundedSemaphore(_launch_concurrency())
+        return _create_semaphore
+
+
+def max_running_containers() -> int:
+    """``container-max-running`` setting (0 = unlimited)."""
+    return max(0, _int_setting("container-max-running", 0))
+
+
+def _current_tmux_socket() -> str:
+    sp = os.environ.get("PM_TMUX_SOCKET")
+    if sp:
+        return sp
+    tmux_env = os.environ.get("TMUX", "")
+    return tmux_env.split(",", 1)[0] if tmux_env else ""
+
+
+def _active_project_root() -> Path:
+    """The project dir this pm invocation acts on.
+
+    Honours ``-C`` / ``PM_PROJECT`` (the CLI's project override) before the
+    cwd walk.  A prefix+M popup runs in the viewed pane's cwd -- often a PR
+    workdir clone whose ``pm/project.yaml`` is a stale snapshot -- with
+    PM_PROJECT pinned to the session's project, so the cwd walk alone would
+    name the wrong project.
+    """
+    try:
+        from pm_core.cli import helpers
+        override = helpers._project_override
+    except Exception:
+        override = None
+    if override is None and os.environ.get("PM_PROJECT"):
+        override = Path(os.environ["PM_PROJECT"]).resolve()
+    if override is not None:
+        return Path(override)
+    from pm_core.store import find_project_root
+    return find_project_root()
+
+
+def _current_project_root() -> str:
+    try:
+        return str(_active_project_root())
+    except Exception:
+        return ""
+
+
+def _infer_kind(name: str) -> str:
+    parsed = parse_container_name(name)
+    return parsed.kind if parsed else "session"
+
+
+def ownership_labels(name: str, *, session_tag: str | None, pr_id: str | None,
+                     kind: str | None, loop_id: str | None = None,
+                     scenario: int | None = None,
+                     project_root: str | None = None) -> dict[str, str]:
+    """Labels that let cleanup match a container to its exact owner."""
+    labels = {
+        LABEL_MANAGED: "1",
+        LABEL_KIND: kind or _infer_kind(name),
+        LABEL_ATTEMPT: uuid.uuid4().hex[:12],
+        LABEL_CREATED: str(int(time.time())),
+    }
+    if session_tag:
+        labels[LABEL_SESSION] = session_tag
+    if pr_id:
+        labels[LABEL_PR] = pr_id
+    if loop_id:
+        labels[LABEL_LOOP] = loop_id
+    if scenario is not None:
+        labels[LABEL_SCENARIO] = str(scenario)
+    root = project_root if project_root is not None else _current_project_root()
+    if root:
+        labels[LABEL_PROJECT] = root
+    sock = _current_tmux_socket()
+    if sock:
+        labels[LABEL_TMUX_SOCKET] = sock
+    return labels
+
+
+# ---------------------------------------------------------------------------
+# Name parsing (legacy, unlabeled containers)
+# ---------------------------------------------------------------------------
+
+_CONTAINER_KINDS = ("qa-debug", "signoff", "review", "impl", "qa")
+
+
+@dataclass
+class ParsedContainerName:
+    name: str
+    kind: str
+    session_tag: str | None
+    rest: str  # text after "<kind>-": "<pr_id>[-<loop>-s<N>]"
+
+    def pr_id(self, known_pr_ids: "set[str] | None" = None) -> str | None:
+        """PR id embedded in the name.
+
+        Session tags and PR ids both contain hyphens, so match against
+        *known_pr_ids* when given; otherwise fall back to the ``pr-<hex>``
+        shape pm generates.
+        """
+        if known_pr_ids:
+            for pid in sorted(known_pr_ids, key=len, reverse=True):
+                if self.rest == pid or self.rest.startswith(pid + "-"):
+                    return pid
+            return None
+        import re
+        m = re.match(r"(pr-[0-9a-f]+)(?:-|$)", self.rest)
+        return m.group(1) if m else None
+
+
+def parse_container_name(name: str) -> ParsedContainerName | None:
+    """Decompose ``pm[-{tag}]-{kind}-{rest}`` (see :func:`_make_container_name`)."""
+    if not name.startswith(CONTAINER_PREFIX):
+        return None
+    body = name[len(CONTAINER_PREFIX):]
+    cands: list[ParsedContainerName] = []
+    for kind in _CONTAINER_KINDS:
+        if body.startswith(f"{kind}-"):
+            cands.append(ParsedContainerName(name, kind, None, body[len(kind) + 1:]))
+        i = body.rfind(f"-{kind}-")
+        if i != -1:
+            cands.append(ParsedContainerName(name, kind, body[:i],
+                                             body[i + len(kind) + 2:]))
+    if not cands:
+        return None
+    # A session tag may itself contain words like "review"; the real kind
+    # marker is the one immediately followed by a pm PR id.
+    with_pr = [c for c in cands if c.pr_id() is not None]
+    if with_pr:
+        return max(with_pr, key=lambda c: len(c.session_tag or ""))
+    return min(cands, key=lambda c: len(c.session_tag or ""))
+
+
+# ---------------------------------------------------------------------------
+# Runtime error classification + keyring awareness
+# ---------------------------------------------------------------------------
+
+_KEYRING_SIGNATURES = (
+    "session keyring",
+    "create session key",
+    "join session keyring",
+)
+_MEMORY_SIGNATURES = (
+    "cannot allocate memory",
+    "out of memory",
+    "oom-kill",
+    "oom killer",
+    "memory: insufficient",
+)
+_PIDS_SIGNATURES = (
+    "pids limit",
+    "resource temporarily unavailable",
+    "fork: retry",
+    "cannot fork",
+)
+
+
+def classify_runtime_error(text: str | None) -> str:
+    """Classify runtime stderr: keyring | memory | pids | image | runtime."""
+    if not text:
+        return "runtime"
+    low = text.lower()
+    if any(sig in low for sig in _KEYRING_SIGNATURES):
+        return "keyring"
+    if "disk quota exceeded" in low and "key" in low:
+        return "keyring"
+    if any(sig in low for sig in _MEMORY_SIGNATURES):
+        return "memory"
+    if any(sig in low for sig in _PIDS_SIGNATURES):
+        return "pids"
+    if "image not known" in low or "no such image" in low or "manifest unknown" in low:
+        return "image"
+    return "runtime"
+
+
+_KEY_USERS_FILE = "/proc/key-users"
+
+
+def keyring_usage(uid: int | None = None):
+    """Parse ``/proc/key-users``: ``uid: usage nkeys/nikeys qnkeys/maxkeys qnbytes/maxbytes``.
+
+    Returns ``{uid: {keys, max_keys, bytes, max_bytes}}`` (or one row for
+    *uid*), or None when unreadable (non-Linux / restricted).
+    """
+    try:
+        text = Path(_KEY_USERS_FILE).read_text()
+    except OSError:
+        return None
+    rows: dict[int, dict[str, int]] = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        head, rest = line.split(":", 1)
+        try:
+            uid_i = int(head.strip())
+        except ValueError:
+            continue
+        parts = rest.split()
+        if len(parts) < 4:
+            continue
+        try:
+            nkeys, maxkeys = parts[2].split("/")
+            nbytes, maxbytes = parts[3].split("/")
+            rows[uid_i] = {"keys": int(nkeys), "max_keys": int(maxkeys),
+                           "bytes": int(nbytes), "max_bytes": int(maxbytes)}
+        except (IndexError, ValueError):
+            continue
+    if uid is not None:
+        return rows.get(uid)
+    return rows
+
+
+def keyring_pressure(threshold: float = 0.9) -> dict | None:
+    """Most-utilised keyring row if its key ratio is ≥ *threshold*, else None."""
+    rows = keyring_usage()
+    if not rows:
+        return None
+    worst = None
+    for uid_i, row in rows.items():
+        if row["max_keys"] <= 0:
+            continue
+        ratio = row["keys"] / row["max_keys"]
+        if worst is None or ratio > worst["ratio"]:
+            worst = {**row, "uid": uid_i, "ratio": ratio}
+    if worst is not None and worst["ratio"] >= threshold:
+        return worst
+    return None
+
+
+def keyring_summary() -> str:
+    """One-line ``uid U: K/M keys`` for the most-utilised row, or ""."""
+    worst = keyring_pressure(threshold=0.0)
+    if not worst:
+        return ""
+    return (f"uid {worst['uid']}: {worst['keys']}/{worst['max_keys']} keys, "
+            f"{worst['bytes']}/{worst['max_bytes']} bytes")
+
+
+def running_container_count() -> int | None:
+    """Number of running pm containers (the keyring-key holders); None if unknown."""
+    from pm_core.container_reaper import list_containers
+    inventory = list_containers()
+    return None if inventory is None else sum(info.running for info in inventory)
+
+
+_REMEDY_REAP = ("Preview leftover containers with 'pm container reap --dry-run' "
+                "and remove them with 'pm container reap'.")
+
+
+def launch_error(name: str, kind: str, stderr: str = "", *,
+                 stage: str = "create", removed: bool = False) -> ContainerLaunchError:
+    """Build a launch error that keeps the runtime's real message and a fix.
+
+    *removed*: PM already removed this failed fresh allocation, so advice
+    must not name the container as something the user can still act on.
+    """
+    tail = (stderr or "").strip()
+    if len(tail) > 600:
+        tail = "…" + tail[-600:]
+    cause = f" Runtime error: {tail}" if tail else ""
+    if kind == "keyring":
+        usage = keyring_summary()
+        running = running_container_count()
+        detail = []
+        if usage:
+            detail.append(f"keyring {usage}")
+        if running is not None:
+            detail.append(f"{running} running pm container(s)")
+        extra = f" ({'; '.join(detail)})" if detail else ""
+        msg = (f"Container '{name}' could not {stage}: the kernel session-keyring "
+               f"quota is exhausted{extra}. Every running container holds keys, "
+               f"so leaked containers block new launches (removing stopped "
+               f"containers does not free keys). {_REMEDY_REAP} Raising "
+               f"kernel.keys.maxkeys/maxbytes only adds headroom.{cause}")
+    elif kind == "memory":
+        msg = (f"Container '{name}' could not {stage}: the host is out of memory. "
+               f"{_REMEDY_REAP} You can also lower 'pm container set memory-limit' "
+               f"or 'pm set container-launch-concurrency'.{cause}")
+    elif kind == "pids" and removed:
+        msg = (f"Container '{name}' could not {stage}: its process/PID limit is "
+               f"exhausted (runaway or zombie processes). PM removed this partial "
+               f"container, which frees its processes; retry the launch.{cause}")
+    elif kind == "pids":
+        msg = (f"Container '{name}' could not {stage}: its process/PID limit is "
+               f"exhausted (runaway or zombie processes). Once no session needs "
+               f"it, 'pm container restart {name}' clears it and keeps its files; "
+               f"raising the limit only postpones the next exhaustion.{cause}")
+    elif kind == "image":
+        msg = (f"Container '{name}' could not {stage}: image not available. "
+               f"Run 'pm container build'.{cause}")
+    elif kind == "timeout":
+        msg = (f"Container '{name}' setup did not finish ({stage}). "
+               f"{_REMEDY_REAP}{cause}")
+    else:
+        msg = f"Container '{name}' could not {stage}.{cause}"
+    return ContainerLaunchError(msg, kind=kind, stderr=stderr or "", name=name,
+                                stage=stage)
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +1166,17 @@ def qa_container_name(pr_id: str, loop_id: str, scenario_index: int,
 # Core container lifecycle
 # ---------------------------------------------------------------------------
 
+def _runtime_domain_operation(func):
+    """Bound runtime identity reuse to one synchronous lifecycle operation."""
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        from pm_core.container_reaper import runtime_domain_scope
+        with runtime_domain_scope():
+            return func(*args, **kwargs)
+    return wrapped
+
+
+@_runtime_domain_operation
 def create_container(
     name: str,
     config: ContainerConfig,
@@ -640,11 +1186,17 @@ def create_container(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    *,
+    kind: str | None = None,
+    loop_id: str | None = None,
+    scenario: int | None = None,
+    allocation_identity: dict[str, str] | None = None,
+    reuse_identity: dict[str, str | None] | None = None,
 ) -> str:
     """Create a detached container with the workdir and claude mounted.
 
-    The container runs ``sleep infinity`` and stays alive for
-    ``docker exec -it`` from a tmux window.
+    The container's PID 1 is a reaping wait loop (see ``_PID1_REAPER``) and
+    stays alive for ``docker exec -it`` from a tmux window.
 
     Automatically:
       - Bind-mounts the host's claude binary at /usr/local/bin/claude
@@ -652,6 +1204,13 @@ def create_container(
       - Passes through Claude-related env vars
       - Applies resource limits from config
       - Starts a host-side push proxy for branch-scoped git push access
+      - Labels the container with its owner (session, PR, kind, attempt,
+        QA loop/scenario) so cleanup can match it exactly
+
+    A running container with the same name is reused only when its setup
+    verifiably completed (see :func:`_ensure_reusable`).  Any failure after
+    ``run`` removes the partial container before raising, and runtime
+    failures raise :class:`ContainerLaunchError` carrying the real stderr.
 
     Args:
         name: Container name (must be unique).
@@ -666,46 +1225,789 @@ def create_container(
             a different workdir — e.g. a QA scenario clone — gets its own.
         pr_id: PR identifier — combined with *session_tag* and the workdir
             to key shared push proxies.
+        kind / loop_id / scenario: ownership metadata recorded as labels.
+        reuse_identity: prior ID/generation for a QA retry handing off its own
+            allocation; otherwise live or still-attaching owners forbid reuse.
 
     Returns:
         Container ID.
     """
-    # If a running container with this name already exists, reuse it.
-    # The proxy socket directory is bind-mounted (not the socket file),
-    # so a restarted proxy is visible to the container immediately.
-    if container_is_running(name):
-        result = _run_runtime(
-            "inspect", "-f", "{{.Id}}", name,
-            check=False, timeout=10,
-        )
-        container_id = result.stdout.strip()
-        _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
-        # Ensure the push proxy is running (it may have died in a crash)
-        if allowed_push_branch:
-            from pm_core.push_proxy import (
-                start_push_proxy, get_proxy_socket_path, proxy_is_alive,
-            )
-            sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                         pr_id=pr_id, workdir=str(workdir))
-            if not sock or not proxy_is_alive(sock):
-                _log.warning("Push proxy dead/missing for container %s — "
-                             "restarting proxy", name)
-                start_push_proxy(
-                    name, str(workdir), allowed_push_branch,
+    with launch_lock(name) as _locked:
+        if not _locked:
+            raise launch_error(name, "runtime",
+                               "another launch of this container is still in progress",
+                               stage="acquire its launch lock")
+        from pm_core import container_reaper
+        # Recovery may restart an unowned allocation and renew its generation;
+        # that new lease belongs to this launch, not a concurrent attaching one.
+        # An unreadable lease/generation is unknown ownership, not absence: it
+        # must refuse this launch with a classified, retryable error rather than
+        # escape as a raw OSError the launchers only report as "is podman up?".
+        try:
+            was_attaching = recent_launch(name, container_reaper.LAUNCH_GRACE)
+            prior_id = current_container_id(name) if was_attaching or reuse_identity else None
+            same_owner = (bool(prior_id) and reuse_identity is not None
+                          and reuse_identity.get("id") == prior_id
+                          and reuse_identity.get("generation") == cleanup_generation(name))
+            # A restart's lease keeps cleanup away until the next launch, but
+            # it is not an attaching launch: that next launch may adopt it.
+            restarted = (bool(prior_id) and was_attaching and not same_owner
+                         and restart_lease_only(name, container_reaper.LAUNCH_GRACE, prior_id))
+        except OSError as exc:
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="check whether the container is still owned") from exc
+        # Recovery can restart or remove an incomplete allocation. Protect the
+        # create-to-pane gap before entering it, not just before renewing reuse.
+        # Capture a QA handoff now: recovery itself may advance its generation.
+        if was_attaching and prior_id != "" and not same_owner and not restarted:
+            raise launch_error(
+                name, "runtime", "container is still owned by an attaching launch; "
+                "use that session or wait for it to finish", stage="be reused")
+        try:
+            reused = _ensure_reusable(name, workdir, allowed_push_branch,
+                                      session_tag=session_tag, pr_id=pr_id)
+        except ContainerError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise launch_error(
+                name, "timeout",
+                f"inspecting the existing container did not return within "
+                f"{exc.timeout}s; retry when the runtime is responsive",
+                stage="be reused") from exc
+        except (OSError, RuntimeError) as exc:
+            # Reuse touches the proxy sockets and the runtime directly; an
+            # OS-level failure (full /tmp, EMFILE, a vanished runtime binary)
+            # must reach the launcher as a classified launch error naming the
+            # container, not escape as a traceback.
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="be reused") from exc
+        if reused:
+            same_owner = same_owner and prior_id == reused
+            if not same_owner:
+                owners = container_reaper.live_owner_panes(name, reused)
+                if owners or was_attaching and not (restarted and reused == prior_id):
+                    raise launch_error(
+                        name, "runtime",
+                        "container is still owned by a live session or an attaching launch; "
+                        "use that session or wait for it to finish",
+                        stage="be reused")
+            _renew_launch(name, reused)
+            if allocation_identity is not None:
+                allocation_identity.update(id=reused, generation=cleanup_generation(name))
+            return reused
+        try:
+            with _create_slot():
+                container_id = _create_fresh(
+                    name, config, workdir,
+                    extra_ro_mounts=extra_ro_mounts,
+                    extra_rw_mounts=extra_rw_mounts,
+                    allowed_push_branch=allowed_push_branch,
                     session_tag=session_tag, pr_id=pr_id,
+                    labels=ownership_labels(name, session_tag=session_tag,
+                                            pr_id=pr_id, kind=kind,
+                                            loop_id=loop_id, scenario=scenario),
                 )
-        return container_id
+                try:
+                    _renew_launch(name, container_id)
+                    if allocation_identity is not None:
+                        allocation_identity.update(id=container_id, generation=cleanup_generation(name))
+                except BaseException:
+                    discard_container(name, container_id=container_id)
+                    raise
+                return container_id
+        except ContainerError:
+            raise
+        except subprocess.TimeoutExpired as exc:
+            raise launch_error(
+                name, "timeout",
+                f"starting the container did not return within {exc.timeout}s",
+                stage="start") from exc
+        except (OSError, RuntimeError) as exc:
+            # Image auto-build, git config and runtime spawn failures that the
+            # helpers did not classify still name the container and keep the
+            # cause instead of surfacing as an unrelated launcher traceback.
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="start") from exc
 
-    remove_container(name)
+
+# Container PID 1 after setup: wait forever, reaping adopted children; exit
+# promptly on stop instead of waiting out the runtime's kill timeout.
+_PID1_REAPER = "trap 'exit 0' TERM; while :; do sleep 86400 & wait $!; done"
+
+
+def _host_claude_json() -> Path:
+    return Path.home() / ".claude.json"
+
+
+def _setup_complete(name: str) -> bool:
+    """True when the host-side post-setup finished (config copied)."""
+    complete, kind, stderr = _probe_setup(name)
+    if kind:
+        raise launch_error(name, kind, stderr, stage="verify completed setup")
+    return complete
+
+
+def _workspace_mount_deleted(name: str) -> bool:
+    """True when the host directory bind-mounted at /workspace was deleted.
+
+    An unlinked directory reports link count 0 through the mount.  The probe
+    runs from ``/`` because the default working directory is that same
+    directory.  Unknown (timeout, runtime error) is False: the existing
+    setup probes then decide.
+    """
+    try:
+        r = _run_runtime("exec", "-w", "/", name, "stat", "-c", "%h",
+                         _CONTAINER_WORKDIR, check=False, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0 and (r.stdout or "").strip() == "0"
+
+
+def _probe_setup(name: str) -> tuple[bool, str, str]:
+    """``(complete, exec_failure_kind, stderr)`` for a running container.
+
+    *exec_failure_kind* is non-empty when the probe could not even run
+    inside the container and the runtime said why (``pids``, ``memory``,
+    ``keyring``) — the container is wedged, not merely unfinished.
+    """
+    check = f"test -f {SETUP_COMPLETE_SENTINEL}"
+    if _host_claude_json().exists():
+        check += f" && test -s {_CONTAINER_HOME}/.claude.json"
+    try:
+        r = _run_runtime("exec", name, "sh", "-c", check, check=False, timeout=15)
+    except subprocess.TimeoutExpired as exc:
+        # An unanswered probe is not proof that setup is incomplete, and
+        # guessing either way is unsafe: fail with a retryable cause instead.
+        raise launch_error(
+            name, "timeout",
+            f"setup verification probe did not return within {exc.timeout}s; "
+            f"retry when the runtime is responsive",
+            stage="verify existing setup") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="verify existing setup") from exc
+    if r.returncode == 0:
+        return True, "", ""
+    stderr = (r.stderr or "").strip()
+    kind = classify_runtime_error(stderr)
+    if kind in ("pids", "memory", "keyring"):
+        return False, kind, stderr
+    if r.returncode != 1 or stderr:
+        raise launch_error(name, kind, stderr or f"setup probe exited {r.returncode}",
+                           stage="verify existing setup")
+    return False, "", ""
+
+
+def _restart_generation_path(name: str, *, for_write: bool = False) -> Path:
+    """Generation belongs to a runtime domain, not merely a reusable name.
+
+    Read pre-domain markers for compatibility until this domain has its own
+    marker. Unknown runtime identity cannot write state or fall back to a
+    legacy generation after scoped state exists.
+    """
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    legacy = _lock_path(f"restart-{name}").with_suffix(".generation")
+    name_key = hashlib.sha256(name.encode()).hexdigest()
+    directory = container_state_dir() / "generations" / name_key
+    if domain is None:
+        if for_write or any(directory.glob("*.generation")):
+            raise OSError(f"Cannot determine runtime domain for container '{name}' generation")
+        return legacy
+    domain_key = hashlib.sha256(json.dumps(domain, sort_keys=True).encode()).hexdigest()
+    scoped = directory / f"{domain_key}.generation"
+    if not for_write and not scoped.exists():
+        return legacy
+    return scoped
+
+
+def canonical_container_name(name: str) -> str:
+    """Resolve runtime ID/slash aliases before using name-keyed lifecycle locks."""
+    if name.startswith(CONTAINER_PREFIX):
+        return name
+    result = _run_runtime("inspect", "--format", "{{.Name}}", name,
+                          check=False, timeout=10)
+    canonical = result.stdout.strip().lstrip("/")
+    managed = canonical.startswith(CONTAINER_PREFIX)
+    if result.returncode == 0 and canonical and not managed:
+        labels = _run_runtime("inspect", "--format", '{{index .Config.Labels "pm.managed"}}',
+                              name, check=False, timeout=10)
+        managed = labels.returncode == 0 and labels.stdout.strip() == "1"
+    if result.returncode != 0 or not managed:
+        raise ContainerError(
+            f"Cannot resolve managed container '{name}': "
+            f"{(result.stderr or '').strip() or 'expected a pm container name or managed label'}")
+    return canonical
+
+
+def cleanup_generation(name: str) -> str:
+    """Read the recovery generation; unreadable state must not authorize cleanup."""
+    try:
+        return _restart_generation_path(name).read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def _identity_generation_path(container_id: str) -> Path:
+    """Rename-stable recovery epoch within one runtime store."""
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    if domain is None:
+        raise OSError("Cannot determine runtime domain for allocation generation")
+    key = hashlib.sha256(json.dumps([domain, container_id], sort_keys=True).encode()).hexdigest()
+    return container_state_dir() / "identity-generations" / f"{key}.generation"
+
+
+def _write_identity_generation(container_id: str, generation: str) -> None:
+    marker = _identity_generation_path(container_id)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    temporary = marker.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(generation)
+        os.replace(temporary, marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _renew_launch(name: str, container_id: str = "") -> None:
+    """Give an attaching owner a new generation and a bounded attachment lease.
+
+    Called under the launch lock after successful create/reuse. Previous EXIT
+    releases must not authorize deletion of this new ownership epoch.
+    """
+    if container_id and current_container_id(name) != container_id:
+        raise launch_error(name, "runtime",
+                           "container identity changed during setup; retry the launch",
+                           stage="record launch ownership")
+    try:
+        marker = _restart_generation_path(name, for_write=True)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        generation = uuid.uuid4().hex
+        marker.write_text(generation)
+        if container_id:
+            _write_identity_generation(container_id, generation)
+    except OSError as exc:
+        raise launch_error(name, "runtime", str(exc),
+                           stage="record launch ownership") from exc
+
+
+def _conclude_launch_lease(name: str, container_id: str) -> None:
+    """End the create-to-pane lease once its launch has attached (best effort).
+
+    Called under the launch lock after the generation check, so only the
+    launch that owns the current generation concludes it.  The pane (or the
+    foreground activity lock) owns the allocation from here; a leftover lease
+    would make ``--fresh`` within LAUNCH_GRACE refuse its own predecessor.
+    The generation is kept, so old EXIT releases stay valid.
+    """
+    from pm_core.container_reaper import LAUNCH_GRACE
+    expired = time.time() - LAUNCH_GRACE - 1
+    try:
+        markers = [_restart_generation_path(name), _identity_generation_path(container_id)]
+    except OSError:
+        return
+    for marker in markers:
+        try:
+            os.utime(marker, (expired, expired))
+        except OSError:
+            pass
+
+
+def launch_concluded(container_id: str, created: float) -> bool:
+    """True when this allocation's launch already attached and concluded its lease.
+
+    :func:`_conclude_launch_lease` backdates the ID marker past the grace, so a
+    marker older than the container itself can only come from a concluded
+    attachment: from then on its pane, not the creation-age grace, owns it.
+    Unreadable or missing markers are not proof (the grace still applies).
+    """
+    try:
+        return _identity_generation_path(container_id).stat().st_mtime < created
+    except OSError:
+        return False
+
+
+def recent_launch(name: str, grace: float, container_id: str | None = None) -> bool:
+    """Protect attachment by name and by rename-stable allocation identity."""
+    now = time.time()
+    try:
+        if now - _restart_generation_path(name).stat().st_mtime < grace:
+            return True
+    except FileNotFoundError:
+        pass
+    # Older installations may only have name generations. Avoid another runtime
+    # inspection until ID generations exist; inventory callers already know the ID.
+    if container_id is None:
+        if not (container_state_dir() / "identity-generations").exists():
+            return False
+        container_id = _await_container_id(name)
+        if container_id is None:
+            raise OSError("Cannot determine allocation identity for attachment lease")
+    if container_id:
+        try:
+            return now - _identity_generation_path(container_id).stat().st_mtime < grace
+        except FileNotFoundError:
+            pass
+    return False
+
+
+# A restart renews the attachment lease so cleanup cannot reap the restarted
+# allocation before the user relaunches it, but no launch is attaching to it.
+# Its generation carries this prefix so the next launch may adopt it.
+RESTART_GENERATION_PREFIX = "restart-"
+
+
+def restart_lease_only(name: str, grace: float, container_id: str) -> bool:
+    """True when every live lease on *name*/*container_id* came from a restart.
+
+    Callers hold the name's launch lock, as do restart and every launch that
+    renews a lease, so the markers cannot change between stat and read.
+    """
+    now = time.time()
+    fresh = []
+    for marker in (_restart_generation_path(name), _identity_generation_path(container_id)):
+        try:
+            if now - marker.stat().st_mtime < grace:
+                fresh.append(marker.read_text().strip())
+        except FileNotFoundError:
+            continue
+    return bool(fresh) and all(g.startswith(RESTART_GENERATION_PREFIX) for g in fresh)
+
+
+@_runtime_domain_operation
+def restart_container(name: str, *, container_id: str | None = None) -> None:
+    """Restart *name* in place: ends every process inside (clearing PID or
+    memory exhaustion) but keeps the container's filesystem, id and mounts.
+
+    Host setup state persists, but PID 1 reruns its setup command on each boot.
+    Wait for a freshly touched ready marker before accepting that state.
+    """
+    # Callers hold the canonical name's launch lock (CLI resolves ID aliases).
+    # Restart terminates attached exec clients. Their delayed EXIT traps must
+    # not remove the very filesystem this recovery is meant to preserve.
+    # Keep the new generation after restart: an old trap can arrive much later.
+    try:
+        current = current_container_id(name)
+        if not current or container_id is not None and current != container_id:
+            raise OSError("container identity unavailable or changed before restart")
+        container_id = current
+        marker = _restart_generation_path(name, for_write=True)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        generation = RESTART_GENERATION_PREFIX + uuid.uuid4().hex
+        marker.write_text(generation)
+        _write_identity_generation(container_id, generation)
+    except OSError as exc:
+        raise ContainerError(f"Cannot protect '{name}' from EXIT cleanup during restart: {exc}") from exc
+    try:
+        r = _run_runtime("restart", "-t", "5", container_id, check=False, timeout=90)
+    except subprocess.TimeoutExpired as exc:
+        # The restart may still finish; its filesystem is preserved either
+        # way, so this is a retryable timeout rather than a failed recovery.
+        raise launch_error(
+            name, "timeout",
+            f"'{_get_runtime()} restart' did not return within {exc.timeout}s; "
+            f"retry once the runtime is responsive",
+            stage="restart") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="restart") from exc
+    if r.returncode != 0:
+        stderr = (r.stderr or "").strip()
+        raise launch_error(name, classify_runtime_error(stderr), stderr,
+                           stage="restart")
+    try:
+        started = _run_runtime("inspect", "--format", "{{json .State.StartedAt}}",
+                               container_id, check=False, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise launch_error(
+            name, "timeout",
+            f"restart start-time probe did not return within {exc.timeout}s; "
+            f"retry once the runtime is responsive",
+            stage="verify restart start time") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="verify restart start time") from exc
+    try:
+        # Go's RFC3339Nano output can have 0–9 fractional digits. Avoid float
+        # timestamps: a quick restart can touch the marker in the same second.
+        stamp = json.loads(started.stdout)
+        match = re.fullmatch(
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
+            stamp if isinstance(stamp, str) else "")
+        if started.returncode or not match:
+            raise ValueError("invalid runtime timestamp")
+        seconds, fraction, zone = match.groups()
+        when = datetime.datetime.fromisoformat(seconds + zone.replace("Z", "+00:00"))
+        started_ns = int(when.timestamp()) * 1_000_000_000 + int(((fraction or "") + "000000000")[:9])
+        if started_ns <= 0:
+            raise ValueError("container has no start time")
+    except (ValueError, OverflowError) as exc:
+        raise launch_error(name, "runtime", started.stderr or "container start time unavailable",
+                           stage="verify restart start time") from exc
+    try:
+        _wait_for_setup(container_id, started_ns=started_ns)
+    except ContainerLaunchError as e:
+        # The probes address the captured id; a launch error must name the
+        # container a user can act on ('pm container restart <name>').
+        if e.kind != "timeout":
+            raise launch_error(name, e.kind, e.stderr,
+                               stage="come back up after restart") from e
+        # Describe a failed recovery rather than an initial setup timeout;
+        # the restarted container and its filesystem remain available.
+        raise launch_error(name, "runtime", e.stderr,
+                           stage="come back up after restart") from e
+    try:
+        complete = _setup_complete(container_id)
+    except ContainerLaunchError as e:
+        raise launch_error(name, e.kind, e.stderr, stage="restart") from e
+    if not complete:
+        raise launch_error(name, "incomplete",
+                           "setup markers missing after restart", stage="restart")
+
+
+def pids_usage(inventory: list | None = None) -> dict[str, tuple[int, int]] | None:
+    """``{name: (pids, limit)}`` for running pm containers (limit 0 = none).
+
+    Read from the runtime's cgroup stats, so it works even when the
+    container is too exhausted to ``exec`` into.  None if unavailable.
+
+    *inventory* is an already-read label-first inventory (the reaper's
+    ``Outcome.inventory``); pass it to avoid re-listing every container on a
+    pass that just did so.  Omitted, the inventory is read here.
+    """
+    try:
+        st = _run_runtime("stats", "--no-stream", "--format",
+                          "{{.Name}}\t{{.PIDs}}", check=False, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if st.returncode != 0:
+        return None
+    if inventory is None:
+        from pm_core.container_reaper import list_containers
+        inventory = list_containers()
+    if inventory is None:
+        return None
+    managed = {info.name for info in inventory}
+    current: dict[str, int] = {}
+    for line in (st.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0] in managed:
+            try:
+                current[parts[0]] = int(parts[1])
+            except ValueError:
+                continue
+    if not current:
+        return {}
+    try:
+        insp = _run_runtime("inspect", "--format",
+                            "{{.Name}}\t{{.HostConfig.PidsLimit}}", *current,
+                            check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        insp = None
+    limits: dict[str, int] = {}
+    for line in ((insp.stdout if insp else "") or "").splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            try:
+                limits[parts[0].lstrip("/")] = max(0, int(parts[1]))
+            except ValueError:
+                continue
+    return {n: (c, limits.get(n, 0)) for n, c in current.items()}
+
+
+def pids_pressure(threshold: float = 0.9,
+                  inventory: list | None = None) -> list[tuple[str, int, int]]:
+    """Running pm containers at ≥ *threshold* of their PID limit.
+
+    *inventory* is forwarded to :func:`pids_usage`; see there.
+    """
+    usage = pids_usage(inventory) or {}
+    return sorted((n, c, lim) for n, (c, lim) in usage.items()
+                  if lim > 0 and c >= threshold * lim)
+
+
+_IDENTITY_PROBE_BUDGET = 45.0  # seconds; concurrent runs can hold the lock ~40s
+_IDENTITY_PROBE_INTERVAL = 1.0
+
+
+def _await_container_id(name: str) -> str | None:
+    """:func:`current_container_id`, re-asked while the runtime is unanswered.
+
+    A busy runtime can leave an inspect unanswered while other scenarios'
+    ``run`` calls hold its storage lock.  Keep asking for a bounded time: an
+    unknown answer is not proof the name is free, and guessing either way is
+    unsafe.  Still None after the budget means genuinely unknown.
+    """
+    deadline = time.monotonic() + _IDENTITY_PROBE_BUDGET
+    container_id = current_container_id(name)
+    while container_id is None and time.monotonic() < deadline:
+        time.sleep(_IDENTITY_PROBE_INTERVAL)
+        container_id = current_container_id(name)
+    return container_id
+
+
+def _ensure_reusable(name: str, workdir: Path, allowed_push_branch: str | None,
+                     *, session_tag: str | None, pr_id: str | None) -> str | None:
+    """Return the id of a running, fully set-up container named *name*.
+
+    "Running" is not enough: setup may have timed out before the
+    ``.claude.json`` copy (Claude would start in onboarding) or the push
+    proxy may be gone.  An incomplete container is finished in place when its
+    in-container setup ran, else removed (returns None → caller recreates).
+    A container that cannot be finished but has a live owning pane is not
+    killed — that raises instead.
+    """
+    from pm_core import container_reaper
+    # Capture before checking state: a stopped container can be replaced by an
+    # external runtime client without acquiring PM's name lock. Every subsequent
+    # probe/removal must address this allocation, never the reusable name.
+    container_id = _await_container_id(name)
+    if container_id is None:
+        # Preserve a runtime's diagnostic on this error path; a later successful
+        # state probe cannot restore the missing immutable identity.
+        try:
+            container_is_running(name)
+        except subprocess.TimeoutExpired:
+            pass
+        raise launch_error(name, "runtime",
+                           f"existing container identity unavailable after "
+                           f"{_IDENTITY_PROBE_BUDGET:.0f}s of unanswered runtime "
+                           f"inspects; retry when the runtime is responsive",
+                           stage="be reused")
+    if not container_id:
+        return None
+    try:
+        running = container_is_running(container_id)
+    except subprocess.TimeoutExpired as exc:
+        # An unanswered running-state probe is unknown, not "stopped": refuse
+        # recreation (which would discard its files) and let the caller retry.
+        raise launch_error(
+            name, "timeout",
+            f"running-state probe did not return within {exc.timeout}s; "
+            f"retry when the runtime is responsive",
+            stage="inspect existing container") from exc
+    except ContainerLaunchError as exc:
+        # The probe addresses the immutable id; the error must name the container.
+        raise launch_error(name, exc.kind, exc.stderr,
+                           stage="inspect existing container") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="inspect existing container") from exc
+    if not running:
+        if container_reaper.is_retained(name, container_id):
+            raise launch_error(
+                name, "incomplete",
+                f"container is explicitly retained; run 'pm container retain "
+                f"--release {name}' before recreation", stage="be reused")
+        owners = container_reaper.live_owner_panes(name, container_id)
+        if owners:
+            raise launch_error(
+                name, "incomplete",
+                f"live pane(s) {', '.join(owners)} still own the stopped container; "
+                "close that session before recreation", stage="be reused")
+        remove_container(name, container_id=container_id)
+        return None
+
+    if _workspace_mount_deleted(container_id):
+        # The host workdir it mounts was deleted (a QA rerun re-clones the
+        # scenario clone at the same path), so the container sees an empty
+        # unlinked directory and every exec fails getcwd().  Finishing or
+        # reusing it would run the worker against the wrong tree.
+        if container_reaper.is_retained(name, container_id):
+            raise launch_error(
+                name, "incomplete",
+                f"its mounted workdir was replaced on the host and the container "
+                f"is explicitly retained; run 'pm container retain --release "
+                f"{name}' before recreation", stage="be reused")
+        owners = container_reaper.live_owner_panes(name, container_id)
+        if owners:
+            raise launch_error(
+                name, "incomplete",
+                f"its mounted workdir was replaced on the host and live pane(s) "
+                f"{', '.join(owners)} still use it; close that session before "
+                f"recreation", stage="be reused")
+        _log.warning("Container %s mounts a deleted workdir — removing it "
+                     "before recreating", name)
+        remove_container(name, container_id=container_id)
+        return None
+
+    try:
+        complete, wedged, probe_err = _probe_setup(container_id)
+    except ContainerLaunchError as exc:
+        # Probes address the captured immutable id, but a launch error must
+        # name the container a user can act on ('pm container restart <name>').
+        raise launch_error(name, exc.kind, exc.stderr,
+                           stage="verify existing setup") from exc
+    retained = container_reaper.is_retained(name, container_id)
+    if retained and wedged in ("pids", "memory"):
+        raise launch_error(
+            name, wedged,
+            f"{probe_err}\nContainer is explicitly retained, so pm will not "
+            f"restart it automatically; run 'pm container restart {name}' once "
+            f"it is safe to end its session.", stage="be reused")
+    if wedged in ("pids", "memory"):
+        # Can't exec: the container's own processes exhausted it.  Restart
+        # clears that and keeps its files, but ends every session inside —
+        # so only when nothing owns it.
+        from pm_core import container_reaper
+        try:
+            owners = container_reaper.live_owner_panes(name, container_id)
+        except ContainerError as exc:
+            raise launch_error(name, wedged, f"{probe_err}\n{exc}",
+                               stage="be reused") from exc
+        if owners:
+            raise launch_error(
+                name, wedged,
+                f"{probe_err}\n(live pane(s) {', '.join(owners)} still use it, "
+                f"so pm will not restart it)", stage="be reused")
+        _log.warning("Container %s is exhausted (%s) and unowned — restarting "
+                     "it in place", name, wedged)
+        try:
+            restart_container(name, container_id=container_id)
+            complete = True
+        except ContainerLaunchError as exc:
+            if exc.kind != "incomplete":
+                raise
+            # The restart cleared the pressure and kept the filesystem; only
+            # the host-side completion marker is missing (every container
+            # created before that marker existed lacks it). That is not a
+            # failed recovery — finish the idempotent post-setup below.
+            _log.info("Container %s restarted; its host setup completion "
+                      "marker is missing, finishing it in place", name)
+            complete = False
+        except ContainerError:
+            _log.warning("Restart of %s failed — preserving its filesystem", name, exc_info=True)
+            raise
+    elif wedged == "keyring":
+        # Host-wide quota, not this container's fault: recreating won't help.
+        raise launch_error(name, "keyring", probe_err, stage="be reused")
+
+    if not complete:
+        _log.warning("Container %s is running but its setup never completed", name)
+        finished = False
+        try:
+            base = _run_runtime("exec", container_id, "test", "-f", _READY_SENTINEL,
+                                check=False, timeout=10)
+        except subprocess.TimeoutExpired as exc:
+            # Like _probe_setup: an unanswered readiness probe is unknown, not
+            # proof that the in-container setup never ran. Preserve the files.
+            raise launch_error(
+                name, "timeout",
+                f"readiness probe did not return within {exc.timeout}s; "
+                f"retry when the runtime is responsive",
+                stage="verify existing setup") from exc
+        except OSError as exc:
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="verify existing setup") from exc
+        if base.returncode == 0:
+            try:
+                _post_setup(container_id, workdir, "podman" in _get_runtime())
+            except ContainerLaunchError as exc:
+                # Post-setup addresses the captured id; name the container, and
+                # keep the helper's stage (e.g. "receive ~/.claude.json").
+                raise launch_error(
+                    name, exc.kind, exc.stderr,
+                    stage=exc.stage or "finish setup of the existing container") from exc
+            try:
+                finished = _setup_complete(container_id)
+            except ContainerLaunchError as exc:
+                raise launch_error(name, exc.kind, exc.stderr,
+                                   stage="verify completed setup") from exc
+            if not finished:
+                # Finishing setup is non-destructive. A failed verification
+                # afterwards is not permission to discard the existing files.
+                raise launch_error(name, "incomplete",
+                                   "setup verification failed after in-place completion; "
+                                   "preserving existing container",
+                                   stage="be reused")
+        elif base.returncode != 1 or (base.stderr or "").strip():
+            stderr = (base.stderr or "").strip()
+            raise launch_error(name, classify_runtime_error(stderr),
+                               stderr or f"readiness probe exited {base.returncode}",
+                               stage="verify existing setup")
+        if not finished:
+            if retained:
+                raise launch_error(
+                    name, "incomplete",
+                    f"container is explicitly retained; run 'pm container retain "
+                    f"--release {name}' before recreation", stage="be reused")
+            if container_reaper.live_owner_panes(name, container_id):
+                raise launch_error(
+                    name, "incomplete",
+                    "container setup is incomplete and a live pane still uses it",
+                    stage="be reused")
+            _log.warning("Removing incomplete container %s before recreating", name)
+            remove_container(name, container_id=container_id)
+            return None
+        _log.info("Finished incomplete setup of container %s in place", name)
+
+    _log.info("Reusing existing container %s (id=%s)", name, container_id[:12])
+    # Ensure the push proxy is running (it may have died in a crash)
+    if allowed_push_branch:
+        from pm_core.push_proxy import (
+            start_push_proxy, proxy_is_alive,
+        )
+        guard = (proxy_lock(session_tag, pr_id) if session_tag and pr_id
+                 else contextlib.nullcontext(True))
+        try:
+            with guard as locked:
+                if not locked:
+                    raise launch_error(name, "proxy", "shared proxy lock unavailable", stage="be reused")
+                # Always pass through start_push_proxy's domain validation, even
+                # when a healthy socket already exists. Serialize dead-socket repair.
+                if session_tag and pr_id:
+                    from pm_core.push_proxy import validate_shared_proxy_mount
+                    validate_shared_proxy_mount(container_id, session_tag, pr_id,
+                                                str(workdir))
+                    sock = start_push_proxy(name, str(workdir), allowed_push_branch,
+                                            session_tag=session_tag, pr_id=pr_id)
+                else:
+                    from pm_core.push_proxy import repair_unshared_proxy
+                    sock = repair_unshared_proxy(container_id, str(workdir), allowed_push_branch)
+                if not proxy_is_alive(sock):
+                    raise launch_error(name, "proxy",
+                                       f"push proxy at {sock} is not accepting connections",
+                                       stage="be reused")
+        except ContainerLaunchError:
+            raise
+        except ContainerError as exc:
+            # The proxy helpers inspect by the immutable id and report no
+            # kind. A launch error must name the container (so the printed
+            # recovery command is runnable) and keep an unanswered inspect
+            # retryable as a timeout rather than a bare runtime failure.
+            kind = ("timeout" if isinstance(exc.__cause__, subprocess.TimeoutExpired)
+                    else "proxy")
+            raise launch_error(name, kind, str(exc),
+                               stage="verify its push proxy") from exc
+    return container_id
+
+
+def _create_fresh(
+    name: str,
+    config: ContainerConfig,
+    workdir: Path,
+    *,
+    extra_ro_mounts: dict[Path, str] | None,
+    extra_rw_mounts: dict[Path, str] | None,
+    allowed_push_branch: str | None,
+    session_tag: str | None,
+    pr_id: str | None,
+    labels: dict[str, str],
+) -> str:
+    """Create a new container (caller holds the launch lock and a slot)."""
+    labels = dict(labels)
+    labels.setdefault(LABEL_ATTEMPT, uuid.uuid4().hex)
 
     # Auto-build the pm-dev image if it's the default and not yet built.
     # Use a lock so concurrent create_container calls don't all build at once.
-    if config.image == DEFAULT_IMAGE and not image_exists(config.image):
+    # An unknown result (None) proceeds: ``run`` reports a real missing image.
+    present = image_exists(config.image)
+    if config.image == DEFAULT_IMAGE and present is False:
         with _build_lock:
-            if not image_exists(config.image):
+            if image_exists(config.image) is False:
                 _log.info("Default image %s not found — building automatically", config.image)
                 build_image(tag=config.image, quiet=True)
-    elif config.image != DEFAULT_IMAGE and not image_exists(config.image):
+    elif config.image != DEFAULT_IMAGE and present is False:
         runtime = _get_runtime()
         raise ContainerError(
             f"Image '{config.image}' not found in {runtime}. "
@@ -821,8 +2123,7 @@ def create_container(
     # NOTE: .claude.json is NOT bind-mounted.  Claude writes it atomically
     # (write tmp + rename) which replaces the inode — a single-file bind
     # mount keeps the old inode so the container sees stale content.
-    # Instead we copy it in after the container is created (see below).
-    _claude_json_src = Path.home() / ".claude.json"
+    # Instead we copy it in after the container is created (_post_setup).
 
     # --- Additional mounts ---
     if extra_ro_mounts:
@@ -853,37 +2154,14 @@ def create_container(
     for mount in config.extra_mounts:
         cmd.extend(["-v", mount])
 
-    # --- Git push proxy ---
-    # If an allowed push branch is set, start a host-side push proxy.
-    # The proxy socket is mounted into the container; credentials stay
-    # on the host.  The proxy serves one host workdir and only real
-    # remotes (HTTP/SSH): a local-path origin (from git clone --local) is
-    # rejected fail-closed rather than fetched into the target, and a repo
-    # with no remote fails cleanly.
-    has_push_proxy = False
-    if allowed_push_branch:
-        from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_DIR,
-        )
-        sock_path = start_push_proxy(
-            name, str(workdir), allowed_push_branch,
-            session_tag=session_tag, pr_id=pr_id,
-        )
-        # Mount the socket's parent *directory* rather than the socket
-        # file itself.  This way, if the proxy restarts and recreates
-        # the socket (new inode), the container sees the new one
-        # through the directory mount.
-        sock_dir = str(Path(sock_path).parent)
-        cmd.extend(["-v", f"{sock_dir}:{_CONTAINER_SOCKET_DIR}"])
-        has_push_proxy = True
-        _log.info("Push proxy started for container %s (branch=%s)",
-                  name, allowed_push_branch)
+    # --- Ownership labels ---
+    for k, v in labels.items():
+        cmd.extend(["--label", f"{k}={v}"])
 
     # --- Create pm user with matching uid/gid, configure git, then sleep ---
-    # A readiness sentinel file is written after setup completes so that
-    # callers can ``docker exec`` immediately after create_container returns
-    # without racing the setup script.
-    _READY_SENTINEL = "/tmp/.pm-ready"
+    # A readiness sentinel file is written after the in-container setup so
+    # callers can tell when the git wrapper exists; the host then finishes
+    # the remaining steps (_post_setup) and writes SETUP_COMPLETE_SENTINEL.
     host_uid = os.getuid()
     host_gid = os.getgid()
     # Propagate host git identity so container commits use the right author
@@ -895,108 +2173,312 @@ def create_container(
     ).stdout.strip()
 
     _is_podman = "podman" in runtime
-    git_setup = _build_git_setup_script(has_push_proxy=has_push_proxy,
-                                        host_workdir=str(workdir) if has_push_proxy else None,
-                                        is_podman=_is_podman)
-    if _is_podman:
-        # Podman with --userns=keep-id: the host UID is already mapped into
-        # the container.  No user creation needed (and we're not root, so
-        # groupadd/useradd would fail).  Just ensure /home/pm exists and
-        # set HOME explicitly so git config writes to the right place.
-        setup_parts = [
-            f"mkdir -p {_CONTAINER_HOME}",
-            f"export HOME={_CONTAINER_HOME}",
-        ]
-    else:
-        # Docker: runs as root, create the pm user.  No-ops when the image
-        # already has the pm user (e.g. project-specific images).
-        setup_parts = [
-            f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
-            f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
-            f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
-        ]
-    if git_name and git_email:
+
+    # Keys held by leaked running containers are what exhaust the rootless
+    # keyring; when it is nearly full, reap orphans before adding another.
+    _relieve_keyring_pressure()
+
+    # --- Git push proxy ---
+    # If an allowed push branch is set, start a host-side push proxy.
+    # The proxy socket is mounted into the container; credentials stay
+    # on the host.  The proxy serves one host workdir and only real
+    # remotes (HTTP/SSH): a local-path origin (from git clone --local) is
+    # rejected fail-closed rather than fetched into the target, and a repo
+    # with no remote fails cleanly.  The shared-proxy lock is
+    # held until the container exists so a concurrent cleanup that sees
+    # "no container for this PR" cannot stop the proxy we're mounting.
+    shared_proxy = bool(allowed_push_branch and session_tag and pr_id)
+    proxy_guard = (proxy_lock(session_tag, pr_id) if shared_proxy
+                   else contextlib.nullcontext(True))
+    with _discard_on_failure(name, labels[LABEL_ATTEMPT]), proxy_guard as proxy_locked:
+        if not proxy_locked:
+            raise launch_error(name, "proxy", "another operation still holds the proxy lock",
+                               stage="acquire its shared proxy lock")
+        has_push_proxy = False
+        if allowed_push_branch:
+            from pm_core.push_proxy import (
+                start_push_proxy, PushProxyError, _CONTAINER_SOCKET_DIR)
+            try:
+                sock_path = start_push_proxy(
+                    name, str(workdir), allowed_push_branch,
+                    session_tag=session_tag, pr_id=pr_id,
+                )
+            except PushProxyError as exc:
+                # Classified like the reuse path's proxy failures, so every
+                # launcher reports the proxy (not the runtime) as the cause.
+                raise launch_error(name, "proxy", str(exc),
+                                   stage="start its push proxy") from exc
+            # Mount the socket's parent *directory* rather than the socket
+            # file itself.  This way, if the proxy restarts and recreates
+            # the socket (new inode), the container sees the new one
+            # through the directory mount.
+            sock_dir = str(Path(sock_path).parent)
+            cmd.extend(["-v", f"{sock_dir}:{_CONTAINER_SOCKET_DIR}"])
+            has_push_proxy = True
+            _log.info("Push proxy started for container %s (branch=%s)",
+                      name, allowed_push_branch)
+
+        git_setup = _build_git_setup_script(
+            has_push_proxy=has_push_proxy,
+            host_workdir=str(workdir) if has_push_proxy else None,
+            is_podman=_is_podman)
         if _is_podman:
-            # Already running as the correct user — direct git config works.
-            setup_parts.append(
-                f"git config --global user.name \"{git_name}\" && "
-                f"git config --global user.email \"{git_email}\""
-            )
+            # Podman with --userns=keep-id: the host UID is already mapped into
+            # the container.  No user creation needed (and we're not root, so
+            # groupadd/useradd would fail).  Just ensure /home/pm exists and
+            # set HOME explicitly so git config writes to the right place.
+            setup_parts = [
+                f"mkdir -p {_CONTAINER_HOME}",
+                f"export HOME={_CONTAINER_HOME}",
+            ]
         else:
-            # Try as current user first (works when running as pm), fall back
-            # to su (works when running as root in the default image).
-            setup_parts.append(
-                f"(git config --global user.name \"{git_name}\" && "
-                f"git config --global user.email \"{git_email}\") 2>/dev/null || "
-                f"su -c 'git config --global user.name \"{git_name}\" && "
-                f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
-            )
-    if git_setup:
-        setup_parts.append(git_setup)
-    # pm is made available inside the container via a shim at
-    # /usr/local/bin/pm (installed in the base image) that execs
-    # ``python3 -m pm_core.wrapper``, picking up pm_core through
-    # PYTHONPATH=/opt/pm-src.  No per-container install step — keeping
-    # container startup fast enough to beat the QA grace period.
-    setup_parts.append(f"touch {_READY_SENTINEL}")
-    setup_parts.append("exec sleep infinity")
-    setup = "; ".join(setup_parts)
-    cmd.extend([config.image, "bash", "-c", setup])
+            # Docker: runs as root, create the pm user.  No-ops when the image
+            # already has the pm user (e.g. project-specific images).
+            setup_parts = [
+                f"groupadd -g {host_gid} {_CONTAINER_USER} 2>/dev/null || true",
+                f"useradd -u {host_uid} -g {host_gid} -m -s /bin/bash {_CONTAINER_USER} 2>/dev/null || true",
+                f"chown {host_uid}:{host_gid} {_CONTAINER_HOME} 2>/dev/null || true",
+            ]
+        if git_name and git_email:
+            if _is_podman:
+                # Already running as the correct user — direct git config works.
+                setup_parts.append(
+                    f"git config --global user.name \"{git_name}\" && "
+                    f"git config --global user.email \"{git_email}\""
+                )
+            else:
+                # Try as current user first (works when running as pm), fall back
+                # to su (works when running as root in the default image).
+                setup_parts.append(
+                    f"(git config --global user.name \"{git_name}\" && "
+                    f"git config --global user.email \"{git_email}\") 2>/dev/null || "
+                    f"su -c 'git config --global user.name \"{git_name}\" && "
+                    f"git config --global user.email \"{git_email}\"' {_CONTAINER_USER}"
+                )
+        if git_setup:
+            setup_parts.append(git_setup)
+        # pm is made available inside the container via a shim at
+        # /usr/local/bin/pm (installed in the base image) that execs
+        # ``python3 -m pm_core.wrapper``, picking up pm_core through
+        # PYTHONPATH=/opt/pm-src.  No per-container install step — keeping
+        # container startup fast enough to beat the QA grace period.
+        setup_parts.append(f"touch {_READY_SENTINEL}")
+        # PID 1 must reap: processes orphaned inside the container are
+        # reparented to it, and ``sleep`` never waits on them, so zombies
+        # pile up against the PID limit until exec fails "Cannot fork".
+        # bash's SIGCHLD handling reaps any child while it sits in ``wait``.
+        setup_parts.append(_PID1_REAPER)
+        # Required setup must stop before readiness on any failure. Do not
+        # carry errexit into PID 1: an interrupted wait is normal on restart.
+        setup = "set -e; " + "; ".join(setup_parts[:-1]) + "; set +e; " + setup_parts[-1]
+        cmd.extend([config.image, "bash", "-c", setup])
 
-    result = _run_runtime(*cmd, timeout=60)
+        run_error: BaseException | None = None
+        try:
+            result = _run_runtime(*cmd, timeout=60, check=False)
+            if result.returncode != 0:
+                stderr = ((result.stderr or "").strip()
+                          or (result.stdout or "").strip())
+                run_error = launch_error(name, classify_runtime_error(stderr),
+                                         stderr, stage="start")
+        except subprocess.TimeoutExpired as exc:
+            run_error = launch_error(
+                name, "timeout",
+                f"'{runtime} run' did not return within {exc.timeout}s",
+                stage="start")
+        except OSError as exc:
+            run_error = launch_error(name, classify_runtime_error(str(exc)),
+                                     str(exc), stage="start")
+        except BaseException as exc:
+            # Cancellation can arrive after run created the allocation. Defer
+            # cleanup until the shared-proxy lock has been released below.
+            run_error = exc
+
+    if run_error is not None:
+        # podman may leave a "created" container behind on failure.  Discard
+        # outside the proxy lock: the removal re-takes it to decide whether
+        # the shared proxy is now unused.
+        _discard_failed_attempt(name, labels[LABEL_ATTEMPT])
+        raise run_error
     container_id = result.stdout.strip()
+    if not container_id:
+        # A successful run with no id is an unknown identity, not proof that
+        # nothing was created. Falling through would address every probe by the
+        # reusable name and finally remove by name, which can delete a different
+        # allocation a concurrent launcher has attached. Preserve the allocation
+        # and its proxy for a later reconcile instead.
+        raise launch_error(
+            name, "runtime",
+            f"'{runtime} run' reported success without a container id; the "
+            f"allocation was left for 'pm container reap'",
+            stage="start")
 
-    # Wait for the setup script to finish (sentinel file appears).
-    # The setup installs the git push-proxy wrapper and configures the
-    # user — if we proceed before it completes, the wrapper won't exist
-    # and git push will bypass the proxy, failing with no credentials.
-    import time
-    _SETUP_TIMEOUT = 30  # seconds — needs headroom under memory pressure
-    _POLL_INTERVAL = 0.2
-    _setup_ready = False
-    _deadline = time.monotonic() + _SETUP_TIMEOUT
-    while time.monotonic() < _deadline:
-        check = _run_runtime(
-            "exec", name, "test", "-f", _READY_SENTINEL,
-            check=False, timeout=5,
-        )
+    try:
+        # Setup helpers address the captured id; a launch error must name the
+        # container a user can act on, not its immutable id.
+        # Keep the helper's stage (e.g. "finish setup within 30s").
+        try:
+            _wait_for_setup(container_id)
+        except ContainerLaunchError as exc:
+            raise launch_error(name, exc.kind, exc.stderr,
+                               stage=exc.stage or "finish setup") from exc
+        try:
+            _post_setup(container_id, workdir, _is_podman)
+        except ContainerLaunchError as exc:
+            raise launch_error(name, exc.kind, exc.stderr,
+                               stage=exc.stage or "finish setup") from exc
+        if allowed_push_branch:
+            from pm_core.push_proxy import proxy_is_alive
+            if not proxy_is_alive(sock_path):
+                raise launch_error(name, "proxy",
+                                   f"push proxy at {sock_path} is not accepting connections",
+                                   stage="finish setup")
+    except BaseException as exc:
+        _log.error("Container %s setup failed — removing the partial container",
+                   name, exc_info=True)
+        removed = discard_container(name, container_id=container_id)
+        if removed and isinstance(exc, ContainerLaunchError) and exc.kind == "pids":
+            # Its restart advice would name a container that no longer exists.
+            raise launch_error(name, "pids", exc.stderr, stage=exc.stage,
+                               removed=True) from exc
+        raise
+
+    _log.info("Created container %s (id=%s)", name, container_id[:12])
+    return container_id
+
+
+_SETUP_TIMEOUT = 30  # seconds — needs headroom under memory pressure
+_SETUP_POLL_INTERVAL = 0.2
+
+
+def _wait_for_setup(name: str, *, started_ns: int | None = None) -> None:
+    """Wait for the in-container setup script to write its sentinel.
+
+    The setup installs the git push-proxy wrapper and configures the
+    user — if we proceed before it completes, the wrapper won't exist
+    and git push will bypass the proxy, failing with no credentials.
+    A probe failure the runtime classifies (keyring, memory) fails fast
+    with the real error instead of waiting out the timeout.
+    """
+    probe = ["test", "-f", _READY_SENTINEL]
+    if started_ns is not None:
+        # Restart cannot clear the old marker using exec before stopping: PID
+        # exhaustion is precisely why exec may be unavailable. The existing
+        # startup command touches it every boot, including legacy containers.
+        probe = ["python3", "-c",
+                 "import os,sys; "
+                 "sys.exit(0 if os.path.isfile(sys.argv[1]) and "
+                 "os.stat(sys.argv[1]).st_mtime_ns >= int(sys.argv[2]) else 1)",
+                 _READY_SENTINEL, str(started_ns)]
+    last_err = ""
+    deadline = time.monotonic() + _SETUP_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            check = _run_runtime(
+                "exec", name, *probe,
+                check=False, timeout=5,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # A slow exec under concurrent creates is "not ready yet", not a
+            # failed launch: keep polling until the setup deadline.
+            last_err = f"readiness probe did not return within {exc.timeout}s"
+            continue
+        except OSError as exc:
+            # The runtime itself is unusable; polling cannot fix that.
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="finish setup") from exc
         if check.returncode == 0:
-            _setup_ready = True
-            break
-        time.sleep(_POLL_INTERVAL)
-    if not _setup_ready:
-        _log.error("Container %s setup did not complete within %ds — "
-                   "git push proxy wrapper may not be installed",
-                   name, _SETUP_TIMEOUT)
-        raise ContainerError(
-            f"Container '{name}' setup timed out after {_SETUP_TIMEOUT}s. "
-            f"The system may be under memory pressure (try stopping unused "
-            f"containers with 'pm session cleanup')."
-        )
+            return
+        err = (check.stderr or "").strip()
+        if err:
+            last_err = err
+            kind = classify_runtime_error(err)
+            if kind in ("keyring", "memory", "pids"):
+                raise launch_error(name, kind, err, stage="finish setup")
+            exited = "is not running" in err.lower() or "no such container" in err.lower()
+            if not exited:
+                # Wording varies (Podman 3.x: "container state improper"); ask
+                # the runtime rather than waiting out the timeout on a
+                # container whose startup command already failed.
+                try:
+                    exited = not container_is_running(name)
+                except ContainerLaunchError as exc:
+                    if exc.kind in ("keyring", "memory", "pids"):
+                        # The runtime answered with an actionable cause; no
+                        # amount of polling will clear an exhausted container.
+                        raise launch_error(name, exc.kind, exc.stderr,
+                                           stage="finish setup") from exc
+                    # A transient inspect error is not proof that the container
+                    # died: keep polling, but carry its cause into the deadline
+                    # error instead of reporting a bare timeout.
+                    last_err = f"{err}\nrunning-state probe: {exc.stderr}".strip()
+                except (ContainerError, subprocess.TimeoutExpired):
+                    # Unanswered probe: not evidence either way.
+                    exited = False
+            if exited:
+                try:
+                    logs = _run_runtime("logs", "--tail", "20", name,
+                                        check=False, timeout=10)
+                    output = (logs.stdout or "") + (logs.stderr or "")
+                except (OSError, subprocess.TimeoutExpired):
+                    # The startup failure is already known; missing logs must
+                    # not replace it with a raw probe timeout.
+                    output = ""
+                raise launch_error(
+                    name, "runtime",
+                    f"{err}\n{output}".strip(),
+                    stage="finish setup")
+        time.sleep(_SETUP_POLL_INTERVAL)
+    _log.error("Container %s setup did not complete within %ds — "
+               "git push proxy wrapper may not be installed",
+               name, _SETUP_TIMEOUT)
+    raise launch_error(name, "timeout",
+                       last_err or f"setup sentinel missing after {_SETUP_TIMEOUT}s",
+                       stage=f"finish setup within {_SETUP_TIMEOUT}s")
 
+
+def _post_setup(name: str, workdir: Path, is_podman: bool) -> None:
+    """Host-side setup steps, then write SETUP_COMPLETE_SENTINEL.
+
+    Idempotent, so an incomplete reused container can be finished in place.
+    The ``.claude.json`` copy is required whenever the host has one —
+    without it Claude starts in onboarding.
+    """
+    host_uid = os.getuid()
+    host_gid = os.getgid()
     # Repair ownership of ~/.pm inside the container.  When we bind-mount
     # ~/.pm/hooks, the container runtime auto-creates the parent
     # /home/pm/.pm as root-owned (uid 0 in the container's user namespace).
     # That blocks the pm user from creating siblings under ~/.pm (debug
     # logs, session registry, etc.) which crashes any ``pm`` invocation
-    # inside the container on first logger setup.  Chown as root — under
-    # podman with --userns=keep-id the container command runs as the pm
-    # user and cannot chown a root-owned path, so we need an explicit
-    # --user 0 exec; under docker the default exec user is already root.
+    # inside the container on first logger setup. Both Podman's keep-id
+    # mapping and Docker images declaring USER pm can default exec to an
+    # unprivileged user, so ownership repair explicitly runs as root.
+    exec_args = ["exec", "--user", "0"]
     try:
-        exec_args = ["exec"]
-        if _is_podman:
-            exec_args.extend(["--user", "0"])
-        exec_args.extend([
-            name, "chown", f"{host_uid}:{host_gid}",
-            f"{_CONTAINER_HOME}/.pm",
-        ])
-        _run_runtime(*exec_args, timeout=5, check=False)
-    except Exception:
-        _log.debug("chown %s/.pm failed in container %s",
-                   _CONTAINER_HOME, name, exc_info=True)
+        # The hooks bind mount is optional; without it the runtime may not
+        # have created this parent directory at all.
+        ownership = _run_runtime(
+            *exec_args, name, "mkdir", "-p", f"{_CONTAINER_HOME}/.pm",
+            timeout=5, check=False)
+        if ownership.returncode == 0:
+            ownership = _run_runtime(
+                *exec_args, name, "chown", f"{host_uid}:{host_gid}",
+                f"{_CONTAINER_HOME}/.pm", timeout=5, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise launch_error(name, "timeout", "creating ~/.pm or repairing its ownership timed out",
+                           stage="repair ~/.pm ownership") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="repair ~/.pm ownership") from exc
+    if ownership.returncode != 0:
+        stderr = (ownership.stderr or "").strip()
+        raise launch_error(name, classify_runtime_error(stderr),
+                           stderr or "creating ~/.pm or repairing its ownership failed",
+                           stage="repair ~/.pm ownership")
 
     # Copy .claude.json into the container (not bind-mounted — see note above)
+    _claude_json_src = _host_claude_json()
     if _claude_json_src.exists():
         # Seed workspace trust for the container's workdir when the mounted
         # host workdir is pm-created or explicitly authorized; otherwise
@@ -1025,40 +2507,283 @@ def create_container(
                          "container %s", name, exc_info=True)
         try:
             _run_runtime("cp", str(_cfg_copy_src),
-                        f"{name}:{_CONTAINER_HOME}/.claude.json",
-                        timeout=10)
-            # Under Docker (root), fix ownership so the pm user can read it.
-            # Under Podman (--userns=keep-id), the file already has the
-            # correct ownership via namespace mapping, and chown would fail
-            # because the process is not root.
-            if not _is_podman:
-                _run_runtime("exec", name, "chown",
-                            f"{host_uid}:{host_gid}",
-                            f"{_CONTAINER_HOME}/.claude.json",
-                            timeout=5)
-        except Exception:
-            _log.warning("Failed to copy .claude.json into container %s",
-                         name, exc_info=True)
+                         f"{name}:{_CONTAINER_HOME}/.claude.json",
+                         timeout=10)
+            # Docker cp creates a root-owned file; repair it as root even
+            # when the image defaults to USER pm. Podman's keep-id mapping
+            # already gives the copied file the host user's ownership.
+            if not is_podman:
+                _run_runtime(*exec_args, name, "chown",
+                             f"{host_uid}:{host_gid}",
+                             f"{_CONTAINER_HOME}/.claude.json",
+                             timeout=5)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            raise launch_error(name, classify_runtime_error(stderr) if stderr else "config",
+                               stderr or "copying ~/.claude.json failed",
+                               stage="receive ~/.claude.json") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise launch_error(name, "timeout", "copying ~/.claude.json timed out",
+                               stage="receive ~/.claude.json") from exc
+        except OSError as exc:
+            raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                               stage="receive ~/.claude.json") from exc
         finally:
             if _seeded_tmp is not None:
                 _seeded_tmp.unlink(missing_ok=True)
 
-    _log.info("Created container %s (id=%s)", name, container_id[:12])
-    return container_id
+    try:
+        done = _run_runtime("exec", name, "touch", SETUP_COMPLETE_SENTINEL,
+                            check=False, timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        raise launch_error(name, "timeout",
+                           f"recording completed setup did not return within "
+                           f"{exc.timeout}s; retry when the runtime is responsive",
+                           stage="record completed setup") from exc
+    except OSError as exc:
+        raise launch_error(name, classify_runtime_error(str(exc)), str(exc),
+                           stage="record completed setup") from exc
+    if done.returncode != 0:
+        stderr = (done.stderr or "").strip()
+        raise launch_error(name, classify_runtime_error(stderr), stderr,
+                           stage="record completed setup")
+
+
+def _discard_failed_attempt(name: str, attempt: str) -> None:
+    """Clean a failed run only when its immutable attempt label proves ownership.
+
+    A runtime client need not take PM's launch lock: name conflicts and timed-out
+    runs can leave another allocation at this name. Read ID and labels together,
+    then address only the verified ID. Unknown state preserves the allocation.
+    """
+    try:
+        result = _run_runtime("inspect", name, check=False, timeout=10)
+        if result.returncode != 0:
+            if _container_absent(result.stderr or ""):
+                from pm_core.push_proxy import stop_push_proxy
+                stop_push_proxy(name)
+            return
+        rows = json.loads(result.stdout)
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            return
+        info = rows[0]
+        labels = (info.get("Config") or {}).get("Labels") or {}
+        cid = info.get("Id") or info.get("ID")
+        if isinstance(cid, str) and cid and attempt and labels.get(LABEL_ATTEMPT) == attempt:
+            discard_container(name, container_id=cid)
+    except Exception:
+        _log.warning("Could not safely clean failed launch attempt for %s", name, exc_info=True)
+
+
+@contextlib.contextmanager
+def _discard_on_failure(name: str, attempt: str):
+    """Cover pre-run proxy/setup failures after any inner proxy lock unwinds."""
+    try:
+        yield
+    except BaseException:
+        _discard_failed_attempt(name, attempt)
+        raise
+
+
+def discard_container(name: str, *, container_id: str | None = None) -> bool:
+    """Best-effort removal of a container whose launch failed or was abandoned
+    before a pane attached to it (never raises).  True once removal is confirmed."""
+    if not name:
+        return False
+    try:
+        remove_container(name, container_id=container_id)
+    except Exception:
+        _log.warning("Could not remove container %s", name, exc_info=True)
+        return False
+    return True
+
+
+@_runtime_domain_operation
+def discard_unowned_container(name: str, *, container_id: str | None = None,
+                               generation: str | None = None,
+                               allowed_owner_panes: set[str] | None = None) -> bool:
+    """Best-effort cleanup after a pane failed to attach (never raises).
+
+    Unlike ``discard_container`` (used inside a locked create), this acquires
+    the name's launch lock and preserves retained, owned or uninspectable
+    containers.  An optional expected id protects the caller's launch attempt;
+    removal always addresses the freshly inspected id, never a reusable name.
+    False leaves the container available for a subsequent cleanup pass.
+    """
+    if not name:
+        return False
+    from pm_core import container_reaper
+    try:
+        with launch_lock(name, timeout=0) as locked:
+            if not locked:
+                return False
+            current = current_container_id(name)
+            if current is None:
+                return False
+            if not current:
+                # Runtime renames do not take this name's launch lock. Only
+                # confirmed absence of the captured allocation permits a host
+                # fallback; a surviving/unknown ID needs a fresh-name retry.
+                return not container_id or current_container_id(container_id) == ""
+            if container_id and current != container_id:
+                return False
+            if generation is not None and cleanup_generation(name) != generation:
+                return False
+            # Review/sign-off preflight has no allocation to release. Another
+            # launcher may have just returned from create before attaching its
+            # pane; only the captured owner may discard during that lease.
+            if (not container_id or generation is None) and recent_launch(
+                    name, container_reaper.LAUNCH_GRACE, current):
+                return False
+            if container_reaper.is_retained(name, current):
+                return False
+            if allowed_owner_panes is None:
+                owners = container_reaper.live_owner_panes(name, current)
+            else:
+                owners = container_reaper.live_owner_panes(name, current, strict=True)
+            if set(owners) - (allowed_owner_panes or set()):
+                return False
+            if allowed_owner_panes:
+                # A failed QA split may leave its concretizer alive. Persist
+                # this checked handoff before removal, otherwise a transient rm
+                # failure makes that pane protect the abandoned allocation forever.
+                if container_reaper._runtime_domain() is None:
+                    return False
+                release_generation = cleanup_generation(name)
+                container_reaper._record_release(
+                    name, current, release_generation, "failed-worker-attachment")
+            # ``remove_container`` keys its proxy bookkeeping by the container
+            # name and pins the runtime operations to the captured id, so a
+            # shared proxy is released here under the real name (a captured
+            # unshared mount is released through its own socket generation).
+            remove_container(name, container_id=current)
+            return True
+    except Exception:
+        _log.warning("Could not safely discard container %s", name, exc_info=True)
+        return False
+
+
+def _relieve_keyring_pressure() -> None:
+    """Reap orphaned containers first when the kernel keyring is nearly full.
+
+    Synchronous so the launch that follows benefits from the freed keys; the
+    pass skips immediately when another process is already reconciling, and
+    never touches the container being launched (its launch lock is held).
+    """
+    pressure = keyring_pressure(0.9)
+    if not pressure:
+        return
+    _log.warning("Keyring for uid %s at %d/%d keys — reaping orphaned "
+                 "containers before launching", pressure["uid"],
+                 pressure["keys"], pressure["max_keys"])
+    try:
+        from pm_core import container_reaper
+        container_reaper.reconcile(reason="keyring-pressure")
+    except Exception:
+        _log.warning("pre-launch reap failed", exc_info=True)
+
+
+def _activity_identity_key(cid: str) -> str:
+    from pm_core.container_reaper import _runtime_domain
+    domain = _runtime_domain()
+    if domain is None:
+        raise ContainerError("Cannot determine runtime domain for interactive ownership")
+    identity = json.dumps([domain, cid], sort_keys=True)
+    return "active-id-" + hashlib.sha256(identity.encode()).hexdigest()
+
+
+def activity_owner(name: str, container_id: str = "") -> bool:
+    """Whether an interactive exec owns this name or its rename-stable identity."""
+    if container_id and _activity_lock_held(_activity_identity_key(container_id)):
+        return True
+    return _activity_lock_held(f"active-{name}")
+
+
+def _activity_lock_held(key: str) -> bool:
+    try:
+        path = _lock_path(key)
+        # Only interactive attachment creates this file. An absent file is
+        # unowned; the final removal recheck is serialized with attachment by
+        # the launch lock. Never unlink existing activity files: a waiter may
+        # already hold their inode open.
+        try:
+            lock = path.open("r")
+        except FileNotFoundError:
+            return False
+        with lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        return False
+    except OSError as exc:
+        raise ContainerError(f"Cannot check interactive owner '{key}': {exc}") from exc
+
+
+@_runtime_domain_operation
+def run_interactive_exec(name: str, cid: str, generation: str,
+                         state_dir: str, command: str, runtime: str,
+                         hold_activity: str = "1") -> int:
+    """Validate allocation before exec; optionally hold foreground ownership.
+
+    Tmux callers already have a pane owner and pass ``hold_activity="0"``.
+    They still need the same stale-allocation check before attaching.
+    """
+    os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
+    # This helper normally runs in its own short-lived interpreter, but an
+    # in-process caller (tests, embedders) must not inherit the pinned runtime
+    # for the rest of the process.
+    global _get_runtime
+    previous_runtime = _get_runtime
+    _get_runtime = lambda: runtime
+    try:
+        # Serialize attachment with cleanup; an old shell must not attach to a
+        # replacement. The child inherits the lock so killing this helper alone
+        # cannot make a still-running exec appear abandoned.
+        with contextlib.ExitStack() as stack:
+            activities = []
+            with launch_lock(name) as locked:
+                if not locked or not cid or current_container_id(name) != cid:
+                    raise ContainerError(f"Container '{name}' changed before interactive attachment")
+                if cleanup_generation(name) != generation:
+                    raise ContainerError(f"Container '{name}' was recovered before interactive attachment")
+                _conclude_launch_lease(name, cid)
+                if hold_activity != "0":
+                    # Keep the legacy name lock for older readers, and an ID/domain
+                    # lock so a runtime rename cannot hide an active foreground exec.
+                    for key in (f"active-{name}", _activity_identity_key(cid)):
+                        path = _lock_path(key)
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        activity = stack.enter_context(path.open("a"))
+                        fcntl.flock(activity, fcntl.LOCK_SH)
+                        activities.append(activity)
+            inherited = tuple(activity.fileno() for activity in activities)
+            return subprocess.call(["bash", "-c", command], pass_fds=inherited)
+    finally:
+        _get_runtime = previous_runtime
 
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
                    proxy_socket_path: str | None = None,
+                   container_id: str | None = None,
+                   interactive_owner: bool = False,
+                   generation: str | None = None,
                    env: dict[str, str] | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
-    When the exec'd process exits, the container is removed (unless
-    *cleanup* is False).  The tmux pane stays open so the user can
-    inspect output.
+    When the exec'd process exits, its allocation is released unless
+    *cleanup* is False or it was explicitly retained. Failed release stays
+    durable for the next reconcile; replacements and restarts are preserved.
 
-    If *proxy_socket_path* is provided, the cleanup also removes the
-    push proxy socket file and its parent directory.  This triggers the
-    proxy daemon thread to self-terminate (it checks for socket existence).
+    If *container_id* is given the cleanup removes that exact container,
+    not whatever currently holds *name*: a trap that fires late (after the
+    window was killed and the session relaunched under the same name) must
+    not delete the replacement.
+
+    *proxy_socket_path* remains accepted for compatibility; proxy release
+    uses the original container name and the shared runtime-user inventory,
+    never unconditional socket deletion.
 
     *env* names environment variables to add to the exec'd process.  Only
     the *name* goes on the runtime command line (``-e NAME``); the runtime
@@ -1068,6 +2793,8 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     ``#{pane_start_command}``.
     """
     runtime = _get_runtime()
+    if generation is None:
+        generation = cleanup_generation(name)
     escaped = shlex.quote(shell_cmd)
     env_args = " ".join(f"-e {shlex.quote(k)}" for k in (env or {}))
     env_prefix = f"{env_args} " if env_args else ""
@@ -1075,65 +2802,156 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     # host user (correct UID).  The "pm" username doesn't exist in
     # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
     # from root to the pm user created during setup.
+    target = shlex.quote(container_id or name)
     if "podman" in runtime:
-        exec_part = (f"{runtime} exec -it {env_prefix}"
-                     f"{shlex.quote(name)} bash -c {escaped}")
+        exec_part = f"{runtime} exec -it {env_prefix}{target} bash -c {escaped}"
     else:
         exec_part = (f"{runtime} exec -it -u {_CONTAINER_USER} {env_prefix}"
-                     f"{shlex.quote(name)} bash -c {escaped}")
+                     f"{target} bash -c {escaped}")
+    if interactive_owner or container_id:
+        import sys
+        script = (
+            f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r}); "
+            "from pm_core.container import run_interactive_exec; "
+            "sys.exit(run_interactive_exec(*sys.argv[1:]))")
+        exec_part = shlex.join([
+            sys.executable, "-c", script, name, container_id or "",
+            generation, str(container_state_dir()), exec_part, runtime,
+            "1" if interactive_owner else "0"])
     if cleanup:
-        cleanup_parts = []
-        if proxy_socket_path:
-            cleanup_parts.append(f"rm -f {shlex.quote(proxy_socket_path)}")
-        cleanup_parts.append(
-            f"{runtime} rm -f {shlex.quote(name)} >/dev/null 2>&1")
-        if proxy_socket_path:
-            sock_dir = str(Path(proxy_socket_path).parent)
-            # The proxy records its workdir/branch in a metadata sidecar next
-            # to the socket.  Leaving it behind makes `rmdir` fail, so the
-            # directory (and the sidecar) would leak in /tmp.
-            from pm_core.push_proxy import _METADATA_NAME
-            cleanup_parts.append(
-                f"rm -f {shlex.quote(str(Path(sock_dir) / _METADATA_NAME))}")
-            cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
-            # The start lock lives *next to* the directory (outside the
-            # mount), so rmdir does not take it: without this the lock file
-            # leaks in /tmp for every per-container proxy a pane tears down.
-            cleanup_parts.append(
-                f"rm -f {shlex.quote(os.path.realpath(sock_dir) + '.lock')}")
-        # Wrap in a bash trap so cleanup runs even when the pane is killed
-        # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
-        # ';'-chained commands to be skipped, but EXIT traps always fire).
-        # Use shlex.quote on the full inner script to avoid quote nesting
-        # issues: exec_part already contains single-quoted arguments from
-        # shlex.quote(), so wrapping in literal '...' would break parsing.
-        inner = f"trap {shlex.quote('; '.join(cleanup_parts))} EXIT; {exec_part}"
+        import sys
+        # Pin this checkout/interpreter, not whichever pm happens to be on the
+        # pane's PATH. The release persists its exact identity before inventory,
+        # then uses the same retention/launch-lock checks as manual cleanup.
+        # The pane's cwd is the PR workdir, which `pm pr cleanup` may already
+        # have deleted: importing pm (its logger resolves the cwd) and every
+        # runtime call (podman needs a cwd) would then fail and the release
+        # would be silently lost.  Import from a surviving cwd, then leave the
+        # workdir so a deletion during the release cannot break it either.
+        script = (
+            "import os, sys\n"
+            "try:\n    os.getcwd()\nexcept OSError:\n    os.chdir('/')\n"
+            f"sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r})\n"
+            "from pm_core.container import release_on_exit\n"
+            "import pm_core.container_reaper\n"
+            "os.chdir('/')\n"
+            "release_on_exit(*sys.argv[1:])")
+        cleanup_cmd = shlex.join([
+            sys.executable, "-c", script, name, container_id or "", generation,
+            runtime, str(container_state_dir()), proxy_socket_path or ""])
+        inner = f"trap {shlex.quote(cleanup_cmd)} EXIT; {exec_part}"
         return f"bash -c {shlex.quote(inner)}"
     return exec_part
 
 
-def remove_container(name: str) -> None:
+def release_on_exit(name: str, cid: str, generation: str, runtime: str,
+                    state_dir: str, proxy_socket_path: str = "") -> None:
+    """Release only the pane's original allocation, preserving retained work."""
+    from pm_core import container_reaper
+    os.environ["PM_CONTAINER_STATE_DIR"] = state_dir
+    # This helper runs in its own short-lived interpreter; keep the runtime
+    # selected by the launcher even if global settings changed meanwhile, and
+    # restore it so an in-process caller does not keep the override.
+    global _get_runtime
+    previous_runtime = _get_runtime
+    _get_runtime = lambda: runtime
+    try:
+        outcome = container_reaper.release_containers(
+            [name], owner_release=True, expected_ids={name: cid},
+            expected_generations={name: generation}, reason="pane-exit")
+    finally:
+        _get_runtime = previous_runtime
+    if outcome.error or outcome.failures or outcome.release_refused:
+        _log.warning("Pane cleanup deferred for %s: %s %s", name,
+                     outcome.summary(), outcome.release_refused)
+
+
+def remove_container(name: str, *, container_id: str | None = None) -> bool:
     """Force-remove a container and its push proxy, then wait until it is gone.
+
+    Return True when an authoritative unshared proxy mount was handled.
+    When supplied, ``container_id`` pins inspection and runtime removal to the
+    checked allocation; ``name`` is only the locked proxy-bookkeeping key.
 
     If another 'docker rm -f' is already in flight (e.g. the previous session's
     EXIT trap), this still blocks until the container has fully disappeared so
     that the caller can safely create a fresh container with the same name.
     """
-    import time
-    from pm_core.push_proxy import stop_push_proxy
+    from pm_core.push_proxy import (
+        stop_push_proxy, capture_unshared_proxy, release_captured_unshared_proxy,
+        defer_unshared_release, forget_unshared_proxy,
+    )
     _log.info("remove_container: name=%s", name)
-    stop_push_proxy(name)
-    _run_runtime("rm", "-f", name, check=False, timeout=30)
+    target = container_id or name
+    proxy = capture_unshared_proxy(target)
+    pending = defer_unshared_release(proxy, target) if proxy else None
+    try:
+        removal = _run_runtime("rm", "-f", target, check=False, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        # Callers expect ContainerError from a failed removal; a raw probe
+        # timeout would bypass their retry path and reach the launcher.
+        raise ContainerError(f"could not remove container {name}: {exc}") from exc
+    removal_error = ""
+    if removal.returncode != 0:
+        diagnostic = (removal.stderr or "").strip() or "without an error diagnostic"
+        removal_error = f"; rm failed (rc={removal.returncode}): {diagnostic}"
     # Wait for the container to be fully gone.  When another rm is already in
     # flight the daemon returns "removal already in progress" and our rm returns
     # immediately, but the container still exists for a brief moment.
+    gone = False
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        result = _run_runtime("inspect", name, check=False, timeout=5)
+        try:
+            result = _run_runtime("inspect", target, check=False, timeout=5)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ContainerError(
+                f"could not confirm removal of container {name}: {exc}"
+                f"{removal_error}") from exc
         if result.returncode != 0:
-            return  # container is gone
+            error = (result.stderr or "").strip()
+            if _container_absent(error):
+                gone = True
+                break
+            raise ContainerError(
+                f"could not confirm removal of container {name}: "
+                f"{error or 'runtime inspect failed without an absence diagnostic'}"
+                f"{removal_error}")
         time.sleep(0.1)
-    _log.warning("remove_container: %s still present after 10 s", name)
+    if not gone:
+        _log.warning("remove_container: %s still present after 10 s%s", name, removal_error)
+        raise ContainerError(f"container {name} still present after 10 s{removal_error}")
+    if container_id:
+        # A deferred owner release of this exact allocation is now complete.
+        from pm_core import container_reaper
+        try:
+            container_reaper.forget_releases_of_removed(container_id)
+        except Exception:
+            _log.debug("could not drop owner releases of %s", name, exc_info=True)
+    # Release the push proxy only after the container is gone.  Failed
+    # removal must leave the surviving container's push access intact.
+    if proxy:
+        forget_unshared_proxy(name, proxy[1])
+        if release_captured_unshared_proxy(proxy):
+            pending.unlink(missing_ok=True)
+        return True  # the actual mount is authoritative, not a reusable runtime name
+    stop_push_proxy(name)
+    return False
+
+
+def containers_for_pr(session_tag: str, pr_id: str) -> set[str] | None:
+    """Names of every pm container (any state) for *session_tag* + *pr_id*.
+
+    Used to decide whether a shared push proxy is still needed.  Returns
+    None when the runtime can't be queried (caller must assume "in use").
+    """
+    from pm_core.container_reaper import list_containers
+    inventory = list_containers()
+    if inventory is None:
+        return None
+    # Use the same label-first identity as the reaper. A renamed managed
+    # container can still mount the shared proxy even without a parsed name.
+    return {info.name for info in inventory
+            if info.session_tag == session_tag and info.pr_id == pr_id}
 
 
 # ---------------------------------------------------------------------------
@@ -1149,6 +2967,8 @@ def wrap_claude_cmd(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    kind: str | None = None,
+    allocation_identity: dict[str, str] | None = None,
     env: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
@@ -1189,10 +3009,11 @@ def wrap_claude_cmd(
         label, workdir, cname, session_tag, pr_id,
     )
 
+    identity = allocation_identity if allocation_identity is not None else {}
     from pm_core.push_proxy import PushProxyError
 
     try:
-        create_container(
+        container_id = create_container(
             name=cname,
             config=config,
             workdir=Path(workdir),
@@ -1201,26 +3022,33 @@ def wrap_claude_cmd(
             allowed_push_branch=allowed_push_branch,
             session_tag=session_tag,
             pr_id=pr_id,
+            kind=kind,
+            allocation_identity=identity,
         )
+    except PushProxyError as exc:
+        # The proxy is what makes pushes work from inside the container;
+        # report the real reason instead of blaming the container runtime.
+        # (PushProxyError is a ContainerError, so it must be matched first.)
+        # create_container classifies its own proxy failures; keep any that
+        # escape it a classified launch error too, not a bare ContainerError.
+        _log.error("Push proxy unavailable for container %s — aborting",
+                   cname, exc_info=True)
+        raise launch_error(cname, "proxy", str(exc),
+                           stage="start its push proxy") from exc
     except ContainerError:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise
-    except PushProxyError as exc:
-        # The proxy is what makes pushes work from inside the container;
-        # report the real reason instead of blaming the container runtime.
-        _log.error("Push proxy unavailable for container %s — aborting",
-                   cname, exc_info=True)
-        raise ContainerError(
-            f"Failed to create container '{cname}': push proxy unavailable "
-            f"— {exc}"
-        ) from exc
     except Exception as exc:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         runtime = _get_runtime()
+        detail = ""
+        if isinstance(exc, subprocess.CalledProcessError):
+            detail = (exc.stderr or exc.output or "").strip()
+        detail = detail or str(exc)
         raise ContainerError(
-            f"Failed to create container '{cname}'. "
+            f"Failed to create container '{cname}': {detail[-600:]}. "
             f"Is {runtime} running? Disable container mode with 'pm container disable' "
             f"to run without containers."
         ) from exc
@@ -1240,12 +3068,17 @@ def wrap_claude_cmd(
     proxy_sock = get_proxy_socket_path(
         cname, session_tag=session_tag, pr_id=pr_id, workdir=workdir)
     # For shared proxies (session_tag + pr_id), don't embed socket cleanup
-    # in the exec command — the socket is shared across containers and its
-    # lifetime is managed via reference counting in stop_push_proxy().
+    # in the exec command — the socket is shared across containers and is
+    # stopped once the runtime reports no container left for the PR
+    # (push_proxy.release_proxy_if_unused, also run by the reaper).
     shared_proxy = session_tag is not None and pr_id is not None
     exec_cmd = build_exec_cmd(
         cname, claude_cmd,
         proxy_socket_path=None if shared_proxy else proxy_sock,
+        container_id=container_id if isinstance(container_id, str) and container_id else None,
+        # None (not "") makes build_exec_cmd read the generation written by
+        # this launch; callers that omit allocation_identity must still attach.
+        generation=identity.get("generation") or None,
         env=env,
     )
     _log.info("Wrapped claude command in container %s", cname)
@@ -1264,6 +3097,11 @@ def create_qa_container(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    loop_id: str | None = None,
+    scenario: int | None = None,
+    kind: str = "qa",
+    allocation_identity: dict[str, str] | None = None,
+    reuse_identity: dict[str, str | None] | None = None,
 ) -> str:
     """Create a detached container for a QA scenario.
 
@@ -1273,7 +3111,8 @@ def create_qa_container(
 
     The container has no access to the parent repo's git directory.
     If *allowed_push_branch* is set, a push proxy is started so the
-    scenario can push fixes to the PR branch.
+    scenario can push fixes to the PR branch.  *loop_id* / *scenario* are
+    recorded as ownership labels so cleanup can tell runs apart.
     """
     return create_container(
         name=name,
@@ -1283,7 +3122,120 @@ def create_qa_container(
         allowed_push_branch=allowed_push_branch,
         session_tag=session_tag,
         pr_id=pr_id,
+        kind=kind,
+        loop_id=loop_id,
+        scenario=scenario,
+        allocation_identity=allocation_identity,
+        reuse_identity=reuse_identity,
     )
+
+
+def _list_names(prefix: str, *, running_only: bool = False) -> list[str] | None:
+    """Container names starting with *prefix*; None if the runtime failed.
+
+    The runtime's ``name=`` filter matches substrings (``npm-cache`` matches
+    ``pm-``), so the prefix is re-checked here.
+    """
+    try:
+        result = _run_runtime(
+            "ps", *(() if running_only else ("-a",)), "--filter", f"name={prefix}",
+            "--format", "{{.Names}}",
+            check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return [ln.strip() for ln in (result.stdout or "").splitlines()
+            if ln.strip().startswith(prefix)]
+
+
+def _remove_captured_container(name: str, cid: str, generation: str,
+                               include_retained: bool = True) -> bool:
+    """Force-remove the captured allocation, never a concurrent replacement."""
+    with launch_lock(name) as locked:
+        if not locked:
+            raise ContainerError(f"Container '{name}' lifecycle lock unavailable")
+        current = current_container_id(name)
+        if current is None:
+            raise ContainerError(f"Container '{name}' identity unknown during cleanup")
+        if not current:
+            # A runtime rename does not take our launch lock. Only absence by
+            # immutable ID proves removal; otherwise retry under the new name.
+            remaining = current_container_id(cid)
+            if remaining is None:
+                raise ContainerError(f"Container '{name}' allocation identity unknown after name disappeared")
+            if remaining:
+                raise ContainerError(f"Container '{name}' renamed during cleanup; retry explicitly")
+            return True  # Already gone; do not touch a subsequently recreated proxy.
+        if current != cid or cleanup_generation(name) != generation:
+            raise ContainerError(f"Container '{name}' changed during cleanup; retry explicitly")
+        if not include_retained:
+            from pm_core import container_reaper
+            if container_reaper.is_retained(name, current):
+                return False
+        # Keep removal and proxy cleanup in one launch exclusion. Explicit
+        # force cleanup bypasses pane ownership and, by default, retention.
+        remove_container(name, container_id=cid)
+        return True
+
+
+@_runtime_domain_operation
+def remove_containers(names: list[str], *, workers: int = 4,
+                      include_retained: bool = True) -> tuple[list[str], dict[str, str]]:
+    """Force-remove captured allocations with bounded parallelism.
+
+    Capture every identity before queueing deletions, then recheck under its
+    launch lock. Returns ``(removed, failures)`` where failures maps name to
+    an error (including a changed allocation that needs an explicit retry).
+    """
+    removed: list[str] = []
+    failures: dict[str, str] = {}
+    allocations: list[tuple[str, str, str]] = []
+    captured_ids: dict[str, str] = {}
+    for name in dict.fromkeys(names):
+        try:
+            with launch_lock(name) as locked:
+                if not locked:
+                    raise ContainerError(f"Container '{name}' lifecycle lock unavailable")
+                cid = current_container_id(name)
+                if cid is None:
+                    raise ContainerError(f"Container '{name}' identity unknown during cleanup")
+                if not cid:
+                    continue
+                captured_ids[name] = cid
+                allocations.append((name, cid, cleanup_generation(name)))
+        except Exception as exc:
+            failures[name] = str(exc)
+    if allocations:
+        with ThreadPoolExecutor(max_workers=max(1, min(len(allocations), workers))) as ex:
+            futures = [(c, ex.submit(contextvars.copy_context().run,
+                                    _remove_captured_container, c, cid, generation,
+                                    include_retained))
+                       for c, cid, generation in allocations]
+            for cname, fut in futures:
+                try:
+                    if fut.result():
+                        removed.append(cname)
+                except Exception as e:
+                    _log.warning("remove_container(%s) failed: %s", cname, e)
+                    failures[cname] = str(e)
+    if removed or failures:
+        from pm_core import container_reaper
+        scope = container_reaper.Scope(names=set(names))
+        out = container_reaper.Outcome(
+            scope=scope.describe(), removed=removed, failures=failures,
+            decisions=[container_reaper.Decision(
+                container_reaper.ContainerInfo(name=name, id=cid),
+                "remove", "explicit cleanup") for name, cid in captured_ids.items()])
+        # Record failures without granting future passes forced owner-release
+        # authority. The reaper serializes this merge with automatic outcomes.
+        try:
+            container_reaper._record(out, scope, "explicit-cleanup")
+        except Exception as exc:
+            out.failures["cleanup state"] = f"could not persist cleanup outcome: {exc}"
+        failures = out.failures
+    return removed, failures
 
 
 def cleanup_qa_containers(pr_id: str, loop_id: str,
@@ -1302,21 +3254,12 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
         prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-{loop_id}-")
     prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-{loop_id}-")
 
-    count = 0
+    names: list[str] = []
     for prefix in prefixes:
-        result = _run_runtime(
-            "ps", "-a", "--filter", f"name={prefix}",
-            "--format", "{{.Names}}",
-            check=False, timeout=30,
-        )
-        if result.returncode != 0:
-            continue
-
-        for line in result.stdout.strip().splitlines():
-            cname = line.strip()
-            if cname and cname not in (exclude or set()):
-                remove_container(cname)
-                count += 1
+        names += [c for c in _list_names(prefix) or []
+                  if c not in (exclude or set()) and c not in names]
+    removed, _failures = remove_containers(names)
+    count = len(removed)
 
     if count:
         _log.info("Cleaned up %d container(s) for %s/%s", count, pr_id, loop_id)
@@ -1324,150 +3267,98 @@ def cleanup_qa_containers(pr_id: str, loop_id: str,
 
 
 def cleanup_pr_containers(pr_id: str,
-                          session_tag: str | None = None) -> list[str]:
-    """Remove every QA container for a PR across all loop ids.
+                          session_tag: str | None = None,
+                          include_retained: bool = True, *,
+                          failures: dict[str, str] | None = None) -> list[str]:
+    """Remove every container for a PR: impl, review, sign-off and QA (all loops).
 
-    Matches both legacy (``pm-qa-{pr_id}-``) and session-tagged
-    (``pm-{session_tag}-qa-{pr_id}-``) name prefixes. Returns the list of
-    container names removed.
+    Matches session-tagged (``pm-{session_tag}-{kind}-{pr_id}``) and legacy
+    (``pm-{kind}-{pr_id}``) names.  Called after the PR's windows were
+    killed (merge, ``pm pr cleanup --resources``, TUI cleanup), so pane
+    ownership is not consulted; explicitly retained containers are kept
+    when *include_retained* is False. Returns the list of names removed; an
+    optional *failures* output mapping receives errors for partial cleanup.
     """
-    prefixes = []
-    if session_tag:
-        prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-")
-    prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-")
+    from pm_core import container_reaper
+    inventory = container_reaper.list_containers()
+    if inventory is None:
+        raise ContainerError("Cannot inventory PR containers; cleanup not performed")
+    # No session means "every resource of this PR" — e.g. 'pm pr cleanup
+    # --resources' run from a plain terminal. Restricting that to untagged
+    # legacy names would leave every session-tagged container running while
+    # the command reported success.
+    tags = None if session_tag is None else {session_tag, None}
+    candidates = [info.name for info in inventory
+                  if (tags is None or info.session_tag in tags)
+                  and info.pr_id == pr_id
+                  and info.kind != "qa-debug"
+                  and (include_retained or not container_reaper.is_retained(info.name, info.id))]
 
-    candidates: list[str] = []
-    seen: set[str] = set()
-    for prefix in prefixes:
-        result = _run_runtime(
-            "ps", "-a", "--filter", f"name={prefix}",
-            "--format", "{{.Names}}",
-            check=False, timeout=30,
-        )
-        if result.returncode != 0:
-            continue
-        for line in result.stdout.strip().splitlines():
-            cname = line.strip()
-            if cname and cname not in seen:
-                seen.add(cname)
-                candidates.append(cname)
-
-    removed: list[str] = []
-    if candidates:
-        with ThreadPoolExecutor(max_workers=min(len(candidates), 8)) as ex:
-            futures = [(c, ex.submit(remove_container, c)) for c in candidates]
-            for cname, fut in futures:
-                try:
-                    fut.result()
-                    removed.append(cname)
-                except Exception as e:  # pragma: no cover - best effort
-                    _log.warning("remove_container(%s) failed: %s", cname, e)
+    removed, cleanup_failures = remove_containers(
+        candidates, workers=8, include_retained=include_retained)
+    if failures is not None:
+        failures.update(cleanup_failures)
     if removed:
         _log.info("Cleaned up %d container(s) for %s", len(removed), pr_id)
     return removed
 
 
 def cleanup_orphaned_qa_containers(session: str, pr_id: str,
-                                   session_tag: str | None = None) -> int:
-    """Remove QA containers whose tmux windows no longer exist.
+                                   session_tag: str | None = None,
+                                   wait: bool = True) -> int:
+    """Remove this PR's QA containers that no live pane owns.
 
-    Called at the start of a new QA run.  Scans all containers matching
-    the QA prefix for *pr_id* (any loop_id) and removes those whose
-    corresponding tmux scenario window is gone.
-
-    Returns the number of containers removed.
+    Called at the start of a new QA run.  Ownership is exact: a container is
+    kept only while a live tmux pane was started with *its* name (or it is
+    retained / mid-launch) — a ``qa-*`` window of another PR or run with the
+    same ``-sN`` suffix no longer keeps it alive.  With ``wait=False`` the
+    removal runs in the background so the new run doesn't pay for the old
+    run's cleanup.  Returns the number removed (0 when not waiting).
     """
-    from pm_core import tmux as tmux_mod
-
-    # Search for both session-tagged and legacy container names
-    prefixes = []
-    if session_tag:
-        prefixes.append(f"{CONTAINER_PREFIX}{session_tag}-qa-{pr_id}-")
-    prefixes.append(f"{CONTAINER_PREFIX}qa-{pr_id}-")
-
-    # Build set of live window names for fast lookup
-    try:
-        live_windows = {w["name"] for w in tmux_mod.list_windows(session)}
-    except Exception:
+    from pm_core import container_reaper
+    if not session_tag:
+        session_tag = session.removeprefix("pm-") if session else None
+    scope = container_reaper.Scope(pr_id=pr_id, session_tag=session_tag,
+                                   kinds={"qa"})
+    outcome = container_reaper.reconcile(scope=scope, wait=wait,
+                                         reason="qa-run-start")
+    if outcome is None:
         return 0
-
-    count = 0
-    for prefix in prefixes:
-        result = _run_runtime(
-            "ps", "-a", "--filter", f"name={prefix}",
-            "--format", "{{.Names}}",
-            check=False, timeout=30,
-        )
-        if result.returncode != 0:
-            continue
-
-        for line in result.stdout.strip().splitlines():
-            cname = line.strip()
-            if not cname:
-                continue
-            # Container name: pm[-{session_tag}]-qa-{pr_id}-{loop_id}-s{N}
-            # Window name:    qa-{display_id}-s{N}
-            # Extract the -s{N} suffix to check against windows.
-            parts = cname.split("-s")
-            if len(parts) < 2:
-                continue
-            suffix = f"-s{parts[-1]}"
-            # Check if ANY window ending with this suffix exists
-            has_window = any(w.endswith(suffix) and w.startswith("qa-")
-                             for w in live_windows)
-            if not has_window:
-                remove_container(cname)
-                count += 1
-
-    if count:
+    if outcome.removed:
         _log.info("Cleaned up %d orphaned QA container(s) for %s",
-                  count, pr_id)
-    return count
+                  len(outcome.removed), pr_id)
+    return len(outcome.removed)
 
 
-def cleanup_session_containers(session_tag: str) -> int:
-    """Remove all containers belonging to a session.
+def cleanup_session_containers(session_tag: str, *,
+                               failures: dict[str, str] | None = None) -> int:
+    """Remove containers with this exact session owner, including renamed ones.
 
-    Filters by ``pm-{session_tag}-`` which matches every container whose
-    name was generated with this session tag embedded.
-
-    Returns the number of containers removed.
+    Returns the number removed; an optional output mapping receives failures.
     """
-    prefix = f"{CONTAINER_PREFIX}{session_tag}-"
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={prefix}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
+    from pm_core import container_reaper
+    inventory = container_reaper.list_containers()
+    if inventory is None:
+        message = f"Cannot inventory containers for session {session_tag}; cleanup deferred"
+        _log.warning(message)
+        if failures is not None:
+            failures["container inventory"] = message
         return 0
-
-    count = 0
-    for line in result.stdout.strip().splitlines():
-        cname = line.strip()
-        if cname:
-            remove_container(cname)
-            count += 1
-
-    if count:
-        _log.info("Cleaned up %d container(s) for session %s", count, session_tag)
-    return count
+    names = [info.name for info in inventory if info.session_tag == session_tag]
+    if not names:
+        return 0
+    removed, cleanup_failures = remove_containers(names)
+    if failures is not None:
+        failures.update(cleanup_failures)
+    if removed:
+        _log.info("Cleaned up %d container(s) for session %s", len(removed), session_tag)
+    return len(removed)
 
 
 def cleanup_all_containers() -> int:
     """Remove all pm containers. Returns count removed."""
-    result = _run_runtime(
-        "ps", "-a", "--filter", f"name={CONTAINER_PREFIX}",
-        "--format", "{{.Names}}",
-        check=False, timeout=30,
-    )
-    if result.returncode != 0:
+    names = _list_names(CONTAINER_PREFIX)
+    if not names:
         return 0
-
-    count = 0
-    for line in result.stdout.strip().splitlines():
-        cname = line.strip()
-        if cname:
-            remove_container(cname)
-            count += 1
-    return count
+    removed, _failures = remove_containers(names)
+    return len(removed)

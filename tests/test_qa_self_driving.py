@@ -512,6 +512,27 @@ class TestFreshStartZT:
             fresh_start_qa(app, "pr-001")
 
         assert running_state.stop_requested is True
+        # The TUI stops tracking it, so the run must drop its own snapshot.
+        assert running_state.superseded is True
+
+    def test_fresh_start_clears_a_finished_unprocessed_snapshot(self, tmp_path):
+        """A finished run popped before its completion was processed leaves
+        a snapshot no one else clears; a later restart would recover it."""
+        from pm_core import qa_loop
+        from pm_core.tui.qa_loop_ui import fresh_start_qa
+
+        app = _make_app(tmp_path)
+        done = QALoopState(pr_id="pr-001")
+        done.qa_workdir = str(tmp_path)
+        snapshot = qa_loop._resume_file_path(done.qa_workdir)
+        snapshot.write_text("{}")
+        app._qa_loops["pr-001"] = done
+
+        with patch("pm_core.tui.qa_loop_ui.start_qa"):
+            fresh_start_qa(app, "pr-001")
+
+        assert not snapshot.exists()
+        assert done.superseded is False
 
     def test_fresh_start_removes_old_loop(self, tmp_path):
         """Step 10: z t removes old loop from _qa_loops before starting new."""

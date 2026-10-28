@@ -463,8 +463,19 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
 
     data = store.load(root)
     session = get_pm_session()
+    if not session and foreground:
+        # Foreground debug owns its exec through activity locks, not a tmux
+        # pane. Derive the project's normal tag for scoped lifecycle cleanup.
+        from pm_core.cli.helpers import _get_session_name_for_cwd
+        session = _get_session_name_for_cwd()
     if not session:
         click.echo("No pm session found. Run inside a pm tmux session.", err=True)
+        raise SystemExit(1)
+
+    use_containers = is_container_mode_enabled()
+    if use_containers and not _runtime_available():
+        click.echo("Container runtime is unavailable; refusing to launch debug on the host. "
+                   "Restore the configured runtime and retry.", err=True)
         raise SystemExit(1)
 
     # Create a workdir keyed to session + instruction (not PR)
@@ -481,7 +492,6 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     # Default to the current branch of the workdir (what the TUI session
     # is operating on), not the project base branch.
     if not branch:
-        import subprocess
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, cwd=str(repo_root),
@@ -502,8 +512,6 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     dest_dir.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copy2(item["path"], dest_dir / filename)
-
-    use_containers = is_container_mode_enabled() and _runtime_available()
 
     if use_containers:
         from pm_core import container as container_mod
@@ -552,24 +560,43 @@ End with a summary of which steps work and which don't, then one of:
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
 
-        container_mod.create_qa_container(
-            name=cname,
-            config=config,
-            workdir=clone_path,
-            scratch_path=scratch_path,
-            allowed_push_branch=base_branch,
-            session_tag=session_tag,
-        )
+        allocation_identity: dict[str, str] = {}
+        try:
+            container_id = container_mod.create_qa_container(
+                name=cname,
+                config=config,
+                workdir=clone_path,
+                scratch_path=scratch_path,
+                allowed_push_branch=base_branch,
+                session_tag=session_tag,
+                kind="qa-debug",
+                allocation_identity=allocation_identity,
+            )
+        except container_mod.ContainerError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
 
-        claude_cmd = build_claude_shell_cmd(
-            prompt=prompt,
-            cwd=container_mod._CONTAINER_WORKDIR,
-            write_dir=str(clone_path),
-            session_type="qa_author",
-            env_out=env,
-        )
-        shell_cmd = container_mod.build_exec_cmd(
-            cname, claude_cmd, cleanup=True, env=env)
+        try:
+            claude_cmd = build_claude_shell_cmd(
+                prompt=prompt,
+                cwd=container_mod._CONTAINER_WORKDIR,
+                write_dir=str(clone_path),
+                session_type="qa_author",
+                env_out=env,
+            )
+            # Debug has its own proxy; its EXIT release stops it too.
+            from pm_core.push_proxy import get_proxy_socket_path
+            shell_cmd = container_mod.build_exec_cmd(
+                cname, claude_cmd, cleanup=True, container_id=container_id,
+                generation=allocation_identity.get("generation"),
+                proxy_socket_path=get_proxy_socket_path(cname),
+                interactive_owner=foreground, env=env)
+        except Exception as exc:
+            container_mod.discard_unowned_container(
+                cname, container_id=container_id,
+                generation=allocation_identity.get("generation"))
+            click.echo(f"Failed to prepare debug session: {exc}", err=True)
+            raise SystemExit(1)
         run_cwd = str(qa_workdir)
     else:
         shell_cmd = build_claude_shell_cmd(
@@ -583,13 +610,49 @@ End with a summary of which steps work and which don't, then one of:
     if foreground:
         click.echo(f"Debug: {item['title']}")
         click.echo(f"  Workdir: {qa_workdir}")
-        os.chdir(run_cwd)
-        os.execvpe("bash", ["bash", "-c", shell_cmd], {**os.environ, **env})
+        try:
+            os.chdir(run_cwd)
+            os.execvpe("bash", ["bash", "-c", shell_cmd], {**os.environ, **env})
+        except OSError as exc:
+            if use_containers:
+                container_mod.discard_unowned_container(
+                    cname, container_id=container_id,
+                    generation=allocation_identity.get("generation"))
+            click.echo(f"Failed to launch debug session: {exc}", err=True)
+            raise SystemExit(1)
     else:
-        tmux_mod.new_window_get_pane(
-            session, window_name, shell_cmd,
-            cwd=run_cwd, switch=False, env=env,
-        )
+        launch_error = "no pane returned"
+        try:
+            pane = tmux_mod.new_window_get_pane(
+                session, window_name, shell_cmd,
+                cwd=run_cwd, switch=False, env=env,
+            )
+        except Exception as exc:
+            launch_error = tmux_mod.launch_error_detail(exc)
+            pane = None
+        if not pane:
+            # new_window_get_pane returns None when it cannot find the window
+            # or list its panes *after* tmux created the window and started the
+            # session in it.  Treat an existing window as launched (with a
+            # setup warning) instead of reporting failure — the same guard the
+            # implementation, review and sign-off launchers use — so a live
+            # debug session is not reported as failed.
+            try:
+                existing = tmux_mod.find_window_by_name(session, window_name)
+            except Exception:
+                existing = None
+            if existing:
+                click.echo(f"Launched debug session in window '{window_name}' "
+                           f"(pane lookup failed: {launch_error}).")
+                click.echo(f"  Instruction: {item['title']}")
+                click.echo(f"  Workdir: {qa_workdir}")
+                return
+            if use_containers:
+                container_mod.discard_unowned_container(
+                    cname, container_id=container_id,
+                    generation=allocation_identity.get("generation"))
+            click.echo(f"Failed to create debug window '{window_name}': {launch_error}", err=True)
+            raise SystemExit(1)
         click.echo(f"Launched debug session")
         click.echo(f"  Instruction: {item['title']}")
         click.echo(f"  Workdir: {qa_workdir}")

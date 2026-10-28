@@ -1,6 +1,8 @@
 """Tests for container isolation of Claude sessions."""
 
+import os
 import shlex
+import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
@@ -107,6 +109,35 @@ class TestBuildImage:
         build_image(tag="pm-dev:test", quiet=True)
         args = mock_run.call_args[0][0]
         assert "--uts" not in args
+
+
+class TestHostGitIdentity:
+    """The image bakes the host identity; empty values break every commit."""
+
+    def _env(self, monkeypatch, tmp_path, system=None, global_=None):
+        for path, ident in (("system", system), ("global", global_)):
+            f = tmp_path / f"{path}.gitconfig"
+            if ident:
+                f.write_text(f"[user]\n\tname = {ident[0]}\n\temail = {ident[1]}\n")
+            monkeypatch.setenv(f"GIT_CONFIG_{path.upper()}", str(f))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+
+    def test_system_identity_used_when_no_global(self, monkeypatch, tmp_path):
+        from pm_core.container import _host_git_identity
+        self._env(monkeypatch, tmp_path, system=("Sys User", "sys@example.com"))
+        assert _host_git_identity() == ("Sys User", "sys@example.com")
+
+    def test_global_identity_wins_over_system(self, monkeypatch, tmp_path):
+        from pm_core.container import _host_git_identity
+        self._env(monkeypatch, tmp_path, system=("Sys User", "sys@example.com"),
+                  global_=("Me", "me@example.com"))
+        assert _host_git_identity() == ("Me", "me@example.com")
+
+    def test_no_identity_anywhere(self, monkeypatch, tmp_path):
+        from pm_core.container import _host_git_identity
+        self._env(monkeypatch, tmp_path)
+        assert _host_git_identity() == ("", "")
 
 
 class TestImageExists:
@@ -330,6 +361,10 @@ class TestNestedPodmanRunArgs:
 
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPodman:
+    @pytest.fixture(autouse=True)
+    def unowned(self, monkeypatch):
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+
     """Podman-specific create_container tests."""
 
     @patch("pm_core.container._get_runtime", return_value="podman")
@@ -346,7 +381,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         args = run_call[0]
         assert "--userns=keep-id" in args
 
@@ -366,7 +401,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args = mock_runtime_cmd.call_args_list[0][0]
+        args = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")[0]
         assert "--memory" not in args
         assert "--cpus" not in args
         # The relaxed-sandbox accommodations still apply.
@@ -388,7 +423,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args = mock_runtime_cmd.call_args_list[0][0]
+        args = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")[0]
         assert "--memory" in args
         assert "--cpus" in args
 
@@ -406,7 +441,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         setup_script = run_call[0][-1]  # last arg is the bash -c script
         assert "groupadd" not in setup_script
         assert "useradd" not in setup_script
@@ -426,7 +461,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         setup_script = run_call[0][-1]
         assert "su -" not in setup_script
         assert "su -c" not in setup_script
@@ -445,7 +480,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         args = run_call[0]
         assert "--userns=keep-id" not in args
 
@@ -465,7 +500,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         args = list(run_call[0])
         host_home = str(Path.home())
         assert f"PM_HOST_HOME={host_home}" in args
@@ -484,7 +519,7 @@ class TestCreateContainerPodman:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        run_call = mock_runtime_cmd.call_args_list[0]
+        run_call = next(c for c in mock_runtime_cmd.call_args_list if c.args[0] == "run")
         setup_script = run_call[0][-1]
         assert "groupadd" in setup_script
         assert "useradd" in setup_script
@@ -493,6 +528,10 @@ class TestCreateContainerPodman:
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainer:
+    @pytest.fixture(autouse=True)
+    def unowned(self, monkeypatch):
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
@@ -507,10 +546,10 @@ class TestCreateContainer:
         )
 
         assert cid == "abc123"
-        mock_rm.assert_called_once_with("pm-test")
+        mock_rm.assert_called_once_with("pm-test", container_id="abc123")
 
-        # First call is `docker run`, subsequent calls are readiness checks
-        run_call = mock_docker.call_args_list[0]
+        # Find creation after the immutable-ID preflight inspection.
+        run_call = next(c for c in mock_docker.call_args_list if c.args[0] == "run")
         args = run_call[0]
         assert args[0] == "run"
         assert "-d" in args
@@ -519,7 +558,7 @@ class TestCreateContainer:
         assert args[-3] == "bash"
         assert args[-2] == "-c"
         assert "useradd" in args[-1]
-        assert "sleep infinity" in args[-1]
+        assert "wait $!" in args[-1]  # reaping PID 1, not bare sleep
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.remove_container")
@@ -535,7 +574,8 @@ class TestCreateContainer:
             extra_ro_mounts={Path("/repo"): "/repo"},
         )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/repo:/repo:ro" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
@@ -552,7 +592,8 @@ class TestCreateContainer:
             extra_rw_mounts={Path("/scratch"): "/scratch"},
         )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/scratch:/scratch" in args_str
         # Should NOT have :ro suffix
         assert "/scratch:/scratch:ro" not in args_str
@@ -571,7 +612,8 @@ class TestCreateContainer:
                 workdir=Path("/w"),
             )
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "ANTHROPIC_API_KEY=sk-test" in args_str
         assert "CUSTOM_VAR=custom_val" in args_str
 
@@ -589,7 +631,8 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude" in args_str
         # Should NOT be read-only
         assert f"/home/user/.claude:{_CONTAINER_HOME}/.claude:ro" not in args_str
@@ -602,6 +645,11 @@ class TestCreateContainer:
         """Host ~/.pm/hooks and ~/.pm/hook_receiver.py are bind-mounted so
         Claude Code hooks running inside the container surface events to
         the host (R-Container-Mounts)."""
+        from pm_core.container import container_state_dir, _restart_generation_path
+        # The mount fixture stubs mkdir below, not lifecycle exclusion itself.
+        (container_state_dir() / "locks").mkdir(parents=True, exist_ok=True)
+        _restart_generation_path("test", for_write=True).parent.mkdir(parents=True, exist_ok=True)
+        (container_state_dir() / "identity-generations").mkdir(parents=True, exist_ok=True)
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
@@ -612,7 +660,8 @@ class TestCreateContainer:
              patch.object(Path, "exists", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         # Hooks dir bind-mount: host ~/.pm/hooks → $CONTAINER_HOME/.pm/hooks
         assert f"/home/user/.pm/hooks:{_CONTAINER_HOME}/.pm/hooks" in args_str
         # Standalone receiver bind-mounted at the same absolute host path,
@@ -635,7 +684,8 @@ class TestCreateContainer:
             create_container(name="test", config=config, workdir=Path("/w"))
 
         # .claude.json should NOT be in the docker run args (no bind mount)
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert f"/home/user/.claude.json:{_CONTAINER_HOME}/.claude.json" not in args_str
         # Instead it should be copied via docker cp (second call after run)
         all_calls = mock_docker.call_args_list
@@ -658,7 +708,8 @@ class TestCreateContainer:
              patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert f"{fake_bin}:/usr/local/bin/claude:ro" in args_str
 
     @patch("pm_core.container.build_image")
@@ -709,6 +760,7 @@ class TestCreateContainer:
     @patch("pm_core.container._run_runtime")
     def test_missing_custom_image_raises(self, mock_docker, mock_rm, mock_exists, _mock_running, _mock_runtime):
         """Missing custom image raises a clear error."""
+        mock_docker.return_value = MagicMock(returncode=1, stdout="", stderr="no such container")
         config = ContainerConfig(image="custom:v1")
 
         with pytest.raises(ContainerError, match="not found in docker"):
@@ -728,7 +780,8 @@ class TestCreateContainer:
 
         assert cid == "id"
         # Should not contain /usr/local/bin/claude mount
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/usr/local/bin/claude" not in args_str
 
 
@@ -736,8 +789,9 @@ class TestCreateContainer:
 class TestContainerReuse:
     @patch("pm_core.container.container_is_running", return_value=True)
     @patch("pm_core.container._run_runtime")
-    def test_reuses_running_container(self, mock_docker, mock_running, _mock_runtime):
-        """An existing running container is reused instead of recreated."""
+    def test_reuses_running_container(self, mock_docker, mock_running, _mock_runtime, monkeypatch):
+        """An existing unowned running container is reused instead of recreated."""
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
         mock_docker.return_value = MagicMock(
             returncode=0, stdout="abc123deadbeef\n")
 
@@ -751,41 +805,20 @@ class TestContainerReuse:
         assert "run" not in calls
 
     @patch("pm_core.container.container_is_running", return_value=True)
-    @patch("pm_core.push_proxy.get_proxy_socket_path",
-           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
     @patch("pm_core.push_proxy.proxy_is_alive", return_value=True)
-    @patch("pm_core.push_proxy.start_push_proxy")
-    @patch("pm_core.container._run_runtime")
-    def test_reuse_finds_the_proxy_by_workdir(self, mock_docker, mock_start,
-                                              mock_alive, mock_sock,
-                                              mock_running, _mock_runtime):
-        """The restart-safe lookup needs workdir/session/pr, not the registry.
-
-        Without them a TUI restart (empty in-process registry) would report
-        "dead/missing" for a perfectly live proxy and respawn it.
-        """
-        mock_docker.return_value = MagicMock(
-            returncode=0, stdout="abc123deadbeef\n")
-
-        create_container(name="pm-test", config=ContainerConfig(),
-                         workdir=Path("/w"), allowed_push_branch="pm/pr-1",
-                         session_tag="tag", pr_id="pr-1")
-
-        mock_sock.assert_called_once_with(
-            "pm-test", session_tag="tag", pr_id="pr-1", workdir="/w")
-        mock_start.assert_not_called()
-
-    @patch("pm_core.container.container_is_running", return_value=True)
-    @patch("pm_core.push_proxy.get_proxy_socket_path",
-           return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
-    @patch("pm_core.push_proxy.proxy_is_alive", return_value=False)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
+    @patch("pm_core.push_proxy.validate_shared_proxy_mount")
     @patch("pm_core.container._run_runtime")
-    def test_reuse_restarts_a_dead_proxy_for_the_same_workdir(
-            self, mock_docker, mock_start, mock_alive, mock_sock,
-            mock_running, _mock_runtime):
-        """A dead proxy is respawned for this container's own workdir."""
+    def test_reuse_keys_the_shared_proxy_by_workdir(
+            self, mock_docker, mock_validate, mock_start, mock_alive,
+            mock_running, _mock_runtime, monkeypatch):
+        """Reuse validates the mount for *this* workdir's proxy directory and
+        always goes through ``start_push_proxy``, which reuses a live daemon
+        (after its domain/workdir checks) or respawns a dead one in place —
+        the restart-safe lookup needs workdir/session/pr, not the registry.
+        """
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
         mock_docker.return_value = MagicMock(
             returncode=0, stdout="abc123deadbeef\n")
 
@@ -793,24 +826,28 @@ class TestContainerReuse:
                          workdir=Path("/w"), allowed_push_branch="pm/pr-1",
                          session_tag="tag", pr_id="pr-1")
 
+        mock_validate.assert_called_once_with("abc123deadbeef", "tag", "pr-1", "/w")
         mock_start.assert_called_once_with(
             "pm-test", "/w", "pm/pr-1", session_tag="tag", pr_id="pr-1")
+        mock_alive.assert_called_once_with(
+            "/tmp/pm-push-proxy-tag-pr-1-abcd/push.sock")
 
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.container.container_is_running", return_value=False)
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
     def test_creates_new_when_not_running(self, mock_docker, mock_rm,
-                                          mock_running, mock_exists, _mock_runtime):
-        """A new container is created when none exists."""
+                                          mock_running, mock_exists, _mock_runtime, monkeypatch):
+        """A new container replaces a stopped, unowned allocation."""
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
         mock_docker.return_value = MagicMock(stdout="newid\n", returncode=0)
         config = ContainerConfig()
         cid = create_container(name="pm-test", config=config,
                                workdir=Path("/w"))
         assert cid == "newid"
-        mock_rm.assert_called_once_with("pm-test")
-        # First docker call should be "run"
-        assert mock_docker.call_args_list[0][0][0] == "run"
+        mock_rm.assert_called_once_with("pm-test", container_id="newid")
+        # Creation follows identity-pinned stopped-container cleanup.
+        assert next(c for c in mock_docker.call_args_list if c.args[0] == "run")[0][0] == "run"
 
 
 class TestResolveClaudeBinary:
@@ -849,6 +886,7 @@ class TestCreateQAContainer:
             allowed_push_branch=None,
             session_tag=None,
             pr_id=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -870,6 +908,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag=None,
             pr_id=None,
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
 
     @patch("pm_core.container.create_container")
@@ -884,6 +923,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
         mock_create.assert_called_once_with(
             name="pm-repo-abc-qa-test-s1",
@@ -893,6 +933,7 @@ class TestCreateQAContainer:
             allowed_push_branch="pm/pr-123-feature",
             session_tag="repo-abc",
             pr_id="pr-123",
+            kind="qa", loop_id=None, scenario=None, allocation_identity=None, reuse_identity=None,
         )
 
 
@@ -909,7 +950,7 @@ class TestBuildExecCmd:
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_includes_cleanup_by_default(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
-        assert "docker rm -f" in cmd
+        assert "release_on_exit" in cmd
         # Cleanup is wrapped in a bash trap for robustness against kill-pane
         assert cmd.startswith("bash -c ")
         assert "trap " in cmd
@@ -919,20 +960,10 @@ class TestBuildExecCmd:
     def test_cleanup_removes_proxy_socket(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'",
                              proxy_socket_path="/tmp/pm-push-proxy-x/push.sock")
-        assert "rm -f" in cmd
+        assert "release_on_exit" in cmd
         assert "/tmp/pm-push-proxy-x/push.sock" in cmd
-        # The proxy's metadata sidecar must go too, or rmdir fails and the
-        # directory leaks in /tmp.
-        assert "/tmp/pm-push-proxy-x/proxy.json" in cmd
-        # ...and the start lock, which lives *next to* the directory so
-        # rmdir never takes it.
-        assert "/tmp/pm-push-proxy-x.lock" in cmd
-        assert "rmdir" in cmd
-        assert "/tmp/pm-push-proxy-x" in cmd
-        # Socket removal should come before container rm
-        rm_pos = cmd.index("rm -f")
-        runtime_rm_pos = cmd.index("docker rm")
-        assert rm_pos < runtime_rm_pos
+        # The shared lifecycle release stops proxies only after confirmed removal.
+        assert "rm -f" not in cmd
 
     @patch("pm_core.container._get_runtime", return_value="docker")
     def test_no_cleanup_when_disabled(self, mock_runtime):
@@ -956,7 +987,7 @@ class TestBuildExecCmd:
     def test_uses_configured_runtime(self, mock_runtime):
         cmd = build_exec_cmd("my-container", "claude 'hi'")
         assert "podman exec -it" in cmd
-        assert "podman rm -f" in cmd
+        assert "release_on_exit" in cmd
         # Podman should NOT use -u pm (user is already mapped via --userns=keep-id)
         assert f"-u {_CONTAINER_USER}" not in cmd
 
@@ -993,6 +1024,22 @@ class TestWrapClaudeCmd:
         assert cname == f"{CONTAINER_PREFIX}impl"
         mock_create.assert_called_once()
         mock_exec.assert_called_once()
+        # No allocation_identity supplied: let build_exec_cmd read the
+        # generation this launch wrote instead of pinning it to "".
+        assert mock_exec.call_args[1]["generation"] is None
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid123")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_forwards_captured_generation(self, mock_enabled, mock_config,
+                                          mock_create, mock_exec):
+        wrap_claude_cmd("claude 'hi'", "/workdir", label="impl",
+                        allocation_identity={"id": "cid123",
+                                             "generation": "gen-1"})
+        assert mock_exec.call_args[1]["container_id"] == "cid123"
+        assert mock_exec.call_args[1]["generation"] == "gen-1"
 
     @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
     @patch("pm_core.container.create_container", return_value="cid123")
@@ -1030,6 +1077,8 @@ class TestRemoveContainer:
         # After rm, remove_container polls with inspect until the container is gone.
         # Simulate inspect returning non-zero (container gone) on first poll.
         mock_docker.return_value.returncode = 1
+        mock_docker.return_value.stderr = "Error: No such container: test-container"
+        mock_docker.return_value.stdout = ""
         remove_container("test-container")
         # First call is rm -f, second is inspect (wait loop)
         mock_docker.assert_any_call(
@@ -1038,6 +1087,7 @@ class TestRemoveContainer:
             "inspect", "test-container", check=False, timeout=5)
 
 
+@patch("pm_core.container.current_container_id", lambda name: "id-" + name)
 class TestCleanupContainers:
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
@@ -1050,8 +1100,8 @@ class TestCleanupContainers:
         count = cleanup_qa_containers("pr1", "loop1")
         assert count == 2
         assert mock_rm.call_count == 2
-        mock_rm.assert_any_call("pm-qa-pr1-loop1-s1")
-        mock_rm.assert_any_call("pm-qa-pr1-loop1-s2")
+        mock_rm.assert_any_call("pm-qa-pr1-loop1-s1", container_id="id-pm-qa-pr1-loop1-s1")
+        mock_rm.assert_any_call("pm-qa-pr1-loop1-s2", container_id="id-pm-qa-pr1-loop1-s2")
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
@@ -1077,16 +1127,17 @@ class TestCleanupContainers:
         count = cleanup_qa_containers("pr1", "loop1")
         assert count == 0
 
-    @patch("pm_core.container.remove_container")
-    @patch("pm_core.container._run_runtime")
-    def test_cleanup_session(self, mock_docker, mock_rm):
-        mock_docker.return_value = MagicMock(
-            returncode=0,
-            stdout="pm-repo-abc-impl-pr1\npm-repo-abc-qa-pr1-loop1-s1\n",
-        )
+    @patch("pm_core.container.remove_containers")
+    @patch("pm_core.container_reaper.list_containers")
+    def test_cleanup_session(self, mock_inventory, mock_rm):
+        from pm_core.container_reaper import ContainerInfo
+        names = ["pm-repo-abc-impl-pr1", "pm-repo-abc-qa-pr1-loop1-s1"]
+        mock_inventory.return_value = [
+            ContainerInfo(name=name, session_tag="repo-abc") for name in names]
+        mock_rm.return_value = (names, {})
         count = cleanup_session_containers("repo-abc")
         assert count == 2
-        mock_rm.assert_any_call("pm-repo-abc-impl-pr1")
+        mock_rm.assert_called_once_with(names)
 
     @patch("pm_core.container.remove_container")
     @patch("pm_core.container._run_runtime")
@@ -1200,6 +1251,10 @@ class TestBuildGitSetupScript:
 @patch("pm_core.container._get_runtime", return_value="docker")
 @patch("pm_core.container.container_is_running", return_value=False)
 class TestCreateContainerPushProxy:
+    @pytest.fixture(autouse=True)
+    def unowned(self, monkeypatch):
+        monkeypatch.setattr("pm_core.container_reaper.live_owner_panes", lambda *a: [])
+
     @patch("pm_core.container.image_exists", return_value=True)
     @patch("pm_core.push_proxy.start_push_proxy",
            return_value="/tmp/pm-push-proxy-test/push.sock")
@@ -1212,7 +1267,8 @@ class TestCreateContainerPushProxy:
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
-        with patch.object(Path, "is_dir", return_value=False):
+        with patch.object(Path, "is_dir", return_value=False), \
+             patch("pm_core.push_proxy.proxy_is_alive", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"),
                              allowed_push_branch="pm/pr-123")
 
@@ -1220,7 +1276,8 @@ class TestCreateContainerPushProxy:
             "test", "/w", "pm/pr-123",
             session_tag=None, pr_id=None,
         )
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "/tmp/pm-push-proxy-test:/run/pm-push-proxy" in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
@@ -1236,7 +1293,8 @@ class TestCreateContainerPushProxy:
         with patch.object(Path, "is_dir", return_value=False):
             create_container(name="test", config=config, workdir=Path("/w"))
 
-        args_str = " ".join(mock_docker.call_args_list[0][0])
+        args_str = " ".join(next(c.args for c in mock_docker.call_args_list
+                                 if c.args[0] == "run"))
         assert "push-proxy" not in args_str
 
     @patch("pm_core.container.image_exists", return_value=True)
@@ -1252,11 +1310,12 @@ class TestCreateContainerPushProxy:
         mock_docker.return_value = MagicMock(stdout="id\n", returncode=0)
         config = ContainerConfig()
 
-        with patch.object(Path, "is_dir", return_value=False):
+        with patch.object(Path, "is_dir", return_value=False), \
+             patch("pm_core.push_proxy.proxy_is_alive", return_value=True):
             create_container(name="test", config=config, workdir=Path("/w"),
                              allowed_push_branch="pm/pr-123")
 
-        args = mock_docker.call_args_list[0][0]
+        args = next(c for c in mock_docker.call_args_list if c.args[0] == "run")[0]
         setup_script = args[-1]
         assert "/home/pm/.local/bin/git" in setup_script
         assert "REAL_GIT=/usr/bin/git" in setup_script
@@ -1305,9 +1364,13 @@ class TestCreateContainerPushProxy:
         mock_create.side_effect = PushProxyError(
             "push proxy did not become ready at /tmp/x/push.sock "
             "(workdir=/w, branch=pm/pr-123)")
-        with pytest.raises(ContainerError, match="push proxy unavailable"):
+        from pm_core.container import ContainerLaunchError
+        with pytest.raises(ContainerLaunchError,
+                           match="could not start its push proxy") as exc:
             wrap_claude_cmd("claude", "/w", label="impl",
                             allowed_push_branch="pm/pr-123")
+        assert exc.value.kind == "proxy"
+        assert "did not become ready" in str(exc.value)
 
     @patch("pm_core.push_proxy.get_proxy_socket_path",
            return_value="/tmp/pm-push-proxy-repo-abc-pr-1/push.sock")
@@ -1325,6 +1388,41 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+
+def test_exit_release_survives_deleted_pane_cwd(tmp_path, monkeypatch):
+    """The EXIT-trap release still runs after the pane's workdir is deleted.
+
+    The pane's cwd is the PR workdir; `pm pr cleanup` can remove it while
+    the worker still runs.  Importing pm (its logger resolves the cwd) then
+    raised FileNotFoundError, so the release was silently lost and the
+    container kept running.  Runtime calls must not inherit the dead cwd.
+    """
+    calls = tmp_path / "runtime-calls.log"
+    stub = tmp_path / "podman"
+    stub.write_text(f'#!/bin/sh\necho "$PWD|$*" >> {calls}\n'
+                    'echo "stub runtime failure" >&2\nexit 1\n')
+    stub.chmod(0o755)
+    monkeypatch.setattr("pm_core.container._get_runtime", lambda: str(stub))
+    monkeypatch.setenv("PM_CONTAINER_STATE_DIR", str(tmp_path / "state"))
+    cmd = build_exec_cmd("pm-tag-impl-pr-1", "true", container_id="cid", generation="gen")
+    trap_argv = shlex.split(shlex.split(cmd)[2])
+    assert trap_argv[0] == "trap"
+    release_argv = shlex.split(trap_argv[1])
+
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    env = dict(os.environ, HOME=str(tmp_path / "home"))
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(
+        ["bash", "-c", 'rmdir "$PWD" && exec "$@"', "_", *release_argv],
+        cwd=workdir, env=env, capture_output=True, text=True, timeout=120)
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    recorded = calls.read_text().splitlines()
+    assert recorded, "release never reached the runtime"
+    assert all(line.split("|", 1)[0] == "/" for line in recorded)
 
 
 # ---------------------------------------------------------------------------
