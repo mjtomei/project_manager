@@ -1116,7 +1116,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
 
-    click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
+    if pr_entry.get("status") == "in_progress":
+        click.echo(f"\nPR {_pr_display_id(pr_entry)} is now in_progress on {machine}")
+    else:
+        # Starting never regresses a PR (e.g. an impl reopened on an
+        # in_review PR keeps it in_review).
+        click.echo(f"\nPR {_pr_display_id(pr_entry)} stays {pr_entry.get('status')}; "
+                   f"implementation running on {machine}")
     click.echo(f"Work directory: {work_path}")
 
     prompt = prompt_gen.generate_prompt(data, pr_id, session_name=pm_session)

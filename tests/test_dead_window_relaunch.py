@@ -116,6 +116,13 @@ class TestPrStartDeadWindow:
         assert "Closed window 'pr-001' (its session has ended)" in result.output
         assert "Switched to existing window" not in result.output
 
+    def test_in_review_pr_is_not_reported_as_in_progress(self, tmp_path):
+        # QA S78: `s` on an in_review PR said "is now in_progress" while
+        # the status (correctly) stayed in_review.
+        result, _ = self._invoke(tmp_path, dead=True)
+        assert "is now in_progress" not in result.output
+        assert "stays in_review" in result.output
+
     def test_refused_relaunch_keeps_dead_window(self, tmp_path):
         # A governor refusal must leave the stopped session's transcript
         # readable (QA S66): the window is closed only once admitted.
