@@ -61,8 +61,9 @@ _log = configure_logger("pm.qa_loop")
 VERDICT_PASS = "PASS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
-# Terminal state for a run the user stopped before any plan existed.  It is
-# deliberately not in ALL_VERDICTS: nothing is reported about the PR (no
+# Terminal state for a run the user stopped before it produced a QA result:
+# during planning, or during execution before any scenario reported.  It is
+# deliberately not in ALL_VERDICTS: nothing was determined about the PR (no
 # incomplete coverage, no missing plan), so it must never parse as a result.
 VERDICT_STOPPED = "STOPPED"
 

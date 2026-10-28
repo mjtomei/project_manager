@@ -390,9 +390,10 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             if verdict == "NEEDS_WORK":
                 return phase, "waiting", "QA NEEDS_WORK; returning to review"
             if verdict == "STOPPED":
-                # A user stop before any plan existed: nothing was decided
-                # about the PR, and auto-start deliberately does not relaunch
-                # it (``QA_HOLD_VERDICTS``), so name the manual re-run.
+                # A user stop that left no QA result (planning never finished,
+                # or no scenario reported): nothing was decided about the PR,
+                # and auto-start deliberately does not relaunch it
+                # (``QA_HOLD_VERDICTS``), so name the manual re-run.
                 return (phase, "waiting",
                         "last QA run was stopped; press t / z t to re-run QA")
             if verdict:
