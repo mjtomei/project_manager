@@ -726,12 +726,14 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
     The separator must be printable: tmux rewrites control characters in
     format output to ``_`` when the server runs under a non-UTF-8 locale
     (``LC_ALL=C``), which silently turned a tab-separated query into one
-    unparsable field.  The session name comes last (``maxsplit=2``) so it
-    may itself contain the separator.
+    unparsable field.  The session name comes last (``maxsplit=3``) so it
+    may itself contain the separator.  A user's own view grouped with
+    *base* under another name (``tmux new-session -t base -s myview``)
+    belongs to the group too (S121).
     """
     result = _run(
         _tmux_cmd("list-sessions", "-F",
-                  "#{session_attached}|#{window_id}|#{session_name}",
+                  "#{session_attached}|#{window_id}|#{session_group}|#{session_name}",
                   socket_path=socket_path),
         text=True,
     )
@@ -739,11 +741,12 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
         return {}
     active = {}
     for line in result.stdout.splitlines():
-        parts = line.split("|", 2)
-        if len(parts) != 3:
+        parts = line.split("|", 3)
+        if len(parts) != 4:
             continue
-        attached, wid, name = parts
-        if (name == base or name.startswith(base + "~")) and attached.isdigit():
+        attached, wid, group, name = parts
+        if (name == base or name.startswith(base + "~") or group == base) \
+                and attached.isdigit():
             if int(attached) > 0 and wid:
                 active[name] = wid
     return active
