@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T09:32:32.172675+00:00'
+  updated_at: '2026-10-28T10:03:19.186740+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14101,6 +14101,18 @@ prs:
       passes with it unset).'
     created_at: '2026-10-28T09:32:32Z'
     last_edited: '2026-10-28T09:32:32Z'
+  - id: note-a9bb6ea
+    text: 'Review i8: (1) Repeat close of a legacy closed entry with no closed_at
+      no longer stamps "now" — only a fresh closure records one (test_repeat_close_does_not_invent_a_closure_time).
+      (2) Incidental fix in the same contract: sync_from_github could rewrite a locally
+      merged PR to in_review (GitHub OPEN) or closed (GitHub CLOSED), erasing merged_at/merge
+      evidence and re-blocking dependents; merged is now terminal in sync alongside
+      closed, at snapshot time and inside the locked apply (CLI + TUI startup sync),
+      while a merge discovered on GitHub still finalizes. 4 new tests, all fail on
+      i7 HEAD. Spec synced (R9, R11 items 24/25, A6). Full suite 4122 passed, 1 skipped
+      (/pm-captures/review-c02f-i8/full-suite.log).'
+    created_at: '2026-10-28T10:03:19Z'
+    last_edited: '2026-10-28T10:03:19Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
