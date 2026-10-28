@@ -60,15 +60,28 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   disappears. This post-merge state is the main new surface.
 - Scenarios 13-17 PASSed at 481644d5 and QA 18-23 PASSed at 25fb1918 (the
   re-run pointer, `pm pr show` resolution rendering, the real #250 shape,
-  bounded evidence, concurrent operators, hostile project.yaml). Since then
-  the only change is the hand base merge above, which also brought the base's
-  own behaviours into overlapping code (`pm_core/cli/pr.py`: the `pr_start`
-  session-aware message and the `pr_qa_run_bg` runtime-state mirror; plus
-  grouped-session window selection in `pm_core/tmux.py`, pane registration,
-  and the TUI popup picker). `pm_core/cli/pr.py` is the one code file both
-  sides changed and Git merged cleanly — exercise both sides' behaviour
-  together, plus the PR's own sign-off code calling into the base's changed
-  tmux/pane-registry helpers.
+  bounded evidence, concurrent operators, hostile project.yaml). Scenarios
+  27-32 PASSed at 91011ee4 (hand-reconciled integration, merged-base
+  behaviours, concurrent operators, publication guards, the resolver at the
+  user surface, the TUI decision surface). Scenario 28's one finding — a
+  killed window lingering in the pane registry — was fixed in 9f930e5f.
+- Since 91011ee4 the branch has gained ~40 review-loop commits that are the
+  main new surface for scenarios 33+: the hand-edited-state contract across
+  the readers and writers of `pm/project.yaml` (non-string
+  description/workdir/signoff, scalar depends_on, malformed notes; the
+  note/dependency *write* paths too), `pm pr note add/edit/delete` keeping
+  note ids unique, `pm pr edit`'s lossless template round-trip (unicode,
+  markdown headings, untouched and unrepresentable notes), the sign-off
+  evidence block + approved base in `pm pr show`, the base-tag check on a
+  MERGE approval, the apply candidate-tree equality guard and `_repo_lock`
+  serialization, and carrying the base assessment across a failed re-check.
+- The hand base merge above also brought the base's own behaviours into
+  overlapping code (`pm_core/cli/pr.py`: the `pr_start` session-aware message
+  and the `pr_qa_run_bg` runtime-state mirror; plus grouped-session window
+  selection in `pm_core/tmux.py`, pane registration, and the TUI popup
+  picker). `pm_core/cli/pr.py` is the one code file both sides changed and Git
+  merged cleanly — exercise both sides' behaviour together, plus the PR's own
+  sign-off code calling into the base's changed tmux/pane-registry helpers.
 - Building the "base already merged by hand" fixture: record the conflicting
   check first (`--record` or a sign-off launch), then in the PR workdir
   `git fetch` and `git merge <base>` by hand keeping both sides' records and
@@ -315,6 +328,90 @@ absent instead of crashing the command.
 - GIVEN a branch that contains the base (a hand merge). WHEN the user opens
   the review window or reads a prompt that names the PR diff. THEN the diff
   shows only the PR's own changes, not the base merge's files.
+- GIVEN a resolved candidate and a PR branch that moved since the check (or a
+  merge driver that changes the merge result). WHEN the user applies. THEN the
+  apply aborts with a reason naming the mismatch, no merge commit is created,
+  and the workdir HEAD/index is unchanged.
+- GIVEN a transient base-fetch failure (an `error` check) after the branch
+  already contains the base, followed by a successful re-check. WHEN the user
+  launches sign-off. THEN the earlier base assessment (changed-file count,
+  overlap, behaviour-relevant changes) is still carried and a MERGE still
+  requires the reuse/checks statement — no silent exemption.
+- GIVEN a base that changed 21-30 (or more) behaviour-relevant settings. WHEN
+  the user launches sign-off. THEN the window opens and lists them with a
+  "… N more" note instead of the launch failing.
+
+### R12. PR metadata editing is lossless; note writes preserve hand-written state
+GIVEN a PR whose title/description contain an apostrophe, `--`, a unicode dash
+and markdown headings, and notes added through pm.
+WHEN the user opens the PR in the edit template and saves without changing
+anything.
+THEN the stored title/description/notes are unchanged (no en-dash/em-dash
+laundering, no "description updated"), every note keeps its id and
+`created_at`, and `pm pr show` / `pm pr note list` show the same content.
+
+GIVEN notes the template cannot render on one bullet line (a multi-line text, a
+text ending in a timestamp-looking suffix, an empty text without `created_at`)
+and a note member that is not a mapping.
+WHEN the user edits one other note and saves, then runs `pm pr note add/edit/
+delete`.
+THEN each untouched/unrepresentable note survives exactly once (not dropped,
+not duplicated as a fragment), malformed members are preserved verbatim, and no
+command raises a traceback.
+
+GIVEN a PR.
+WHEN the user adds the exact same note text twice, including two simultaneous
+adds from separate terminals.
+THEN the notes get distinct ids, `pm pr note list` shows both, `pm pr note
+delete <one id>` removes only that one, and a later metadata-conflict
+resolution still succeeds (the resolver refuses a duplicate id).
+
+### R13. Hand-edited project.yaml is tolerated by every reader and prompt launch
+GIVEN a PR with a non-string description (an unquoted date), a non-string
+`workdir`, a scalar `depends_on`, a scalar `signoff` record, and a `notes` list
+holding a non-mapping member.
+WHEN the user runs `pm pr list`, `pm pr show`, `pm pr note list`, opens the TUI
+home/tree, and launches sign-off (plus the impl/review prompts).
+THEN each reads the bad values as absent (or `?` for a note), the tree does not
+crash, and the session window opens instead of the launch failing.
+
+GIVEN an integration record with a hand-edited shape (a non-mapping record, a
+non-list overlap, a non-string resolution path, a malformed `unresolved`
+value).
+WHEN the user runs `pm pr show` and `pm pr merge`.
+THEN the malformed parts read as absent, the per-path labels stay honest, and
+the merge gate still requires the evidence statement — never a traceback.
+
+GIVEN a `project.yaml` carrying a duplicate id inside a nested list, or a
+duplicate note id hidden behind a malformed member.
+WHEN the user runs `pm pr signoff integrate`.
+THEN the result is `conflict` naming the duplicate, and no merge is applied.
+
+### R14. The approval's provenance is visible and bound to the base it assessed
+GIVEN an applied resolved candidate with a recorded MERGE approval.
+WHEN the user runs `pm pr show`.
+THEN the Sign-off section shows the verdict, approved head, approved base
+(`branch@sha`), reviewed head, candidate tree, reused evidence with its reason
+(or targeted checks) and required return stage, and the Integration section
+names the candidate tree and the applied merge.
+
+GIVEN a report that names the correct candidate but another base (or omits /
+mistypes the candidate tag).
+WHEN the user records MERGE or runs the merge.
+THEN the record/merge is refused with a message naming the mismatch, and no
+approval is written.
+
+GIVEN a metadata conflict whose resolution failed or was superseded.
+WHEN the user runs `pm pr signoff integrate --record`.
+THEN `integration.json` names no delta file that was never written, the output
+lists the unresolved conflicts, and `pm pr show` labels the attempt
+`Resolution attempted (NOT resolved)`.
+
+GIVEN a carried resolution whose delta file is unreadable (binary or a null
+byte in the path).
+WHEN the user launches sign-off.
+THEN the launch succeeds, the provenance is still shown, and the delta reads as
+absent — no bare "Integration check failed".
 
 ## Pass / Fail criteria
 

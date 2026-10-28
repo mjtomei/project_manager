@@ -37579,6 +37579,21 @@ prs:
       (not `$TEST_DIR/transcripts`). (6) Captures at /pm-captures/scenarios/34/{01-readers,02-tui-tree-home,03-merge-gate,04-field-conflict,05-duplicate-ids,06-auto-sequence}.'
     created_at: '2026-10-28T09:14:39Z'
     last_edited: '2026-10-28T09:14:39Z'
+  - id: note-b026714
+    text: 'QA planner 2026-10-28: extended pm/specs/pr-5cee3d5/qa.md for the review-loop
+      fixes landed since 91011ee4 — new R12 (lossless pm pr edit template round-trip:
+      unicode, markdown headings, untouched/unrepresentable notes; note add/edit/delete
+      preserve malformed members and keep ids unique), R13 (hand-edited project.yaml
+      values tolerated by every reader and prompt launch; duplicate ids refused),
+      R14 (sign-off evidence block + approved base in pm pr show; report bound to
+      another base refused; delta pointer only when written), plus edge cases for
+      the apply head/candidate-tree guard, carrying the base assessment across an
+      error check, and the 21-30 behaviour list. Planned scenarios 33-38: edit/note
+      round-trip, hostile project.yaml across readers/launch, apply guards + carried
+      base assessment, approval provenance, concurrent operators, merged-base behaviours/pane
+      registry.'
+    created_at: '2026-10-28T08:05:47Z'
+    last_edited: '2026-10-28T08:05:47Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
