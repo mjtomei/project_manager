@@ -11858,7 +11858,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T08:18:32.829676+00:00'
+  updated_at: '2026-10-28T08:53:30.238571+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15126,6 +15126,25 @@ prs:
       container inventory" (one poll after the floor launch).'
     created_at: '2026-10-28T08:18:32Z'
     last_edited: '2026-10-28T08:18:32Z'
+  - id: note-1b06e97
+    text: 'QA S84 PASS (S82 rerun at 1afa1b32 = code b6338490; real rootless Podman
+      3.4.4, unmodified build-base incl. Chromium smoke, fake agents; evidence /pm-captures/scenarios/84/manifest.md).
+      No code change. S1: A run2 first container ~4-5 s after z t (run1 ~5.3 s), no
+      qa-run-start for A, no lock wait; B supersede removed 3 in ~4 s, renumbered
+      s11-s20; zz t during two verifications -> TUI "QA complete: INPUT_REQUIRED [finalize:
+      skipped — run was stopped]", no B finalize pane, qa_status only s11/s12 IR,
+      release "removed 2, kept 2 (kept s11, s12 IR)", s15-s20 never created; A s19/s20
+      VERIFIED/300 then FINALIZE_DONE, final release removed 0; end 6 = kept set;
+      sampler 0 rows after 37 removals. S2: nogit review fails rc1 with real git:
+      command not found, no leftovers, C impl/proxy unchanged; retry rc0 Opened review
+      window, proxy push ok. S3: merge pushed, pane-exit signoff + reconcile[manual]
+      removed 1 stopped 1 proxy; breadcrumb restart trigger=merge_restart, startup
+      removed 2 kept 3, h/l 16-28 ms during pass; final 3 unchanged; plain restart
+      trigger=initial, PM_TUI_RESTART_TRIGGER unset. Wording only: session is pm-<tag>
+      (not <tag>) for show-environment -t; s0 verdict is "interactive"; raw uid-1000
+      key-users +5 all from other sandboxes container keyrings (ours 11->11).'
+    created_at: '2026-10-28T08:53:30Z'
+    last_edited: '2026-10-28T08:53:30Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
