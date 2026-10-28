@@ -399,7 +399,7 @@ def qa_run(instruction_id: str, pr_id: str | None):
         steps=f"Follow the instruction file {filename}",
     )
 
-    loop_id = f"cli-{pr_id}"
+    loop_id = qa_loop.instruction_run_loop_id(pr_id)
     qa_workdir = qa_loop.create_qa_workdir(pr_id, loop_id)
     # The loop id is fixed, so an earlier run's start record is still here.
     # It names that run's process, long gone: auto-start would take this

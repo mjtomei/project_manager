@@ -598,23 +598,28 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     if pending.get(pr_id) != result:
         pending[pr_id] = result
         stage, reason = result
+        # A sign-off REQA start waits here too: name what owes the QA run
+        # (S120: "Review PASS" was logged for a REQA's deferred start).
+        reqa = pr_id in _reqa_waiting(app)
+        cause = "Sign-off REQA" if reqa else "Review PASS"
         if stage == "driven":
-            _log.info("auto_qa: %s review passed; QA starts once %s ends",
-                      pr_id, reason)
+            _log.info("auto_qa: %s %s; QA starts once %s ends", pr_id,
+                      "sign-off REQA" if reqa else "review passed", reason)
             app.log_message(escape(
-                f"Review PASS for {pr_id} — QA starts once {reason} ends"),
+                f"{cause} for {pr_id} — QA starts once {reason} ends"),
                 sticky=10)
             return
         locked = reason == store.LOCK_BUSY_REASON
-        _log.warning("auto_qa: %s review passed; QA %s waits until "
+        _log.warning("auto_qa: %s %s; QA %s waits until "
                      "project.yaml %s: %s", pr_id,
+                     "sign-off REQA" if reqa else "review passed",
                      "start" if stage == "launch" else "transition",
                      "is unlocked" if locked else "loads again", reason)
         # Sticky: the "Review loop done … PASS" line logged just before is
         # sticky too, and would otherwise hide this one (S48: logged only
         # as "hidden by sticky message").  It names the review PASS itself.
         app.log_message(escape(
-            f"Review PASS for {pr_id} — waiting for project.yaml "
+            f"{cause} for {pr_id} — waiting for project.yaml "
             f"{'to be unlocked' if locked else 'to load'} to start QA: "
             f"{reason}"), sticky=10)
 

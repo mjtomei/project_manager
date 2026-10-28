@@ -880,6 +880,24 @@ class TestLatestQaStatusPath:
         with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
             assert paths.latest_qa_status_path("pr-001") is None
 
+    def test_instruction_run_is_skipped(self, tmp_path):
+        """S120: a ``pm qa run`` of one instruction is never the PR's QA,
+        even when its status is the newest."""
+        import os
+        from pm_core import paths
+        qa = tmp_path / "qa"
+        full = qa / "pr-001-aaaa" / "qa_status.json"
+        cli = qa / "pr-001-cli-pr-001" / "qa_status.json"
+        for st, mtime in ((full, 1000), (cli, 2000)):
+            st.parent.mkdir(parents=True)
+            st.write_text("{}")
+            os.utime(st, (mtime, mtime))
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") == full
+        full.unlink()
+        with patch("pm_core.paths.workdirs_base", return_value=tmp_path):
+            assert paths.latest_qa_status_path("pr-001") is None
+
     def _two_clone_runs(self, tmp_path):
         """This clone's older run and another clone's newer one of pr-001
         (two clones share ~/.pm/workdirs/qa), plus an untagged legacy run."""

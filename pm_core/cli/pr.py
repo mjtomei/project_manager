@@ -4032,7 +4032,7 @@ def pr_auto_sequence(pr_id: str):
             if awaiting == "qa":
                 if (qa_win and _qa_run_started_since(pr_id, return_ts)) \
                         or _qa_run_starting(pr_id, return_ts) \
-                        or _qa_run_driven_since(pr_id, return_ts):
+                        or _qa_run_driven_since(pr_id):
                     # The TUI started the re-run while project.yaml was
                     # busy: its clear of ``awaiting`` is still pending (the
                     # poll tick retries it), and a tick queued on the lock
@@ -4040,7 +4040,11 @@ def pr_auto_sequence(pr_id: str):
                     # is the re-run's, not the judged run's (or it has
                     # none yet: it is still replacing the judged run's).  A
                     # live driver of that run counts even after the user
-                    # closed its qa window (S89).
+                    # closed its qa window (S89).  So does a run another
+                    # process still drives from before the return (the
+                    # user's ``pm qa run``): a launch now kills its windows
+                    # as stale and runs a second loop beside it; the re-run
+                    # starts once it ends (S120).
                     click.echo("running: qa")
                     return
                 # Sign-off sent this back to QA and no driver has started
@@ -4132,9 +4136,13 @@ def pr_auto_sequence(pr_id: str):
             # ``awaiting`` relaunch leaves this driver alone until it starts.
             # A concurrent qa tick may already have claimed it in between
             # the hop and here: that tick launches, this one must not.
+            # A QA run another process still drives (the user's ``pm qa
+            # run``) is left to finish: the qa tick launches the re-run once
+            # it ends, as ``awaiting`` stays set (S120).
             from pm_core.signoff import claim_return_launch
             _check_qa_launch(root, pr_id)
-            if claim_return_launch(root, pr_id, "qa"):
+            if not _qa_run_driven_since(pr_id) \
+                    and claim_return_launch(root, pr_id, "qa"):
                 _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")
             return

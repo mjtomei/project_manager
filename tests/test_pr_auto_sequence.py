@@ -507,6 +507,32 @@ class TestSignOff:
         # sign_off entry runs a fresh router (no stale-verdict replay loop).
         mock_retire.assert_called_once()
 
+    def test_reqa_leaves_a_run_driven_elsewhere_to_finish(self, runner,
+                                                         tmp_path):
+        """S120: the user's ``pm qa run`` still runs when sign-off says
+        REQA.  The hop tick must not launch qa-run-bg over it (that kills
+        its windows as stale and runs a second loop beside it): the return
+        stays awaiting qa, and a later qa tick launches once it ends."""
+        pr = _pr("sign_off")
+        data = _data_with(pr)
+        with patch("pm_core.cli.pr.state_root", return_value=tmp_path), \
+             patch("pm_core.cli.pr.store.load", return_value=data), \
+             patch("pm_core.cli.pr._get_pm_session", return_value="pm-test"), \
+             patch("pm_core.cli.pr._check_signoff_verdict",
+                   return_value="SIGNOFF_REQA"), \
+             patch("pm_core.cli.pr.store.locked_update",
+                   side_effect=_locked_update_runs(data)), \
+             patch("pm_core.cli.pr._retire_signoff_window"), \
+             patch("pm_core.cli.pr._qa_run_driven_since", return_value=True), \
+             patch("pm_core.cli.pr._launch_qa_detached") as mock_qa:
+            result = runner.invoke(pr_auto_sequence, ["pr-001"])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "sign_off: re-qa"
+        assert pr["status"] == "qa"
+        assert pr["signoff_return"]["awaiting"] == "qa"
+        assert "launch_claim" not in pr["signoff_return"]
+        mock_qa.assert_not_called()
+
     def test_bounce_retires_window_but_recommendation_does_not(self, runner, tmp_path):
         """A bounce retires the sign-off window; ready_to_merge/blocked don't
         (the PR legitimately stays in sign_off, so its window/verdict persist)."""

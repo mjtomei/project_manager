@@ -524,6 +524,29 @@ def test_reqa_route_waits_for_a_run_driven_elsewhere(world_factory):
     assert w.merges() == []
 
 
+def test_reqa_start_waiting_on_a_busy_lock_names_the_reqa(world_factory):
+    """S120: the run another process drove ended while project.yaml was
+    locked.  The deferred REQA start waits for the lock and says so as the
+    sign-off REQA's QA, not as a review PASS."""
+    app, w = world_factory(stop=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=True), \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
+        _poll(app)
+        sq.assert_not_called()
+    with patch("pm_core.tui.qa_loop_ui.start_qa", return_value=False), \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False):
+        review_loop_ui._start_qa_after_review(app, PR)   # lock busy
+    assert review_loop_ui._pending_auto_qa(app)[PR] == (
+        "launch", store.LOCK_BUSY_REASON)
+    waits = [m for m in app.logs if "waiting for project.yaml" in m]
+    assert waits and all(m.startswith(f"Sign-off REQA for {PR}")
+                         for m in waits)
+    assert not any(m.startswith("Review PASS") for m in app.logs)
+
+
 def test_review_route_restarts_review_loop(world_factory):
     app, w = world_factory(stop=True)
     _qa_pass(app)

@@ -503,6 +503,76 @@ def test_cli_qa_return_whose_rerun_is_still_starting_is_left_to_it(
         claim.assert_not_called()
 
 
+@pytest.mark.parametrize("owner_alive, launched", [(True, False),
+                                                    (False, True)])
+def test_cli_qa_return_waits_for_a_run_driven_from_before_it(
+        tmp_path, monkeypatch, owner_alive, launched):
+    """S120: the user's ``pm qa run`` started before sign-off's REQA return
+    and its process still drives it.  A tick must not launch the re-run
+    over it (qa-run-bg kills its windows as stale and runs a second loop
+    beside it); once that process is gone the tick launches."""
+    import json
+    from pm_core import qa_loop
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ret = time.time() - 60
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    _qa_run_record(tmp_path / "home", ret - 65, loop_id=f"cli-{PR}")
+    qa_wd = (tmp_path / "home" / ".pm" / "workdirs" / "qa"
+             / f"{PR}-{int(ret - 65)}")
+    owner = os.getppid() if owner_alive else 2 ** 22 + 12345
+    (qa_wd / "qa_resume.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": f"cli-{PR}", "owner_pid": owner,
+         "owner_start": qa_loop._proc_start_time(owner)}))
+    claim = MagicMock(return_value=True)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts),
+        **{"pm_core.cli.pr._qa_status_for": {"return_value": (None, None)},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": {"id": "@7", "index": "3"}},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    if launched:
+        assert result.output.strip() == "running: qa (launched)"
+        qa.assert_called_once()
+    else:
+        assert result.output.strip() == "running: qa"
+        qa.assert_not_called()
+        claim.assert_not_called()
+
+
+def test_cli_instruction_run_pass_after_the_return_is_not_the_rerun(
+        tmp_path, monkeypatch):
+    """S120: a ``pm qa run`` of one instruction that ends PASS after the
+    REQA return is the newest qa_status.json, but not the PR's QA: the tick
+    launches the full re-run instead of advancing to sign-off on it."""
+    import json
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    ret = time.time() - 60
+    ts = datetime.fromtimestamp(ret, timezone.utc).isoformat()
+    qa_root = tmp_path / "home" / ".pm" / "workdirs" / "qa"
+    for name, mtime in ((f"{PR}-judged", ret - 300),
+                        (f"{PR}-cli-{PR}", ret + 30)):
+        (qa_root / name).mkdir(parents=True)
+        st = qa_root / name / "qa_status.json"
+        st.write_text(json.dumps({"pr_id": PR, "overall": "PASS"}))
+        os.utime(st, (mtime, mtime))
+    claim = MagicMock(return_value=True)
+    result, _, _, qa = _seq(
+        tmp_path, _returned("qa", "qa", ts=ts),
+        **{"pm_core.paths.pm_home": {"return_value": tmp_path / "home" / ".pm"},
+           "pm_core.cli.pr.tmux_mod.find_window_by_name":
+               {"return_value": None},
+           "pm_core.qa_loop.get_pm_session": {"return_value": "pm-test"},
+           "pm_core.cli.pr._check_qa_launch": {"return_value": None},
+           "pm_core.signoff.claim_return_launch": {"new": claim}})
+    assert result.exit_code == 0, result.output
+    assert "advanced: sign_off" not in result.output
+    assert result.output.strip() == "running: qa (launched)"
+    qa.assert_called_once()
+
+
 @pytest.mark.parametrize("awaiting", ["qa", None])
 @pytest.mark.parametrize("owner_alive, launched", [(True, False),
                                                     (False, True)])

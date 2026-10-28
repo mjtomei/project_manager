@@ -300,6 +300,18 @@ def create_qa_workdir(pr_id: str, loop_id: str) -> Path:
     return workdir
 
 
+def instruction_run_loop_id(pr_id: str) -> str:
+    """Loop id of ``pm qa run <instruction> --pr <pr_id>``: one instruction
+    checked against the PR, never the PR's QA."""
+    return f"cli-{pr_id}"
+
+
+def is_instruction_run(pr_id: str, qa_workdir: str | Path) -> bool:
+    """Whether *qa_workdir* is a ``pm qa run`` of one instruction against
+    *pr_id* (see :func:`instruction_run_loop_id`)."""
+    return Path(qa_workdir).name == f"{pr_id}-{instruction_run_loop_id(pr_id)}"
+
+
 def _scenario_transcript_path(qa_workdir: str | Path, scenario_index: int) -> str:
     """Return the path where a scenario's transcript symlink should live."""
     return str(Path(qa_workdir) / f"transcript-s{scenario_index}.jsonl")
