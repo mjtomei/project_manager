@@ -973,7 +973,19 @@ S13, S14, S22, S101.
   thirty-fifth pass. The session is resolved once per process: the
   pane's or popup client's pm session inside tmux, with the grouped
   `~N` suffix stripped, otherwise the session named after the cwd's git
-  root. Only a host without tmux uses the shared path. Given two clones,
+  root. A user's own view grouped with the pm session under another name
+  (`tmux new-session -t pm-<tag> -s myview`) resolves through its
+  `#{session_group}` everywhere: the TUI's own session name and pidfile,
+  CLI→TUI commands and `_get_current_pm_session` (S118 91b259bd), the
+  `C-b P`/`C-b M` popups, the `after-split-window` and `window-resized`
+  pane hooks (one pane registry, `pm-<tag>.json`; no stray
+  `<view>.json`), and the picker's ● active-window markers for every
+  attached client of the group (S121 89d914a0, c1027cd6). Open point for
+  the forty-third pass (S124): `pane_registry.pm_session_name` and
+  `_get_current_pm_session` skip the group lookup when the view's own
+  name starts with `pm-` (e.g. `pm-laptop`), and `_get_current_pm_session`
+  strips a `~` before looking the group up (a view named `my~view`).
+  The TUI's `_own_session_name` asks the group first and is not affected. Only a host without tmux uses the shared path. Given two clones,
   When one clone's run writes running, done or a verdict, Then the
   other clone's picker, auto-start and mount sweep never see it (S93).
   Given records written at the shared path by an older pm, When a
@@ -1046,14 +1058,33 @@ S13, S14, S22, S101.
     once the CLI run ends. The CLI run's windows are kept, and its
     one-instruction verdict is never taken as the re-run's result. If
     project.yaml is busy when the start fires, it waits for the lock and
-    is not dropped. Known gap, filed and not in scope: pr-db3bf10. The
-    pending start lives only in memory, so a TUI restart while it waits
-    loses it. `awaiting: qa` stays on disk, and `t` (or auto-start)
-    starts the re-run.
+    is not dropped; its sticky line then reads "Sign-off REQA for <pr> —
+    waiting for project.yaml to be unlocked to start QA" (d7e65156; it
+    said "Review PASS for" before). Known gap, filed and not in scope:
+    pr-db3bf10. The pending start lives only in memory, so a TUI restart
+    while it waits loses it. `awaiting: qa` stays on disk. After a plain
+    restart `t` only focuses the leftover `qa-<pr>` window; `z t` (or an
+    auto-start pass) starts the re-run (S119 story 7; the earlier "`t`
+    starts the re-run" was inaccurate).
+  - An interrupted `pm qa run` (Ctrl-C: no verdict, snapshot kept) is
+    never adopted by the TUI resume scan after a restart. Only a full QA
+    run's snapshot is resumed (S119 b402464e, c774b5af).
   - A `pm qa run` started before a sign-off REQA is not the re-run's
-    driver. An auto-sequence tick of that PR must not take its
-    `qa_status.json` as the re-run's verdict, and must not start a
-    second loop over it. The forty-second pass probes this (S120).
+    driver, but it holds the PR until it ends (S120 d7e65156, c774b5af).
+    An auto-sequence tick in the awaiting-qa branch, and the tick's
+    sign_off→qa hop, start nothing while any QA run of the PR that this
+    pm session launched still has a live driver, however old; the tick
+    prints `running: qa`. The next tick after the run ends launches one
+    `qa-run-bg`. A one-instruction run's `qa_status.json` (workdir
+    `<pr>-cli-<pr>`) is never the PR's QA status anywhere: ticks never
+    advance on it, and the sign-off prompt's QA verdict and the finalize
+    prompt's pointer name the latest full run. master has the same tick
+    defect (pr-d7d4601, close when this merges).
+  - A TUI mount sweep (`pm tui restart`) keeps the `qa` runtime entry
+    of a run another live process drives (a tick's `qa-run-bg` or a
+    `pm qa run`), so the picker keeps its `[working]` badge until the
+    verdict (S121 89d914a0). An entry whose driver is dead is still
+    swept.
 
 ### Generic providers and per-PR configuration (2026-10-27; impl.md R10–R13)
 - **RQ48** (R10, 87fd093f) Generic router provider. Given a router
@@ -2452,6 +2483,59 @@ S13, S14, S22, S101.
       commands, picker popups from PR windows (badges), ticks and
       `pm qa run` from view panes (runtime records under `pm-<tag>`),
       and non-pm and ungrouped sessions as controls.
+    Results (run a36d03e5d7e46754, every scenario mp4):
+    - S119 NEEDS_WORK. c9ce4f6a held live in all 7 stories (one full QA
+      on the poll after the CLI run exits; auto-start on, off and
+      removed; CLI NEEDS_WORK/INPUT_REQUIRED; busy project.yaml; two
+      PRs). Finding: after a Ctrl-C `pm qa run`, the TUI resume scan
+      adopted the one-instruction run as the PR's QA and handed it to
+      sign-off (2 of 5 runs). Fixed in b402464e. Story 7 corrected the
+      RQ56 text on `t` after a restart.
+    - S120 NEEDS_WORK. Ticks launched `qa-run-bg` over a live
+      `pm qa run` started before the return (TUI-deferred and tick-only
+      variants), and advanced to sign_off on the CLI run's PASS. Fixed in
+      d7e65156. master has the same defect (pr-d7d4601). Incidental:
+      pr-0ef7f21 (`pm tui view` reports a dead pane with rc 0).
+    - S121 NEEDS_WORK. 91b259bd held live. Gaps fixed in 89d914a0 (popups
+      and pane hooks resolve a view through its group; the mount sweep
+      keeps a driven run's `qa` entry) and c1027cd6 (● for a view's
+      active window).
+    - Review 325b i1 c774b5af (rename, the since filter dropped, the
+      resume skip uses `instruction_run_loop_id`), i2 PASS.
+  - Forty-third pass (S122+), delta-only, QA43 planner 2026-10-28, HEAD
+    c774b5af. Product changes since run a36d03e5d7e46754 are b402464e,
+    d7e65156, 89d914a0, c1027cd6 and c774b5af. Each ran live only in its
+    finding's scenario, right after the fix, and c774b5af has not run
+    live. Every scenario publishes `recording.mp4`. Controls, run beside
+    HEAD: ab2ac466 (pre-b402464e), fedcdd01 (pre-d7e65156), 9a9633b4
+    (pre-89d914a0) and 89d914a0 (pre-c1027cd6). A PASS must show the
+    control failing where the fix applies. Harness:
+    `/pm-captures/scenarios/119/scripts`, `/pm-captures/scenarios/120/scripts`,
+    `/pm-captures/scenarios/121/scripts` and `/pm-captures/scenarios/118/scripts`.
+    Keep `PM_CAPTURES_PR` exported. Not to redo: S103–S121.
+    - S122: host, fake-claude. What counts as the PR's QA once a user
+      has run `pm qa run`: TUI restarts over interrupted CLI runs (alone
+      and beside an interrupted full run), the sign-off prompt's QA
+      verdict and the finalize pointer after a later CLI run, and ticks
+      at `qa` whose newest status is a CLI verdict.
+    - S123: host, fake-claude. The no-since `_qa_run_driven` hold:
+      a CLI run started seconds before the return (before its snapshot),
+      a long CLI run under steady ticks, a first QA after review PASS
+      while a CLI run is live, a Ctrl-C'd CLI run (no hold), two PRs, and
+      another clone's CLI run of the same PR id.
+    - S124: host, fake-claude. A user's own grouped views (`myview`,
+      `pm-laptop`, `my~view`) beside the base and `~N` clients: pane
+      splits/closes and terminal resizes (layout, one registry), picker ●
+      markers on attach/detach, popups, CLI→TUI commands, and
+      `pm tui restart` from a view while a `qa-run-bg` driver, a live
+      `pm qa run`, or a killed driver holds a `qa` entry. Probe for the
+      RQ47 open point.
+    - S125: container mode (podman 3, slirp4netns) and then host, real
+      claude routed refiner/worker on the router stub beside an unrouted
+      PR, on HEAD c774b5af. Ticks from outside tmux, a sign-off REQA
+      that meets the user's live `pm qa run`, watched from a user's
+      grouped view. Routing, bridge mount, stub logs, hooks and
+      transcripts as in RQ52/R9, and exactly one routed full re-run.
 
 ## 3. Edge cases
 
