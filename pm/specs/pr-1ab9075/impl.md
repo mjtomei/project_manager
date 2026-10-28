@@ -142,7 +142,12 @@ launch that was in flight when the controller died is re-attempted (counts
 as an attempt).
 
 R9. **Preserve evidence.**  Retries never delete a started worker's clone or
-container (`exec`/`exit` use relaunch).  Each relaunch re-points the
+container (`exec`/`exit` use relaunch).  Retry bookkeeping also never
+replaces a completed verdict: `_record_failure` settles (and does not
+record a failure for) a scenario that already has a verdict, so a verdict
+that lands while a failure is being classified — including when the retry
+budget is already spent — is preserved rather than overwritten with
+INPUT_REQUIRED.  Each relaunch re-points the
 transcript symlink to a new session; the previous session id is recorded in
 the retry record (`sessions`) so the earlier native transcript can still be
 found.  Completed verdicts are never touched by retry logic.  A relaunch
@@ -164,9 +169,17 @@ are unchanged apart from per-scenario grace.
 - Concurrency accounting: `active = pending + verifying + in-flight
   dequeues`; a dequeued scenario is in `pending` from the moment its launch
   thread starts.
-- Thread safety: launch threads mutate only their own scenario object and
-  report outcome through a lock-protected results dict; the poll thread
-  applies outcomes (pending/verdict/retry updates, status writes).
+- Thread safety: launch threads mutate their own scenario object, report the
+  outcome through a lock-protected results dict, and (as the launcher
+  already did for refiner rejections / trust blocks) may record that
+  scenario's verdict/reason; every other update — pending/retry state,
+  status and resume writes — happens on the poll thread, which applies the
+  outcomes.  The resume writer snapshots the verdict/reason dicts before
+  serialising so a concurrent insert cannot break the write.
+- A (re)created worker pane starts with fresh per-session polling state:
+  the hook timestamp, trust watch and verdict-reminder timer of the dead
+  session are cleared, so the new worker is not gated by the old session's
+  grace or reminder interval.
 - A successful start clears the stale launch-failure `verdict_reason` so the
   eventual transcript verdict isn't shown with an old launch error.
 - A `create` retry re-runs `_prepare_scenario`, which clears

@@ -11830,7 +11830,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-28T07:14:23.948085+00:00'
+  updated_at: '2026-10-28T07:53:51.066740+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -11889,6 +11889,18 @@ prs:
       you.'
     created_at: '2026-10-28T07:14:23Z'
     last_edited: '2026-10-28T07:14:23Z'
+  - id: note-b063313
+    text: 'Retry caveat for the reaper (from pr-1ab9075 review): once a QA scenario''s
+      failure kind is exec/exit, retries only relaunch inside the existing container
+      — the clone and container are kept so worker commits/evidence survive. So if
+      your cleanup force-removes a scenario container mid-run, the QA loop cannot
+      rebuild it: each relaunch fails with "container <name> not found" and the scenario
+      burns its ~5 min budget to INPUT_REQUIRED. If reaping containers of a live QA
+      run is in scope, either leave them until the run ends or notify the loop; adding
+      an escalate-to-create path later would need a create that reuses the existing
+      host clone at ~/.pm/workdirs/qa/<pr>-<loop>/s-N/repo instead of re-cloning it.'
+    created_at: '2026-10-28T07:53:51Z'
+    last_edited: '2026-10-28T07:53:51Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -23206,11 +23218,24 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-05-23T03:14:54.863296+00:00'
+  updated_at: '2026-10-28T07:53:41.793661+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-ed60e3d
+    text: 'pr-1ab9075 (#247) reworked the retry half of _poll_tmux_verdicts: per-scenario
+      launch_retries (attempts/kind/cause/state/retry_at/sessions) persisted in qa_resume.json;
+      launch/relaunch/diagnose steps run in background threads (launch_ops/launch_results)
+      and the poll thread applies their outcomes; per-scenario grace_until; _record_failure
+      never sleeps and settles (never overwrites) a scenario that already has a verdict.
+      Your no-verdict recovery trackers live in the same loop, so expect textual conflicts
+      in the pending-set loop, the idle-reminder block and the status write. Please
+      reuse this pattern instead of adding a second per-scenario pending/retry mechanism:
+      hang the recovery nudge off the same record and retire a worker through _settle
+      + pending.discard the way launch failures do.'
+    created_at: '2026-10-28T07:53:41Z'
+    last_edited: '2026-10-28T07:53:41Z'
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
@@ -29434,7 +29459,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T22:18:20.648960+00:00'
+  updated_at: '2026-10-28T07:56:04.302720+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29447,6 +29472,19 @@ prs:
       This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
     created_at: '2026-10-13T22:18:20Z'
     last_edited: '2026-10-13T22:18:20Z'
+  - id: note-cf7a82a
+    text: 'Adjacent work landed in pr-1ab9075 (#247), which rewrote the retry/cancellation
+      half of _poll_tmux_verdicts. Relevant to your repro: _launch_next_queued returns
+      immediately when state.stop_requested; _relaunch_scenario_window returns False
+      before creating a window; both launchers (_launch_scenarios_in_tmux/_launch_scenarios_in_containers)
+      now check stop_requested after the concretizer finishes and before splitting
+      the worker pane; and background launch/relaunch/diagnose threads check stop
+      at entry, so a stopped run no longer spawns workers from the retry path. NOT
+      changed there: the post-loop finalize path and verdict aggregation (only pre-existing
+      unverdicted→INPUT_REQUIRED). Re-check your repro against #247 before implementing
+      the relaunch/queued-launch half; the finalizer half is still yours.'
+    created_at: '2026-10-28T07:56:04Z'
+    last_edited: '2026-10-28T07:56:04Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id

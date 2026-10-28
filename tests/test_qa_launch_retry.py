@@ -621,6 +621,85 @@ def test_create_retry_reinstalls_scenario_instruction(tmp_path):
     assert (tmp_path / "scratch" / "qa-instructions" / "x.md").exists()
 
 
+def test_launch_failure_never_replaces_a_completed_verdict(tmp_path):
+    """Retry bookkeeping must not overwrite a verdict that landed while the
+    failure was being classified (e.g. restored from a resume snapshot):
+    the retry budget runs out, but a completed result is preserved."""
+    sc = QAScenario(index=1, title="t", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1",
+                    container_name="pm-qa-x-s1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.launch_retries = {1: {"attempts": _SCENARIO_MAX_RETRIES,
+                                "kind": "exec", "cause": "boom",
+                                "state": "running", "retry_at": None,
+                                "sessions": []}}
+
+    def diagnose(name):
+        # A verdict lands while the container probe is running.
+        state.scenario_verdicts[1] = VERDICT_PASS
+        state.scenario_verdict_reasons[1] = "worked"
+        return "container process (PID) limit exhausted"
+
+    def on_tick(clock):
+        if 1 in state.scenario_verdicts:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.container.diagnose_exec_failure", side_effect=diagnose),
+    ]
+    _run(state, tmp_path, patches, use_containers=True)
+
+    assert state.scenario_verdicts[1] == VERDICT_PASS
+    assert state.scenario_verdict_reasons[1] == "worked"
+    # The exhausted budget did not turn the verdict into a launch failure.
+    assert state.launch_retries[1]["state"] == "running"
+    assert state.launch_retries[1]["attempts"] == _SCENARIO_MAX_RETRIES
+
+
+def test_relaunch_resets_verdict_reminder_timer(tmp_path):
+    """The dead worker's verdict-format reminder timer must not suppress the
+    relaunched worker's first nudge (per-session state belongs to the dead
+    session, like the hook timestamp and trust watch)."""
+    sc = QAScenario(index=1, title="t", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1", transcript_path="/t/s1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    dead = {"flag": False}
+    reminded: list[str] = []
+
+    def fake_relaunch(scenario, st, *a):
+        scenario.pane_id = "%2"
+        scenario.session_id = "sid-2"
+        scenario.transcript_path = "/t/s2"
+        return True
+
+    def on_tick(clock):
+        if len(clock.sleeps) == 2:
+            dead["flag"] = True  # the first worker dies after one poll
+        if "%2" in reminded:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(
+        clock, {"sid-1": _idle("sid-1"), "sid-2": _idle("sid-2")}, {}) + [
+        patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0),
+        patch("pm_core.qa_loop._get_verdict_reminder_timeout", return_value=60),
+        patch("pm_core.tmux.pane_exists",
+              side_effect=lambda pid: pid == "%2" or not dead["flag"]),
+        patch("pm_core.tmux.send_keys",
+              side_effect=lambda pid, text: reminded.append(pid)),
+        patch("pm_core.qa_loop._relaunch_scenario_window",
+              side_effect=fake_relaunch),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert reminded[:1] == ["%1"]
+    assert "%2" in reminded
+
+
 def test_create_retry_tears_down_previous_attempt(tmp_path):
     """The worker split failed after the container and concretizer window
     were created.  The full relaunch re-clones the scenario dir, so it must

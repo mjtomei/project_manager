@@ -2975,6 +2975,15 @@ def _poll_tmux_verdicts(
         retry budget is spent.  Never sleeps."""
         nonlocal verdicts_changed
         idx = scenario.index
+        if idx in state.scenario_verdicts:
+            # A verdict landed while this failure was being classified
+            # (e.g. restored from a resume snapshot).  Retry bookkeeping
+            # must never replace a completed verdict, so settle it instead
+            # of recording a launch failure — including on exhaustion.
+            pending.discard(idx)
+            verdicts_changed = True
+            _settle(scenario, state.scenario_verdicts[idx])
+            return
         rec = retries.setdefault(idx, {"attempts": 0, "sessions": []})
         rec["kind"] = kind
         rec["cause"] = cause
@@ -3085,8 +3094,12 @@ def _poll_tmux_verdicts(
                 if rec:
                     rec["state"] = "running"
                 grace_until[idx] = now_mono + _VERDICT_GRACE_PERIOD
+                # Per-session state belongs to the dead worker: a fresh
+                # session must get its own grace, trust watch and first
+                # verdict-format reminder.
                 _last_scenario_hook_ts.pop(idx, None)
                 _trust_watches.pop(idx, None)
+                _last_reminder_sent.pop(idx, None)
                 _log.info("Scenario %d worker window created (%s)", idx, op)
                 continue
             kind = ("create" if op in ("launch", "create")
