@@ -115,6 +115,28 @@ Reproduction traps (from the prior QA runs — avoid rediscovering them):
   "up to date". The read-only check still writes the delta its output names.
 - Drive loops/verdicts with the fake-claude stand-in (see the TUI instruction)
   so a scenario never waits on a real model.
+- After scenarios 39-43, six more commits landed (review-loop 0c92 i1/i2 and
+  7a43 i1, plus the scenario-40 sync fix): the hand-edited-state contract now
+  also covers the recorded *verdict member* (a dict/list `verdict` reads as
+  absent in `pm pr list`/`pm pr show`, the home-window PR list, the tech tree
+  and the runs-popup status snapshot), the approval's `integration.target_repo`
+  (a non-string is a different repository — a refusal, not a `Path(5)`
+  traceback out of `pm pr merge`), `project.base_branch` at the review-window
+  launch (a non-string falls back to the default branch instead of killing the
+  window), and `pm pr list --timestamps` sorting a hand-edited unquoted date.
+  Scenario 40's story 5(b) also produced a real fix: `pm pr sync` (and
+  `pm_core/pr_sync.sync_prs`) now falls back to the project repo when every
+  workdir is gone, so a deleted workdir can no longer turn a bad merge into a
+  silent finalize.
+- Fake-github harness facts (from scenarios 40/43): the stand-in's session tag
+  derives from the git-root basename, so re-running a fixture in the same
+  directory reuses the stand-in (and may already contain the PR head); use a
+  fresh dir name per run or delete `~/.pm/sessions/<tag>`. The binding the
+  check compares is `signoff.integration.candidate_tree`, not the top-level
+  `pr["integration"]["candidate_tree"]`. With the TUI killed the tmux server is
+  gone, so provision the workdir with `pm fake-claude config set '{"_all": {}}'`
+  first. The local `master` must be an ancestor of the stand-in's base before
+  `--propagation-only` can fast-forward.
 
 ## Requirements (Given / When / Then)
 
@@ -483,8 +505,45 @@ WHEN the user runs the recovery path (`--propagation-only` /
 THEN it refuses, says the PR's HEAD is not in the base, and points back at
 `pm pr signoff` → `pm pr merge`; nothing is finalized.
 
+GIVEN every PR workdir is gone and the project repo is the only directory the
+sync can use.
+WHEN the user runs `pm pr sync` after a teammate merged on GitHub.
+THEN the merge is still detected and checked against the signed-off candidate
+from the project repo — a bad merge is warned about and recorded, a good one is
+silent — instead of "No workdirs found" exiting 1.
+
+### R16. Hand-edited members of the sign-off record and the launch state
+GIVEN a PR whose recorded `signoff.verdict` was hand-edited to a mapping or a
+list (a person editing `project.yaml` by hand).
+WHEN the user runs `pm pr list` / `pm pr show`, opens the TUI home window and
+tech tree, and opens the runs/status popup.
+THEN every surface renders the PR without a traceback, shows no sign-off
+verdict (no icon, no decision), and the status snapshot says no verdict rather
+than routing the mapping as a stale decision. A real string verdict still
+shows its icon and routes normally.
+
+GIVEN an approval whose `integration.target_repo` was hand-edited to a
+non-string.
+WHEN the user runs `pm pr merge`.
+THEN the merge is refused readably as a target-repository change, the PR
+returns to sign-off, and nothing is published — never a traceback out of the
+command.
+
+GIVEN `project.base_branch` hand-edited to a non-string.
+WHEN the user launches the review window (local backend).
+THEN the window opens, the diff pane uses the default base, and the pane shows
+only the PR's own changes.
+
+GIVEN PRs whose `updated_at` was hand-edited to a YAML date (an unquoted date)
+alongside PRs with pm's ISO strings.
+WHEN the user runs `pm pr list --timestamps`.
+THEN both rows render, newest first, without a comparison error.
+
 ## Edge cases (Given / When / Then)
 
+- GIVEN a hand-edited non-string verdict and a clean integration check. WHEN the
+  user launches sign-off. THEN the window opens and pm does not treat the
+  malformed value as a prior decision (no invented prior verdict/revision).
 - GIVEN a teammate pushed an unreviewed commit to the PR's remote branch after
   sign-off and merged on GitHub. WHEN the user runs `pm pr merge`. THEN
   publication is refused before anything is published, naming the remote head

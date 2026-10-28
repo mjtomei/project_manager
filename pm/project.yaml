@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T15:14:02.885470+00:00'
+  updated_at: '2026-10-28T16:14:46.314084+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39396,6 +39396,22 @@ prs:
       merge gate, router, justification, open/awaiting/verdicts): no crash.'
     created_at: '2026-10-28T15:14:02Z'
     last_edited: '2026-10-28T15:14:02Z'
+  - id: note-c6e4346
+    text: 'QA planner 2026-10-28 #3: spec extended with R16 (hand-edited members of
+      the sign-off record and launch state: a dict/list verdict across pm pr list/show,
+      the TUI home list/tech tree and the runs-popup status snapshot; a non-string
+      approval target_repo on the merge gate; a non-string project.base_branch at
+      the review-window launch; an unquoted-date updated_at under pm pr list --timestamps)
+      and R15 gained the every-workdir-gone fallback story from the 7d5dae15 fix.
+      New scenarios 44-47 target the six commits since the 39-43 plan: 44 hand-edited
+      sign-off state at every reader/launch/gate, 45 the full #250 journey at the
+      current head (resolve by record id, apply, evidence reuse, fresh candidate-bound
+      approval, publish), 46 a merge discovered by sync when the PR workdir is gone
+      (bad merge flagged, good merge silent, sync-github and --propagation-only parity),
+      47 concurrent operators on the project-repo fallback, the shared registry and
+      one PR workdir (apply racing merge).'
+    created_at: '2026-10-28T16:14:46Z'
+    last_edited: '2026-10-28T16:14:46Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
