@@ -531,12 +531,38 @@ def test_turn_state_interrupt_without_a_fence_is_in_progress(
     assert latest_turn_state(p, 0.0) == "in_progress"
 
 
+def test_turn_state_interrupt_with_an_unreadable_timestamp_is_in_progress(
+        tmp_path: Path) -> None:
+    # A marker whose own timestamp is missing/unparseable cannot be shown to
+    # predate the request, so it must not end the turn: the same asymmetry as
+    # a missing fence (a false "complete" starts the review over aborted work;
+    # a false "in_progress" ends as soon as the user sends another turn).
+    for label, extra in (("missing", {}),
+                         ("unparseable", {"timestamp": "not-a-timestamp"})):
+        rec = {"type": "user",
+               "message": {"role": "user",
+                           "content": [{"type": "text",
+                                        "text": "[Request interrupted by "
+                                                "user]"}]},
+               **extra}
+        p = _write(tmp_path, [_user_line("do it"),
+                              _assistant_line("partial"),
+                              json.dumps(rec)])
+        assert latest_turn_state(p, _EPOCH_TS) == "in_progress", label
+
 
 # JSON leaves Unicode line separators (U+2028 / U+2029 / U+0085) unescaped
 # inside a string, and real transcripts contain them.  The JSONL reader must
 # split on "\n" only: ``str.splitlines`` would fragment such a record into
 # pieces that fail ``json.loads``, so the newest turn would be read from an
 # older record.
+#
+# The separators are spelled as ``\u2028`` escapes, not pasted
+# literally: an invisible character in source is easy to lose in an
+# edit, and the test would then pass without exercising the split.
+_U2028 = "\u2028"
+
+
 def _raw_separator_line(rec: dict) -> str:
     return json.dumps(rec, ensure_ascii=False)
 
@@ -551,7 +577,7 @@ def test_turn_state_complete_when_the_answer_has_a_unicode_separator(
             "message": {
                 "role": "assistant",
                 "content": [{"type": "text",
-                             "text": "done next paragraph"}],
+                             "text": f"done{_U2028}next paragraph"}],
             },
         }) + "\n")
     assert latest_turn_state(p) == "complete"
@@ -568,7 +594,7 @@ def test_turn_state_in_progress_when_a_prompt_has_a_unicode_separator(
         + _raw_separator_line({
             "type": "user",
             "message": {"role": "user",
-                        "content": "pasted text, now change it"},
+                        "content": f"pasted{_U2028}text, now change it"},
         }) + "\n")
     assert latest_turn_state(p) == "in_progress"
 
@@ -583,7 +609,7 @@ def test_verdict_survives_a_unicode_separator_in_the_record(
             "message": {
                 "role": "assistant",
                 "content": [{"type": "text",
-                             "text": "some notes\nPASS"}],
+                             "text": f"some{_U2028}notes\nPASS"}],
             },
         }) + "\n")
     assert extract_verdict_from_transcript(p, VERDICTS) == "PASS"

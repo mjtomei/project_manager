@@ -1178,15 +1178,17 @@ class _PrefixApp:
     def _clear_prefix_hint(self):
         self.cleared += 1
 
+    # Bind the real timer methods rather than re-stating them: the prefix
+    # tests then exercise the production bodies.  (Only the ``_z_count`` /
+    # ``_clear_prefix_hint`` bookkeeping is observable through the duck type,
+    # so a copy here would let the real bodies regress unnoticed.)
     def _stop_z_timer(self):
-        if self._z_cancel_timer:
-            self._z_cancel_timer.stop()
-            self._z_cancel_timer = None
+        from pm_core.tui.app import ProjectManagerApp
+        return ProjectManagerApp._stop_z_timer(self)
 
     def _cancel_z_mode(self):
-        if self._z_count:
-            self._z_count = 0
-            self._clear_prefix_hint()
+        from pm_core.tui.app import ProjectManagerApp
+        return ProjectManagerApp._cancel_z_mode(self)
 
     def log_message(self, *_a, **_k):
         return 0

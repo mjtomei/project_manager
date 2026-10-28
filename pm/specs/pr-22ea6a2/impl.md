@@ -835,3 +835,32 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   import; ``autostart_fresh.SUPERSEDED`` still resolves to it.
 * No functional change to the fresh flow.  Full suite: 3924 passed, 1
   skipped, 0 failures (223 s).
+
+## Review-iteration notes (8d61 i1)
+
+* **An interrupt marker with no readable timestamp no longer ends the turn** —
+  ``_turn_state_from_tail`` treated an ``[Request interrupted by user]``
+  record whose own ``timestamp`` was missing/unparseable as predating the
+  request (``_record_epoch`` returns ``0.0``), so the fresh handoff could
+  start the review over aborted work — the exact false-``complete`` direction
+  the fence exists to prevent.  The record now ends the turn only when its
+  timestamp is readable **and** predates ``requested_at``; otherwise the
+  conservative ``in_progress`` is returned, matching the module's stated
+  asymmetry (a false ``in_progress`` ends with the user's next turn; a false
+  ``complete`` is not recoverable).  Measured over the local corpus first: all
+  54 real transcripts that end on an interrupt marker carry a valid
+  timestamp, so the tightening cannot stall an observed session.  Pinned by
+  ``test_turn_state_interrupt_with_an_unreadable_timestamp_is_in_progress``
+  (verified to fail without the fix).
+* **The Unicode-separator fixtures no longer contain literal invisible
+  characters** — the three ``latest_turn_state`` / verdict tests pasted a raw
+  U+2028 into the source, which an editor or formatter can silently strip (the
+  test would then pass without exercising the ``split("\n")`` path).  They now
+  build the separator from a named ``_U2028`` constant.
+* **The prefix tests now exercise the real timer bodies** —
+  ``_PrefixApp`` in ``tests/test_autostart_fresh.py`` re-stated
+  ``_stop_z_timer`` / ``_cancel_z_mode`` instead of binding the
+  production methods, so a regression in either (e.g. forgetting to stop
+  the armed timer) would still pass.  The duck type now delegates to
+  ``ProjectManagerApp``'s implementations.
+* No functional change to the fresh flow.

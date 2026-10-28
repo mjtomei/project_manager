@@ -149,11 +149,13 @@ def latest_turn_state(transcript_path: str | Path | None,
 
     An ``[Request interrupted by user]`` marker ends a turn (the CLI writes it
     exactly when it aborts generation, and the agent owes no reply), but only
-    when it predates *interrupted_before* (epoch seconds — the fresh-autostart
-    request time).  A marker written *after* the request may be followed by a
-    retyped prompt, so it keeps the turn ``"in_progress"``; with no fence the
-    conservative ``"in_progress"`` is returned too.  This matters because the
-    marker is a *list*-content user record, so it is not covered by
+    when it carries a readable timestamp that predates *interrupted_before*
+    (epoch seconds — the fresh-autostart request time).  A marker written
+    *after* the request may be followed by a retyped prompt, so it keeps the
+    turn ``"in_progress"``; with no fence (or no readable marker timestamp,
+    which cannot be shown to predate the request) the conservative
+    ``"in_progress"`` is returned too.  This matters because the marker is a
+    *list*-content user record, so it is not covered by
     :func:`_is_non_prompt_user_record`, and an interrupt left as the tail
     would otherwise stall the handoff forever.
 
@@ -273,9 +275,13 @@ def _turn_state_from_tail(text: str,
                 # written after it may be followed by a retyped prompt, so
                 # wait rather than start a review over aborted work.  A
                 # missing fence (0.0 from an unparseable ``requested_at``) is
-                # not a fence: stay conservative.
-                if (interrupted_before
-                        and _record_epoch(rec) <= interrupted_before):
+                # not a fence, and neither is an unreadable record timestamp
+                # (0.0 — it cannot be shown to predate the request): stay
+                # conservative in both cases.  A false "complete" would start
+                # the review over aborted work; a false "in_progress" is
+                # recoverable (the user's next turn ends it).
+                epoch = _record_epoch(rec)
+                if (interrupted_before and 0.0 < epoch <= interrupted_before):
                     return "complete"
                 return "in_progress"
             if _is_non_prompt_user_record(rec):
