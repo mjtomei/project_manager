@@ -1144,6 +1144,28 @@ S13, S14, S22, S101.
   [--container] [--live]`, `pm provider show` and the TUI provider list
   still report the router's live status and configured `remedy`, as
   diagnostics only.
+- **RQ55** A stopped run keeps what it settled (07cc00f3, 0dad507b,
+  0ad075ae, abd23015). Given a QA run that a provider setup error (RQ53)
+  stops mid-run at a queued launch, a dead-worker relaunch or a verifier
+  launch, When the run stops, Then its `qa_status.json` (the QA status
+  window and every later reader) shows each verdict and verification
+  settled before the stop, including those settled in the same poll
+  interval or tick as the stop:
+  - A verified PASS shows `PASS`, not `PASS (verifying)`.
+  - A verifier flag past `qa-verify-retries` shows NEEDS_WORK with its
+    `failed verification: …` reason.
+  - A retryable flag sends the worker no follow-up and shows
+    `PASS (verifying:<n>)`.
+  - A scenario that never launched shows `queued`.
+  - `overall` stays empty, `stopped` is set, and the resume snapshot is
+    gone.
+  - After the stop pm sends no follow-up and launches no queued scenario,
+    verifier or finalizer.
+  - The usual RQ53 surface holds: one `QA stopped: …` line or one tick
+    `Error:` line, and exactly one driver once the setting is fixed.
+  A run that is not stopped writes the same statuses as before: the extra
+  write before a queued launch never leaves a running scenario shown as
+  `queued` once its verdict, verification or slot change is written.
 
 ## 2. Setup
 
@@ -2188,6 +2210,42 @@ S13, S14, S22, S101.
     a host `launcher` only outside a container, so in container mode a
     non-executable launcher is not an error. That is expected, because
     containers never use the launcher.
+    Results (run a256c3dd8ddb5662): S103, S104 and S105 PASS, no code
+    change. S106 NEEDS_WORK: every RQ53 Then held, but a queued-launch
+    stop kept a verified scenario as `PASS (verifying)`. That was fixed in
+    07cc00f3, and review 0f81 (0dad507b, 0ad075ae, abd23015) extended the
+    fix to the relaunch and verifier paths (RQ55).
+  - Thirty-ninth pass (S107+), delta-only, planner 2026-10-28, HEAD
+    abd23015. Planner run a0e706a5b5b10f04 ended in a launch ERROR with no
+    plan, and run 21f1de510c58c784 replaced it. Product changes since run
+    a256c3dd8ddb5662 are 07cc00f3, 0dad507b, 0ad075ae and abd23015
+    (RQ55), all in the `qa_loop` poll loop. Only 07cc00f3 has run live (S106
+    story 3 round B post-fix). Every story sets the stop up in the same
+    poll interval (5 s) or tick as a settled result, and runs a control
+    tree beside HEAD that shows the stale status, so a PASS proves the
+    timing window was hit:
+    - Use 15e2a918 as the control for the queued-launch stop.
+    - Use 07cc00f3 as the control for the relaunch stop.
+    - Use 0dad507b and 0ad075ae as the controls for the verifier stop.
+    Harness: `/pm-captures/scenarios/106/scripts` (fault fixtures
+    F1–F7, setup_proj.sh, fake configs).
+    - S107: host, TUI-driven, verifier-path stop. A verifier passes, a
+      verifier flags past the retry limit (`qa-verify-retries 0`), and a
+      verifier flags with retries left, each beside another scenario
+      whose verifier launch hits a broken `qa_verification` provider. Then
+      fix the provider, start QA again, and check that the stopped run's
+      record is unchanged.
+    - S108: host, worker relaunch and queued-launch stops. A settled
+      verdict sits beside a dead worker whose relaunch hits a broken
+      `qa_scenario` provider. A verified PASS sits beside a queued launch
+      (cap 1). Both run in a run the TUI adopted after a restart and in a
+      run driven by an auto-sequence `qa-run-bg` driver, with ticks racing
+      the stop. A run that never stops, with a queue, is the regression
+      control for the extra pre-dequeue write.
+    - S109: container mode (podman 3), real claude refiner/worker routed
+      through the router stub. One verifier-path round and one relaunch
+      round on a routed PR, beside an unrouted PR whose QA runs to PASS at
+      the same time.
 
 ## 3. Edge cases
 
