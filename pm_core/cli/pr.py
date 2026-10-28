@@ -951,12 +951,14 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         if tmux_mod.session_exists(pm_session):
             window_name = _pr_display_id(pr_entry)
             existing = tmux_mod.find_window_by_name(pm_session, window_name)
-            if existing and not fresh and tmux_mod.window_panes_dead(
+            if existing and tmux_mod.window_panes_dead(
                     pm_session, existing["id"]):
                 # Its session ended (e.g. stop-on-idle removed the
                 # container and kept the dead pane readable): relaunch.
                 # The window is closed only once the launch is admitted,
-                # so a refused relaunch keeps the transcript readable.
+                # so a refused relaunch keeps the transcript readable —
+                # with --fresh too (a sign-off bounce): no live session
+                # is left to stop first.
                 ended_window = existing
                 existing = None
             if existing:

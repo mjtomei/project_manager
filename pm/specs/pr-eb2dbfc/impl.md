@@ -157,7 +157,8 @@ admission, so a refused relaunch leaves it, and its pane text, in place
 (QA S70).  This holds for review loops too: a loop forces `--fresh`,
 but a dead review window has no live reviewer to stop first, so it is
 closed only once the loop's first review is admitted (review e0a0 i1,
-QA S78).  A *live* window a fresh launch replaces is still killed up
+QA S78).  The same goes for `pm pr start --fresh` (the sign-off bounce
+back to implementation) on a dead impl window (review e0a0 i2).  A *live* window a fresh launch replaces is still killed up
 front, because its container must go before the new one is created.
 A window whose dead impl pane sits beside a live companion
 shell is kept: `s` switches to it (review dc3e).

@@ -84,7 +84,7 @@ def _mock_tmux(mock_tmux, dead):
 
 
 class TestPrStartDeadWindow:
-    def _invoke(self, tmp_path, dead, refuse=False):
+    def _invoke(self, tmp_path, dead, refuse=False, fresh=False):
         pm_dir, data = _save_project(tmp_path)
         git = MagicMock()
         git.is_git_repo.return_value = False
@@ -105,7 +105,8 @@ class TestPrStartDeadWindow:
              patch("pm_core.paths.get_global_setting", return_value=False), \
              patch("pm_core.home_window.park_if_on"):
             _mock_tmux(mock_tmux, dead)
-            result = CliRunner().invoke(pr_mod.pr, ["start", "pr-001"])
+            args = ["start", "pr-001"] + (["--fresh"] if fresh else [])
+            result = CliRunner().invoke(pr_mod.pr, args)
         return result, mock_tmux
 
     def test_dead_window_is_closed_not_switched_to(self, tmp_path):
@@ -132,6 +133,29 @@ class TestPrStartDeadWindow:
         mock_tmux.kill_window.assert_not_called()
         mock_tmux.new_window.assert_not_called()
         assert "Closed window" not in result.output
+
+    def test_refused_fresh_relaunch_keeps_dead_window(self, tmp_path):
+        # A sign-off bounce runs `pm pr start --fresh`; with stop-idle-impl
+        # on the impl window is dead by then, and killing it before
+        # admission lost the transcript on a refusal.
+        result, mock_tmux = self._invoke(tmp_path, dead=True, refuse=True,
+                                         fresh=True)
+        assert result.exit_code == 1
+        mock_tmux.kill_window.assert_not_called()
+        mock_tmux.new_window.assert_not_called()
+
+    def test_admitted_fresh_relaunch_closes_dead_window(self, tmp_path):
+        result, mock_tmux = self._invoke(tmp_path, dead=True, fresh=True)
+        mock_tmux.kill_window.assert_called_once_with("pm-sess", "@1")
+        mock_tmux.new_window.assert_called_once()
+        assert "Closed window 'pr-001' (its session has ended)" in result.output
+
+    def test_live_window_killed_before_fresh_start(self, tmp_path):
+        # A live session is still stopped up front.
+        result, mock_tmux = self._invoke(tmp_path, dead=False, refuse=True,
+                                         fresh=True)
+        assert "Killed existing window 'pr-001'" in result.output
+        mock_tmux.kill_window.assert_called_once_with("pm-sess", "@1")
 
     def test_live_window_is_switched_to(self, tmp_path):
         result, mock_tmux = self._invoke(tmp_path, dead=False)
