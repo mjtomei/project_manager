@@ -1046,7 +1046,8 @@ def create_container(
 
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
-                   proxy_socket_path: str | None = None) -> str:
+                   proxy_socket_path: str | None = None,
+                   env: dict[str, str] | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
@@ -1056,17 +1057,28 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     If *proxy_socket_path* is provided, the cleanup also removes the
     push proxy socket file and its parent directory.  This triggers the
     proxy daemon thread to self-terminate (it checks for socket existence).
+
+    *env* names environment variables to add to the exec'd process.  Only
+    the *name* goes on the runtime command line (``-e NAME``); the runtime
+    reads the value from its own environment, which the tmux pane carries
+    (the pane command sources a private env file).  Values must never be
+    interpolated into this string: it is logged and kept as
+    ``#{pane_start_command}``.
     """
     runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
+    env_args = " ".join(f"-e {shlex.quote(k)}" for k in (env or {}))
+    env_prefix = f"{env_args} " if env_args else ""
     # Under Podman with --userns=keep-id, the default user is already the
     # host user (correct UID).  The "pm" username doesn't exist in
     # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
     # from root to the pm user created during setup.
     if "podman" in runtime:
-        exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
+        exec_part = (f"{runtime} exec -it {env_prefix}"
+                     f"{shlex.quote(name)} bash -c {escaped}")
     else:
-        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+        exec_part = (f"{runtime} exec -it -u {_CONTAINER_USER} {env_prefix}"
+                     f"{shlex.quote(name)} bash -c {escaped}")
     if cleanup:
         cleanup_parts = []
         if proxy_socket_path:
@@ -1124,6 +1136,7 @@ def wrap_claude_cmd(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -1142,6 +1155,11 @@ def wrap_claude_cmd(
             for shared push proxies (with *pr_id*).
         pr_id: PR identifier — combined with *session_tag* to share push
             proxies across containers on the same branch.
+        env: Provider environment variables to pass to the exec'd claude by
+            name (see ``build_exec_cmd``).  Callers must also export the same
+            values into the tmux pane (``env=`` on the pane helper); the pane
+            command sources a private env file, so only the names reach the
+            runtime command line.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
@@ -1201,6 +1219,7 @@ def wrap_claude_cmd(
     exec_cmd = build_exec_cmd(
         cname, claude_cmd,
         proxy_socket_path=None if shared_proxy else proxy_sock,
+        env=env,
     )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname

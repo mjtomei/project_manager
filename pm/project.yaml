@@ -37008,3 +37008,304 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-84ebabf
+  plan: bugs
+  title: 'Bug: a claude-type provider api_key (even a ${VAR} reference) is written
+    as ANTHROPIC_API_KEY=<value> into the logged launch command and the tmux pane
+    command'
+  branch: pm/pr-84ebabf-bug-a-claude-type-provider-api-key-even-a-var-refe
+  status: in_progress
+  depends_on: []
+  description: 'pm_core/providers.py ProviderConfig.env_vars resolves api_key (_resolve_env_ref)
+    and pm_core/claude_launcher.py build_claude_shell_cmd inlines every provider env
+    value as NAME=<value> in the shell command (pre-existing on master: claude_launcher.py:937,
+    providers.py:75). log_shell_command then writes it at INFO to ~/.pm/debug/<tag>.log,
+    and tmux keeps it as the pane_start_command (tmux list-panes -F "#{pane_start_command}").
+    Live (QA S67 story 3, /pm-captures/scenarios/67/story3/secret-in-launch-cmd.txt):
+    provider mainstub (type claude, api_key ${ANTHROPIC_API_KEY}) as a PR qa_finalize
+    override; the three finalizer launches logged ANTHROPIC_API_KEY=<the dummy value>
+    and their panes carried it; ps after exec did not. Same class as the container
+    -e NAME=value leak this PR fixed (env values via the process env, not argv). Decide
+    how host panes get secret provider env (process env of the tmux client, a shell
+    reference for ${VAR} keys when the pane inherits the var, or redaction at least
+    in the log) and keep openai OPENAI_API_KEY the same.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/268
+  gh_pr_number: 268
+  created_at: '2026-10-26T05:09:15.878235+00:00'
+  updated_at: '2026-10-28T00:44:09.422718+00:00'
+  started_at: '2026-10-27T19:07:41.620041+00:00'
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-1a74701
+    text: 'Launch handoff from user-approved critical-bug review, 2026-10-27: host
+      build_claude_shell_cmd still places resolved provider secrets in logged strings
+      and tmux pane_start_command. Prevent the secret transport/metadata exposure
+      as well as logging it; redaction alone does not fix the tmux copy. Use synthetic
+      canary credentials for tests and never reproduce by printing real credentials.
+      #249 already covers the separate container -e NAME=value issue (75f0dde6), so
+      avoid duplicating that work.'
+    created_at: '2026-10-27T18:43:31Z'
+    last_edited: '2026-10-27T18:43:31Z'
+  - id: note-c3f89aa
+    text: 'impl: fixed. build_claude_shell_cmd no longer interpolates provider env
+      values; it returns them via env_out. Host tmux panes get them with `-e NAME`
+      (value in the tmux client env, so only the name reaches #{pane_start_command});
+      foreground launches use execvpe; container exec uses `-e NAME` (runtime reads
+      the value from the pane env); send_keys (no production callers) sources a 0600
+      env file. launch_claude debug env dump now logs names only. Evidence: /pm-captures/impl/{pre-fix,post-fix}
+      (synthetic canary only) — pre-fix leaked into command, pane_start_command and
+      log; post-fix all three clean and the value still reaches the pane process env.
+      Full suite 3837 passed / 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full.log.
+      Tests: test_provider_integration, test_tmux TestProviderEnvTransport, test_container
+      TestBuildExecCmdProviderEnv, test_claude_launcher TestLaunchClaudeInTmuxProviderEnv/TestWriteEnvFile.'
+    created_at: '2026-10-27T19:52:26Z'
+    last_edited: '2026-10-27T19:52:26Z'
+  - id: note-7db09b8
+    text: 'review-loop b1c1 i1: blocking bug found and fixed. tmux 3.2a only resolves
+      `-e NAME` from the client environment for new-session; new-window uses the server
+      env and split-window the session env, so every provider-override impl/review/QA/signoff/TUI
+      pane would have silently lost the key — or picked up an unrelated value from
+      the server env (e.g. the user real ANTHROPIC_API_KEY sent to a third-party base
+      URL). The post-fix capture had only exercised create_session, the one path that
+      works. Replaced the transport with a 0600 env file under ~/.pm/run sourced by
+      the pane (`sh -c "set -a; . file; set +a; rm -f file; <cmd>"`); a leading `cd
+      ... && ` is kept outside the wrapper so pane_transcript_path still parses it,
+      and files from panes that never ran are swept after 24h. Container exec keeps
+      `-e NAME` (the pane now carries the value). Added real-tmux tests TestProviderEnvReachesRealPane
+      that read the value back out of new_window/split_pane panes and assert pane_start_command
+      is clean (the old transport fails them). Re-captured /pm-captures/impl/post-fix
+      with new_window+split_pane (synthetic canary only); spec R2/A1/A5 updated with
+      a §7 finding. Full suite: 3841 passed, 1 skipped (pytest 8.4.2) in /pm-captures/impl/post-fix/pytest-full-review1.log.'
+    created_at: '2026-10-27T20:30:01Z'
+    last_edited: '2026-10-27T20:30:01Z'
+  - id: note-2aebc10
+    text: 'review-loop b1c1 i2: no behavioural changes. Fixed three docstrings that
+      still described the superseded `tmux -e NAME` transport (container.wrap_claude_cmd,
+      TestBuildExecCmdProviderEnv, tui.pane_ops.launch_pane) — they now describe the
+      0600 env-file transport. Added TestLaunchClaude::test_debug_env_dump_names_only
+      covering spec R4 (launch_claude debug dump names provider vars only; the command
+      handed to log_shell_command carries no value). Re-verified pane_start_command
+      parsing survives the wrapper (leading `cd ... && ` still matches _PANE_CD_RE;
+      --session-id and container exec still detected). Full suite 3842 passed / 1
+      skipped (pytest 8.4.2, markdown installed) in /pm-captures/review-b1c1-i2/pytest-full.log.
+      Out of scope, unchanged: create_container still passes `-e NAME=value` in its
+      argv (#249 owns that).'
+    created_at: '2026-10-27T20:54:02Z'
+    last_edited: '2026-10-27T20:54:02Z'
+  - id: note-2af6d76
+    text: 'QA scenario 6 concretizer notes (2026-10-27): (1) The apostrophe-workdir
+      edge case cannot be driven with a real claude launch: build_claude_shell_cmd
+      emits "$(cat <workdir>/pm/prompts/...)" with the path unquoted (pre-existing
+      at 0edfd481, unchanged by this PR), so a workdir containing an apostrophe makes
+      the pane command fail with ''sh: Syntax error: Unterminated quoted string''
+      and the session never starts. A workdir containing a space makes the prompt
+      empty (same raw $(cat ...)), also pre-existing. Scenario 6 therefore exercises
+      the apostrophe path with fake-claude (no prompt file) and the space path with
+      real claude via a workdir recorded by ''pm pr start --workdir <repo with a space>'',
+      where pane cwd/start-command/TUI tracking are still observable. (2) fake-claude
+      returns before adding --model/cd, so the ''--model openai:...'' flag check needs
+      a non-fake launch (read the launch line from pm log). (3) The tmux-failure-cleanup
+      edge case (no env file left when tmux fails) is not deterministically drivable
+      from the user surface; it is covered by tests/test_tmux.py::test_failed_tmux_removes_the_env_file.
+      (4) The TUI ''s'' action builds ''--transcript {tdir}/...'' unquoted and shlex.splits
+      it, so a project path containing a space breaks the TUI launch (pre-existing);
+      use a plain project root and record the awkward workdir with pm pr start --workdir.'
+    created_at: '2026-10-27T22:13:15Z'
+    last_edited: '2026-10-27T22:13:15Z'
+  - id: note-1f3143e
+    text: 'QA scenario 6 (baseline / hostile values / awkward workdirs) PASS. Observations
+      only, not failures: (1) with a provider selected, the launch line in pm log
+      is the pre-wrap command (`cd <workdir> && claude --model openai:synth-model
+      ...`, secret-free) while #{pane_start_command} is the `sh -c "set -a; . <env
+      file>; ..."` wrapper — the log does not show the wrapper; (2) `pm pr start --workdir
+      <new>` is ignored for an in_progress PR ("reusing existing workdir"); set `pm
+      pr edit <id> --status pending` first to re-record a workdir; (3) under fake-claude
+      the tech-tree tracked marker (spinner) is only visible ~5 s after launch because
+      the fake writes idle_prompt, and a killed impl pane leaves a stale spinner on
+      its node (pre-existing TUI behavior, unrelated to the env transport). Evidence:
+      /pm-captures/scenarios/6/ (CLI cast+mp4 for baseline, hostile key byte-for-byte,
+      stale sweep; tmux pane captures for space workdir).'
+    created_at: '2026-10-27T22:43:09Z'
+    last_edited: '2026-10-27T22:43:09Z'
+  - id: note-4da9b61
+    text: QA S6 capture artifacts completed after the review flag. /pm-captures/scenarios/6/cli/
+      now has transcript.log (tmux pipe-pane scrollback of the recorded session) alongside
+      recording.cast, recording.mp4 and manifest.md; new /pm-captures/scenarios/6/tui/
+      holds the recipe two-session TUI recording (transcript.log, recording.cast,
+      recording.mp4, manifest.md) for the space workdir (real claude, BASH_ENV-held
+      pane, cd outside wrapper, spinner, transcript UUID match) and the apostrophe
+      workdir (fake backend, wrapper without cd, canary only in the process env).
+      All nine stories were re-executed or re-verified on e559149f; verdict unchanged
+      PASS.
+    created_at: '2026-10-27T23:06:05Z'
+    last_edited: '2026-10-27T23:06:05Z'
+  - id: note-a17dac1
+    text: 'sign-off 2026-10-27 → SIGNOFF_REQA (QA evidence gap only; code, impl captures
+      and review all hold at e6cebed2-equivalent code, HEAD 75d0bc30, base master@f2650b46
+      clean). Scenario 6 verdict says all nine stories PASS, but /pm-captures/scenarios/6
+      only records 5 (baseline, hostile key, stale sweep in cli/; space + apostrophe
+      workdirs in tui/). No capture anywhere in /pm-captures shows the OpenAI-type
+      provider, which the PR description names explicitly ("keep openai OPENAI_API_KEY
+      the same") and the 19:12 note requires for every provider type (only mocked
+      unit tests cover it). Re-run scenario 6 on the current code and record, with
+      cast+mp4+transcript.log like cli/: (1) openai provider with fake-claude (story
+      4): the fake process /proc environ has OPENAI_API_KEY=canary86-oai-84ebabf and
+      OPENAI_BASE_URL exactly, and neither value is in pane_start_command, pm log,
+      the pane registry, ps -ef argv, tmux show-environment -g/-t, and no env-*.sh
+      is left; (2) openai with real claude (story 5): the pm log launch line and pane_start_command
+      show --model openai:synth-model, the cd prefix outside the sh -c wrapper, and
+      no key, and /proc/<claude pid>/environ has the OPENAI_* values; (3) unset ${VAR}
+      key (story 2): ANTHROPIC_API_KEY= (empty) in the process env, no error; (4)
+      pane killed before its command runs (story 8): its env-*.sh stays behind with
+      mode 0600 until the 24 h sweep. Synthetic canaries only. Scenarios 1–5 and the
+      5 recorded stories of scenario 6 stay valid; there is no need to redo them.'
+    created_at: '2026-10-27T23:20:00Z'
+    last_edited: '2026-10-27T23:20:00Z'
+  - id: note-29e730f
+    text: 'sign-off pass 2, 2026-10-27 → SIGNOFF_REQA again. Nothing changed since
+      note-a17dac1: HEAD 75d0bc30, master@f2650b46 clean, and no new QA capture (scenarios/6
+      files are all dated 23:11 or earlier). QA must still re-run scenario 6 and record
+      the four stories in note-a17dac1: openai + fake-claude, openai + real claude,
+      unset ${VAR} key, pane killed before its command runs. Each needs cast+mp4+transcript.log.
+      Scenarios 1-5 and the 5 recorded S6 stories stay valid. Minor, non-blocking:
+      tests/test_tmux.py TestProviderEnvTransport writes canary env-*.sh files into
+      the real ~/.pm/run (pm_home not redirected to tmp_path). Fix when convenient.'
+    created_at: '2026-10-27T23:41:15Z'
+    last_edited: '2026-10-27T23:41:15Z'
+  - id: note-9b6e56e
+    text: 'QA scenario 9 concretizer notes (2026-10-28): (1) "discuss" is NOT in model_config.SESSION_TYPES,
+      so `pm model set discuss provider:X` is rejected. The TUI discuss/Claude pane
+      resolves its provider through get_provider(None) -> PM_PROVIDER / per-session
+      provider file / providers.yaml `default`, so select the discuss provider with
+      `pm provider default <name>` (restore `pm provider default claude` afterwards).
+      (2) Do not export the ${VAR} canaries into the shared tmux server environment:
+      every pane inherits them and the "none of the other canaries" assertion becomes
+      untestable. Pass them command-scoped (`PM_QA_CANARY_IMPL=... pm pr start ...`)
+      so only the provider env transport carries the value into the launched process.
+      (3) Launch impl/review with `--background` (the auto-start mode). Without it,
+      `pm pr start`/`pm pr review` select their new window in the session and pane_ops.launch_pane
+      resolves the TUI window via get_window_id(), so a concurrent `?` then `h` discuss
+      split lands in the impl/review window instead of the TUI window. (4) With fake-claude,
+      build_claude_shell_cmd returns before the cd/--model flags, so each pane_start_command
+      is `sh -c "set -a; . <HOME>/.pm/run/env-XXXXXX.sh; set +a; rm -f <same>; fake-claude
+      --verdict NONE|PASS"` (no leading cd, no --model).'
+    created_at: '2026-10-28T00:20:26Z'
+    last_edited: '2026-10-28T00:20:26Z'
+  - id: note-dc1c8f1
+    text: 'QA scenario 8 (env-file privacy/lifetime R4 + unset ${VAR}) PASS on 75d0bc30.
+      Captures (cast+mp4+transcript.log, synthetic canaries only) in /pm-captures/scenarios/8/.
+      Story 1 = unset ${PM_QA_UNSET_VAR}: launch succeeds, fake-claude process env
+      has ANTHROPIC_API_KEY= (empty, not the stale session value), pane_start_command
+      carries only the env-*.sh path, pm log + pane registry clean, ~/.pm/run empty
+      after start. Story 2 = handoff file is 0600 in a 0700 dir, its canary value
+      reaches the process, and the file is gone once the pane command starts. Story
+      3 = pane killed before its command runs: orphan env-*.sh stays 0600 in a 0700
+      dir, referenced by no live pane, and is swept only by a later provider-env launch
+      once older than 24 h (fresh orphan kept, new launch file present). This covers
+      sign-off items (3) unset ${VAR} and (4) pane killed before its command runs;
+      items (1) openai + fake-claude and (2) openai + real claude still need recording
+      by scenario 6.'
+    created_at: '2026-10-28T00:32:08Z'
+    last_edited: '2026-10-28T00:32:08Z'
+  - id: note-f6ab894
+    text: 'QA scenario 7 (OpenAI-type provider) PASS at 75d0bc30; captures at /pm-captures/scenarios/7/{cli,tui}.
+      cli = impl + fake-claude via pm pr start (new-window path): #{pane_start_command}
+      is the 0600 env-file wrapper with only the file path; the fake process /proc
+      environ carries OPENAI_API_KEY=canary-84ebabf-do-not-use and OPENAI_BASE_URL=http://127.0.0.1:9/v1
+      exactly; neither value in pane command, pm log (grep exit 1), pane registry,
+      ps argv or tmux show-environment -g/-t; env file removed and nothing under ~/.pm/run
+      contains the canary. tui = review + real claude via pm pr review (split-pane
+      path): start command `cd <workdir> && sh -c "... env file ...; claude --model
+      openai:synth-model ..."` with the cd outside the wrapper; pm log line is the
+      pre-wrap `cd <workdir> && claude --model openai:synth-model`; claude /proc environ
+      has both OPENAI_* values; registry review-claude entry stores the unwrapped,
+      value-free command; env file removed. Each capture has transcript.log + recording.cast
+      + recording.mp4 + manifest.md. These are the two openai stories the sign-off
+      REQA asked for (openai+fake, openai+real); they live under scenarios/7, not
+      scenarios/6.'
+    created_at: '2026-10-28T00:43:29Z'
+    last_edited: '2026-10-28T00:43:29Z'
+  - id: note-96c4635
+    text: 'QA scenario 9 (mixed launch surfaces, three providers concurrently) PASS
+      on 75d0bc30. Three panes created ~0.3 s apart through three code paths (pm pr
+      start new window, pm pr review new window, TUI discuss split) each got its own
+      0600 env-*.sh under ~/.pm/run (3 distinct paths seen by a poller, dir 700, none
+      left behind) and its own provider values in /proc/<fake pid>/environ (impl ANTHROPIC_*,
+      review OPENAI_*, discuss ANTHROPIC_*), exactly one canary per process; no canary
+      in any pane_start_command, pm log, ~/.pm/debug, pane registry, tmux show-environment
+      -g/-t or ps argv. Discuss C-d teardown: pane gone in 224 ms, window 0 rebalanced
+      99→200 cols (pane width == window width), handle_pane_exited + deferring rebalance
+      logged, discuss row removed from the registry. Focused regression tests (test_tmux
+      TestProviderEnvTransport + TestProviderEnvReachesRealPane, test_claude_launcher
+      provider-env/TestWriteEnvFile, test_container TestBuildExecCmdProviderEnv, test_provider_integration)
+      25 passed. Evidence: /pm-captures/scenarios/9/{tui,cli} (cast+mp4+transcript.log+manifest).
+      QA workdir: /scratch/pm-s9-1793147411.'
+    created_at: '2026-10-28T00:44:09Z'
+    last_edited: '2026-10-28T00:44:09Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    signoff: provider:claude-work
+    merge: provider:deepseek-flash
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-84ebabf-bug-a-claude-type-provider-api-key-e-registered-20261027
+- id: pr-9ff8a1b
+  plan: bugs
+  title: 'Bug: pm qa debug/launch crash when the project repo and ~/.pm/workdirs are
+    on different filesystems (git clone --local cross-device hardlink)'
+  branch: pm/pr-9ff8a1b-bug-pm-qa-debug-launch-crash-when-the-project-repo
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py create_scenario_workdir (~line 320) runs
+    `git clone --local <repo_root> <dest>`; --local hardlinks objects, so it fails
+    when <repo_root> and ~/.pm/workdirs are on different filesystems. Repro: project
+    at /scratch/x (nvme) with HOME=/home/user/.pm on overlay; run `pm qa debug <instruction>
+    --foreground` -> CalledProcessError: git clone --local ... returned exit status
+    128, fatal: failed to create link ...: Invalid cross-device link. Same for any
+    qa path that clones from a project root on another mount. Fix: on clone failure,
+    retry with --no-hardlinks (or always pass it when st_dev differs). Found during
+    QA S3 of pr-84ebabf; worked around by pointing HOME at a same-device dir.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T22:20:00.072106+00:00'
+  updated_at: '2026-10-27T22:20:00.072106+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e847a7a
+  plan: bugs
+  title: 'Bug: launch commands interpolate the workdir prompt path and TUI transcript
+    path unquoted (apostrophe/space in workdir or project path breaks the pane command)'
+  branch: pm/pr-e847a7a-bug-launch-commands-interpolate-the-workdir-prompt
+  status: pending
+  depends_on: []
+  description: 'Found during pr-84ebabf QA scenario 6 (pre-existing, unchanged by
+    that PR). pm_core/claude_launcher.py build_claude_shell_cmd appends "$(cat <workdir>/pm/prompts/...)"
+    with the prompt-file path not shell-quoted inside the command substitution (around
+    line 1040). A workdir containing an apostrophe makes the pane command fail (''sh:
+    Syntax error: Unterminated quoted string''); a workdir containing a space yields
+    an empty prompt. Separately, the TUI start/review/merge actions build ''--transcript
+    {tdir}/impl-<id>.jsonl'' unquoted and shlex.split it (pm_core/tui/pr_view.py:155,210;
+    pm_core/tui/review_loop_ui.py:715), so a project path containing a space breaks
+    the TUI launch. Fix: shlex.quote the paths at each interpolation and add tests
+    with a workdir/project path containing a space and an apostrophe.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T23:16:14.111057+00:00'
+  updated_at: '2026-10-27T23:16:14.111057+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

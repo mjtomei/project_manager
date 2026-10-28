@@ -512,6 +512,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _claude_cwd = workdir
             _claude_write_dir = None
 
+        env: dict[str, str] = {}
         claude_cmd = build_claude_shell_cmd(
             prompt=signoff_prompt,
             transcript=transcript,
@@ -520,7 +521,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             model=_resolution.model,
             provider=_resolution.provider,
             effort=_resolution.effort,
-            session_type="signoff")
+            session_type="signoff",
+            env_out=env)
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
@@ -531,7 +533,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
                     claude_cmd, workdir, label=f"signoff-{pr_id}",
                     allowed_push_branch=branch,
                     session_tag=_stag,
-                    pr_id=pr_id)
+                    pr_id=pr_id,
+                    env=env)
             except ContainerError as e:
                 print(str(e))
                 return
@@ -545,7 +548,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             # report.html directly; the report carries the diff inline and
             # the dashboard surfaces it. No separate evidence pane needed.
             claude_pane = tmux_mod.new_window_get_pane(
-                pm_session, window_name, claude_cmd, workdir, switch=switch)
+                pm_session, window_name, claude_cmd, workdir, switch=switch,
+                env=env)
             if not claude_pane:
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
                 return

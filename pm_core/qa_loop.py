@@ -689,6 +689,7 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     finalize_session_id = str(_uuid.uuid4())
     _finalize_resolution = _resolve_qa_model(pr_data, project_data,
                                              session_type="qa_finalize")
+    finalize_env: dict[str, str] = {}
     finalize_cmd = build_claude_shell_cmd(
         prompt=prompt, cwd=workdir_path, write_dir=workdir_path,
         session_id=finalize_session_id,
@@ -697,12 +698,13 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
         effort=_finalize_resolution.effort,
         session_type="qa_finalize",
         session_tag=state.session_tag,
+        env_out=finalize_env,
     )
 
     try:
         finalize_pane = tmux_mod.split_pane_at(
             anchor_pane, "v", finalize_cmd, background=True,
-            cwd=workdir_path,
+            cwd=workdir_path, env=finalize_env,
         )
     except Exception:
         _log.exception("split_pane_at failed for finalize pane")
@@ -1696,8 +1698,13 @@ def _build_concretize_cmd(
     write_dir: str | None = None,
     session_id: str | None = None,
     session_tag: str | None = None,
+    env_out: dict[str, str] | None = None,
 ) -> str:
-    """Build the shell command for the concretization step."""
+    """Build the shell command for the concretization step.
+
+    *env_out* receives the provider environment variables; the caller must
+    pass them to the tmux pane (``env=``) so they never enter the command.
+    """
     from pm_core.claude_launcher import build_claude_shell_cmd
 
     resolution = _resolve_qa_model(pr_data, project_data,
@@ -1719,12 +1726,13 @@ def _build_concretize_cmd(
         # though it shares model resolution with qa_scenario.
         session_type="qa_concretize",
         session_tag=session_tag,
+        env_out=env_out,
     )
 
     if container_name:
         from pm_core import container as container_mod
         return container_mod.build_exec_cmd(
-            container_name, claude_cmd, cleanup=False)
+            container_name, claude_cmd, cleanup=False, env=env_out)
     return claude_cmd
 
 
@@ -1862,17 +1870,20 @@ def _launch_scenario_0(
     )
 
     scenario_cwd = str(clone_path) if repo_root else workdir_path
+    scenario_env: dict[str, str] = {}
     final_cmd = build_claude_shell_cmd(
         prompt=child_prompt,
         model=_qa_resolution.model, provider=_qa_resolution.provider, effort=_qa_resolution.effort,
         cwd=scenario_cwd,
         session_type="qa_scenario",
-        session_tag=state.session_tag)
+        session_tag=state.session_tag,
+        env_out=scenario_env)
 
     win_name = _scenario_window_name(pr_data, 0)
     try:
         pane_id = tmux_mod.new_window_get_pane(session, win_name, final_cmd,
-                                               cwd=scenario_cwd, switch=False)
+                                               cwd=scenario_cwd, switch=False,
+                                               env=scenario_env)
         scenario.window_name = win_name
         scenario.pane_id = pane_id
     except Exception:
@@ -2122,15 +2133,16 @@ def _launch_scenarios_in_tmux(
 
         import uuid as _uuid
         scenario.concretize_session_id = str(_uuid.uuid4())
+        concretize_env: dict[str, str] = {}
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=scenario_cwd,
             instruction_content=instruction_content,
             session_id=scenario.concretize_session_id,
-            session_tag=state.session_tag)
+            session_tag=state.session_tag, env_out=concretize_env)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
-                cwd=scenario_cwd, switch=False)
+                cwd=scenario_cwd, switch=False, env=concretize_env)
         except Exception:
             concretize_pane = None
         if not concretize_pane:
@@ -2200,15 +2212,17 @@ def _launch_scenarios_in_tmux(
         if refined_steps:
             scenario.steps = refined_steps
 
+        scenario_env: dict[str, str] = {}
         child_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
             session=session, workdir_path=workdir_path,
+            env_out=scenario_env,
         )
 
         try:
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", child_cmd, background=True,
-                cwd=pane_cwd)
+                cwd=pane_cwd, env=scenario_env)
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2367,16 +2381,17 @@ def _launch_scenarios_in_containers(
 
         import uuid as _uuid
         scenario.concretize_session_id = str(_uuid.uuid4())
+        concretize_env: dict[str, str] = {}
         concretize_cmd = _build_concretize_cmd(
             scenario, pr_data, data, cwd=container_workdir,
             container_name=cname, instruction_content=instruction_content,
             write_dir=str(clone_path),
             session_id=scenario.concretize_session_id,
-            session_tag=state.session_tag)
+            session_tag=state.session_tag, env_out=concretize_env)
         try:
             concretize_pane = tmux_mod.new_window_get_pane(
                 session, win_name, concretize_cmd,
-                cwd=workdir_path, switch=False)
+                cwd=workdir_path, switch=False, env=concretize_env)
         except Exception:
             concretize_pane = None
         if not concretize_pane:
@@ -2444,14 +2459,16 @@ def _launch_scenarios_in_containers(
         if refined_steps:
             scenario.steps = refined_steps
 
+        scenario_env: dict[str, str] = {}
         exec_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
             session=None, workdir_path=workdir_path,
+            env_out=scenario_env,
         )
         try:
             scenario_pane = tmux_mod.split_pane_at(
                 concretize_pane, "v", exec_cmd, background=True,
-                cwd=pane_cwd)
+                cwd=pane_cwd, env=scenario_env)
             scenario.window_name = win_name
             scenario.pane_id = scenario_pane
             scenario.transcript_path = transcript
@@ -2510,6 +2527,7 @@ def _build_scenario_run_cmd(
     *,
     session: str | None,
     workdir_path: str,
+    env_out: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Build the shell command that launches a scenario's claude pane.
 
@@ -2564,11 +2582,12 @@ def _build_scenario_run_cmd(
         transcript=transcript, cwd=wd_in, write_dir=host_clone,
         session_type="qa_scenario",
         session_tag=state.session_tag,
+        env_out=env_out,
     )
 
     if use_containers:
         run_cmd = container_mod.build_exec_cmd(
-            scenario.container_name, claude_cmd, cleanup=False)
+            scenario.container_name, claude_cmd, cleanup=False, env=env_out)
     else:
         run_cmd = claude_cmd
 
@@ -2606,13 +2625,16 @@ def _relaunch_scenario_window(
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
 
     try:
+        scenario_env: dict[str, str] = {}
         run_cmd, pane_cwd = _build_scenario_run_cmd(
             scenario, state, data, transcript, _qa_resolution,
             session=None if (use_containers and scenario.container_name) else session,
             workdir_path=workdir_path,
+            env_out=scenario_env,
         )
         pane_id = tmux_mod.new_window_get_pane(session, win_name, run_cmd,
-                                               cwd=pane_cwd, switch=False)
+                                               cwd=pane_cwd, switch=False,
+                                               env=scenario_env)
 
         scenario.window_name = win_name
         scenario.pane_id = pane_id
@@ -3484,6 +3506,7 @@ def _verify_single_scenario(
             return False, "no verification cwd", None
         import uuid as _uuid
         verify_session_id = str(_uuid.uuid4())
+        verify_env: dict[str, str] = {}
         verify_cmd = build_claude_shell_cmd(
             prompt=prompt,
             model=resolution.model, provider=resolution.provider,
@@ -3491,10 +3514,12 @@ def _verify_single_scenario(
             cwd=verify_cwd, session_id=verify_session_id,
             session_type="qa_verification",
             session_tag=session_tag,
+            env_out=verify_env,
         )
         try:
             verify_pane = tmux_mod.split_pane_at(
-                scenario_pane, "v", verify_cmd, background=True, cwd=verify_cwd,
+                scenario_pane, "v", verify_cmd, background=True,
+                cwd=verify_cwd, env=verify_env,
             )
         except Exception:
             _log.warning("Verification: split_pane_at failed for scenario %d",
@@ -3811,13 +3836,15 @@ def run_qa_sync(
         )
         import uuid as _uuid
         planner_session_id = str(_uuid.uuid4())
+        planner_env: dict[str, str] = {}
         cmd = build_claude_shell_cmd(
             prompt=planner_prompt,
             model=_qa_planning_resolution.model, provider=_qa_planning_resolution.provider, effort=_qa_planning_resolution.effort,
             cwd=workdir_path,
             session_id=planner_session_id,
             session_type="qa_planning",
-            session_tag=state.session_tag)
+            session_tag=state.session_tag,
+            env_out=planner_env)
 
         # If the main QA window already exists, remember which sessions
         # were watching it so we can switch them to the replacement window
@@ -3873,7 +3900,7 @@ def run_qa_sync(
         # Create QA window with planner pane (switch=False; we handle
         # session switching explicitly below to preserve focus)
         tmux_mod.new_window(session, window_name, cmd, cwd=workdir_path,
-                            switch=False)
+                            switch=False, env=planner_env)
         time.sleep(2)  # let tmux register the new window
 
         # Post-creation guard: a concurrent out-of-band merge can land DURING

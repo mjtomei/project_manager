@@ -1252,3 +1252,43 @@ class TestCreateContainerPushProxy:
                         session_tag="repo-abc", pr_id="pr-1")
         call_kwargs = mock_exec.call_args[1]
         assert call_kwargs["proxy_socket_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# provider env transport through exec (pr-84ebabf)
+# ---------------------------------------------------------------------------
+
+CANARY = "canary-84ebabf-do-not-use"
+
+
+class TestBuildExecCmdProviderEnv:
+    """Provider secrets reach the container by name, never by value.
+
+    ``podman/docker exec -e NAME`` reads the value from the runtime client's
+    environment, which the tmux pane carries (its command sources a private
+    env file before running the runtime).
+    """
+
+    @patch("pm_core.container._get_runtime", return_value="podman")
+    def test_env_passed_by_name_not_value(self, mock_runtime):
+        cmd = build_exec_cmd("my-container", "claude 'hi'",
+                             env={"ANTHROPIC_API_KEY": CANARY})
+        assert "-e ANTHROPIC_API_KEY" in cmd
+        assert CANARY not in cmd
+
+    @patch("pm_core.container._get_runtime", return_value="docker")
+    def test_no_env_no_flags(self, mock_runtime):
+        cmd = build_exec_cmd("my-container", "claude 'hi'")
+        assert "-e ANTHROPIC_API_KEY" not in cmd
+
+    @patch("pm_core.container.build_exec_cmd", return_value="docker exec ...")
+    @patch("pm_core.container.create_container", return_value="cid123")
+    @patch("pm_core.container.load_container_config",
+           return_value=ContainerConfig())
+    @patch("pm_core.container.is_container_mode_enabled", return_value=True)
+    def test_wrap_forwards_env_to_exec(self, mock_enabled, mock_cfg,
+                                       mock_create, mock_exec):
+        wrap_claude_cmd("claude 'hi'", "/workdir", label="impl",
+                        env={"ANTHROPIC_API_KEY": CANARY})
+        assert mock_exec.call_args.kwargs["env"] == {
+            "ANTHROPIC_API_KEY": CANARY}
