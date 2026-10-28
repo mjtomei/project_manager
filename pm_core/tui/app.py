@@ -81,6 +81,26 @@ def _record_log_message(app, msg: str, suppressed: bool) -> None:
     _log.info("log: %s%s", plain, " (hidden by sticky message)" if suppressed else "")
 
 
+def _own_session_name() -> str:
+    """The pm session this TUI's pane belongs to (base name, no "~N").
+
+    Asks about this pane's session group: for a window shared by grouped
+    sessions tmux names the most recently active one, so a client on a
+    grouped session not named "<base>~N" moved a restarted TUI's pidfile
+    and command queue there, and every CLI command to the TUI timed out
+    (S118).
+    """
+    import os
+    pane = os.environ.get("TMUX_PANE")
+    result = _run_shell(
+        tmux_mod._tmux_cmd(
+            "display-message", "-p", *(["-t", pane] if pane else []),
+            "#{?session_group,#{session_group},#{session_name}}"),
+        capture_output=True, text=True, timeout=5
+    )
+    return result.stdout.strip().split("~")[0]
+
+
 class ProjectManagerApp(App):
     """Interactive TUI for managing PR dependency graphs."""
 
@@ -516,14 +536,11 @@ class ProjectManagerApp(App):
             trigger = "initial"
         _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
                   os.getpid(), Path.cwd(), trigger)
-        # Get session name for frame capture file naming
+        # Get session name for frame capture file naming and the IPC
+        # pidfile/queue.
         if tmux_mod.in_tmux():
             try:
-                result = _run_shell(
-                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
-                    capture_output=True, text=True, timeout=5
-                )
-                self._session_name = result.stdout.strip().split("~")[0]
+                self._session_name = _own_session_name()
             except Exception:
                 pass
         # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).

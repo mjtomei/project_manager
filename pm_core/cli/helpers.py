@@ -930,6 +930,12 @@ def _get_current_pm_session() -> str | None:
         name = name.rsplit("~", 1)[0]
     if name.startswith("pm-"):
         return name
+    # Another name grouped with a pm session (a user's own view of it):
+    # tmux names that session for every pane and popup of the group while
+    # its client is the most recently active one (S118).
+    group = tmux_mod.session_group(name) if name else ""
+    if group.startswith("pm-"):
+        return group.rsplit("~", 1)[0] if "~" in group else group
     return None
 
 

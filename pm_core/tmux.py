@@ -73,6 +73,17 @@ def session_exists(name: str, socket_path: str | None = None) -> bool:
     return result.returncode == 0
 
 
+def session_group(name: str) -> str:
+    """The group of session *name* (named after the session it was
+    grouped with), or '' when it is not grouped or does not exist."""
+    result = _run(
+        _tmux_cmd("display-message", "-p", "-t", f"={name}:",
+                  "#{session_group}"),
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def grant_server_access(users: list[str], socket_path: str | None = None) -> None:
     """Grant tmux server-access to a list of users.
 
