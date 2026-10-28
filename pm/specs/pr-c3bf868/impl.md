@@ -235,7 +235,12 @@ E14. **Startup refusal must not clean up the sibling's files.** `on_unmount`
     removes the pidfile and queue only when this process holds the claim;
     a refused second TUI never unlinks files it does not own. If a
     successor has taken the pidfile over, the queue is left in place for
-    it (it is the shared, session-keyed queue).
+    it (it is the shared, session-keyed queue). A successor that is
+    *between* its `O_EXCL` create and its first write shows up as an
+    empty pidfile; that counts as "owned by another process" too
+    (`TuiPidfileClaim.owned_by_other`), because the file can only be
+    there if someone else created it after our release, and the queue it
+    is about to use is the shared one.
 E15. **TUI entry-point names.** The cmdline marker accepts an exact `_tui`
     argv element plus an entry point: an argv element whose basename is
     `pm`, or a `pm_core` / `pm_core.*` module — the shapes produced by the
@@ -295,7 +300,9 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     with code 2, and never publishes or releases a pidfile it does not
     own.
 15. `on_unmount` with an owned claim removes both the pidfile and the
-    queue; when the pidfile names a successor it removes neither.
+    queue; when the pidfile names a successor it removes neither; when
+    it is empty (a successor mid-claim) it also removes neither
+    (`owned_by_other` is true for that window).
 16. `submit_tui_command` when `_signal_tui` reports `permission denied`
     returns `signal_error` and leaves the pidfile in place (E4); reload
     with no pidfile returns False.

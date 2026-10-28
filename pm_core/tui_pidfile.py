@@ -383,8 +383,15 @@ class TuiPidfileClaim:
         A successor TUI can only take the file over once this process
         looks stale, but if it did, the shared command queue belongs to
         it: shutting down must not delete a file the successor is using.
+        An *empty* file counts as a successor too: it can only be there
+        because someone else created it with ``O_EXCL`` between our
+        release and this check (see ``claim_tui_pidfile``), and the queue
+        it is about to use is the shared one.
         """
-        desc = read_pidfile(self.path)
+        raw = read_pidfile_text(self.path)
+        if raw == "":
+            return True
+        desc = parse_pidfile(raw)
         return desc is not None and desc.pid != self.pid
 
 

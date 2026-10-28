@@ -365,6 +365,24 @@ class TestClaim:
         assert path.exists()
         assert tpf.read_pidfile(path).pid == DEAD_PID
 
+    def test_successor_mid_claim_counts_as_owned_by_other(self, tmp_path):
+        """A successor's empty O_EXCL file must not read as "nobody owns it".
+
+        The dying TUI uses ``owned_by_other`` to decide whether the shared
+        command queue now belongs to a successor; an empty file is that
+        successor between its create and its first write, so the queue
+        must be left alone (and ``release`` must not unlink the file).
+        """
+        path = tmp_path / "tui-pm-test.pid"
+        claim = tpf.claim_tui_pidfile(path, SESSION)
+        path.write_text("")  # successor created it, has not written yet
+        assert claim.owned_by_other() is True
+        claim.release()
+        assert path.exists()
+        # Our own descriptor is not "someone else".
+        _write_json(path, os.getpid(), [tpf.CAP_RELOAD])
+        assert claim.owned_by_other() is False
+
 
 # ---------------------------------------------------------------------------
 # Caller side: command queue
@@ -863,6 +881,29 @@ class TestSignalGuards:
         app.on_unmount()
 
         assert tpf.read_pidfile(pidfile).pid == DEAD_PID
+        assert queue.read_text() == "successor command\n"
+
+    def test_unmount_keeps_queue_while_successor_claims(self, tmp_path,
+                                                        monkeypatch):
+        """A successor mid-claim (empty pidfile) owns the shared queue."""
+        pidfile = tmp_path / "tui-pm-test.pid"
+        queue = tmp_path / "tui-pm-test.cmd-queue"
+        monkeypatch.setattr(tpf, "pidfile_path", lambda session: pidfile)
+        monkeypatch.setattr(tpf, "command_queue_path", lambda session: queue)
+        claim = tpf.claim_tui_pidfile(pidfile, SESSION)
+        queue.write_text("successor command\n")
+        # The successor created the file with O_EXCL and has not written
+        # its descriptor yet.
+        pidfile.write_text("")
+
+        app = ProjectManagerApp.__new__(ProjectManagerApp)
+        app._session_name = SESSION
+        app._pidfile_claim = claim
+        app._write_queue = None
+
+        app.on_unmount()
+
+        assert pidfile.exists()
         assert queue.read_text() == "successor command\n"
 
     def test_unmount_does_not_delete_unclaimed_pidfile(self, tmp_path,
