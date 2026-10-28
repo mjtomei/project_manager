@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T19:45:31.562241+00:00'
+  updated_at: '2026-10-28T19:51:15.022500+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37052,6 +37052,24 @@ prs:
       — status/popup/tree all read running). No code changes made.'
     created_at: '2026-10-28T19:45:31Z'
     last_edited: '2026-10-28T19:45:31Z'
+  - id: note-a258cf3
+    text: 'QA scenario 17 (reported-bug non-reproduction) PASSED the wait lifecycle
+      but found and fixed an incidental bug. `pm autostart remove` of the last target
+      while a review loop is mid-follow-up ran `_finalize_all_transcripts`, replacing
+      the loop transcript symlink with a frozen copy; the loop then could not see
+      the follow-up verdict, read the next idle as a prose question and re-armed a
+      false `waiting / review INPUT_REQUIRED (iteration N)` (the PASS never landed).
+      Fixed in 07340d38: `_finalize_all_transcripts` keeps the symlink for a review
+      loop whose state is still `running` (the loop finalizes its own transcripts
+      on completion); tests/test_autostart_disable_transcripts.py fails pre-fix. Runtime
+      before/after: /pm-captures/scenarios/17/story4-pass-settles/{pre-fix,post-fix}/
+      — pre-fix settles on the false wait, post-fix logs `keeping transcript symlink
+      for a running review loop`, records `follow-up verdict=PASS` and settles at
+      `review passed; QA transition pending`. Stories 1-3 and 5 held unchanged; tests/test_review_input_required_state.py
+      + test_verdict_transcript.py + the new file: 91 passed, auto-start suites 214
+      passed.'
+    created_at: '2026-10-28T19:51:14Z'
+    last_edited: '2026-10-28T19:51:14Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
