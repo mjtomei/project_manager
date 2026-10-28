@@ -62,9 +62,10 @@ VERDICT_PASS = "PASS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 # Terminal state for a run the user stopped before it produced a QA result:
-# during planning, or during execution before any scenario reported.  It is
-# deliberately not in ALL_VERDICTS: nothing was determined about the PR (no
-# incomplete coverage, no missing plan), so it must never parse as a result.
+# during planning, during execution before any scenario reported, or while the
+# finalizer was running.  It is deliberately not in ALL_VERDICTS: the run never
+# produced its outcome (no plan, incomplete coverage, or no finalize result),
+# so it must never parse as a result.
 VERDICT_STOPPED = "STOPPED"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
