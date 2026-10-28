@@ -695,6 +695,40 @@ class TestSubmitCommand:
         assert _wait_for(lambda: _marker_lines(marker) == ["sigusr2"])
         assert tui.poll() is None
 
+    def test_append_reaches_the_file_before_the_lock_is_released(
+            self, ipc_paths, start_fake_tui, monkeypatch):
+        """The queued line must be on disk *under* the append lock.
+
+        The TUI's drain reads and truncates the queue under the same
+        flock.  A ``write`` still sitting in Python's buffer when the
+        lock is released would land in the file after a concurrent drain
+        truncated it, so the command would be silently dropped — and
+        because the TUI is perfectly healthy the spinner's owner check
+        would never abort, leaving "queued…" forever.
+        """
+        import fcntl as _fcntl
+
+        pidfile, queue = ipc_paths
+        tui = start_fake_tui()
+        _write_json(pidfile, tui.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+
+        seen_at_unlock = []
+        real_flock = _fcntl.flock
+
+        def spy(fd, op):
+            if op == _fcntl.LOCK_UN:
+                seen_at_unlock.append(queue.read_bytes())
+            return real_flock(fd, op)
+
+        monkeypatch.setattr(_fcntl, "flock", spy)
+        res = helpers.submit_tui_command(SESSION, "review-loop pr-1")
+
+        assert res.ok is True
+        # Verified to fail before the ``f.flush()``: the file was still
+        # empty at LOCK_UN and only gained the line when the ``with``
+        # block closed the file afterwards.
+        assert seen_at_unlock == [b"review-loop pr-1\n"]
+
     def test_trigger_tui_command_is_boolean(self, ipc_paths):
         res = helpers.trigger_tui_command(SESSION, "review-loop pr-1")
         assert res is False

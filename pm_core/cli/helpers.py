@@ -820,6 +820,15 @@ def submit_tui_command(session: str, cmd: str) -> TuiIpcResult:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 f.write(line.encode("utf-8"))
+                # Flush to the kernel *before* releasing the lock: the
+                # TUI's drain reads and truncates the queue under this
+                # same flock, so bytes still sitting in Python's buffer
+                # at LOCK_UN would land in the file *after* a drain
+                # truncated it — the command would be silently dropped
+                # and the caller would spin on "queued…" forever with a
+                # perfectly healthy TUI (so the spinner's owner check
+                # would never abort it).
+                f.flush()
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except OSError as e:

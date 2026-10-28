@@ -114,6 +114,15 @@ I3. The command queue file must exist before caps are published (a caller
     concurrent caller appending after ours cannot pin our failed command
     into the queue; every other line is kept byte-for-byte.
 
+    The append is flushed to the kernel *inside* that `flock`: the drain
+    reads and truncates the queue under the same lock, so a line still
+    sitting in Python's write buffer at `LOCK_UN` would land in the file
+    after a concurrent drain truncated it — silently dropping a command
+    the caller was told was queued, with a healthy TUI so the spinner's
+    owner check never aborts it. (Same reasoning, and the same
+    `f.flush()`-before-`LOCK_UN` idiom, as `runtime_state.py`'s
+    read-modify-write.)
+
     One command is exactly one line on both sides of that protocol: the
     writer (`_queue_line`) replaces every character `str.splitlines`
     treats as a boundary (`\r`, `\x0b`, `\x0c`, `\x1c`-`\x1e`, `\x85`,
@@ -495,6 +504,11 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     `submit_tui_command` reports `stale_pidfile`, removes the file and
     never signals the unrelated process. All four verified to fail
     against the pre-fix `return None`.
+34. the queued line reaches the file *under* the append `flock` (I3): a
+    spy on `fcntl.flock` records the queue's bytes at `LOCK_UN`, and the
+    test asserts they already contain the command. Verified to fail
+    before the `f.flush()` (`b''` at `LOCK_UN`; the line only appeared
+    when the `with` block closed the file afterwards).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;
