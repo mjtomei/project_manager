@@ -37347,6 +37347,56 @@ prs:
       `-fps_mode`).'
     created_at: '2026-10-28T23:27:06Z'
     last_edited: '2026-10-28T23:27:06Z'
+  - id: note-124011d
+    text: 'QA scenario 24 (concretizer) refined: the draft is drivable on this HEAD
+      with the interactive stand-in (the bundled fake-claude cannot answer a follow-up).
+      Harness/environment notes for the runner: (1) proven stand-in reference /home/matt/.pm/sessions/project_manager-5b29c418/captures/pr-a80bde5/scenarios/19/harness/stub-claude.py
+      (or /pm-captures/scenarios/19/harness/stub-claude.py if mounted) — adapt its
+      /workspace paths to the clone and bake the per-launch script path in so the
+      TUI process env needs no STUB_SCRIPT. (2) In this container the clone session
+      tag has ~/.pm/sessions/<tag>/override pointing at another workdir (pr-592e4bd),
+      so `pm which` run inside the clone prints that checkout, not the clone; verify
+      from the throwaway test project with PYTHONPATH=<clone>, and if the TUI still
+      runs another checkout write <clone> to ~/.pm/sessions/$(pm session tag)/override
+      (wrapper priority 1). (3) The breadcrumb is ~/.pm/autostart-resume.json with
+      marker ~/.pm/merge-restart (the spec’s ~/.pm/breadcrumb.json is stale). (4)
+      A breadcrumb restart during an answered follow-up publishes the neutral `review
+      resuming (iteration N)` (resuming=true, ir=false, fu=false) for the sub-second
+      adopt check — allow it; it is not a wait. (5) The TUI notice dedupes identical
+      consecutive log lines, so judge re-arm from pm tui frames --json triggers (raise
+      the buffer with pm tui capture -b 2000).'
+    created_at: '2026-10-28T22:53:25Z'
+    last_edited: '2026-10-28T22:53:25Z'
+  - id: note-29d57dc
+    text: 'QA scenario 24 (reported-bug non-reproduction, full wait lifecycle): PASS
+      at e9ec829e, live TUI + interactive stand-in on a throwaway local-backend project
+      (pr-95325c4). (1) answer -> follow-up running (ir=false/fu=true, ⟳1, popup RUNNING
+      #1, same pane, count 1, no new relauncher) -> breadcrumb restart mid-follow-up:
+      one `review resuming (iteration 1)` sample and no sample reading waiting / review
+      INPUT_REQUIRED / ir=true / fu=true -> adoption line `(…, answered)` -> NEEDS_WORK
+      -> iteration 2 with exactly one new `relauncher: … iteration=2`, count 2, tree
+      ⟳2, popup RUNNING #2; 30 s sustained sampling (3 popups + 6 tree captures) with
+      no wait, no ⏸2, no iteration 3. (2) iteration 2 ends INPUT_REQUIRED -> second
+      genuine question (iteration=2, ir=true, ⏸2, popup WAITING #2, frames notice
+      count 1->2, same pane, count still 2) -> answer -> 16 follow-up-running samples
+      -> PASS -> `review passed; QA transition pending` -> qa phase, tree ⟳2✓, no
+      iteration 3. (3) single-question cycle -> PASS, ⟳1✓, no iteration 2, count stays
+      1. (4) breadcrumb restart while unanswered -> only paused/resuming shapes, adoption
+      `(…, unanswered)`, same window/panes, pane capture byte-identical, wait neither
+      auto-answered nor converted; then answer -> PASS, ⟳1✓. No defects found; no
+      code changes. Harness notes: (a) the story-1 restart must land well inside the
+      follow-up - with the spec work:45 the first attempt landed 2 s before the verdict,
+      so the cycle was re-run with work:90; (b) use work>=6 s for the PASS response
+      or the answered/follow-up state is sub-poll (<0.4 s) and unobservable; (c) the
+      TUI frames buffer is in-memory and resets on a breadcrumb restart, so the notice-count
+      delta must be measured in a restart-free cycle (story 2 re-driven); (d) the
+      asciinema recorder must unset $TMUX (`env -u TMUX ... tmux attach`) or it dies
+      with "sessions should be nested with care"; (e) the bundled fake-claude QA session
+      never writes a QA spec, so every PASS is followed by "QA error: QA spec was
+      not generated during planning" - harness noise; the review object stays PASS.
+      Captures: scenarios/24/{story1,2,3,4}-cycle + manifest.md.'
+    created_at: '2026-10-28T23:27:18Z'
+    last_edited: '2026-10-28T23:27:18Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
