@@ -599,3 +599,40 @@ covered by tests in `tests/test_qa_input_required.py` /
   when there is one.  Covered by
   `test_fresh_start_supersedes_a_run_that_has_no_workdir_yet` and
   `test_qa_loop_restart_supersedes_a_stale_state`.
+
+## 18. Implementation notes (review iteration 13)
+
+- **A hold that ends without a follow-up left the "(waiting)" marker
+  behind.**  The held finalize writes `qa_status.json` with the waiting
+  scenarios flagged (R5/§14), but the hold's exit path (stop, PR left `qa`)
+  only rewrote the *resume snapshot*.  The dashboard therefore kept
+  rendering `INPUT_REQUIRED (waiting)` — and `state.latest_output` kept
+  saying "waiting for input in scenario(s) N" — for a run nothing was
+  polling any more, i.e. exactly the stale advertisement §14 removed for
+  the "run left QA" case.  The exit path now rewrites the status file with
+  an empty waiting set (same `overall`, the INPUT_REQUIRED evidence is
+  untouched) and sets the settled `QA complete: ...` output.  Covered by
+  `test_status_file_drops_the_waiting_marker_when_the_hold_ends`; the
+  reopen-ordering test now expects the extra settled write.
+- **Docstring/UX corrections.**  `qa_loop_ui._on_qa_complete`'s docstring
+  still said INPUT_REQUIRED "pause[s] self-driving loop for human input";
+  a held run keeps watching and resumes the loop, so the docstring now
+  says so (the log line was already fixed in iteration 10).  `start_qa`'s
+  held-run message pointed at the "QA window" — the status dashboard —
+  where the user cannot answer; it now points at the scenario worker pane,
+  matching `_on_qa_complete`.
+- **Test robustness.**  `test_pr_notes.py` asserted on a literal
+  `"does\nnot describe ..."` line wrap of the concretizer prompt; it now
+  collapses whitespace so a re-wrap cannot break it.
+- **One discard path for a dropped run.**  §17 made the fresh-start and
+  `zz t` restart paths stop/supersede a discarded run so it could not
+  rewrite its snapshot.  A third path — sign-off's REQA return hop
+  (`signoff_ui.step`) — still only popped the run from `_qa_loops`.
+  Before this PR that was harmless (a run was finished by then); now a
+  *held* run has no timeout, so popping it left its thread polling the
+  worker panes for ever and its snapshot let a restart scan re-adopt it
+  over the run that replaced it.  The pattern now lives in one helper,
+  `qa_loop_ui.discard_qa_state` (stop + supersede + clear the snapshot),
+  used by all three paths.  Covered by
+  `test_discard_qa_state_stops_and_supersedes`; the existing fresh-start
+  and restart tests still pin the other two call sites.

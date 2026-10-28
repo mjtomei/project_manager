@@ -145,8 +145,9 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
             # confirmation is still sticky (QA s22).
             if existing.held:
                 app.log_message(
-                    f"QA for {pr_id} is waiting for input — answer in the "
-                    "QA window; the loop is still watching", force=True)
+                    f"QA for {pr_id} is waiting for input — answer in its "
+                    "scenario worker pane; the loop is still watching",
+                    force=True)
             else:
                 app.log_message(f"QA already running for {pr_id}", force=True)
             return
@@ -169,6 +170,27 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def discard_qa_state(state: QALoopState | None) -> None:
+    """Make a QA run dropped from ``app._qa_loops`` safe to abandon.
+
+    Every path that discards a tracked run must go through this: a
+    still-winding-down thread must not rewrite the resume snapshot (a later
+    restart scan would resurrect the discarded run), and a *held* run
+    (waiting for an INPUT_REQUIRED follow-up) would otherwise keep polling
+    its worker panes forever — the hold has no timeout of its own.
+    ``superseded`` is marked even when the run has no qa workdir yet
+    (superseded during startup, before ``run_qa_sync`` creates one): it
+    creates one later and must not snapshot the discarded run.
+    """
+    if state is None:
+        return
+    from pm_core import qa_loop
+    state.stop_requested = True
+    state.superseded = True
+    if state.qa_workdir:
+        qa_loop.clear_resume_file(state.qa_workdir)
 
 
 def _enter_qa_status(app, pr: dict, caller: str) -> bool:
@@ -244,18 +266,7 @@ def fresh_start_qa(app, pr_id: str) -> None:
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
-    # The superseded run must not be re-adopted by a later restart scan:
-    # clear its snapshot and stop its (still winding-down) thread from
-    # rewriting it, which would resurrect the run.  Mark it even when it has
-    # no qa workdir yet (superseded during startup, before run_qa_sync
-    # creates one): it creates one later, and its snapshot must be suppressed
-    # too — otherwise a later restart scan adopts the discarded run and
-    # records a spurious QA note for it.
-    if existing:
-        from pm_core import qa_loop
-        existing.superseded = True
-        if existing.qa_workdir:
-            qa_loop.clear_resume_file(existing.qa_workdir)
+    discard_qa_state(existing)
     # Clear self-driving state so the fresh start is a one-shot QA
     app._self_driving_qa.pop(pr_id, None)
 
@@ -299,14 +310,8 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         return
 
     # Remove stale loop state — run_qa_sync will clean up old windows
-    # after capturing which sessions were watching them.  The superseded
-    # run must not rewrite the snapshot we are clearing (even when it has no
-    # qa workdir yet: it creates one later and must not snapshot the run).
-    if existing:
-        from pm_core import qa_loop
-        existing.superseded = True
-        if existing.qa_workdir:
-            qa_loop.clear_resume_file(existing.qa_workdir)
+    # after capturing which sessions were watching them.
+    discard_qa_state(existing)
     app._qa_loops.pop(pr_id, None)
 
     # Like start_qa: the first run of a loop on an in_review PR moves it
@@ -634,7 +639,11 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         sign-off or a merge itself.  Otherwise restart QA.
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
-      - INPUT_REQUIRED: pause self-driving loop for human input.
+      - INPUT_REQUIRED: the run is held — the loop keeps watching the
+        scenario worker panes for a follow-up verdict (pr-2c67d50) and
+        resumes this self-driving loop when one lands, so it is not
+        "paused" unless the hold ends without a follow-up (stop, or the
+        PR leaving qa).
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled

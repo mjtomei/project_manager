@@ -802,8 +802,10 @@ class TestQAVerdictFinalityGuidance:
         assert "This Decision Is Final" in prompt
         assert "REFINER_REJECT defers the scenario" in prompt
         # The refiner stays one-shot, scoped away from the worker's
-        # INPUT_REQUIRED continuation.
-        assert "does\nnot describe the scenario worker's INPUT_REQUIRED wait" in prompt
+        # INPUT_REQUIRED continuation.  (Assert on the collapsed text so a
+        # re-wrap of the prompt source cannot break the test.)
+        assert ("not describe the scenario worker's INPUT_REQUIRED wait"
+                in " ".join(prompt.split()))
         assert "pm pr note add pr-fin '<text>'" in prompt
         assert "Prefer pm PR notes over GitHub" in prompt
         assert "travels to master when this PR merges" in prompt

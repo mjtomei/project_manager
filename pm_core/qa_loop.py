@@ -5086,8 +5086,24 @@ def _execute_and_finalize(
             # restart does not re-adopt a hold that is already over.
             state.held = False
             state.running = False
+            # The run is over: nothing polls the waiting panes any more, so
+            # the dashboard must stop advertising them as "(waiting)" (the
+            # held finalize wrote the marker).  Only the "nothing is waiting"
+            # case already rewrote the status inside the hold.
+            _write_status_file(status_path, state.pr_id, state.scenarios,
+                               state.scenario_verdicts,
+                               overall=state.latest_verdict,
+                               scenario_0=state.scenario_0, error=state._error,
+                               verdict_reasons=state.scenario_verdict_reasons,
+                               waiting_for_input=set())
+            state.latest_output = (
+                f"QA complete: {state.latest_verdict}{finalize_suffix} — "
+                + qa_outcome_detail(state) + planner_code_changes_suffix(state)
+                + input_wait_changes_suffix(state)
+            )
             _write_resume_file(state, use_containers, concurrency_cap,
                                queued_indices)
+            notify()
             break
 
         # A follow-up (or a dropped attempt) needs the live collection loop

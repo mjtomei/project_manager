@@ -1037,8 +1037,10 @@ class TestFinalizeHoldsForInput:
                 use_containers=False, concurrency_cap=0,
                 queued_scenarios=[], notify=lambda: None)
 
-        # Held result → in-progress reopen → the second result.
-        assert overalls == [VERDICT_INPUT_REQUIRED, "", VERDICT_INPUT_REQUIRED]
+        # Held result → in-progress reopen → the second result → the run
+        # settles (the last write clears the now-stale "(waiting)" marker).
+        assert overalls == [VERDICT_INPUT_REQUIRED, "", VERDICT_INPUT_REQUIRED,
+                            VERDICT_INPUT_REQUIRED]
         # The snapshot written at the reopen describes a live collection, so
         # build_resume_state/_resume_incomplete_qa resumes it instead of
         # treating the run as complete.
@@ -1107,6 +1109,38 @@ class TestFinalizeHoldsForInput:
         # The INPUT_REQUIRED evidence itself is kept.
         assert state.waiting_for_input == {1}
         assert state.scenario_verdicts[1] == VERDICT_INPUT_REQUIRED
+
+    def test_status_file_drops_the_waiting_marker_when_the_hold_ends(
+            self, tmp_path):
+        """A hold that ends without a follow-up (stop, PR left qa) leaves the
+        held finalize's ``(waiting)`` marker in qa_status.json unless the run
+        clears it: the dashboard would keep telling the user to answer a
+        worker pane nothing polls any more."""
+        state = _waiting_state(tmp_path / "t.jsonl")
+        state.qa_workdir = str(tmp_path)
+        calls = []
+
+        with patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._write_status_file",
+                   side_effect=lambda *_a, **kw: calls.append(kw)), \
+             patch("pm_core.qa_loop._hold_for_follow_up",
+                   return_value=False), \
+             patch("pm_core.qa_loop._poll_tmux_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane",
+                   return_value="FINALIZE_DONE"):
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+
+        # The held finalize marks the wait; the settled run clears it.
+        assert calls[0]["waiting_for_input"] == {1}
+        assert calls[-1]["waiting_for_input"] == set()
+        assert calls[-1]["overall"] == VERDICT_INPUT_REQUIRED
+        assert state.latest_output.startswith("QA complete: INPUT_REQUIRED")
+        assert "waiting for input" not in state.latest_output
 
 
 # ---------------------------------------------------------------------------
@@ -1300,6 +1334,31 @@ def test_qa_loop_restart_supersedes_a_stale_state(tmp_path):
 
     assert state.superseded is True
     assert not (tmp_path / "qa_resume.json").exists()
+
+
+def test_discard_qa_state_stops_and_supersedes(tmp_path):
+    """Every path that drops a run from ``app._qa_loops`` must discard it.
+
+    A held run has no timeout, so merely forgetting it would leave its
+    thread polling the worker panes for ever, and its resume snapshot would
+    let a restart scan re-adopt it over the run that replaced it (the
+    sign-off REQA return path did exactly that).
+    """
+    from pm_core.tui import qa_loop_ui
+
+    state = _waiting_state(tmp_path / "t.jsonl")
+    state.qa_workdir = str(tmp_path)
+    state.held = True
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    assert (tmp_path / "qa_resume.json").exists()
+
+    qa_loop_ui.discard_qa_state(state)
+
+    assert state.stop_requested is True
+    assert state.superseded is True
+    assert not (tmp_path / "qa_resume.json").exists()
+    # Safe for a run that was never tracked (nothing in _qa_loops).
+    qa_loop_ui.discard_qa_state(None)
 
 
 def test_waiting_suffix_fits_the_status_line():

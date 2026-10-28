@@ -318,7 +318,12 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             "decision (see the sign-off report)", sticky=30)
     elif hop == "qa":
         app.log_message(f"Sign-off routed {pr_id} back to QA (SIGNOFF_REQA)")
-        app._qa_loops.pop(pr_id, None)
+        from pm_core.tui import qa_loop_ui
+        # Discard (not just forget) any tracked run: a held run waiting for
+        # an INPUT_REQUIRED follow-up has no timeout, so popping it alone
+        # would leave its thread polling the worker panes for ever, and its
+        # snapshot would let a restart scan re-adopt it over the new run.
+        qa_loop_ui.discard_qa_state(app._qa_loops.pop(pr_id, None))
         # Drop the finished run's PASS record: it would otherwise read as
         # "QA passed" to the catch-up hand-off before the new run starts.
         try:
@@ -326,7 +331,6 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             _rs.set_action_state(pr_id, "qa", None)
         except Exception:
             _log.debug("runtime_state qa clear failed", exc_info=True)
-        from pm_core.tui import qa_loop_ui
         qa_loop_ui.start_qa(app, pr_id)
     elif hop == "review":
         app.log_message(
