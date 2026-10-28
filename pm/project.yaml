@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-2478bf4
+  active_pr: pr-852dde2
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T19:06:46.370997+00:00'
+  updated_at: '2026-10-28T19:45:32.578462+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39586,6 +39586,30 @@ prs:
       suite: 4352 passed, 1 skipped.'
     created_at: '2026-10-28T19:06:46Z'
     last_edited: '2026-10-28T19:06:46Z'
+  - id: note-ab4410e
+    text: 'review-loop 4f1e i1: closed the last refusal-laundering hole in `compact`.
+      A hand-edited `unresolved` that is a *list* of non-mappings (a list of strings)
+      was sanitised to `[]` by `_compact_resolution` (`resolution_entries` drops non-mapping
+      members), so the truthiness-based refusal (`valid_for`, the merge gate, the
+      router, the prompt) vanished on the next routine re-check — exactly the hole
+      the non-list value already avoided. Such a value is now kept (bounded, with
+      its real length, so the digest stays stable); `unresolved_paths` likewise treats
+      a truthy `unresolved` naming no string path as unenumerable, so `pm pr show`
+      / `pm pr signoff integrate` / the launch label every recorded path an attempt
+      rather than "resolved" while the prompt says "NOT resolved". Also `_as_int`
+      now reads a hand-edited boolean as no count (`true` `base_files_count`/`paths_total`
+      counted as 1; the prompt own count reader already excluded bools). Three new
+      tests, each failing on the pre-fix code; the one existing assertion that encoded
+      the list laundering was corrected; impl.md R9-14 and qa.md R13 updated. Full
+      suite: 4342 passed, 1 skipped, failure set byte-identical to the pre-fix baseline
+      (13 env-only: missing markdown package + the hook-installer container guard).
+      Filed pr-852dde2 (incidental, same hand-edited-state class as i3): a hand-edited
+      non-mapping top-level `project` (e.g. `project: 5`) crashes every prompt builder
+      (verified: AttributeError: int has no attribute get, out of generate_prompt/review/signoff/qa-planner/review-loop/qa-child/standalone-qa/watcher/bug-fix/improvement/discovery
+      prompts) plus `pm pr list` (project.active_pr) and the pr_sync/model_config/container/guide/spec_gen/tui-sync
+      readers; out of scope here (40 call sites, needs one shared reader).'
+    created_at: '2026-10-28T19:45:32Z'
+    last_edited: '2026-10-28T19:45:32Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
@@ -41003,6 +41027,42 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T17:45:15.498421+00:00'
   updated_at: '2026-10-28T17:45:15.498421+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-852dde2
+  plan: bugs
+  title: 'Bug: a hand-edited non-mapping top-level `project` in project.yaml crashes
+    every prompt builder and `pm pr list`'
+  branch: pm/pr-852dde2-bug-a-hand-edited-non-mapping-top-level-project-in
+  status: pending
+  depends_on: []
+  description: "Location: every `data.get(\"project\", {}).get(...)` reader in pm_core.\
+    \ `project.yaml` is hand-edited state, and `store.load` accepts a top-level `project`\
+    \ that is not a mapping (e.g. `project: 5`).\n\nRepro (verified on pr-5cee3d5\
+    \ at 7fc8e7ec): write `project: 5` into pm/project.yaml, then build any prompt:\n\
+    \  PYTHONPATH=/workspace python3 -c \"from pm_core import store, prompt_gen; d=store.load(...);\
+    \ prompt_gen.generate_signoff_prompt(d, \\\"pr-1\\\")\"\n-> AttributeError: 'int'\
+    \ object has no attribute 'get'.\n\n`data.get(\"project\", {})` returns the scalar\
+    \ when one is present, so `.get` raises. Verified crash sites: prompt_gen.generate_prompt\
+    \ / generate_review_prompt / generate_signoff_prompt / generate_qa_planner_prompt\
+    \ / generate_review_loop_prompt / generate_qa_child_prompt / generate_standalone_qa_prompt\
+    \ / generate_watcher_prompt / generate_bug_fix_impl_prompt / generate_improvement_fix_impl_prompt\
+    \ / generate_discovery_supervisor_prompt (the window/prompt cannot launch), plus\
+    \ `pm pr list` (project.active_pr, pm_core/cli/pr.py), pm_core/pr_sync.py, pm_core/model_config.py,\
+    \ pm_core/container.py, pm_core/guide.py, pm_core/spec_gen.py, pm_core/tui/sync.py,\
+    \ pm_core/cli/model.py.\n\nFix: one shared reader (e.g. `store.project_of(data)`\
+    \ returning the mapping or {}) and use it at every site, the same contract pr-5cee3d5\
+    \ applies to the integration/approval/recovery paths (`integration.target_for`,\
+    \ `run_check`, `_resolve_repo_dir`). Related: pr-727073f (non-string `workdir`\
+    \ in `pm pr start`), pr-2478bf4 (remaining unguarded `workdir` reads) — same hand-edited-state\
+    \ class."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T19:42:26.469885+00:00'
+  updated_at: '2026-10-28T19:42:26.469885+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
