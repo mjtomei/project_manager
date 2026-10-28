@@ -271,6 +271,31 @@ def test_workdir_is_byte_identical_after_close(tmp_path):
     assert "M tracked.txt" in status
 
 
+def test_cleanup_remains_the_explicit_way_to_drop_a_closed_workdir(tmp_path):
+    """Close keeps the workdir; removing it is the separate, explicit
+    `pm pr cleanup` step (which close's help points at).  A closed status is
+    normal for that step, so it must not be warned about as unexpected."""
+    project = _make_project(tmp_path)
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        assert _run_close(project["pm_dir"], "pr-001").exit_code == 0
+    assert project["workdir"].is_dir()
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["cleanup", "pr-001", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert "Warning:" not in result.output
+    assert not project["workdir"].exists()
+    entry = _load_entry(project["pm_dir"])
+    assert entry is not None
+    assert entry["status"] == "closed"      # the registry record is retained
+    assert entry["workdir"] is None         # only the reference is cleared
+
+
 # ---------------------------------------------------------------------------
 # flags
 # ---------------------------------------------------------------------------

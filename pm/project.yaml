@@ -27203,7 +27203,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/217
   gh_pr_number: 217
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-25T03:22:10.165069+00:00'
+  updated_at: '2026-10-28T11:11:34.572181+00:00'
   started_at: '2026-05-24T21:58:50.019678+00:00'
   reviewed_at: '2026-05-25T03:22:10.165069+00:00'
   merged_at: null
@@ -27214,6 +27214,22 @@ prs:
       a TUI restart: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-3d1fa55-c66689e5322c9701)'
     created_at: '2026-05-25T04:20:49Z'
     last_edited: '2026-05-25T04:20:49Z'
+  - id: note-fd141d0
+    text: 'Cross-PR interaction from pr-62ad13d (review c02f i10): `pm pr close` now
+      retains the entry with status: closed (non-destructive close — entry/notes/branch/workdir
+      all kept). Your `_reclaim_terminal_pr_windows` sweep reclaims windows/containers
+      for any `_TERMINAL_STATUSES` PR on every sync, so a locally closed PR would
+      have its impl/review/QA windows and containers torn down on the next reload
+      — i.e. an automatic cleanup triggered by closing, which pr-62ad13d spec A4/R4
+      explicitly ruled out ("close must not tear down tmux windows/containers; that
+      is `pm pr cleanup --resources`"). Files/branch/workdir are untouched either
+      way. Please confirm with the user whether `closed` should authorize live-resource
+      reclamation (your current behavior) or whether the sweep should be limited to
+      `merged`, leaving close fully non-destructive until an explicit `pm pr cleanup
+      --resources`. pr-62ad13d spec A4 now records this interaction. Related: pr-62ad13d,
+      pr-0939d97.'
+    created_at: '2026-10-28T11:11:33Z'
+    last_edited: '2026-10-28T11:11:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d1fa55-bug-terminal-status-prs-keep-their-t-c52f26ee
 - id: pr-d82e0f1
   plan: null
@@ -38590,6 +38606,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-a3b86b7
+  plan: bugs
+  title: 'Bug: retained closed PRs have no TUI toggle, unlike merged PRs (pm pr close
+    keeps them hidden)'
+  branch: pm/pr-a3b86b7-bug-retained-closed-prs-have-no-tui-toggle-unlike-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/tech_tree.py:758 (_hide_closed hardcoded True),
+    pm_core/tui/tree_layout.py:172 (filters closed PRs), pm_core/tui/pr_view.py:318
+    (toggle_merged has a keybinding; there is no closed equivalent). Repro: pm pr
+    close <id> now retains the entry with status closed (pr-62ad13d), but the TUI
+    hides it by default and only the f status-filter cycle can reveal it; merged records
+    get the X toggle and a persisted hide_merged setting. Fix: add a symmetric show/hide-closed
+    toggle (and, if desired, a hide_closed project setting), update the help screen,
+    and cover it in the TUI tests. Related: pr-0939d97.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T11:01:11.032240+00:00'
+  updated_at: '2026-10-28T11:01:11.032240+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

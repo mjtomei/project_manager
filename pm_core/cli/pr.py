@@ -1616,7 +1616,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     status = pr_entry.get("status")
     display_id = _pr_display_id(pr_entry)
 
-    if status in ("merged", "closed"):
+    if status in TERMINAL_PR_STATES:
         click.echo(f"PR {pr_id} is already {status}.", err=True)
         raise SystemExit(1)
     if status == "in_review":
@@ -2800,7 +2800,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     if pr_entry.get("status") == "closed":
         click.echo(
             f"PR {pr_id} is closed — reopen it first with "
-            f"'pm pr edit {pr_id} --status <status>' to merge it.", err=True)
+            f"'pm pr edit {pr_id} --status pending' to merge it.", err=True)
         raise SystemExit(1)
 
     # Sign-off gate (record-only): a fresh SIGNOFF_MERGE for the current HEAD
@@ -2934,6 +2934,10 @@ def pr_sync_github():
     - CLOSED → closed
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
+
+    A PR that is already merged or closed locally keeps that status (a
+    merge discovered on GitHub still finalizes): the local record is
+    history, not a cache of the GitHub state.
     """
     root = state_root()
     data = store.load(root)
@@ -3300,7 +3304,10 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         click.echo(f"PR '{pr_id}' not found.", err=True)
         raise SystemExit(1)
 
-    if pr_entry.get("status") not in ("merged", "in_review"):
+    # `closed` is a normal terminal state (pr-62ad13d retains those records and
+    # `pm pr close` points here for the explicit cleanup), so it is not worth a
+    # "not merged" warning; anything else still is.
+    if pr_entry.get("status") not in ("merged", "in_review", "closed"):
         click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
         click.echo("Cleaning up anyway.", err=True)
 
@@ -4132,7 +4139,7 @@ def pr_qa_run_bg(pr_id: str):
     # window and run a full QA loop against an already-merged PR.  Bail BEFORE
     # run_qa_sync (which creates the window) so no QA window/subprocess is left
     # running against the merged PR.
-    if (pr_entry.get("status") or "") in ("merged", "closed"):
+    if (pr_entry.get("status") or "") in TERMINAL_PR_STATES:
         _log.info("pr_qa_run_bg: %s is %s; skipping QA (no longer qa-eligible)",
                   pr_id, pr_entry.get("status"))
         return

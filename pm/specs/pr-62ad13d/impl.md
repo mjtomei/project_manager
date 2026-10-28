@@ -53,7 +53,8 @@ Audit of close-adjacent teardown paths (all stay explicit / merged-only):
   (`pm_core/pr_cleanup.py:36`) — explicit; unchanged.
 - TUI `Y` cleanup (`pm_core/tui/pr_view.py:515`) — explicit key; unchanged.
 - `_kill_merged_pr_windows` (`pm_core/tui/sync.py:50`) — fires only for
-  `merged_prs` from sync, never for `closed`.
+  `merged_prs` from sync, never for `closed`.  (pr-3d1fa55's
+  `_reclaim_terminal_pr_windows` would extend this to `closed`; see A4.)
 - `_finalize_merge` (`pm_core/cli/pr.py:1919`) — merge path only.
 - `pm_core/tui/auto_start.py` target pruning removes *targets* for terminal
   PRs; it does not delete branches/workdirs.
@@ -233,6 +234,23 @@ workdirs are touched.
     (`pr_utils.TERMINAL_PR_STATES`) used by the new guards in `pr.py`,
     `pr_sync.py` and `tui/sync.py`, and by the `pm pr list --open` filter, so
     "terminal" cannot drift between the sync paths.
+27. One terminal definition, everywhere (review c02f i10): the pre-existing
+    duplicates of the pair now derive from `pr_utils.TERMINAL_PR_STATES` too —
+    `autostart_state.TERMINAL_STATUSES` (aliased; the scheduler/CLI/popup
+    importers keep their name) and `cli/session.py`'s `_TERMINAL_STATUSES`
+    (a set copy).  The two remaining literal checks in `pr.py`
+    (`pr_review`, `pr_qa_run_bg`) use the constant as well, so no path can
+    disagree about which statuses are terminal.
+28. Cleanup after close (review c02f i10): `pm pr cleanup <id>` is the
+    explicit workdir-removal step `pm pr close` points at, and `closed` is now
+    its normal input — it no longer prints the "status is 'closed' (not
+    merged)" warning.  The registry record survives with `workdir: null`.
+    Covered by `test_cleanup_remains_the_explicit_way_to_drop_a_closed_workdir`.
+29. Guard messages (review c02f i10): `pm pr merge <closed>` names the
+    concrete reopen command (`pm pr edit <id> --status pending`), matching
+    `pm pr start`, instead of the unhelpful `--status <status>` placeholder.
+    `pm pr sync-github --help` documents that a locally merged/closed record
+    is not reopened.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -288,6 +306,14 @@ be rewritten to assert retention.
 - **A4 — Should close tear down tmux windows/containers?** Resolved: no.
   Those are live resources owned by explicit `pm pr cleanup --resources`
   (and by merge detection). Close must not silently remove anything.
+  **Cross-PR interaction (review c02f i10):** pr-3d1fa55 (#217, in QA) adds
+  `_reclaim_terminal_pr_windows` — a TUI sync sweep that tears down windows,
+  containers and runtime state for *any* `merged`/`closed` PR. Once that
+  lands, a locally closed PR's live windows are reclaimed on the next reload,
+  i.e. the automatic cleanup this decision rules out. Files/branch/workdir
+  are untouched either way. The question (does `closed` authorize
+  live-resource reclamation, or should #217 limit the sweep to `merged`?) is
+  with the user; a note was added to pr-3d1fa55.
 - **A5 — Close on a `merged` PR?** Resolved: refuse (exit 1) without
   `--remove`, because rewriting `merged` → `closed` erases merge history and
   merge-integrity evidence. With `--remove`, delete the registry record only
@@ -341,6 +367,11 @@ No **[UNRESOLVED]** ambiguities.
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
+- `pm_core/autostart_state.py`, `pm_core/cli/session.py` — the pre-existing
+  terminal-status duplicates alias the `pr_utils` constant (review c02f i10).
+- `pm_core/cli/pr.py` — `pr_cleanup`'s "not merged" warning set also accepts
+  `closed`, so following close's help to the explicit cleanup is not flagged
+  as unexpected (review c02f i10).
 - `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN, at
   snapshot time and again inside the locked apply.
 - `pm_core/tui/sync.py` — the startup GitHub sync's apply applies the same
@@ -356,6 +387,8 @@ No **[UNRESOLVED]** ambiguities.
 ## 6. Out of scope
 
 - Real GitHub operations of any kind; all verification uses the fake backend.
-- Changing `pm pr cleanup`, `pm pr merge`, or TUI cleanup keys.
+- Changing `pm pr cleanup`'s behaviour (the only change is dropping a
+  misleading warning for the now-normal `closed` input), `pm pr merge`'s
+  merge flow, or TUI cleanup keys.
 - Branch deletion features (e.g. `gh pr close --delete-branch`) — removed from
   the close path entirely; no replacement command is added.
