@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-27T18:21:45.563149+00:00'
+  updated_at: '2026-10-28T00:13:22.655092+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38335,6 +38335,32 @@ prs:
       previous verdict PASS kept.'
     created_at: '2026-10-27T18:21:45Z'
     last_edited: '2026-10-27T18:21:45Z'
+  - id: note-3501c0e
+    text: 'QA S106 (2026-10-28, RQ53/E2/e6d986dd, host + container podman 3, real
+      claude 2.1.312 vs router/main stubs; captures /pm-captures/scenarios/106, REPORT.md):
+      CODE CHANGE 07cc00f3 needs normal re-review. Every setup-error Then held live
+      on 15e2a918. (1) TUI t/z t with F1-F7 (round 1, fake refiner/worker) and F1/F3/F5/F6
+      (round 2, real): one "QA stopped: …, then start QA again" line, one pm log warning,
+      0 Traceback, no s-1+ clone, overall "" + stopped, no notes, B stays qa, 0 router
+      requests; each fix then z t ran QA to PASS. F7 open-quote cut gave "not valid
+      YAML (line 4)". (2) auto-sequence: in-session tick + 2 concurrent ticks outside
+      tmux each one Error line, rc 1, empty stdout, 0 drivers/windows/qa dirs; after
+      the fix one tick gave running: qa (relaunched) and exactly one driver, PASS.
+      (3) mid-run: relaunch after kill-pane (api_base http://:8999) and queued launch
+      (chmod -x launcher) both stop with no claude started; H untouched, PASS on main
+      only. DEFECT fixed in 07cc00f3: the queued-launch stop raised inside _launch_next_queued
+      before the dashboard write, so the stopped qa_status.json kept the verified
+      scenario as "PASS (verifying)"; now the status is written before dequeuing (test_setup_error_at_queued_launch_records_settled_verdicts;
+      full suite 4442 passed). (4) container: F1/F3/F4/F6 stop identically, podman
+      ps -a stays empty; F5 alone does not stop, model show says claude (container
+      route bridge) / via=container-bridge, router gets work/ requests, launcher never
+      runs, PASS; containers removed by pm session kill. Env note: this host denies
+      sethostname, so pm container build-base works only from a nested_podman project.
+      (5) CLI on C: start/review/signoff each one Error line rc 1 (no Remedy token),
+      no-model start gives the Remedy line; model shows as specified. 0 canary hits
+      in pm/stub logs/TUI.'
+    created_at: '2026-10-28T00:13:22Z'
+    last_edited: '2026-10-28T00:13:22Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
