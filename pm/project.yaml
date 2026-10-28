@@ -38964,6 +38964,28 @@ prs:
       -> filed pr-7824490.'
     created_at: '2026-10-28T10:37:36Z'
     last_edited: '2026-10-28T10:37:36Z'
+  - id: note-3a217f2
+    text: 'QA S124 (2026-10-28, host, all fake-claude, tmux 3.2a, HEAD b0579323 vs
+      controls 9a9633b4/89d914a0; captures /pm-captures/scenarios/124, REPORT.md,
+      every client mp4): CODE CHANGE 920633fe needs normal re-review. Story 1: splits
+      from myview held. On HEAD, C-b x from myview left the pane registered ("handle_any_pane_closed:
+      no registry for myview") and C-b R returned 1. Story 2 markers held on HEAD;
+      control 89d914a0 reproduced. Story 3 RQ47 open point, all fixed: pm-laptop popups
+      said "Not a pm session." and its split wrote a stray pm-laptop.json; my~view
+      pm session home from /tmp gave rc 1; pm session home from myview/my~view switched
+      ~1, not the view. Fix: pane_registry.pm_session_name does the #{session_group}
+      lookup by the full name for every session; _get_current_pm_session, _pane-closed,
+      pm rebalance and the popup dispatch (TUI IPC, dispatcher tag) use it; current_or_base_session
+      accepts a current session whose group is the base. Post-fix, all three views
+      work on every surface, and myview/c1 behave identically for close and C-b R.
+      Story 4 held on a pristine b0579323 worktree and on the fix; control 9a9633b4
+      dropped C2 [working] at the restart. tmux 3.2a has no window-resized hook (not
+      drivable). Filed pr-ee18218 (global split hook writes <session>.json for unrelated
+      sessions, pre-existing). CONFLICT: S125 ca2a0657 (picker shows a live pm qa
+      run as [working]) contradicts the S124 story-4 Then (D no [working] while pm
+      qa run is live). Decide which is intended and fix the spec.'
+    created_at: '2026-10-28T11:02:26Z'
+    last_edited: '2026-10-28T11:02:26Z'
   - id: note-df53337
     text: 'QA S125 (2026-10-28, container podman 3, real claude 2.1.312 vs main +
       acme router stubs; captures /pm-captures/scenarios/125, README.md): CODE CHANGE
