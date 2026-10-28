@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T08:39:57.199669+00:00'
+  updated_at: '2026-10-28T09:06:09.661500+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14077,6 +14077,17 @@ prs:
       failures are env-only (missing markdown package; PM_HOST_HOME set) — see /pm-captures/review-c02f-i5/full-suite.log.'
     created_at: '2026-10-28T08:39:57Z'
     last_edited: '2026-10-28T08:39:57Z'
+  - id: note-00e89d2
+    text: 'Review i6: fixed a crash in the new dependent warning — it walked data["prs"]
+      raw after the status write, so a hand-edited entry with no `id` depending on
+      the closed PR raised KeyError from _pr_display_id (close persisted, then exit
+      1). Now uses usable_prs. Dropped RST double-backticks from the `pm pr close
+      --help` docstring (literal ``closed`` was rendering). Tests: test_malformed_dependent_entry_does_not_break_{close,remove}.
+      Full suite 4114 passed, 1 skipped; the single hook-installer failure is env-only
+      (PM_HOST_HOME set — passes with it unset). Noted the remaining store.get_pr
+      KeyError on pr-77c4f91.'
+    created_at: '2026-10-28T09:06:09Z'
+    last_edited: '2026-10-28T09:06:09Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
