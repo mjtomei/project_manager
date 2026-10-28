@@ -38565,7 +38565,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T19:18:42.608345+00:00'
+  updated_at: '2026-10-28T19:52:32.069351+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
@@ -38752,6 +38752,42 @@ prs:
       amended (I5 + a6a3 i4).'
     created_at: '2026-10-28T19:18:42Z'
     last_edited: '2026-10-28T19:18:42Z'
+  - id: note-ef6d87b
+    text: 'review-loop a6a3 i5 (df5e1e1d). Two gaps closed, no change to the handoff
+      contract.
+
+
+      1. `pm pr auto-sequence`''s qa branch advanced to sign_off on any qa_status.json
+      PASS newer than the return ts — so the bug''s own `pm qa run` (in flight at
+      the bounce) could silently cancel the owed full re-run once it passed: the PR
+      left qa and the reconciler stopped considering it owed. A PASS seen while `awaiting:
+      qa` is still set is never the owed run''s (every full-run starter clears it
+      as it starts), so the tick now leaves the PR at qa and starts the owed run through
+      the claim-guarded catch-up (mirrors the TUI''s _on_qa_complete guard). The catch-up''s
+      qa-<pr> window check is skipped while the obligation is unclaimed: QA windows
+      are kept for inspection, so the finished run''s window made a watcher-only tick
+      report "running: qa" forever.
+
+
+      2. `claim_return_launch` takes a snapshot pre-check (`_launch_claimable`) and
+      returns without the locked update when the record is already unwinnable. `locked_update`
+      saves even when its callback declines, so waiting out another driver''s fresh
+      claim rewrote the whole project.yaml every ~5 s tick for up to 180 s (the churn
+      class i2 fixed for the consumed case).
+
+
+      Tests: 3 new in test_pr_auto_sequence.py (pre-return PASS does not advance and
+      still launches; the finished window does not strand the owed re-run; the owed
+      run''s own PASS still advances) and 1 in test_owed_reqa.py (held claim declined
+      with store.save never called); each fails with its guard neutralised. Full suite:
+      4130 passed, 1 skipped. Spec amended (i5).
+
+
+      Non-blocking, left alone: `_auto_start_qa_loops` does not call `_recheck_after_claim`
+      when the owed claim is lost — the 5 s reconciler (not gated by auto-start) takes
+      over, so nothing is stranded. (2026-10-28T20:05:00Z)'
+    created_at: '2026-10-28T19:52:31Z'
+    last_edited: '2026-10-28T19:52:31Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
