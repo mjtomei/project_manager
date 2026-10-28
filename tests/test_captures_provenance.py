@@ -287,6 +287,26 @@ def test_audit_flags_manifest_run_mismatch(tmp_path):
     assert any("run1" in x and "run2" in x for x in a.anomalies)
 
 
+def test_audit_classifies_against_the_manifest_run_when_status_differs(tmp_path):
+    """A stale ``qa_status.json`` (its run's workdir was reaped, or a newer run
+    died before publishing a manifest) must not make the manifest's own
+    records read as another run's missing evidence: the membership printed is
+    the manifest's, so the classification has to follow that same run."""
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="runB",
+                            scenarios=[{"index": 1, "title": "one"}])
+    _scenario_dir(root, 1, {"index": 1, "pr_id": "pr-x", "run_id": "runB"})
+
+    a = captures.audit(root, pr_id="pr-x", run_id="runA")  # stale status run
+
+    assert a.run_id == "runB"
+    assert a.dirs[1].state == "current"
+    # The disagreement is still surfaced — once, as itself.
+    assert any("runB" in x and "runA" in x for x in a.anomalies)
+    assert not any("evidence for it is missing" in x for x in a.anomalies)
+    assert not any("prior QA run" in x for x in a.anomalies)
+
+
 def test_audit_without_manifest_flags_run_stamped_records(tmp_path):
     """A record naming a run, with no manifest to bind it to a current run,
     is reported with the run it names — never silently treated as current."""

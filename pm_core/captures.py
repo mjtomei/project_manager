@@ -370,6 +370,15 @@ def audit(captures_root: Path | str | None, *,
     listing.  Every ``scenarios/<n>/`` directory is classified so a caller
     can tell this run's evidence from an earlier run's, a foreign project's,
     or a legacy record with no identity at all.
+
+    Directories are classified against the *manifest's* run whenever one is
+    readable, because that is the run whose membership they are being
+    compared with.  *run_id* is what the caller believes is current (the live
+    ``qa_status.json``'s run); when it disagrees with the manifest, the
+    disagreement is reported as an anomaly but the classification still
+    follows the manifest — otherwise every member's own record would be
+    reported as "prior run … this run's evidence is missing" directly beside
+    a membership list that names that very run.
     """
     if captures_root is None:
         # No captures dir at all: nothing is bound to a run, and saying so is
@@ -381,7 +390,7 @@ def audit(captures_root: Path | str | None, *,
     root = Path(captures_root)
     manifest = read_manifest(captures_root, pr_id=pr_id, run_id=run_id or None)
     manifest_run = (manifest or {}).get("run_id", "")
-    effective_run = run_id or manifest_run
+    effective_run = manifest_run or run_id
     members = [m for m in ((manifest or {}).get("scenarios") or [])
                if isinstance(m, dict)]
     dirs = {i: _classify(root, i, pr_id, effective_run)
@@ -396,7 +405,7 @@ def audit(captures_root: Path | str | None, *,
     elif run_id and manifest_run and manifest_run != run_id:
         anomalies.append(
             f"the manifest belongs to QA run {manifest_run}, "
-            f"not {run_id}")
+            f"not {run_id}; the manifest is authoritative")
     for i, ev in sorted(dirs.items()):
         if ev.state == FOREIGN:
             anomalies.append(
