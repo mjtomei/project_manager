@@ -32986,7 +32986,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T01:50:20.375427+00:00'
-  updated_at: '2026-10-13T08:09:09.251179+00:00'
+  updated_at: '2026-10-28T13:46:24.341809+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33003,6 +33003,18 @@ prs:
       in the pr-b8561ac captures.'
     created_at: '2026-10-13T08:09:09Z'
     last_edited: '2026-10-13T08:09:09Z'
+  - id: note-d2219cc
+    text: 'QA S8 on pr-62fdd54 (2026-10-28) hit the same crash from a live run, not
+      a resume: fake-claude QA, scenario 1 wrote PASS, verifier pane %15 wrote VERIFIED
+      and exited; verification FLAGGED "verifier pane disappeared", and the follow-up
+      Enter loop in qa_loop._poll_tmux_verdicts sent send_keys("") to scenario pane
+      %14 (also exited) -> CalledProcessError "tmux send-keys -t %14 ... exit 1" ->
+      "QA thread crashed", verdict ERROR, qa_status.json left overall "". Log: ~/.pm/debug/repo-efafdc62.log
+      13:40:21-13:40:25. Confirms the earlier note: the Enter loop needs the same
+      pane_exists guard / CalledProcessError catch as the follow-up send. (Not caused
+      by pr-62fdd54: the function is untouched by that PR.)'
+    created_at: '2026-10-28T13:46:24Z'
+    last_edited: '2026-10-28T13:46:24Z'
 - id: pr-a75da60
   plan: bugs
   title: 'Bug: local-backend pm pr merge of a second PR always falls to the merge-resolution
@@ -34345,7 +34357,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T13:44:57.530583+00:00'
+  updated_at: '2026-10-28T13:46:48.533309+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -34553,6 +34565,24 @@ prs:
       ~2 s during a QA run, else pm window switches pull the cast off the log pane.'
     created_at: '2026-10-28T13:44:57Z'
     last_edited: '2026-10-28T13:44:57Z'
+  - id: note-d4a12fe
+    text: 'QA S8 (imported application code -> review + old sign-off retired) PASS,
+      both stories, at 0fe7b8af. Story 1: a worker push of app.py (d5b1fa8d) over
+      the signed-off head (7c7938dd) -> workdir fast-forwarded, `QA returning to review:
+      upstream application code 7c7938dd..d5b1fa8d (app.py) was never reviewed` +
+      `QA NEEDS_WORK ... returning to review`, qa_status.json overall=NEEDS_WORK with
+      error naming app.py and scenarios=[], signoff record gains `invalidated: QA
+      sync: upstream application code ... (app.py) was never reviewed`, PR in_review,
+      no qa-* window, reflog `merge d5b1fa8d: Fast-forward`. Story 2: after the review
+      pass (zzd -> PASS) and a fresh SIGNOFF_MERGE at d5b1fa8d, a pm-only commit 9fc895e7
+      fast-forwards (`Fast-forwarded ... d5b1fa8d -> 9fc895e7`), no new route (NEEDS_WORK
+      count 1->1), PR stays qa, signoff not re-invalidated, planner + s-0/s-1 run
+      at 9fc895e7 with `qa: worker fix` present. Captures: /pm-captures/scenarios/8/.
+      Env note: fake-claude verifier panes exit right after writing VERIFIED, so the
+      end-of-run `zzt` stop can hit the known pane-death crash tracked in pr-ae66f59
+      (not this PR; _poll_tmux_verdicts is untouched by this diff).'
+    created_at: '2026-10-28T13:46:48Z'
+    last_edited: '2026-10-28T13:46:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
