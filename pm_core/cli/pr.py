@@ -3557,14 +3557,19 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
                 # record into `closed`.
                 merged_concurrently = True
                 return
-            prior_closed_at = (pr.get("closed_at")
-                               if pr.get("status") == "closed" else None)
+            was_closed = (pr.get("status") or "pending") == "closed"
+            prior_closed_at = pr.get("closed_at") if was_closed else None
             pr["status"] = "closed"
             _record_status_timestamp(pr, "closed")
-            if prior_closed_at:
+            if was_closed:
                 # Repeat close is idempotent: updated_at still moves, but the
-                # original closure time is history and is not rewritten.
-                pr["closed_at"] = prior_closed_at
+                # original closure time is history and is not rewritten.  An
+                # entry closed before closed_at existed keeps none — stamping
+                # "now" would invent a closure time that never happened.
+                if prior_closed_at:
+                    pr["closed_at"] = prior_closed_at
+                else:
+                    pr.pop("closed_at", None)
         if data.get("project", {}).get("active_pr") == pr_id:
             remaining = [
                 p for p in usable_prs(data.get("prs"))

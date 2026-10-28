@@ -333,6 +333,28 @@ def test_repeat_close_is_idempotent(tmp_path):
     assert _snapshot(project["workdir"]) == wd_before
 
 
+def test_repeat_close_does_not_invent_a_closure_time(tmp_path):
+    """An entry already `closed` before `closed_at` existed keeps no
+    timestamp: a repeat close must not stamp "now" as its closure time (only
+    a fresh closure records one, A6)."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    wd_before = _snapshot(project["workdir"])
+    before = _load_entry(project["pm_dir"])
+    assert "closed_at" not in before
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    after = _load_entry(project["pm_dir"])
+    assert after["status"] == "closed"
+    assert "closed_at" not in after
+    # updated_at still moves: the record was touched, not rewritten.
+    assert after["updated_at"] >= before["updated_at"]
+    assert _snapshot(project["workdir"]) == wd_before
+
+
 def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):
     """A merge landing between load and the store lock must not become closed."""
     project = _make_project(tmp_path)
@@ -797,3 +819,61 @@ def test_sync_from_github_still_closes_open_prs(tmp_path):
         result = pr_sync.sync_from_github(project["pm_dir"], save_state=False)
 
     assert result.status_updates.get("pr-001") == "in_review"
+
+
+def test_sync_from_github_does_not_reopen_a_merged_pr(tmp_path):
+    """A local merge record is terminal too: GitHub OPEN (the merge landed
+    outside GitHub) must not rewrite `merged` back to an active status — that
+    would erase merged_at/merge evidence and re-block dependents."""
+    project = _make_project(tmp_path, status="merged", with_dependent=False)
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="OPEN")
+        data = store.load(project["pm_dir"])
+        data["prs"][0]["gh_pr_number"] = pr.number
+        store.save(data, project["pm_dir"])
+
+        result = pr_sync.sync_from_github(project["pm_dir"], save_state=False)
+
+    assert "pr-001" not in result.status_updates
+    assert store.get_pr(store.load(project["pm_dir"]),
+                        "pr-001")["status"] == "merged"
+
+
+def test_sync_from_github_does_not_close_a_merged_pr(tmp_path):
+    """GitHub CLOSED does not undo a local merge record either (the evidence
+    lives in the registry, not on GitHub)."""
+    project = _make_project(tmp_path, status="merged", with_dependent=False)
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="CLOSED")
+        data = store.load(project["pm_dir"])
+        data["prs"][0]["gh_pr_number"] = pr.number
+        store.save(data, project["pm_dir"])
+
+        result = pr_sync.sync_from_github(project["pm_dir"], save_state=False)
+
+    assert "pr-001" not in result.closed_prs
+    assert store.get_pr(store.load(project["pm_dir"]),
+                        "pr-001")["status"] == "merged"
+
+
+def test_sync_from_github_keeps_a_concurrently_merged_pr(tmp_path):
+    """The apply guard covers `merged` as well: a merge landing between the
+    GitHub round-trip and the store lock is not rewritten to in_review."""
+    project = _make_project(tmp_path, status="in_progress",
+                            with_dependent=False)
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="OPEN")
+        data = store.load(project["pm_dir"])
+        data["prs"][0]["gh_pr_number"] = pr.number
+        store.save(data, project["pm_dir"])
+        stale = store.load(project["pm_dir"])
+
+        # `pm pr merge` finalizes before the sync takes the store lock.
+        def _mark_merged(d):
+            store.get_pr(d, "pr-001")["status"] = "merged"
+        store.locked_update(project["pm_dir"], _mark_merged)
+
+        pr_sync.sync_from_github(project["pm_dir"], data=stale)
+
+    assert store.get_pr(store.load(project["pm_dir"]),
+                        "pr-001")["status"] == "merged"

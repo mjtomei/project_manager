@@ -417,6 +417,26 @@ def test_tui_startup_github_sync_keeps_a_concurrently_closed_pr(sync_github):
     assert pr_entry(sync_github)["status"] == "closed"
 
 
+def test_tui_startup_github_sync_keeps_a_concurrently_merged_pr(sync_github):
+    """A `merged` status written while the worker was fetching GitHub is
+    terminal too: the stale copy's in_review must not overwrite it
+    (pr-62ad13d)."""
+    def _set(status: str) -> None:
+        def _apply(d):
+            store.get_pr(d, PR)["status"] = status
+        store.locked_update(sync_github.pm_dir, _apply)
+
+    # GitHub PR is OPEN: the stale copy says in_progress, so the update is
+    # in_review and would overwrite the merge that landed meanwhile.
+    _set("in_progress")
+    app = _FakeApp(sync_github.pm_dir)
+    _set("merged")
+
+    asyncio.run(tui_sync.startup_github_sync(app))
+
+    assert pr_entry(sync_github)["status"] == "merged"
+
+
 # --- CLI pm pr sync --------------------------------------------------------
 
 def test_cli_pr_sync_records_integrity(sync_github):

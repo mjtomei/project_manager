@@ -116,20 +116,25 @@ Add `--remove` to `pm pr close`:
   means `_infer_pr_id`'s cwd match can resolve a closed PR for an id-less
   `pm pr merge` (its cwd step ignores the status filter).
 
-### R9 — Closed status is durable across GitHub sync
+### R9 — Terminal statuses are durable across GitHub sync
 
 - `pr_sync.sync_from_github` (`pm_core/pr_sync.py:367`) maps an OPEN GitHub PR
   to `in_progress`/`in_review`. That would silently un-close a PR closed with
   `--keep-github` (or when the `gh` call failed), losing the historical record.
 - Mirror the existing `qa`/`sign_off` preservation: when GitHub reports OPEN
   and the local status is `closed`, skip the PR (keep `closed`).
+- `merged` is terminal in the same way (review c02f i8, incidental fix): a
+  local merge record must not be rewritten to `in_review`/`in_progress` by
+  GitHub OPEN (the merge landed outside GitHub) nor to `closed` by GitHub
+  CLOSED. Either rewrite erases `merged_at`/merge evidence and re-blocks the
+  dependents the merge satisfied. The docstring states the rule.
 - The same rule must hold inside the locked apply, not only against the
   pre-lock snapshot: `sync_from_github` computes `status_updates` before taking
-  the store lock, so a `pm pr close` landing during the GitHub round-trip would
-  otherwise be overwritten. Both the `save_state` apply in `sync_from_github`
-  and the TUI's `startup_github_sync` apply skip a status update when the fresh
-  entry is already `closed` (a discovered `merged` still finalizes — GitHub is
-  authoritative about a merge).
+  the store lock, so a `pm pr close` (or `pm pr merge`) landing during the
+  GitHub round-trip would otherwise be overwritten. Both the `save_state`
+  apply in `sync_from_github` and the TUI's `startup_github_sync` apply skip a
+  status update when the fresh entry is already `merged`/`closed` (a discovered
+  `merged` still finalizes — GitHub is authoritative about a merge).
 - `pr_sync.sync_prs` (TUI/`pm pr sync`) already ignores non-active statuses;
   unchanged.
 
@@ -206,6 +211,21 @@ workdirs are touched.
     would turn a persisted close into a traceback.  The scan iterates
     `usable_prs`, like every other id-indexing loop.  Covered for both the
     default close and `--remove`.
+24. Repeat close of a legacy `closed` entry with no `closed_at` (review c02f
+    i8): the entry keeps none — a repeat close moves `updated_at` only.
+    `_record_status_timestamp` would otherwise stamp "now", inventing a
+    closure time for a PR closed before the field existed (A6: only a *fresh*
+    closure records one).  Covered by
+    `test_repeat_close_does_not_invent_a_closure_time`.
+25. `merged` durability in sync (review c02f i8, R9): GitHub OPEN does not
+    reopen a locally `merged` PR and GitHub CLOSED does not rewrite it to
+    `closed`; the locked apply also skips a stale update when the fresh entry
+    is already `merged` (CLI `sync_from_github` and the TUI
+    `startup_github_sync`).  Covered by
+    `test_sync_from_github_does_not_reopen_a_merged_pr`,
+    `test_sync_from_github_does_not_close_a_merged_pr`,
+    `test_sync_from_github_keeps_a_concurrently_merged_pr`, and
+    `test_tui_startup_github_sync_keeps_a_concurrently_merged_pr`.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -270,7 +290,9 @@ be rewritten to assert retention.
   `--keep-github` (so a close whose `gh` call previously failed can be
   retried); `updated_at` is refreshed. The original `closed_at` is preserved
   (only a fresh closure — i.e. from a non-`closed` status — records a new one),
-  so repeated close never rewrites closure history.
+  so repeated close never rewrites closure history.  An entry that was already
+  `closed` before `closed_at` existed stays without one: a repeat close must
+  not stamp "now" and invent a closure time (review c02f i8).
 - **A7 — Runtime notice for `--keep-branch`?** Resolved: none; the deprecation
   lives in `--help` (a runtime line would be noise in QA scripts that still
   pass the flag).
