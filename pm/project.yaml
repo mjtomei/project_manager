@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T06:48:18.266006+00:00'
+  updated_at: '2026-10-28T06:54:28.884786+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35984,6 +35984,19 @@ prs:
       to amend the two Thens or change the product.'
     created_at: '2026-10-28T06:48:18Z'
     last_edited: '2026-10-28T06:48:18Z'
+  - id: note-86379f5
+    text: 'QA S4 (z-prefix safety) PASS. Capture mechanics for the next run: (1) the
+      `z t` story leaves the PR in `qa` status, so the later stories that assume `in_review`
+      need `pm pr edit <pr> --status in_review` + `r` to restore the Given; (2) after
+      a review loop ends KILLED, plain `A` will not restart it (app._review_loops
+      keeps the completed loop) — use `zz` then `d`; (3) "Stopped review loop for
+      <pr> — opening fresh review" is logged but immediately replaced on the TUI log
+      line by the review spinner (no hold), so it is only visible in `pm log show`,
+      not in a TUI capture — the fresh review window + "Review loop done … ☠ KILLED"
+      are the on-screen evidence. Captures: /pm-captures/scenarios/4/01-z-prefix-safety
+      (all six stories) and 02-zzz-cancel (zzz with human-paced presses).'
+    created_at: '2026-10-28T06:54:28Z'
+    last_edited: '2026-10-28T06:54:28Z'
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
