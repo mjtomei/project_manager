@@ -29687,7 +29687,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-28T10:25:49.025008+00:00'
+  updated_at: '2026-10-28T10:57:08.034585+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -29807,6 +29807,22 @@ prs:
       is reachable." so the sentence ends "repository exists.. Restart" (double period).'
     created_at: '2026-10-28T10:25:48Z'
     last_edited: '2026-10-28T10:25:48Z'
+  - id: note-507d8fb
+    text: 'QA S4 (concurrent writers): PASS. (1) worker push during planning -> handoff
+      refused INPUT_REQUIRED with both remedies; (2) `pr qa fresh` fast-forwarded
+      H->U1 and routed to review with no planner; (3) two simultaneous QA starts (auto-sequence
+      tick + TUI) both settled PASS on the same upstream head, planted untracked local-work.txt
+      preserved, every s-*/repo at the upstream head; (4) 40 pm/-only pushes racing
+      the sync -> sync ff to the observed head, handoff refused (branch behind upstream),
+      all 40 pushes still ancestors. Observed, not fixed: `pm pr auto-sequence` outside
+      a pm tmux session prints `running: qa (launched)` but the detached driver dies
+      with `No pm session found` and writes no qa_status.json (the sign_off branch
+      guards this with `paused: no pm tmux session`; the qa branch does not). Also,
+      for an application-code import the TUI log shows the route-to-review line rather
+      than the `Fast-forwarded ... in the PR workdir` detail (the detail is in the
+      qa_status.json error and the PR note); spec R1 accepts either.'
+    created_at: '2026-10-28T10:57:07Z'
+    last_edited: '2026-10-28T10:57:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
