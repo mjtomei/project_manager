@@ -244,6 +244,32 @@ caller-side process-identity validation plus a spinner abort. See
 - **THEN** two actors restarting at once still produce exactly one
   restart, one refreshed pidfile, and at most one consumed marker
 
+### R19 — Corrupt restart state never disables the TUI's IPC
+
+- **GIVEN** a session whose `~/.pm/autostart-resume.json` holds
+  structurally corrupt JSON — an array, `null`, a bare string, or an
+  object whose `session` / `run_id` / `review_loops` / `history` /
+  `watchers` fields have the wrong types
+- **WHEN** the user restarts the TUI and then routes a command to it from
+  another pane (`pm autostart list|add`, or a picker action)
+- **THEN** the TUI mounts and renders the board with no traceback in the
+  pane or `~/.pm/debug/<tag>.log`, and its pidfile advertises both
+  capabilities
+- **THEN** the command is applied and the queue drained — a corrupt
+  breadcrumb must not leave a live TUI that never drains its queue (the
+  picker would sit on "queued…" forever with a perfectly valid pidfile)
+- **THEN** the corrupt breadcrumb is removed, not re-read on every start
+- **GIVEN** `~/.pm/merge-restart` holds binary/undecodable bytes
+- **WHEN** the user restarts the TUI (plain, and with `--breadcrumb`)
+- **THEN** the restart completes without a traceback, the marker does not
+  survive to the next start, and a later plain restart is still a clean
+  restart (`pm autostart list` shows auto-start off)
+- **GIVEN** a breadcrumb left by a *different* session (or the user starts
+  a TUI outside tmux with `pm _tui`, which has no session name)
+- **WHEN** this TUI mounts
+- **THEN** it does not restore the other session's targets — its own
+  auto-start stays off — and the breadcrumb is left in place for its owner
+
 ## Setup
 
 All scenarios start from the TUI manual-testing setup: an editable pm
@@ -321,6 +347,34 @@ state, not source code.
   that is discarded by the startup drain. The abort message therefore
   says the command *may not* have been applied. Rollback of the line only
   happens when the signal could not be delivered at submit time.
+- **E14 Corrupt breadcrumb shapes.** `~/.pm/autostart-resume.json` that is
+  valid JSON but not a breadcrumb object (`[]`, `null`, `"x"`), or an
+  object with wrong-typed `run_id` / `review_loops` / `history` /
+  `watchers`, is dropped like an unreadable file: the TUI mounts on
+  defaults, external IPC still works, and the file is removed. A
+  wrong-typed `session` reads as unscoped (consumed by this mount) rather
+  than stranding the file as another session's forever.
+- **E15 Corrupt merge-restart marker.** Undecodable bytes in
+  `~/.pm/merge-restart` read as an unscoped marker: the mount discards it
+  and logs `trigger=merge_restart` without raising, and a concurrent
+  session's readable marker is never deleted by that discard.
+
+## Known limitations (do not assert as fixed)
+
+- **Shared breadcrumb *write* (`pr-000d03e`, review-loop 9aa2 i1).**
+  `save_breadcrumb` still writes the single
+  `~/.pm/autostart-resume.json`, so two sessions that **both** restart
+  state-preserving within the save→mount window overwrite each other and
+  the clobbered session loses its auto-start / review-loop / watcher
+  state. Only the *read* side is session-scoped. Scenarios must not assert
+  that both sessions keep their state in that exact combination; the
+  invariant to assert is that neither session restores the *other's*
+  targets, and that a single-session `--breadcrumb` restart preserves its
+  own.
+- **`pm autostart` is report-only for a dead-pid pidfile** (see R5): it
+  prints the stale message and exits 2 without deleting the file; cleanup
+  falls to the next reload, picker dispatch, or TUI startup. A scenario
+  must not fail it for leaving the file.
 
 ## Pass/Fail criteria
 
@@ -414,3 +468,35 @@ entry now runs the live-pane scan instead of reporting "No TUI pane
 found". These are user-visible (R17/R18) and were not exercised by
 scenarios 1–18, which ran before the fixes. Scenarios 19+ must cover
 them.
+
+## Post-QA context (restart-state hardening, 2026-10-28)
+
+QA scenario 22 (concurrent actors) exposed two restart-state defects,
+fixed in `148a9ea2`: an orphaned `~/.pm/merge-restart` left by a lost race
+turned the *next* plain restart into a state-preserving one, and both
+`~/.pm/merge-restart` and `~/.pm/autostart-resume.json` were global, so
+two sessions consumed each other's restart requests. The marker now names
+its owning session (a `~N` grouped-session suffix is normalized), a
+marker present at mount is discarded as orphaned, and
+`consume_breadcrumb` leaves another session's breadcrumb in place.
+
+Review loop `c0c9` then hardened the same files (`3322efba`, `24888fd7`,
+`23a05814`): the marker is read totally (an undecodable marker no longer
+raises out of `action_restart`/`save_breadcrumb`/mount), written
+atomically, and cleared only if unchanged since it was checked; a caller
+with no session name can no longer consume a scoped marker or breadcrumb;
+and every breadcrumb section is read structurally so a corrupt file can
+no longer abort `_deferred_startup` before `_cmd_queue_ready` is set —
+the state that would leave a healthy-looking TUI that never drains the
+command queue. These are user-visible as R19 and were not exercised by
+scenarios 1–22 (all of which ran before `c0c9`). The *write* side of the
+breadcrumb is still shared — see Known limitations.
+
+Mechanics for the concurrent-restart scenarios: the marker race is
+timing-dependent in both directions, so assert the invariants (no marker
+left behind; each session ends in the state its own restart asked for),
+never which caller won. `pm tui restart` resolves the grouped session
+name (`pm-foo~1`) while the TUI keys its pidfile/marker by the base name;
+normalize with `split("~")[0]`. Two racing panes are easier to capture as
+two panes of one window, and the session should keep a spare window so it
+survives its only TUI window dying.
