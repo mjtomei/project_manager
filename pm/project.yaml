@@ -14561,7 +14561,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T11:58:45.935220+00:00'
-  updated_at: '2026-10-28T00:20:51.574882+00:00'
+  updated_at: '2026-10-28T01:12:34.634973+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15380,6 +15380,20 @@ prs:
       commands, since it forwards push/fetch/pull/ls-remote to the host workdir.'
     created_at: '2026-10-27T23:32:42Z'
     last_edited: '2026-10-27T23:32:42Z'
+  - id: note-472d7a9
+    text: 'Impl (2026-10-28): sign-off routed this back (SIGNOFF_IMPL) for the master@f2650b46
+      integration conflict. Resolved in merge commit fa3d7678. The only conflict was
+      the single project.active_pr scalar; kept master''s pr-e102089, because both
+      sides had set active_pr only as a side-effect of filing a new PR entry (ours
+      pr-e618b9c, master pr-e102089) and neither was a deliberate focus decision.
+      Both PR entries and every note on both sides are preserved (501 PRs, identical
+      per-id content, note-id union verified against both parents, project.yaml loads
+      cleanly through pm_core.store with validation). No code change: the push-proxy
+      fix is unchanged, so the QA evidence at dfa769cb still holds. Tests at the merge:
+      tests/test_push_proxy.py + tests/test_container.py 238 passed; full suite 3911
+      passed, 1 skipped, 0 failed.'
+    created_at: '2026-10-28T01:12:34Z'
+    last_edited: '2026-10-28T01:12:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
