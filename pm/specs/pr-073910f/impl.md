@@ -171,9 +171,15 @@ must be left untouched:
 
 1. If the private socket has no session **and** a session with the same name
    exists on the default server, `_session_start()` attaches to the legacy
-   session (env `PM_TMUX_SOCKET` cleared) and prints a one-line note that
-   `pm session kill` + `pm session` migrates it. No migration, no detach, no
-   restart, no kill is performed automatically.
+   session and prints a one-line note that `pm session kill` + `pm session`
+   migrates it. No migration, no detach, no restart, no kill is performed
+   automatically. `_resolve_session_socket()` returns `None` so nothing is
+   propagated into the session, but it exports
+   `PM_TMUX_SOCKET=str(default_socket_path())`: *clearing* the variable is
+   not enough, because with no `-S` the tmux binary follows `$TMUX`, which
+   from inside another pm pane names that session's private server — the
+   legacy session would look missing and the create path would duplicate it
+   on the wrong server (same failure mode as R4.3).
 2. `pm session kill` is the only command that removes the legacy session, and
    only when the user explicitly runs it.
 3. Never call `kill-server`; use `kill-session` for the base/grouped sessions
@@ -341,3 +347,32 @@ Two gaps found reviewing the first implementation:
 Also made two pre-existing `tests/test_shared_sessions.py` assertions
 independent of an ambient `PM_TMUX_SOCKET`: every pm pane now exports it,
 so those tests failed when run from inside a pm session.
+
+## Review iteration (2026-10-28, review-loop b972 i2)
+
+The i1 lesson (R4.3: `use_env=False` alone does not reach the default
+server) had not been applied to the legacy rollout path, and two smaller
+gaps surfaced:
+
+1. **The legacy branch still relied on `$TMUX`.** `_resolve_session_socket()`
+   *cleared* `PM_TMUX_SOCKET` for a legacy session, so every later
+   `_tmux_cmd()` ran without `-S` and the tmux binary followed `$TMUX`.  Run
+   from inside another pm pane that names that session's private server, so
+   the legacy session looked missing and `_session_start()` would create a
+   duplicate session on the wrong server (reachable when the ambient session
+   is not known to this HOME, i.e. exactly the R5b scenario).  It now exports
+   `PM_TMUX_SOCKET=str(default_socket_path())`; the returned `socket_path`
+   stays `None` so nothing is propagated into the session (R6.1).
+2. **`pm session --print-connect` skipped the R5b guard.** It used
+   `_get_current_pm_session()` directly while `pm session` used
+   `_resolve_start_session_name()`, so the printed command could name a
+   foreign session that `pm session` would refuse to adopt.  Both now use
+   `_resolve_start_session_name()`.
+3. **`pm qa regression -s <session>` accepted a session with no TUI pane.**
+   `_find_tui_pane()` deliberately returns the session name when the pane is
+   gone (history/frames read files keyed by the session), but the QA runner
+   drives that pane, so it now requires a live `pane_id` and errors with the
+   session name instead of launching a runner that cannot interact.
+4. The private-socket ownership refusal now names the remedy (the socket's
+   owner must remove a stale file; a 1777 directory's sticky bit prevents
+   anyone else from doing it).

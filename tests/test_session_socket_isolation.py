@@ -447,7 +447,10 @@ class TestResolveSessionSocket:
                                                            False)
         assert sock is None
         assert legacy is True
-        assert "PM_TMUX_SOCKET" not in os.environ
+        # Not merely cleared: the tmux binary follows $TMUX when no -S is
+        # given, so the default server has to be addressed explicitly or
+        # the legacy session looks missing from inside another pm pane.
+        assert os.environ["PM_TMUX_SOCKET"] == str(paths.default_socket_path())
 
     def test_shared_never_falls_back_to_legacy(self, monkeypatch, tmp_path):
         from pm_core.cli import session as session_mod
@@ -461,6 +464,45 @@ class TestResolveSessionSocket:
                                                            True)
         assert sock == str(tmp_path / "pm-repo-abc")
         assert legacy is False
+
+    def test_refuses_socket_owned_by_another_user(self, monkeypatch, tmp_path):
+        """The socket dir is world-writable; never connect to a planted one."""
+        from pm_core.cli import session as session_mod
+
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        (sock_dir / "pm-repo-abc").write_text("")
+        real_uid = os.getuid()
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
+        monkeypatch.setattr(session_mod.os, "getuid", lambda: real_uid + 1)
+
+        with pytest.raises(SystemExit):
+            session_mod._resolve_session_socket("pm-repo-abc", False)
+
+
+class TestPickExistingSession:
+    def test_prefers_the_first_running_candidate(self, monkeypatch, tmp_path):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "session_exists",
+            lambda name, socket_path=None, use_env=True:
+            name == "pm-ambient" and socket_path is None and not use_env)
+
+        assert session_mod._pick_existing_session(
+            ["pm-cwd", "pm-ambient"]) == "pm-ambient"
+
+    def test_falls_back_to_first_candidate_when_none_run(self, monkeypatch,
+                                                         tmp_path):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+
+        assert session_mod._pick_existing_session(
+            ["pm-cwd", "pm-ambient"]) == "pm-cwd"
 
 
 # ---------------------------------------------------------------------------

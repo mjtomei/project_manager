@@ -282,8 +282,11 @@ def _resolve_session_socket(session_name: str,
 
     Rollout compatibility: if no private session exists but an older pm
     session of the same name lives on the default server, return
-    ``(None, True)`` and leave ``PM_TMUX_SOCKET`` unset.  Nothing is
-    migrated, detached, or killed automatically.
+    ``(None, True)`` and point ``PM_TMUX_SOCKET`` at the *default* server's
+    socket.  ``None`` keeps the caller from propagating the variable into
+    the session; the export is what makes the rest of this process (and
+    the subprocesses it spawns) address the default server explicitly.
+    Nothing is migrated, detached, or killed automatically.
     """
     from pm_core.paths import ensure_socket_dir, session_socket_path
 
@@ -300,7 +303,8 @@ def _resolve_session_socket(session_name: str,
         if owner != os.getuid():
             click.echo(
                 f"Refusing to use tmux socket '{socket_path}': owned by "
-                f"uid {owner}, not you.", err=True)
+                f"uid {owner}, not you. A stale socket has to be removed "
+                "by its owner ('pm session kill' as that user).", err=True)
             raise SystemExit(1)
     os.environ["PM_TMUX_SOCKET"] = socket_path
 
@@ -309,7 +313,13 @@ def _resolve_session_socket(session_name: str,
                                             socket_path=socket_path)
             and tmux_mod.session_exists(session_name, use_env=False)):
         _log.info("legacy default-server session found: %s", session_name)
-        os.environ.pop("PM_TMUX_SOCKET", None)
+        # Address the default server explicitly rather than clearing the
+        # override: with no -S the tmux binary follows $TMUX, which from
+        # inside another pm pane names that session's private server.  The
+        # legacy session would then look missing, and the create path would
+        # duplicate it on the wrong server.
+        from pm_core.paths import default_socket_path
+        os.environ["PM_TMUX_SOCKET"] = str(default_socket_path())
         return None, True
     return socket_path, False
 
@@ -664,8 +674,9 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
                 raise SystemExit(1)
             session_name = f"pm-{tag}"
         else:
-            session_name = (_get_current_pm_session()
-                            or _get_session_name_for_cwd())
+            # Same resolution as `pm session` itself, so the printed
+            # command names the session that would actually be attached.
+            session_name = _resolve_start_session_name()
         sp = str(session_socket_path(session_name.removeprefix("pm-")))
         if (not tmux_mod.session_exists(session_name, socket_path=sp)
                 and tmux_mod.session_exists(session_name, use_env=False)):

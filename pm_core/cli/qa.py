@@ -335,6 +335,11 @@ def qa_regression(test_id: str, session: str | None, file_prs: bool):
     if not sess:
         click.echo("No pm tmux session found. Start one with 'pm session'.", err=True)
         raise SystemExit(1)
+    # The runner drives the TUI through this pane, so a session whose TUI
+    # pane is gone (stale --session, killed TUI) is not a usable target.
+    if not pane_id:
+        click.echo(f"No TUI pane found in session '{sess}'.", err=True)
+        raise SystemExit(1)
 
     full_prompt = build_regression_test_prompt(
         session=sess,

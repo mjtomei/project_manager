@@ -1006,7 +1006,11 @@ def _registry_tui_pane(session: str) -> str | None:
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
-    Returns (pane_id, session_name) or (None, None) if not found.
+    Returns ``(pane_id, session_name)``, or ``(None, None)`` when no session
+    can be identified at all.  With an explicit *session* the name is
+    returned even when the session or its TUI pane is gone — history/frames
+    commands key their files off it, so callers that need a live pane must
+    check ``pane_id``.
 
     Every pm session has its own tmux server, so resolution also selects
     the server hosting the found session: subsequent ``tmux_mod`` calls in
