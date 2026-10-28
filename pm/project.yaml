@@ -10635,7 +10635,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/161
   gh_pr_number: 161
   created_at: '2026-04-07T23:32:03.613084+00:00'
-  updated_at: '2026-10-28T01:40:27.051718+00:00'
+  updated_at: '2026-10-28T02:03:58.621629+00:00'
   started_at: '2026-04-07T23:32:39.565390+00:00'
   reviewed_at: '2026-04-09T20:59:10.963258+00:00'
   merged_at: null
@@ -11367,6 +11367,52 @@ prs:
       once, B admitted first try, 3 stale removals each. Captures /pm-captures/scenarios/79.'
     created_at: '2026-10-28T01:40:26Z'
     last_edited: '2026-10-28T01:40:26Z'
+  - id: note-27c246a
+    text: 'S78 refine (619ae5c6): = S70 stop-idle rerun on the post-b468d16d tree
+      + a TUI s / CLI pm pr start race on one dead-window PR at a target that fits
+      one more impl. Code prediction: pm pr start has no cross-process guard (guard_pr_action
+      is TUI-only). If both reach acquire_launch_admission before the winner''s container
+      exists, the governor lock + acquired reservation refuse the loser (''Memory
+      governor blocked impl <pr>: ... reserved ... > ... target'') and it leaves the
+      dead window alone (correct). But if the loser passes its dead-window fast path
+      before the winner''s new_window and reaches wrap_claude_cmd after the winner''s
+      create_container finished, container_is_running() reuses the container with
+      no admission, its kill_window hits the already-closed id, and it opens a SECOND
+      window with the PR name exec''ing into the same container (duplicate windows,
+      two claude sessions in one container). Expect this at a CLI lag of roughly the
+      container-create time (a few s), not at lag 0; sweep offsets. Likely fix: a
+      per-PR flock around the start/review launch (fast-path check through new_window),
+      or re-check find_window_by_name for a live window after admission/reuse and
+      switch instead.'
+    created_at: '2026-10-28T00:58:49Z'
+    last_edited: '2026-10-28T00:58:49Z'
+  - id: note-65203b9
+    text: 'QA S78 (2026-10-28, 619ae5c6, nested rootless podman, fake-claude): fixed
+      c8404020 + 372aaad2. TUI s and pm pr start on one dead-window PR (stop-on-idle)
+      had no cross-process guard. (1) CLI first, key 2 s later: the TUI start passed
+      the dead-window fast path, then reused the CLI container with no admission and
+      opened a SECOND pr-<id> window exec-ing into it (crossed panes; stop-on-idle
+      then kept it, "its pane runs another session"). (2) lag 0: both starts use key
+      = container name, and _upsert_locked adopts the other acquired entry and re-admits
+      it, so both passed admission. The loser died in podman run ("Is podman running?")
+      with a traceback in the debug log. Fix: a per-window flock (~/.pm/locks/window-<session>-<window>.lock,
+      90 s, then Busy). pm pr start re-checks the window under the lock and switches
+      to a live one; admission, create, kill of the dead window and new_window run
+      inside it. _launch_review_window holds the same lock from its fast path. 8 post-fix
+      rounds (lag 0/0.5/1/2/4/6, CLI-first +1/+2) gave 1 container, 1 window and the
+      loser "Switched", with no traceback; the review race was also clean. 372aaad2:
+      s on an in_review PR printed "is now in_progress" (status unchanged); it now
+      prints "stays in_review". All other Thens held live: policies off kept 2+ min,
+      [open] [idle] -> [done PASS]; removal 11-17 s with own-ID lines; IR kept 45
+      min; dead-window s/d relaunch with Closed lines after Created; companion Switched;
+      stale X line names Y; attached PR6 kept; B untouched; samples = removals (impl
+      19/review 5). Full suite 4113 passed, 1 env-only hook_events failure. For the
+      reviewer: (a) sessions started from a shell (pm pr start/review, no --transcript)
+      are never idle-tracked, so stop-on-idle never removes them. (b) A review loop
+      (--fresh) kills the dead previous review window before admission, so a refused
+      loop start loses its scrollback (A7 covers only non-fresh). Captures /pm-captures/scenarios/78.'
+    created_at: '2026-10-28T02:03:58Z'
+    last_edited: '2026-10-28T02:03:58Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-eb2dbfc-container-memory-governor-dynamic-me-850ec349
 - id: pr-a3a081a
   plan: plan-qa
