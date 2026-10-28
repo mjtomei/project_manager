@@ -43,16 +43,20 @@ After the reduction the PR no longer touches `pm_core/` at all.
 
 R1. **Create the capture directory before recording.** Both
    `tmux-screen-recording.md` and `cli-recording.md` `mkdir -p` the capture
-   directory first. `asciinema rec` prints "asciicast saved" and exits 0 while
-   writing nothing when the directory is missing, so a missing `mkdir` looks
-   like a successful capture that does not exist.
+   directory first — in the runnable capture block, not only in prose, so a
+   worker that pastes the block gets it. `asciinema rec` prints "asciicast
+   saved" and exits 0 while writing nothing when the directory is missing, so
+   a missing `mkdir` looks like a successful capture that does not exist (the
+   tmux recipe's `pipe-pane` transcript is lost the same way).
 
 R2. **Remove a stale cast before recording.** Both recipes `rm -f` the cast
    before starting the recorder. The render step rewrites the `.mp4` from
    whatever cast is on disk, so without this a recording that wrote nothing
    still produces a fresh-looking video of the *previous* run (and without
    `--overwrite`, `asciinema rec` aborts on the existing file and the recorder
-   session dies).
+   session dies). The tmux recipe also removes a stale `transcript.log`:
+   `pipe-pane ... "cat >>"` appends, so an earlier run's log would be mixed
+   into this run's evidence.
 
 R3. **Wait for the recorder to draw before sending keys.** Both recipes have a
    bounded readiness wait on the pane content (and the session still
@@ -74,18 +78,24 @@ R5. **CLI scaffold writes the cast where the render reads it.** The no-TTY
    `<capture-dir>/recording.cast`, so a worker following it would render
    nothing.
 
-R6. **Bound the remaining readiness polls.** The tmux recipe's `until tmux ls`
-   (60 s) and the web-UI recipe's `until curl` (120 s) carry a deadline with an
-   actionable failure instead of hanging forever when the session/server never
-   comes up. The web-UI poll also stops the server it started, and bounds each
-   attempt (`--connect-timeout 2 --max-time 5`) because a deadline is only
-   consulted between attempts.
+R6. **Bound the remaining readiness polls, and poll the right handle.** The
+   tmux recipe's pm-session poll (60 s) and the web-UI recipe's `until curl`
+   (120 s) carry a deadline with an actionable failure instead of hanging
+   forever when the session/server never comes up. The tmux poll waits on the
+   computed session (`tmux has-session -t "$TARGET"`), not on `tmux ls | grep
+   '^pm-'`: that also matches the recipe's own `pm-recorder` session (and any
+   other project's pm session), so the poll would pass before the target
+   exists and the failure path would never fire. An empty target is rejected
+   first because `tmux has-session -t ''` succeeds. The web-UI poll also stops
+   the server it started, and bounds each attempt (`--connect-timeout 2
+   --max-time 5`) because a deadline is only consulted between attempts.
 
 R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
-   asserts the kept recipe behaviour: capture-dir creation, stale-cast
-   removal, scaffold parses, recorder readiness before keys, bounded stop +
-   cast check, the CLI `exit` stop, the CLI scaffold cast path, and the
-   bounded readiness polls.
+   asserts the kept recipe behaviour: capture-dir creation in the runnable
+   block, stale-cast and stale-transcript removal, scaffold parses, recorder
+   readiness before keys, bounded stop + cast check, the CLI `exit` stop, the
+   CLI scaffold cast path, the pm-session poll targeting the computed handle
+   (and not `grep '^pm-'`), and the bounded readiness polls.
 
 ## Non-goals
 
@@ -98,7 +108,7 @@ R7. **Regression coverage.** `tests/test_qa_artifact_recording_recipes.py`
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale-cast removal, recorder readiness, bounded stop + cast check, bounded `until tmux ls` |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript removal, recorder readiness, bounded stop + cast check, bounded pm-session poll on `has-session -t "$TARGET"` |
 | `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check) |
 | `pm/qa/artifacts/web-ui-recording.md` | bounded `until curl` with per-attempt timeout and server cleanup |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |

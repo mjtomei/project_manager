@@ -7,13 +7,15 @@ hits, regardless of how it waits for a background job:
   (it prints "asciicast saved" and exits 0 while writing nothing);
 - a cast from an earlier run is removed before recording, so the render
   step cannot turn a failed recording into a fresh-looking video of the
-  previous run;
+  previous run (the tmux transcript, which is appended to, is cleared too);
 - the no-TTY scaffold writes the cast where the render step reads it;
 - keys are not sent before the recorder has drawn (they are silently lost);
 - the recorder is stopped by ending the recorded command and awaited with a
   bound, and the cast is checked non-empty;
 - readiness polls (pm session, web-ui server) carry a deadline and an
-  actionable failure instead of hanging forever.
+  actionable failure instead of hanging forever, and the pm-session poll
+  waits on the computed session rather than any ``pm-`` session (which would
+  also match this recipe's own ``pm-recorder``).
 """
 
 import re
@@ -64,12 +66,19 @@ class TestRecipes:
         ``asciinema rec`` prints "asciicast saved" and exits 0 when the
         parent directory is missing — it writes nothing — so a recipe that
         only names the path produces a capture that looks successful and
-        does not exist.
+        does not exist. It has to be in the runnable block, not just in the
+        prose: a worker that pastes the block skips prose-only steps.
         """
-        section = _recipe_text(name).split("## Capture", 1)[1]
-        intro = section.split("```", 1)[0]
+        text = _recipe_text(name)
+        intro = text.split("## Capture", 1)[1].split("```", 1)[0]
         assert "mkdir -p <capture-dir>" in intro, (
             f"{name}: capture section never creates the capture directory")
+        block = _scaffold_block(text)
+        mkdir = block.find("mkdir -p <capture-dir>")
+        assert mkdir != -1, (
+            f"{name}: the runnable scaffold never creates the capture dir")
+        assert mkdir < block.index("asciinema rec"), (
+            f"{name}: the capture dir is created only after recording starts")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_capture_section_removes_a_stale_cast(self, name):
@@ -88,6 +97,41 @@ class TestRecipes:
         start = block.index("asciinema rec")
         assert rm.start() < start, (
             f"{name}: the stale cast is removed only after the recorder starts")
+
+    def test_tmux_capture_section_removes_a_stale_transcript(self):
+        """The transcript is appended to, so an earlier run's log would mix in.
+
+        ``tmux pipe-pane ... "cat >> transcript.log"`` appends: re-running
+        the recipe in the same capture directory leaves a log holding both
+        runs, so a recording that produced nothing still has a transcript
+        that looks like this run's evidence.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        rm = re.search(r"^rm -f [^\n]*transcript\.log", block, re.M)
+        assert rm, "tmux recipe never removes an earlier transcript.log"
+        assert rm.start() < block.index("pipe-pane"), (
+            "the stale transcript is removed only after the pipe is attached")
+
+    def test_tmux_readiness_wait_targets_the_computed_session(self):
+        """The pm-session poll must not match the recipe's own recorder.
+
+        ``tmux ls | grep '^pm-'`` also matches ``pm-recorder`` — the session
+        this very recipe creates — and any other project's pm session, so
+        the wait can pass before the target exists and its failure path
+        never fires. ``tmux has-session -t "$TARGET"`` is the actual
+        handle; an empty target must be rejected first because
+        ``tmux has-session -t ''`` succeeds.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        assert 'has-session -t "$TARGET"' in block, (
+            "tmux recipe does not wait on the computed session handle")
+        assert "grep -q '^pm-'" not in block and "until tmux ls" not in block, (
+            "tmux recipe still matches any pm- session (incl. pm-recorder)")
+        target = block.index("TARGET=$(pm session name)")
+        guard = block.index('[ -n "$TARGET" ]')
+        wait = block.index('until tmux has-session -t "$TARGET"')
+        assert target < guard < wait, (
+            "the empty-TARGET guard must come before the has-session wait")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_scaffold_block_parses(self, name):
@@ -164,7 +208,7 @@ class TestRecipes:
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [
-    ("tmux-screen-recording.md", "until tmux ls", None),
+    ("tmux-screen-recording.md", 'until tmux has-session -t "$TARGET"', None),
     ("web-ui-recording.md", "until curl", "--max-time"),
 ])
 def test_readiness_waits_are_bounded(name, marker, probe_bound):
@@ -177,6 +221,7 @@ def test_readiness_waits_are_bounded(name, marker, probe_bound):
     regardless.
     """
     text = _recipe_text(name)
+    assert marker in text, f"{name}: no readiness poll matching {marker!r}"
     idx = text.index(marker)
     window = text[max(0, idx - 700):idx + 700]
     assert "deadline" in window, f"{name}: unbounded readiness wait"

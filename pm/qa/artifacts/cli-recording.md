@@ -133,6 +133,7 @@ while tmux -L scaffold has-session -t rec 2>/dev/null; do
 done
 test -s <capture-dir>/<short-name>/recording.cast || {
     echo "asciinema wrote no cast — check the pane output" >&2
+    tmux -L scaffold kill-server 2>/dev/null   # do not leave `rec` behind
     exit 1
 }
 tmux -L scaffold kill-server 2>/dev/null || true   # cleanup

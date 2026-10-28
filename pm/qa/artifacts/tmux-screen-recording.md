@@ -44,17 +44,23 @@ recorder pane rendering the attach client rendering the recorder
 pane — endless recursion and a useless cast. Different sessions on
 the same tmux server is enough to break that recursion.
 
-Create the capture directory first: `mkdir -p <capture-dir>`, and delete
-any cast an earlier run left there (`rm -f <capture-dir>/recording.cast`).
-`asciinema rec` reports "asciicast saved" and exits 0 even when the
-directory does not exist, so a missing `mkdir` looks like a successful
-capture that wrote nothing. A leftover cast is worse in the other
-direction: without `--overwrite`, `asciinema rec` aborts with "recording
-already exists", the recorder session dies, and the render step then
-rewrites the `.mp4` from the *old* cast — a failed recording that looks
-like a fresh capture.
+Step 0 of the capture flow runs `mkdir -p <capture-dir>` and clears the
+files an earlier run left there. Both matter: `asciinema rec` reports
+"asciicast saved" and exits 0 even when the directory does not exist, so a
+missing `mkdir` looks like a successful capture that wrote nothing. A
+leftover cast is worse in the other direction: without `--overwrite`,
+`asciinema rec` aborts with "recording already exists", the recorder
+session dies, and the render step then rewrites the `.mp4` from the *old*
+cast — a failed recording that looks like a fresh capture. The transcript
+is appended to, so a stale `transcript.log` would silently mix an earlier
+run into this run's evidence.
 
 ```
+# 0. Create the capture directory and clear what an earlier run left there
+#    before anything writes into it.
+mkdir -p <capture-dir>
+rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log
+
 # 1. Start the canonical pm session. `pm session` (no subcommand)
 #    creates the project's pm session and then attaches; the attach
 #    can stall when there's no tty (or when this recipe is itself
@@ -62,18 +68,26 @@ like a fresh capture.
 #    — not `pm session` — and wait for the session to exist before
 #    moving on. The subshell form keeps job-control noise out of the
 #    recording.
+TARGET=$(pm session name)             # canonical pm session name
+[ -n "$TARGET" ] || {
+    echo "pm session name printed nothing — is pm on PATH?" >&2
+    exit 1
+}
 ( pm session >/dev/null 2>&1 ) &
-# Bounded readiness wait: poll for the session to exist, but give up with a
-# reason instead of hanging forever if `pm session` never starts it.
+# Bounded readiness wait on that exact session, not on any session whose
+# name starts with pm-: this recipe's own pm-recorder session (and any
+# other project's pm session) matches that, so the wait would pass before
+# the target exists and the failure path below would never fire. An empty
+# target would match too — `tmux has-session -t ''` succeeds — hence the
+# guard above.
 deadline=$(( $(date +%s) + 60 ))
-until tmux ls 2>/dev/null | grep -q '^pm-'; do
+until tmux has-session -t "$TARGET" 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "pm session did not appear within 60s — check 'pm session' output" >&2
+        echo "pm session $TARGET did not appear within 60s — check 'pm session' output" >&2
         exit 1
     fi
     sleep 0.2
 done
-TARGET=$(pm session name)             # canonical pm session name
 
 # 2. Stream the home pane's scrollback to transcript.log.
 tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
@@ -83,11 +97,7 @@ tmux pipe-pane -t "$TARGET:0.0" -o "cat >> <capture-dir>/transcript.log"
 #    $TARGET`. tmux sizes the session group to the smallest attached
 #    client, so set -x and -y large enough to render the TUI legibly
 #    (the cast inherits this size). 200x50 fits a typical desktop
-#    layout; bump them up if your scenario needs more room. Clear any
-#    cast from an earlier run first: without --overwrite asciinema
-#    refuses to start, and the render step would then re-render the old
-#    one into a fresh-looking mp4.
-rm -f <capture-dir>/recording.cast
+#    layout; bump them up if your scenario needs more room.
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t $TARGET'"

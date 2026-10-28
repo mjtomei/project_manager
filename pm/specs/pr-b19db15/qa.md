@@ -10,14 +10,16 @@ watcher PR (pr-ff9b728) will catch. What remains is a set of real
 recording-recipe bugs that any worker following the recipe hits:
 
 - both recording recipes create the capture directory before recording;
-- both remove a stale cast before recording;
+- both remove a stale cast before recording (the tmux recipe also removes a
+  stale `transcript.log`, which is appended to);
 - both wait (bounded) for the recorder to draw before sending keys;
 - both stop by ending the recorded command and then wait (bounded) on the
   recorder's session handle and check the cast is non-empty;
 - the CLI no-TTY scaffold writes the cast where the render reads it;
-- the tmux `until tmux ls` and web-UI `until curl` readiness polls are
-  bounded, with the web-UI poll bounding each attempt and stopping the server
-  it started.
+- the tmux pm-session poll is bounded and waits on the computed session
+  (`tmux has-session -t "$TARGET"`), not on any `pm-` session (which would
+  also match the recipe's own `pm-recorder`); the web-UI `until curl` poll is
+  bounded, bounds each attempt, and stops the server it started.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -81,15 +83,18 @@ session, stop the recorder, and render the cast,
   observed, not assumed);
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files.
 
-### R3 — Recipe readiness and stop waits are bounded, and a stale cast is cleared
+### R3 — Recipe readiness and stop waits are bounded, and stale files are cleared
 
-**Given** a `pm session` that never appears, or a recorder that never exits,
+**Given** a `pm session` that never appears (including with a leftover
+`pm-recorder` session already on the server), or a recorder that never exits,
 **When** the worker runs the recipe's readiness/stop wait,
 **Then** it exits within the stated deadline with an actionable message and
-cleans up (kills the recorder/session) instead of hanging; and
-**Given** a cast left by an earlier run, **When** the capture step starts,
-**Then** the stale cast is removed first, so the recorder does not abort with
-"recording already exists" and the new cast is this run's.
+cleans up (kills the recorder/session) instead of hanging or passing on the
+wrong session; and
+**Given** a cast or transcript left by an earlier run, **When** the capture
+step starts, **Then** the stale files are removed first, so the recorder does
+not abort with "recording already exists", the new cast is this run's, and the
+transcript does not hold two runs.
 
 ### R4 — The web-UI recipe's readiness wait is bounded and cleans up
 
