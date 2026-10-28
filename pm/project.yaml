@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T21:47:35.518772+00:00'
+  updated_at: '2026-10-28T21:49:08.413048+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33099,6 +33099,24 @@ prs:
       + tests/test_qa_artifact_recording_recipes.py 149 passed. No repo change.'
     created_at: '2026-10-28T21:47:35Z'
     last_edited: '2026-10-28T21:47:35Z'
+  - id: note-7248e7a
+    text: 'QA scenario 22 PASS (host run, not the /workspace container). All 7 stories
+      reproduced the intended behaviour at 865a88f9: killed recorder -> "asciinema
+      exited 137", torn-down pane -> "recorder status is missing", killed ffmpeg ->
+      "ffmpeg failed on the gif", garbage cast -> "agg failed on the cast", no ffmpeg
+      -> "ffmpeg is not installed", no cast -> "there is no cast to render", unusable
+      capture path / blocked TMUX_TMPDIR -> "could not create ..." / "could not start
+      the recorder session", interactive no-exit -> 5s bound + recorder-pane.log,
+      two actors on one socket -> A loud failure + B own cast/mp4. Observation for
+      a future iteration (the scenario accepts it, so no fix made): with two workers
+      sharing one HOME, both pass the install block command -v agg guard and download
+      to the same in-place ~/.local/bin/agg path, so one render dies with ETXTBSY
+      and reports "agg failed on the cast — is agg installed?" — a wrong cause. Seven
+      runs: never a truncated agg (sha256 == release), always exactly one valid mp4
+      and one loud failure. An atomic temp-file + mv install would remove the misdiagnosis.
+      Evidence: captures/pr-b19db15/scenarios/22/.'
+    created_at: '2026-10-28T21:49:08Z'
+    last_edited: '2026-10-28T21:49:08Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
