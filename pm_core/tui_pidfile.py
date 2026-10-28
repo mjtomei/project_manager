@@ -64,6 +64,20 @@ _TUI_ARG = "_tui"
 _ENTRY_BASENAME = "pm"
 _ENTRY_MODULE = "pm_core"
 
+# A zero-length ``/proc/<pid>/cmdline`` means "not a pm TUI" — a kernel
+# thread (``mm == NULL``) or a zombie — but it is *also* what the kernel
+# serves for the few hundred microseconds inside ``execve`` before the new
+# argv is installed, and ``restart_app`` re-execs the TUI in place, keeping
+# its PID.  Believing that window would make a caller delete a live TUI's
+# pidfile and report "restart the TUI" during a Ctrl+R restart, and would
+# let the startup claim take a session over while the restarting TUI is
+# still coming up (it then refuses to start and its pane dies).  An empty
+# read is therefore re-polled for this bounded grace before it is
+# believed: the exec window closes in milliseconds (measured 0.2-3.6 ms on
+# a loaded box), while a kernel thread's argv never fills in.
+_EMPTY_CMDLINE_GRACE_S = 0.1
+_EMPTY_CMDLINE_POLL_S = 0.01
+
 
 def pidfile_path(session: str) -> Path:
     """Path to the pidfile a TUI in *session* writes."""
@@ -261,6 +275,11 @@ def proc_cmdline(pid: int) -> list[str] | None:
     to such a process look like a live TUI: the startup claim refused to
     start (the exact failure this module exists to avoid) and callers
     would have signaled it.
+
+    An empty read is *also* what ``execve`` serves for a few hundred
+    microseconds while the new argv is not yet installed, so identity
+    decisions go through :func:`_settled_cmdline` rather than reading
+    this directly.
     """
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
@@ -284,6 +303,21 @@ def cmdline_is_tui(parts: list[str]) -> bool:
     if _TUI_ARG not in parts:
         return False
     return any(_is_pm_entry_point(part) for part in parts)
+
+
+def _settled_cmdline(pid: int) -> list[str] | None:
+    """``proc_cmdline`` with the ``execve`` window given a moment to close.
+
+    An empty argv is believed only after the bounded grace: see
+    ``_EMPTY_CMDLINE_GRACE_S``.  A non-empty argv, and ``None`` ("cannot
+    tell"), are returned immediately.
+    """
+    parts = proc_cmdline(pid)
+    deadline = time.monotonic() + _EMPTY_CMDLINE_GRACE_S
+    while parts == [] and time.monotonic() < deadline:
+        time.sleep(_EMPTY_CMDLINE_POLL_S)
+        parts = proc_cmdline(pid)
+    return parts
 
 
 def pid_alive(pid: int) -> bool:
@@ -312,7 +346,8 @@ def identity_problem(desc: TuiPidfile) -> str | None:
     ``starttime``, and the command line.  Off-procfs platforms degrade
     to the liveness check (``starttime`` is absent and cmdline unknown).
     An empty argv (``[]``) is a *known* non-TUI, not "unknown" — see
-    :func:`proc_cmdline`.
+    :func:`proc_cmdline` — but it is only believed once the ``execve``
+    window has closed (:func:`_settled_cmdline`).
     """
     if not pid_alive(desc.pid):
         return "process is not running"
@@ -322,7 +357,7 @@ def identity_problem(desc: TuiPidfile) -> str | None:
     if (desc.starttime is not None and live_starttime is not None
             and desc.starttime != live_starttime):
         return "pid was reused by another process"
-    parts = proc_cmdline(desc.pid)
+    parts = _settled_cmdline(desc.pid)
     if parts is not None and not cmdline_is_tui(parts):
         return "pid belongs to a different program"
     return None

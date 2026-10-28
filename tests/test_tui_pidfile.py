@@ -441,6 +441,95 @@ class TestEmptyCmdline:
         assert other.poll() is None
 
 
+class TestExecWindow:
+    """A re-exec'ing TUI keeps its PID but briefly has an empty argv.
+
+    ``execve`` serves a zero-length ``/proc/<pid>/cmdline`` for the few
+    hundred microseconds before the new argv is installed (measured
+    0.2-3.6 ms).  ``restart_app`` re-execs the TUI *in place*, so a caller
+    that validated the pidfile during a Ctrl+R restart would otherwise
+    classify the live TUI as "a different program": it would delete the
+    pidfile and report "restart the TUI", and the startup claim would let
+    a second TUI take the session over while the restarting one is still
+    coming up (that one then refuses to start and its pane dies).  An
+    empty read is therefore re-polled briefly before it is believed.
+    """
+
+    @staticmethod
+    def _empty_once_then(real):
+        """A ``proc_cmdline`` stand-in: empty on the first read, then *real*."""
+        reads = []
+
+        def fake(pid):
+            reads.append(pid)
+            if len(reads) == 1:
+                return []  # inside execve: the new argv is not installed yet
+            return real(pid)
+
+        return fake, reads
+
+    def test_identity_problem_survives_the_exec_window(self, monkeypatch):
+        fake, reads = self._empty_once_then(tpf.proc_cmdline)
+        monkeypatch.setattr(tpf, "proc_cmdline", fake)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_GRACE_S", 0.5)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_POLL_S", 0.005)
+        pid = os.getpid()
+        desc = tpf.TuiPidfile(pid=pid, caps=frozenset({tpf.CAP_RELOAD}),
+                              starttime=tpf.proc_starttime(pid))
+
+        # The test process is not a TUI, so the *settled* read still
+        # reports a foreign program — but it must be the settled read that
+        # decides, i.e. the empty window alone never decides.
+        assert tpf.identity_problem(desc) == "pid belongs to a different program"
+        assert len(reads) >= 2
+
+    def test_claim_refuses_a_tui_that_is_mid_exec(self, tmp_path,
+                                                  start_fake_tui, monkeypatch):
+        proc = start_fake_tui()
+        path = tmp_path / "tui-pm-test.pid"
+        _write_json(path, proc.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        fake, reads = self._empty_once_then(tpf.proc_cmdline)
+        monkeypatch.setattr(tpf, "proc_cmdline", fake)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_GRACE_S", 0.5)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_POLL_S", 0.005)
+
+        with pytest.raises(tpf.TuiPidfileConflict):
+            tpf.claim_tui_pidfile(path, SESSION)
+
+        assert len(reads) >= 2
+        assert tpf.read_pidfile(path).pid == proc.pid
+
+    def test_submit_keeps_the_pidfile_of_a_tui_that_is_mid_exec(
+            self, ipc_paths, start_fake_tui, monkeypatch):
+        proc = start_fake_tui()
+        pidfile, queue = ipc_paths
+        _write_json(pidfile, proc.pid, [tpf.CAP_RELOAD, tpf.CAP_COMMAND])
+        fake, reads = self._empty_once_then(tpf.proc_cmdline)
+        monkeypatch.setattr(tpf, "proc_cmdline", fake)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_GRACE_S", 0.5)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_POLL_S", 0.005)
+
+        result = helpers.submit_tui_command(SESSION, "pr list")
+
+        assert result.ok, result.message
+        assert len(reads) >= 2
+        assert pidfile.exists(), "a live TUI's pidfile must not be removed"
+        assert proc.poll() is None
+
+    def test_a_permanently_empty_argv_is_still_rejected(self, monkeypatch):
+        """The grace is bounded: a kernel thread's argv never fills in."""
+        monkeypatch.setattr(tpf, "proc_cmdline", lambda pid: [])
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_GRACE_S", 0.05)
+        monkeypatch.setattr(tpf, "_EMPTY_CMDLINE_POLL_S", 0.005)
+        pid = os.getpid()
+        desc = tpf.TuiPidfile(pid=pid, starttime=tpf.proc_starttime(pid))
+
+        started = time.monotonic()
+        assert (tpf.identity_problem(desc)
+                == "pid belongs to a different program")
+        assert time.monotonic() - started < 2.0
+
+
 # ---------------------------------------------------------------------------
 # Startup claim
 

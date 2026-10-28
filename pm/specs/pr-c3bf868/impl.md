@@ -395,6 +395,27 @@ E18. **An empty argv is a known non-TUI, not "unknown".** A process can
     E3/E16: an identity check must never misclassify an unrelated
     process as the TUI.
 
+E19. **An empty argv is also what `execve` serves.** For the few hundred
+    microseconds between `exec_mmap` and the new argv being installed,
+    `/proc/<pid>/cmdline` reads zero-length (measured 0.2–3.6 ms on a
+    loaded box; `comm` already shows the new binary). `restart_app`
+    re-execs the TUI *in place*, keeping its PID, so E18's "empty argv is
+    positive evidence of a non-TUI" would misclassify a live, restarting
+    TUI as a foreign process: `_validate_tui_owner` would delete the live
+    TUI's pidfile and report "not available (pid belongs to a different
+    program); restart the TUI" for every caller that fires during a
+    Ctrl+R restart, and `claim_tui_pidfile` would let a second TUI take
+    the session over while the restarting one is still coming up — that
+    one then refuses to start and its pane dies, breaking the
+    single-TUI guarantee (A2/R4). So an empty read is re-polled for a
+    bounded grace (`_EMPTY_CMDLINE_GRACE_S` = 100 ms, 10 ms steps)
+    before it is believed: the exec window closes in milliseconds, while
+    a kernel thread's argv never fills in, so E18's protection is kept
+    and its cost is one bounded wait on a rare path. `identity_problem`
+    goes through `_settled_cmdline`; `proc_cmdline` stays a pure read.
+    A non-empty argv and `None` ("cannot tell") are returned
+    immediately, so the ordinary path is unchanged.
+
 ## Tests
 
 New `tests/test_tui_pidfile.py` (shared module + helper + app integration)
@@ -572,6 +593,15 @@ and additions to `tests/test_popup_picker.py` / a spinner test:
     unbuffered.
 38. a short raw write that then succeeds (I3) is completed by the append
     loop rather than reported as a failure, so the whole line lands.
+39. the `execve` window (E19): a `proc_cmdline` that reads empty once and
+    then a TUI argv must not be read as "a different program" — so
+    `identity_problem` reports no problem, `claim_tui_pidfile` raises the
+    conflict (instead of stealing the restarting TUI's pidfile) and
+    `submit_tui_command` succeeds and leaves the pidfile in place. The
+    first three were verified to fail against a direct `proc_cmdline`
+    read. A *permanently* empty argv is still rejected after the bounded
+    grace (that test passes both ways by design: it pins that the grace
+    does not weaken E18).
 
 The dispatch helpers share one reader, `helpers._read_tui_owner()`, which
 returns `(pidfile, raw, descriptor, problem)` and never modifies anything;
