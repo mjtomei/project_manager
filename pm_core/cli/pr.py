@@ -247,10 +247,28 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
         # verbatim instead of raising ``AttributeError``/``KeyError`` out of
         # the write path or dropping hand-written state silently.
         stored_notes = _notes_of(pr_entry)
-        uneditable = [n for n in stored_notes
-                      if not isinstance(n, dict) or _note_text(n) is None]
-        current_notes = [n for n in stored_notes
-                         if isinstance(n, dict) and _note_text(n) is not None]
+
+        def _renders_back(n) -> bool:
+            """Whether the template's bullet for *n* reads back as its text.
+
+            A note is only matched to a parsed line by its ``text``, so a
+            member the template renders as a line that parses to no note (or
+            to different text) is never matched: a rebuild would drop it or
+            rewrite its content.  That is the case for an empty ``text`` with
+            no ``created_at`` (a bare ``- `` bullet — pm's own note commands
+            always stamp one, so the shape is hand-written), for a text whose
+            trailing ``# <timestamp>``-looking suffix the comment stripping
+            would eat, and for a text the bullet cannot hold on one line (a
+            newline).  Parsed line by line, like the template itself.
+            """
+            text = _note_text(n)
+            if text is None:
+                return False
+            lines = _note_bullet_line(n).splitlines()
+            return len(lines) == 1 and _note_bullet_text(lines[0]) == text
+
+        uneditable = [n for n in stored_notes if not _renders_back(n)]
+        current_notes = [n for n in stored_notes if _renders_back(n)]
         # Compare the parse against what an *unmodified* template parses back
         # to — the same bullet renderer, line parser, ASCII substitution and
         # unicode restoration — rather than against the editable notes alone:

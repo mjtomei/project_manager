@@ -998,6 +998,59 @@ class TestPrNoteWritePaths:
         assert any(n.get("id") == "note-null" for n in notes)
         assert any(n.get("text") == "new" for n in notes)
 
+    def test_pr_edit_keeps_a_note_the_template_cannot_read_back(self, tmp_path):
+        """A note the template's own parser does not read back is kept.
+
+        The reconciliation matches a stored note to a parsed line by its
+        ``text``, so a note whose rendered bullet parses to no note (or to
+        other text) can never be matched — a save that rebuilt the notes
+        dropped it or rewrote its content:
+
+        * ``text: ""`` with no ``created_at`` renders as a bare ``- `` bullet,
+          which parses to no note at all.  pm's note commands always stamp
+          ``created_at`` (such a note reads back as an empty note), so this
+          shape is hand-written state.
+        * a text that ends in a timestamp-looking suffix (or carries trailing
+          whitespace) is truncated by the template's ``# <ts>`` comment
+          stripping, so it used to be replaced by its truncated form.
+
+        Both are hand-written state and must be kept verbatim, like a member
+        the template cannot show.  A stamped empty note must still round-trip
+        as itself, not become a duplicate.
+        """
+        from pm_core.cli.pr import _apply_pr_edit
+
+        suffixed = "note  # 2026-01-15T10:30:00Z"
+        original = [
+            {"id": "note-plain", "text": ""},
+            {"id": "note-stamped", "text": "",
+             "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "note-suffixed", "text": suffixed},
+            {"id": "note-real", "text": "real",
+             "created_at": "2026-01-02T00:00:00Z"},
+        ]
+        root = _make_state(tmp_path, notes=[dict(n) for n in original])
+
+        changes = _apply_pr_edit(root, "pr-001", {
+            "title": None, "status": None, "depends_on_str": None,
+            "note_texts": ["", "note", "real", "a new note"],
+            "description": "A test PR",
+        })
+        assert "notes updated" in changes
+        notes = self._notes(root)
+        ids = [n.get("id") for n in notes if isinstance(n, dict)]
+        # The hand-written empty note survives; the stamped empty note is
+        # matched by its parsed empty bullet rather than duplicated.
+        assert "note-plain" in ids
+        assert ids.count("note-stamped") == 1
+        assert sum(1 for n in notes
+                   if isinstance(n, dict) and n.get("text") == "") == 2
+        # The suffixed text is kept whole, not replaced by its truncated form.
+        assert any(n.get("text") == suffixed
+                   for n in notes if isinstance(n, dict))
+        assert any(n.get("text") == "a new note"
+                   for n in notes if isinstance(n, dict))
+
     def test_a_noop_editor_save_changes_nothing(self, tmp_path):
         """The editor watcher saves on every write, unchanged or not.
 

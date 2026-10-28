@@ -914,11 +914,15 @@ class TechTree(Widget):
                 pr.get("agent_machine"),
                 bool(pr.get("workdir")),
                 _signoff_verdict(pr),
-                # Hand-edited state: ``tuple(5)`` raises, and iterating a
-                # string yields characters, so a malformed ``depends_on``
-                # reads as absent instead of crashing every render.
-                tuple(pr["depends_on"]) if isinstance(pr.get("depends_on"), list)
-                else (),
+                # ``graph.deps_of``: a hand-edited scalar ``depends_on`` is
+                # not a list of ids (``tuple(5)`` raises, and iterating a
+                # string yields characters), and a non-string member is not a
+                # dependency the layout can draw.  This is the same reader
+                # ``compute_tree_layout`` and the edge canvas use, so the
+                # signature changes exactly when the layout can — and it stays
+                # hashable, as documented above (a raw list member may be a
+                # mapping).
+                tuple(graph.deps_of(pr)),
                 pr.get("updated_at"), pr.get("created_at"), pr.get("started_at"),
                 pr.get("reviewed_at"), pr.get("merged_at"),
             )

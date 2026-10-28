@@ -845,6 +845,16 @@ tests):
     not a string (or is missing): the edit template renders it as an empty
     bullet, so the parsed round-trip never matches it and a no-op save used to
     drop the note and replace it with a fresh empty one on every save.  The
+    rule is "the template must render this note *and read it back*", line by
+    line as the template is parsed: a member whose bullet parses to no note or
+    to other text is kept verbatim.  That covers a note whose `text` is empty
+    with no `created_at` (a bare bullet that parses to nothing; pm's note
+    commands always stamp one, so the shape is hand-written — it used to be
+    dropped by any save that rebuilt the notes, and it must not turn into a
+    duplicate when a sibling empty note is the one the parse matches), a text
+    whose trailing `# <timestamp>`-looking suffix the comment stripping would
+    eat, and a text the bullet cannot hold on one line (a newline) — both of
+    which used to be rewritten to their truncated first line.  The
     template's bullet renderer, line parser, ASCII substitution and unicode
     restoration are shared (`_note_bullet_line` / `_note_bullet_text` /
     `_to_editor_ascii` / `_restore_unicode`), and the reconciliation compares
