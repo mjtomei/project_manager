@@ -14635,7 +14635,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-04T12:31:09.535902+00:00'
-  updated_at: '2026-10-28T06:22:58.434751+00:00'
+  updated_at: '2026-10-28T06:34:50.850581+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -15221,6 +15221,25 @@ prs:
       therefore start from a stale pidfile as the scenario assumes.'
     created_at: '2026-10-28T06:21:50Z'
     last_edited: '2026-10-28T06:22:58Z'
+  - id: note-e76da3c
+    text: 'QA S8 (2026-10-28): PASS. Two pm sessions (pm-A/pm-B), pidfile key/identity
+      verified: each ~/.pm/tui-<session>.pid is v1 JSON naming its own session with
+      pid == that session''s pm _tui pane_pid (1942/1991), distinct pids, no cross-naming;
+      autostart owner resolves per session. Reload isolation: pm pr add in A -> A
+      reload +1 only (B 0), both pidfiles byte-identical (SIGUSR1, no re-claim). Queue
+      isolation: pane-routed pm autostart status (no -s) advances only its own queue
+      mtime; both 0 bytes. Session-key regression: with a client on B and bare display-message
+      resolving to B, pm tui restart -s A kept pid 1942 and refreshed only A''s started_at;
+      B pidfile untouched; A pane showed the normal UI; A''s pane-routed command answered
+      by A (owner.session=A, pid=1942); B still B. Evidence /pm-captures/scenarios/8/cli.
+      RERUN GOTCHAS: (1) panes need PM_HOST_HOME=/home/matt in the tmux server env,
+      else the host-mounted ~/.claude hooks look foreign and the TUI crashes at startup;
+      (2) the prescribed env -u TMUX setsid script -qec "tmux attach -t $B" KILLS
+      the session''s active window on tmux 3.2a (reproduces on a fresh server with
+      no pm hooks; does not happen from a real pty) - select the ops window before
+      attaching so the TUI is not active.'
+    created_at: '2026-10-28T06:34:50Z'
+    last_edited: '2026-10-28T06:34:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
