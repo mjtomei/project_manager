@@ -3244,6 +3244,19 @@ def _poll_tmux_verdicts(
 
             rec = retries.get(idx)
             if rec is not None and rec.get("state") == "waiting":
+                if idx in state.scenario_verdicts:
+                    # A verdict landed before the retry came due (e.g. it
+                    # was restored from a resume snapshot): the retry record
+                    # is stale.  Relaunching would kill the finished
+                    # worker's window and spawn a second worker for a
+                    # scenario that already has a result, so ignore the
+                    # record and keep the verdict.
+                    pending.discard(idx)
+                    rec["state"] = "running"
+                    rec["retry_at"] = None
+                    verdicts_changed = True
+                    _settle(scenario, state.scenario_verdicts[idx])
+                    continue
                 if now < float(rec.get("retry_at") or 0):
                     continue  # backoff still running; others keep moving
                 rec["attempts"] = int(rec.get("attempts", 0)) + 1
@@ -3265,9 +3278,11 @@ def _poll_tmux_verdicts(
             # container, window or split failure — possibly before any
             # pane existed at all).  A worker that did start is an ``exit``
             # failure instead: relaunching keeps its clone and commits,
-            # while a create retry re-clones them away.
-            if not scenario.window_name or (
-                    not scenario.pane_id and not scenario.session_id
+            # while a create retry re-clones them away.  Check that first:
+            # a started worker is never a creation failure, even when the
+            # attempt never recorded a window name.
+            if ((not scenario.window_name
+                 or (not scenario.pane_id and not scenario.session_id))
                     and not _worker_has_started(scenario)):
                 _record_failure(scenario, "create", (
                     state.scenario_verdict_reasons.get(idx)

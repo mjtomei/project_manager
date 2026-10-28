@@ -388,6 +388,35 @@ def test_started_worker_without_session_keeps_clone(tmp_path):
     assert full_launches == []
 
 
+def test_started_worker_without_window_is_not_recloned(tmp_path):
+    """A worker that ran but whose attempt never recorded a window name (the
+    resume snapshot was written before the launcher published it) is still an
+    ``exit`` failure, not a creation failure: a create retry re-clones the
+    scenario dir and would delete the worker's commits."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="t", focus="f", transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+
+    def on_tick(clock):
+        if state.launch_retries:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    full_launches: list = []
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+        patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+              side_effect=lambda *a, **kw: full_launches.append(a)),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert state.launch_retries[1]["kind"] == "exit"
+    assert full_launches == []
+
+
 def test_container_exit_mid_run_names_diagnosed_cause(tmp_path):
     """A started container worker that dies mid-run (the #236 fork storm)
     is an ``exit`` failure, but still carries the probed runtime cause."""
@@ -687,6 +716,47 @@ def test_launch_failure_never_replaces_a_completed_verdict(tmp_path):
     # The exhausted budget did not turn the verdict into a launch failure.
     assert state.launch_retries[1]["state"] == "running"
     assert state.launch_retries[1]["attempts"] == _SCENARIO_MAX_RETRIES
+
+
+def test_due_retry_with_verdict_is_ignored(tmp_path):
+    """A retry record restored from a resume snapshot can come due for a
+    scenario whose verdict already landed.  Acting on it would kill the
+    finished worker's window and spawn a second worker, so the stale record
+    is ignored and the completed result is kept (spec E4)."""
+    sc = QAScenario(index=1, title="done", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1", transcript_path="/t/s1")
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+    state.scenario_verdict_reasons = {1: "found and fixed a bug"}
+    state.launch_retries = {1: {"attempts": 2, "kind": "exec", "cause": "boom",
+                                "state": "waiting", "retry_at": 0,
+                                "sessions": []}}
+
+    def on_tick(clock):
+        if len(clock.sleeps) == 2:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    relaunched: list[int] = []
+
+    def fake_relaunch(scenario, st, *a):
+        relaunched.append(scenario.index)
+        scenario.pane_id = "%1r"
+        return True
+
+    patches = _base_patches(clock, {}, {}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._relaunch_scenario_window",
+              side_effect=fake_relaunch),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert relaunched == []
+    assert state.scenario_verdicts == {1: VERDICT_NEEDS_WORK}
+    assert state.scenario_verdict_reasons == {1: "found and fixed a bug"}
+    rec = state.launch_retries[1]
+    assert rec["state"] == "running" and rec["retry_at"] is None
 
 
 def test_relaunch_resets_verdict_reminder_timer(tmp_path):
