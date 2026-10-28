@@ -35061,7 +35061,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T11:06:01.375371+00:00'
+  updated_at: '2026-10-28T12:59:33.036894+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39004,6 +39004,46 @@ prs:
       in tick loops, one story at a time.'
     created_at: '2026-10-28T11:06:01Z'
     last_edited: '2026-10-28T11:06:01Z'
+  - id: note-a14e4fb
+    text: 'S128 refine (HEAD 3110c6f3): /pm-captures/scenarios/125/scripts does not
+      exist (S125 scripts lived in /scratch, now gone). Rebuild from /pm-captures/scenarios/113/scripts
+      (stub.py/stubs.sh/seed_home.sh), 103 (run2.sh outage watcher + clirec), 123
+      (tick.sh/common.sh/killrun/recorder/render) and the full S125 host setup trace
+      /pm-captures/scenarios/125/void/run1-host-outage-missed/setup/setup_proj.log.
+      The 113 stub has one global "signoff" mode; add a per-PR sign-off sequence (S125
+      used ctl key signoff_seq). Story 1 is TUI-driven (pm autostart add R U): the
+      REQA hold over the pm qa run is the TUI path (signoff_ui -> defer_reqa_start,
+      log "Sign-off REQA for <R> — QA starts once the QA run another process drives
+      ends"), which is NOT a route line. Story 2 uses a fresh project driven by plain-terminal
+      pm pr auto-sequence ticks; R joins TUI auto-start only after the first tick-launched
+      sign-off (pr-66432ce: TUI never adopts it, tick applies the hop). Control for
+      [working]: S125 pre-fix capture (cli-run-live-R shows [done PASS]).'
+    created_at: '2026-10-28T11:52:19Z'
+    last_edited: '2026-10-28T11:52:19Z'
+  - id: note-9fd0765
+    text: 'QA S128 (2026-10-28, host, real claude 2.1.312 vs main + acme router stubs,
+      fake planner/verifier/finalizer, HEAD 3110c6f3; captures /pm-captures/scenarios/128/README.md,
+      s1/s2 recording.mp4): INPUT_REQUIRED, no code change. Held live: picker qa [working]
+      during the live pm qa run (TUI and qa-<R> window; S125 control [done PASS]);
+      TUI REQA hold line over the CLI run, no R window/loop dir before the CLI Result,
+      then exactly one Starting QA + one loop dir; U REQA re-run at once on main only;
+      routed refiner ECONNREFUSED Retrying attempt k/10 with the router down, recovery
+      with no pm action, re-run PASS, one sign-off BLOCKED; 0 route wait/defer/stall/recover/nudge
+      lines; main.jsonl no R refiner/worker and no acme model; hooks+transcripts for
+      every routed session; secret grep 0. Story 2 (plain-terminal ticks): sign_off:
+      re-qa tick spawns the one qa-run-bg, no Error:/QA stopped, TUI "driven by another
+      process, not starting", one hand-off, paused: sign_off_blocked. DECISION NEEDED:
+      the re-run start (_cleanup_stale_scenario_windows) logs "Killing stale QA window
+      qa-<pr>-s1" for the FINISHED pm qa run leftover window (pm qa run names its
+      window like a full run), against the S128 Then "no Killing stale QA window names
+      the CLI windows" / RQ56 "the CLI run windows are kept". Keep it (window name
+      clash) or drop the Then? Also observed: the tick advances to sign_off on overall
+      PASS while the driver is still finalizing (~30 s); a sign-off REQA landing then
+      makes the hop tick defer and a later tick launch (still one re-run). The TUI
+      has no periodic auto-start pass, so "driven by another process" only logs after
+      an event (pm autostart add).'
+    created_at: '2026-10-28T12:59:32Z'
+    last_edited: '2026-10-28T12:59:32Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
