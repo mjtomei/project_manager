@@ -33234,6 +33234,34 @@ prs:
       had to be moved aside.'
     created_at: '2026-10-28T22:30:00Z'
     last_edited: '2026-10-28T22:30:00Z'
+  - id: note-416b4d7
+    text: 'QA S21 (nominal CLI capture/render) PASSED at 767bcd9a. Environment note
+      for future runs on this host: ffmpeg/ffprobe are NOT on the host PATH and there
+      is no sudo; I installed real ffmpeg/ffprobe 9.0.2 via micromamba (conda-forge,
+      libx264) into a private env and prepended it to PATH, and installed agg 1.9.0
+      via the recipes own guarded `command -v agg` block. All six stories passed:
+      (1) one-shot into a dirty capture dir — the seeded cast/transcript/mp4/gif/status/stderr/pane
+      log were all cleared, recorder.status 0 (not 99), no STALE_ markers survived,
+      fresh h264 mp4 (3.08 s); (2) interactive — the dir did not exist before and
+      the scaffold mkdir -p created it, readiness returned on the cast header before
+      the first send, all three checked send-keys exited 0; (3) quiet 35 s command
+      — readiness 0.23 s on a blank pane, step 4 34.9 s, QUIET_MARKER present; (4)
+      long 40 s command with RECORDER_STOP_TIMEOUT=90 — step 4 waited 40.02 s past
+      the 30 s default; (5) mistyped RECORDER_STOP_TIMEOUT=2m — rc 1 in 7 ms with
+      the documented message and the recorder torn down; (6) documented escaped forms
+      — `bash -c "set -x; echo ''inner quoted''; echo OUTER_DONE"` and `pm pr note
+      add $PR_ID ''a note''` both recorded with status 0 and the note persisted; (7)
+      completion beside an agg-like decoy on a separate socket — step 4 returned in
+      0.25 s, the observer survived (kill -0 + ps + has-session), scaffold socket
+      cleaned. Test module tests/test_qa_artifact_recording_recipes.py: 130 passed,
+      0 failed, 0 skipped. Captures under scenarios/21/cli-*. Observation, not a failure:
+      the render 2x upscale produced 1966x1388 and libx264 warned "MB rate (1070100)
+      > level limit (983040)" for the 100 tbr gif; the encode still succeeded at declared
+      level 5.1, but the recipe size guard bounds dimensions only, not frame rate,
+      so a busier cast could exceed level 5.1. Unconfirmed as a playback failure —
+      worth checking only if iOS decode issues surface.'
+    created_at: '2026-10-28T21:45:04Z'
+    last_edited: '2026-10-28T21:45:04Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
