@@ -14883,6 +14883,22 @@ prs:
       be on PATH ($R/bin symlink) or the planner exits -> ERROR.'
     created_at: '2026-10-28T05:12:12Z'
     last_edited: '2026-10-28T05:12:12Z'
+  - id: note-82c17bb
+    text: 'S78 refine (2026-10-28, HEAD fdb3c7d3, code trace): same-PR reruns are
+      renumbered (_next_scenario_offset scans ~/.pm/workdirs/qa/<pr>-*/s-*): A run1
+      s1-s10, A run2 s11-s20, B run1 s1-s10, B fresh s11-s20, so identical numbers
+      collide across PRs (qa-<A>-s11 vs qa-<B>-s11), not within a PR. The fake qa_scenario
+      cursor is per session tag in launch order, so put the A NEEDS_WORK early and
+      clamp to a delayed PASS for all later runs. Stopping a run with zz t downgrades
+      an unverified PASS to INPUT_REQUIRED and keeps that container while its pane
+      lives; a superseded run gets no PR note (only qa_status.json). A genuine setup
+      failure (image without git: FROM pm-dev, rm /usr/bin/git) is kind runtime: "could
+      not finish setup. Runtime error: ... git: command not found". It names no pm
+      recovery command (only keyring/memory/pids/image/timeout do); the fix is pm
+      container set image pm-dev:latest. pm pr merge spawns a detached reap --pr,
+      so merged-PR leftovers are usually gone before the TUI restart startup pass.'
+    created_at: '2026-10-28T04:23:17Z'
+    last_edited: '2026-10-28T04:23:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
