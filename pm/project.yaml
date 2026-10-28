@@ -35958,7 +35958,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-28T09:32:04.005241+00:00'
+  updated_at: '2026-10-28T09:42:30.044556+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36204,6 +36204,23 @@ prs:
       TUI after each switch.'
     created_at: '2026-10-28T09:32:03Z'
     last_edited: '2026-10-28T09:32:03Z'
+  - id: note-fa5353e
+    text: 'QA scenario 12 (superseding QA/sign-off, late old verdicts) — stories 1,
+      3, 4 pass; stories 2 and 5 each have one Then conflict. Both stories have the
+      implementation turn already complete at the fresh, yet the Then requires fresh_autostart.awaiting_handoff:
+      true. Spec R3 ("If the turn is complete at reset time, advance immediately")
+      makes fresh_start consume the marker synchronously: the CLI prints "implementation
+      turn complete, fresh review started" and project.yaml shows awaiting_handoff:
+      false with handoff_at/review_started_at set (evidence: /pm-captures/scenarios/12/story2/08-yaml-post.txt
+      and story5/07-yaml-after-fresh2.txt). The two Thens are mutually exclusive (a
+      review that starts immediately cannot still be awaiting a handoff), so this
+      reads as a scenario-authoring conflict rather than a product defect: retirement
+      of the old QA/review/sign-off, evidence preservation, no duplicate superseded_history
+      entry, attempt increment, and exactly-one-fresh-review all held. Needs a decision:
+      amend the Then for the already-complete case, or change the product to defer
+      the immediate handoff. Captures: /pm-captures/scenarios/12/.'
+    created_at: '2026-10-28T09:42:29Z'
+    last_edited: '2026-10-28T09:42:29Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
