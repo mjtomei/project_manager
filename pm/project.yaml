@@ -31530,7 +31530,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-28T05:21:14.491528+00:00'
+  updated_at: '2026-10-28T08:26:44.432020+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31588,6 +31588,25 @@ prs:
       (fixture writes during the run).'
     created_at: '2026-10-28T05:21:14Z'
     last_edited: '2026-10-28T05:21:14Z'
+  - id: note-218b11d
+    text: 'QA S3 (2026-10-28): the incident path and the repro suite pass. Part 1
+      (fixture writes scenarios/2 + root qa_manifest.json while the run is live) —
+      completion sync quarantined it to scenarios/_foreign/cli-pr-3233a01-2 (bytes
+      preserved), re-published the run manifest naming cli-pr-3233a01 with only Scenario
+      1, and pm qa evidence listed only the real scenario. Part 3 — tests/test_captures_provenance.py:
+      71 passed, exit 0, all six named tests PASSED. Part 2 (shared /pm-captures)
+      could NOT verify its premise: /pm-captures has no qa_manifest.json and no qa_runs/
+      — the enclosing controller runs pre-PR code (it writes scenarios/{1..4} prompts
+      into that same tree, but a start-of-run sync would have published the manifest
+      before any prompt). What did hold: with PM_CAPTURES_PR unset the nested PR resolved
+      /pm-captures, the run stopped at the QA-spec gate (INPUT_REQUIRED) and published
+      qa_manifest.json + qa_runs/cli-pr-0e9258e.json, no enclosing scenario dir was
+      moved and no scenarios/_foreign/ appeared, and pm qa evidence pr-1ae1d2d flagged
+      both the foreign pointer and scenarios/9 as a foreign record. The qa_runs-recovery
+      wording was demonstrated separately against a real run record. Next QA run:
+      re-check the enclosing-run membership Then once the loop runs this branch.'
+    created_at: '2026-10-28T08:26:44Z'
+    last_edited: '2026-10-28T08:26:44Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
