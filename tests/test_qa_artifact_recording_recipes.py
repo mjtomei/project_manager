@@ -52,7 +52,15 @@ hits, regardless of how it waits for a background job:
   install advertised through ``NODE_PATH``, which ESM's resolver ignores, so
   the run block links a ``node_modules`` beside the driver (only when there is
   no local install) and stops at its own resolution check when the import
-  still does not resolve.
+  still does not resolve;
+- a step that cannot do its job says so where it fails instead of being
+  misdiagnosed downstream: an unusable capture directory and a failed
+  ``new-session`` stop the run with their own message (otherwise the failure
+  reads as "recorder exited before it drew" / "asciinema wrote no cast", both
+  pointing at files that were never written), the web-UI driver block refuses
+  a capture directory it cannot enter (``cd`` fails and the link lands in the
+  worker's cwd), and a web-UI start that never answers removes the pid it
+  recorded so the teardown cannot signal a recycled one.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -115,13 +123,20 @@ def _statement(block, start_marker):
 
     The scaffold statements span several lines, and what follows them is not
     always a blank line, so the end is the first line without a trailing
-    backslash.
+    backslash. A statement that opens a ``{`` brace group (the recorder start,
+    which reports a failed ``new-session``) carries on to its closing ``}``.
     """
     lines = []
-    for line in block[block.index(start_marker):].splitlines():
+    rest = iter(block[block.index(start_marker):].splitlines())
+    for line in rest:
         lines.append(line)
         if not line.rstrip().endswith("\\"):
             break
+    if lines[-1].rstrip().endswith("{"):
+        for line in rest:
+            lines.append(line)
+            if line.strip() == "}":
+                break
     return "\n".join(lines)
 
 
@@ -1327,6 +1342,37 @@ def test_web_ui_driver_block_refuses_an_unset_capdir(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_block_refuses_a_missing_capture_dir(tmp_path):
+    """A set-but-missing ``CAPDIR`` is the same hole as an unset one.
+
+    ``cd "$CAPDIR"`` fails and the shell stays in the worker's cwd, so the
+    link and the resolution check run *there* and pass, and the driver then
+    dies with a bare "Cannot find module …/driver.mjs". Verified: with
+    ``CAPDIR`` pointing at a path that does not exist, the previous block
+    created ``node_modules`` in the cwd and printed "playwright ok". The
+    block has to stop on the directory it cannot enter.
+    """
+    global_dir = _fake_playwright(tmp_path / "global")
+    block = _web_ui_driver_block().replace("/usr/lib/node_modules",
+                                           str(global_dir))
+    work = tmp_path / "cwd"
+    work.mkdir()
+    env = dict(os.environ, CAPDIR=str(tmp_path / "missing-cap"),
+               APP_URL="http://localhost:1")
+    r = subprocess.run(["bash"], input=block, env=env, cwd=work,
+                       capture_output=True, text=True, timeout=120)
+
+    assert r.returncode != 0, (
+        "the driver block ran with a capture directory that does not exist")
+    assert "does not exist" in r.stderr, r.stderr
+    assert "playwright ok" not in r.stdout, (
+        "the block passed its resolution check on a link it created in the "
+        "worker's cwd: " + r.stdout)
+    assert not os.path.lexists(work / "node_modules"), (
+        "the block created a node_modules link in the worker's cwd")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_block_refuses_an_unset_app_url(tmp_path):
     """An unset APP_URL is not "the default app" — the driver has a fallback.
 
@@ -1466,13 +1512,20 @@ def _web_ui_start_block():
     return re.findall(r"```bash\n(.*?)```", section, re.S)[0]
 
 
-def _run_web_ui_start(mode, tmp_path):
-    """Run the web-UI recipe's app-start block with stub pm/curl/my-app."""
+def _run_web_ui_start(mode, tmp_path, caps_is_file=False):
+    """Run the web-UI recipe's app-start block with stub pm/curl/my-app.
+
+    ``caps_is_file`` makes the captures path itself a regular file, so the
+    block's ``mkdir -p`` cannot create the capture directory.
+    """
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", _web_ui_start_block())
     bindir = tmp_path / "bin"
     caps = tmp_path / "captures"
-    for d in (bindir, caps):
-        d.mkdir(parents=True, exist_ok=True)
+    bindir.mkdir(parents=True, exist_ok=True)
+    if caps_is_file:
+        caps.write_text("not a directory")
+    else:
+        caps.mkdir(parents=True, exist_ok=True)
     launched = tmp_path / "app-launched"
     _stub_tool(bindir, "pm", f'echo "{caps}"\n')
     _stub_tool(bindir, "curl", _STUB_CURL)
@@ -1517,6 +1570,39 @@ class TestWebUiStartExecution:
         assert r.returncode != 0, (
             "a server that never answers was reported as started")
         assert "did not answer" in r.stderr, r.stderr
+
+    def test_a_failed_start_removes_the_pid_it_recorded(self, tmp_path):
+        """The dead app's pid must not outlive it in ``server.pid``.
+
+        The readiness failure kills the app, and the teardown falls back to
+        the recorded pid. Leaving it there means the teardown can signal a
+        recycled pid — the exact reason step 1 clears a stale ``server.pid``
+        before writing a new one (verified: the pre-fix block left the dead
+        pid in place).
+        """
+        r, _launched = _run_web_ui_start("never", tmp_path)
+        assert r.returncode != 0, r.stderr
+        assert not (_web_ui_capdir(tmp_path) / "server.pid").exists(), (
+            "the failed start left a dead app's pid in server.pid, so the "
+            "teardown could signal a recycled pid")
+
+    def test_an_unusable_capture_dir_stops_the_start(self, tmp_path):
+        """The capture dir cannot be created, and the block still exits 0.
+
+        Every later step writes into ``$CAPDIR`` (the pid file, the Layer 2
+        redirects, the driver's outputs). Verified: with the captures path a
+        regular file, the pre-fix block reported success, launched the app
+        and wrote no pid file — the "silent success while writing nothing"
+        class the Layer 2 and finalize guards were added for.
+        """
+        r, launched = _run_web_ui_start("ok", tmp_path, caps_is_file=True)
+        assert r.returncode != 0, (
+            "a capture directory that cannot be created was reported as a "
+            "successful start")
+        assert "could not create" in r.stderr, r.stderr
+        assert not launched.exists(), (
+            "the app was started although the capture directory does not "
+            "exist, so its outputs have nowhere to go")
 
 
 def test_web_ui_clears_a_previous_video():
@@ -1603,6 +1689,33 @@ def test_web_ui_layer2_block_refuses_an_unset_capdir(tmp_path):
         "aimed at the filesystem root")
 
 
+def test_web_ui_layer2_block_refuses_a_missing_capture_dir(tmp_path):
+    """A set-but-missing ``CAPDIR`` is the same silent success, one step on.
+
+    Both redirects fail, so neither ``curl`` runs, and the block's last
+    command succeeds — verified: the previous block exits 0 while writing no
+    protocol capture at all. The guard has to cover the directory, not only
+    the variable.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "curl-called"
+    _stub_tool(bindir, "curl", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(tmp_path / "missing-cap"),
+               APP_URL="http://localhost:1",
+               PATH=f"{bindir}:{os.environ['PATH']}")
+
+    r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode != 0, (
+        "the protocol block ran with a capture directory that does not exist "
+        "and reported success")
+    assert "does not exist" in r.stderr, r.stderr
+    assert not called.exists(), (
+        "the protocol block ran curl with nowhere to write its logs")
+
+
 def test_web_ui_layer2_block_writes_both_logs(tmp_path):
     """The guard must not break the step it protects."""
     capdir = tmp_path / "cap"
@@ -1681,6 +1794,14 @@ case "$sub" in
       [ "$STUB_MODE" = detachfail ] && exit 1
       exit 0 ;;
   new-session)
+      # `nostart`: tmux cannot create the session at all (server gone or
+      # refusing, a duplicate session from a concurrent run). The pane command
+      # never runs, so the readiness/stop checks must not be reached — the
+      # recipe has to report the start failure, not "the recorder exited".
+      if [ "$STUB_MODE" = nostart ]; then
+          echo "tmux: error connecting to /tmp/tmux-1000/default" >&2
+          exit 1
+      fi
       s=$(val -s "$@")
       touch "$STATE/$s"
       case "$STUB_MODE" in
@@ -1726,18 +1847,22 @@ exit 0
 
 
 def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
-               sessions=(), files=None, state_files=None):
+               sessions=(), files=None, state_files=None, capture=None):
     """Run one recipe block against stub tmux/pm; return (proc, cast path).
 
     ``raw`` is the block text as a worker pastes it, ``sessions`` the tmux
     sessions that already exist when it starts (a stop block runs against the
     sessions steps 1-3 left behind), ``files`` the capture-dir files and
-    ``state_files`` the stub's own files (``pane``) to seed.
+    ``state_files`` the stub's own files (``pane``) to seed. ``capture``
+    overrides the capture directory (a test that wants it unusable passes a
+    path that cannot be created).
     """
-    capture = tmp_path / "cap"
     state = tmp_path / "state"
     bindir = tmp_path / "bin"
-    for d in (capture, state, bindir):
+    if capture is None:
+        capture = tmp_path / "cap"
+        capture.mkdir()
+    for d in (state, bindir):
         d.mkdir()
     _stub_tool(bindir, "tmux", _STUB_TMUX)
     _stub_tool(bindir, "pm", _STUB_PM)
@@ -2086,6 +2211,59 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, (
             "the stop block ran with no target session at all")
         assert "TARGET is unset" in r.stderr, r.stderr
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_recorder_session_that_never_starts_is_reported(self, name,
+                                                            tmp_path):
+        """A failed ``new-session`` is not "the recorder exited".
+
+        Verified with real tmux 3.2a: when the session cannot be created at
+        all (the server is gone or refusing — ``tmux new-session`` against a
+        missing ``TMUX_TMPDIR`` reports "server exited unexpectedly" — or a
+        concurrent run already holds the name, "duplicate session"), the pane
+        command never runs. The recipe used to ignore the failure and let the
+        readiness/stop checks diagnose it, ending with "recorder exited before
+        it drew" / "asciinema wrote no cast" and pointing at a cast and a
+        ``recorder-stderr.log`` that were never written. The start has to be
+        checked, and the failure named.
+        """
+        r, cast = _run_capture_block(name, "nostart", tmp_path, target=True)
+        assert r.returncode != 0, (
+            f"{name}: a recorder session that was never created was reported "
+            "as a successful capture")
+        assert "could not start the recorder session" in r.stderr, r.stderr
+        assert "exited before it drew" not in r.stderr and \
+            "wrote no cast" not in r.stderr, (
+            f"{name}: the start failure is reported as a recorder that ran "
+            "and died, so the worker looks for evidence that does not exist: "
+            + r.stderr)
+        assert not cast.exists()
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_dir_that_cannot_be_created_is_reported(self, name,
+                                                            tmp_path):
+        """An unusable capture directory must be named where it fails.
+
+        Every later step writes into it, and their failures read as something
+        else: the transcript redirect and the cast write fail, the recorder
+        dies, and the run ends with "recorder exited before it drew" (tmux) or
+        the readiness timeout (CLI) — pointing at files that do not exist.
+        Verified: with ``<capture-dir>`` under a regular file, the pre-fix
+        blocks report the downstream symptom, not the directory.
+        """
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory")
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text(name)), "ok", tmp_path,
+            target=True, capture=blocker / "cap")
+        assert r.returncode != 0, (
+            f"{name}: a capture directory that cannot be created was reported "
+            "as a successful capture")
+        assert "could not create" in r.stderr, r.stderr
+        assert "exited before it drew" not in r.stderr and \
+            "did not start within" not in r.stderr, (
+            f"{name}: the unusable capture directory is reported as a "
+            "recorder problem instead of the directory: " + r.stderr)
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

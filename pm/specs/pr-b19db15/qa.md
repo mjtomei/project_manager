@@ -47,6 +47,11 @@ recording-recipe bugs that any worker following the recipe hits:
   neither is available instead of silently leaving the app holding the port.
   The Layer 2 protocol block carries the same guard: with `CAPDIR`/`APP_URL`
   unset it used to redirect to `/http.log` and `/sse.log` and still exit 0.
+- a start step that cannot do its job says so where it fails: an unusable
+  capture directory and a `new-session` that never creates the recorder stop
+  the run with their own message instead of being misdiagnosed as a dead
+  recorder, the web-UI driver block refuses a capture directory it cannot
+  enter, and a failed web-UI start removes the pid it recorded.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -287,6 +292,28 @@ run.
   Following the old "check the pane" instruction after the run gives "no
   server running" — the recipe must not point at evidence it destroys, and a
   stale log from an earlier run must be cleared with the stale cast.
+- The capture directory cannot be created (the path is under a regular file,
+  or the captures dir is unwritable) → the run stops at `mkdir` with "could
+  not create …" instead of reporting the recorder as dead ("recorder exited
+  before it drew", "asciinema wrote no cast", the readiness timeout) or, in
+  the web-UI start block, exiting 0 with the app launched and no pid file.
+- The recorder session cannot be created at all (`tmux new-session` fails:
+  server gone or refusing, a duplicate session from a concurrent run, a bad
+  option) → the run stops with "could not start the recorder session — see
+  tmux's error above", not with the recorder-death messages that point at a
+  cast and a `recorder-stderr.log` that were never written.
+- The web-UI driver block runs with `CAPDIR` *set but missing* → it stops
+  with "capture directory … does not exist" instead of `cd` silently staying
+  put and creating `node_modules` in the worker's cwd (where the resolution
+  check then passes on that stray link).
+- A web-UI start that never answers → the readiness failure kills the app
+  *and* removes the `server.pid` it recorded, so a teardown afterwards cannot
+  signal a recycled pid.
+- The bundled Dockerfile now installs `agg`, but the image used for QA on
+  2026-10-27 was built before that and does not have it → check
+  `command -v agg`; the recipe's install line is the remedy either way, and
+  the render prose says `agg` may be missing rather than claiming it is
+  always absent.
 
 ## Pass / Fail criteria
 

@@ -68,7 +68,16 @@ screen when a wait gives up — so an earlier run's copies go too.
 # 0. Clear what an earlier run left behind before anything writes into it:
 #    the recorder session, the capture directory, and the files in it.
 tmux kill-session -t pm-recorder 2>/dev/null || true
-mkdir -p <capture-dir>
+# A capture directory that cannot be created must stop the run here. Every
+# later step writes into it, and their failures read as something else: the
+# transcript pipe cannot redirect, asciinema cannot write its cast, and the
+# recorder dies before it draws — so the run ends with "recorder exited
+# before it drew" naming a cast and a stderr log that do not exist.
+mkdir -p <capture-dir> || {
+    echo "could not create <capture-dir> — check the path and its" \
+        "permissions" >&2
+    exit 1
+}
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
       <capture-dir>/recorder-pane.log
@@ -139,7 +148,16 @@ tmux pipe-pane -t "$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
         -c 'tmux attach -t $TARGET' 2> <capture-dir>/recorder-stderr.log; \
-        echo \$? > <capture-dir>/recorder.status"
+        echo \$? > <capture-dir>/recorder.status" || {
+    # tmux could not create the session at all (server gone or refusing,
+    # a duplicate session left by a concurrent run, a bad option): the pane
+    # command never ran, so the readiness wait below would report "recorder
+    # exited before it drew" and point at a cast and stderr log that were
+    # never written. Say what actually happened instead.
+    echo "could not start the recorder session — see tmux's error above" >&2
+    tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+    exit 1
+}
 # Wait (bounded) for the recorder to draw: the detach key in step 5 (and
 # every key sent below) is lost if the attach client has not started yet.
 # A recorder that *exits* here cannot have recorded the TUI — the
@@ -311,11 +329,12 @@ renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
 magnitude slower and fragile). The intermediate GIF is discarded.
 
-Two tools do the two stages. The QA image ships `ffmpeg` but **not**
-`agg`, and the block below fails instead of leaving a missing or stale
-video — so install `agg` first when `command -v agg` prints nothing
-(`~/.local/bin` is on `PATH` in the image; the install creates it if it is
-missing, since `curl -o` cannot; the asset is per architecture, verified
+Two tools do the two stages. `ffmpeg` is in the QA image; `agg` may not be
+(the image used for QA on 2026-10-27 did not have it, although the bundled
+Dockerfile now installs it), and the block below fails instead of leaving a
+missing or stale video — so install `agg` first when `command -v agg` prints
+nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
+it is missing, since `curl -o` cannot; the asset is per architecture, verified
 with agg 1.9.0):
 
 ```

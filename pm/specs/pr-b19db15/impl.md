@@ -573,6 +573,49 @@ R14. **A handle that has to survive a shell boundary is written down, and a
      remedy silently inert and the render failing with "is 'agg' installed?".
      Both render sections `mkdir -p ~/.local/bin` first.
 
+R15. **A start step that cannot do its job says so, instead of being
+   misdiagnosed downstream.** Four leftovers of the PR's own class found by
+   review loop e7e1 i2, all reproduced live in this container:
+   - **An unusable capture directory is not a recorder problem.** All three
+     recipes `mkdir -p` the capture directory and ignored the result. With
+     `<capture-dir>` under a regular file, the tmux recipe ran on and ended
+     with "recorder exited before it drew — see the cast and
+     `recorder-stderr.log`" (neither exists), the CLI scaffold with its
+     readiness timeout naming a pane log it could not write, and the web-UI
+     start block **exited 0** — it launched the app, wrote no pid file and
+     reported success with no capture directory at all (the same "silent
+     success while writing nothing" as the Layer 2 block). Each `mkdir -p`
+     now stops the run with "could not create … — check the path and its
+     permissions".
+   - **A failed `tmux new-session` is not a recorder that died.** Both
+     scaffolds ignored `new-session`'s exit status. Verified with real tmux
+     3.2a: a missing `TMUX_TMPDIR` makes `new-session` fail (the client
+     reports "server exited unexpectedly"; a concurrent run holding the name
+     gives "duplicate session"), the pane command never runs, and the recipe
+     reported "recorder exited before it drew" / "asciinema wrote no cast",
+     pointing at a cast and a `recorder-stderr.log` that were never written.
+     Both scaffolds now stop with "could not start the recorder session — see
+     tmux's error above" (the tmux recipe stops the transcript pipe; the CLI
+     scaffold tears its private server down, like its other failure paths).
+   - **The web-UI driver block's `cd "$CAPDIR"` was unchecked.** The guard
+     covered an *unset* `CAPDIR` but not a *missing* one: `cd` fails, the
+     shell stays in the worker's cwd, and the conditional link plus the
+     resolution check run there — verified: `node_modules` was created in the
+     cwd and the check printed "playwright ok", after which the driver dies
+     with a bare "Cannot find module …/driver.mjs". The block now stops with
+     "capture directory … does not exist — create it and run step 1".
+   - **A failed web-UI start left its dead pid in `server.pid`.** The
+     readiness failure kills the app but kept the file, which the teardown
+     falls back to — so a teardown after the failure could signal a recycled
+     pid, the exact reason step 1 clears a stale `server.pid`. The failure
+     path now removes it.
+   - Also corrected: the render sections claimed categorically that "the QA
+     image ships `ffmpeg` but **not** `agg`". The bundled `Dockerfile` has
+     installed `agg` since e51274fe (2026-05-30); the image actually used for
+     QA here was built before that, which is why it was missing. The prose now
+     says `agg` *may* be missing and keeps the `command -v agg` conditional
+     (the actionable rule was already conditional).
+
 ## Non-goals
 - **No product polling loop.** There is no checked-in `pgrep` loop to fix.
 - **No new helper, prompt block, verifier text, or QA-loop change.** Those
@@ -583,9 +626,9 @@ R14. **A handle that has to survive a shell boundary is written down, and a
 
 | File | Change |
 |---|---|
-| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir, stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, and the `agg` install creates `~/.local/bin` first (R14) |
-| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14) |
-| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14) |
+| `pm/qa/artifacts/tmux-screen-recording.md` | capture-dir mkdir (checked), stale cast + transcript + recorder status removal, recorder readiness, bounded stop + cast check, recorder-status handle so a recorder killed while the target session also ended is not a success, bounded pm-session poll on `has-session -t "$TARGET"`, failed `pipe-pane` reported + `transcript.log` checked, stale render outputs cleared + renderer exit statuses checked + mp4 checked, `agg` prerequisite + install line, asciinema's own stderr + the pane's last screen saved on failure (R11), step 5 re-derives `$TARGET` and saves the pane inline because it is pasted on its own (R13); the pm-session readiness failure says its output was discarded instead of pointing at it, the `agg` install creates `~/.local/bin` first (R14), and a failed `new-session` is reported as a start failure (R15) |
+| `pm/qa/artifacts/cli-recording.md` | same capture fixes; no-TTY scaffold rewritten (cast path, readiness, `exit` stop, bounded wait + cast check, escaped command form, recorder-status handle so a killed recorder is not a success); stale render outputs cleared + renderer exit statuses checked + mp4 checked + no-cast failure named; `agg` prerequisite + install line; stop failure names the interactive remedy; `'\''` escape documented; `tee` fallback reconciled with the hard-failing render; asciinema's own stderr + the pane's last screen saved on failure (R11), saved inline in step 4 for the same paste-alone reason (R13); the `agg` install creates `~/.local/bin` first (R14); the capture-dir `mkdir` and the recorder `new-session` are checked (R15) |
+| `pm/qa/artifacts/web-ui-recording.md` | port pre-check (refuses a server already answering) then bounded `until curl` with per-attempt timeout and server cleanup; stale webm/mp4/trace/screenshots/DOM dump/protocol logs cleared before the driver + mp4 checked on ffmpeg's exit status; finalize/driver/teardown guards stop the block (`if … exit 1`, because `${VAR:?}` only stops a scripted run); driver resolves the image's global Playwright through a conditional local `node_modules` (ESM ignores `NODE_PATH`) and stops if it does not; the driver guard covers `APP_URL` too, because the driver falls back to `localhost:8000` (R13); step 1 records the app's pid in `server.pid` (cleared first, removed by the teardown) so the teardown works from a fresh shell, and the Layer 2 protocol block stops on an unset `CAPDIR`/`APP_URL` instead of redirecting to `/http.log` and `/sse.log` and exiting 0 (R14); the start block checks its `mkdir` and drops the dead pid on a failed start, and the driver block refuses a capture directory it cannot enter (R15) |
 | `tests/test_qa_artifact_recording_recipes.py` | **new** regression tests for the kept recipe fixes |
 | `pm/specs/pr-b19db15/impl.md` | this spec |
 | `pm/specs/pr-b19db15/qa.md` | reduced QA scope (recipe fixes only) |
@@ -605,7 +648,11 @@ R14. **A handle that has to survive a shell boundary is written down, and a
    recipes so its failure path does not depend on a function or variable
    from an earlier paste; the web-UI step-1 pid recording and the fresh-shell
    teardown against a real `sleep` process, the Layer 2 protocol block both
-   ways, and the tmux readiness message).
+   ways, and the tmux readiness message; R15's start-step checks: a recorder
+   session that `new-session` cannot create, a capture directory that cannot
+   be created (both recording recipes, and the web-UI start block), the
+   web-UI driver block with a missing capture directory, and a failed web-UI
+   start removing its pid file).
 2. Run the related suites for regressions (`test_qa_artifact_web_ui_recording.py`,
    `test_qa_instructions.py`, `test_qa_loop.py`).
 3. Manual/QA evidence: the recipe fixes were exercised live in QA scenarios
@@ -726,3 +773,29 @@ R14. **A handle that has to survive a shell boundary is written down, and a
   were excluded (the push proxy rejects pushes to master). Evidence:
   `/pm-captures/review-e7e1-i1/` (`probe.log`, the pre/post recipe copies and
   the two probe scripts).
+- Review loop e7e1 i2 verified R15 live in this container (real tmux 3.2a,
+  bash; stub `tmux`/`pm` for the block runs, and a real `node` for the driver
+  guard). A failed `new-session` (`TMUX_TMPDIR` unset to a missing path, or a
+  duplicate name) makes both scaffolds end with "recorder exited before it
+  drew" / "asciinema wrote no cast" and point at a cast and
+  `recorder-stderr.log` that were never written — reproduced with the
+  recipes' own blocks (empty capture dir) — and post-fix they stop with
+  "could not start the recorder session — see tmux's error above". With
+  `<capture-dir>` under a regular file the tmux recipe reported the recorder
+  as having died and the CLI scaffold hit its readiness timeout; the web-UI
+  start block **exited 0** with the app launched and no pid file; post-fix
+  all three stop at "could not create …". The web-UI driver block with
+  `CAPDIR` set but missing created `node_modules` in the worker's cwd,
+  printed "playwright ok" on that link, and then failed on `driver.mjs`;
+  post-fix it stops with "capture directory … does not exist". A failed
+  web-UI start (app never answers) left the dead pid in `server.pid` for the
+  teardown to signal; post-fix the file is gone. The Layer 2 protocol block
+  with `CAPDIR` set but missing fails both redirects, runs neither `curl`,
+  and still **exits 0** (verified); post-fix it stops at the directory guard.
+  File 99 pass (3 runs); the eight new assertions fail against the pre-fix
+  recipes (checked by restoring them in place). Full suite: 3954 passed,
+  1 skipped, 92 deselected (`test_merge_publish`/`test_signoff_integration`
+  — the push proxy rejects pushes to master), run with `env -u PM_HOST_HOME
+  PATH=/usr/bin:/bin` and `markdown` on the path, which is what makes the
+  hook-installer, git-pull and markdown baselines pass here. Evidence:
+  `/pm-captures/review-e7e1-i2/` (`probe.log`, the pre/post recipe copies).

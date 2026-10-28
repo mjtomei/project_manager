@@ -35,7 +35,14 @@ Before any of the forms below, create the capture directory and clear an
 earlier run's cast, recorder status and failure logs:
 
 ```
-mkdir -p <capture-dir>/<short-name>
+# A capture directory that cannot be created must stop the run here: every
+# form below writes into it, and asciinema reports "asciicast saved" and
+# exits 0 even when it wrote nothing, so the failure would read as success.
+mkdir -p <capture-dir>/<short-name> || {
+    echo "could not create <capture-dir>/<short-name> — check the path and" \
+        "its permissions" >&2
+    exit 1
+}
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
@@ -131,7 +138,11 @@ where the CLI runs.
 #    needs, and every failure path below tears the pane down. The recorded
 #    command's own stderr still goes to the pty and is recorded.
 tmux -L scaffold kill-session -t rec 2>/dev/null || true
-mkdir -p <capture-dir>/<short-name>
+mkdir -p <capture-dir>/<short-name> || {
+    echo "could not create <capture-dir>/<short-name> — check the path and" \
+        "its permissions" >&2
+    exit 1
+}
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
@@ -146,7 +157,16 @@ rm -f <capture-dir>/<short-name>/recording.cast \
 tmux -L scaffold new-session -d -s rec -x 100 -y 30 \
     "asciinema rec --quiet --overwrite <capture-dir>/<short-name>/recording.cast \
         -c '<command-to-record>' 2> <capture-dir>/<short-name>/recorder-stderr.log; \
-        echo \$? > <capture-dir>/<short-name>/recorder.status"
+        echo \$? > <capture-dir>/<short-name>/recorder.status" || {
+    # tmux could not create the session at all (server gone or refusing, a
+    # duplicate session left by a concurrent run, a bad option): the pane
+    # command never ran, so step 4 would report "asciinema wrote no cast" and
+    # point at a stderr log that was never written. Say what actually
+    # happened instead.
+    echo "could not start the recorder session — see tmux's error above" >&2
+    tmux -L scaffold kill-server 2>/dev/null
+    exit 1
+}
 
 # 2. Wait (bounded) for the recorder to start before any keys go in:
 #    keystrokes sent before asciinema has attached to the pane are silently
@@ -253,11 +273,12 @@ renders the cast to frames (GIF), then `ffmpeg` encodes H.264 — there is
 no single cast→video tool worth using (the dedicated ones are orders of
 magnitude slower and fragile). The intermediate GIF is discarded.
 
-Two tools do the two stages. The QA image ships `ffmpeg` but **not**
-`agg`, and the block below fails instead of leaving a missing or stale
-video — so install `agg` first when `command -v agg` prints nothing
-(`~/.local/bin` is on `PATH` in the image; the install creates it if it is
-missing, since `curl -o` cannot; the asset is per architecture, verified
+Two tools do the two stages. `ffmpeg` is in the QA image; `agg` may not be
+(the image used for QA on 2026-10-27 did not have it, although the bundled
+Dockerfile now installs it), and the block below fails instead of leaving a
+missing or stale video — so install `agg` first when `command -v agg` prints
+nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
+it is missing, since `curl -o` cannot; the asset is per architecture, verified
 with agg 1.9.0):
 
 ```

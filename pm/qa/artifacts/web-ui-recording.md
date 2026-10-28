@@ -60,7 +60,13 @@ PR_ID=pr-xxxxxxx             # the PR under QA (keys the captures dir)
 CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<short-name>
 PORT=8000                    # the port your app serves on
 APP_URL="http://localhost:$PORT"
-mkdir -p "$CAPDIR"
+# Every step below writes into the capture directory, and several of them
+# report success while writing nothing when it is not there (the redirects
+# fail, the driver's outputs go nowhere). Stop here instead.
+mkdir -p "$CAPDIR" || {
+    echo "could not create $CAPDIR — check the path and its permissions" >&2
+    exit 1
+}
 # A previous run's outputs must not survive a failed driver or transcode: the
 # finalize step would otherwise turn an earlier run's webm into a
 # fresh-looking mp4 of that run, and the driver's trace, screenshots and DOM
@@ -116,6 +122,10 @@ until curl -sf --connect-timeout 2 --max-time 5 -o /dev/null "$APP_URL/"; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         echo "app did not answer on $APP_URL within 120s — check its startup output" >&2
         kill "$SERVER_PID" 2>/dev/null || true
+        # The pid is dead now, so the file must go with it: the teardown
+        # falls back to it, and a recycled pid would make it signal an
+        # unrelated process (the same reason step 1 clears a stale one).
+        rm -f "$CAPDIR/server.pid"
         exit 1
     fi
     sleep 0.2
@@ -144,7 +154,13 @@ if [ -z "${CAPDIR:-}" ] || [ -z "${APP_URL:-}" ]; then
         "whatever answers there as this run's evidence" >&2
     exit 1
 fi
-cd "$CAPDIR"                                 # where driver.mjs lives
+# A set-but-missing CAPDIR is the same hole: `cd` fails, the shell stays in
+# the worker's cwd, and the link and the driver run there (verified: the
+# link landed in the cwd and the resolution check passed on it).
+cd "$CAPDIR" || {                            # where driver.mjs lives
+    echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
+    exit 1
+}
 # The driver is an ES module, and Node's ES-module resolver ignores
 # NODE_PATH, so with only the image's global Playwright a bare
 # `node driver.mjs` fails at once with "ERR_MODULE_NOT_FOUND: Cannot find
@@ -304,6 +320,13 @@ Greppable proof of the server contract underneath the rendered demo.
 if [ -z "${CAPDIR:-}" ] || [ -z "${APP_URL:-}" ]; then
     echo "CAPDIR/APP_URL are unset — set the placeholders from step 1 first;" \
         "the redirects below would otherwise aim at the filesystem root" >&2
+    exit 1
+fi
+# A set-but-missing directory is the same failure one step later: both
+# redirects fail, neither curl runs, and the block still exits 0 (verified)
+# — a run with no protocol capture that reads as success. Stop instead.
+if [ ! -d "$CAPDIR" ]; then
+    echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
     exit 1
 fi
 # http.log — snapshot each route you care about. -sS keeps it quiet but
