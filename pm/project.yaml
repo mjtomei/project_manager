@@ -35051,7 +35051,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T04:01:39.964086+00:00'
+  updated_at: '2026-10-28T05:12:19.848886+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38652,6 +38652,32 @@ prs:
       start_qa without any live-driver check.'
     created_at: '2026-10-28T03:05:11Z'
     last_edited: '2026-10-28T03:05:11Z'
+  - id: note-ffc0a37
+    text: 'QA S111 (2026-10-28, host, all fake-claude, HEAD 9a2dacaa vs control 1f90deb6
+      side by side, post-fix in fresh setups; captures /pm-captures/scenarios/111,
+      REPORT.md): CODE CHANGE d35c473a needs normal re-review. Story 1 (restarts/auto-start
+      passes over a live qa-run-bg driver) held on HEAD: every pass "driven by another
+      process", 1 driver, 1 QA complete, 1 sign-off hand-off; picker bare [open] after
+      the tui-mount sweep (accepted). Control duplicated every pass. Findings on HEAD:
+      F1 spawn-to-qa_run.json gap: a project.yaml hold of 0.5/1.0/1.8 s let a TUI
+      auto-start pass start its own loop, whose windows the driver killed as stale;
+      holds of 3/10 s killed the driver silently (2 s StoreLockTimeout) and the TUI
+      started QA before and after the restart (duplicate s0 window, two sign-off hand-offs).
+      F2 pm qa run left qa_resume.json: the TUI recovered the one-instruction PASS
+      as the PR QA result and handed off to sign-off, full QA never ran. F3 the kept
+      cli-<pr> run record named run 1 dead pid, and the review->QA hand-off killed
+      CLI run 2 windows. Fix d35c473a: the auto-sequence tick writes a launch run
+      record (tick pid, then the spawned driver pid, qa-run-bg --loop-id) before the
+      PR shows qa; qa-run-bg locks only when still in_review and waits out a busy
+      lock; pm qa run rewrites its record per run and clears its resume snapshot;
+      the review->QA hand-off skips a run driven elsewhere and drops the earlier run
+      recorded verdict (else the sign-off catch-up handed an old PASS to sign-off);
+      auto-start re-checks every 30 s while a run is driven elsewhere so full QA starts
+      once a CLI run ends. Post-fix all 5 lock rounds, story 1 and story 4 held live.
+      Full suite 4454 passed. Not exercised: signoff_ui REQA still calls start_qa
+      without a live-run check.'
+    created_at: '2026-10-28T05:12:19Z'
+    last_edited: '2026-10-28T05:12:19Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
