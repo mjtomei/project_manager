@@ -513,6 +513,7 @@ async def consume_breadcrumb(app) -> None:
     if watchers_data:
         from pm_core.tui import watcher_ui
         tdir = get_transcript_dir(app)
+        resumed = 0
         for wd in watchers_data:
             if not isinstance(wd, dict):
                 _log.warning("consume_breadcrumb: ignoring malformed watcher "
@@ -524,7 +525,10 @@ async def consume_breadcrumb(app) -> None:
                 meta_pm_root=wd.get("meta_pm_root"),
                 watcher_type=wd.get("type", "auto-start"),
             )
-        _log.info("consume_breadcrumb: resumed %d watcher(s)", len(watchers_data))
+            resumed += 1
+        # Count what was actually handed to the watcher manager: a malformed
+        # record is skipped above, so a bare len() would overstate the resume.
+        _log.info("consume_breadcrumb: resumed %d watcher(s)", resumed)
 
     # Summarise last: the per-loop resume messages above (one of them
     # sticky) would otherwise overwrite this before it is ever painted.

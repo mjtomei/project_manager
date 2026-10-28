@@ -89,7 +89,9 @@ Rules, in order:
    - must be a `list`; `dict`, `str`, `None`, number, bool → reject. This is
      the incident shape and must never fall through to legacy parsing.
    - every entry must be:
-     - a non-empty `str` (no whitespace-only), or
+     - a non-empty `str` with no whitespace (see `valid_pr_id`; a padded id
+       could never match a real PR, so it is malformed rather than coerced),
+       or
      - a `dict` with a non-empty `str` `pr_id`; its other fields are copied.
        If `wait_for_merge` is present it must be `bool`; `added_at`/`source`
        if present must be `str`. Any other malformed field/entry rejects the
@@ -105,10 +107,12 @@ Rules, in order:
      targets, preserving records in order and their `wait_for_merge` flags.
 6. `targets` key **absent** → legacy handling:
    - `target` present:
-     - non-empty `str` → `{target: record(source="legacy-breadcrumb")}`,
+     - a valid id (`valid_pr_id`: non-empty `str`, no whitespace) →
+       `{target: record(source="legacy-breadcrumb")}`,
        `migrated=True`. This is the only permitted migration and it names
        exactly one validated target; no other PR gains authority.
-     - dict, number, empty/whitespace string → reject with a diagnostic.
+     - dict, number, empty/whitespace-containing string → reject with a
+       diagnostic.
      - `None` → treated as "no target" rather than an invalid one: with
        `auto_start`/`run_id` present it is rejected by the targetless rule
        below (the pre-multi-target writer emitted exactly this shape for
