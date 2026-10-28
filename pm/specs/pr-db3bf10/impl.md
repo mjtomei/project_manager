@@ -85,7 +85,8 @@ def arm_owed_reqa(app) -> None            # mount: reconcile + arm the poll time
 QA when:
 
 1. no QA loop of this process is running for the PR
-   (`app._qa_loops[pr_id].running`),
+   (`app._qa_loops[pr_id].running`) — a *finished* entry (it lingers for one
+   poll tick) or a stopped one does not own the PR,
 2. `run_driven_elsewhere(pr_id)` is false,
 3. it wins the on-disk launch claim (R4).
 
@@ -103,7 +104,10 @@ ends` (the S127 wording), so the log is not a per-tick repeat.
   are unchanged).
 - `start_qa` → `clear_return_awaiting` pops `awaiting` **and** the claim, so
   the winner's start consumes the obligation; losers see either a fresh
-  claim (skip) or no `awaiting` (nothing owed).
+  claim (skip) or no `awaiting` (nothing owed).  The clear runs *after* the
+  `in_review → qa` transition: a start that bails there must leave the
+  obligation on disk rather than drop it silently (the same ordering is used
+  by `start_or_stop_qa_loop`'s `zz t` start).
 - A claim whose launcher died expires after
   `signoff.RETURN_LAUNCH_CLAIM_SECONDS` (180 s); the 5 s reconciler takes
   over then, so a restart between the claim and the start cannot strand it.
@@ -255,3 +259,30 @@ one full QA starts (one `qa-<pr>` window set, one verifier, one finalizer, one
 - `tests/test_owed_reqa.py` patches `qa_loop.run_driven_elsewhere` with
   `create=True` so the pre-fix run fails on the symptom rather than on a
   missing attribute.
+
+## Review-loop amendments (a6a3 i1)
+
+- `start_owed_reqa` returns whether it *started* a loop (a fresh, running
+  `app._qa_loops[pr_id]`), not merely whether it won the claim: auto-start
+  announces `Auto-start: QA for <pr>` off that return value, so a start that
+  bailed (PR gone, parse error, failed status transition) must not be
+  announced.
+- `qa_loop.resume_qa_background` now publishes `state.running = True` before
+  starting its thread, mirroring `start_qa_background`.  The reconciler runs
+  in the same poll tick as the resume scan (R3 edge case), and without this
+  the run it just adopted still looked unowned for the length of the thread
+  start.
+- `_consume_owed_reqa_in_memory` clears `awaiting`/`launch_claim` only when
+  the record is awaiting `qa`: a return awaiting `impl`/`review` is not the
+  hop a QA start consumed, and clearing it in memory would hide it from the
+  scheduler until the next reload.  It is now called from `start_qa` itself,
+  so *every* QA start (``t``, ``z t``, auto-start, a resumed/owed run) mirrors
+  the consumption in `app._data`; `zz t` keeps its explicit call because it
+  starts its run without `start_qa`.
+- `start_qa` and `start_or_stop_qa_loop` consume the obligation *after* the
+  `in_review → qa` transition: a failed transition must leave it on disk for
+  the reconciler rather than drop it silently.
+- Tests added for each: a bailed start reports `False` and keeps the
+  obligation, a finished/stopped loop entry does not block the owed start,
+  `resume_qa_background` publishes `running` synchronously, and the in-memory
+  mirror leaves another hop alone.

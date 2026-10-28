@@ -145,12 +145,16 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
             app.log_message(f"QA already running for {pr_id}", force=True)
             return
 
-    # A sign-off REQA return is now being re-verified.
-    from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(app._root, pr_id, "qa")
-
     if not _enter_qa_status(app, pr, "start_qa"):
         return
+
+    # A sign-off REQA return is now being re-verified.  Consumed only once
+    # the run will actually start (a failed status transition must leave it
+    # on disk for the reconciler) and mirrored in ``app._data``, or the
+    # reconciler re-attempts the claim every 5 s until a reload.
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(app._root, pr_id, "qa")
+    _consume_owed_reqa_in_memory(app, pr_id)
 
     state = QALoopState(pr_id=pr_id, focus_on_create=focus)
 
@@ -266,7 +270,10 @@ def _consume_owed_reqa_in_memory(app, pr_id: str) -> None:
         if pr.get("id") != pr_id:
             continue
         rec = pr.get("signoff_return")
-        if isinstance(rec, dict):
+        # Only the hop this start consumed: a return awaiting a different
+        # hop is not ours to clear, and clearing it here would hide it from
+        # the scheduler until the next reload.
+        if isinstance(rec, dict) and rec.get("awaiting") == "qa":
             rec["awaiting"] = None
             rec.pop("launch_claim", None)
         return
@@ -279,12 +286,19 @@ def start_owed_reqa(app, pr_id: str) -> bool:
     can all act on the same obligation; a second loop over the first retires
     its windows and duplicates verifier/finalizer panes.  The on-disk launch
     claim picks one winner, and ``start_qa`` clears ``awaiting`` (and the
-    claim) as the run actually starts.
+    claim) as the run actually starts.  Returns whether this call started a
+    loop (a start that bailed leaves the obligation for a later tick).
     """
     from pm_core.qa_loop import run_driven_elsewhere
     from pm_core.signoff import claim_return_launch
 
-    if not getattr(app, "_root", None) or pr_id in app._qa_loops:
+    if not getattr(app, "_root", None):
+        return False
+    # Only a *running* loop owns the PR: a finished one lingers in
+    # ``_qa_loops`` for a poll tick (and a stopped one indefinitely), and
+    # neither should strand the obligation.
+    existing = app._qa_loops.get(pr_id)
+    if existing is not None and existing.running:
         return False
     if run_driven_elsewhere(pr_id):
         return False
@@ -294,12 +308,11 @@ def start_owed_reqa(app, pr_id: str) -> bool:
         return False
     _log.info("owed REQA: starting the QA run for %s", pr_id)
     start_qa(app, pr_id)
-    if pr_id in app._qa_loops:
-        # The run really started, so ``start_qa`` consumed the obligation on
-        # disk; drop it here too (a start that bailed keeps the obligation,
-        # and the claim expiry makes the next tick retry it).
-        _consume_owed_reqa_in_memory(app, pr_id)
-    return True
+    loop = app._qa_loops.get(pr_id)
+    # A start that bailed keeps the obligation on disk (and in ``app._data``);
+    # the claim expiry makes the next tick retry it.  A real start consumed
+    # both, in ``start_qa``.
+    return loop is not None and loop is not existing and loop.running
 
 
 def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
@@ -319,7 +332,11 @@ def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
     deferrals = _owed_reqa_deferrals(app)
     for pr in owed:
         pr_id = pr["id"]
-        if pr_id in app._qa_loops:
+        # A running loop of this process owns the PR (the user's ``t`` /
+        # ``zz t``, or a run the resume scan just adopted).  A finished or
+        # stopped entry does not: the obligation is still owed.
+        loop = app._qa_loops.get(pr_id)
+        if loop is not None and loop.running:
             deferrals.pop(pr_id, None)
             continue
         ts = (pr.get("signoff_return") or {}).get("ts")
@@ -433,6 +450,11 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # after capturing which sessions were watching them.
     app._qa_loops.pop(pr_id, None)
 
+    # Like start_qa: the first run of a loop on an in_review PR moves it
+    # to qa (restarts go through start_qa, which already does this).
+    if not _enter_qa_status(app, pr, "qa_loop_ui"):
+        return
+
     # Like start_qa: this loop *is* the full re-run a sign-off REQA owes, so
     # consume the obligation as start_qa would.  This path starts the run
     # without going through start_qa; leaving ``awaiting`` behind would make
@@ -440,11 +462,6 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     from pm_core.signoff import clear_return_awaiting
     clear_return_awaiting(app._root, pr_id, "qa")
     _consume_owed_reqa_in_memory(app, pr_id)
-
-    # Like start_qa: the first run of a loop on an in_review PR moves it
-    # to qa (restarts go through start_qa, which already does this).
-    if not _enter_qa_status(app, pr, "qa_loop_ui"):
-        return
 
     # Register self-driving QA state
     app._self_driving_qa[pr_id] = {

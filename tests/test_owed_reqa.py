@@ -270,6 +270,26 @@ def test_resume_qa_sync_rewrites_the_run_record(home, tmp_path):
     assert rec is not None and rec["owner_pid"] == os.getpid()
 
 
+def test_resume_qa_background_publishes_running_immediately():
+    """The owed-REQA reconciler runs in the same poll tick as the resume
+    scan: an adopted run must already look owned, or the reconciler starts a
+    second full run over it."""
+    import threading
+    state = qa_loop.QALoopState(pr_id=PR)
+    release = threading.Event()
+
+    def hold(*_a, **_kw):
+        release.wait(10)
+
+    with patch("pm_core.qa_loop.resume_qa_sync", side_effect=hold):
+        t = qa_loop.resume_qa_background(state, "/x", {})
+        try:
+            assert state.running is True
+        finally:
+            release.set()
+            t.join(10)
+
+
 # ---------------------------------------------------------------------------
 # Reconciliation — durable, and independent of the auto-start switch
 # ---------------------------------------------------------------------------
@@ -422,8 +442,15 @@ def test_two_tuis_start_the_owed_qa_only_once(tmp_path):
 def test_start_owed_reqa_claims_the_launch_before_starting(tmp_path):
     root = _project(tmp_path, ret=_owed_return())
     app = App(root)
+
+    def fake_start(app_, pr_id, **kw):
+        # What the real start_qa does: register the loop (running) first.
+        state = qa_loop.QALoopState(pr_id=pr_id)
+        state.running = True
+        app_._qa_loops[pr_id] = state
+
     with _driven(False), \
-         patch.object(qa_loop_ui, "start_qa") as sq:
+         patch.object(qa_loop_ui, "start_qa", side_effect=fake_start) as sq:
         assert qa_loop_ui.start_owed_reqa(app, PR) is True
         sq.assert_called_once_with(app, PR)
     rec = app.pr()["signoff_return"]
@@ -431,26 +458,73 @@ def test_start_owed_reqa_claims_the_launch_before_starting(tmp_path):
     assert rec["launch_claim"]["hop"] == "qa"
 
 
+def test_start_owed_reqa_reports_a_bailed_start(tmp_path):
+    """``start_qa`` can refuse (no project root, PR gone, parse error).  The
+    caller must not be told a run started — auto-start would announce one
+    that does not exist — and the obligation must stay on disk."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+    with _driven(False), \
+         patch.object(qa_loop_ui, "start_qa") as sq:   # registers nothing
+        assert qa_loop_ui.start_owed_reqa(app, PR) is False
+        sq.assert_called_once_with(app, PR)
+    assert app.pr()["signoff_return"]["awaiting"] == "qa"
+    assert qa_loop_ui.owed_reqa_prs(app) != []
+
+
+def test_a_finished_or_stopped_loop_does_not_block_the_owed_start(tmp_path):
+    """``_qa_loops`` keeps a finished run for one poll tick and a stopped one
+    indefinitely.  Only a *running* loop owns the PR; a stale entry must not
+    strand the obligation."""
+    root = _project(tmp_path, ret=_owed_return())
+    app = App(root)
+    stale = qa_loop.QALoopState(pr_id=PR)
+    stale.running = False
+    app._qa_loops[PR] = stale
+    with _driven(False), \
+         patch.object(qa_loop_ui, "start_qa") as sq:
+        qa_loop_ui.reconcile_owed_reqa(app)
+    sq.assert_called_once_with(app, PR)
+
+
 def test_a_started_owed_reqa_is_dropped_from_memory(tmp_path):
     """Once the start consumed the obligation on disk, this process's copy
     must stop offering it: otherwise every ~5 s tick re-attempts the claim —
-    a full project.yaml read plus an fsynced rewrite — until a reload."""
+    a full project.yaml read plus an fsynced rewrite — until a reload.
+
+    Exercises the real ``start_qa`` (only the background thread is stubbed),
+    so the consumption and its in-memory mirror are the shipped ones.
+    """
     root = _project(tmp_path, ret=_owed_return())
     app = App(root)
 
-    def fake_start(a, pr_id, **kw):
-        a._qa_loops[pr_id] = qa_loop.QALoopState(pr_id=pr_id)
-        signoff.clear_return_awaiting(root, pr_id, "qa")
+    def fake_background(state, *_a, **_kw):
+        # What the real start_qa_background does before starting its thread.
+        state.running = True
 
     with _driven(False), \
-         patch.object(qa_loop_ui, "start_qa", side_effect=fake_start):
+         patch.object(qa_loop_ui, "start_qa_background",
+                      side_effect=fake_background) as bg:
         assert qa_loop_ui.start_owed_reqa(app, PR) is True
-    assert qa_loop_ui.owed_reqa_prs(app) == []
+    bg.assert_called_once()
+    assert app.pr()["signoff_return"]["awaiting"] is None   # on disk
+    assert qa_loop_ui.owed_reqa_prs(app) == []              # and in memory
 
     app._qa_loops.clear()                 # the run has ended
     with patch.object(signoff, "claim_return_launch") as claim:
         qa_loop_ui.reconcile_owed_reqa(app)
     claim.assert_not_called()
+
+
+def test_in_memory_consumption_leaves_another_hop_alone(tmp_path):
+    """The mirror of ``start_qa``'s consumption must only clear the ``qa``
+    hop: clearing a return awaiting impl/review would hide it from the
+    scheduler until the next reload."""
+    root = _project(tmp_path, ret=_owed_return(awaiting="review"))
+    app = App(root)
+    qa_loop_ui._consume_owed_reqa_in_memory(app, PR)
+    assert app._data["prs"][0]["signoff_return"]["awaiting"] == "review"
+    assert app.pr()["signoff_return"]["awaiting"] == "review"
 
 
 def test_arm_owed_reqa_arms_the_tick_and_starts_the_run(tmp_path):

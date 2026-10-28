@@ -4576,5 +4576,14 @@ def resume_qa_background(
                 on_update(state)
 
     t = threading.Thread(target=_run, daemon=True, name=f"qa-resume-{state.pr_id}")
-    t.start()
+    # Publish the accepted resume before the worker can block on model/state
+    # loading, exactly like start_qa_background: the TUI's owed-REQA
+    # reconciler runs in the same poll tick as the resume scan and must see
+    # this PR as owned rather than start a second full run over it.
+    state.running = True
+    try:
+        t.start()
+    except Exception:
+        state.running = False
+        raise
     return t
