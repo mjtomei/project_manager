@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T23:09:01.596763+00:00'
+  updated_at: '2026-10-28T23:27:06.797979+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37316,6 +37316,37 @@ prs:
       line.'
     created_at: '2026-10-28T23:09:01Z'
     last_edited: '2026-10-28T23:09:01Z'
+  - id: note-0acdbd8
+    text: 'QA scenario 21 (autostart-disable while a review loop polls its transcript):
+      PASS, 4/4 stories at e9ec829e, live TUI + interactive stand-in on throwaway
+      local-backend projects. (1) answer then `pm autostart remove` mid-follow-up:
+      i1 stayed a symlink and received the typed answer + NEEDS_WORK written after
+      the disable, marker held ⟳1 (never ⏸1), NEEDS_WORK relaunched exactly one iteration
+      (⟳2, new window), PASS settled ⟳2✓ and both transcripts finalized; no new INPUT_REQUIRED
+      notice; no second loop/window; PR stayed in_review. (2) remove with the question
+      unanswered: mode=off/runs=[], marker stayed ⏸1, question on screen, same window/pane/iteration,
+      no new transcript; answering gave ⟳1 in ~1 s and PASS gave ⟳1✓ with no restart
+      and no QA. (3) remove while iteration 2 works (PASS --delay 45): same iteration-2
+      window/pane, marker ⟳2, i2 stayed a symlink, delayed PASS completed ⟳2✓ with
+      no ⏸ and both transcripts finalized. (4) remove then `pm autostart add`: exactly
+      one run entry, waiting / review INPUT_REQUIRED (iteration 1), ir=true/fu=false/resuming=false,
+      one review window, same window id and stand-in pane, no new transcript; answering
+      gave running/follow-up and NEEDS_WORK launched exactly one next iteration into
+      the loop original run dir (the re-add new run dir stayed empty). tests/test_autostart_disable_transcripts.py:
+      3 passed. Captures /pm-captures/scenarios/21/{summary.md,story1..4}/. Harness
+      notes for the next run: (a) panes inherit the *creating client process* environment,
+      not `tmux set-environment` — the stand-in must be in the session-creating shell
+      PATH before `pm session`, and a stale PM_QA_FOLLOWUP_FILE can leak across projects,
+      so have the stand-in read its verdict from a file in the pane cwd instead; (b)
+      in this build the review window layout is pane .0 = claude, .1 = git-diff pager,
+      so `send-keys` to `:review-<pr>.1` types into the pager — target .0 (or the
+      pane id); (c) re-arming a loop after a KILLED/complete run needs a clean `pm
+      tui restart` first (an autostart re-add keeps the finished run state); (d) ffmpeg
+      is not on PATH in this container — use the conda package at ~/.local/share/mamba/pkgs/ffmpeg-9.0.2-gpl_hf463c51_905/bin
+      with LD_LIBRARY_PATH over all pkgs/*/lib, and ffmpeg 9 rejects `-vsync` (use
+      `-fps_mode`).'
+    created_at: '2026-10-28T23:27:06Z'
+    last_edited: '2026-10-28T23:27:06Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
