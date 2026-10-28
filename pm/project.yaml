@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-16e45ba
+  active_pr: pr-1b170f4
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -39599,6 +39599,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T03:01:10.948548+00:00'
   updated_at: '2026-10-28T03:01:10.948548+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1b170f4
+  plan: bugs
+  title: 'Bug: picker spinner shows a stale "done" verdict for a re-run QA while the
+    command is still queued (masks the TUI-gone abort)'
+  branch: pm/pr-1b170f4-bug-picker-spinner-shows-a-stale-done-verdict-for-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py _wait_for_tui_command terminal-state
+    short-circuit (reason=terminal_state). Repro: run qa on a PR once (verdict done/INPUT_REQUIRED);
+    freeze the TUI (cgroup v2 freezer) and dispatch qa again from the prefix+P picker.
+    The spinner immediately prints "✓ qa: done (INPUT_REQUIRED)" although the command
+    is only queued and the PR status is unchanged. If the TUI is dead, the stale terminal
+    state can also win over the 3s tui_gone grace, showing success instead of the
+    abort. Only fresh-mode actions snapshot the initial runtime_state (initial_state_key);
+    non-fresh actions should likewise ignore a terminal state that predates the dispatch.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T13:54:30.231666+00:00'
+  updated_at: '2026-10-28T13:54:30.231666+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
