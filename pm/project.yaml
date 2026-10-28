@@ -38565,11 +38565,104 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/276
   gh_pr_number: 276
   created_at: '2026-10-28T07:54:43.422053+00:00'
-  updated_at: '2026-10-28T15:04:26.926200+00:00'
+  updated_at: '2026-10-28T15:59:34.062397+00:00'
   started_at: '2026-10-28T15:04:26.926200+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-657342c
+    text: 'Base: this workdir is cut from master@89e3c501 (project base_branch = master),
+      which does NOT contain #249''s S117 fix c9ce4f6a (`defer_reqa_start`, `run_driven_elsewhere`).
+      So the fix is implemented in master''s idiom, and it carries the live-run guard
+      the durable handoff needs — without it the reconciler would start a TUI loop
+      over a live `pm qa run` and retire its windows as stale (the S117 duplicate),
+      and the "deferred behind a live run" case could not exist at all.
+
+
+      What the fix does
+
+      - The obligation is the persisted return record: an OPEN `signoff_return` with
+      `awaiting: qa` on a PR still at `qa`. A bare `qa` status, a cleared/resolved
+      return, or a PR that moved on is not authorization.
+
+      - pm_core/qa_loop.py: new per-run record `qa_run.json` (`write_run_record`/`read_run_record`)
+      written at the top of `run_qa_sync` and `resume_qa_sync`, plus `run_driven_elsewhere(pr_id)`
+      = any `<pr>-*/qa_run.json` whose owner is a live process (reuses `resume_owned_elsewhere`,
+      so pid reuse and zombies are handled). The record exists before planning/scenario
+      launch, unlike `qa_resume.json`.
+
+      - pm_core/tui/qa_loop_ui.py: `owed_reqa_prs`, `start_owed_reqa`, `reconcile_owed_reqa`,
+      `arm_owed_reqa`. The reconciler runs from `poll_qa_state` (5 s cadence, after
+      the resume scan) and at mount (`App.on_mount`), and is NOT gated by `auto_start.is_enabled`/`in_scope`.
+      It skips a PR this TUI already has a loop for, waits out `run_driven_elsewhere`
+      (logging "QA starts once the QA run another process drives ends" once per return
+      episode), else claims the launch and starts.
+
+      - pm_core/signoff.py: `claim_return_launch(..., require_status=...)` — the claim
+      and the "PR is still at qa" check are one locked update. `qa` is deliberately
+      NOT in `_CLAIMED_RETURN_HOPS`: the deferring hop must not hold a claim, or the
+      reconciler would stall up to 180 s after the live run ends. Every *starter*
+      claims instead.
+
+      - pm_core/tui/signoff_ui.py qa hop: defers (record stays on disk, poll tick
+      armed) when a run is driven elsewhere; otherwise `start_owed_reqa` (claim first).
+
+      - pm_core/tui/auto_start.py: `_auto_start_qa_loops` skips a driven-elsewhere
+      PR and routes an owed REQA through the claim.
+
+      - pm_core/cli/pr.py (`pm pr auto-sequence`): the sign_off->qa hop defers when
+      a run is in flight and claims before spawning the detached driver; the qa catch-up
+      branch does not launch over a live run and claims an owed REQA.
+
+      - `_on_qa_complete` (legacy PASS): does not hand the PR to sign-off while `awaiting:
+      qa` — a run that was in flight when the bounce was recorded verified the code
+      the router judged; the owed run itself clears `awaiting` as it starts, so this
+      only catches pre-return runs.
+
+
+      Exactly once
+
+      `start_qa` clears `awaiting` + the claim when the run starts, so repeated restarts/ticks
+      find nothing owed; the claim makes concurrent TUIs/ticks single-owner; an expired
+      claim (180 s) is taken over, so a claimer that died does not strand it. The
+      reconciler skips a PR `_resume_incomplete_qa` just adopted, so a resumed orphan
+      and the owed run cannot race.
+
+
+      Tests
+
+      `tests/test_owed_reqa.py` (new, 22 tests) + 2 in `tests/test_tui_signoff_handoff.py`.
+      Pre-fix they fail behaviourally: "Expected ''start_qa'' to be called once. Called
+      0 times." (the repro), "…to not have been called. Called 1 times." (hop over
+      a live run), 2 starts (two TUIs), and a pre-return PASS handing off to sign-off.
+
+      Full suite: 4011 passed, 1 skipped. The 55 failed + 36 errors are pre-existing
+      environment failures (git fetch through the sandbox git wrapper, missing `markdown`
+      dep) in test_merge_publish / test_sync_merge_integrity / test_signoff_integration
+      / test_markdown_render / test_hook_events / test_git_ops; verified identical
+      pre-fix vs post-fix by set diff.
+
+
+      Evidence: /pm-captures/impl/pre-fix/codified-repro/ (24 failed, 35 passed) and
+      /pm-captures/impl/post-fix/verify/ (294 passed) — asciinema cast + H.264 mp4
+      + manifest each.
+
+
+      Not done here (container): the end-to-end TUI repro. This impl container has
+      no host pm state, tmux pm session or TUI, so QA must run the scenario on the
+      host: auto-start OFF; PR in sign_off; start `pm qa run <instr> --pr <id>`; let
+      sign-off record SIGNOFF_REQA; restart the TUI before the CLI run exits. Expected:
+      the restarted TUI logs "Sign-off REQA for <pr> — QA starts once the QA run another
+      process drives ends" on its first tick, leaves the live run alone, and starts
+      exactly one full QA when it ends (one qa-<pr> window set, one verifier, one
+      finalizer, one qa_status.json) — no `t` press, auto-start still off. Pressing
+      `t` before the live run ends must still consume the obligation (no later duplicate).
+
+
+      Cross-PR note note-ae7cf29 on pr-592e4bd covers the S127 assertion relaxation
+      and the merge reconciliation.'
+    created_at: '2026-10-28T15:59:33Z'
+    last_edited: '2026-10-28T15:59:33Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
