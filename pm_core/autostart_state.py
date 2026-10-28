@@ -536,6 +536,14 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     return (phase, "waiting",
                             "last QA run ended INPUT_REQUIRED (see QA note); "
                             "press t / z t to re-run QA")
+                if qa.get("held"):
+                    # A held run (pr-2c67d50) is still watching its scenario
+                    # worker panes for a follow-up verdict: the answer
+                    # belongs in the worker pane, not in the status
+                    # dashboard this row is rendered from.
+                    return (phase, "waiting",
+                            "QA INPUT_REQUIRED — answer in the scenario "
+                            "worker pane (still watching for a follow-up)")
                 return phase, "waiting", "QA INPUT_REQUIRED — answer in QA window"
             if verdict == "PASS":
                 return (phase, "waiting",
@@ -646,6 +654,12 @@ def build_status(inp: dict) -> dict:
                 "done": qa.get("done") or 0,
                 "counts": dict(qa.get("counts") or {}),
                 "running": bool(qa.get("running")),
+                # Still watching a scenario worker pane for an
+                # INPUT_REQUIRED follow-up (pr-2c67d50).  Reported alongside
+                # the derived ``reason`` so the JSON run entry does not lose
+                # the distinction a consumer would otherwise have to parse
+                # out of the text.
+                "held": bool(qa.get("held")),
                 "verdict": qa.get("verdict") or "",
                 "error": qa.get("error") or "",
                 "recorded": bool(qa.get("recorded")),
@@ -854,6 +868,9 @@ def qa_progress_input(state) -> dict:
     verdicts = dict(getattr(state, "scenario_verdicts", {}) or {})
     return {
         "running": bool(getattr(state, "running", False)),
+        # A held run (pr-2c67d50) has running=False but is still watching its
+        # scenario worker panes for an INPUT_REQUIRED follow-up.
+        "held": bool(getattr(state, "held", False)),
         "planning": bool(getattr(state, "planning_phase", False)),
         "total": len(getattr(state, "scenarios", []) or []),
         "done": len(verdicts),

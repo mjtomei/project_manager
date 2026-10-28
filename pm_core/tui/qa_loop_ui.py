@@ -21,6 +21,7 @@ from pm_core.qa_loop import (
     start_qa_background,
     _compute_qa_window_name,
     planner_code_changes_suffix,
+    input_wait_changes_suffix,
     qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
@@ -132,17 +133,26 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     # Check if QA is already running for this PR
     if pr_id in app._qa_loops:
         existing = app._qa_loops[pr_id]
-        if existing.running:
+        if existing.running or existing.held:
             # A user can ask to view a background run before its first window
             # exists. Reuse that worker, but retain the explicit focus request;
             # popup suppression is still consumed at window creation.
-            if focus:
+            if focus and existing.running:
                 existing.focus_on_create = True
             # A direct answer to the user's start must be visible even when
             # an auto-start/setup confirmation is holding the log line —
             # this lands in the gap where the scheduler's "targets +="
             # confirmation is still sticky (QA s22).
-            app.log_message(f"QA already running for {pr_id}", force=True)
+            # ``running`` wins over ``held``: the hold's reopen publishes
+            # running=True before clearing held, so a run that is actively
+            # collecting must not be described as waiting for input.
+            if existing.running:
+                app.log_message(f"QA already running for {pr_id}", force=True)
+            else:
+                app.log_message(
+                    f"QA for {pr_id} is waiting for input — answer in its "
+                    "scenario worker pane; the loop is still watching",
+                    force=True)
             return
 
     # A sign-off REQA return is now being re-verified.
@@ -163,6 +173,27 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def discard_qa_state(state: QALoopState | None) -> None:
+    """Make a QA run dropped from ``app._qa_loops`` safe to abandon.
+
+    Every path that discards a tracked run must go through this: a
+    still-winding-down thread must not rewrite the resume snapshot (a later
+    restart scan would resurrect the discarded run), and a *held* run
+    (waiting for an INPUT_REQUIRED follow-up) would otherwise keep polling
+    its worker panes forever — the hold has no timeout of its own.
+    ``superseded`` is marked even when the run has no qa workdir yet
+    (superseded during startup, before ``run_qa_sync`` creates one): it
+    creates one later and must not snapshot the discarded run.
+    """
+    if state is None:
+        return
+    from pm_core import qa_loop
+    state.stop_requested = True
+    state.superseded = True
+    if state.qa_workdir:
+        qa_loop.clear_resume_file(state.qa_workdir)
 
 
 def _enter_qa_status(app, pr: dict, caller: str) -> bool:
@@ -232,12 +263,13 @@ def fresh_start_qa(app, pr_id: str) -> None:
 
     # Stop any running QA for this PR
     existing = app._qa_loops.get(pr_id)
-    if existing and existing.running:
+    if existing and (existing.running or existing.held):
         existing.stop_requested = True
-        _log.info("fresh_start_qa: stopping running QA for %s", pr_id)
+        _log.info("fresh_start_qa: stopping running/held QA for %s", pr_id)
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
+    discard_qa_state(existing)
     # Clear self-driving state so the fresh start is a one-shot QA
     app._self_driving_qa.pop(pr_id, None)
 
@@ -270,9 +302,9 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         app.log_message(f"PR not found: {pr_id}")
         return
 
-    # If a QA loop is running, stop it
+    # If a QA loop is running (or holding for input), stop it
     existing = app._qa_loops.get(pr_id)
-    if existing and existing.running:
+    if existing and (existing.running or existing.held):
         existing.stop_requested = True
         # Also remove self-driving registration
         app._self_driving_qa.pop(pr_id, None)
@@ -282,6 +314,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
 
     # Remove stale loop state — run_qa_sync will clean up old windows
     # after capturing which sessions were watching them.
+    discard_qa_state(existing)
     app._qa_loops.pop(pr_id, None)
 
     # Like start_qa: the first run of a loop on an in_review PR moves it
@@ -322,7 +355,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
 def stop_qa(app, pr_id: str) -> None:
     """Request graceful stop of QA for a PR."""
     state = app._qa_loops.get(pr_id)
-    if state and state.running:
+    if state and (state.running or state.held):
         state.stop_requested = True
         app.log_message(f"Stopping QA for {pr_id}...")
     else:
@@ -354,6 +387,37 @@ def poll_qa_state(app) -> None:
         if not state.running and state.latest_verdict:
             first_completion = not state._ui_complete_notified
             _on_qa_complete(app, state)
+            # The held watcher can reopen the run (running=True) between the
+            # check above and here — _on_qa_complete does file I/O for the
+            # note, and a follow-up can arrive at any moment.  A reopened run
+            # must keep its state and resume snapshot: falling through would
+            # clear the snapshot and mark the completion notified, so the
+            # reopened run's eventual verdict would never be processed.
+            if state.running:
+                continue
+            # A held run finalized INPUT_REQUIRED but is still watching its
+            # worker panes for a follow-up.  Keep the state tracked and the
+            # resume snapshot on disk so a restart can re-adopt the wait; the
+            # held watcher resets the completion flags when it reopens.
+            # Only an INPUT_REQUIRED result can be held: a crashed/aborted
+            # run (ERROR) or any other verdict must take the normal path so
+            # the state is not pinned in _qa_loops forever.
+            if state.held and state.latest_verdict == VERDICT_INPUT_REQUIRED:
+                if first_completion:
+                    state._ui_complete_notified = True
+                    from pm_core import qa_loop
+                    qa_loop.mark_completion_processed(state)
+                continue
+            # The hold can also reopen the run *between* the two checks
+            # above: it publishes running=True before clearing held, so the
+            # first check can read the pre-reopen False while the second
+            # reads the already-cleared held.  Falling through then would
+            # clear the reopened run's snapshot (the follow-up it reopened
+            # for is still being collected) and mark its completion
+            # notified.  Re-check running after the held branch so every
+            # reopen ordering keeps the run.
+            if state.running:
+                continue
             # The completion has now been processed (note recorded,
             # lifecycle transition done).  Drop the resume snapshot
             # immediately rather than waiting for the tick-2 cleanup
@@ -494,12 +558,53 @@ def _resume_incomplete_qa(app) -> None:
         state = qa_loop.build_resume_state(rdata)
         app._resumed_qa_pr_ids.add(pr_id)
 
+        # A held run finalized INPUT_REQUIRED but was still watching its
+        # worker panes.  Keep it tracked and re-spawn the watcher rather
+        # than processing it as a finished run: a follow-up that landed
+        # during downtime must be collected, and an already-processed
+        # result must not be noted/transitioned twice.
+        if state.held and state.waiting_for_input:
+            state.running = True
+            if not state.completion_processed:
+                # The held result finalized while the TUI was down and was
+                # never recorded.  Note it here, exactly as the live path
+                # does when it publishes the held result: the re-spawned
+                # watcher sets ``running`` immediately, so the normal
+                # completion poll never observes (not running,
+                # INPUT_REQUIRED) and the note would otherwise be lost
+                # whenever no follow-up ever arrives (stop, PR leaves qa,
+                # the user abandons the wait).  Persist the flag so a second
+                # restart does not note it again.
+                _on_qa_complete(app, state)
+                qa_loop.mark_completion_processed(state)
+            else:
+                app.log_message(
+                    f"QA for {pr_id} is waiting for input — still watching "
+                    "for a follow-up verdict...")
+            state._ui_complete_notified = True
+
+            def _on_update(s, _app=app):
+                _app.call_from_thread(_on_qa_update, _app, s)
+
+            app._qa_loops[pr_id] = state
+            _log.info("Re-adopting held QA run for %s (waiting=%s, "
+                      "processed=%s)", pr_id,
+                      sorted(state.waiting_for_input),
+                      state.completion_processed)
+            qa_loop.resume_qa_background(state, app._root, pr, _on_update)
+            continue
+
         if overall:
             # Completed during downtime — process and clear the snapshot.
+            # A snapshot whose result the TUI already noted (a held run that
+            # ended its hold without a follow-up: stop, PR left qa, last
+            # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
             state.latest_verdict = overall
-            _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
-            _on_qa_complete(app, state)
+            _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
+                      pr_id, overall, state.completion_processed)
+            if not state.completion_processed:
+                _on_qa_complete(app, state)
             state._ui_complete_notified = True
             if state.qa_workdir:
                 qa_loop.clear_resume_file(state.qa_workdir)
@@ -537,7 +642,11 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         sign-off or a merge itself.  Otherwise restart QA.
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
-      - INPUT_REQUIRED: pause self-driving loop for human input.
+      - INPUT_REQUIRED: the run is held — the loop keeps watching the
+        scenario worker panes for a follow-up verdict (pr-2c67d50) and
+        resumes this self-driving loop when one lands, so it is not
+        "paused" unless the hold ends without a follow-up (stop, or the
+        PR leaving qa).
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled
@@ -546,6 +655,11 @@ def _on_qa_complete(app, state: QALoopState) -> None:
       - NEEDS_WORK: transition to in_review, rely on auto-start.
     """
     if state._ui_complete_notified:
+        return
+    # The held watcher can clear ``latest_verdict`` (reopening the run) while
+    # this call is being set up; a completion with no verdict has nothing to
+    # record, and noting it would write a bogus "QA : ..." note.
+    if not state.latest_verdict:
         return
 
     pr_id = state.pr_id
@@ -638,11 +752,23 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             if _auto_start.is_enabled(app):
                 app.run_worker(_auto_start.check_and_start(app))
     elif verdict == VERDICT_INPUT_REQUIRED:
-        app.log_message(
-            f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
-        )
+        if state.held:
+            app.log_message(
+                f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — waiting for "
+                "input in the scenario worker pane (still watching for a "
+                "follow-up verdict)"
+            )
+        else:
+            app.log_message(
+                f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
+            )
         if sd:
-            _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
+            # A held run is not paused: it keeps watching the worker pane and
+            # resumes the self-driving loop when the follow-up lands.
+            _log.info(
+                "QA self-driving: INPUT_REQUIRED — %s",
+                "holding the run for a follow-up verdict" if state.held
+                else "loop paused")
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 
@@ -719,6 +845,9 @@ def _record_qa_note(app, state: QALoopState) -> None:
         note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
         # Tell the next review session why QA bounced an all-PASS run.
         note_text += planner_code_changes_suffix(state)
+        # ... or why a follow-up PASS after an INPUT_REQUIRED wait still
+        # needs review (the PR head moved while the scenario waited).
+        note_text += input_wait_changes_suffix(state)
         if state.qa_workdir:
             note_text += f" (workdir: {state.qa_workdir})"
 

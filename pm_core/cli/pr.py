@@ -3620,6 +3620,28 @@ def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     return data.get("overall") or None, latest
 
 
+def _qa_run_owned_elsewhere(status_path: Path | None) -> bool:
+    """True when another live process still drives the run behind *status_path*.
+
+    The status file carries an empty ``overall`` for the whole duration of a
+    run, so a missing qa window does not prove the run is dead.  The resume
+    snapshot next to it records the driver (owner pid + start time); the same
+    check a restarting TUI uses decides whether the run is orphaned.
+    """
+    if status_path is None:
+        return False
+    import json
+    from pm_core import qa_loop
+    try:
+        data = json.loads(
+            (status_path.parent / "qa_resume.json").read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return qa_loop.resume_owned_elsewhere(data)
+
+
 def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
                              fresh: bool, review_loop: bool = True) -> None:
     """Launch review *iteration* in the background for auto-sequence.
@@ -3850,16 +3872,25 @@ def pr_auto_sequence(pr_id: str):
             )
             return
         if overall is None:
-            # No qa_status.json yet.  Could be a never-started run *or*
-            # a freshly-launched run whose first status write hasn't
-            # landed yet.  Check for the qa tmux window before
-            # re-launching to avoid stacking duplicate QA subprocesses
-            # during the launch→first-write race window.
+            # No finalized result yet.  Could be a never-started run *or*
+            # a run still in progress (its status file carries an empty
+            # overall, including the reopen window after an INPUT_REQUIRED
+            # wait).  Check for the qa tmux window before re-launching to
+            # avoid stacking duplicate QA subprocesses during the
+            # launch→first-write race window.
             display_id = _pr_display_id(pr_entry)
             qa_win = tmux_mod.find_window_by_name(
                 pm_session, f"qa-{display_id}",
             ) if pm_session else None
             if qa_win:
+                click.echo("running: qa")
+                return
+            if _qa_run_owned_elsewhere(_path):
+                # The window is gone but a live driver still owns the run
+                # (e.g. a TUI-held run during its reopen).  Launching a
+                # second driver would duplicate scenario workers — and the
+                # new driver's stale-window cleanup would kill the worker
+                # panes the live driver is polling.
                 click.echo("running: qa")
                 return
             _launch_qa_detached(root, pr_id)

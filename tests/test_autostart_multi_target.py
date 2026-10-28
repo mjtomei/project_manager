@@ -753,6 +753,33 @@ class TestBuildStatus:
                          qa_loops={"a": {"verdict": "PASS"}}), "a")
         assert r["state"] == "waiting" and "sign-off" in r["reason"]
 
+    def test_qa_held_run_points_at_the_worker_pane(self):
+        """A held run (pr-2c67d50) is still watching its scenario pane, so
+        the answer belongs in the worker pane — not in the status dashboard
+        this row is rendered from."""
+        r = _run(_status([_pr("a", status="qa")], ["a"],
+                         qa_loops={"a": {"verdict": "INPUT_REQUIRED",
+                                         "held": True}}), "a")
+        assert r["state"] == "waiting"
+        assert "scenario worker pane" in r["reason"]
+        # The run entry keeps the flag as well as the derived reason.
+        assert r["qa"]["held"] is True
+
+    def test_qa_input_required_without_a_watcher_keeps_the_dashboard_hint(self):
+        r = _run(_status([_pr("a", status="qa")], ["a"],
+                         qa_loops={"a": {"verdict": "INPUT_REQUIRED"}}), "a")
+        assert r["reason"] == "QA INPUT_REQUIRED — answer in QA window"
+
+    def test_qa_progress_input_reports_a_held_run(self):
+        """The TUI status builder reads ``qa_progress_input``; a held run
+        (running=False, still watching) must carry ``held`` so the reason
+        can point at the worker pane."""
+        state = QALoopState(pr_id="a", running=False, held=True,
+                            latest_verdict="INPUT_REQUIRED")
+        inp = st.qa_progress_input(state)
+        assert inp["running"] is False and inp["held"] is True
+        assert inp["verdict"] == "INPUT_REQUIRED"
+
     def test_merge_refused_by_signoff_gate(self):
         r = _run(_status([_pr("a", status="qa")], ["a"],
                          pending_merge={"a"}), "a")
