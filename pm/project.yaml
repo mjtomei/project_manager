@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T10:03:17.910388+00:00'
+  updated_at: '2026-10-28T10:11:07.093621+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26255,6 +26255,20 @@ prs:
       log file has it — grep `pm log grep` for the sequence. Captures: /pm-captures/scenarios/22/.'
     created_at: '2026-10-28T10:03:17Z'
     last_edited: '2026-10-28T10:03:17Z'
+  - id: note-c61a7c5
+    text: 'QA S25 (concurrent surfaces + stop): the QA status dashboard dropped the
+      scenario table and the overall verdict whenever qa_status.json carried an error,
+      so a planner-recovery exhaustion showed only the ERROR block. Fixed on top of
+      fc1975e5 (which added the Overall line): the error branch now falls through
+      to the table + Overall when scenarios/overall exist, error-only otherwise; regression
+      tests in tests/test_qa_status_render.py (merged with fc1975e5''s). Verified
+      live: post-fix pane shows QA Status / ERROR / "0 Interactive Session interactive"
+      / Overall: INPUT_REQUIRED. Concurrent runs otherwise passed: two loops ended
+      on their own (review ! NO_VERDICT 1 iter, QA INPUT_REQUIRED), a mid-episode
+      stop gave ☠ KILLED + STOPPED with no note/lifecycle, and healthy restarts gave
+      ✓ PASS / QA PASS with per-PR window isolation.'
+    created_at: '2026-10-28T10:11:07Z'
+    last_edited: '2026-10-28T10:11:07Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
