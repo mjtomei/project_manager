@@ -36189,7 +36189,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/259
   gh_pr_number: 259
   created_at: '2026-10-27T04:19:02.749373+00:00'
-  updated_at: '2026-10-28T06:18:07.406774+00:00'
+  updated_at: '2026-10-28T06:17:34.247435+00:00'
   started_at: '2026-10-27T04:26:41.499360+00:00'
   reviewed_at: null
   merged_at: null
@@ -36893,6 +36893,30 @@ prs:
       Evidence: /pm-captures/scenarios/19/{story1-repair-mid-backoff,story2-manual-loop-markup,story3-rearm,story4-tests}.'
     created_at: '2026-10-28T06:18:07Z'
     last_edited: '2026-10-28T06:18:07Z'
+  - id: note-d3dd7aa
+    text: 'QA scenario 21 (third pass, 1fc4 i2 item 1) PASS: a breadcrumb restart
+      whose saved loop cannot resume no longer strands the target. Live run: in_review
+      PR + auto-start target, loop in the 10 s backoff after a failed container launch
+      (podman shim, image qa-broken:latest); the loop own manual-<token> transcript
+      dir was replaced by a stray file while the auto-start run dir stayed usable;
+      pm tui restart --breadcrumb. Observed: no "Review loop resumed" anywhere; log
+      says "Cannot create transcript dir …: [Errno 17] File exists" + "consume_breadcrumb:
+      could not resume the review loop …; dropping the restored state so the scheduler
+      can restart it"; the scheduler started a fresh loop (new loop id) into the run
+      dir, fake-claude PASS, PR advanced to QA; pm autostart status right after the
+      restart read "running/review review #1 — review iteration 1" (JSON state=running,
+      review.running=true, attempts=1); TUI stayed responsive. Mechanics for future
+      runs: start the manual loop BEFORE enabling auto-start so its transcript dir
+      differs from the auto-start run dir (enabling auto-start first makes get_transcript_dir
+      return the run dir, and replacing that one would make consume_breadcrumb own
+      mkdir raise); watch the debug log for "launch attempt 2/3 failed … retrying
+      in 10s" and do the break + pm container disable + restart inside that 10 s window.
+      Minor observation (non-blocking): the on-screen single sticky log line ends
+      up as "Auto-start: resumed after merge restart → <pr>", so the refusal reason
+      is visible via pm log show rather than the one-line pane log. Evidence: /pm-captures/scenarios/21/failed-resume/
+      (recording.mp4/cast, transcript, status-after-restart/, final-state/, test-evidence/).'
+    created_at: '2026-10-28T06:17:34Z'
+    last_edited: '2026-10-28T06:17:34Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
