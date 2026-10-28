@@ -466,3 +466,28 @@ covered by tests in `tests/test_qa_input_required.py` /
 - **Iteration 6 note correction.** The `held=False` on follow-up collection
   now lives in `_poll_waiting`, not in `_clear_waiting` (see above); the
   behaviour that note describes is unchanged.
+
+## 13. Implementation notes (review iteration 8)
+
+- **Reopening must publish a live run, not a finished one.** `_hold_for_follow_up`
+  recomputed `held` from `waiting_for_input` *before* the reopen check.  When a
+  scan dropped the last waiting attempt (dead pane handed back to the retry
+  path, superseded attempt), `waiting_for_input` became empty, so the state was
+  published as (`running=False`, `held=False`, `INPUT_REQUIRED`) for the few
+  milliseconds of the snapshot/status writes before `_execute_and_finalize`
+  reopened it.  That is exactly the tuple `poll_qa_state` reads as a finished
+  run: it drops the state from `_qa_loops` and deletes the resume snapshot, so
+  the reopened run's follow-up verdict would never be processed.  The reopen
+  branch now sets `running=True` (and keeps `held=True`) before returning, and
+  leaves both file writes to the reopen block in `_execute_and_finalize` (which
+  already writes them as in-progress).  `test_reopening_never_publishes_a_finished_looking_run`
+  pins it.
+- **A held run keeps the shared poll timer armed.** `ensure_animation_timer`
+  and `_poll_loop_state_inner` computed `qa_running` from `state.running`
+  only, so a held run (running=False) could let the timer stop when no active
+  PR kept it alive — and then the follow-up would never be collected.
+  Both now count `state.held`.  `test_held_run_keeps_the_poll_timer_armed`
+  covers it.
+- **Test coverage for the restore contract.** `test_restored_completed_scenario_is_not_re_polled`
+  pins the `_needs_polling` rule that a restored run never re-reads a completed
+  scenario's stale turn (only an unverified PASS is polled again).

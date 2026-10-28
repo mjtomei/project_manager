@@ -576,6 +576,34 @@ class TestReopenDoesNotDuplicateWorkers:
 
         assert launched == [3]
 
+    def test_restored_completed_scenario_is_not_re_polled(self, tmp_path):
+        """A restored/held run must not re-read a completed scenario's stale
+        turn.  With a live pane and a fresh hook event the collector would
+        otherwise re-accept the old verdict (re-recording it, or re-spawning
+        a verifier for an already verified PASS).  Only an unverified PASS
+        is polled again."""
+        done = QAScenario(index=1, title="Done", focus="f",
+                          window_name="qa-s1", pane_id="%1",
+                          transcript_path=str(tmp_path / "s1.jsonl"),
+                          session_id="sid-1")
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = None  # skip snapshot writes inside the loop
+        state.scenarios = [done]
+        state.scenario_verdicts = {1: VERDICT_NEEDS_WORK}
+
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.find_verdict_turn") as find, \
+             patch("pm_core.hook_events.read_event",
+                   return_value={"event_type": "idle_prompt",
+                                 "timestamp": 1e12}), \
+             patch("pm_core.tmux.pane_exists", return_value=True):
+            qa_loop._poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work",
+                tmp_path / "status.json", lambda *a: None)
+
+        find.assert_not_called()
+        assert state.scenario_verdicts == {1: VERDICT_NEEDS_WORK}
+
 
 # ---------------------------------------------------------------------------
 # Hold loop
@@ -696,6 +724,32 @@ class TestHoldForFollowUp:
         snapshot = _load_resume_file(tmp_path)
         assert snapshot["held"] is True
         assert snapshot["waiting_for_input"] == [2]
+
+    def test_reopening_never_publishes_a_finished_looking_run(self, tmp_path):
+        """A dropped last waiting attempt must not leave the state as
+        (not running, not held, INPUT_REQUIRED): the TUI's completion poll
+        reads exactly that as a finished run, drops it from ``_qa_loops`` and
+        deletes the resume snapshot, so the reopened run's verdict could
+        never be collected.  ``running`` is published (and ``held`` kept)
+        before returning; the reopen block in _execute_and_finalize does the
+        rest."""
+        state = _waiting_state(self._ir_only(tmp_path))
+        state.held = True
+        state.latest_verdict = VERDICT_INPUT_REQUIRED
+
+        with patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.qa_loop._write_status_file"), \
+             patch("pm_core.qa_loop._write_resume_file"):
+            assert qa_loop._hold_for_follow_up(
+                state, None, tmp_path / "status.json", False, 0,
+                set()) is True
+
+        # The attempt was dropped back to the retry path ...
+        assert state.waiting_for_input == set()
+        # ... and the run is published as live, never as finished.
+        assert state.running is True
+        assert state.held is True
 
 
 # ---------------------------------------------------------------------------
@@ -1080,3 +1134,45 @@ def test_waiting_suffix_fits_the_status_line():
     for line in out.splitlines():
         visible = re.sub(r"\033\[[0-9;?]*[A-Za-z]", "", line)
         assert len(visible) <= 80, repr(visible)
+
+
+def test_status_file_marks_waiting_scenarios(tmp_path):
+    """The status file is what the TUI renders from, so a waiting scenario
+    must be flagged per row (and at the top level) for the ``(waiting)``
+    marker to appear."""
+    import json
+
+    scenario = QAScenario(index=1, title="A", focus="a")
+    status_path = tmp_path / "status.json"
+    qa_loop._write_status_file(
+        status_path, "pr-001", [scenario],
+        {1: VERDICT_INPUT_REQUIRED}, overall=VERDICT_INPUT_REQUIRED,
+        waiting_for_input={1})
+
+    data = json.loads(status_path.read_text())
+    assert data["waiting_for_input"] == [1]
+    assert data["scenarios"][0]["waiting_for_input"] is True
+
+
+def test_held_run_keeps_the_poll_timer_armed(tmp_path):
+    """A held run has ``running=False`` but still needs the shared poll
+    timer: without it the follow-up is never collected and the reopened
+    result is never processed.  With no active PR to keep the timer alive,
+    the held loop itself must count as active."""
+    from unittest.mock import MagicMock
+
+    from pm_core.tui import review_loop_ui
+
+    app = MagicMock()
+    app._data = {"prs": []}
+    app._review_loops = {}
+    app._review_loop_timer = None
+    state = QALoopState(pr_id="pr-001")
+    state.running = False
+    state.held = True
+    app._qa_loops = {"pr-001": state}
+
+    review_loop_ui.ensure_animation_timer(app)
+
+    assert app._review_loop_timer is not None
+

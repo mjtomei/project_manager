@@ -568,15 +568,21 @@ def qa_outcome_detail(state: QALoopState) -> str:
     return "; ".join(parts)
 
 
+def _summarize_changes(changes: list[str]) -> str:
+    """First few change labels for a note/summary suffix (with a ``+N``)."""
+    shown = ", ".join(changes[:5])
+    more = len(changes) - 5
+    if more > 0:
+        shown += f" (+{more} more)"
+    return shown
+
+
 def planner_code_changes_suffix(state: QALoopState) -> str:
     """Summary suffix explaining a planner-forced NEEDS_WORK (or ``""``)."""
     if not state.planner_code_changes:
         return ""
-    shown = ", ".join(state.planner_code_changes[:5])
-    more = len(state.planner_code_changes) - 5
-    if more > 0:
-        shown += f" (+{more} more)"
-    return (f" — planner edited application code ({shown}); "
+    return (f" — planner edited application code "
+            f"({_summarize_changes(state.planner_code_changes)}); "
             "review required before sign-off")
 
 
@@ -584,11 +590,8 @@ def input_wait_changes_suffix(state: QALoopState) -> str:
     """Summary suffix explaining an INPUT_REQUIRED-wait-forced NEEDS_WORK."""
     if not state.input_wait_code_changes:
         return ""
-    shown = ", ".join(state.input_wait_code_changes[:5])
-    more = len(state.input_wait_code_changes) - 5
-    if more > 0:
-        shown += f" (+{more} more)"
-    return (f" — PR head moved during the INPUT_REQUIRED wait ({shown}); "
+    return (f" — PR head moved during the INPUT_REQUIRED wait "
+            f"({_summarize_changes(state.input_wait_code_changes)}); "
             "new source changes require review before sign-off")
 
 
@@ -3113,7 +3116,10 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
 
     Returns True when the caller should reopen the run (a follow-up arrived
     or a waiting attempt was dropped and needs the live loop), False when
-    the hold ends (stop requested, PR left qa, or nothing is waiting).
+    the hold ends (stop requested, PR left qa, or nothing is waiting).  On
+    True the state is published as a live run (``running`` set, ``held``
+    kept) so the TUI's completion poll cannot mistake the reopen for a
+    finished run.
     """
     from pm_core import store
 
@@ -3133,6 +3139,24 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                           state.pr_id, live.get("status"))
                 return False
         scan = _scan_waiting_scenarios(state)
+        if scan.follow_ups or scan.dropped:
+            # Reopening.  Publish ``running`` *before* clearing ``held``: the
+            # TUI's completion poll reads (not running, not held,
+            # INPUT_REQUIRED) as a finished run and drops the state plus its
+            # resume snapshot.  The last waiting scenario can be dropped by
+            # this very scan (dead pane handed back to the retry path), which
+            # empties ``waiting_for_input`` — so recomputing ``held`` first
+            # left exactly that finished-looking tuple published for the few
+            # milliseconds of the snapshot/status writes below, orphaning the
+            # reopened run.  The reopen block in ``_execute_and_finalize``
+            # rewrites both files as in-progress immediately afterwards, so
+            # the hold does not write them here.
+            state.running = True
+            state.held = True
+            _log.info("QA hold for %s: %d follow-up(s), %d dropped — "
+                      "reopening the run", state.pr_id,
+                      len(scan.follow_ups), len(scan.dropped))
+            return True
         # The hold lasts exactly as long as something is still waiting.  A
         # scan can clear one scenario terminally (no session/transcript, or
         # relaunches exhausted) while another still waits; leaving ``held``
@@ -3153,11 +3177,6 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                 scenario_0=state.scenario_0, error=state._error,
                 verdict_reasons=state.scenario_verdict_reasons,
                 waiting_for_input=state.waiting_for_input)
-        if scan.follow_ups or scan.dropped:
-            _log.info("QA hold for %s: %d follow-up(s), %d dropped — "
-                      "reopening the run", state.pr_id,
-                      len(scan.follow_ups), len(scan.dropped))
-            return True
     return False
 
 
