@@ -35816,7 +35816,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T09:36:50.642459+00:00'
+  updated_at: '2026-10-28T09:56:44.976278+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37594,6 +37594,24 @@ prs:
       registry.'
     created_at: '2026-10-28T08:05:47Z'
     last_edited: '2026-10-28T08:05:47Z'
+  - id: note-8c9047b
+    text: 'signoff (claude-work) 2026-10-28 #3: SIGNOFF_IMPL — code conflict, not
+      metadata-only. master@89e3c501 conflicts in pm_core/cli/pr.py (4 hunks) + pm/project.yaml.
+      Master (pr-2e06289, addf8b40/c8171867/92f073da) moved _verify_github_merge +
+      the approved-candidate lookup into NEW pm_core/merge_integrity.py (also called
+      by TUI background sync), which lacks this PR R9-14 hand-edited-state guards:
+      approved_candidate() .get()s a possibly scalar signoff/integration and accepts
+      non-string sha/base_sha; verify_github_merge() slices head/base_sha/candidate_tree
+      [:12] unguarded; apply_to_pr() builds the note-id set from raw (possibly unhashable)
+      ids. Fix: merge master, TAKE master structure and PORT the guards into merge_integrity
+      (revision_of for sha/base_sha, a _short helper, non-mapping signoff/integration
+      read as absent, _notes_of/_note_id helpers), one failing-on-master test each;
+      keep every project.yaml record from both sides; full suite on the merged tree.
+      Evidence: review holds for PR code at 35693308 (no code since); QA 33-38 PASS
+      hold except the GitHub-merge verification / --propagation-only recovery path,
+      which needs review + targeted re-QA after the reconciliation.'
+    created_at: '2026-10-28T09:56:44Z'
+    last_edited: '2026-10-28T09:56:44Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
