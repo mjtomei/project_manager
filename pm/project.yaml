@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-28T23:27:06.797979+00:00'
+  updated_at: '2026-10-28T23:36:05.890473+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37397,6 +37397,37 @@ prs:
       Captures: scenarios/24/{story1,2,3,4}-cycle + manifest.md.'
     created_at: '2026-10-28T23:27:18Z'
     last_edited: '2026-10-28T23:27:18Z'
+  - id: note-d1451ef
+    text: 'QA scenario 22 (resuming state + adopt decision, sampled concurrently by
+      CLI text, CLI JSON and the runs popup): PASS at e9ec829e, live TUI + interactive
+      stand-in, 5/5 stories. (1) S1 unanswered live wait: 1 resuming sample (JSON
+      T0+0.20s, text T0+0.07s) `running / review resuming (iteration 1)` ir=false
+      fu=false res=true, text row `win=review-<P>`; then 99 waiting/INPUT_REQUIRED/ir=true;
+      adopt line `(unanswered)`; window/pane ids unchanged; no iteration 2. (2) S2
+      answered-before-restart: no waiting/ir=true sample; adopt `(answered)`; then
+      follow-up running; verdict -> exactly one hook-driven + one `iteration 2 for`.
+      (3) S3 verdict already in transcript, no idle: `follow-up verdict NEEDS_WORK
+      already in transcript` + iteration 2, no hook-driven line. (4) S4 seeded breadcrumb
+      with no live pane: `has no live pane; continuing` + iteration 2, popup RUNNING
+      review #2, never waiting. (5) S5 two targets: both resuming at T0+0.17s, then
+      P4 waiting / P5 follow-up, two adopt lines (unanswered/answered), P5 verdict
+      -> iteration 2 only, P4 untouched. Whole session: 7,735 runs[] samples, 0 flag<->reason
+      violations; 6,451 text/JSON pairs, 7 mismatches all within +/-0.13s at transition
+      instants. Captures /pm-captures/scenarios/22/. Harness notes: (a) run with a
+      private HOME - ~/.pm/autostart-resume.json and ~/.pm/merge-restart are global
+      to the machine and with several QA scenarios restarting concurrently on the
+      shared HOME our breadcrumb was consumed by someone else (written 18:06:08, gone
+      by the 18:06:09 mount, no consume line in our log, auto-start came back off
+      with no targets); private HOME + private PM_TMUX_SOCKET restored reliably every
+      time. (b) the adopt branch publishes the transcript answered state before it
+      writes `adopting ... (answered)` (e386-i3 ordering), so a reader can catch the
+      true answered state a fraction of a second before that log line - spec-consistent
+      (R13), just do not use the log line as a timestamp. (c) the sticky bottom log
+      line keeps `INPUT_REQUIRED ...` after the wait is answered/stopped (a log line,
+      not a status surface; status/popup/tree all read the follow-up state). No code
+      changes made.'
+    created_at: '2026-10-28T23:36:05Z'
+    last_edited: '2026-10-28T23:36:05Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
