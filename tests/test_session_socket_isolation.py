@@ -1000,6 +1000,45 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == ("%2", "pm-a")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/a"
 
+    def test_last_resort_never_crosses_sessions_on_one_server(
+            self, monkeypatch):
+        """A server is not a session: the default server hosts several.
+
+        Pane ids are unique per *server*, so "some pm session on this
+        server has a live ``pm _tui`` pane" is not proof that the pane is
+        ours.  Legacy pm sessions all live on the default server, so from
+        inside pm-a (registry entry gone, e.g. heal testing) an unscoped
+        last-resort scan would return pm-b's TUI and let ``pm tui send``
+        drive it — the cross-session damage this PR exists to prevent.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a")
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        # Both sessions share the legacy default server (socket None).
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [{"name": "pm-a", "socket": None,
+                                      "attached": 0, "shared": False},
+                                     {"name": "pm-b", "socket": None,
+                                      "attached": 0, "shared": False}])
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **kw: MagicMock(
+                returncode=0, stdout='%2 pm-b "pm _tui"\n'))
+
+        assert helpers._find_tui_pane() == (None, None)
+
     def test_explicit_session_selects_its_server(self, monkeypatch, tmp_path):
         from pm_core.cli import helpers
         from pm_core import pane_registry
@@ -1073,6 +1112,32 @@ class TestResolveSessionSocket:
                                                            True)
         assert sock == str(tmp_path / "pm-repo-abc")
         assert legacy is False
+
+    def test_unusable_socket_dir_reports_the_fix(self, monkeypatch, tmp_path,
+                                                 capsys):
+        """A directory it cannot secure is refused with actionable advice.
+
+        ``ensure_socket_dir`` fails closed when the shared directory is
+        world-writable without the sticky bit (another user could unlink
+        our socket, which the uid check cannot prevent).  ``pm session``
+        must report that as a message, not a traceback.
+        """
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+
+        def unusable():
+            raise PermissionError(13, "Operation not permitted")
+
+        monkeypatch.setattr(paths, "ensure_socket_dir", unusable)
+
+        with pytest.raises(SystemExit) as exc:
+            session_mod._resolve_session_socket("pm-repo-abc", False)
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "Cannot use tmux socket directory" in err
+        assert str(tmp_path) in err
+        assert "sticky bit" in err
 
     def test_refuses_socket_owned_by_another_user(self, monkeypatch, tmp_path):
         """The socket dir is world-writable; never connect to a planted one."""
@@ -1405,6 +1470,25 @@ class TestResolveTargetSession:
                             lambda cands: seen.append(cands) or cands[0])
         session_mod._resolve_target_session()
         assert seen == [["pm-same"]]
+
+    def test_tmux_missing_inside_a_pane_degrades_to_no_session(
+            self, monkeypatch):
+        """``pm session mobile`` / ``--print-connect`` must not crash.
+
+        ``$TMUX`` is set in a forwarded pane environment or a container
+        where the tmux binary is missing; the ambient lookup then reports
+        "not inside a pm session" instead of raising, like every other
+        probe in the module.
+        """
+        from pm_core.cli import helpers
+
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+
+        def missing():
+            raise FileNotFoundError(2, "No such file or directory: 'tmux'")
+
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name", missing)
+        assert helpers._get_current_pm_session() is None
 
 
 class TestSessionMobileServerSelection:

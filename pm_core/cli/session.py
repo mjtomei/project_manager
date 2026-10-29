@@ -349,9 +349,21 @@ def _resolve_session_socket(session_name: str,
     the subprocesses it spawns) address the default server explicitly.
     Nothing is migrated, detached, or killed automatically.
     """
-    from pm_core.paths import ensure_socket_dir, session_socket_path
+    from pm_core.paths import (
+        SHARED_SOCKET_DIR, ensure_socket_dir, session_socket_path)
 
-    ensure_socket_dir()
+    try:
+        ensure_socket_dir()
+    except OSError as e:
+        # ensure_socket_dir refuses a world-writable directory without the
+        # sticky bit: another user could unlink our socket there, and the
+        # uid check below cannot prevent it (it runs once, before tmux
+        # binds).  Report the fix instead of a traceback.
+        click.echo(
+            f"Cannot use tmux socket directory '{SHARED_SOCKET_DIR}': {e}. "
+            "It must be owned by you, or have the sticky bit set (1777) so "
+            "no other user can remove your sockets.", err=True)
+        raise SystemExit(1)
     socket_path = str(session_socket_path(session_name.removeprefix("pm-")))
     # Private servers live in a world-writable directory; refuse to connect
     # to a socket another user planted at our path.  Shared sessions are

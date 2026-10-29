@@ -1259,10 +1259,17 @@ def _get_current_pm_session() -> str | None:
     """
     if not tmux_mod.in_tmux():
         return None
-    name = tmux_mod.get_session_name()
-    # Strip grouped session suffix
-    if "~" in name:
-        name = name.rsplit("~", 1)[0]
+    try:
+        name = tmux_mod.get_session_name()
+    except OSError:
+        # tmux missing/unexecutable while $TMUX is set (a forwarded pane
+        # environment, or a container without tmux): "not inside a pm
+        # session" rather than a crash out of `pm session mobile` /
+        # `--print-connect`, like every other probe in this module.
+        return None
+    # Shared definition of "grouped session base" (see
+    # ``pane_registry.base_session_name``), like the other call sites.
+    name = pane_registry.base_session_name(name)
     if name.startswith("pm-"):
         return name
     return None
@@ -1463,12 +1470,18 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # ``_live_panes_and_tuis`` — the same query ``_find_live_tui_pane``
     # filters — so "a pane running the TUI" has one definition, and a tmux
     # that cannot be run degrades to "nothing found" instead of raising.
+    #
+    # The pane must belong to the *row's* session, not merely to some pm
+    # session on the same server: a server is not a session, and the
+    # legacy default server hosts every pre-isolation pm session, so
+    # accepting any pm- TUI pane here would hand back another session's
+    # pane (and ``pm tui send`` delivers keys unscoped).
     for info in servers:
         _use_tmux_socket(info["socket"])
         _, live_tuis = _live_panes_and_tuis()
         for pane_id, tui_session in live_tuis:
-            if tui_session.startswith("pm-"):
-                return pane_id, pane_registry.base_session_name(tui_session)
+            if pane_registry.base_session_name(tui_session) == info["name"]:
+                return pane_id, info["name"]
 
     # Nothing found: undo the scan's env mutations so the caller keeps the
     # server it started with.

@@ -1160,3 +1160,52 @@ the PR note for this iteration).  No live session, server or shared host
 configuration was touched; the new test is unit-level.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop 7af7 i2)
+
+Verification pass over the integrated head; no requirement changes.  Three
+items, all of the class the previous iterations fixed:
+
+1. **The i1 scope was per *server*, but a server is not a session.**  The
+   last-resort `pm _tui` scan in `_find_tui_pane()` was scoped to the
+   identified session's server, and then returned the first `pm _tui` pane
+   it found there.  That is exact for a private server (one session per
+   server), but the legacy default server hosts *every* pre-isolation pm
+   session: from inside legacy `pm-a` with its registry entry gone, the
+   scan could return `pm-b`'s live TUI, and `pm tui send` delivers keys
+   unscoped — the same cross-session damage i1 removed, one level down.
+   The pane's base session is now compared with the row's session
+   (`info["name"]`), which is exact in both cases (with no session
+   identified, every row is one base session).  Test:
+   `test_last_resort_never_crosses_sessions_on_one_server` (verified to
+   fail without the comparison: it returned `pm-b`'s pane).
+2. **`ensure_socket_dir()`'s fail-closed refusal surfaced as a traceback.**
+   The d1c0 i12 guard raises when the shared directory is world-writable
+   without the sticky bit (another user could unlink our socket, which the
+   uid check cannot prevent because it runs once, before tmux binds).
+   `_resolve_session_socket()` now reports it as an actionable message
+   (which directory, and that it must be owned by the user or be 1777)
+   instead of letting the `OSError` escape.  Test:
+   `test_unusable_socket_dir_reports_the_fix`.
+3. **`_get_current_pm_session()` crashed when tmux cannot be run.**  Every
+   other probe in the module degrades (d1c0 i2/i6/i9/i11), but this one
+   called `get_session_name()` unguarded; with `$TMUX` set and no tmux
+   binary (a forwarded pane environment, or a container without tmux) it
+   raised `OSError` out of `pm session mobile` and `pm session
+   --print-connect` (both of which now reach it through the ambient
+   session lookup).  It returns `None` ("not inside a pm session") now,
+   and uses `pane_registry.base_session_name()` for the `~N` strip, like
+   the other call sites i6 unified.  Test:
+   `test_tmux_missing_inside_a_pane_degrades_to_no_session`.
+
+Validation on the integrated head: full suite re-run after these edits
+(see the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket (`TMUX_TMPDIR` on a scratch dir):
+private server created, `PM_TMUX_SOCKET` in the session env, the global
+env and the hooks, default server untouched; `pm session list` re-verified
+end to end against disposable private/shared servers (private row,
+`(shared)` marker, grouped `~1` collapsed, non-socket/stale entries
+skipped).  No live session, server or shared host configuration was
+touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
