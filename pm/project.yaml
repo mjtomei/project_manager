@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T10:39:12.296606+00:00'
+  updated_at: '2026-10-29T10:48:45.693863+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29877,6 +29877,38 @@ prs:
       under test before opening it.'
     created_at: '2026-10-29T10:39:12Z'
     last_edited: '2026-10-29T10:39:12Z'
+  - id: note-d7e3bdc
+    text: 'QA S37 PASS (recovery settings as shared global state). All four stories
+      verified live on the TUI with fake-claude in an isolated harness (private HOME
+      + PM_TMUX_SOCKET; the host tmux server was never touched). (1) Mid-episode change
+      is safe: settle 5->0 and max-attempts 3->2 applied at +25 s left the A episode
+      untouched — same window @15 / Claude pane %21 before, after and at completion,
+      one "Review loop started" line, row kept ⟳1, ended at 42 s on the no-progress
+      path ("re-announced its idle turn 11 time(s)"), no "recovery request" line and
+      no outcome request in the pane. (2) Next run reads them: B got "recovery request
+      1/2" then "2/2" (never 3), the outcome request echoed twice in its pane, ended
+      22 s after the window launch with "the session idled 2 time(s) ... recovery
+      attempts are exhausted". (3) Hand-edited junk: settle "inf" and budget "abc"
+      stored (pm set list shows them without a (default) marker), the loop still ended
+      at 42 s on the no-progress path (inf fell back to the 5 s default) and the log
+      carried both "loop_shared: ignoring invalid ..." warnings; no traceback. (4)
+      Junk budget falls back to 3: settle set to a valid 0, D got "1/3", "2/3", "3/3"
+      and "the session idled 3 time(s) ... recovery attempts are exhausted" at 27
+      s. Captures: /pm-captures/scenarios/37/ (per-story casts + mp4 + TUI frames
+      + window/pane snapshots + log extracts, plus a top-level manifest). Harness
+      notes for the next run: (a) tmux send-keys -l needs "--" before the literal
+      string — a chunk starting with "-" (e.g. "-loop ") is parsed as an option and
+      silently dropped, which turns "review-loop start <pr>" into "reviewstart"; (b)
+      the recorder tmux attach starts on the session current window, so create the
+      shell window first and select-window -t "$SESS:0" before attaching; (c) a finished
+      review loop leaves an in-memory ⟳N<verdict> marker on the board (app._review_loops)
+      that survives killing the window, deleting ~/.pm/runtime/<pr>.json and `pm pr
+      edit --status in_progress` — only a TUI restart (C-r) clears it; (d) agg is
+      not preinstalled: the aarch64 asset is "agg-aarch64-unknown-linux-gnu" (no v
+      prefix, no .tar.gz) from the v1.9.0 release, and this ffmpeg 4.4.2 wants -vsync
+      vfr.'
+    created_at: '2026-10-29T10:48:45Z'
+    last_edited: '2026-10-29T10:48:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
