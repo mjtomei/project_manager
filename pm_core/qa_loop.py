@@ -321,7 +321,7 @@ class QALoopState:
     _ui_tracker_keys: set = field(default_factory=set, repr=False, compare=False)
     # Completion bookkeeping in qa_loop_ui while project.yaml cannot be
     # loaded (RQ37): the result writes already made (lifecycle transition,
-    # QA note), follow-up actions (review loop start, zz t restart,
+    # QA note per verdict), follow-up actions (review loop start, zz t restart,
     # sign-off, tree reload) to retry because the file broke under them,
     # and the reason last reported for a completion that waits.
     _ui_writes_done: set = field(default_factory=set, repr=False, compare=False)

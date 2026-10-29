@@ -96,6 +96,16 @@ def focus_or_start_qa(app, pr_id: str) -> None:
             suppress = _rs.consume_suppress_switch(pr_id, "qa")
             if not suppress:
                 tmux_mod.select_window(session, window_name)
+            existing = app._qa_loops.get(pr_id)
+            if existing and existing.held and not existing.running:
+                # A held run is not over: it waits for the user's answer.
+                # Say so, as start_qa does when the window is gone, rather
+                # than only that its window was focused (S132).
+                app.log_message(
+                    f"QA for {pr_id} is waiting for input — answer in its "
+                    "scenario worker pane; the loop is still watching",
+                    force=True)
+            elif not suppress:
                 app.log_message(f"Focused QA window for {pr_id}")
             else:
                 app.log_message(
@@ -811,7 +821,7 @@ def _completion_waits_for_project(app, state: QALoopState) -> bool:
         if state._ui_wait_reason != reason:
             state._ui_wait_reason = reason
             verdict = state.latest_verdict
-            if "note" in state._ui_writes_done:
+            if _note_key(state) in state._ui_writes_done:
                 # Recorded already; only a follow-up (sign-off hand-off,
                 # zz t restart, review loop, tree reload) waits.  Saying
                 # "to record it" here read as a lost result (S49).
@@ -850,6 +860,18 @@ def _follow_up(state: QALoopState, action) -> None:
         state._ui_pending.append(action)
 
 
+def _note_key(state: QALoopState) -> str:
+    """The ``_ui_writes_done`` entry for this result's QA note.
+
+    Keyed by verdict: a held INPUT_REQUIRED run keeps its state when a
+    follow-up reopens it, and the follow-up's result (PASS, NEEDS_WORK) is a
+    new one to note.  A plain "note" entry left by the held result skipped
+    the follow-up's note (S132).  The same verdict for the same run is
+    deduplicated by _record_qa_note anyway.
+    """
+    return f"note:{state.latest_verdict}"
+
+
 def _record_completion(app, state: QALoopState) -> bool:
     """Write the run's result to project.yaml: the NEEDS_WORK → in_review
     transition and the QA note, each once.  False when one could not be
@@ -861,6 +883,7 @@ def _record_completion(app, state: QALoopState) -> bool:
     released (RQ38).
     """
     done = state._ui_writes_done
+    note = _note_key(state)
     try:
         if (state.latest_verdict == VERDICT_NEEDS_WORK
                 and "transition" not in done):
@@ -868,16 +891,16 @@ def _record_completion(app, state: QALoopState) -> bool:
                                          "in_review", lock_timeout=store.NO_WAIT):
                 return False
             done.add("transition")
-        if "note" not in done and state.setup_stop:
+        if note not in done and state.setup_stop:
             # A provider setup error stopped the run with no overall
             # verdict (at launch, or a verifier/finalizer mid-run): a
             # "QA ERROR:" note would only tell later sessions about a run
             # that has no result; the restart after the fix records one.
-            done.add("note")
-        if "note" not in done:
+            done.add(note)
+        if note not in done:
             if not _record_qa_note(app, state, lock_timeout=store.NO_WAIT):
                 return False
-            done.add("note")
+            done.add(note)
     except store.StoreLockTimeout:
         reason = store.LOCK_BUSY_REASON
         if state._ui_wait_reason != reason:

@@ -393,7 +393,7 @@ def test_wait_line_after_the_result_was_recorded_names_the_follow_up(tmp_path):
     from pm_core.tui import qa_loop_ui
     app = _make_app(tmp_path)
     state, snap = _finished_run(app, tmp_path, VERDICT_PASS)
-    state._ui_writes_done.add("note")
+    state._ui_writes_done.add(qa_loop_ui._note_key(state))
     state._ui_complete_notified = True
     calls = []
     state._ui_pending.append(lambda: calls.append(1) or True)

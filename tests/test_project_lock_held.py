@@ -148,7 +148,7 @@ def test_pending_sign_off_follow_up_waits_for_a_held_lock(tmp_path):
     from pm_core.tui import qa_loop_ui, signoff_ui
     app = _make_app(tmp_path)
     state, snap = _finished_run(app, tmp_path, VERDICT_PASS)
-    state._ui_writes_done.add("note")
+    state._ui_writes_done.add(qa_loop_ui._note_key(state))
     state._ui_complete_notified = True
     state._ui_pending.append(lambda: qa_loop_ui._trigger_signoff(app, "pr-001"))
 
@@ -571,7 +571,7 @@ def test_completion_load_wait_line_is_not_replaced_by_a_same_frame_resume(
     app = _make_app(tmp_path)
     state, _snap = _finished_run(app, tmp_path, VERDICT_PASS)
     if recorded:
-        state._ui_writes_done.add("note")
+        state._ui_writes_done.add(qa_loop_ui._note_key(state))
         state._ui_pending.append(lambda: True)
     _break(app._root, "conflict")
     shown, end_hold = _painting(app)

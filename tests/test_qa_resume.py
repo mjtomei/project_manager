@@ -683,6 +683,45 @@ def test_poll_qa_state_held_notes_once_and_keeps_state(tmp_path):
     assert len(qa_notes) == 1
 
 
+def test_follow_up_result_of_a_held_run_is_noted(tmp_path):
+    """The live TUI keeps a held run's state when a follow-up reopens it.
+    The note written for the held INPUT_REQUIRED result must not stand in
+    for the follow-up's: the PASS gets its own note (S132), once."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_held_run(tmp_path, completion_processed=False)
+    state = build_resume_state(_load_resume_file(qa_dir))
+    app._qa_loops = {"pr-001": state}
+    app._qa_resume_poll_counter = 1
+    app._self_driving_qa = {}
+
+    with patch.object(qa_loop_ui, "_resume_incomplete_qa"):
+        qa_loop_ui.poll_qa_state(app)
+
+    # The answer lands: the held watcher reopens the run (as qa_loop does)
+    # and the follow-up is collected PASS.
+    state.running = True
+    state.held = False
+    state.latest_verdict = ""
+    state._ui_complete_notified = False
+    state.completion_processed = False
+    state.waiting_for_input = set()
+    state.waiting_input_sources = {}
+    state.scenario_verdicts[1] = VERDICT_PASS
+    state.running = False
+    state.latest_verdict = VERDICT_PASS
+
+    with patch.object(qa_loop_ui, "_resume_incomplete_qa"):
+        qa_loop_ui.poll_qa_state(app)
+        qa_loop_ui.poll_qa_state(app)
+
+    notes = store.get_pr(store.load(app._root), "pr-001").get("notes") or []
+    tail = f" (workdir: {qa_dir})"
+    assert [n["text"].startswith("QA INPUT_REQUIRED: ") for n in notes
+            if n["text"].endswith(tail)] == [True, False]
+    assert len([n for n in notes if n["text"].startswith("QA PASS: ")
+                and n["text"].endswith(tail)]) == 1
+
+
 def test_resume_abort_stops_advertising_the_held_wait(tmp_path):
     """A held run adopted after a restart can still fail to resume (no pm
     session, PR workdir gone).  It is then not waiting for input any more:

@@ -900,6 +900,7 @@ def test_focus_suppressed_answer_visible_over_sticky():
 
     app, shown = _stub_app()
     app._root = "/unused"
+    app._qa_loops = {}
     _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
     with patch.object(qa_loop_ui.store, "load", return_value={}), \
          patch.object(qa_loop_ui.store, "get_pr",
