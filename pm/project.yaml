@@ -38197,7 +38197,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-29T10:01:34.047628+00:00'
+  updated_at: '2026-10-29T11:16:09.082523+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -38705,6 +38705,55 @@ prs:
       (2026-10-29T10:01:00Z)'
     created_at: '2026-10-29T10:01:33Z'
     last_edited: '2026-10-29T10:01:33Z'
+  - id: note-b402dd9
+    text: 'QA S16 (R2/R3/E1/E6, PID-limit classification + independent retries + mixed
+      aggregation) PASS 4/4 stories, real podman + fake-claude, HEAD f8ee3eb6. Isolated
+      harness: HOME=/scratch/qa16/home, TMPDIR=/scratch/qa16/tmp, PM_TMUX_SOCKET=/scratch/qa16/tmux.sock,
+      project /scratch/qa16/pm-test-1793269852 (local backend, nested_podman, pm-dev:latest);
+      the real pm-project_manager session and ~/.pm were never touched. Failure injection
+      used a bounded PATH wrapper (/scratch/qa16/wrap/podman) that returns the real
+      crun "Cannot fork" text for podman run|exec on named containers. (1) exec-kind
+      PID cause: killing the s3 window with its container in the fail list gives `launch
+      retry 1/6` + `worker exited before Claude started: container process (PID) limit
+      exhausted (cannot fork) — restart the container with `podman restart <s3>`;
+      its files are kept`, never a verdict; s1/s2 PASS+verified at +120 s while s3
+      was at 5/6 (`Progress: 2/3 scenarios complete (1 relaunching)`); ladder exactly
+      5/10/20/40/80/160 s for s3 only; exhaustion -> INPUT_REQUIRED `(runtime failure,
+      not an agent verdict); gave up after 6 relaunch attempt(s): <same cause>`, `Overall:
+      INPUT_REQUIRED`, `QA complete: INPUT_REQUIRED [finalize: FINALIZE_DONE]`. (2)
+      Simultaneous independent failures: s2 exec-kind + s3 container stopped (`podman
+      stop -t 1`) in the same tick -> both rows `launch retry 1/6` with different
+      causes (PID + restart hint vs `container <s3> is exited`, no hint), each with
+      its own `next attempt at`; s1 PASS+verified while both retried (`Progress: 1/3
+      (2 relaunching)`); `/` -> `pr qa loop` during backoff ended the run in 1-2 s
+      with no new s2/s3 worker window (board falls back to INPUT_REQUIRED, as in scenario
+      13). (3) Mixed aggregation: NEEDS_WORK sibling + PASS sibling (verified, spinner
+      `⠋ verifying` caught) + s3 exhausted -> failed row INPUT_REQUIRED, `Overall:
+      NEEDS_WORK` (never PASS), `QA complete: NEEDS_WORK [finalize: FINALIZE_DONE]`;
+      progress never counted s3 complete. (4) create-kind: glob `pm-*-qa-<pr>-*-s3`
+      in the fail list -> `launch retry 1/6` with `worker could not be created: container
+      create failed: container process (PID) limit exhausted (cannot fork) — restart
+      the container; its files are kept` (no container name), no s3 window/container
+      during backoff; clearing the entry -> `Scenario 3: relaunch 2/6 (create)`, one
+      container + one same-named window, s3 PASS verified, `Overall: PASS` / `QA complete:
+      PASS [finalize: FINALIZE_DONE]`, exactly one s3 container and window afterwards.
+      FIXTURE NOTES for the next run: (a) the fake QA_PLAN body must NOT contain QA_PLAN_START/END
+      - fake-claude wraps the body in the block markers itself, and a doubled marker
+      reads as `plan truncated` (the run then dies at planning); (b) give qa_finalize
+      a non-zero hold - with `hold: 0` the finalize pane exits before the poller reads
+      its transcript, `_run_qa_finalize_pane` logs `pane vanished` and the run reports
+      finalize=None (observed once; benign, but the `[finalize: FINALIZE_DONE]` suffix
+      is lost); (c) the QA status pane clips long reason lines - zoom and resize the
+      window to ~420 cols for a full-sentence still (pm resets the zoom when it rebuilds
+      the window); (d) `tmux capture-pane -t %N` with a stale pane id silently captures
+      nothing - re-resolve the status pane after a relaunch; (e) do not delete a qa
+      workdir while the TUI still considers the run live - it raises FileNotFoundError
+      in _write_status_file and the run ends ERROR (harness mistake, not a product
+      bug); (f) the debug log is shared across runs in one session - scope greps by
+      timestamp. Captures /pm-captures/scenarios/16/story{1,2,3,4}/ (story1 has recording.cast
+      + recording.mp4). No code change.'
+    created_at: '2026-10-29T11:16:09Z'
+    last_edited: '2026-10-29T11:16:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
