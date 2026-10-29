@@ -185,16 +185,18 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
     click.echo(f"Set session override: ~/.pm/sessions/{session_tag}/override")
 
     # Build command with cleanup on exit
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(prompt=prompt, session_tag=session_tag,
                                         cwd=str(work_path),
-                                        session_type="meta")
+                                        session_type="meta", env_out=env)
     cmd = _build_meta_pane_cmd(claude_cmd, session_tag, work_path)
 
     # Try to launch in tmux (reuse pm_session from above)
     if pm_session:
         if tmux_mod.session_exists(pm_session):
             try:
-                tmux_mod.new_window(pm_session, window_name, _tmux_shell_cmd(cmd), str(work_path))
+                tmux_mod.new_window(pm_session, window_name, _tmux_shell_cmd(cmd),
+                                    str(work_path), env=env)
                 win = tmux_mod.find_window_by_name(pm_session, window_name)
                 if win:
                     tmux_mod.set_shared_window_size(pm_session, win["id"])
@@ -205,12 +207,12 @@ def meta_cmd(task: str, branch: str | None, tag: str | None):
 
     # Fallback: launch interactively
     click.echo("Launching Claude...")
-    rc = _run_interactive(f"cd {shell_quote(str(work_path))} && {cmd}")
+    rc = _run_interactive(f"cd {shell_quote(str(work_path))} && {cmd}", env=env)
     # The EXIT/INT/TERM trap in the shell command handles cleanup
     raise SystemExit(rc)
 
 
-def _run_interactive(cmd: str) -> int:
+def _run_interactive(cmd: str, env: dict[str, str] | None = None) -> int:
     """Run *cmd* through the shell, waiting it out across Ctrl-C.
 
     ``subprocess.run`` only gives the child ~0.25 s after a KeyboardInterrupt
@@ -222,8 +224,14 @@ def _run_interactive(cmd: str) -> int:
     exit on its own; a second Ctrl-C just re-interrupts the wait, it never
     escalates to a kill.  Returns the shell child's returncode (130 when it
     was interrupted).
+
+    *env* holds provider values and is passed through the process
+    environment, never interpolated into *cmd*.
     """
-    proc = subprocess.Popen(cmd, shell=True)
+    proc = subprocess.Popen(
+        cmd, shell=True,
+        env={**os.environ, **env} if env else None,
+    )
     try:
         return proc.wait()
     except KeyboardInterrupt:

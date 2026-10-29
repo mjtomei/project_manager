@@ -518,6 +518,9 @@ def test_adopted_review_polls_with_pr_workdir(tmp_path):
     (transcript_dir / "review-pr-x-i2.jsonl").symlink_to(tmp_path / f"{sid}.jsonl")
     state = review_loop.ReviewLoopState(pr_id="pr-x")
     state.iteration = 2
+    # A resumed loop only adopts an iteration it actually launched; the
+    # breadcrumb records that (pr-e040aeb's fabrication guard).
+    state.iteration_attempted = True
     pr_data = {"id": "pr-x", "workdir": "/wd/pr-x"}
     with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
          patch("pm_core.review_loop._find_claude_pane", return_value="%5"), \
@@ -1043,8 +1046,8 @@ def test_tmux_guide_launch_goes_through_trust_boundary(home, tmp_path,
     monkeypatch.setattr(guide_cli.guide_mod, "build_assist_prompt",
                         lambda *a, **k: "assist")
     execs = []
-    monkeypatch.setattr(guide_cli.os, "execvp",
-                        lambda f, args: execs.append(args))
+    monkeypatch.setattr(guide_cli.os, "execvpe",
+                        lambda f, args, env: execs.append(args))
 
     monkeypatch.chdir(proj)
     guide_cli._run_guide()

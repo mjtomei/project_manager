@@ -16,6 +16,8 @@ import logging
 import os
 import shlex
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 # Cache for session tags to avoid repeated subprocess calls
@@ -101,10 +103,16 @@ def captures_dir(pr_id: str,
        already exists. ``tag`` is *session_tag* if supplied, else the
        tmux-derived tag, else the cwd-derived tag.
     2. Otherwise the container bind-mount at
-       :data:`CONTAINER_CAPTURES_MOUNT` if it exists (set up by
-       :func:`container.create_container`) and belongs to *pr_id* — the
-       container's :data:`CAPTURES_PR_ENV` names the mounted PR; when it
-       is unset any PR may use the mount.
+       :data:`CONTAINER_CAPTURES_MOUNT` if it exists and belongs to
+       *pr_id*: the container's :data:`CAPTURES_PR_ENV` names the mounted
+       PR, and only a match may use the mount (surrounding whitespace is
+       stripped first, so a trailing newline from a shell export still
+       matches). A missing, empty or different marker fails closed — a
+       throwaway pm project driven inside the container (nested QA runs)
+       must never write its own PRs' captures into the enclosing PR's
+       evidence, and losing a marker-less worker's captures to its
+       container-local home is recoverable where overwriting host
+       evidence is not.
     3. Otherwise create and return the host path.
 
     The ``~/.pm`` path takes precedence so on the host we always land
@@ -116,8 +124,9 @@ def captures_dir(pr_id: str,
     Readers (prompt builders, ``pm qa evidence``) must not conjure a
     captures dir as a side effect of looking for evidence in it.
 
-    Returns None when no tag can be derived AND the bind-mount isn't
-    present.
+    Returns None when no tag can be derived AND the bind-mount is absent
+    or not owned by *pr_id* (the fail-closed case: never the mount for a
+    PR it doesn't belong to).
     """
     if session_tag is None:
         session_tag = _resolve_session_tag(start_path)
@@ -130,9 +139,10 @@ def captures_dir(pr_id: str,
     # The mount belongs to one PR (PM_CAPTURES_PR, set at container
     # creation). A throwaway pm project driven inside the container
     # (e.g. nested fake-Claude QA runs) must not write its own PRs'
-    # captures into it.
-    mount_pr = os.environ.get(CAPTURES_PR_ENV)
-    if mount.is_dir() and (not mount_pr or mount_pr == pr_id):
+    # captures into it, so an absent/empty/mismatched marker fails
+    # closed instead of granting the mount to any PR.
+    mount_pr = (os.environ.get(CAPTURES_PR_ENV) or "").strip()
+    if mount.is_dir() and mount_pr and mount_pr == pr_id:
         return mount
     if host_path is not None and create:
         host_path.mkdir(parents=True, exist_ok=True)
@@ -727,6 +737,55 @@ def log_shell_command(cmd: list[str] | str, prefix: str = "shell", returncode: i
             f.write(entry)
     except (OSError, IOError):
         pass  # Silently fail if we can't write to log
+
+
+# Provider env values must never appear in a command string that is logged,
+# kept as tmux's ``#{pane_start_command}`` or stored in the pane registry.
+# They are handed to the launched shell in a private file instead.
+_ENV_FILE_TTL = 24 * 60 * 60  # remove files from launches whose pane never ran
+
+
+def write_env_file(env: dict[str, str]) -> tuple[str, str]:
+    """Write *env* to a private shell file; return ``(source_prefix, path)``.
+
+    The prefix sources the file (``set -a`` exports each assignment), removes
+    it, and leaves the values in the shell's environment.  Only the file
+    *path* ever reaches a command string — never a value — so secrets stay out
+    of the command log, tmux's ``#{pane_start_command}`` and the pane registry.
+
+    Callers that fail before the command runs must unlink *path*.
+    """
+    d = pm_home() / "run"
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except OSError:
+        pass  # not ours to tighten; the file itself is still 0600
+
+    # Best effort: a pane that is killed before running its command never
+    # removes its file, so sweep old leftovers on every write.
+    cutoff = time.time() - _ENV_FILE_TTL
+    for old in d.glob("env-*.sh"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+
+    fd, path = tempfile.mkstemp(prefix="env-", suffix=".sh", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            for k, v in env.items():
+                fh.write(f"{k}={shlex.quote(v)}\n")
+        os.chmod(path, 0o600)
+    except OSError:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    quoted = shlex.quote(path)
+    return f"set -a; . {quoted}; set +a; rm -f {quoted}; ", path
 
 
 def bench_cache_dir() -> Path:

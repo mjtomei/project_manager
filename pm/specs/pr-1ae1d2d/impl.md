@@ -56,11 +56,32 @@ additive `create=False` reader mode); it defends on the evidence side (the
 stops the write; provenance makes any write that still happens detectable and
 non-authoritative.
 
-Merge note: this branch is based on a pre-#264 `master`, so
-`paths.captures_dir`'s **docstring** conflicts at merge time. A trial merge
-into current `master` auto-resolves the routing code to master's fail-closed
-form (the branch did not touch those lines) and leaves only the docstring
-hunk to reconcile — no behavioural loss either way.
+Merge note (updated 2026-10-29): this branch was cut from a pre-#264
+`master`. It has now been merged with `origin/master@4a74d880` (the 2026-10-29
+restart). Two files conflicted:
+
+- `paths.captures_dir`'s **docstring** — reconciled by keeping the branch's
+  `create=False` reader paragraph *and* master's fail-closed "Returns None …
+  not owned by *pr_id*" wording. The routing code auto-resolved to master's
+  fail-closed form (the branch never touched those lines); the branch keeps
+  only its additive `create` parameter.
+- `pm_core/qa_loop.py` — master had rewritten the same regions this PR
+  touches. Resolution:
+  - `_write_status_file` now carries **both** master's `waiting_for_input`
+    parameter and this PR's `run_id`; every call site (including master's new
+    `_write_status()` closure and the hold/reopen writes) passes
+    `run_id=state.loop_id`.
+  - `_execute_and_finalize` keeps master's hold/follow-up loop verbatim; this
+    PR's `_persist_scenario_verdicts(..., overall=…)` and the post-persist
+    `_sync_captures_evidence` were re-inserted after the loop's final-status
+    write, so the completion re-sync runs on every iteration (including a
+    reopened held run).
+  - All four early-exit `_sync_captures_evidence(..., scenarios=[])` calls and
+    the two start-of-run syncs (`run_qa_sync`, `resume_qa_sync`) survived
+    unchanged.
+
+No behavioural loss on either side: master's hold logic and this PR's evidence
+provenance are orthogonal and compose.
 
 ## 1. Requirements
 

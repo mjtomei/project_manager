@@ -21,6 +21,7 @@ from pm_core.qa_loop import (
     start_qa_background,
     _compute_qa_window_name,
     planner_code_changes_suffix,
+    input_wait_changes_suffix,
     qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
@@ -132,25 +133,38 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     # Check if QA is already running for this PR
     if pr_id in app._qa_loops:
         existing = app._qa_loops[pr_id]
-        if existing.running:
+        if existing.running or existing.held:
             # A user can ask to view a background run before its first window
             # exists. Reuse that worker, but retain the explicit focus request;
             # popup suppression is still consumed at window creation.
-            if focus:
+            if focus and existing.running:
                 existing.focus_on_create = True
             # A direct answer to the user's start must be visible even when
             # an auto-start/setup confirmation is holding the log line —
             # this lands in the gap where the scheduler's "targets +="
             # confirmation is still sticky (QA s22).
-            app.log_message(f"QA already running for {pr_id}", force=True)
+            # ``running`` wins over ``held``: the hold's reopen publishes
+            # running=True before clearing held, so a run that is actively
+            # collecting must not be described as waiting for input.
+            if existing.running:
+                app.log_message(f"QA already running for {pr_id}", force=True)
+            else:
+                app.log_message(
+                    f"QA for {pr_id} is waiting for input — answer in its "
+                    "scenario worker pane; the loop is still watching",
+                    force=True)
             return
-
-    # A sign-off REQA return is now being re-verified.
-    from pm_core.signoff import clear_return_awaiting
-    clear_return_awaiting(app._root, pr_id, "qa")
 
     if not _enter_qa_status(app, pr, "start_qa"):
         return
+
+    # A sign-off REQA return is now being re-verified.  Consumed only once
+    # the run will actually start (a failed status transition must leave it
+    # on disk for the reconciler) and mirrored in ``app._data``, or the
+    # reconciler re-attempts the claim every 5 s until a reload.
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(app._root, pr_id, "qa")
+    _consume_owed_reqa_in_memory(app, pr_id)
 
     state = QALoopState(pr_id=pr_id, focus_on_create=focus)
 
@@ -163,6 +177,27 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
     app.log_message(f"Starting QA for {pr_id}...")
 
     start_qa_background(state, app._root, pr, on_update)
+
+
+def discard_qa_state(state: QALoopState | None) -> None:
+    """Make a QA run dropped from ``app._qa_loops`` safe to abandon.
+
+    Every path that discards a tracked run must go through this: a
+    still-winding-down thread must not rewrite the resume snapshot (a later
+    restart scan would resurrect the discarded run), and a *held* run
+    (waiting for an INPUT_REQUIRED follow-up) would otherwise keep polling
+    its worker panes forever — the hold has no timeout of its own.
+    ``superseded`` is marked even when the run has no qa workdir yet
+    (superseded during startup, before ``run_qa_sync`` creates one): it
+    creates one later and must not snapshot the discarded run.
+    """
+    if state is None:
+        return
+    from pm_core import qa_loop
+    state.stop_requested = True
+    state.superseded = True
+    if state.qa_workdir:
+        qa_loop.clear_resume_file(state.qa_workdir)
 
 
 def _enter_qa_status(app, pr: dict, caller: str) -> bool:
@@ -204,6 +239,210 @@ def _ensure_poll_timer(app) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Owed sign-off REQA: a durable start, independent of the auto-start switch
+# ---------------------------------------------------------------------------
+# A SIGNOFF_REQA bounce leaves ``signoff_return.awaiting == "qa"`` on a PR
+# that is back at ``qa``: an owed *full* QA run.  The obligation is on disk,
+# so it must not live only in one TUI's memory (a restart with auto-start off
+# lost it and the PR sat at ``qa`` until someone pressed ``t``), and it must
+# not be started over a run another live process drives (S117: the new loop
+# retires that run's windows as stale and runs QA twice).
+
+# How long ``arm_owed_reqa`` waits before reconciling: enough for the first
+# frame to paint (see that function), short enough that the owed run still
+# reads as "at startup".
+_OWED_REQA_ARM_DELAY = 0.1
+
+
+def _is_owed_reqa(pr: dict | None) -> bool:
+    """Whether *pr* still owes the full QA run a sign-off REQA asked for.
+
+    Only an **open** return record awaiting ``qa`` on a PR still at ``qa``
+    qualifies — a bare ``qa`` status, a cleared/resolved return or a PR that
+    moved on is not authorization.
+    """
+    from pm_core.signoff import open_return, return_awaiting
+    if not pr or pr.get("status") != "qa":
+        return False
+    if return_awaiting(pr) != "qa":
+        return False
+    return open_return(pr) is not None
+
+
+def owed_reqa_prs(app, prs: list[dict] | None = None) -> list[dict]:
+    """The PRs whose open sign-off return still owes its QA run."""
+    if prs is None:
+        prs = (getattr(app, "_data", None) or {}).get("prs") or []
+    return [pr for pr in prs if _is_owed_reqa(pr)]
+
+
+def _disk_owed_state(app, pr_id: str) -> bool | None:
+    """Whether the PR's *on-disk* return record still owes its QA run.
+
+    ``None`` when the record cannot be read: a caller must not read that as
+    "nothing is owed".
+    """
+    if not getattr(app, "_root", None):
+        return None
+    try:
+        return _is_owed_reqa(store.get_pr(store.load(app._root), pr_id))
+    except (store.ProjectYamlParseError, OSError):
+        return None
+
+
+def _owed_reqa_on_disk(app, pr_id: str) -> bool:
+    """Whether the PR's return record on disk still owes its QA run."""
+    return _disk_owed_state(app, pr_id) is True
+
+
+def _owed_reqa_deferrals(app) -> dict:
+    """``{pr_id: return-record ts}`` of deferrals already reported."""
+    d = getattr(app, "_owed_reqa_deferrals", None)
+    if not isinstance(d, dict):
+        d = {}
+        app._owed_reqa_deferrals = d
+    return d
+
+
+def _consume_owed_reqa_in_memory(app, pr_id: str) -> None:
+    """Mirror the on-disk consumption of the obligation in this process.
+
+    A QA start clears ``awaiting`` and the claim on disk (``start_qa``, the
+    ``zz t`` loop, or another process's start).  The in-memory copy would
+    otherwise keep saying the PR is owed, and the ~5 s reconciler would
+    re-attempt the claim — a full project.yaml read plus a fsynced rewrite —
+    until some other path reloads the state.
+    """
+    for pr in (getattr(app, "_data", None) or {}).get("prs") or []:
+        if pr.get("id") != pr_id:
+            continue
+        rec = pr.get("signoff_return")
+        # Only the hop this start consumed: a return awaiting a different
+        # hop is not ours to clear, and clearing it here would hide it from
+        # the scheduler until the next reload.
+        if isinstance(rec, dict) and rec.get("awaiting") == "qa":
+            rec["awaiting"] = None
+            rec.pop("launch_claim", None)
+        return
+
+
+def start_owed_reqa(app, pr_id: str) -> bool:
+    """Start the full QA a sign-off REQA owes, once across every driver.
+
+    This TUI's poll tick, a restart, another TUI and ``pm pr auto-sequence``
+    can all act on the same obligation; a second loop over the first retires
+    its windows and duplicates verifier/finalizer panes.  The on-disk launch
+    claim picks one winner, and ``start_qa`` clears ``awaiting`` (and the
+    claim) as the run actually starts.  Returns whether this call started a
+    loop (a start that bailed leaves the obligation for a later tick).
+    """
+    from pm_core.qa_loop import run_driven_elsewhere
+    from pm_core.signoff import claim_return_launch
+
+    if not getattr(app, "_root", None):
+        return False
+    # Only a *running* loop owns the PR: a finished one lingers in
+    # ``_qa_loops`` for a poll tick (and a stopped one indefinitely), and
+    # neither should strand the obligation.
+    existing = app._qa_loops.get(pr_id)
+    if existing is not None and existing.running:
+        return False
+    if run_driven_elsewhere(pr_id):
+        return False
+    if not claim_return_launch(app._root, pr_id, "qa", require_status="qa"):
+        # Another driver holds the claim — or one already consumed the
+        # obligation (its start cleared ``awaiting`` on disk).  The second
+        # case must also drop this process's copy: otherwise every ~5 s tick
+        # re-reads project.yaml and re-attempts the claim until some other
+        # path reloads the state.
+        if _disk_owed_state(app, pr_id) is False:
+            _consume_owed_reqa_in_memory(app, pr_id)
+        _log.info("owed REQA: %s launch claimed elsewhere or no longer owed",
+                  pr_id)
+        return False
+    _log.info("owed REQA: starting the QA run for %s", pr_id)
+    start_qa(app, pr_id)
+    loop = app._qa_loops.get(pr_id)
+    # A start that bailed keeps the obligation on disk (and in ``app._data``);
+    # the claim expiry makes the next tick retry it.  A real start consumed
+    # both, in ``start_qa``.
+    return loop is not None and loop is not existing and loop.running
+
+
+def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
+    """Start the QA runs the project still owes a sign-off REQA.
+
+    Runs from the shared poll tick and at mount, and is deliberately *not*
+    gated by ``auto_start.is_enabled``/``in_scope``: a manual sign-off owes
+    its re-run, and the obligation has to survive a restart with auto-start
+    off.  A run another live process drives is waited out — the record keeps
+    the obligation, so the next tick starts it when that run ends.
+    """
+    from pm_core.qa_loop import run_driven_elsewhere
+
+    owed = owed_reqa_prs(app, prs)
+    if not owed:
+        return
+    deferrals = _owed_reqa_deferrals(app)
+    for pr in owed:
+        pr_id = pr["id"]
+        # A running loop of this process owns the PR (the user's ``t`` /
+        # ``zz t``, or a run the resume scan just adopted).  A finished or
+        # stopped entry does not: the obligation is still owed.
+        loop = app._qa_loops.get(pr_id)
+        if loop is not None and loop.running:
+            deferrals.pop(pr_id, None)
+            continue
+        # The return record's ``ts`` names the episode, so the deferral is
+        # reported once per bounce rather than every tick.  ``or ""`` keeps a
+        # hand-edited record with no ``ts`` reportable at all — keying on
+        # None would compare equal to "never reported" and swallow the line.
+        ts = (pr.get("signoff_return") or {}).get("ts") or ""
+        if run_driven_elsewhere(pr_id):
+            if deferrals.get(pr_id) != ts:
+                deferrals[pr_id] = ts
+                reason = "the QA run another process drives"
+                _log.info("owed REQA: %s waits for %s", pr_id, reason)
+                app.log_message(escape(
+                    f"Sign-off REQA for {pr_id} — QA starts once {reason} ends"),
+                    sticky=10)
+            continue
+        deferrals.pop(pr_id, None)
+        start_owed_reqa(app, pr_id)
+
+
+def arm_owed_reqa(app) -> None:
+    """Mount/routing hook: make sure an owed REQA is not left to memory.
+
+    Arms the poll timer so the obligation is retried even when auto-start is
+    off and no loop is running to keep the tick alive, then reconciles once
+    against the in-memory state (both callers — the mount hook and the
+    sign-off hop — reload it immediately before this, so no extra
+    project.yaml read is needed).
+
+    The reconcile itself is deferred by a timer tick: actually starting the
+    run costs two locked project.yaml rewrites (the claim and the
+    ``awaiting`` clear), ~1 s each on a large project, and the mount hook
+    runs before the first frame — a restarted TUI with an owed REQA must not
+    appear hung while it starts.  The obligation is on disk either way.
+    """
+    prs = (getattr(app, "_data", None) or {}).get("prs") or []
+    if not owed_reqa_prs(app, prs):
+        return
+    _ensure_poll_timer(app)
+
+    def _reconcile() -> None:
+        # The caller's own guard cannot cover a deferred call, and a silent
+        # failure here is exactly the bug this hook exists to prevent.
+        try:
+            reconcile_owed_reqa(app)
+        except Exception:
+            _log.warning("owed REQA arm: reconcile failed", exc_info=True)
+
+    app.set_timer(_OWED_REQA_ARM_DELAY, _reconcile)
+
+
+# ---------------------------------------------------------------------------
 # z t — fresh start
 # ---------------------------------------------------------------------------
 
@@ -232,12 +471,13 @@ def fresh_start_qa(app, pr_id: str) -> None:
 
     # Stop any running QA for this PR
     existing = app._qa_loops.get(pr_id)
-    if existing and existing.running:
+    if existing and (existing.running or existing.held):
         existing.stop_requested = True
-        _log.info("fresh_start_qa: stopping running QA for %s", pr_id)
+        _log.info("fresh_start_qa: stopping running/held QA for %s", pr_id)
 
     # Remove from loops dict so start_qa doesn't see it as running
     app._qa_loops.pop(pr_id, None)
+    discard_qa_state(existing)
     # Clear self-driving state so the fresh start is a one-shot QA
     app._self_driving_qa.pop(pr_id, None)
 
@@ -270,9 +510,9 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
         app.log_message(f"PR not found: {pr_id}")
         return
 
-    # If a QA loop is running, stop it
+    # If a QA loop is running (or holding for input), stop it
     existing = app._qa_loops.get(pr_id)
-    if existing and existing.running:
+    if existing and (existing.running or existing.held):
         existing.stop_requested = True
         # Also remove self-driving registration
         app._self_driving_qa.pop(pr_id, None)
@@ -282,12 +522,21 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
 
     # Remove stale loop state — run_qa_sync will clean up old windows
     # after capturing which sessions were watching them.
+    discard_qa_state(existing)
     app._qa_loops.pop(pr_id, None)
 
     # Like start_qa: the first run of a loop on an in_review PR moves it
     # to qa (restarts go through start_qa, which already does this).
     if not _enter_qa_status(app, pr, "qa_loop_ui"):
         return
+
+    # Like start_qa: this loop *is* the full re-run a sign-off REQA owes, so
+    # consume the obligation as start_qa would.  This path starts the run
+    # without going through start_qa; leaving ``awaiting`` behind would make
+    # the owed-REQA reconciler start a second full run once this loop ends.
+    from pm_core.signoff import clear_return_awaiting
+    clear_return_awaiting(app._root, pr_id, "qa")
+    _consume_owed_reqa_in_memory(app, pr_id)
 
     # Register self-driving QA state
     app._self_driving_qa[pr_id] = {
@@ -322,7 +571,7 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
 def stop_qa(app, pr_id: str) -> None:
     """Request graceful stop of QA for a PR."""
     state = app._qa_loops.get(pr_id)
-    if state and state.running:
+    if state and (state.running or state.held):
         state.stop_requested = True
         app.log_message(f"Stopping QA for {pr_id}...")
     else:
@@ -354,6 +603,37 @@ def poll_qa_state(app) -> None:
         if not state.running and state.latest_verdict:
             first_completion = not state._ui_complete_notified
             _on_qa_complete(app, state)
+            # The held watcher can reopen the run (running=True) between the
+            # check above and here — _on_qa_complete does file I/O for the
+            # note, and a follow-up can arrive at any moment.  A reopened run
+            # must keep its state and resume snapshot: falling through would
+            # clear the snapshot and mark the completion notified, so the
+            # reopened run's eventual verdict would never be processed.
+            if state.running:
+                continue
+            # A held run finalized INPUT_REQUIRED but is still watching its
+            # worker panes for a follow-up.  Keep the state tracked and the
+            # resume snapshot on disk so a restart can re-adopt the wait; the
+            # held watcher resets the completion flags when it reopens.
+            # Only an INPUT_REQUIRED result can be held: a crashed/aborted
+            # run (ERROR) or any other verdict must take the normal path so
+            # the state is not pinned in _qa_loops forever.
+            if state.held and state.latest_verdict == VERDICT_INPUT_REQUIRED:
+                if first_completion:
+                    state._ui_complete_notified = True
+                    from pm_core import qa_loop
+                    qa_loop.mark_completion_processed(state)
+                continue
+            # The hold can also reopen the run *between* the two checks
+            # above: it publishes running=True before clearing held, so the
+            # first check can read the pre-reopen False while the second
+            # reads the already-cleared held.  Falling through then would
+            # clear the reopened run's snapshot (the follow-up it reopened
+            # for is still being collected) and mark its completion
+            # notified.  Re-check running after the held branch so every
+            # reopen ordering keeps the run.
+            if state.running:
+                continue
             # The completion has now been processed (note recorded,
             # lifecycle transition done).  Drop the resume snapshot
             # immediately rather than waiting for the tick-2 cleanup
@@ -401,6 +681,9 @@ def poll_qa_state(app) -> None:
     app._qa_resume_poll_counter = getattr(app, "_qa_resume_poll_counter", 0)
     if app._qa_resume_poll_counter % 5 == 0:
         _resume_incomplete_qa(app)
+        # After the resume scan, so a run it just adopted is visible in
+        # _qa_loops and the owed start waits for it instead of racing it.
+        reconcile_owed_reqa(app)
     app._qa_resume_poll_counter += 1
 
 
@@ -494,12 +777,53 @@ def _resume_incomplete_qa(app) -> None:
         state = qa_loop.build_resume_state(rdata)
         app._resumed_qa_pr_ids.add(pr_id)
 
+        # A held run finalized INPUT_REQUIRED but was still watching its
+        # worker panes.  Keep it tracked and re-spawn the watcher rather
+        # than processing it as a finished run: a follow-up that landed
+        # during downtime must be collected, and an already-processed
+        # result must not be noted/transitioned twice.
+        if state.held and state.waiting_for_input:
+            state.running = True
+            if not state.completion_processed:
+                # The held result finalized while the TUI was down and was
+                # never recorded.  Note it here, exactly as the live path
+                # does when it publishes the held result: the re-spawned
+                # watcher sets ``running`` immediately, so the normal
+                # completion poll never observes (not running,
+                # INPUT_REQUIRED) and the note would otherwise be lost
+                # whenever no follow-up ever arrives (stop, PR leaves qa,
+                # the user abandons the wait).  Persist the flag so a second
+                # restart does not note it again.
+                _on_qa_complete(app, state)
+                qa_loop.mark_completion_processed(state)
+            else:
+                app.log_message(
+                    f"QA for {pr_id} is waiting for input — still watching "
+                    "for a follow-up verdict...")
+            state._ui_complete_notified = True
+
+            def _on_update(s, _app=app):
+                _app.call_from_thread(_on_qa_update, _app, s)
+
+            app._qa_loops[pr_id] = state
+            _log.info("Re-adopting held QA run for %s (waiting=%s, "
+                      "processed=%s)", pr_id,
+                      sorted(state.waiting_for_input),
+                      state.completion_processed)
+            qa_loop.resume_qa_background(state, app._root, pr, _on_update)
+            continue
+
         if overall:
             # Completed during downtime — process and clear the snapshot.
+            # A snapshot whose result the TUI already noted (a held run that
+            # ended its hold without a follow-up: stop, PR left qa, last
+            # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
             state.latest_verdict = overall
-            _log.info("Recovered completed QA from disk: %s → %s", pr_id, overall)
-            _on_qa_complete(app, state)
+            _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
+                      pr_id, overall, state.completion_processed)
+            if not state.completion_processed:
+                _on_qa_complete(app, state)
             state._ui_complete_notified = True
             if state.qa_workdir:
                 qa_loop.clear_resume_file(state.qa_workdir)
@@ -537,14 +861,24 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         sign-off or a merge itself.  Otherwise restart QA.
       - NEEDS_WORK / changes: reset pass_count, transition to in_review,
         and directly start a review loop (independent of auto-start).
-      - INPUT_REQUIRED: pause self-driving loop for human input.
+      - INPUT_REQUIRED: the run is held — the loop keeps watching the
+        scenario worker panes for a follow-up verdict (pr-2c67d50) and
+        resumes this self-driving loop when one lands, so it is not
+        "paused" unless the hold ends without a follow-up (stop, or the
+        PR leaving qa).
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled
-        (only a fresh SIGNOFF_MERGE then reaches the merge / O stop).
+        (only a fresh SIGNOFF_MERGE then reaches the merge / manual-merge
+        wait).
       - NEEDS_WORK: transition to in_review, rely on auto-start.
     """
     if state._ui_complete_notified:
+        return
+    # The held watcher can clear ``latest_verdict`` (reopening the run) while
+    # this call is being set up; a completion with no verdict has nothing to
+    # record, and noting it would write a bogus "QA : ..." note.
+    if not state.latest_verdict:
         return
 
     pr_id = state.pr_id
@@ -564,7 +898,17 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 # state and defer to auto-start (if active) or the user.
                 app._self_driving_qa.pop(pr_id, None)
                 from pm_core.tui import auto_start as _auto_start
-                if _auto_start.in_scope(app, pr_id):
+                if _owed_reqa_on_disk(app, pr_id):
+                    # This loop's run began before sign-off bounced the PR
+                    # (a later ``start_qa`` restart would have consumed the
+                    # obligation), so its PASS verified the code sign-off
+                    # judged.  Handing off would drop the owed full re-run;
+                    # ending the loop leaves it to the owed-REQA reconciler.
+                    app.log_message(
+                        f"[green]QA PASS[/] for {pr_id} "
+                        f"({sd['pass_count']}/{required} consecutive) — the "
+                        "owed sign-off re-run has not run yet")
+                elif _auto_start.in_scope(app, pr_id):
                     app.log_message(
                         f"[green bold]QA PASS[/] for {pr_id} "
                         f"({sd['pass_count']}/{required} consecutive) — "
@@ -592,7 +936,17 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         else:
             # Legacy path — sign-off hand-off only when auto-start is active
             from pm_core.tui import auto_start as _auto_start
-            if _auto_start.in_scope(app, pr_id):
+            if _owed_reqa_on_disk(app, pr_id):
+                # A run that was already in flight when sign-off sent the PR
+                # back verified the code the router judged, not the rework.
+                # Handing the PR to sign-off on its PASS would supersede the
+                # full re-run the bounce owes (the owed run clears
+                # ``awaiting`` as it starts, so this only ever catches a
+                # pre-return run).
+                app.log_message(
+                    f"[green]QA PASS[/] for {pr_id} — the owed sign-off "
+                    "re-run has not run yet")
+            elif _auto_start.in_scope(app, pr_id):
                 app.log_message(
                     f"[green bold]QA PASS[/] for {pr_id} — handing off to sign-off")
                 _trigger_signoff(app, pr_id)
@@ -637,11 +991,23 @@ def _on_qa_complete(app, state: QALoopState) -> None:
             if _auto_start.is_enabled(app):
                 app.run_worker(_auto_start.check_and_start(app))
     elif verdict == VERDICT_INPUT_REQUIRED:
-        app.log_message(
-            f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
-        )
+        if state.held:
+            app.log_message(
+                f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — waiting for "
+                "input in the scenario worker pane (still watching for a "
+                "follow-up verdict)"
+            )
+        else:
+            app.log_message(
+                f"[red bold]QA INPUT_REQUIRED[/] for {pr_id} — paused for human input"
+            )
         if sd:
-            _log.info("QA self-driving: INPUT_REQUIRED — loop paused")
+            # A held run is not paused: it keeps watching the worker pane and
+            # resumes the self-driving loop when the follow-up lands.
+            _log.info(
+                "QA self-driving: INPUT_REQUIRED — %s",
+                "holding the run for a follow-up verdict" if state.held
+                else "loop paused")
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 
@@ -718,6 +1084,9 @@ def _record_qa_note(app, state: QALoopState) -> None:
         note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
         # Tell the next review session why QA bounced an all-PASS run.
         note_text += planner_code_changes_suffix(state)
+        # ... or why a follow-up PASS after an INPUT_REQUIRED wait still
+        # needs review (the PR head moved while the scenario waited).
+        note_text += input_wait_changes_suffix(state)
         if state.qa_workdir:
             note_text += f" (workdir: {state.qa_workdir})"
 
