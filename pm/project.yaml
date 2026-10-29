@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T09:40:00.382962+00:00'
+  updated_at: '2026-10-29T10:33:38.392907+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14791,6 +14791,28 @@ prs:
       No other changes; the close contract itself is untouched.'
     created_at: '2026-10-29T09:40:00Z'
     last_edited: '2026-10-29T09:40:00Z'
+  - id: note-dab9ea8
+    text: 'QA S10 (superseded PR survives close, end to end): PASS. Sandboxed project
+      against the fake-github stand-in (no real gh/claude). `pm pr close` with no
+      id on the active in_progress PR A (pr-bb669c4) printed `Using active PR: pr-bb669c4`,
+      closed fake PR #1, recorded status: closed, and printed `Kept: registry entry,
+      branch ..., workdir ...` + Reopen/Cleanup lines; stderr carried the dependent
+      warning + hint for B (verified separately that warning/hint go to stderr, summary
+      to stdout). After close: entry/notes/plan/branch/workdir/GitHub ref unchanged,
+      workdir sha256 listing byte-identical (modified README, untracked local-notes.txt,
+      ignored .cache/, captures/ all intact), `pm pr list` shows [closed], `pm pr
+      list --open` drops A and keeps B pending with `<- [pr-bb669c4]`, stand-in remote
+      branch still resolves, fake PR #1 state CLOSED, active_pr reassigned off the
+      closed entry. Second story: `pm pr close <C> --keep-branch` on a second started
+      PR (pr-9713a73) is silent about the deprecated flag and leaves branch+workdir
+      intact — same SHA 26e6d49e in workdir, target repo and stand-in. Third: `pm
+      pr close --help` / `pm pr cleanup --help` document the retention contract, `--keep-branch`
+      deprecated no-op, `--remove` registry-only, and cleanup auto-selecting the sole
+      terminal (merged or closed) PR. Regression tests: tests/test_pr_close.py 62
+      passed. No bug found; no code change. Evidence: /pm-captures/scenarios/10/{close-default,close-keep-branch,help-contract}/
+      (cast + mp4 + manifests).'
+    created_at: '2026-10-29T10:33:38Z'
+    last_edited: '2026-10-29T10:33:38Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
