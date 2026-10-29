@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T02:20:52.019727+00:00'
+  updated_at: '2026-10-29T03:18:59.036009+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29690,6 +29690,24 @@ prs:
       Prior QA evidence is NOT a pass for this head: native review and QA must follow.'
     created_at: '2026-10-29T02:20:51Z'
     last_edited: '2026-10-29T02:20:51Z'
+  - id: note-5a3d1b3
+    text: 'Review-loop 345f i1 (94cc53b0): found and fixed the last poller that could
+      turn a user stop into a missing-outcome failure — the QA concretizer. `_concretize_scenario`
+      now takes `stop_check`, passes it to `poll_for_verdict` (no nudging during teardown)
+      and returns `(None, None)` instead of a `no refiner outcome` reason when an
+      exhaustion lands while stopping; `_concretize_and_launch` (tmux + container)
+      returns before the concretizer runs and again before the worker is split on
+      `state.stop_requested`, so a stop during concretization leaves the scenario
+      unverdicted and the run ends STOPPED rather than INPUT_REQUIRED + a QA note.
+      Also fixed `_retire_if_exhausted`s return annotation (VerdictHit, not str).
+      New test: test_concretize_stop_during_recovery_is_not_a_refiner_failure. Full
+      suite: 4506 passed, 43 failed, 36 errors — all 43F/36E reproduce identically
+      on the pre-change tree in this container (git push proxy rejects every non-PR-branch
+      push; test_signoff_integration + test_hook_events::test_installer_writes_standalone_receiver
+      + test_git_ops::TestPullRebase are environment failures), so no regressions;
+      focused recovery/QA/review/watcher/autostart suites 494 passed.'
+    created_at: '2026-10-29T03:18:58Z'
+    last_edited: '2026-10-29T03:18:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
