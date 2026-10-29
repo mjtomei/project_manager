@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T01:54:09.465852+00:00'
+  updated_at: '2026-10-29T03:00:16.824668+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39530,6 +39530,31 @@ prs:
       in the breadcrumb.'
     created_at: '2026-10-29T01:54:09Z'
     last_edited: '2026-10-29T01:54:09Z'
+  - id: note-d92ccc2
+    text: 'review 5228 i1 (fix + handoff, 4dd40f69). Reviewed integrated HEAD bc039d4c
+      (merge-base == origin/master@4a74d880; registry diff vs master: 0 PRs/notes
+      lost). No defects in the wait state itself. Two false-wait residuals fixed,
+      both with regressions that fail pre-fix: (1) _adoptable_wait_transcript looked
+      only at the loop own review-<pr>-i<N>.jsonl. Discovery can adopt another driver
+      session for an iteration this loop did not launch, so after a restart during
+      that wait the own symlink is missing (-> "no live pane", relaunch over the live
+      question pane) or names a dead failed attempt (-> wait never sees the answer).
+      It now recovers the live pane own session via pane_transcript_path and uses
+      it whenever it names a different session (the human answers in the pane); regressions
+      test_restart_during_wait_on_another_drivers_transcript[missing|dead]. (2) _start_loop
+      marks a resumed loop running synchronously before the thread exists, so a restored
+      INPUT_REQUIRED history with input_required=False read as "INPUT_REQUIRED answered;
+      follow-up running" for that window; _adopting_wait is now raised before running
+      goes up (regression test_resume_of_a_restored_wait_publishes_resuming_before_running).
+      impl.md R2 + adopt-gate edge case and qa.md E3 updated. Validation: targeted
+      wait-state suites 672 passed; FULL SUITE 4535 passed, 1 skipped, 12 failed —
+      all 12 are tests/test_markdown_render.py (markdown not installed; 13/13 pass
+      after pip install markdown, so environment-only). Not run here: live TUI/stand-in
+      QA. For QA: re-run S24 lifecycle + S22 restart/adopt, add the new restart-during-a-wait-on-another-drivers-transcript
+      shape (qa.md E3), and the wait->answer->restart window. Also noted on pr-4caa36a
+      that its slash-command-echo bug is fixed here (baa8 i3).'
+    created_at: '2026-10-29T03:00:16Z'
+    last_edited: '2026-10-29T03:00:16Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
