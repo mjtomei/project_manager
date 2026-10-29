@@ -377,8 +377,11 @@ No **[UNRESOLVED]** ambiguities.
   `tests/test_breadcrumb_review_loop.py` gains an
   `iteration_sessions` round-trip test, asserts int-keyed restoration in
   the existing consume test (an unparsable key and a non-string value are
-  dropped), and pins that a malformed (non-object) `iteration_sessions`
-  value does not abort the restore.
+  dropped), pins that a malformed (non-object) `iteration_sessions`
+  value does not abort the restore, and (review d468 i5) that a missing,
+  blank or wrong-typed `loop_id` is regenerated at the widened width
+  while a valid one is preserved (the regeneration tests fail on the
+  pre-fix restore path).
   `tests/test_review_launch_retry.py`: the fake that writes a transcript
   now links the path the launcher was given (not a hardcoded legacy
   name), and `test_retry_never_adopts_a_previous_runs_transcript` is
@@ -535,6 +538,15 @@ Applied on top of the design above; keep them when editing the code.
   own.  `consume_breadcrumb` also drops a non-string/empty
   `iteration_sessions` value (a hand-edited breadcrumb must not silently
   disable the check).
+- `consume_breadcrumb` regenerates a restored loop's `loop_id` when the
+  breadcrumb's value is missing, blank or not a string (review d468 i5).
+  The id is the ownership identity in every loop-scoped iteration
+  filename, so the restore path must not keep the old 4-hex default
+  (`secrets.token_hex(2)`) that the i4 widening retired, and a
+  wrong-typed value must never reach a filename.  A *valid* id is
+  preserved verbatim (a resumed loop must reproduce its loop-scoped
+  path); a regenerated one still adopts a legacy in-flight iteration
+  through `resolve_iteration_transcript`'s legacy fallback.
 
 ## Known limitations (accepted)
 

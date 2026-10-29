@@ -411,7 +411,9 @@ async def consume_breadcrumb(app) -> None:
                      "(%s)", type(review_loops_data).__name__)
         review_loops_data = {}
     if review_loops_data:
-        from pm_core.review_loop import ReviewLoopState, ReviewIteration
+        from pm_core.review_loop import (
+            ReviewLoopState, ReviewIteration, _generate_loop_id,
+        )
         for pr_id, loop_data in review_loops_data.items():
             if not isinstance(loop_data, dict):
                 _log.warning("consume_breadcrumb: ignoring corrupt review "
@@ -421,11 +423,20 @@ async def consume_breadcrumb(app) -> None:
             history = loop_data.get("history")
             if not isinstance(history, list):
                 history = []
+            # The loop id is the ownership identity in every loop-scoped
+            # iteration transcript name, so a missing or blank one must be
+            # replaced with a freshly generated id at the same width as
+            # ``ReviewLoopState``'s own factory (pr-9ee4d64).  A legacy
+            # in-flight iteration is still adoptable through
+            # ``resolve_iteration_transcript``'s legacy-name fallback.
+            loop_id = loop_data.get("loop_id")
+            if not isinstance(loop_id, str) or not loop_id:
+                loop_id = _generate_loop_id()
             rstate = ReviewLoopState(
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
-                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
+                loop_id=loop_id,
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
                 retry_iteration=loop_data.get("retry_iteration", 0) or 0,

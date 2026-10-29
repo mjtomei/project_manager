@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T04:14:09.580782+00:00'
+  updated_at: '2026-10-29T04:39:59.484026+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38030,6 +38030,24 @@ prs:
       three symptoms fixed; the pre-fix capture still shows all three.'
     created_at: '2026-10-29T04:14:09Z'
     last_edited: '2026-10-29T04:14:09Z'
+  - id: note-7d63b3b
+    text: 'Review-loop d468 i5 (2026-10-29): one hardening; the archive/finalize behaviour
+      is unchanged. `consume_breadcrumb` now regenerates a restored loop loop_id when
+      the breadcrumb value is missing, blank or not a string, instead of falling back
+      to `secrets.token_hex(2)` (the 4-hex width the i4 entropy widening retired)
+      or keeping a wrong-typed value that would flow into every loop-scoped iteration
+      filename. A valid id is preserved verbatim (a resumed loop must reproduce its
+      loop-scoped path); a regenerated one still adopts a legacy in-flight iteration
+      through `resolve_iteration_transcript` legacy fallback. Tests: `tests/test_breadcrumb_review_loop.py`
+      +5 (parametrized regeneration over missing/blank/None/int, plus valid-id-preserved);
+      the four regeneration cases fail on the pre-fix restore path (verified in a
+      HEAD worktree). Spec `pm/specs/pr-9ee4d64/impl.md` updated (i5 bullet, verification
+      note). Verified: 593 passed across the affected suites; full suite 4528 passed
+      / 1 skipped with a single failure (`test_hook_events.py::test_installer_writes_standalone_receiver`)
+      that fails identically on master 4a74d880 — env-only, unrelated. Pre/post-fix
+      captures unchanged and re-run (post-fix repro reports all three symptoms fixed).'
+    created_at: '2026-10-29T04:39:59Z'
+    last_edited: '2026-10-29T04:39:59Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
