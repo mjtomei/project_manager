@@ -850,15 +850,19 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
                     after = store.get_pr(store.load(app._root), pr_id) or pr
                 except Exception:
                     after = pr
+                # The turn *is* over here, so a launch that did not move the
+                # status must not be reported as "waiting for the current
+                # implementation turn" (the user would wait for a turn that
+                # already finished); the poll timer retries it.
                 handoffs[pr_id] = ("review_started"
                                    if after.get("status") == "in_review"
-                                   else "waiting")
+                                   else "launch_pending")
             except Exception:
                 # The poll timer retries the same handoff; a failed launch
                 # must not lose the attempt.
                 _log.warning("autostart_fresh: immediate review launch "
                              "failed for %s", pr_id, exc_info=True)
-                handoffs[pr_id] = "waiting"
+                handoffs[pr_id] = "launch_pending"
         else:
             handoffs[pr_id] = "waiting"
 
@@ -875,6 +879,9 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
         if state == "review_started":
             parts.append(f"{pr_id}: implementation turn complete, "
                          f"fresh review started")
+        elif state == "launch_pending":
+            parts.append(f"{pr_id}: implementation turn complete, fresh "
+                         f"review launch pending (retrying)")
         elif state == "waiting":
             parts.append(f"{pr_id}: waiting for the current implementation "
                          f"turn")

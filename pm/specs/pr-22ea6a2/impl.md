@@ -1085,3 +1085,20 @@ behavioural adaptation are below.
   ``TestHandoff::test_an_armed_marker_outside_implementation_does_not_hand_off``
   (verified to fail without the guard); ``_marker_pr`` in the test module
   gained the status a real fresh-waiting PR always has.
+
+## Review-iteration notes (d9f2 i5)
+
+* **A handoff whose launch bailed is not reported as "waiting for the
+  turn"** — ``fresh_start``'s immediate handoff only said
+  "waiting for the current implementation turn" when the review did not
+  start, but at that point the turn *is* complete (``handoff_ready`` was
+  true): the launch itself failed (store lock timeout, a bailing helper, an
+  exception).  The user would be told to wait for a turn that already
+  finished, contradicting the status row ("implementation turn complete;
+  starting fresh review") for as long as the poll's retry takes.  The reply
+  now carries a distinct ``launch_pending`` handoff state and the message
+  says "implementation turn complete, fresh review launch pending
+  (retrying)"; the attempt stays armed for the poll's retry.  Pinned by
+  ``TestFreshStart::test_a_failed_launch_is_not_reported_as_waiting_for_the_turn``
+  and ``test_a_raising_launch_is_not_reported_as_waiting_for_the_turn``
+  (both fail with the old wording).

@@ -787,6 +787,37 @@ class TestFreshStart:
         assert len(calls) == 1
         assert calls[0][0][0] == "pr-a"
 
+    def test_a_failed_launch_is_not_reported_as_waiting_for_the_turn(
+            self, project):
+        # The turn is *complete* at the immediate handoff, so a launch that
+        # does not move the PR out of implementation (store lock timeout, a
+        # bailing helper, an exception) must not tell the user to wait for a
+        # turn that already finished.  The poll timer retries the launch.
+        app = self._app(project)
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=True), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs") as rev:
+            out = autostart_fresh.fresh_start(app, ["pr-a"])
+        rev.assert_called_once()
+        assert out["ok"] and out["handoff"]["pr-a"] == "launch_pending"
+        assert "fresh review launch pending" in out["message"]
+        assert not any("waiting for the current implementation turn" in line
+                       for line in app.logs)
+        # The attempt is still armed for the retry.
+        assert st.fresh_awaiting(store.get_pr(store.load(project), "pr-a"))
+
+    def test_a_raising_launch_is_not_reported_as_waiting_for_the_turn(
+            self, project):
+        app = self._app(project)
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=True), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs",
+                   side_effect=RuntimeError("boom")):
+            out = autostart_fresh.fresh_start(app, ["pr-a"])
+        assert out["ok"] and out["handoff"]["pr-a"] == "launch_pending"
+        assert not any("waiting for the current implementation turn" in line
+                       for line in app.logs)
+
     def test_dead_pane_does_not_hand_off_immediately(self, project, tmp_path):
         # A pane that died since the last poll leaves a stale "live" tracker
         # entry whose transcript still ends in a completed turn.  The
