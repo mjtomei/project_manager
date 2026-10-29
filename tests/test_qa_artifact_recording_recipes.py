@@ -101,8 +101,11 @@ hits, regardless of how it waits for a background job:
   claim is canonicalized while the pipe's command runs in the pm session's
   directory (the transcript lands nowhere the end-of-run check looks), the
   web-UI driver block refuses
-  a capture directory it cannot enter (``cd`` fails and the link lands in the
-  worker's cwd), a web-UI start that never answers removes the pid it
+  a capture directory that is missing or cannot be written or entered — its
+  existence and permission checks run before its ``cd``, because a directory
+  that exists and cannot be searched failed that ``cd`` and was reported as
+  missing — so the link cannot land in the worker's cwd, a web-UI start that
+  never answers removes the pid it
   recorded so the teardown cannot signal a recycled one, and the web-UI
   finalize step names a missing ``ffmpeg`` instead of reporting it as a
   failed transcode of the driver's webm; both recording recipes' render blocks
@@ -2473,6 +2476,47 @@ def test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_enter(tmp_path):
+    """A directory that cannot be entered is not a directory that is missing.
+
+    The block's existence and permission checks used to sit *after* its
+    ``cd``, so a capture directory that exists and cannot be searched (mode
+    400, say) failed the ``cd`` and was reported as "does not exist — create
+    it and run step 1": the worker is sent to create a directory that is
+    already there and to re-run the step that created it, with bash's own
+    "Permission denied" as the only clue. Verified live: pre-fix the block
+    exits 1 with that message for a mode-400 directory, while the finalize
+    and Layer 2 blocks — which never ``cd`` — name the same directory
+    "cannot be written". Both checks now run before the ``cd``, so an
+    existing directory is always named as the directory it is.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("root can enter a mode-400 directory")
+    global_dir = _fake_playwright(tmp_path / "global")
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    capdir.chmod(0o400)
+    try:
+        r = _run_driver_block(capdir, global_dir)
+    finally:
+        capdir.chmod(0o700)
+
+    assert r.returncode != 0, (
+        "the driver block ran into a capture directory it cannot enter")
+    assert "cannot be written" in r.stderr, (
+        "a capture directory that exists but cannot be entered is not named "
+        "as the directory it is: " + r.stderr)
+    assert "does not exist" not in r.stderr, (
+        "an existing capture directory is reported as missing, so the worker "
+        "is sent to create a directory that is there and re-run the step "
+        "that created it: " + r.stderr)
+    assert "playwright ok" not in r.stdout, (
+        "the block passed its resolution check in a directory it cannot "
+        "enter: " + r.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_block_refuses_an_unset_app_url(tmp_path):
     """An unset APP_URL is not "the default app" — the driver has a fallback.
 
@@ -4282,9 +4326,10 @@ class TestCaptureFlowExecution:
 
         It clears the previous run's files before any recording form, and a
         clear that cannot write leaves the earlier cast in place — which the
-        simple `asciinema rec` form (no ``--overwrite``) then reports as
-        "recording already exists", a cause the worker cannot connect to the
-        path. The preamble refuses the directory instead.
+        simple `asciinema rec` form (no ``--overwrite``) then aborts on it
+        ("asciinema: <path> already exists, aborting" on 2.1.0), a cause the
+        worker cannot connect to the path. The preamble refuses the directory
+        instead.
         """
         if not hasattr(os, "geteuid") or os.geteuid() == 0:
             pytest.skip("root can write a mode-500 directory")

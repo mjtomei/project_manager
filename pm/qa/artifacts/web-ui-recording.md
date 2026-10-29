@@ -267,21 +267,39 @@ fi
 # A set-but-missing CAPDIR is the same hole: `cd` fails, the shell stays in
 # the worker's cwd, and the link and the driver run there (verified: the
 # link landed in the cwd and the resolution check passed on it).
-cd "$CAPDIR" || {                            # where driver.mjs lives
+# The existence and permission checks run *before* the `cd`, not after it.
+# A directory that exists and cannot be *entered* fails the `cd` with
+# "Permission denied", and the message below then says it does not exist: a
+# mode-400 capture directory (r--------) is there, `-d` answers 0, and the
+# worker is told to create it and re-run the step that created it (verified
+# live: pre-fix the block exits 1 with "does not exist" after bash's own
+# "Permission denied", while the finalize and Layer 2 blocks — which never
+# `cd` — name the same directory "cannot be written"). A missing directory is
+# named by the first check, an existing one that cannot be searched or
+# written by the second, and the `cd` only runs for a directory that passed
+# both.
+[ -d "$CAPDIR" ] || {
     echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
     exit 1
 }
-# A directory that exists and cannot be written is the same hole one shape
-# over, and it is misdiagnosed: `ln` fails with "Permission denied", the
-# resolution check then reports "playwright does not resolve beside
+# A directory that exists and cannot be written (or entered) is the same hole
+# one shape over, and it is misdiagnosed: `ln` fails with "Permission denied",
+# the resolution check then reports "playwright does not resolve beside
 # driver.mjs" and tells the worker to run that same link again — a remedy that
 # cannot work — while the driver's own outputs have nowhere to go (verified
 # live with a mode-500 capture directory: the block exits 1 with the
-# Playwright message and the link's "Permission denied" above it).
+# Playwright message and the link's "Permission denied" above it). `-x` is the
+# half the `cd` below needs, so a directory that cannot be searched is refused
+# here instead of failing that `cd` as "does not exist".
 [ -w "$CAPDIR" ] && [ -x "$CAPDIR" ] || {
     echo "capture directory $CAPDIR cannot be written — the link, the" \
         "driver's video, trace, screenshots and DOM dump all go there; check" \
         "the path and its permissions" >&2
+    exit 1
+}
+cd "$CAPDIR" || {                            # where driver.mjs lives
+    echo "capture directory $CAPDIR could not be entered — it may have been" \
+        "removed after the checks above; re-create it and run step 1" >&2
     exit 1
 }
 # Clear this attempt's outputs *before* anything below can fail. This block is

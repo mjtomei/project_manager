@@ -58,8 +58,12 @@ recording-recipe bugs that any worker following the recipe hits:
 - a start step that cannot do its job says so where it fails: an unusable
   capture directory and a `new-session` that never creates the recorder stop
   the run with their own message instead of being misdiagnosed as a dead
-  recorder, the web-UI driver block refuses a capture directory it cannot
-  enter, and a failed web-UI start removes the pid it recorded;
+  recorder, the web-UI driver block names a missing capture directory ("does
+  not exist") separately from one that exists and cannot be written or
+  entered ("cannot be written — … check the path and its permissions") —
+  both checks run before its `cd`, because an unsearchable directory failed
+  that `cd` and used to be reported as missing (R58) — and a failed web-UI
+  start removes the pid it recorded;
 - a failure message names a remedy that still exists: the web-UI busy-port
   refusal says the answering server's pid is no longer in `server.pid` (the
   cleanup just cleared it) and to find it with `ss -ltnp`, and the Playwright
@@ -332,6 +336,25 @@ recording-recipe bugs that any worker following the recipe hits:
   `/*` left the file green and refused a documented-valid path; the tmux
   step-0 block and the CLI preamble now run with `~/cap` and must create it
   under `$HOME`.
+- the web-UI driver block reported a capture directory it could not *enter*
+  as one that is missing (review loop ebd1 i17): its missing-directory and
+  writability checks sat after `cd "$CAPDIR"`, so a directory that exists and
+  cannot be searched (mode 400) failed the `cd` with "Permission denied" and
+  the block said "capture directory … does not exist — create it and run step
+  1" — the worker is sent to create a directory that is already there and to
+  re-run the step that created it, while the finalize and Layer 2 blocks,
+  which never `cd`, name the same directory "cannot be written" (verified
+  live in this container: pre-fix rc 1 with that message after bash's own
+  "Permission denied"). The checks now run before the `cd` — `-d` first
+  ("does not exist"), then `-w`/`-x` ("cannot be written — … check the path
+  and its permissions") — and the `cd` only runs for a directory that passed
+  both, so its failure says the directory "could not be entered — it may have
+  been removed after the checks above". A new case
+  (`test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_enter`, mode
+  400, skips under root) fails against the pre-fix block. The two recipes'
+  prose also quote asciinema's real abort message ("asciinema: <path> already
+  exists, aborting" on 2.1.0) instead of "recording already exists", which the
+  tool does not print.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -373,6 +396,11 @@ cannot be written" before starting the app (pre-fix it exits 0, writes no
 and Layer 2 blocks pasted on their own must stop with the same message rather
 than reporting "playwright does not resolve", a failed transcode of the
 driver's webm, or (the Layer 2 block) exiting 0 with neither log written.
+With the capture directory at mode **400** (exists, cannot be entered), the
+driver block must stop with "capture directory … cannot be written — …
+check the path and its permissions" and *not* "does not exist — create it
+and run step 1" (review loop ebd1 i17, R58); the pre-fix block reports the
+directory as missing after bash's own `cd: … Permission denied`.
 S21/S22 also re-check the CLI scaffold's refusal order: pasted with a
 relative or unsubstituted `<capture-dir>`, it must stop at "must be an
 absolute path" *without* clearing the host-shared `rec` session — a
@@ -550,7 +578,8 @@ and
 **Given** a cast, transcript, recorder status, recorder session, manifest, or
 render output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
-cleared first, so the recorder does not abort with "recording already exists"
+cleared first, so the recorder does not abort on it ("asciinema: <path>
+already exists, aborting" on asciinema 2.1.0, the version in the QA image)
 and a duplicate session does not stop the run at "could not start the recorder
 session" (the start check reports that, so the run never reaches the readiness
 wait with the previous run's recorder in place), the new cast is this run's,
@@ -737,10 +766,10 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   starts — `driver.mjs` is the one file kept, because it is the run's input,
   not its evidence — and the driver step repeats the attempt-scoped
   cleanup (`recording.mp4`, `*.webm`, `trace.zip`, `dom.html`, `*.png`,
-  `manifest.md`) after its `cd`, so a failed run cannot present the earlier
-  run's video, trace, screenshots or protocol logs as this run's evidence, nor
-  leave the earlier attempt's manifest naming the video that cleanup deleted
-  (R48). The driver's own exit status is the
+  `manifest.md`, `http.log`, `sse.log`) after its `cd`, so a failed run
+  cannot present the earlier run's video, trace, screenshots or protocol logs
+  as this run's evidence, nor leave the earlier attempt's manifest naming the
+  video that cleanup deleted (R48). The driver's own exit status is the
   completion handle: the driver block stops with "the driver failed — this
   run's video, trace and screenshots are incomplete" instead of letting the
   finalize step transcode whatever is on disk (which misreports a driver

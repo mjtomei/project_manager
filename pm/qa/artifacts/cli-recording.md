@@ -71,11 +71,11 @@ mkdir -p <capture-dir>/<short-name> || {
 # An *existing* directory that cannot be written is the same state one shape
 # over, and `mkdir -p` answers 0 for it: the clear below cannot remove the
 # previous run's files, and every form then writes into a directory that
-# cannot hold the capture (the simple forms abort with asciinema's "recording
-# already exists" for a cast that could not be cleared, and the no-TTY
-# scaffold's pane redirect fails before asciinema runs — step 4 then reports
-# "asciinema wrote no cast" for a file that cannot exist, verified live with a
-# mode-500 capture directory). Stop here instead.
+# cannot hold the capture (the simple forms abort on the uncleared cast —
+# asciinema 2.1.0 answers "asciinema: <path> already exists, aborting" — and
+# the no-TTY scaffold's pane redirect fails before asciinema runs — step 4
+# then reports "asciinema wrote no cast" for a file that cannot exist,
+# verified live with a mode-500 capture directory). Stop here instead.
 [ -w <capture-dir>/<short-name> ] && [ -x <capture-dir>/<short-name> ] || {
     echo "capture directory <capture-dir>/<short-name> cannot be written —" \
         "check the path and its permissions" >&2

@@ -87,18 +87,18 @@ the recorder's own redirects fail before asciinema runs, which step 3 reports
 as "recorder exited before it drew" for a cast and a stderr log that cannot
 exist. Step 0 refuses that directory where the path is known, and so does
 step 2, which is pasted on its own. A leftover cast is worse in the other
-direction: without `--overwrite`, `asciinema rec` aborts with "recording
-already exists" and the recorder dies before it draws, so the run fails at
-the readiness wait — loudly, but for a reason unrelated to the scenario,
-and with the earlier run's cast still on disk for the render step to pick
-up if the worker overrides that failure. The transcript is appended to, so
-a stale `transcript.log` would silently mix an earlier run into this run's
-evidence. `recorder.status` holds this run's recorder exit status (step 5);
-a leftover one would let a recorder that was torn down before it finished
-pass that check. `recorder-stderr.log` and `recorder-pane.log` are this
-run's failure evidence — asciinema's own diagnostics, and the pane's last
-screen when a wait gives up or the driving step's send fails — so an earlier
-run's copies go too. The previous run's `manifest.md` goes with them, and for
+direction: without `--overwrite`, `asciinema rec` aborts on it ("asciinema:
+<path> already exists, aborting" on 2.1.0) and the recorder dies before it
+draws, so the run fails at the readiness wait — loudly, but for a reason
+unrelated to the scenario, and with the earlier run's cast still on disk for
+the render step to pick up if the worker overrides that failure. The
+transcript is appended to, so a stale `transcript.log` would silently mix an
+earlier run into this run's evidence. `recorder.status` holds this run's
+recorder exit status (step 5); a leftover one would let a recorder that was
+torn down before it finished pass that check. `recorder-stderr.log` and
+`recorder-pane.log` are this run's failure evidence — asciinema's own
+diagnostics, and the pane's last screen when a wait gives up or the driving
+step's send fails — so an earlier run's copies go too. The previous run's `manifest.md` goes with them, and for
 the same reason one level up: it is the document that says what this capture
 is (workdir, commands, `## Files`), so a re-run that fails before the worker
 writes a new one would leave a manifest describing the *previous* run — and
