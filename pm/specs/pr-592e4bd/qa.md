@@ -1301,15 +1301,21 @@ S13, S14, S22, S101.
 
 ### Forty-fifth-pass fixes (2026-10-29; QA46 planner)
 - **RQ57** A QA run that a `pm tui restart` cuts off (S131 245eb22f;
-  review 6e6b 51a709f3, 74cebe25). `pm tui restart` execs the TUI in
-  place, so the pid stays the same. Given a QA run that this TUI started
-  and the restart killed before the run's first resume snapshot
-  (planning or refining, about the first 20 s), When the new TUI mounts,
-  Then:
+  review 6e6b 51a709f3, 74cebe25; S136 44ea3dd7). `pm tui restart` execs
+  the TUI in place, so the pid stays the same. Given a QA run that this
+  TUI started and the restart killed before the run's first resume
+  snapshot (planning or refining, about the first 20 s), When the new TUI
+  mounts, Then:
   - The run's record is ended. No tick or TUI reads the run as "driven
     elsewhere" any more. The dead run's `qa-*` scenario windows are
-    killed. Its main `qa-<pr>` window may survive, and `t` only focuses
-    it.
+    killed: in host mode those working inside its QA workdir, and in
+    container mode also those (opened in the PR workdir) that exec into
+    the run's own scenario containers (`…-qa-<pr>-<loop>-sN`, 44ea3dd7).
+    No other run's window is touched. The dead containers are not
+    removed at mount. The next run of that PR removes them when its
+    planning starts, except while another PR shows a same-numbered
+    `qa-*-sN` window (pr-81a249e). Its main `qa-<pr>` window may
+    survive, and `t` only focuses it.
   - If the run was the re-run a sign-off REQA owed, the obligation is
     reopened (`awaiting: qa`) and started once through the claim
     (RQ56), with auto-start on or off. No line asks the user to act.
@@ -1325,7 +1331,18 @@ S13, S14, S22, S101.
   - Runs with a snapshot are left to the resume scan (held runs
     included). Records owned by another process are never touched: a
     `pm qa run`, a tick's `qa-run-bg`, another clone's TUI, or a TUI
-    with a new pid after a crash.
+    with a new pid after a crash. The crash case strands the PR at `qa`
+    on master too (pr-58aa21a, not this PR).
+  - Ticks around these runs (decided by review d05b i1, note-d4f4170;
+    both come from pr-f1d825b, pre-existing on master: `overall` is
+    written before the finalizer ends):
+    - With no sign-off return, a tick advances a PASS to `sign_off`
+      exactly once and never prints `(launched)`. It may land before the
+      TUI's QA PASS line while the finalizer runs.
+    - During an owed re-run, ticks print `running: qa`, then
+      `running: qa (driven elsewhere)` from the re-run's `overall` write
+      until the run ends. They never print `(launched)` or
+      `sign_off: re-qa`.
 - **RQ58** A held INPUT_REQUIRED run's follow-up (S132 b7321370,
   3de073a6). Given a run held on INPUT_REQUIRED (#271):
   - When the user presses `t` with its window open, Then the TUI says
@@ -2868,6 +2885,79 @@ S13, S14, S22, S101.
       `pm tui restart --breadcrumb` inside the backoff and an auto-start
       re-arm, then recovery onto the route. The same restart cuts off a
       QA run on another PR.
+    Results (run 6ba3e63ef0492096). QA47 planner decisions on spec
+    wording are marked "Decided"; none needed the user.
+    - S134 INPUT_REQUIRED, no code change. Every RQ57 Then held live on
+      HEAD 74cebe25, with controls f9a6343d (no line) and 51a709f3 (lines
+      at mount, before the breadcrumb pass). Two tick Thens failed as
+      worded, both from pr-f1d825b. Decided by review d05b i1
+      (note-d4f4170): the RQ57 "Ticks" bullet now gives the wording. The
+      crash probe (new pid) strands the PR on HEAD and master alike. It
+      is filed as pr-58aa21a. S139 reruns the core with these Thens.
+    - S135 PASS (RQ58 on HEAD with control a0e55418, and RQ57 beside it).
+    - S136 NEEDS_WORK, fixed by 44ea3dd7 (RQ57 in container mode).
+      `kill_windows_of_run` matched only windows working inside the QA
+      workdir. Container scenario windows open in the PR workdir, so the
+      cut-off run's `qa-<pr>-s1/-s2` windows and their held refiners
+      survived the restart until `z t`. They are now also matched by the
+      run's container name in their start command. Post-fix (story 7,
+      same container): s0, s1 and s2 were killed, `z t` removed the two
+      dead containers before its planner, and the routed run passed.
+      Every other story held on HEAD (merge smoke, provider remove,
+      bridge-symlink refusals, RQ60 with control 5f204dc2). Decided: the
+      dead containers are left to the next run's planning cleanup
+      (review d05b i1; removing them at mount would block the TUI on
+      `podman rm`). The pushes from the S134/S136 containers were blocked
+      because those containers mounted the s-135 push proxy. That is
+      filed as pr-bd298f4.
+    - S137 PASS (RQ59 with control 4656d4cc, the true pre-7fb5df75 commit;
+      the spec's 1cf5ae0e already had the fix). Decided: a launcher setup
+      error reads "Error: provider '<name>': launcher … not an executable
+      file". The planner window `qa-<pr>` outlives a cut-off run until
+      the fresh run replaces it. A wait-for-merge target stops at "signed
+      off … waiting for manual merge".
+    - Review d05b i1 PASS on b49a8cac (code 44ea3dd7). The full suite
+      passed: 5197 passed, 1 skipped.
+  - Forty-seventh pass (S138+), delta-only, QA47 planner 2026-10-29, HEAD
+    b49a8cac. Code is 44ea3dd7, pushed. origin/master is still 4a74d880,
+    an ancestor. The only product change since run 6ba3e63ef0492096 is
+    44ea3dd7. It has run live only post-fix, inside S136's own container,
+    and never on a fresh setup or beside other live runs in the same
+    session. Every scenario publishes `recording.mp4`. The control is
+    74cebe25 (pre-44ea3dd7). A PASS needs:
+    - the control's container scenario windows surviving the restart;
+    - HEAD matching the control everywhere else, including every
+      host-mode Then.
+    Test isolation is as in the forty-fifth pass: private HOME/`~/.pm`
+    and tmux socket, scrubbed `TMUX`/routing vars, own sessions only, and
+    `PM_CAPTURES_PR` kept exported. The S125 PID 1 reaping rule applies.
+    Harness: `/pm-captures/scenarios/136/scripts` (container, stubs,
+    restart cut-off), `134` (host restarts, ticks, busy project.yaml),
+    `135` (holding a refiner at the router stub, ask limit) and `126`/`131`
+    (two clones). Copy them, re-point any `/scratch/s1NN` path, and
+    recreate the trees, venv and `agg`. Podman gotcha from S136: killing a
+    setup that owns the podman pause process breaks podman until the stale
+    `pause.pid` is removed. If a scenario container's push proxy is wired
+    to a sibling (pr-bd298f4), push from the host clone. Not to redo as
+    such: S103–S137.
+    - S138: container mode (podman 3, slirp4netns). RQ57 container
+      windows on a fresh setup, beside other live runs:
+      - a resumed run of another PR in the same TUI;
+      - another PR's live container `pm qa run`;
+      - an unrouted tick-driven run;
+      - a second clone, sharing `~/.pm` and podman, restarted at the same
+        moment with a cut-off run of the same PR id.
+      Only the dead run's windows die, and `z t` removes only its
+      containers. Routing is as in RQ52/R9.
+    - S139: host, fake-claude. The S134 core with the decided Thens on the
+      final HEAD:
+      - a user `t` run cut off by a restart;
+      - a breadcrumb restart with a cut-off target and a cut-off
+        non-target;
+      - an owed REQA re-run reopened, and the busy-project.yaml fallback;
+      - other processes' runs left untouched;
+      - ticks as in the RQ57 "Ticks" bullet.
+      The control 74cebe25 matches HEAD.
 
 ## 3. Edge cases
 
