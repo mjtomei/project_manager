@@ -1092,7 +1092,7 @@ class TestKeyBindings:
     def test_z_lower_a_requests_fresh_keeping_the_policy(self, monkeypatch):
         # `z a` is the generic fresh autostart: policy=None preserves an
         # existing target's policy (wait_for_merge included) and defaults a
-        # new target to stop-before-merge.
+        # new target to wait_for_merge.
         from pm_core.tui.app import ProjectManagerApp
         calls = self._fresh_calls(monkeypatch)
         ProjectManagerApp.action_show_auto_runs(_KeyApp(z=1, pr_id="pr-a"))
@@ -1131,7 +1131,7 @@ class TestKeyBindings:
         assert app.workers == [sentinel]
 
     def test_plain_upper_o_still_arms_the_sequence(self, monkeypatch):
-        # Plain ``O`` keeps its continuation semantics (arm a stop-before-merge
+        # Plain ``O`` keeps its continuation semantics (arm a wait-for-merge
         # auto-sequence target); only ``z O`` is the fresh reset.
         from pm_core.tui.app import ProjectManagerApp
         sentinel = object()
@@ -1400,6 +1400,26 @@ class TestRetirement:
         assert written["review-loop"][1]["verdict"] == "SUPERSEDED"
         assert written["review-loop"][1]["previous_verdict"] == "NEEDS_WORK"
         assert written["qa"][1]["verdict"] == "SUPERSEDED"
+
+    def test_a_held_qa_run_is_discarded_not_just_stopped(self):
+        # A run that finalized with INPUT_REQUIRED is *held* with ``running``
+        # False while it keeps polling its worker panes (the hold has no
+        # timeout of its own), so checking ``running`` alone left it alive.
+        # Every discard must go through ``discard_qa_state``: it stops the
+        # run, marks it superseded (a winding-down thread must not rewrite
+        # the resume snapshot) and clears that snapshot.
+        app = FakeApp([_pr()])
+        qa = QALoopState(pr_id="pr-a")
+        qa.held = True
+        qa.waiting_for_input = {1}
+        app._qa_loops["pr-a"] = qa
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert "pr-a" not in app._qa_loops
+        assert qa.stop_requested
+        assert qa.superseded
 
     def test_qa_scenario_tracker_keys_are_dropped(self):
         # ``poll_qa_state`` unregisters a finished run's scenario keys; a

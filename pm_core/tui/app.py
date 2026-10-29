@@ -358,7 +358,7 @@ class ProjectManagerApp(App):
                 hint = ""
                 if self._z_count == 1:
                     hint = (" [dim](d=review t=qa a=fresh "
-                            "O=fresh-stop A=fresh-auto)[/]")
+                            "O=fresh-wait A=fresh-auto)[/]")
                 self._prefix_hint_seq = self.log_message(
                     f"[bold]{'z' * self._z_count} …[/]{hint}")
                 self._stop_z_timer()

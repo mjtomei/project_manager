@@ -204,6 +204,24 @@ def fresh_requested_at(pr: dict | None) -> str | None:
     return fresh_marker(pr).get("requested_at") or None
 
 
+def fresh_requested_epoch(pr: dict | None) -> float | None:
+    """Epoch seconds of the current fresh attempt, or None when unusable.
+
+    One shared conversion for the "did this predate the fresh request?"
+    fences: the QA/sign-off evidence guards compare a record's timestamp
+    against it, and the handoff's interrupt fence passes it to
+    :func:`pm_core.verdict_transcript.latest_turn_state`.
+    """
+    since = fresh_requested_at(pr)
+    if not since:
+        return None
+    from pm_core.signoff import parse_ts
+    try:
+        return parse_ts(since).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Target records + breadcrumb
 # ---------------------------------------------------------------------------

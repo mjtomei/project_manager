@@ -373,13 +373,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                         and p.name.startswith(f"review-{state.pr_id}-")):
                     finalize_transcript(p)
 
-    from pm_core import runtime_state as _rs
     # Release this loop's cross-driver launch lease (only if we still hold
     # it; a superseding loop owns its own).
     _release_lease(state)
+    # Re-checked because the loop can be superseded *during* the finalize
+    # above; the guard at the top of this function covers the common case.
+    # Don't overwrite the successor's 'running' entry with our terminal
+    # (often KILLED) verdict.
     if not _is_active_loop(state):
-        # We were superseded by a fresh loop; don't overwrite its
-        # 'running' entry with our terminal (often KILLED) verdict.
         _log.debug("review_loop_ui: skipping completion mirror for "
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)

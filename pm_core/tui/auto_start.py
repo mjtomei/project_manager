@@ -1244,12 +1244,14 @@ def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
 
 def _predates_fresh_request(at: str | None, pr: dict) -> bool:
     """Whether *at* predates the PR's current fresh-autostart attempt."""
-    since = autostart_state.fresh_requested_at(pr)
-    if not since:
+    since = autostart_state.fresh_requested_epoch(pr)
+    if since is None:
         return False
+    if not at:
+        return True
     from pm_core.signoff import parse_ts
     try:
-        return not at or parse_ts(at) < parse_ts(since)
+        return parse_ts(at).timestamp() < since
     except (TypeError, ValueError):
         return False
 

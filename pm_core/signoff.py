@@ -263,11 +263,11 @@ def fresh_recorded_verdict(pr: dict, current_sha: str | None) -> str | None:
     # still matches HEAD verified the pre-feedback code, not the reworked
     # branch.  The reset also invalidates the record; this guards a
     # racing/legacy write.
-    from pm_core.autostart_state import fresh_requested_at
-    since = fresh_requested_at(pr)
-    if since and record.get("ts"):
+    from pm_core.autostart_state import fresh_requested_epoch
+    since = fresh_requested_epoch(pr)
+    if since is not None and record.get("ts"):
         try:
-            if parse_ts(record["ts"]) < parse_ts(since):
+            if parse_ts(record["ts"]).timestamp() < since:
                 return None
         except (TypeError, ValueError):
             pass

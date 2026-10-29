@@ -3,7 +3,7 @@
 ## Summary
 
 The PR adds an explicit **fresh autostart** action — TUI `z a` (policy-preserving),
-`z O` (stop-before-merge), `z A` (auto-merge), and the CLI `pm autostart fresh
+`z O` (wait-for-merge), `z A` (auto-merge), and the CLI `pm autostart fresh
 PR_ID...` — which returns a reviewed PR (`in_review` / `qa` / `sign_off`) to
 `in_progress`, retires the previous attempt's review-loop / QA / sign-off
 ownership (keeping historical evidence), adopts the **existing** implementation
@@ -11,6 +11,12 @@ session without killing or relaunching it, waits for the current implementation
 turn to complete, and then runs exactly one fresh review followed by the normal
 QA → sign-off → merge-policy flow. Plain `autostart add` / `A` / `O` remain a
 continuation from the current phase and must never rewind a PR.
+
+*(Policy vocabulary after the 2026-10-29 master integration: master removed
+`stop_before_merge`, so the single manual policy is `wait_for_merge` — the
+same manual merge gate, which additionally holds the target's whole unmerged
+dependency closure. `--stop-before-merge` survives only as a deprecated alias
+for it. Scenarios below name `wait-for-merge`.)*
 
 User-facing surfaces to exercise: the `pm autostart fresh` CLI (which reaches the
 running TUI over the existing session command queue), the TUI key chords
@@ -30,7 +36,7 @@ on-disk state in the git-tracked `pm/project.yaml`.
    THEN the command prints a `fresh: <pr> (in_review → in_progress)` line, then
    the wait message ("waiting for the current implementation turn"), then the
    auto-start target line; the PR's status in `pm pr show` / `project.yaml` is
-   `in_progress`; the PR is an auto-start target with the stop-before-merge
+   `in_progress`; the PR is an auto-start target with the wait-for-merge
    policy; **no** review window has opened yet.
 
 2. GIVEN the same reset has just been applied,
@@ -64,7 +70,7 @@ on-disk state in the git-tracked `pm/project.yaml`.
    THEN the log line announces a fresh run returned to implementation after
    feedback, the PR row/status reason says it is waiting for the current
    implementation turn (with the reason), and the PR is `in_progress` with an
-   auto-start target using stop-before-merge (manual merge).
+   auto-start target using wait-for-merge (manual merge).
 
 7. GIVEN a PR in review is selected,
    WHEN the user presses plain `a`,
@@ -72,7 +78,7 @@ on-disk state in the git-tracked `pm/project.yaml`.
 
 8. GIVEN a PR in review is selected and is not an auto-start target,
    WHEN the user presses plain `A` (or plain `O`),
-   THEN it only toggles/arms an auto-merge target (or a stop-before-merge
+   THEN it only toggles/arms an auto-merge target (or a wait-for-merge
    sequence): the PR's status stays `in_review` and no fresh reset happens.
 
 9. GIVEN nothing is selected,
@@ -83,7 +89,7 @@ on-disk state in the git-tracked `pm/project.yaml`.
     WHEN the user presses `z a`,
     THEN the fresh reset keeps that policy (the target is still listed as
     wait-for-merge, with its dependency-wide hold), while `z O` / `z A` force
-    stop-before-merge / auto-merge on the same attempt.
+    wait-for-merge / auto-merge on the same attempt.
 
 11. GIVEN the user asks for keybinding help (`?` in the TUI and `pm tui keys`),
     WHEN they read it,
@@ -133,7 +139,7 @@ on-disk state in the git-tracked `pm/project.yaml`.
 ### R5 — Downstream flow: QA, sign-off, manual merge gate, evidence
 
 19. GIVEN a PR that already completed review → QA → sign-off once and is
-    sitting at the manual merge gate (`SIGNOFF_MERGE`, stop-before-merge, not
+    sitting at the manual merge gate (`SIGNOFF_MERGE`, wait-for-merge, not
     merged), with the user back in its implementation session,
     WHEN the user runs `pm autostart fresh <pr>`,
     THEN the reset is applied from `sign_off`, the old approval is archived in
@@ -358,7 +364,7 @@ requests produce two attempts or two reviews; unrelated targets are disturbed.
 Resolved:
 
 1. **`z a` vs `z O` / `z A`** — `z a` preserves an existing target's policy
-   (including `wait_for_merge`) and defaults a new target to stop-before-merge;
+   (including `wait_for_merge`) and defaults a new target to wait-for-merge;
    `z O` / `z A` force the policy. Plain `a` keeps opening the runs popup.
 2. **Fresh on an `in_progress` PR without a fresh marker** — rejected
    (`not_later_stage`, "use autostart add"), not silently treated as a reset.

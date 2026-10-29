@@ -927,3 +927,38 @@ behavioural adaptation are below.
   set is no longer asserted, and the two CLI round-trip tests now patch
   `submit_tui_command` (master replaced `trigger_tui_command`) with a result
   object exposing `.ok`.
+
+## Review-iteration notes (d9f2 i1)
+
+* **A discarded QA run now goes through `discard_qa_state`** — R4's retirement
+  popped `app._qa_loops[pr_id]` and only set `stop_requested` when
+  `qa.running`.  A run that finalized with INPUT_REQUIRED is *held* with
+  `running` False while it keeps polling its worker panes (the hold has no
+  timeout of its own), so it was never stopped; and a still-winding-down
+  thread could rewrite its `qa_resume.json`, which a later restart scan could
+  resurrect once the PR is back in `qa` after the fresh review.
+  `qa_loop_ui.discard_qa_state` — the one path the code documents for
+  dropping a tracked run — also marks the run `superseded` and clears the
+  resume snapshot, so the retirement now calls it (with the old
+  `stop_requested` behaviour kept as a fallback).  Pinned by
+  `TestRetirement::test_a_held_qa_run_is_discarded_not_just_stopped`
+  (verified to fail without the fix).
+* **One shared fresh-request timestamp helper** — the "did this predate the
+  fresh request?" fence parsed the marker's `requested_at` in four places
+  (`autostart_fresh._epoch`, `auto_start._predates_fresh_request`,
+  `signoff.fresh_recorded_verdict`, plus the per-record parses).
+  `autostart_state.fresh_requested_epoch(pr)` now does that conversion once,
+  next to `fresh_marker` / `fresh_awaiting` / `fresh_requested_at`; no
+  behaviour change (a missing/unparseable timestamp still means "no fence"
+  for the handoff and "not predating" for the QA/sign-off guards).
+* **Stale `stop-before-merge` vocabulary removed** — the master merge removed
+  the policy but left it in the TUI's inline `z` prefix hint
+  (`O=fresh-stop`) and throughout `pm/specs/pr-22ea6a2/qa.md`, whose
+  scenarios would then assert a policy that no longer exists.  Both now say
+  wait-for-merge (`--stop-before-merge` remains only the deprecated CLI
+  alias).
+* **Merge leftovers tidied** — the redundant `from pm_core import
+  runtime_state as _rs` in `_on_complete_from_thread` (the merge's second
+  supersede guard re-imported it) is gone, with the guard's race-window
+  comment made explicit; one stray extra blank line before `@dataclass` in
+  `verdict_transcript.py` is fixed.

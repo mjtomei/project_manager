@@ -357,7 +357,6 @@ def _turn_state_from_tail(text: str,
     return "unknown"
 
 
-
 @dataclass(frozen=True)
 class VerdictHit:
     """A verdict found in a transcript, with the identity of its turn.

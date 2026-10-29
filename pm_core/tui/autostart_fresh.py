@@ -36,7 +36,7 @@ from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import (
     FRESH_KEY, POLICY_WAIT, SUPERSEDED, TERMINAL_STATUSES, fresh_awaiting,
-    fresh_marker, now_iso,
+    fresh_marker, fresh_requested_epoch, now_iso,
 )
 
 _log = configure_logger("pm.tui.autostart_fresh")
@@ -238,8 +238,22 @@ def retire_in_memory(app, pr: dict) -> None:
         _kill_review_window(app, pr)
 
     qa = app._qa_loops.pop(pr_id, None)
-    if qa is not None and getattr(qa, "running", False):
-        qa.stop_requested = True
+    # ``discard_qa_state`` is the one path the code documents for dropping a
+    # tracked QA run.  Checking ``running`` alone is not enough: a run that
+    # finalized with INPUT_REQUIRED is *held* with ``running`` False while it
+    # polls its worker panes, and that hold has no timeout of its own.  The
+    # helper also marks the run superseded (a still-winding-down thread must
+    # not rewrite its resume snapshot) and clears that snapshot, so a later
+    # restart scan cannot resurrect the discarded run once the PR is back in
+    # ``qa`` after the fresh review.
+    try:
+        from pm_core.tui.qa_loop_ui import discard_qa_state
+        discard_qa_state(qa)
+    except Exception:
+        _log.warning("autostart_fresh: qa discard failed for %s", pr_id,
+                     exc_info=True)
+        if qa is not None:
+            qa.stop_requested = True
     (getattr(app, "_self_driving_qa", None) or {}).pop(pr_id, None)
     if qa is not None and tracker is not None:
         # ``poll_qa_state`` unregisters a finished run's scenario keys; a
@@ -394,14 +408,9 @@ def _latest_hook_event(transcript: str | None) -> dict | None:
     return hook_events.read_event(sid)
 
 
-def _epoch(iso: str | None) -> float:
-    if not iso:
-        return 0.0
-    try:
-        from pm_core.signoff import parse_ts
-        return parse_ts(iso).timestamp()
-    except (TypeError, ValueError):
-        return 0.0
+def _request_epoch(pr: dict) -> float:
+    """``fresh_autostart.requested_at`` as epoch seconds (0.0 when absent)."""
+    return fresh_requested_epoch(pr) or 0.0
 
 
 def reconcile_idle_status(app, pr: dict, tracker) -> None:
@@ -435,7 +444,7 @@ def reconcile_idle_status(app, pr: dict, tracker) -> None:
     from pm_core.verdict_transcript import latest_turn_state
     try:
         state = latest_turn_state(
-            transcript, _epoch(fresh_marker(pr).get("requested_at")))
+            transcript, _request_epoch(pr))
     except Exception:
         _log.debug("autostart_fresh: idle reconcile read failed for %s",
                    pr_id, exc_info=True)
@@ -499,7 +508,7 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
         # before the request means the turn was already over when the user
         # asked (see :func:`pm_core.verdict_transcript.latest_turn_state`).
         state = latest_turn_state(
-            transcript, _epoch(fresh_marker(pr).get("requested_at")))
+            transcript, _request_epoch(pr))
         if state == "complete":
             return True
         if state == "in_progress":
@@ -511,7 +520,7 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
 
     # Transcript missing/unreadable: fall back to the newest hook event,
     # fenced against the old attempt by ``requested_at``.
-    since = _epoch(fresh_marker(pr).get("requested_at"))
+    since = _request_epoch(pr)
     event = _latest_hook_event(transcript)
     if event:
         try:
