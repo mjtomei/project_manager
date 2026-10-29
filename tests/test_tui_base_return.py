@@ -560,3 +560,69 @@ def test_start_loop_continues_iteration_numbering(tmp_path):
     state = app._review_loops["pr-001"]
     assert state.iteration == 2
     assert state.adopt_in_flight is False
+
+
+# --- a restarted TUI still finds the rework session -----------------------
+
+def test_shared_impl_transcript_prefers_the_newest_link(tmp_path):
+    from pm_core.tui import review_loop_ui
+
+    app = _app(tmp_path, [])
+    base = app._root / "transcripts"
+    old_dir = base / "autostart-x"
+    new_dir = base / "auto-sequence" / "pr-001"
+    old_dir.mkdir(parents=True)
+    new_dir.mkdir(parents=True)
+    target = tmp_path / "sess.jsonl"
+    target.write_text("{}\n")
+    old = old_dir / "impl-pr-001.jsonl"
+    new = new_dir / "impl-pr-001.jsonl"
+    old.symlink_to(target)
+    new.symlink_to(target)
+    import os as _os
+    # Set each *link's* own mtime (follow_symlinks=False): both point at the
+    # same target, so a following utime would make them indistinguishable.
+    _os.utime(old, (1000, 1000), follow_symlinks=False)
+    _os.utime(new, (2000, 2000), follow_symlinks=False)
+
+    assert review_loop_ui._shared_impl_transcript(app, "pr-001") == str(new)
+    assert review_loop_ui._shared_impl_transcript(app, "pr-999") is None
+
+
+def test_poll_impl_idle_registers_from_a_shared_transcript_after_restart(
+        tmp_path):
+    """A restarted TUI's fresh run dir has no impl link.
+
+    The pane was launched by an earlier TUI/auto-start run, so the current
+    run dir holds nothing to register and ``PaneIdleTracker.register`` raises
+    — which silently skips the base-rework catch-up.  An open return then has
+    no launcher and no completion check at all unless a CLI tick happens to
+    run (R6 forbids stranding it).  The poll must fall back to a link another
+    driver already wrote.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr("in_progress", base_return=_return(awaiting="impl"))
+    app = _app(tmp_path, [pr])
+    app._session_name = "pm-test"
+    app._pending_merge_prs = set()
+
+    shared = app._root / "transcripts" / "auto-sequence" / "pr-001"
+    shared.mkdir(parents=True)
+    target = tmp_path / "sess.jsonl"
+    target.write_text("{}\n")
+    link = shared / "impl-pr-001.jsonl"
+    link.symlink_to(target)
+
+    fresh = app._root / "transcripts" / "manual-abc"
+    tracker = app._pane_idle_tracker
+    tracker.is_tracked.return_value = False
+    tracker.is_gone.return_value = False
+
+    with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+               return_value="%1"), \
+         patch("pm_core.tui.auto_start.get_transcript_dir",
+               return_value=fresh):
+        review_loop_ui._poll_impl_idle(app)
+
+    assert tracker.register.call_args[0][2] == str(link)

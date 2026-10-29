@@ -11,6 +11,7 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
              If a loop is already running, make this iteration the last one.
 """
 
+import os
 import time
 
 from rich.markup import escape
@@ -1138,6 +1139,48 @@ def _prune_untracked_trust(app, seen: set[str]) -> None:
             app._untracked_trust_reported.discard(pane_id)
 
 
+def _shared_impl_transcript(app, pr_id: str) -> str | None:
+    """Find an ``impl-<pr>.jsonl`` link another driver already wrote.
+
+    The restarted TUI's run dir is empty, but the project's ``transcripts/``
+    tree keeps the links written by the auto-start run
+    (``transcripts/<run>/``) and by the CLI driver
+    (``transcripts/auto-sequence/<pr>/``).  Registering from one of them lets
+    the base-rework catch-up keep watching the session the previous TUI (or
+    the gate's relaunch) actually launched.  Newest link wins so a
+    ``share_impl_transcript`` refresh is preferred over a stale copy.
+
+    Best effort: returns ``None`` when no usable link exists.
+    """
+    import glob
+
+    from pm_core.paths import pm_home
+
+    root = app._root or pm_home()
+    base = root / "transcripts"
+    if not base.is_dir():
+        return None
+    name = f"impl-{pr_id}.jsonl"
+    best: str | None = None
+    best_mtime = -1.0
+    for pattern in (f"*/{name}", f"*/*/{name}"):
+        try:
+            candidates = glob.glob(str(base / pattern))
+        except OSError:  # pragma: no cover - best effort
+            continue
+        for p in candidates:
+            try:
+                # lstat: a refreshed link is rewritten, so its own mtime is
+                # the freshness signal (getmtime would follow the shared
+                # target and make every link look identical).
+                mtime = os.lstat(p).st_mtime
+            except OSError:
+                continue
+            if mtime > best_mtime:
+                best, best_mtime = p, mtime
+    return best
+
+
 def _poll_impl_idle(app) -> None:
     """Poll implementation panes for idle detection.
 
@@ -1189,6 +1232,18 @@ def _poll_impl_idle(app) -> None:
             if not tdir:
                 continue
             impl_transcript = str(tdir / f"impl-{pr_id}.jsonl")
+            if not os.path.lexists(impl_transcript):
+                # A TUI restart starts a fresh transcript run dir with no
+                # links in it, so a pane launched by an earlier TUI/auto-start
+                # run has nothing to register here.  An open base return then
+                # has no launcher and no completion check at all unless a CLI
+                # tick happens to run — the stranding R6 forbids.  Fall back
+                # to the link another driver already wrote; it names the live
+                # session (``share_impl_transcript`` re-points it on relaunch,
+                # and a stale link's idle turn is still rejected by
+                # ``impl_completion``'s post-relaunch guard).
+                impl_transcript = (_shared_impl_transcript(app, pr_id)
+                                   or impl_transcript)
             try:
                 tracker.register(pr_id, pane_id, impl_transcript)
             except ValueError:
