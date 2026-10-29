@@ -698,20 +698,26 @@ class TestSignoffPromptBounding:
         assert "/host-home/" not in block
         assert str(status) not in block
 
-    def test_qa_scenario_marker_needs_no_path_resolution(self, tmp_path,
-                                                         monkeypatch):
+    def test_qa_scenario_marker_resolves_captures_read_only(self, tmp_path,
+                                                            monkeypatch):
         """The marker is spelled `$CAP/...` (the sign-off prompt defines CAP in
-        its own evidence checklist), so it neither bakes a host path nor
-        creates the captures dir as a side effect."""
+        its own evidence checklist), so it never bakes a host path.  Building
+        the block does resolve the captures dir — it has to, to find the run
+        manifest that binds the listing — but only in reader mode: a prompt
+        must never create the captures dir as a side effect (pr-1ae1d2d)."""
         self._many_scenarios(tmp_path, monkeypatch)
+        calls: list[bool] = []
 
-        def _boom(pr_id):
-            raise AssertionError("captures_dir() called while building a prompt")
+        def _record(pr_id, session_tag=None, start_path=None, create=True):
+            calls.append(create)
+            return None
 
-        monkeypatch.setattr("pm_core.paths.captures_dir", _boom)
+        monkeypatch.setattr("pm_core.paths.captures_dir", _record)
         block = prompt_gen._signoff_qa_scenarios_block("pr-x")
         assert "(+20 more scenarios" in block
         assert "$CAP/scenarios/<n>/verdict.md" in block
+        # Resolution happened, and never in writer mode.
+        assert calls and not any(calls)
 
     def test_the_signoff_prompt_defines_the_cap_the_marker_names(
             self, tmp_path, monkeypatch):

@@ -710,6 +710,34 @@ def test_finalize_resyncs_evidence_even_if_persisting_raised(tmp_path):
     assert [name for name, _ in calls] == ["persist", "sync"]
 
 
+def test_resume_sync_keeps_the_runs_overall_verdict(tmp_path):
+    """A restart re-asserts the same run's membership, and must not blank the
+    overall verdict the manifest already recorded.  A held run resumes with
+    ``INPUT_REQUIRED`` and then blocks in the poll phase, so `pm qa evidence`
+    would otherwise read a manifest whose overall verdict had been erased by
+    the restart (pr-1ae1d2d)."""
+    from pm_core import qa_loop
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    (tmp_path / "qa").mkdir()
+    state = qa_loop.QALoopState(pr_id="pr-x")
+    state.qa_workdir = str(tmp_path / "qa")
+    state.scenarios = [qa_loop.QAScenario(index=1, title="one",
+                                          focus="f", steps="s")]
+    state.latest_verdict = "INPUT_REQUIRED"
+    pr_data = {"id": "pr-x", "workdir": str(workdir)}
+    syncs: list[dict] = []
+    with patch("pm_core.qa_loop.get_pm_session", return_value="pm-s"), \
+         patch("pm_core.store.load", return_value={"prs": [pr_data]}), \
+         patch("pm_core.qa_loop._load_resume_file", return_value={}), \
+         patch("pm_core.qa_loop._sync_captures_evidence",
+               side_effect=lambda *a, **k: syncs.append(k)), \
+         patch("pm_core.qa_loop._execute_and_finalize", return_value=None):
+        qa_loop.resume_qa_sync(state, tmp_path / "pm", pr_data)
+
+    assert [s.get("overall") for s in syncs] == ["INPUT_REQUIRED"]
+
+
 def test_status_file_carries_run_id(tmp_path):
     from pm_core import qa_loop
     p = tmp_path / "qa_status.json"

@@ -361,6 +361,15 @@ is introduced for pre-existing reports.
   `tests/test_captures_dir_mount.py` is not modified.
 - **Preserve existing captures.** Nothing is deleted; quarantine is a move,
   and only for provably-foreign records.
+- **Tests never write real evidence.** The evidence writers resolve their
+  destination through `paths.sessions_dir()`, so any test that drives
+  `run_qa_sync` / `_execute_and_finalize` would otherwise publish a real
+  `qa_manifest.json` + `qa_runs/<id>.json` into the runner's live
+  `~/.pm/sessions/<tag>/captures/`. `tests/conftest.py`'s autouse
+  `_isolated_sessions_tree` fixture points `sessions_dir` at a per-test temp
+  dir (the same pattern as the `runtime_state` and `CLAUDE_CONFIG_DIR`
+  fixtures); tests that resolve captures paths themselves patch it again and
+  win.
 
 ## 3. Ambiguities (resolved)
 
@@ -468,7 +477,9 @@ No **[UNRESOLVED]** items.
   `_persist_scenario_verdicts` stamping + manifest + completion quarantine
   (R2, R3, R5); `_sync_captures_evidence` start-of-run/completion sync (R3,
   R5) with the shared-mount quarantine guard; `_execute_and_finalize`
-  completion sync; `resume_qa_sync` start sync; pass `run_id` at every
+  completion sync; `resume_qa_sync` start sync carrying the restored
+  `latest_verdict` as the manifest's `overall` (a restart must not blank a
+  held run's recorded verdict); pass `run_id` at every
   `_write_status_file` call site.
 - `pm_core/paths.py` — `captures_dir(create=False)` and
   `captures_root(create=False)` so readers (prompt builders, `pm qa
@@ -482,3 +493,5 @@ No **[UNRESOLVED]** items.
   `tests/test_prompt_bounds.py` / `tests/test_behavior_report.py` /
   `tests/test_signoff.py` assertions updated only where the new text is
   asserted verbatim.
+- `tests/conftest.py` — autouse `_isolated_sessions_tree` so no test writes
+  evidence into the runner's real `~/.pm/sessions` tree.

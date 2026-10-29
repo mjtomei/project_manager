@@ -5556,8 +5556,11 @@ def _resume_qa_sync(
     # Same start-of-run evidence sync as the fresh launch path (pr-1ae1d2d):
     # queued scenarios launch from the poll phase below, and their prompt.md
     # must not land on top of another project's record.  ``loop_id`` survives
-    # the restart, so this re-asserts the *same* run's membership.
-    _sync_captures_evidence(state)
+    # the restart, so this re-asserts the *same* run's membership.  The
+    # overall verdict is restored from the resume file, so carrying it keeps
+    # a restart (a held run especially) from blanking the verdict the manifest
+    # already recorded while the poll phase below blocks.
+    _sync_captures_evidence(state, overall=state.latest_verdict)
 
     return _execute_and_finalize(
         state, pm_root, pr_data, data, session, window_name,
