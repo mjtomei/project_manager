@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T14:34:25.481807+00:00'
+  updated_at: '2026-10-29T15:09:03.000711+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37119,6 +37119,52 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T14:34:25Z'
     last_edited: '2026-10-29T14:34:25Z'
+  - id: note-d6d5892
+    text: 'Review loop ebd1 i9: one leftover in the kept tmux-recipe scope, the PR''s
+      own class (a handle that matches the wrong thing). Step 2 asserted the exact
+      target and then read, wrote and released the capture-directory claim (`@pm_capture_dir`)
+      with a plain `-t "$TARGET"` — the last bare session handles in the recipe —
+      on the strength of its comment''s "show-options/set-option do not accept `=`"
+      and "exact-match-wins makes the plain target mean it". The first is true only
+      of the bare form; the second fails exactly when the exact session is gone, which
+      is the case the write''s guard exists for. Verified on tmux 3.2a (private TMUX_TMPDIR):
+      with only pm''s grouped `pm-test~1` on the server, `set-option -t pm-test @pm_capture_dir
+      <cap>` exits 0 and writes the option on the grouped session, while the `=pm-test:0.0`
+      pane form is accepted by show-options/set-option and is exact ("no such session:
+      =pm-test:0.0"); `:0.0` needs no window 0 (a session whose window 0 was killed
+      still round-trips set/show/unset). Run against the recipe''s own step-2 block
+      with a tmux wrapper that ends the target as the claim is written, HEAD''s block
+      exited 1 at "could not stream pm-test:0.0 … — check that pane exists": the guard
+      never fired, the claim sat on the grouped session where the exact read can never
+      see it (the collision guard silently off), and the message named a pane for
+      a session that went away — the misdiagnosis R45''s `claimgone` case exists to
+      prevent, in the shape where a grouped session is present (claimgone models only
+      the shape where nothing matches the prefix, so even a bare write fails). Fix:
+      the read, the write and all fourteen releases take `-t "=$TARGET:0.0"`, so the
+      write fails with "no such session" exactly when the target is gone and the guard
+      reports "could not claim … the session went away", nothing lands on the grouped
+      session, and the release is the no-op its step-5 comment claims to be; both
+      comments corrected. Tests: the stub `tmux` strips the pane spec for show-options/set-option
+      (as it already did for capture-pane/pipe-pane/send-keys) and gains the `claimgap`
+      mode (the target ends at the write, a grouped session is left, which a bare
+      write succeeds against); new `test_a_claim_written_to_a_prefix_session_is_reported`
+      runs the whole block in that mode with another run''s claim seeded on `pm-test~1`
+      and requires "could not claim" (not "could not stream", not "already being recorded")
+      with the grouped claim unchanged; `test_tmux_session_handles_are_exact` also
+      rejects the three bare forms and requires the three exact ones; `test_the_claim_is_released_only_after_the_pipe_is_stopped`
+      follows the new release spelling. Mutation (every claim handle bare): 3 failed,
+      203 passed, each failing exactly the case it names and passing on the unmodified
+      recipe. File 206 passed (was 205). Full suite `env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py`
+      -> 4600 passed, 1 skipped, 92 deselected, 0 failed (407.78 s, with the pytest<9
+      and markdown deps on the scratch path). Nominal step 2 re-run live with real
+      tmux 3.2a: rc 0, the claim on the target and not on the grouped session beside
+      it. Evidence: $(pm qa captures-path pr-b19db15)/review-ebd1-i9/ (probe.log sections
+      A-E, mutation-check.log, suite.log, README.md, scripts/). impl.md R50 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped. (2026-10-29T15:12:00Z)'
+    created_at: '2026-10-29T15:09:02Z'
+    last_edited: '2026-10-29T15:09:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
