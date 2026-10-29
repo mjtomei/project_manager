@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T05:45:50.625685+00:00'
+  updated_at: '2026-10-29T06:15:18.154707+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36613,6 +36613,32 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T05:45:50Z'
     last_edited: '2026-10-29T05:45:50Z'
+  - id: note-20c2320
+    text: 'Review loop 7c9c i7: one leftover in the kept recipe/spec scope, the PR
+      own class (a statement that names a failure mode the handle cannot have), in
+      four places. R33 corrected the step-0 prose that said a leftover recorder session
+      would make the readiness wait "pass on the previous run''s recorder" — since
+      R15 a duplicate `new-session` stops the run at "could not start the recorder
+      session" — but the same claim survived in cli-recording.md''s step-0 prose,
+      impl.md R2, qa.md R3 and test_stale_recorder_is_cleared_before_start''s docstring.
+      In the CLI it was never true for a second reason: that recipe''s readiness handle
+      is the cast file (a quiet command draws nothing), which step 0 clears, so a
+      leftover `rec` session can only burn the deadline. Verified live on tmux 3.2a
+      with the recipes'' own readiness blocks: with a leftover `rec` session and an
+      empty cast the CLI block exits 1 with "recorder did not start within 30s", while
+      the tmux block (pane content) passes at once on the leftover `pm-recorder`''s
+      pane — which is why the tmux wording is a legitimate counterfactual and the
+      CLI one was not. The CLI prose now says the scaffold reports the duplicate as
+      a start failure instead of spinning out its wait against a `rec` session that
+      never writes a cast; R2, qa.md R3 and the test docstring say the clear keeps
+      a re-run from stopping at the start check and record the pre-R15 behaviour as
+      history. No behaviour change and no new assertion — the behaviour is covered
+      by test_recorder_session_that_never_starts_is_reported and the readiness execution
+      cases. Evidence: $(pm qa captures-path pr-b19db15)/review-7c9c-i7/ (probe.log
+      with the two live runs, scripts/ with the extracted blocks and the probe driver).
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T06:15:18Z'
+    last_edited: '2026-10-29T06:15:18Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

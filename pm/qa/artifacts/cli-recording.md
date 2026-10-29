@@ -84,7 +84,10 @@ still produce a fresh-looking video of the *previous* run. The no-TTY
 scaffold repeats both steps, and also clears a `rec` session an earlier run
 left behind: a leftover one makes `new-session` fail with "duplicate
 session: rec" — the scaffold reports that as a start failure, instead of
-letting the readiness wait pass on the previous run's recorder.
+spinning out its readiness wait against a `rec` session that never writes a
+cast. This recipe's readiness handle is the cast file, not the pane (a quiet
+command draws nothing), so — unlike the tmux recipe's pane-content wait — it
+cannot pass on the previous run's recorder; it would just burn its deadline.
 `recorder.status` holds this run's recorder exit status (step 4 of
 the no-TTY scaffold); a leftover one would let a recorder that was torn down
 before it finished pass that check. `recorder-stderr.log` and

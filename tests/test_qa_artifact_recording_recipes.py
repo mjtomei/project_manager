@@ -444,10 +444,16 @@ class TestRecipes:
         """A leftover recorder from an earlier run must be cleared first.
 
         ``new-session`` fails with "duplicate session" while the previous
-        run's recorder is still there — and the readiness wait then sees the
-        *old* session, passes at once, and the worker drives the wrong
-        attach client while the cast check fails later with a misleading
-        message. Clearing it up front is what makes a re-run deterministic.
+        run's recorder is still there, and the start check reports that as
+        "could not start the recorder session", so a re-run would end before
+        recording anything. (Before that check the run carried on, but not
+        into a false pass: the tmux readiness wait took the *old* session's
+        pane content as readiness and drove the previous run's attach client,
+        while the CLI wait — which is on the cast file, and step 0 clears it —
+        ran out its deadline against a ``rec`` session that never wrote a
+        cast.) Clearing the session up front is what makes a re-run
+        deterministic, and the start check is what makes the leftover loud if
+        a concurrent run recreates it after the clear.
 
         The CLI scaffold clears the *session*, not the server: killing a
         server and reconnecting a few milliseconds later races its exit and

@@ -269,10 +269,11 @@ wrong session; and
 output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort with "recording already exists"
-or "duplicate session", the readiness wait does not pass on the previous
-run's recorder, the new cast is this run's, the transcript holds only this
-run, and a capture that fails before the render step still leaves no earlier
-run's video in the capture directory.
+and a duplicate session does not stop the run at "could not start the recorder
+session" (the start check reports that, so the run never reaches the readiness
+wait with the previous run's recorder in place), the new cast is this run's,
+the transcript holds only this run, and a capture that fails before the render
+step still leaves no earlier run's video in the capture directory.
 
 ### R4 — The web-UI recipe's readiness wait is bounded and cleans up
 
