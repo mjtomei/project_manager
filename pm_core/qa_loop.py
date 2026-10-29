@@ -809,8 +809,15 @@ def _write_status_file(status_path: Path, pr_id: str,
                        verification_failures: dict[int, int] | None = None,
                        error: str = "",
                        verdict_reasons: dict[int, str] | None = None,
-                       waiting_for_input: set[int] | None = None) -> None:
-    """Atomically write the qa_status.json file."""
+                       waiting_for_input: set[int] | None = None,
+                       run_id: str = "") -> None:
+    """Atomically write the qa_status.json file.
+
+    *run_id* is the QA run (``QALoopState.loop_id``) that wrote the file, so
+    a reader can bind the listing to a real run instead of trusting whatever
+    scenario directories happen to exist (pr-1ae1d2d).  Omitted when the
+    caller has none, keeping the legacy file shape.
+    """
     _verifying = verifying_scenarios or set()
     _queued = queued_scenarios or set()
     _verify_fails = verification_failures or {}
@@ -853,6 +860,8 @@ def _write_status_file(status_path: Path, pr_id: str,
         "error": error,
         "waiting_for_input": sorted(_waiting),
     }
+    if run_id:
+        data["run_id"] = run_id
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(data, indent=2))
     tmp_path.rename(status_path)
@@ -2220,6 +2229,7 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
 def _write_scenario_capture_file(pr_id: str, scenario_index: int,
                                   name: str, content: str,
                                   session_tag: str | None = None,
+                                  base: Path | None = None,
                                   ) -> Path | None:
     """Write a per-scenario capture file under the host captures dir.
 
@@ -2235,11 +2245,14 @@ def _write_scenario_capture_file(pr_id: str, scenario_index: int,
     ``QALoopState.session_tag``) so this lands in the same dir the
     review pane's bind-mount and scenario containers' ``/pm-captures``
     point at. Callers that don't supply one fall back to
-    :func:`captures_dir`'s tmux-then-cwd resolution.
+    :func:`captures_dir`'s tmux-then-cwd resolution.  *base* is the
+    already-resolved captures dir, for a caller that resolved it once
+    and writes several files (``_persist_scenario_verdicts``).
     """
     try:
-        from pm_core.paths import captures_dir
-        base = captures_dir(pr_id, session_tag=session_tag)
+        if base is None:
+            from pm_core.paths import captures_dir
+            base = captures_dir(pr_id, session_tag=session_tag)
         if base is None:
             _log.warning("captures_dir unavailable for pr=%s (no session tag)",
                          pr_id)
@@ -2255,7 +2268,8 @@ def _write_scenario_capture_file(pr_id: str, scenario_index: int,
         return None
 
 
-def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
+def _persist_scenario_verdicts(state: "QALoopState", branch: str,
+                               overall: str = "") -> None:
     """Write each scenario's final verdict under the host captures dir.
 
     Resolves to ``~/.pm/sessions/<tag>/captures/<pr_id>/scenarios/<n>/verdict.md``
@@ -2265,8 +2279,29 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
     The ``branch`` arg is kept for signature stability but no longer
     drives any git operation — workers don't commit-and-push captures
     anymore.
+
+    Every record names the PR and the QA run that produced it, and the run
+    publishes its authoritative scenario membership as
+    ``$CAP/qa_manifest.json`` (pr-1ae1d2d).  Without that, a nested QA
+    fixture or an earlier verification run leaves records that are
+    indistinguishable from real coverage.
     """
     _ = branch  # kept for caller compatibility
+    from pm_core import captures
+    from pm_core.paths import captures_dir
+
+    base = None
+    try:
+        base = captures_dir(state.pr_id, session_tag=state.session_tag)
+    except Exception:
+        _log.warning("Could not resolve captures dir for pr=%s",
+                     state.pr_id, exc_info=True)
+    else:
+        if base is None:
+            _log.warning("captures_dir unavailable for pr=%s — scenario "
+                         "records and the run manifest were not written",
+                         state.pr_id)
+
     for s in state.scenarios:
         verdict = state.scenario_verdicts.get(s.index, "")
         if not verdict:
@@ -2275,10 +2310,15 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
         body = f"# Scenario {s.index}: {s.title}\n\n{verdict}\n"
         if reason:
             body += f"\n{reason}\n"
-        _write_scenario_capture_file(
-            state.pr_id, s.index, "verdict.md", body,
-            session_tag=state.session_tag,
-        )
+        if base is not None:
+            # Reuse the resolved captures dir: resolving twice would let the
+            # two files (verdict.md, scenario.json) land in different trees if
+            # the resolution changed between calls, and it re-created the dir
+            # as a side effect.
+            _write_scenario_capture_file(
+                state.pr_id, s.index, "verdict.md", body,
+                session_tag=state.session_tag, base=base,
+            )
         # Also persist a structured per-scenario record so the sign-off
         # agent (pr-2d5f712 + pr-8e693f6) can synthesize the BDD framing
         # (steps / focus / verdict / reason) into report.html without
@@ -2293,11 +2333,113 @@ def _persist_scenario_verdicts(state: "QALoopState", branch: str) -> None:
             "verdict": verdict,
             "reason": reason,
         }
-        _write_scenario_capture_file(
-            state.pr_id, s.index, "scenario.json",
-            json.dumps(record, indent=2),
-            session_tag=state.session_tag,
+        captures.write_scenario_record(
+            base, s.index, record,
+            pr_id=state.pr_id, run_id=state.loop_id,
         )
+
+    captures.write_manifest(
+        base, pr_id=state.pr_id, run_id=state.loop_id,
+        scenarios=_manifest_scenarios(state), overall=overall,
+    )
+
+
+def _manifest_scenarios(state: "QALoopState") -> list[dict]:
+    """This run's authoritative scenario membership, for the run manifest.
+
+    Membership is the run's scenarios — not the verdicts — so a run that
+    dies before a verdict still owns (and fails to demonstrate) the scenarios
+    it was going to run.  Scenario 0 is the interactive window, not coverage.
+    """
+    return [
+        {
+            "index": s.index,
+            "title": s.title,
+            "verdict": state.scenario_verdicts.get(s.index, ""),
+        }
+        for s in state.scenarios
+    ]
+
+
+def _captures_root_is_ours(base: Path, pr_id: str) -> bool:
+    """True when *base* is provably this PR's captures dir.
+
+    Inside a scenario container :func:`captures_dir` falls through to the
+    shared ``/pm-captures`` bind mount whenever the host path is absent.  The
+    mount belongs to the container's PR (``PM_CAPTURES_PR``, set at container
+    creation); when that marker is missing — a controller predating #264 — a
+    nested pm project (the fake-Claude QA fixture) resolves the *enclosing*
+    PR's mount.  Publishing a manifest there is recoverable (readers validate
+    ``pr_id`` and fall back to ``qa_runs/<run_id>.json``), but quarantining
+    is a **move**: the nested project would classify the enclosing PR's real
+    records as foreign and move them out of ``scenarios/``.  So quarantine
+    only a tree that is unambiguously ours; foreign records elsewhere are
+    still detected by :func:`captures.audit` and by the PR that owns them.
+
+    The marker is compared with surrounding whitespace stripped, exactly as
+    :func:`pm_core.paths.captures_dir` does (pr-1e9c117/#264): a trailing
+    newline from a shell ``export`` still grants the mount there, so the
+    guard must agree — otherwise it would refuse to quarantine a tree
+    ``captures_dir`` handed us as this PR's, and log that the marker is
+    "unset or naming another PR" when it plainly names this one.
+    """
+    from pm_core.paths import CAPTURES_PR_ENV, CONTAINER_CAPTURES_MOUNT
+    try:
+        if Path(base) != Path(CONTAINER_CAPTURES_MOUNT):
+            return True
+    except (TypeError, ValueError):
+        return True
+    return (os.environ.get(CAPTURES_PR_ENV) or "").strip() == pr_id
+
+
+def _sync_captures_evidence(state: "QALoopState", overall: str = "",
+                            scenarios: list[dict] | None = None) -> None:
+    """Quarantine foreign scenario records and refresh the run manifest.
+
+    Called at execution start (before any scenario prompt is written, so a
+    foreign directory at a reused index is out of the way) and at
+    completion (a nested fixture can write *during* the run — the observed
+    incident).  Best effort: evidence bookkeeping must never abort a QA run.
+
+    *scenarios* overrides the membership written to the manifest.  An early
+    exit that launched nothing (planner trust-blocked, QA spec missing)
+    passes ``[]``: the run owns no evidence, and an older run's scenario
+    directories must not pass as its coverage just because the plan named
+    them.
+    """
+    from pm_core import captures
+    from pm_core.paths import (
+        CAPTURES_PR_ENV, CONTAINER_CAPTURES_MOUNT, captures_dir,
+    )
+    try:
+        base = captures_dir(state.pr_id, session_tag=state.session_tag)
+        if base is None:
+            _log.warning("captures_dir unavailable for pr=%s — no evidence "
+                         "manifest written", state.pr_id)
+            return
+        if _captures_root_is_ours(base, state.pr_id):
+            moved = captures.quarantine_foreign(
+                base, pr_id=state.pr_id, run_id=state.loop_id)
+            if moved:
+                _log.warning("Quarantined %d foreign scenario dir(s) for %s: "
+                             "%s", len(moved), state.pr_id,
+                             ", ".join(str(p) for p in moved))
+        else:
+            _log.warning(
+                "captures dir %s is the shared %s mount and is not marked as "
+                "%s's (%s unset or naming another PR) — not quarantining its "
+                "scenario directories, which may be the enclosing PR's real "
+                "evidence", base, CONTAINER_CAPTURES_MOUNT, state.pr_id,
+                CAPTURES_PR_ENV)
+        captures.write_manifest(
+            base, pr_id=state.pr_id, run_id=state.loop_id,
+            scenarios=(_manifest_scenarios(state)
+                       if scenarios is None else scenarios),
+            overall=overall,
+        )
+    except Exception:
+        _log.warning("Failed to sync captures evidence for %s",
+                     state.pr_id, exc_info=True)
 
 
 def _install_artifact_files(pm_root: Path, scenario: QAScenario,
@@ -2458,6 +2600,7 @@ def _launch_scenarios_in_tmux(
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
             verdict_reasons=state.scenario_verdict_reasons,
+            run_id=state.loop_id,
         )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
@@ -2706,6 +2849,7 @@ def _launch_scenarios_in_containers(
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
             verdict_reasons=state.scenario_verdict_reasons,
+            run_id=state.loop_id,
         )
 
     # --- Phase 2: poll concretizers in parallel, launch agent as each finishes ---
@@ -3284,7 +3428,8 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
                 state.scenario_verdicts, overall=state.latest_verdict,
                 scenario_0=state.scenario_0, error=state._error,
                 verdict_reasons=state.scenario_verdict_reasons,
-                waiting_for_input=state.waiting_for_input)
+                waiting_for_input=state.waiting_for_input,
+                run_id=state.loop_id)
     return False
 
 
@@ -3389,7 +3534,8 @@ def _poll_tmux_verdicts(
                            scenario_0=state.scenario_0,
                            queued_scenarios=_queued_indices,
                            verdict_reasons=state.scenario_verdict_reasons,
-                           waiting_for_input=state.waiting_for_input)
+                           waiting_for_input=state.waiting_for_input,
+                           run_id=state.loop_id)
 
     grace_start = time.monotonic()
 
@@ -3626,7 +3772,8 @@ def _poll_tmux_verdicts(
                            queued_scenarios=_queued_indices,
                            verification_failures=verification_failures,
                            verdict_reasons=state.scenario_verdict_reasons,
-                           waiting_for_input=state.waiting_for_input)
+                           waiting_for_input=state.waiting_for_input,
+                           run_id=state.loop_id)
 
     # A resumed/held run may already have a follow-up in the transcript.
     # Accept it before the loop starts — and publish it, because the first
@@ -4653,7 +4800,8 @@ def _run_qa_sync(
                 _write_status_file(status_path, state.pr_id, state.scenarios,
                                    state.scenario_verdicts,
                                    scenario_0=state.scenario_0,
-                                   verdict_reasons=state.scenario_verdict_reasons)
+                                   verdict_reasons=state.scenario_verdict_reasons,
+                                   run_id=state.loop_id)
 
         if branch:
             pre_plan_head = _rev_parse(workdir_path, f"refs/heads/{branch}")
@@ -4819,7 +4967,13 @@ def _run_qa_sync(
                                state.scenario_verdicts,
                                overall=state.latest_verdict,
                                scenario_0=state.scenario_0,
-                               error=state._error)
+                               error=state._error,
+                               run_id=state.loop_id)
+            # The run owns no scenarios; record that, so a stale scenario
+            # directory from an earlier run cannot pass as this run's
+            # coverage (pr-1ae1d2d).
+            _sync_captures_evidence(state, overall=state.latest_verdict,
+                                    scenarios=[])
             # Show the error block beside the dialog: the user looking at
             # the QA window otherwise sees only the prompt, no explanation.
             if planner_pane and tmux_mod.pane_exists(planner_pane):
@@ -4921,6 +5075,11 @@ def _run_qa_sync(
             "Then restart QA from the TUI."
         )
         _notify()
+        # Scenarios were planned but none launched, so this run owns no
+        # evidence: bind it with an empty membership rather than letting the
+        # plan read as coverage (pr-1ae1d2d).
+        _sync_captures_evidence(state, overall=state.latest_verdict,
+                                scenarios=[])
         state.running = False
         return state  # Do not launch scenarios without a QA spec
 
@@ -4941,6 +5100,10 @@ def _run_qa_sync(
                 "scenario workers, so no scenarios were launched.\n\n"
                 f"{exc}"
             )
+            # Planned but launched nothing, so this run owns no evidence —
+            # same rule as the other pre-execution exits (pr-1ae1d2d).
+            _sync_captures_evidence(state, overall=state.latest_verdict,
+                                    scenarios=[])
             _notify()
             state.running = False
             return state
@@ -5000,11 +5163,18 @@ def _run_qa_sync(
                        scenario_0=state.scenario_0,
                        queued_scenarios=queued_indices,
                        error=state._error,
-                       verdict_reasons=state.scenario_verdict_reasons)
+                       verdict_reasons=state.scenario_verdict_reasons,
+                       run_id=state.loop_id)
 
     # Add status pane to the main QA window (split planner pane horizontally)
     if planner_pane:
         _add_status_pane(session, planner_pane, status_path)
+
+    # Publish this run's authoritative scenario membership and move any
+    # provably-foreign record out of `scenarios/` BEFORE a scenario prompt is
+    # written — an index reused from an earlier run must not receive this
+    # run's files on top of another project's evidence (pr-1ae1d2d).
+    _sync_captures_evidence(state)
 
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
@@ -5142,7 +5312,8 @@ def _execute_and_finalize(
                            scenario_0=state.scenario_0, error=state._error,
                            verdict_reasons=state.scenario_verdict_reasons,
                            waiting_for_input=(state.waiting_for_input
-                                              if state.held else set()))
+                                              if state.held else set()),
+                           run_id=state.loop_id)
 
         # Run the post-QA finalize pane synchronously: it verifies scenario
         # pushes reached origin/<branch> and fast-forwards the user's PR
@@ -5150,9 +5321,17 @@ def _execute_and_finalize(
         # FINALIZE_BLOCKED. Reuses the same pane-polling pattern used for
         # scenario verdict verification.
         try:
-            _persist_scenario_verdicts(state, pr_data.get("branch", ""))
+            _persist_scenario_verdicts(state, pr_data.get("branch", ""),
+                                       overall=state.latest_verdict)
         except Exception:
             _log.exception("Failed to persist scenario verdicts")
+
+        # Re-sync after the run: a nested QA fixture driven inside a scenario
+        # container can write into this PR's captures *while* the run is live
+        # (the pr-0b87a97 incident).  The manifest re-asserts this run's
+        # membership and any remaining foreign directory is quarantined before
+        # sign-off reads the evidence.
+        _sync_captures_evidence(state, overall=state.latest_verdict)
 
         # Snapshot the hold decision before the (potentially long) finalize
         # pane so a restart while it runs still recovers the wait instead of
@@ -5231,7 +5410,8 @@ def _execute_and_finalize(
                                overall=state.latest_verdict,
                                scenario_0=state.scenario_0, error=state._error,
                                verdict_reasons=state.scenario_verdict_reasons,
-                               waiting_for_input=set())
+                               waiting_for_input=set(),
+                               run_id=state.loop_id)
             state.latest_output = (
                 f"QA complete: {state.latest_verdict}{finalize_suffix} — "
                 + qa_outcome_detail(state) + planner_code_changes_suffix(state)
@@ -5268,7 +5448,8 @@ def _execute_and_finalize(
                            state.scenario_verdicts,
                            scenario_0=state.scenario_0, error=state._error,
                            verdict_reasons=state.scenario_verdict_reasons,
-                           waiting_for_input=state.waiting_for_input)
+                           waiting_for_input=state.waiting_for_input,
+                           run_id=state.loop_id)
         _write_resume_file(state, use_containers, concurrency_cap,
                            queued_indices)
         notify()
@@ -5371,6 +5552,15 @@ def _resume_qa_sync(
     # the dead one would leave other TUIs thinking the run is up for grabs.
     write_run_record(state)
     _notify()
+
+    # Same start-of-run evidence sync as the fresh launch path (pr-1ae1d2d):
+    # queued scenarios launch from the poll phase below, and their prompt.md
+    # must not land on top of another project's record.  ``loop_id`` survives
+    # the restart, so this re-asserts the *same* run's membership.  The
+    # overall verdict is restored from the resume file, so carrying it keeps
+    # a restart (a held run especially) from blanking the verdict the manifest
+    # already recorded while the poll phase below blocks.
+    _sync_captures_evidence(state, overall=state.latest_verdict)
 
     return _execute_and_finalize(
         state, pm_root, pr_data, data, session, window_name,

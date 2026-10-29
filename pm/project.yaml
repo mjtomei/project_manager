@@ -34717,7 +34717,7 @@ prs:
   plan: bugs
   title: 'Bug: nested QA fixtures overwrite the enclosing PR scenario evidence metadata'
   branch: pm/pr-1ae1d2d-bug-nested-qa-fixtures-overwrite-the-enclosing-pr-
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Observed during #229 live QA on 2026-10-12. The real QA run pr-0b87a97-1302d0167f638df7
     contains scenarios 1–5; at 21:34Z only 1 and 3 had real NEEDS_WORK verdicts. Yet
@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-12T21:42:00.057612+00:00'
+  updated_at: '2026-10-29T06:36:19.323825+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34765,6 +34765,324 @@ prs:
       evidence-integrity issue based on that guard alone.'
     created_at: '2026-10-12T22:43:42Z'
     last_edited: '2026-10-12T22:43:42Z'
+  - id: note-b97259d
+    text: 'Implemented persisted evidence provenance (14c1ab65). New pm_core/captures.py:
+      scenario.json stamped with schema/pr_id/run_id/captured_at; each QA run publishes
+      $CAP/qa_manifest.json (authoritative membership) plus a per-run copy at $CAP/qa_runs/<run_id>.json
+      so a nested fixture clobbering the root pointer cannot destroy the PR membership;
+      audit() classifies scenarios/<n>/ as current/prior-run/foreign/unowned and flags
+      orphans, manifest-vs-status run disagreement, and manifest members whose evidence
+      dir is gone; quarantine_foreign() moves only records naming another pr_id to
+      scenarios/_foreign/<run_id>-<n>/ (bytes preserved, nothing deleted). qa_loop
+      syncs (quarantine+manifest) before scenario launch and again at completion (the
+      fixture writes during the run); qa_status.json now carries run_id; captures_dir(create=False)
+      for readers. Readers: sign-off prompt names the run + requires pm-signoff-qa-run
+      meta and says membership is the manifest (not arbitrary dirs); dashboard flags
+      a report bound to a superseded run; merge gate refuses one; new `pm qa evidence
+      <pr>` prints membership+anomalies. paths.captures_dir mount condition untouched
+      (that half stays with #264/pr-1e9c117). Tests: tests/test_captures_provenance.py
+      (31). Evidence: $CAP/impl/pre-fix/nested-fixture-overwrites-scenario-evidence
+      and $CAP/impl/post-fix/nested-fixture-detected-and-quarantined (cast+mp4+manifest+observed.txt).
+      Full suite: 43F+17E, the documented environmental baseline (test_git_ops/test_merge_publish/test_signoff_integration/test_hook_events),
+      identical on the pre-fix tree. (2026-10-27)'
+    created_at: '2026-10-27T20:17:01Z'
+    last_edited: '2026-10-27T20:17:01Z'
+  - id: note-b782c51
+    text: 'Review-loop 12d0: master has moved since this branch was cut — #264/pr-1e9c117
+      (fail-closed PM_CAPTURES_PR routing) is now on origin/master. A trial merge
+      into current master auto-resolves pm_core/paths.py routing to master fail-closed
+      form and conflicts only in the captures_dir docstring; reconcile that hunk at
+      merge time and keep create=False reader mode. Also added completion-resync tests
+      (fixture writes during the run).'
+    created_at: '2026-10-28T05:21:14Z'
+    last_edited: '2026-10-28T05:21:14Z'
+  - id: note-218b11d
+    text: 'QA S3 (2026-10-28): the incident path and the repro suite pass. Part 1
+      (fixture writes scenarios/2 + root qa_manifest.json while the run is live) —
+      completion sync quarantined it to scenarios/_foreign/cli-pr-3233a01-2 (bytes
+      preserved), re-published the run manifest naming cli-pr-3233a01 with only Scenario
+      1, and pm qa evidence listed only the real scenario. Part 3 — tests/test_captures_provenance.py:
+      71 passed, exit 0, all six named tests PASSED. Part 2 (shared /pm-captures)
+      could NOT verify its premise: /pm-captures has no qa_manifest.json and no qa_runs/
+      — the enclosing controller runs pre-PR code (it writes scenarios/{1..4} prompts
+      into that same tree, but a start-of-run sync would have published the manifest
+      before any prompt). What did hold: with PM_CAPTURES_PR unset the nested PR resolved
+      /pm-captures, the run stopped at the QA-spec gate (INPUT_REQUIRED) and published
+      qa_manifest.json + qa_runs/cli-pr-0e9258e.json, no enclosing scenario dir was
+      moved and no scenarios/_foreign/ appeared, and pm qa evidence pr-1ae1d2d flagged
+      both the foreign pointer and scenarios/9 as a foreign record. The qa_runs-recovery
+      wording was demonstrated separately against a real run record. Next QA run:
+      re-check the enclosing-run membership Then once the loop runs this branch.'
+    created_at: '2026-10-28T08:26:44Z'
+    last_edited: '2026-10-28T08:26:44Z'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-a91a592
+    text: 'INTEGRATION COMPLETE 2026-10-29 (restart): merged origin/master@4a74d880
+      into the branch as merge commit fea18428; pushed to origin. master untouched.
+      Conflicts resolved: paths.py docstring (kept create=False reader paragraph +
+      master fail-closed wording; routing auto-resolved to master) and qa_loop.py
+      (kept master hold/follow-up loop AND this PR evidence provenance — _write_status_file
+      carries both waiting_for_input and run_id; every call site incl. the new _write_status
+      closure passes run_id=state.loop_id; _execute_and_finalize runs _persist_scenario_verdicts(overall=)
+      + completion _sync_captures_evidence after each loop final-status write; four
+      early-exit scenarios=[] syncs and both start-of-run syncs survived). Tests on
+      merged tree: tests/test_captures_provenance.py 71 passed; test_qa_loop+test_qa_planner_handoff+test_workspace_trust+test_captures_dir_mount
+      264 passed; test_prompt_bounds+test_behavior_report+test_signoff 247 passed;
+      full suite 4558 passed, 1 flaky (test_push_proxy::test_teardown_refuses_a_foreign_discovery_link
+      — passes in isolation and the whole test_push_proxy.py module 158/158; unrelated
+      to this diff). pm qa evidence pr-1ae1d2d still reports the real captures (legacy
+      unowned records, no manifest) read-only, exit 0. Spec impl.md updated with the
+      actual reconciliation. Ready for native review/QA; Opus5.5/xhigh signoff override
+      preserved.'
+    created_at: '2026-10-29T01:56:58Z'
+    last_edited: '2026-10-29T01:56:58Z'
+  - id: note-8e876a8
+    text: 'Review-loop 5297 i1 (9a89182a): no blocking code defects in the provenance
+      implementation — captures.py/audit/quarantine, the qa_loop sync points, the
+      prompt/merge-gate/dashboard bindings and the 71-test suite all hold up on the
+      merged tree. Three fixes applied: (1) test isolation — driving _execute_and_finalize/run_qa_sync
+      from tests published real qa_manifest.json + qa_runs/<id>.json for pr-001 into
+      the runner live ~/.pm/sessions/<tag>/captures/ (verified by running tests/test_qa_input_required.py);
+      cfbb3efe patched three harnesses and missed the seven call sites in test_qa_input_required.py,
+      so an autouse _isolated_sessions_tree conftest fixture now pins paths.sessions_dir
+      at a per-test temp dir; (2) _resume_qa_sync now passes overall=state.latest_verdict
+      so a restart no longer blanks the manifest overall a held run already recorded;
+      (3) test_prompt_bounds::test_qa_scenario_marker_needs_no_path_resolution was
+      vacuous (its _boom AssertionError was swallowed by _qa_run_binding except Exception)
+      — rewritten to assert create=False, plus a new resume-sync test. Full suite
+      after edits: 4469 passed, 1 skipped, 55F+36E = the documented environmental
+      baseline for this container, identical on the unmodified tree; no test writes
+      into the real ~/.pm/sessions any more. Residual for QA, not code: the impl pre/post
+      captures are a *modelled* repro (paths.captures_dir routed at a temp sandbox),
+      not a live nested-container fixture — QA S3 could not verify that premise because
+      the enclosing controller runs pre-PR code, so the next QA round should re-check
+      the enclosing-run membership story once the loop runs this branch.'
+    created_at: '2026-10-29T03:00:52Z'
+    last_edited: '2026-10-29T03:00:52Z'
+  - id: note-5770981
+    text: 'Review-loop 5297 i2 (bd2a38d8): no blocking code defects — captures.py
+      (manifest/audit/quarantine), the qa_loop sync points and shared-mount guard,
+      the prompt/dashboard/merge-gate bindings and the test suite all hold up. Two
+      fixes: (1) the i1 `_isolated_sessions_tree` fixture called `tmp_path_factory.mktemp`
+      inside the patched `sessions_dir` lambda, so each call in a test returned a
+      NEW temp dir (sessions0, sessions1, …) — write-then-read assertions would compare
+      against the wrong tree; it now creates the dir once, like `_isolated_runtime_state`;
+      (2) nothing pinned that `_run_qa_sync` publishes the start-of-run quarantine
+      + manifest BEFORE the first scenario launch — added a call-order test in tests/test_qa_planner_handoff.py
+      (mutation-checked: moving the sync after `_launch_scenarios_in_tmux` fails it)
+      and hoisted `_StopHarness` to module scope. Full suite this container: 4482
+      passed, 1 skipped, 43F+36E = environmental baseline (test_merge_publish/test_signoff_integration/test_sync_merge_integrity
+      — `git push` fails here); reproduced with the conftest change reverted. Residual
+      for QA, unchanged: the impl pre/post captures are a modelled repro, so the live
+      nested-fixture story still needs the enclosing-run check once the loop runs
+      this branch.'
+    created_at: '2026-10-29T03:26:23Z'
+    last_edited: '2026-10-29T03:26:23Z'
+  - id: note-23fd1b5
+    text: 'Review-loop 5297 i3 (no blocking code defects in the provenance implementation;
+      three fixes): (1) prompt_gen — a damaged qa_status.json whose `scenarios` value
+      is not a list (a bare int from a truncated/hand-edited write) raised TypeError
+      while building the QA block, taking the whole run binding down with it; both
+      readers now normalise through _status_scenario_entries and treat it as "no listing"
+      (new test test_signoff_qa_block_survives_a_non_list_status_scenarios; the TypeError
+      was reproduced before the change). (2) behavior_report — the QA-run binding
+      had doubled the per-PR report read on a no-cache HTTP dashboard (two 256 KB-capped
+      head reads); the row now reads the head once and derives verdict + meta from
+      it (_extract_verdict / extract_signoff_meta keep their signatures as thin wrappers;
+      cli/pr.py unaffected). (3) pm/specs/pr-1ae1d2d/qa.md corrected: it still claimed
+      captures_dir was the pre-#264 fail-open form, which the 2026-10-29 master merge
+      invalidated. R8 now states that #264 routing fails closed and drives the incident
+      by writing fixture records into the enclosing tree directly (the pre-fix controller''s
+      effect) — explicitly NOT by exporting PM_CAPTURES_PR=<fixture pr>, which would
+      make _captures_root_is_ours treat the mount as the fixture''s own and quarantine
+      the enclosing PR''s real records. QA S3 Part 1 already demonstrated the direct-write
+      variant, so the next QA round can re-verdict R8 against the corrected recipe.
+      Full suite after edits: 4561 passed, 1 skipped, 1 failed (test_hook_events::test_installer_writes_standalone_receiver
+      — PM_HOST_HOME=/home/matt in this container makes _install_receiver a no-op;
+      same failure on the unmodified tree). Residual unchanged for QA: the impl pre/post
+      captures are a modelled repro, so the live nested-fixture/enclosing-run check
+      still needs the next QA round. Also left a cross-PR note on pr-155f3e3 that
+      captures_dir(create=False) now exists.'
+    created_at: '2026-10-29T03:45:59Z'
+    last_edited: '2026-10-29T03:59:02Z'
+  - id: note-f6f395c
+    text: 'Review-loop 5297 i4 (fc1fca51): no blocking code defects in the provenance
+      implementation — captures.py, the qa_loop sync points and shared-mount guard,
+      the prompt/dashboard/merge-gate bindings and the suite all still hold up. One
+      robustness gap fixed: captures._valid_manifest read a manifest whose `scenarios`
+      was present but not a list (a bare int, null, a mapping from a hand edit or
+      partial rewrite) as a run with zero members, so `pm qa evidence` printed "(none)"
+      with NO anomaly and the sign-off block told the session the run "captured no
+      coverage" — a confident claim about a fact the file does not state (the same
+      class of damage i3 fixed on the qa_status.json side). Such a manifest is now
+      rejected as damaged, so readers fall back to qa_runs/<run_id>.json (membership
+      survives a damaged pointer) and the audit reports "damaged (its scenario list
+      is not a list)"; a manifest with the key absent still reads as owning nothing.
+      Reproduced on the old code before the change: read_manifest returned {"run_id":
+      "run1", "scenarios": []} and audit returned zero anomalies. Also: (a) the four
+      duplicated root-pointer anomaly branches in audit() collapsed into _root_pointer_anomaly(),
+      which gives the new case one wording in both the "not run-bound" and "recovered
+      from qa_runs/" variants; (b) neither reader calls an existing-but-refused manifest
+      absent any more (`pm qa evidence` prints "a qa_manifest.json exists but is unusable",
+      the sign-off block says the same) — the session can see the file, so "no manifest"
+      invited it to trust the record pm refused; (c) signoff.report_meta() now resolves
+      the captures root with create=False (a reader must not conjure the tree; same
+      result as before). Tests: tests/test_captures_provenance.py 77 passed (+4: non-list
+      scenarios rejected and recovered from the run copy; audit reports damaged-not-empty
+      in both membership branches; the sign-off block and `pm qa evidence` say unusable
+      rather than absent). Full suite on the edited tree: 4553 passed, 1 skipped,
+      13 failed — all environmental (12 test_markdown_render "No module named markdown",
+      1 test_hook_events PM_HOST_HOME), the documented baseline. Spec impl.md R1/R6
+      updated with the damaged-manifest rule. Residual unchanged for QA: the impl
+      pre/post captures remain a modelled repro, so the live nested-fixture/enclosing-run
+      membership check still belongs to the next QA round (QA S3 Part 1 demonstrated
+      the direct-write variant).'
+    created_at: '2026-10-29T04:22:16Z'
+    last_edited: '2026-10-29T04:22:16Z'
+  - id: note-2517783
+    text: 'QA S5 (nominal end-to-end provenance) PASSED on the merged tree (e6882d0c),
+      driven through a real pm session on a private tmux socket with a fake planner/scenario/verifier/finalizer.
+      Verified: PR A pr-58117ff, run 548f8760ee230949 — qa_manifest.json has schema
+      1, pr_id, overall PASS and exactly one member ("Provenance nominal scenario":
+      PASS); qa_runs/548f8760ee230949.json is byte-identical (cmp IDENTICAL) and qa_runs/
+      holds exactly that one file; scenarios/ holds only "1", whose scenario.json
+      carries schema/pr_id/run_id/captured_at/verdict PASS, and there is no scenarios/0;
+      the run''s qa_status.json carries the same run_id and overall PASS. pm qa evidence
+      pr-58117ff prints PR, the captures path, QA run, Overall: PASS and "Scenario
+      1 — Provenance nominal scenario: PASS", with no Anomalies section and EXIT=0.
+      PR B pr-d3f87ac (never QA''d): reader exits 0 with Captures: (none), "QA run:
+      (no qa_manifest.json — membership not run-bound)", (none) membership and the
+      single anomaly "no captures dir — no QA evidence to audit"; the captures dir
+      is absent before AND after, so the reader does not conjure it. PR C pr-843e55e
+      (no QA spec): run 23bc7f0631861c45 stops at the spec gate, manifest overall
+      INPUT_REQUIRED with scenarios [], the qa_runs copy carries the same empty membership,
+      there is no scenarios/ directory at all, and the reader prints (none) with no
+      anomalies. tests/test_captures_provenance.py: 77 passed. 47/47 Then assertions
+      passed. One wording nuance for whoever writes the next scenario: the spec-gate
+      message ("QA spec was not generated during planning…") is emitted to the main
+      TUI QA log, not into a qa-<PR> window — a run that launches no scenario never
+      creates a qa-<PR> status window, only the planner pane (qa-pr-XXXX) and the
+      interactive pane (qa-pr-XXXX-s0). The gate is still unambiguous from the log
+      line plus the INPUT_REQUIRED/empty manifest. Captures: /pm-captures/scenarios/5/
+      (tui-qa-launch/, tui-spec-gate/, pm-qa-evidence/, then-checks.txt). Residual
+      R8 (a live nested fixture writing into the enclosing captures tree) still needs
+      its own round; this run did not exercise the incident path.'
+    created_at: '2026-10-29T05:08:14Z'
+    last_edited: '2026-10-29T05:08:14Z'
+  - id: note-a1af61d
+    text: 'QA S6 (2026-10-29) PASS: quarantine/preservation semantics verified end-to-end
+      on the merged tree. (1) seeded scenarios/{1 foreign,2 unowned,3 prior-run run0,03
+      non-canonical} — `pm qa evidence` read-only, exit 0, named all three anomalies
+      separately, never mentioned 03, all bytes unchanged. (2) TUI `/ pr qa pr-a551fef`
+      on that tree: watcher logged _foreign first at t+0 and scenarios/1/prompt.md
+      16.33 s later; quarantine went to scenarios/_foreign/f1e852c799ad37f0-1 with
+      the seeded files byte-identical; scenarios/2,3,03 unchanged. (3) post-run evidence:
+      QA run f1e852c799ad37f0, Overall PASS, membership Scenario 1 — Example scenario:
+      PASS, anomalies scenarios/2 unowned + scenarios/3 prior QA run run0, foreign
+      record not listed. (4) damaged root manifest (scenarios=3, qa_runs intact):
+      membership recovered from qa_runs/ with the exact "damaged (its scenario list
+      is not a list) — membership recovered from qa_runs/" anomaly, no "no qa_manifest.json"
+      line, exit 0; with qa_runs moved aside it prints "a qa_manifest.json exists
+      but is unusable — membership not run-bound" plus the "scenario membership is
+      not run-bound" anomaly. (5) two CLI `pm qa run smoke --pr pr-461af20` passes:
+      run1 quarantined to _foreign/cli-pr-461af20-1, run2 to distinct _foreign/cli-pr-461af20-1-1,
+      run1 dir sha256sum -c OK, both dirs present, scenarios/1 = run2 record (pr_id=pr-461af20,
+      run_id=cli-pr-461af20), evidence shows Scenario 1 — Smoke: PASS. No bugs found,
+      nothing committed. Captures under /pm-captures/scenarios/6/s1..s5 (cast+mp4+manifest).
+      Ran on a private tmux socket (PM_TMUX_SOCKET=/tmp/qa-s6.sock); default server
+      and real sessions untouched.'
+    created_at: '2026-10-29T05:14:35Z'
+    last_edited: '2026-10-29T05:14:35Z'
+  - id: note-024bb62
+    text: 'QA S7 (2026-10-29): PASS. S1 — outer QA run (throwaway project, own tmux
+      socket + HOME, PM_CAPTURES_PR=pr-1ae1d2d, captures on the host path) driven
+      from the TUI; a second actor wrote scenarios/2 (pr-fixture/fixturerun) and a
+      foreign root qa_manifest.json at 05:40:39 while the run was live. The completion
+      sync quarantined it to scenarios/_foreign/8ea5dd0b56443354-2 with sha256 identical
+      to the bytes written, re-published the root pointer as pr-37258ad / run 8ea5dd0b56443354
+      / overall PASS with only Scenario 1, and left scenarios/1 intact and stamped;
+      pm qa evidence was clean (exit 0, no fixture titles). S2 — post-run clobber
+      of the root pointer: the reader still printed the outer run and Scenario 1 from
+      qa_runs/<run>.json (sha256 -c OK after the clobber), named pr-fixture in Anomalies,
+      exit 0. S3 — tests/test_captures_provenance.py 77 passed, all 11 named tests
+      present in the collection. S4 — a nested pm project with PM_CAPTURES_PR unset
+      ran its own QA to completion; captures-path stayed on its own host path, the
+      full-tree snapshot across the run window shows the only new files under /pm-captures
+      were scenarios/8 (a parallel QA scenario of THIS PR, prompt written 05:54, before
+      the nested run), no pr-946e060 mention anywhere in the enclosing tree outside
+      scenario 7s own capture dir, no qa_manifest.json / qa_runs / scenarios/_foreign
+      under the mount, and pm qa evidence pr-1ae1d2d byte-identical to the pre-run
+      baseline. Captures: /pm-captures/scenarios/7/{outer-run-tui,story1-quarantine-and-evidence,story2-post-run-clobber,story3-provenance-tests,story4-nested-run-tui,story4-nested-shared-mount}.
+      For the next round: /pm-captures still has no qa_manifest.json — the enclosing
+      controller runs pre-PR code, so the enclosing-run membership Then can only be
+      exercised once the loop itself runs this branch.'
+    created_at: '2026-10-29T06:03:38Z'
+    last_edited: '2026-10-29T06:03:38Z'
+  - id: note-bb9e19e
+    text: 'QA S9 (2026-10-29): PASS 7/7 stories, no code change. Downstream consumers
+      were driven against a throwaway local-backend project (5 PRs) using a private
+      tmux socket and an isolated HOME, with the branch pm installed editable and
+      PYTHONPATH=/workspace so /opt/pm-src could not shadow it. S1 dashboard: only
+      the PR whose report names run-A while qa_manifest.json names run-B carried the
+      stale-run span, title exactly "report reviewed QA run run-A; the PR''s current
+      QA run is run-B"; the other four rows had no marker. S2 merge gate: refused
+      exit 1 with the superseded-evidence message, no Merging/Updated master lines,
+      master sha unchanged, PR left unmerged. S3 matching run, S4 legacy report with
+      no pm-signoff-qa-run tag (manifest run-B), S5 report with no qa_manifest.json:
+      no marker, merge published and marked merged, exit 0. S6 readers: pm qa evidence
+      on a never-QAed PR exited 0 with Captures (none) / QA run (no qa_manifest.json
+      - membership not run-bound) / Scenarios (none) / anomaly no captures dir, pm
+      pr merge refused with no sign-off verdict recorded yet, dashboard showed no
+      report yet, and the per-PR captures dir was still absent after all three. S7
+      sign-off prompt generation in a real pm-session pane printed Integration: already
+      contained in master@af3ee732 and wrote only integration.json (the launch integration
+      check); no qa_manifest.json, qa_runs/ or scenarios/ appeared, and pm qa evidence
+      then reported Captures <path> with still no manifest. Artifacts: /pm-captures/scenarios/9/{merge-gate,dashboard,nocaps-signoff}.
+      One scenario-text mismatch recorded, not a product defect: pm fake-claude config
+      set {"_all": {}} produced SIGNOFF_MERGE rather than a no-verdict mock; no Then
+      of S7 depends on it. (2026-10-29T06:36:00Z)'
+    created_at: '2026-10-29T06:36:19Z'
+    last_edited: '2026-10-29T06:36:19Z'
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
 - id: pr-b19db15
   plan: bugs
   title: 'Bug: generated background-job waits can match themselves and stall completed
@@ -38250,75 +38568,78 @@ prs:
   notes: []
 - id: pr-592e4bd
   plan: improvements
-  title: Route QA scenario refinement and execution through claude-mixed work models; keep other
-    sessions on main Claude
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
   status: pending
   depends_on: []
-  description: 'The user expects the main Claude subscription to run out before reset. Integrate
-    the existing claude-mixed/work-model routing promptly so autonomous QA scenario refinement
-    and execution workers use the work account; all other PM sessions retain the main account
-    and plain Claude binary for remote control. Keep Opus5.5/high effort: work/claude-opus-5-5
-    for scenario refinement (qa_concretize) and execution (qa_scenario) workers, claude-opus-5-5
-    for the other roles unless the user changes that policy.
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
 
 
     Current integration points and gaps:
 
-    - PM already resolves models/providers independently for qa_planning, qa_scenario, qa_concretize,
-    qa_verification and qa_finalize via model_config.py, pm model set, and qa_loop._resolve_qa_model.
-    Reuse this configuration and the common launcher boundary rather than adding a parallel
-    scheduler.
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
 
-    - claude_launcher.py currently hardcodes the claude executable. The user''s host launcher
-    is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py with
-    ~/.config/claude-router/routes.json. The anthropic-work backend selects the work/ prefix,
-    strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
     on each request. Keep account credentials on the host; do not embed them in project.yaml,
     generated launch commands, logs or captures.
 
-    - Existing QA containers use slirp4netns. Probes from a real QA container failed to connect
-    to port8790 at both127.0.0.1 and host.containers.internal; the host router is up on127.0.0.1:8790.
-    Provide a tested container-compatible route/launcher using the existing host router without
-    publicly exposing the credential-bearing router or changing global networking for unrelated
-    sessions. Host QA must work too. Do not silently fall back to the main account when work
-    routing is unavailable.
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
 
-    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive QA
-    session from scenario-worker targeting so s0 stays on main/plain Claude and remains available
-    for remote control. Planning, verification, finalization, implementation, review, sign-off
-    and other interactive sessions also stay on main/plain Claude. Preserve fake-claude behavior,
-    hooks, transcript discovery and session identity.
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
 
 
     Acceptance:
 
-    A configured project can select the launcher/model route for QA scenario refinement and
-    execution workers only, with existing overrides and resumed/relaunched workers handled consistently.
-    Normal sessions retain their current main binary/account/model; no global claude replacement,
-    global account swap, or accidental model downgrade. Route selection is visible without exposing
-    credentials. Startup/auth/router errors explain the required remedy and leave a recoverable
-    state, not an unexplained human-judgment verdict or fallback billed to the main account.
-    Validate initial worker launch, replacement/retry and restart adoption, plus refinement
-    launch/retry paths and unaffected s0, planner, verifier, finalizer and review launch commands.
-    Add focused regressions and a real container/host smoke using a harmless prompt through
-    the work route when authentication is available; verify actual backend/model routing and
-    normal hooks/transcript output. Keep manual merge/spec-review gates.
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
 
 
-    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host smoke
-    through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result ok, reported model
-    work/claude-opus-5-5). Container transport and hooks/transcript smoke are still required.
-    Do not change login credentials yourself or copy tokens into containers. Host scripts claude-work-ping
-    / claude-work-expiry document the current refresh workflow; the router itself only reads
-    the token and does not refresh it.
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
 
 
-    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery changes;
-    keep this PR focused on role/account routing. No dependency on the larger Codex integration/refactor
-    is required. After merge, configure this project''s QA scenario refinement and execution
-    workers to the validated work route; leave already running sessions intact unless the user
-    requests migration.
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
 
     '
   agent_machine: null
@@ -38331,58 +38652,61 @@ prs:
   merged_at: null
   notes:
   - id: note-da1f854
-    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize) and execution
-      (qa_scenario) through the work account, retaining Opus5.5/high. All other roles, including
-      interactive QA s0, planning, verification and finalization, stay on main/plain Claude
-      for RC. User work login is complete; a host claude-mixed work/claude-opus-5-5 smoke returned
-      ok. Container/hook/transcript validation remains required. Main-account session limit
-      resets18:40UTC; supervisor will nudge the blocked non-QA runs after reset and shepherd
-      this PR to sign-off, preserving manual merge/spec gates.'
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
   - id: note-ae7cf29
-    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review. Three things
-      for this branch:
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
 
 
-      1. S127''s restart expectation is now the observable contract, not a cosmetic log: after
-      a plain TUI restart with auto-start off, the PR at qa whose return record says awaiting:
-      qa is started exactly once when the live `pm qa run` ends — one qa-<pr> window set, one
-      verifier, one finalizer, one qa_status.json — and no second loop ever starts over the
-      live run. master''s implementation also logs "Sign-off REQA for <pr> — QA starts once
-      the QA run another process drives ends" once per return episode (first poll tick or mount),
-      so an assertion on that line still holds there, but it is not the contract. Please relax
-      S127''s Then accordingly rather than requiring the line.
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
 
 
-      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the owed start
-      in app._pending_auto_qa + app._reqa_waiting — memory only, which is the bug pr-db3bf10
-      fixes. master now persists the obligation in signoff_return.awaiting + a qa_run.json run
-      record, reconciles it from qa_loop_ui.poll_qa_state and App.on_mount regardless of the
-      auto-start switch, and gates every starter (sign-off hop, auto-start pass, pm pr auto-sequence)
-      on signoff.claim_return_launch(..., require_status="qa"). On merge, route the REQA deferral
-      through qa_loop_ui.start_owed_reqa / reconcile_owed_reqa and drop the in-memory pending
-      entry: otherwise the durable path claims while the in-memory path calls start_qa directly,
-      and the two can each start a loop for the same obligation.
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
 
 
-      3. run_driven_elsewhere exists on both sides with the same signature and semantics. master''s
-      version has only qa_run.json (written at the top of run_qa_sync / resume_qa_sync, owner
-      pid + owner_start) and reuses resume_owned_elsewhere; this branch''s richer record set
-      (write_launch_record, own_run_driven_since, run_overlaps_own_run, launched_elsewhere)
-      should win on merge.'
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
     created_at: '2026-10-28T15:57:32Z'
     last_edited: '2026-10-28T15:57:32Z'
   - id: note-9b00f90
     text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
-      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd) but goes
-      further: a failed launch is retried up to 3 times and then reported as LAUNCH_FAILED (retryable)
-      instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
-      expects a single attempt and latest_verdict == "ERROR"; after both merge, update it to
-      expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR as an alias.
-      The no-traceback behavior is preserved (ReviewLaunchError is caught with _log.error, not
-      _log.exception), and _launch_review_window keeps the "Review window launch failed (rc=N):
-      <detail>" message shape.'
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
@@ -39242,7 +39566,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T01:15:37.606229+00:00'
-  updated_at: '2026-10-25T15:10:40.378475+00:00'
+  updated_at: '2026-10-29T03:46:09.641331+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39262,6 +39586,19 @@ prs:
       (not a per-PR dir) — decide whether this bug should be narrowed to that or closed.'
     created_at: '2026-10-25T15:10:40Z'
     last_edited: '2026-10-25T15:10:40Z'
+  - id: note-4ea1a2e
+    text: 'Cross-PR note from pr-1ae1d2d review-loop 5297 i3: the "resolution split
+      from creation" half of this bug is already implemented on pr-1ae1d2d — pm_core.paths.captures_dir()
+      and captures_root() now take create=False, which returns an existing dir (or
+      None) and never mkdirs the per-PR path; the sign-off prompt builder and the
+      new `pm qa evidence` reader already resolve through it. Reuse that mode rather
+      than adding a second reader variant when picking this up. Still open here: sessions_dir()/pm_home()/workdirs_base()
+      mkdir unconditionally, so any reader that resolves a path (e.g. _signoff_qa_scenarios_block
+      -> latest_qa_status_path -> workdirs_base) still creates ~/.pm/sessions and
+      ~/.pm/workdirs as a side effect. Note pr-1ae1d2d merges to master before this
+      work lands, so rebase onto it.'
+    created_at: '2026-10-29T03:46:09Z'
+    last_edited: '2026-10-29T03:46:09Z'
 - id: pr-bebc2e9
   plan: bugs
   title: 'Bug: pm pr edit / pm pr note delete crash on a note with a null id or text'

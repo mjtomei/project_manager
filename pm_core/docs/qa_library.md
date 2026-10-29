@@ -238,6 +238,9 @@ Captures are organized by which kind of session produced them:
 ```
 ~/.pm/sessions/<session-tag>/captures/
 ├── <pr-id>/                   # captures bound to a PR
+│   ├── qa_manifest.json       # authoritative QA-run membership (see below)
+│   ├── qa_runs/
+│   │   └── <run-id>.json      # per-run copy of the manifest
 │   ├── impl/
 │   │   ├── pre-fix/
 │   │   │   ├── recording.cast
@@ -246,8 +249,11 @@ Captures are organized by which kind of session produced them:
 │   │   └── post-fix/
 │   │       └── …
 │   └── scenarios/
+│       ├── _foreign/          # records naming another PR, moved aside
 │       ├── 1/
-│       │   └── …
+│       │   ├── prompt.md
+│       │   ├── verdict.md
+│       │   └── scenario.json  # structured record, stamped with PR + run
 │       └── 2/
 │           └── …
 └── regression/                # captures from regression tests (no PR)
@@ -266,6 +272,26 @@ When a phase needs more than one capture (two distinct pre-fix
 demonstrations, multiple captures within one scenario), give each its
 own named subdirectory under the phase, e.g.
 `impl/pre-fix/<short-name>/`.
+
+### QA run membership
+
+`qa_manifest.json` is written by the QA orchestrator when a run starts
+and again when it completes. It names the PR, the QA *run id*, and the
+scenarios that run owns — that list, not "a directory exists under
+`scenarios/`", is the authoritative membership. Each run also keeps a
+copy under `qa_runs/<run-id>.json` so a stale or foreign overwrite of
+the current-run pointer cannot destroy it. `pm qa evidence <pr-id>`
+prints the manifest's membership and flags every `scenarios/<n>/`
+directory that disagrees with it.
+
+`scenarios/<n>/scenario.json` carries `pr_id` and `run_id` alongside the
+`index/title/focus/steps/verdict/reason` a report reads. A directory
+whose record names a *different* PR (a nested fixture project writing
+into this tree) is moved — never deleted — to `scenarios/_foreign/`.
+Records from an earlier run of the same PR, and legacy records with no
+identity at all, stay in place and are reported as anomalies instead.
+Do not cite a `scenarios/<n>/` directory that the manifest does not list
+as coverage for the PR.
 
 ### Manifest
 

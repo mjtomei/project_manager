@@ -30,6 +30,31 @@ def _isolated_claude_config(tmp_path_factory, monkeypatch):
                        str(tmp_path_factory.mktemp("claude-config")))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_sessions_tree(tmp_path_factory, monkeypatch):
+    """Keep the captures/evidence tree out of the real ``~/.pm/sessions``.
+
+    QA evidence writers (``qa_loop._sync_captures_evidence``,
+    ``_persist_scenario_verdicts``) resolve their destination through
+    ``paths.sessions_dir()``, so a test that drives ``run_qa_sync`` /
+    ``_execute_and_finalize`` would otherwise publish a real
+    ``qa_manifest.json`` and ``qa_runs/<id>.json`` into the runner's live
+    ``~/.pm/sessions/<tag>/captures/<pr>/`` — evidence in a session tree the
+    test does not own (pr-1ae1d2d).  Tests that resolve captures paths
+    themselves patch ``sessions_dir`` again and win (their monkeypatch is
+    applied later).
+
+    The temp dir is created once, like ``_isolated_runtime_state``'s: the
+    patch is a ``lambda`` and ``mktemp`` hands out a *new* directory on every
+    call, so creating it lazily would make two ``sessions_dir()`` calls in
+    one test resolve to different trees — a write-then-read assertion would
+    silently compare against the wrong one.
+    """
+    from pm_core import paths
+    sessions = tmp_path_factory.mktemp("sessions")
+    monkeypatch.setattr(paths, "sessions_dir", lambda: sessions)
+
+
 @pytest.fixture
 def fake_github():
     """Install a pure-metadata FakeGitHubBackend as the `gh` transport.

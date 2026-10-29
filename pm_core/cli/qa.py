@@ -222,6 +222,91 @@ def qa_captures_path(pr_id: str):
     click.echo(str(path))
 
 
+@qa.command("evidence")
+@click.argument("pr_id")
+def qa_evidence(pr_id: str):
+    """Show the authoritative QA evidence record for a PR.
+
+    Prints the QA run that owns this PR's captures (from
+    ``$CAP/qa_manifest.json``) and the scenarios that run ran, then every
+    anomaly.  A ``$CAP/scenarios/<n>/`` directory that does *not* match is
+    flagged: a foreign record written by another PR's project (a nested QA
+    fixture), a legacy record with no PR/run identity, or a directory the
+    current run never listed.  A root ``qa_manifest.json`` that a foreign
+    writer overwrote is flagged too — membership is then recovered from
+    ``$CAP/qa_runs/`` and the anomaly says so.
+
+    Scenario membership is the manifest's, never "the directory exists" —
+    this is the reader a sign-off session uses instead of walking the
+    captures tree by hand. Read-only: it never writes or quarantines, and it
+    exits 0 for any existing PR — "no captures dir" is reported as an
+    anomaly, not as a command failure.
+    """
+    import json
+
+    from pm_core import captures, store
+    from pm_core.cli.helpers import _resolve_pr_id, state_root
+    from pm_core.paths import captures_dir, latest_qa_status_path
+
+    data = store.load(state_root())
+    pr_entry = _resolve_pr_id(data, pr_id)
+    if pr_entry is None:
+        click.echo(f"PR '{pr_id}' not found.", err=True)
+        raise click.exceptions.Exit(1)
+    canonical = pr_entry["id"]
+
+    latest = latest_qa_status_path(canonical)
+    status: dict = {}
+    if latest is not None:
+        try:
+            loaded = json.loads(latest.read_text())
+        except (OSError, ValueError):
+            loaded = None
+        if isinstance(loaded, dict):
+            status = loaded
+    # The run the live status file names (or its legacy workdir suffix) —
+    # shared with the sign-off prompt so the two never disagree.
+    status_run = captures.status_run_id(status, latest, canonical)
+
+    try:
+        root = captures_dir(canonical, create=False)
+    except Exception:
+        root = None
+
+    # "No captures dir" is a valid audit result, not a command failure: this
+    # is the reader a sign-off session runs, and it must report the absence
+    # (``audit`` turns it into an anomaly) instead of failing the session.
+    audit = captures.audit(root, pr_id=canonical, run_id=status_run)
+    click.echo(f"PR: {canonical}")
+    click.echo(f"Captures: {root if root is not None else '(none)'}")
+    if audit.manifest is None:
+        # Distinguish "no manifest" from "a manifest the reader refused": the
+        # anomalies below say which, and the summary line must not contradict
+        # them by claiming the file is absent when it is sitting right there.
+        pointer = captures.manifest_path(root) if root is not None else None
+        if pointer is not None and pointer.is_file():
+            click.echo("QA run: (a qa_manifest.json exists but is unusable — "
+                       "membership not run-bound)")
+        else:
+            click.echo("QA run: (no qa_manifest.json — membership not run-bound)")
+    else:
+        click.echo(f"QA run: {audit.manifest_run}")
+        if audit.manifest.get("overall"):
+            click.echo(f"Overall: {audit.manifest['overall']}")
+    if audit.members:
+        click.echo("Scenarios (authoritative membership):")
+        for m in audit.members:
+            click.echo(f"  Scenario {m.get('index', '?')} — "
+                       f"{m.get('title') or ''}: "
+                       f"{m.get('verdict') or '(no verdict)'}")
+    else:
+        click.echo("Scenarios (authoritative membership): (none)")
+    if audit.anomalies:
+        click.echo("Anomalies:")
+        for line in audit.anomalies:
+            click.echo(f"  {line}")
+
+
 def _author_path(category: str, name: str) -> Path:
     from pm_core import qa_instructions
     root = state_root()

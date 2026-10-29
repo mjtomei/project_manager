@@ -91,7 +91,8 @@ def _resolve_session_tag(start_path: Path | None = None) -> str | None:
 
 def captures_dir(pr_id: str,
                  session_tag: str | None = None,
-                 start_path: Path | None = None) -> Path | None:
+                 start_path: Path | None = None,
+                 create: bool = True) -> Path | None:
     """Return the captures directory for *pr_id*.
 
     Single source of truth for captures-path resolution across every
@@ -118,6 +119,11 @@ def captures_dir(pr_id: str,
     in the canonical location; inside a container the host path
     doesn't exist and we fall through to the bind-mount.
 
+    *create* may be ``False`` for a **reader**: resolution then never
+    creates the host path, returning ``None`` when nothing exists yet.
+    Readers (prompt builders, ``pm qa evidence``) must not conjure a
+    captures dir as a side effect of looking for evidence in it.
+
     Returns None when no tag can be derived AND the bind-mount is absent
     or not owned by *pr_id* (the fail-closed case: never the mount for a
     PR it doesn't belong to).
@@ -138,14 +144,15 @@ def captures_dir(pr_id: str,
     mount_pr = (os.environ.get(CAPTURES_PR_ENV) or "").strip()
     if mount.is_dir() and mount_pr and mount_pr == pr_id:
         return mount
-    if host_path is not None:
+    if host_path is not None and create:
         host_path.mkdir(parents=True, exist_ok=True)
         return host_path
     return None
 
 
 def captures_root(session_tag: str | None = None,
-                  start_path: Path | None = None) -> Path | None:
+                  start_path: Path | None = None,
+                  create: bool = True) -> Path | None:
     """Return the host captures *root* (``~/.pm/sessions/<tag>/captures/``).
 
     This is the directory that holds every per-PR captures dir; it is also
@@ -155,12 +162,18 @@ def captures_root(session_tag: str | None = None,
     tag, else the cwd/tmux-derived tag. Returns ``None`` when no tag can
     be derived (e.g. not inside a git repo). The directory is created if
     it doesn't exist when a tag is available.
+
+    *create* may be ``False`` for a **reader** (the merge gate, evidence
+    lookups): the root is then returned only when it already exists, so
+    checking a gate never conjures a captures tree as a side effect.
     """
     if session_tag is None:
         session_tag = _resolve_session_tag(start_path)
     if not session_tag:
         return None
     root = sessions_dir() / session_tag / "captures"
+    if not create:
+        return root if root.is_dir() else None
     root.mkdir(parents=True, exist_ok=True)
     return root
 

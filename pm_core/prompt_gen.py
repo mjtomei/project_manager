@@ -638,12 +638,166 @@ def _qa_scenarios_pointer() -> str:
     return f"read {_QA_SCENARIOS_READER}"
 
 
-def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
+def _status_scenario_entries(status: dict) -> list:
+    """The ``qa_status.json`` scenario entries, as a list.
+
+    The status file lives in an ephemeral workdir that a crash, a partial
+    write or a hand edit can leave damaged, so a ``scenarios`` value that is
+    not a list (a bare int from a truncated write, a string) must not turn
+    prompt generation into a ``TypeError`` — the sign-off session would lose
+    the whole QA block, which is the surface that tells it which run the
+    evidence belongs to.  A mapping is tolerated (older shapes); anything
+    else contributes no entries.
+    """
+    value = status.get("scenarios")
+    if isinstance(value, dict):
+        value = list(value.values())
+    return value if isinstance(value, list) else []
+
+
+def _qa_run_binding(pr_id: str, status: dict, status_path,
+                    listing_expected: bool = True,
+                    session_tag: str | None = None) -> list[str]:
+    """Lines binding this QA listing to the run that produced the evidence.
+
+    The report's scenario membership must come from a real QA run, not from
+    "a directory exists under ``$CAP/scenarios/``" (pr-1ae1d2d): a nested
+    fake-Claude fixture inside an outer scenario container, or an earlier
+    verification run, leaves records that look exactly like coverage.  The
+    run manifest at ``$CAP/qa_manifest.json`` is the authoritative record;
+    here we name it, the run id, and any disagreement with the live
+    ``qa_status.json`` so the sign-off session can see the evidence is stale
+    before it writes the report.
+
+    *listing_expected* says whether a per-scenario listing follows this head
+    in the prompt.  Without a readable ``qa_status.json`` there is none, so
+    the legacy-evidence line must not tell the session to cite "the scenarios
+    listed below" — there would be nothing below it.
+
+    *session_tag* is the tag of the pm session this prompt is written for
+    (``<session name>`` minus its ``pm-`` prefix).  The QA run wrote its
+    captures under that session's dir, so resolving the manifest with it is
+    what makes the binding correct even when prompt generation runs with a
+    cwd whose own tag would drift (a workdir clone) — the same reason
+    ``qa_loop`` captures ``QALoopState.session_tag`` once.  ``None`` keeps
+    :func:`captures_dir`'s cwd/tmux resolution.
+    """
+    from pm_core import captures
+    from pm_core.paths import captures_dir
+
+    lines: list[str] = []
+    # The status file's own run id, falling back to the legacy workdir suffix
+    # (~/.pm/workdirs/qa/<pr>-<run_id>/qa_status.json) — one implementation,
+    # shared with `pm qa evidence`.
+    status_run = captures.status_run_id(status, status_path, pr_id)
+    try:
+        root = captures_dir(pr_id, session_tag=session_tag, create=False)
+    except Exception:
+        root = None
+    manifest = (captures.read_manifest(root, pr_id=pr_id,
+                                       run_id=status_run or None)
+                if root else None)
+    manifest_run = (manifest or {}).get("run_id", "")
+
+    run_id = manifest_run or status_run
+    if run_id:
+        lines.append(f"QA run: `{run_id}`")
+    if manifest is None:
+        # Say which fact is true.  A `$CAP/qa_manifest.json` that exists but is
+        # unusable (damaged, or naming another PR with no recoverable copy) is
+        # not the same as none: the session can see the file, so telling it
+        # there is no manifest invites it to trust the very record pm refused.
+        pointer = captures.manifest_path(root) if root else None
+        why = ("a `$CAP/qa_manifest.json` exists but is not usable for this PR "
+               "(damaged, or it names another PR)"
+               if pointer is not None and pointer.is_file()
+               else "no `$CAP/qa_manifest.json` for this PR")
+        if listing_expected:
+            lines.append(
+                f"Scenario membership is **not run-bound**: {why}. Treat every "
+                "`$CAP/scenarios/<n>/` directory as unverified provenance and "
+                "cite only the scenarios listed below.")
+        else:
+            lines.append(
+                f"Scenario membership is **not run-bound**: {why}, and no QA "
+                "listing to enumerate it. Treat every `$CAP/scenarios/<n>/` "
+                "directory as unverified provenance: say the evidence cannot "
+                "be enumerated rather than inferring coverage from directories.")
+        return lines
+    if status_run and status_run != manifest_run:
+        lines.append(
+            f"**Warning:** the captures evidence belongs to QA run "
+            f"`{manifest_run}`, but the latest `qa_status.json` is run "
+            f"`{status_run}` — the scenario evidence may not match this "
+            f"run. Re-run QA before routing on it.")
+    members = [m for m in manifest.get("scenarios") or [] if isinstance(m, dict)]
+    if members:
+        lines.append(
+            f"Scenario membership: the {len(members)} scenario(s) listed in "
+            f"`$CAP/qa_manifest.json` — not whatever directories exist under "
+            f"`$CAP/scenarios/`.")
+    else:
+        # An empty manifest is a run that owns no evidence (it planned
+        # nothing or launched nothing).  Say that plainly: "the 0 scenario(s)"
+        # reads like a formatting slip, and the whole point is that such a
+        # run must not be mistaken for coverage.
+        lines.append(
+            "Scenario membership: **none** — `$CAP/qa_manifest.json` lists no "
+            "scenarios for this QA run, so this run captured no coverage. Do "
+            "not treat `$CAP/scenarios/<n>/` directories as its evidence.")
+    # Both listings are untrusted-ish input (the manifest lives in a tree a
+    # nested fixture can write), so only real int indices take part in the
+    # comparison — ``captures.member_index`` returns None for anything else,
+    # and a set of those used to raise on an unhashable value.
+    manifest_idx = [i for m in manifest.get("scenarios") or []
+                    if (i := captures.member_index(m)) is not None]
+    # Scenario 0 is the interactive window: it stays in qa_status.json (the
+    # display contract) but is deliberately not a manifest member, so
+    # comparing the two listings verbatim would warn on every normal run.
+    listed = _status_scenario_entries(status)
+    listed_idx = [i for s in listed
+                  if (i := captures.member_index(s)) is not None and i != 0]
+    if manifest_idx and listed_idx and set(manifest_idx) != set(listed_idx):
+        lines.append(
+            "**Warning:** `qa_manifest.json` lists scenarios "
+            f"{_idx_list(manifest_idx)} but `qa_status.json` lists "
+            f"{_idx_list(listed_idx)} — the evidence and the status "
+            "disagree about this run's membership.")
+    return lines
+
+
+def _idx_list(indices: list, limit: int = 20) -> str:
+    """Comma-joined scenario indices, capped with a count of the remainder."""
+    vals = [str(i) for i in indices[:limit]]
+    rest = len(indices) - len(vals)
+    out = ", ".join(vals)
+    return out + (f" (+{rest} more)" if rest > 0 else "")
+
+
+def _qa_head_without_status(note: str, pr_id: str,
+                            status_path,
+                            session_tag: str | None = None) -> tuple[str, str]:
+    """QA block head when there is no readable ``qa_status.json``.
+
+    The live status file is the *listing*; the run binding comes from the
+    captures manifest, which outlives the QA workdir, so name it anyway.
+    There is no listing to follow this head, so the binding must not refer to
+    one.
+    """
+    lines = [note]
+    lines.extend(_qa_run_binding(pr_id, {}, status_path,
+                                 listing_expected=False,
+                                 session_tag=session_tag))
+    return ("\n" + "\n".join(lines) + "\n", "")
+
+
+def _signoff_qa_scenarios_parts(pr_id: str,
+                                session_tag: str | None = None) -> tuple[str, str]:
     """Split the QA status block into ``(head, listing)``.
 
-    *head* is the overall verdict and the QA error.  Both are pm-generated
-    evidence, not enumerations, so they are inlined whole and never truncated:
-    the error's full text exists only in the QA run's host
+    *head* is the overall verdict, the QA error and the QA-run binding.  All
+    are pm-generated evidence, not enumerations, so they are inlined whole and
+    never truncated: the error's full text exists only in the QA run's host
     ``~/.pm/workdirs/qa/<pr>-*/qa_status.json``, which a containerised
     sign-off session cannot read (the reason the old 500-character cut was
     removed).  Keeping them out of the shrinkable block is what stops
@@ -659,13 +813,28 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     from pm_core.paths import latest_qa_status_path
     latest = latest_qa_status_path(pr_id)
     if latest is None:
-        return ("\n_No qa_status.json found — read the captures dir directly._\n",
-                "")
+        # No live status file (the QA workdir may have been reaped) — but the
+        # captures evidence may still exist, so still bind the report to the
+        # run that owns it instead of leaving membership implicit.
+        return _qa_head_without_status(
+            "_No qa_status.json found — read the captures dir directly._",
+            pr_id, None, session_tag)
     try:
         data = json.loads(latest.read_text())
     except (OSError, ValueError):
-        return ("\n_qa_status.json unreadable — read the captures dir directly._\n",
-                "")
+        return _qa_head_without_status(
+            "_qa_status.json unreadable — read the captures dir directly._",
+            pr_id, latest, session_tag)
+    if not isinstance(data, dict):
+        # A truncated or hand-edited file can parse as a list/scalar.  It
+        # carries no verdict and no listing, so treat it exactly like an
+        # unreadable one instead of raising on ``data.get`` below — the
+        # sign-off session must still get its run binding.
+        return _qa_head_without_status(
+            "_qa_status.json unreadable — read the captures dir directly._",
+            pr_id, latest, session_tag)
+    valid = [s for s in _status_scenario_entries(data)
+             if isinstance(s, dict)]
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is
@@ -676,11 +845,12 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
         # sign-off session cannot read.
         err = " ".join(str(data["error"]).split())
         head_lines.append(f"QA error: {err}")
+    # A status file with no scenario entries yields no listing either, so the
+    # run binding must not point at one that will not follow.
+    head_lines.extend(_qa_run_binding(pr_id, data, latest,
+                                      listing_expected=bool(valid),
+                                      session_tag=session_tag))
     head = "\n" + "\n".join(head_lines) + "\n"
-    scenarios = data.get("scenarios") or []
-    if isinstance(scenarios, dict):
-        scenarios = list(scenarios.values())
-    valid = [s for s in scenarios if isinstance(s, dict)]
     if not valid:
         return (head, "")
     truncated = False
@@ -724,13 +894,14 @@ def _signoff_qa_scenarios_parts(pr_id: str) -> tuple[str, str]:
     return (head + "\n", "\n".join(listing_lines) + "\n")
 
 
-def _signoff_qa_scenarios_block(pr_id: str) -> str:
+def _signoff_qa_scenarios_block(pr_id: str,
+                                session_tag: str | None = None) -> str:
     """The complete QA status block (head + listing).
 
     See :func:`_signoff_qa_scenarios_parts` for the split; the sign-off
     builder passes only the listing to ``fit_prompt``.
     """
-    head, listing = _signoff_qa_scenarios_parts(pr_id)
+    head, listing = _signoff_qa_scenarios_parts(pr_id, session_tag)
     return head + listing
 
 
@@ -847,8 +1018,17 @@ def generate_signoff_prompt(data: dict, pr_id: str,
     impl_spec_block = format_spec_for_prompt(pr, "impl") or ""
     # The QA block is split: the overall verdict and the QA error are
     # pm-generated evidence, inlined whole; only the per-scenario verdict
-    # listing is handed to fit_prompt as a shrinkable enumeration.
-    qa_head, qa_listing = _signoff_qa_scenarios_parts(pr_id)
+    # listing is handed to fit_prompt as a shrinkable enumeration.  The QA-run
+    # binding resolves captures under the session this prompt is written for,
+    # not under whatever tag this process's cwd would derive (prompt
+    # generation can run from a workdir clone) — ``qa_loop`` captured the same
+    # tag once when the run wrote its evidence.
+    session_tag = None
+    if session_name and session_name.startswith("pm-"):
+        # ``pm-<tag>`` -> ``<tag>``; an empty remainder keeps the cwd/tmux
+        # resolution rather than pinning an unusable empty tag.
+        session_tag = session_name.removeprefix("pm-") or None
+    qa_head, qa_listing = _signoff_qa_scenarios_parts(pr_id, session_tag)
     integration_block = _signoff_integration_block(pr, pr_id)
 
     if _is_bug_pr(pr):
@@ -924,6 +1104,15 @@ isolated candidate (your worktree and the base branch were not touched):
    - `CAP="$(pm qa captures-path {pr_id})"`:
      - {impl_bullet}
      - `$CAP/scenarios/<n>/` — per-scenario QA captures, prompts, and verdicts.
+     - `$CAP/qa_manifest.json` — the authoritative record of the QA run that
+       owns this PR's evidence and of the scenarios it ran. **Scenario
+       membership comes from this manifest, not from the directories on
+       disk.** A `$CAP/scenarios/<n>/` directory outside it, or one whose
+       `scenario.json` names another `pr_id`/`run_id`, is stale or foreign
+       evidence — a nested fixture project or an earlier run — and **must
+       not be cited as coverage** for this PR. `pm qa evidence {pr_id}`
+       prints the manifest's membership and flags every directory that
+       disagrees.
    - **(a) BDD — does the captured behavior support the diff's claims?** For
      each scenario/step, does the evidence actually demonstrate the behavior the
      diff claims to deliver?
@@ -997,7 +1186,19 @@ isolated candidate (your worktree and the base branch were not touched):
    <meta name="pm-signoff-head" content="<PR HEAD sha you reviewed>">
    <meta name="pm-signoff-base" content="<base revision sha you integrated with>">
    <meta name="pm-signoff-reason" content="<one or two sentences: why this route>">
+   <meta name="pm-signoff-qa-run" content="<the QA run id you reviewed>">
    ```
+
+   `pm-signoff-qa-run` must be the run the QA scenarios block above takes
+   from `$CAP/qa_manifest.json` — never the `qa_status.json` run id on its
+   own, which can name a different run than the evidence does. It binds the
+   report's scenario membership and verdicts to a real QA run, so a report
+   built from superseded or foreign evidence is detectable: the dashboard
+   flags a report whose run is not the PR's current one, and `pm pr merge`
+   refuses it. When that block reports no run-bound manifest (legacy
+   evidence, even if it still names a run from `qa_status.json`), omit this
+   tag rather than inventing an id; a report without it is neither flagged
+   nor refused.
 
    A human approval (`pm pr signoff record`) is refused unless these match
    the current HEAD and the recorded integration check. Include an

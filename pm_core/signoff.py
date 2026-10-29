@@ -383,11 +383,13 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
                 f"{bound.get('base_branch')!r}, but the project merges into "
                 f"{base_branch!r}. Re-run `pm pr signoff --fresh {pr_id}`.")
     recorded_hash = (pr.get("signoff") or {}).get("report_hash")
+    from pm_core import captures as captures_mod
+    from pm_core.paths import captures_root
+    # Reader only: a gate check must not create a captures tree.
+    croot = captures_root(create=False)
+    report = croot / pr_id / "report.html" if croot else None
     if recorded_hash:
         import hashlib
-        from pm_core.paths import captures_root
-        croot = captures_root()
-        report = croot / pr_id / "report.html" if croot else None
         current_hash = (
             hashlib.sha256(report.read_bytes()).hexdigest()
             if report is not None and report.is_file() else None)
@@ -395,6 +397,23 @@ def merge_gate_refusal(pr: dict, current_sha: str | None,
             return (f"PR {pr_id}: report.html changed since the recorded "
                     f"approval; re-run `pm pr signoff record {pr_id}` "
                     f"after reviewing it.")
+    # The report's scenario membership is bound to the QA run it reviewed
+    # (``pm-signoff-qa-run``).  If a later QA run replaced the PR's evidence,
+    # the approval certifies superseded coverage — refuse it, exactly like an
+    # edited report.  A report without the tag is legacy and passes: this
+    # adds no new requirement to reports written before the binding existed.
+    from pm_core.behavior_report import extract_signoff_meta
+    report_run = (extract_signoff_meta(report).get("qa-run", "")
+                  if report is not None else "")
+    if report_run:
+        manifest = captures_mod.read_manifest(
+            croot / pr_id if croot else None, pr_id=pr_id)
+        current_run = (manifest or {}).get("run_id", "")
+        if current_run and current_run != report_run:
+            return (f"PR {pr_id}: report.html was written against QA run "
+                    f"{report_run}, but the PR's current QA run is "
+                    f"{current_run}. Its scenario evidence is superseded — "
+                    f"re-run sign-off against the current run.")
     return None
 
 
@@ -684,7 +703,9 @@ def report_meta(pr_id: str) -> dict[str, str]:
     """``pm-signoff-*`` meta tags of the PR's ``report.html`` (or {})."""
     from pm_core.behavior_report import extract_signoff_meta
     from pm_core.paths import captures_root
-    croot = captures_root()
+    # Reader only: looking up a report must not create the captures tree
+    # (pr-1ae1d2d added ``create=False`` for exactly this).
+    croot = captures_root(create=False)
     if not croot:
         return {}
     return extract_signoff_meta(croot / pr_id / "report.html")

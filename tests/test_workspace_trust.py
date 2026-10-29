@@ -623,6 +623,7 @@ def test_zero_scenarios_skip_finalizer(tmp_path):
     state._error = "No parseable scenarios"
     with patch("pm_core.qa_loop._poll_tmux_verdicts"), \
          patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+         patch("pm_core.qa_loop._sync_captures_evidence"), \
          patch("pm_core.qa_loop._write_resume_file"), \
          patch("pm_core.qa_loop._run_qa_finalize_pane") as finalize:
         _execute_and_finalize(
