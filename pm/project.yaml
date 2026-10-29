@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T01:57:42.036131+00:00'
+  updated_at: '2026-10-29T02:26:25.723593+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40797,6 +40797,35 @@ prs:
       is not a pass for this integrated head: native review then QA must run on f92802e4.'
     created_at: '2026-10-29T01:57:41Z'
     last_edited: '2026-10-29T01:57:41Z'
+  - id: note-dd5c3d9
+    text: 'Review-loop be50 i1 fixes (on 565bf839). (1) base_check now reads pr["base_check"]
+      through a _check_record() helper: the four call sites used `pr.get("base_check")
+      or {}`, which raises AttributeError on a string/list from a hand-edited project.yaml.
+      gate() caught that and failed open (the integration check never ran, so a conflict
+      was never recorded) and impl_completion reported "completion check failed" on
+      every poll — a PR stuck with an open base return nobody could resolve. Non-dict
+      now reads as "no record", the same guard open_return/last_return already give
+      base_return. (2) _start_loop''s open-base-return refusal returned None instead
+      of the documented False. (3) Dropped a stale "tolerate a 2-tuple" comment in
+      _auto_review_idle_prs. Tests: real-git coverage for a corrupt base_check on
+      the conflict path and on the probe-failure recorder (both verified to fail without
+      the fix); the refused _start_loop now asserts `is False`. Spec R5 + test plan
+      items 21 + the QA-choke-point file attribution updated. Full suite: 4566 passed,
+      1 skipped, 13 failed — all pre-existing env (12x test_markdown_render needs
+      the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Non-blocking observations left for later: (a) the
+      documented gate self-heal can resolve an open return while a mid-turn impl session
+      has a clean tree, starting a reviewer beside it (impl_completion is the normal
+      resolver; unchanged); (b) the CLI auto-sequence path runs one ls-remote per
+      tick through impl_completion while a return is open and the impl is idle (the
+      TUI throttles at BASE_CHECK_POLL_SECONDS); (c) worst-case gate latency (fetch
+      waiting on the 300s repo lock plus a 300s `pm pr start`) can exceed the 360s
+      review child budget, reported as a timeout for a conflict that was recorded
+      (self-corrects on the next loop start: gate -> WAIT -> exit 3); (d) next_review_iteration
+      continues numbering against the loop''s max_iterations=50 safety cap, so a PR
+      with many prior iterations gets fewer per loop restart. (2026-10-29T03:20:00Z)'
+    created_at: '2026-10-29T02:26:03Z'
+    last_edited: '2026-10-29T02:26:25Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
