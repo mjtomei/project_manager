@@ -39616,7 +39616,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-29T02:22:07.424803+00:00'
+  updated_at: '2026-10-29T05:37:14.544880+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -39763,6 +39763,30 @@ prs:
       merge gate applies.'
     created_at: '2026-10-29T02:22:07Z'
     last_edited: '2026-10-29T02:22:07Z'
+  - id: note-38d2f15
+    text: 'QA S18 (restored target set carries its merge holds) PASS on integrated
+      head afea729a. Restore path verified end-to-end with a dedicated HOME + PM_TMUX_SOCKET:
+      saved {"auto_start":true,"targets":[{"pr_id":T,"wait_for_merge":true,...}]}
+      resumed as "Auto-start: resumed after merge restart → T"; status --json showed
+      mode targets with exactly runs {T, D} (no unrelated U, no out-of-scope S); D
+      ran impl→review(skip_qa)→sign-off and was HELD ("signed off (fresh SIGNOFF_MERGE);
+      waiting for manual merge (held by T)") for a 70 s idle with T still pending;
+      merging D by hand started T with no add/A/O; merging T by hand retired auto-start
+      ("Auto-start: target T merged — removed (all targets complete — auto-start OFF)",
+      status mode=off/targets=[]/runs=[]). Zero "signed off, merging" lines and zero
+      merge-* windows across the whole run; U stayed pending and S stayed sign_off
+      with its fresh SIGNOFF_MERGE unmerged. FIXTURE NOTE for future runs: the S18/S9-S12
+      fixture as written (local backend, PR branches with no commits) cannot reach
+      a fresh SIGNOFF_MERGE — the PR head equals base, the integration check records
+      status "in_base", and effective_verdict() coerces SIGNOFF_MERGE → SIGNOFF_BLOCKED
+      ("cannot approve without a conflict-free integration check (already contained
+      in master@…)"), so the PR lands at sign_off BLOCKED and the hold/merge story
+      cannot be exercised. Seed one commit on each PR branch (git checkout -B <branch>
+      master; commit a file) before starting the session; integration then reports
+      up_to_date with a candidate tree. Captures + verbatim evidence: /pm-captures/scenarios/18/.
+      (2026-10-29T05:40:00Z)'
+    created_at: '2026-10-29T05:37:14Z'
+    last_edited: '2026-10-29T05:37:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
