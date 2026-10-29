@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T18:41:44.369689+00:00'
+  updated_at: '2026-10-29T19:12:56.729278+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37336,6 +37336,38 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T18:41:44Z'
     last_edited: '2026-10-29T18:41:44Z'
+  - id: note-4403c75
+    text: 'Review loop ebd1 i15: one leftover in the kept tmux-recipe scope, the PR''s
+      own class (a step that cannot do its job must say so where it fails — and a
+      path that resolves against a different directory than the one the step checked).
+      Step 0 refuses a relative <capture-dir> because tmux runs the transcript pipe''s
+      command in the pm session''s directory, and step 2 — the paste-alone re-attach,
+      which already re-derives $TARGET and carries directory guards for that reason
+      — had no path guard. A relative path that exists beside the worker passed step
+      2''s writability check, the claim was taken on the worker''s canonical absolute
+      path, and the pipe''s command then ran in the session''s directory. Verified
+      live on tmux 3.2a with the recipe''s own step-2 block extracted verbatim and
+      a stub tmux that runs pipe-pane commands in the session''s cwd: pre-fix rc 0,
+      claim on …/worker/relcap, session''s shell "cannot create relcap/transcript.log:
+      Directory nonexistent" — no transcript anywhere, so step 5 reports "transcript.log
+      is empty — the pipe-pane stream never wrote to it" for a pipe that never had
+      a writable target; post-fix rc 1 with "relcap must be an absolute path (or start
+      with ~/) …" and no claim; the same block with an absolute path still exits 0,
+      claims the directory and writes the transcript. Fix: step 2 carries step 0''s
+      case guard (/* | "~"/*) before the claim, and step 0''s prose says step 2 refuses
+      it too. Tests: test_step_two_refuses_a_relative_capture_dir runs step 2 alone
+      from a worker directory holding relcap and requires the refusal, no claim and
+      no pipe attach (it fails against HEAD''s recipe, rc 0). Steps 4/5 and the render
+      blocks checked and dismissed: their capture-dir uses are worker-side redirects/reads,
+      so they agree with themselves. File 223 passed (was 222); related suites 175
+      passed; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect
+      tests/test_merge_publish.py --deselect tests/test_signoff_integration.py ->
+      4617 passed, 1 skipped, 92 deselected, 0 failed (404.55 s). Evidence: $(pm qa
+      captures-path pr-b19db15)/review-ebd1-i15/ (probe.log, mutation-check.log, suite.log,
+      README.md, scripts/). impl.md R56 + Files/verification/evidence and qa.md updated.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T19:12:56Z'
+    last_edited: '2026-10-29T19:12:56Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
