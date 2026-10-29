@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T17:07:02.909871+00:00'
+  updated_at: '2026-10-29T18:12:15.489800+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37264,6 +37264,45 @@ prs:
       change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T17:07:02Z'
     last_edited: '2026-10-29T17:07:02Z'
+  - id: note-1826462
+    text: 'Review loop ebd1 i13: one leftover in the kept recipe scope, the PR own
+      class (a step that cannot do its job must say so where it fails), plus two guards
+      that had no case. (1) Both recipes guard the capture directory by creating it,
+      and `mkdir -p` answers 0 for a directory that already exists and cannot be written,
+      so a mode-500 capture directory passed the guard and every write into it failed
+      inside a pane: the tmux capture block exits 1 at "recorder exited before it
+      drew — see the cast and …/recorder-stderr.log" and the CLI scaffold at "asciinema
+      wrote no cast — see …/recorder-stderr.log", each naming a file that cannot exist
+      (verified live on tmux 3.2a with the recipes own blocks extracted verbatim;
+      the directory stays empty in both). The tmux step 2 pasted on its own — the
+      "re-attach the transcript" paste — is the same hole for a path that is not there
+      at all: it exited 0 with the capture-directory claim on the session, a pipe
+      that wrote nothing and the claim left for the next attempt to clear by hand.
+      Fix: both recipes check `[ -w … ] && [ -x … ]` and stop with "capture directory
+      … cannot be written — check the path and its permissions" — tmux step 0 (before
+      the shared `pm-recorder` clear) and step 2 (before the claim), the CLI preamble
+      and scaffold (before the shared `rec` clear) — so a refused block makes no tmux
+      call at all; the `claim_dir` fallback comment now says it covers only a directory
+      that disappears between the guard and the `cd`. (2) The CLI readiness timeout
+      names `recorder-pane.log` and nothing required the file: deleting the `capture-pane`
+      line left the file green (211 passed) while the message went on naming a file
+      nothing writes — `test_cli_recorder_that_never_writes_a_cast_fails` now requires
+      it to exist and hold what the recorder drew, as the tmux readiness-timeout case
+      already did. (3) Both absolute-path guards accept a `~/…` capture directory
+      (the prose says so, and step 2 canonical comparison exists for it) but every
+      case used an absolute path: narrowing the pattern to `/*` left the file green
+      and refused a documented-valid path — `test_a_tilde_capture_dir_is_accepted`
+      runs the tmux step-0 block and the CLI preamble with `~/cap`. Tests: file 218
+      passed (was 211); the five new guard cases fail against HEAD recipes, and mutation
+      K (drop the CLI readiness pane save) and mutation A (narrow both guards to `/*`)
+      each fail exactly the case that names them. Full suite `env -u PM_HOST_HOME
+      PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py` -> 4612 passed, 1 skipped, 92 deselected,
+      0 failed (401.91 s). Evidence: $(pm qa captures-path pr-b19db15)/review-ebd1-i13/
+      (probe.log, mutation-check.log, suite.log, README.md, scripts/). No pm_core/
+      change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T18:12:15Z'
+    last_edited: '2026-10-29T18:12:15Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
