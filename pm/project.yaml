@@ -39616,7 +39616,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/267
   gh_pr_number: 267
   created_at: '2026-10-27T19:03:40.643246+00:00'
-  updated_at: '2026-10-29T05:37:14.544880+00:00'
+  updated_at: '2026-10-29T05:51:47.604559+00:00'
   started_at: '2026-10-27T19:04:56.616056+00:00'
   reviewed_at: null
   merged_at: null
@@ -39787,6 +39787,32 @@ prs:
       (2026-10-29T05:40:00Z)'
     created_at: '2026-10-29T05:37:14Z'
     last_edited: '2026-10-29T05:37:14Z'
+  - id: note-0746fe2
+    text: 'QA S18 RE-RUN (supersedes my previous S18 note): re-executed the whole
+      scenario from a fresh fixture because the first run substituted three observations.
+      All specified Thens now observed directly. (1) `pm pr merge pr-cf0dfa5` → `PR
+      pr-cf0dfa5 marked as merged (newly ready: pr-db0ad09).` verbatim, and the very
+      next poll (05:47:39, one sample after the merge) of `pm pr show pr-db0ad09`
+      printed `Status: in_progress` (sample 1 one second earlier was `Status: pending`;
+      8 s later `in_review`), with the `pr-db0ad09` window present and no `merge-*`
+      window. (2) The text form `◎ pr-db0ad09 [wait-for-merge] … └ pr-cf0dfa5 [wait-for-merge
+      ← pr-db0ad09] …` was captured on the RESTORED pair while D was held and T still
+      pending — not a substitute pair. (3) The TUI capture now includes the recipe-mandated
+      `transcript.log` via `pipe-pane` on `$S:0.0`; it contains `resumed after merge
+      restart → pr-db0ad09`, both hold sentences, `starting pr-db0ad09` and `all targets
+      complete`. Rest of the story unchanged and re-verified: restore resumed as T
+      only (runs exactly {T, D}); D signed off and held (`✓ … waiting for manual merge
+      (wait-for-merge: pr-db0ad09) — press g`) through a 70 s idle with T pending;
+      merging T retired auto-start (`PR pr-db0ad09 marked as merged.`, `Auto-start:
+      off` / `No auto-start targets (auto-start off).`, json mode=off/targets=[]/runs=[],
+      `Auto-start: target pr-db0ad09 merged — removed (all targets complete — auto-start
+      OFF)` once). Zero `signed off, merging` lines and zero merge windows across
+      the run; U stayed pending and S stayed sign_off with its fresh SIGNOFF_MERGE
+      unmerged. Captures: /pm-captures/scenarios/18/{restore-merge-holds,cli-merge-d-then-t-starts,cli-merge-target-then-status,evidence.md}.
+      Fixture caveat unchanged: seed one commit per PR branch, else the local backend
+      yields integration `in_base` and coerces SIGNOFF_MERGE → SIGNOFF_BLOCKED. (2026-10-29T05:55:00Z)'
+    created_at: '2026-10-29T05:51:47Z'
+    last_edited: '2026-10-29T05:51:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
