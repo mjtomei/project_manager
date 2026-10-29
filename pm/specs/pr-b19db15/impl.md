@@ -1733,4 +1733,9 @@ R27. **A port check that cannot tell a free port from a taken one, a
   pass; related suites (`test_qa_artifact_web_ui_recording`,
   `test_qa_instructions`, `test_qa_loop`) 175 pass; full suite 4008 passed, 1
   skipped, 92 deselected (`test_merge_publish`/`test_signoff_integration`).
-  No `pm_core/` change; the dropped helper/prompt/verifier work stays dropped.
+  Evidence: `$(pm qa captures-path pr-b19db15)/review-9265-i4/`
+  (`probe-prefix.log` with the HEAD-recipe observations above,
+  `probe-postfix.log` with the same cases re-run after the fix, and
+  `scripts/` — the block extractor, the three probe drivers and the stub
+  `pm`). No `pm_core/` change; the dropped helper/prompt/verifier work stays
+  dropped.
