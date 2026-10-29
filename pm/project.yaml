@@ -43650,3 +43650,41 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-2a541db
+  plan: bugs
+  title: 'Bug: QA scenario relaunch creates a duplicate qa-<pr>-sN window and returns
+    a pane from the old one'
+  branch: pm/pr-2a541db-bug-qa-scenario-relaunch-creates-a-duplicate-qa-pr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tmux.py new_window_get_pane (232-270), used by pm_core/qa_loop.py
+    _relaunch_scenario_window (3112).
+
+
+    new_window_get_pane always runs `tmux new-window`, then resolves the window it
+    just created with find_window_by_name(), which returns the FIRST window carrying
+    that name. When a window with that name already exists it therefore (a) leaves
+    a duplicate window behind and (b) returns a pane id belonging to the OLD window.
+
+
+    Repro (QA scenario 42, fake Claude): a QA scenario whose PASS is FLAGGED while
+    the scenario window is still alive (its concretizer + verifier panes keep it up)
+    relaunches the worker into the same window name. Observed live: windows `qa-pr-95325c4-s2`
+    existed twice (indices 3 and 4), and the log line `new_window_get_pane: ... name=qa-pr-95325c4-s2
+    id=@5 index=3` shows the OLD window being resolved, so `scenario.pane_id` was
+    set to the old window first pane (the concretizer), not the relaunched worker
+    pane. Verdicts still arrived because polling is hook/transcript-driven, so the
+    run looked correct apart from the stray window and the wrong follow-up target.
+
+
+    Suggested fix: have new-window return its own pane id (`new-window -P -F "#{pane_id}"`)
+    instead of re-resolving by name.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T15:27:09.967003+00:00'
+  updated_at: '2026-10-29T15:27:09.967003+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
