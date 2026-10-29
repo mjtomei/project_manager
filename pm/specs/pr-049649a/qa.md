@@ -24,7 +24,9 @@ internals.
 - **Watcher**: the auto-start watcher's pane, and the prompt pm hands it
   (`<project>/pm/prompts/pm_prompt_*.txt`, referenced by the pane's command).
 - **Status surfaces**: `pm autostart status` / `list` text and `--json`
-  (`mode` is only `off` or `targets`), plus the runs popup.
+  (`mode` is only `off` or `targets`; `--json` always carries `ok` — true on
+  success, false with `error`/`message` on an owner-side failure — matching
+  add/remove/clear/list), plus the runs popup.
 
 ## Requirements
 
@@ -237,5 +239,9 @@ project), stays off, and A's running auto-start is unaffected.
 - **Watcher prompt with no targets** — explicit observation-only block that
   states it overrides the generic fix instructions; an omitted scope argument
   keeps the legacy prompt unchanged.
+- **`status --json` shape** — the `pm.autostart.status/1` document is
+  unchanged; `ok` is an additive top-level field (note-33a61cb) so a captured
+  status snapshot is self-describing. A status reply with `ok: false` is an
+  owner-side failure, not an empty success.
 
 No **[UNRESOLVED]** ambiguities.
