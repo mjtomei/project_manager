@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T01:09:14.640293+00:00'
+  updated_at: '2026-10-29T01:12:45.763734+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26343,6 +26343,28 @@ prs:
       PATH (use /tmp/ffmpeg-7.0.2-arm64-static).'
     created_at: '2026-10-29T01:09:14Z'
     last_edited: '2026-10-29T01:09:14Z'
+  - id: note-4eddcc1
+    text: 'QA S30 (one run per PR): found+fixed 57773bbf — a QA run whose window was
+      replaced by "pr qa fresh" (z t) re-resolved the QA window by NAME in Phase 2
+      (_ensure_qa_main_pane -> find_window_by_name) and adopted the replacement run
+      window, splitting its planner pane: the live run window ended with 3 panes (replacement
+      planner + the dead run status dashboard showing "No parseable scenarios" + the
+      replacement own dashboard). run_qa_sync now adopts the window only when this
+      run own planner pane is still alive; a vanished window with the name free is
+      still recreated (execution-only restart). Tests: TestDeadRunDoesNotAdoptReplacementWindow
+      (replacement case fails pre-fix). Verified live pre/post (captures /pm-captures/scenarios/30/{pre-fix,post-fix}).
+      Other stories passed: TUI "pr qa" focuses the detached run window (no second
+      run, one planning phase); killed driver ends on pane-gone with its own status
+      in its own loop dir; finished detached run held by auto-sequence (paused: input_required)
+      with picker [done INPUT_REQUIRED]; concurrent E/F kept their own outcomes (INPUT_REQUIRED
+      vs PASS) with per-PR windows and status dirs, both PRs stay qa. Caveats: (1)
+      a planner-failure run logs no "QA complete for <pr>" line (returns before _execute_and_finalize)
+      — the picker/status pane carry the verdict, as story 3 states; (2) a no-plan
+      run creates no qa-<pr>-s0 window; (3) fixture note: a test project with an empty
+      git repo cannot pass the happy-path planner handoff ("PR branch ... not found
+      in workdir") — commit master before a PASS-path QA run.'
+    created_at: '2026-10-29T01:12:45Z'
+    last_edited: '2026-10-29T01:12:45Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
