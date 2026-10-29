@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T03:06:31.453614+00:00'
+  updated_at: '2026-10-29T05:15:00.036174+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40847,6 +40847,34 @@ prs:
       deselected — needs PM_HOST_HOME unset).'
     created_at: '2026-10-29T03:06:31Z'
     last_edited: '2026-10-29T03:06:31Z'
+  - id: note-939f064
+    text: 'QA S2 refiner (2026-10-29), verified live in an isolated fixture: two environment
+      traps. (1) The container git wrapper (~/.local/bin/git) proxies fetch/ls-remote,
+      so the pre-review gate''s fetch of the local test repo fails -> RETRY (fail
+      open) -> the reviewer launches and no base return is recorded. Put /usr/bin
+      ahead of ~/.local/bin on PATH for the TUI and every pm command (fake-claude
+      and claude still resolve from ~/.local/bin). (2) A fake-claude impl pane refreshes
+      its idle_prompt hook every 2s, so base_check.impl_completion''s IDLE_SETTLE_SECONDS
+      never elapses and the TUI auto-handoff cannot resolve a base return in a fake
+      fixture; resolve it with the documented manual `d` self-heal (gate re-checks
+      a quiescent tree) and then `zz d` to restart the loop. Refined S2 steps carry
+      both.'
+    created_at: '2026-10-29T04:39:05Z'
+    last_edited: '2026-10-29T04:39:05Z'
+  - id: note-2abda19
+    text: 'QA S2 incidental fix: the plain-`d` base-return refusal was swallowed by
+      a sticky log message. `review_pr` runs `pm pr review` through `_run_command_async`,
+      which logged the child stderr as a plain message; the loop-done message is sticky
+      for 10s, so pressing `d` right after a bounce showed nothing (TUI debug log:
+      "hidden by sticky message") even though the PR correctly stayed in_progress
+      with no reviewer and no iteration. The sibling `zz d` refusal in `review_loop_ui._start_loop`
+      already forces. Added `force_errors` to `run_command`/`_run_command_async`,
+      passed from `review_pr`; scoped to the review action so other commands keep
+      the existing policy. Regression tests: test_command_error_visible_during_sticky
+      and test_command_error_still_yields_to_sticky_by_default (both verified to fail
+      without the fix). Captures: /pm-captures/scenarios/2/{pre,post}-fix/.'
+    created_at: '2026-10-29T05:14:59Z'
+    last_edited: '2026-10-29T05:14:59Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
