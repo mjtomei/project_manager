@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-28T22:54:17.251858+00:00'
+  updated_at: '2026-10-29T00:43:44.481309+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39747,6 +39747,42 @@ prs:
       Specs updated (impl R6/R9-14, qa edge cases). Full suite: 4371 passed, 1 skipped.'
     created_at: '2026-10-28T22:54:17Z'
     last_edited: '2026-10-28T22:54:17Z'
+  - id: note-037ab6d
+    text: 'review-loop 4f1e i6 (d4ff8b92): fixed the last hand-edited value interpolated
+      into a command the routed step runs. The sign-off return''s "Reconcile it in
+      this branch" hint fell back to `integration.base_branch` for its `git merge
+      <ref>` when the record cannot name a base revision, so a null rendered the literal
+      `git merge None` and a mapping its repr — `base_branch` is hand-editable project.yaml
+      state, and the block''s own header already read it through `_text`. All three
+      sites (the command plus the two prose "your usual diff against `<base>`" hints)
+      now go through `_text` (`<base>` / "the base"), and the conflict-to-impl coercion
+      reason (recorded on the PR, carried into the return text) renders `?@<sha>`.
+      Test: test_the_reconcile_command_names_a_real_base_or_a_placeholder — fails
+      on the pre-fix code.
+
+
+      Independent checks this iteration: 3k malformed-state trials across summary/unresolved_paths/contained_base/compact/_resolution_digest/valid_for/format_signoff_return/_signoff_evidence_lines/effective_verdict/approval_justification_problem/merge_gate_refusal,
+      plus 2.5k over the sign-off prompt and invalidation blocks — 0 exceptions; an
+      800-trial resolver fuzz against an independently written leaf-level preservation
+      checker (755 resolved, 45 refused, 0 lost changes, 0 nondeterministic outputs);
+      the real 2 MB project.yaml still round-trips byte-identically (0.94 s). Affected
+      modules: 510 passed. Full suite on the pre-commit tree: 4373 passed, 1 skipped
+      with test_push_proxy::TestPushProxyLifecycle::test_get_proxy_socket_path deselected
+      — it fails only under the current heavy machine load and passes in isolation.
+
+
+      Base has moved again: remote master is now 4a74d880 (+22k lines vs 89e3c501,
+      including a new pm_core/tui_pidfile.py and signoff_ui/qa_loop_ui/review_loop_ui
+      changes), and the read-only integration check reports conflicts in pm_core/signoff.py,
+      pm_core/tui/app.py and tests/test_cli_helpers.py besides pm/project.yaml. Those
+      are genuine code conflicts, so sign-off will route SIGNOFF_IMPL and impl must
+      merge that base; a review iteration did not merge it. Noted, not fixed: the
+      pre-existing unguarded `data.get("project", {}).get(...)` readers in prompt_gen/cli/pr.py
+      (already filed as pr-852dde2), and a workdir deleted between run_check''s `is_dir()`
+      guard and its first git call can still raise NotADirectoryError out of `pm pr
+      signoff integrate` (a race, not hand-edited state).'
+    created_at: '2026-10-29T00:43:44Z'
+    last_edited: '2026-10-29T00:43:44Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
