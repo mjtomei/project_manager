@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T04:39:59.484026+00:00'
+  updated_at: '2026-10-29T05:54:41.497287+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38048,6 +38048,25 @@ prs:
       captures unchanged and re-run (post-fix repro reports all three symptoms fixed).'
     created_at: '2026-10-29T04:39:59Z'
     last_edited: '2026-10-29T04:39:59Z'
+  - id: note-68214b0
+    text: 'QA S9 (2026-10-29) PASS, all three stories, on integrated HEAD eb02bbbe
+      in a scenario-private env (own HOME/TMUX_TMPDIR, fake-Claude). One auto-start
+      run (autostart-pr-a711a5b-1efab848): impl ca8d118f -> review f6357633 -> SIGNOFF_IMPL
+      router dec2138f -> return 05:32:18 (archive impl ca8d118f, rework 96946ea7,
+      canonical signoff-*.jsonl+.head removed) -> rework -> review 5d2a2806 -> SIGNOFF_MERGE
+      router 514c04e3 -> merged 05:34:18, auto-start OFF. End state: impl/signoff
+      canonicals frozen to regular files, 2 impl + 2 review + 2 signoff archive entries
+      (one per sid), canonical signoff holds SIGNOFF_MERGE only, exactly one "routed
+      SIGNOFF_IMPL", 10 jsonl files all valid, no merge-*.jsonl, 0 ERROR lines. Tests:
+      35/35 pass at HEAD, 35/35 fail at 3699f71a. Story-3 text drift (not a code defect):
+      the scenario lists test_disable_skips_a_running_review_loop among the "behavioural,
+      no missing-symbol" pre-fix failures, but at this HEAD it fails pre-fix with
+      AttributeError (pm_core.review_loop has no iteration_transcript); the actual
+      assertion failures are 8 other tests (see /pm-captures/scenarios/9/tests/manifest.md).
+      Also, pr-9966785 did NOT reproduce: review loop 2 started 5s after rework idle,
+      no "impl_idle" line. Captures: /pm-captures/scenarios/9/{story12,verify,tests}/.'
+    created_at: '2026-10-29T05:54:41Z'
+    last_edited: '2026-10-29T05:54:41Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
@@ -40952,7 +40971,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T19:49:24.430536+00:00'
-  updated_at: '2026-10-28T19:49:24.430536+00:00'
+  updated_at: '2026-10-29T05:55:09.883859+00:00'
+  notes:
+  - id: note-a605f46
+    text: 'QA S9 of pr-9ee4d64 (2026-10-29, integrated HEAD eb02bbbe): the reported
+      symptom did not reproduce. Timeline: rework impl went idle 05:33:48 -> review
+      loop 2 logged "Review loop started for pr-a711a5b loop=5d2a2806" at 05:33:53
+      (5s later); zero "impl_idle" lines in the log; the run merged at 05:34:18. Earlier
+      QA on the pre-integration branch saw a ~3-4 min "impl_idle: awaiting sign-off
+      rework launch" stall after a SIGNOFF_IMPL return. Worth re-checking whether
+      the master integration already fixed the stale signoff_return.awaiting, or whether
+      this run just avoided the window.'
+    created_at: '2026-10-29T05:55:09Z'
+    last_edited: '2026-10-29T05:55:09Z'
 - id: pr-e040aeb
   plan: bugs
   title: 'Bug: failed review iteration launch strands an autostart target until a
