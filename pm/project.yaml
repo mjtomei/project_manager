@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T04:12:07.834657+00:00'
+  updated_at: '2026-10-29T04:37:23.506467+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4747,6 +4747,32 @@ prs:
       <name>` only as an unreachable last resort. (2026-10-29)'
     created_at: '2026-10-29T04:12:07Z'
     last_edited: '2026-10-29T04:12:07Z'
+  - id: note-6b3b092
+    text: 'Review loop d1c0 i5 (no requirement changes; full suite 4570 passed / 1
+      skipped). Verification pass over the integrated head. (1) server_alive()''s
+      "cannot probe" contract — an unprobeable socket counts as alive so pm session
+      kill never unlinks on a guess, the one branch where being wrong destroys state
+      — had no test; added TestServerAlive (live vs stale by returncode, plus OSError
+      -> alive). (2) tmux.socket_path_from_tmux_env()''s call-time SHARED_SOCKET_DIR
+      import looked like an oversight but is load-bearing (a module-level import would
+      freeze the Path, so tests and the smoke script could no longer re-point it);
+      now commented. (3) detach_current_client()''s failure comment described a caller
+      that does not exist — quit_app uses the result only for logging; corrected.
+      (4) The private-socket ownership refusal intentionally precedes legacy detection
+      (fail closed on a squatted socket even though the legacy path would not connect
+      to it); documented. Re-ran pm/specs/pr-073910f/session_start_smoke.py end to
+      end on a disposable socket (private server, session env, global env, hooks correct;
+      default server untouched) and verified pm session list on the real, empty socket
+      dir. Residual notes unchanged and non-blocking: uid ownership check only on
+      pm session start; /tmp/pm-sessions literal duplicated in wrapper._mark_tmux_socket
+      and qa_status._tmux_argv by design; pane ids no longer globally unique but always
+      resolved with their session/socket; R5b relies on the pane registry; the TUI
+      connect screen keeps a bare `tmux attach -t <name>` only as an unreachable last
+      resort. Cross-PR note: per-plan sessions (pr-341100c) will need a distinct session
+      tag per plan, since the socket is derived from the tag, and `pm session` has
+      no --session flag today.'
+    created_at: '2026-10-29T04:37:23Z'
+    last_edited: '2026-10-29T04:37:23Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
