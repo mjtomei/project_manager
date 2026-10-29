@@ -36234,7 +36234,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-29T04:11:48.416383+00:00'
+  updated_at: '2026-10-29T04:29:13.164408+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -36626,6 +36626,27 @@ prs:
       Captures: /pm-captures/scenarios/27/. No product defects found.'
     created_at: '2026-10-29T04:11:48Z'
     last_edited: '2026-10-29T04:11:48Z'
+  - id: note-0bf19f5
+    text: 'QA S26 (stale-refresh smoke, driven from the TUI): PASS on all six shapes.
+      Behind-only workdir -> "Fast-forwarded ... c99eb0e8 -> ccb3118c" before "Plan:
+      1 scenario(s)", planner and qa_resume planning_base/planner_head and the scenario
+      worktree all at the upstream head, run PASS. Level workdir -> no-op sync (same
+      sha both sides), no ff/route/hold, no qa_branch_sync record. App-code import
+      -> ff then route to review, no qa-* window, NEEDS_WORK with scenarios [], signoff
+      gains invalidated/invalidated_at, workdir at APP_HEAD. Local-only origin ->
+      no [qa_loop] QA sync line at all, PASS. Upstream branch deleted -> "has no branch",
+      plans, republishes at the local head, PASS. Plain-directory workdir -> only
+      "QA sync: <branch> not found", no checkout hold, no scenario window, stops at
+      the planner handoff as INPUT_REQUIRED. Captures: /pm-captures/scenarios/26/
+      (per-story cast+mp4+evidence+manifest); tests/test_qa_branch_sync.py 34 passed.
+      Fixture gotcha for the next run: on a pm PR workdir `git remote set-url origin
+      <plain dir>` rewrites only the FETCH url — the push urls (project repo + file://
+      upstream) persist — so check `git remote -v` when building the local-only shape
+      (the fetch url alone is enough for resolve_real_origin to return None). Cosmetic,
+      not filed: with a non-git workdir the planner line reads "reads <branch> at
+      ?". (2026-10-29T04:30:00Z)'
+    created_at: '2026-10-29T04:29:13Z'
+    last_edited: '2026-10-29T04:29:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
