@@ -1,9 +1,14 @@
 # pr-62ad13d — QA spec: `pm pr close` is a non-destructive lifecycle action
 
 Implementation spec: `pm/specs/pr-62ad13d/impl.md`.
-Regression suite: `tests/test_pr_close.py` (44 tests) plus
+Regression suite: `tests/test_pr_close.py` (62 tests) plus
 `tests/test_fake_github.py`, `tests/test_cli_helpers.py`,
-`tests/test_store_validation.py`.
+`tests/test_store_validation.py`, `tests/test_watcher_loop.py`.
+
+Spec last synced against head `292c738d` (2026-10-29), after the
+review iterations that added the QA/sign-off reopen guards, the watcher
+prompt's `closed` lifecycle line, the `--remove` dependent wording, and the
+`closed_at` centralisation in `_record_status_timestamp`.
 
 Change under test: `pm_core/cli/pr.py:pr_close()` (with
 `pm_core/cli/helpers.py:_record_status_timestamp`,
@@ -104,13 +109,22 @@ WHEN the user closes it,
 THEN a warning names the dependent PR(s) and states they remain blocked, and
 offers the two ways out (reopen, or drop the dependency); the dependent's
 status and `depends_on` are unchanged and it does not become "ready".
-WHEN the user then tries to start, review, sign off, merge or auto-advance the
-closed PR,
+WHEN the user then tries to start, review, run QA, sign off, merge or
+auto-advance the closed PR,
 THEN each refuses (or, for auto-advance, reports `closed` and stops) with a
 message naming the concrete reopen command `pm pr edit <id> --status pending`,
-and nothing is launched or published.
+and nothing is launched or published. All five refusals share one sentence
+(`helpers._closed_reopen_hint`), so a drift between them is a defect.
+WHEN a watcher/auto-start session is launched against the project,
+THEN the lifecycle description it reads says `closed` is retained history,
+terminal like `merged`, never satisfies a dependency, and must not be merged
+to unblock dependents.
 WHEN the user tries to re-add a PR with the same title and description,
 THEN the duplicate message names the closed status and the reopen command.
+WHEN the user removes the closed record with `--remove` and it had dependents,
+THEN the warning says the dependents depend on the *removed* record and are
+blocked without it (not that a closed status blocks them), and points at
+dropping the dependency (re-adding mints a new id).
 
 ### R11 — Reopen and re-close maintain one closure time; merges are protected
 GIVEN a closed PR,
@@ -122,8 +136,10 @@ GIVEN a PR recorded as `merged`,
 WHEN the user tries to close it,
 THEN the close is refused and the message points at `--remove`; with
 `--remove` the registry entry is deleted while the branch and workdir are
-kept and the output describes the GitHub PR as left unchanged rather than
-asserting a GitHub state.
+kept, no GitHub close is attempted, and the output describes the GitHub PR as
+left unchanged ("the PR is recorded as merged") rather than asserting a
+GitHub state. With `--remove --keep-github` the keep-github sentence takes
+precedence and never says "open".
 
 ### R12 — GitHub sync never reopens a locally closed or merged record
 GIVEN a PR closed locally with `--keep-github` while its GitHub PR is still
@@ -131,10 +147,16 @@ open,
 WHEN the user runs `pm pr sync-github` (or the TUI performs its startup
 sync),
 THEN the local status stays `closed` and the closure timestamp survives; a
-merge newly discovered on GitHub still finalizes the record as `merged`.
+merge newly discovered on GitHub still finalizes the record as `merged`
+(`merged_at` recorded and the now-stale `closed_at` dropped).
 GIVEN a locally `merged` record whose GitHub PR is open or closed,
 WHEN the user runs `pm pr sync-github`,
 THEN the record stays `merged` with its merge evidence intact.
+GIVEN a `closed` record and a GitHub OPEN state discovered while the command
+(or the TUI startup sync) is mid-round-trip,
+WHEN the sync applies its results under the store lock,
+THEN the concurrent closure wins: the record is not rewritten to `in_review`,
+and a merge discovered in the same round still finalizes it.
 
 ### R13 — Cleanup is separate and explicit
 GIVEN a PR just closed by the user,
@@ -146,6 +168,13 @@ and the closure status/notes are untouched.
 GIVEN exactly one terminal (merged or closed) PR with an existing workdir,
 WHEN the user runs `pm pr cleanup` with no id,
 THEN it auto-selects that PR (instead of answering "No merged PRs …").
+GIVEN several terminal PRs with workdirs,
+WHEN the user runs `pm pr cleanup` with no id,
+THEN it lists them and asks for an id rather than guessing.
+GIVEN a hand-edited `project.yaml` entry with no `id`,
+WHEN the user runs `pm pr cleanup --all` or `--prune`,
+THEN the malformed entry is skipped (no traceback, and `--all` does not fail
+after deleting a workdir) and the valid entries are still cleaned.
 
 ### R14 — A GitHub failure never triggers a destructive local fallback
 GIVEN a GitHub-backed PR where the `gh` close call fails (scripted failure,
@@ -162,16 +191,28 @@ THEN the TUI drops it from the default tree view (it is reachable when the
 status filter is cycled to closed), the active marker moves off it, the live
 window is still alive, and the workdir still exists. Only the explicit
 `pm pr cleanup --resources <id>` removes the live window.
+Note (known gap, filed as pr-a3b86b7): `closed` has no dedicated show/hide
+toggle like `merged`; the status-filter cycle is the only way to reveal it.
+QA records this if observed but does not fail this PR for it.
 
 ### R16 — Concurrent close keeps one consistent history
 GIVEN one project and two or more actors (separate processes/containers)
 operating at once,
 WHEN two closes race, or a close races `pm pr close --remove`, or a close
-races `pm pr sync-github` (GitHub OPEN), or a close races `pm pr start`,
+races `pm pr sync-github` (GitHub OPEN), a close races `pm pr start` or
+`pm pr review`, a close races a reopen (`pm pr edit --status pending`), or a
+close races the explicit `pm pr cleanup` / `pm pr cleanup --all`,
 THEN every invocation ends without a traceback, the final registry state is
 one of the legal outcomes (closed with history intact, or removed once — never
-a half-written entry), a closed record is never resurrected to an active
-status or re-pointed as active, and the workdir is never deleted by a close.
+a half-written entry, and never `pending` while still carrying `closed_at`),
+a closed record is never resurrected to an active status or re-pointed as
+active, and the workdir is never deleted by a close (only by the explicit
+cleanup that ran alongside it).
+GIVEN another process holds the `project.yaml` store lock longer than the
+close's 2-second timeout,
+WHEN the user closes a PR,
+THEN the command fails with a clear lock-timeout message naming the lock file
+and no partial entry is written; retrying after the holder exits succeeds.
 
 ## 2. Setup (cross-cutting, described as user steps)
 
@@ -268,6 +309,14 @@ sync overwrite, destructive fallback, locking).
   file; a scenario that races close with sync should assert product invariants
   (registry state, workdir, branch) and, if the stand-in's own state file is
   inconsistent, re-seed and re-run before reporting anything.
+- **Prior QA run** (2026-10-29, head `b99217f8`): scenarios 1-9 ran; 1, 2,
+  4-9 PASS and scenario 3 NEEDS_WORK because `pm pr review`'s refusal omitted
+  the reopen command. That was fixed in `b99217f8` and re-verified. The head
+  has since advanced to `292c738d` (QA/sign-off reopen guards via one shared
+  helper, the watcher prompt's `closed` lifecycle line, `--remove` dependent
+  wording for merged records, `closed_at` centralised in
+  `_record_status_timestamp`, `pm pr cleanup --all`/`--prune` tolerating
+  malformed entries). Prior evidence is not a pass for the current head.
 - No **[UNRESOLVED]** ambiguities: the user clarification of 2026-10-28
   (retain YAML entry, remote branch, local workdir; no automatic cleanup)
   settles the open questions this spec would otherwise raise.
