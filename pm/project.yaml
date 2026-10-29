@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T02:30:04.274708+00:00'
+  updated_at: '2026-10-29T02:50:42.158063+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14593,6 +14593,26 @@ prs:
       of the PR re-reviewed as-is — no other changes. (2026-10-29)'
     created_at: '2026-10-29T02:30:04Z'
     last_edited: '2026-10-29T02:30:04Z'
+  - id: note-56f7f90
+    text: 'Review 8820 i2: (1) Added test_close_does_not_tear_down_live_resources
+      — the default close and --remove never reach pr_cleanup.cleanup_pr_resources,
+      tmux.kill_window, helpers.kill_pr_windows or container.cleanup_pr_containers
+      (spies verified to fire on a direct call, so it is not vacuous), pinning A4/R4
+      which the cross-PR note to pr-3d1fa55/#217 is about. (2) Added test_close_preserves_merge_and_signoff_evidence:
+      a real signoff record (verdict/sha/report_hash/integration), a merge_integrity
+      finding, spec_pending and the qa state survive close verbatim. (3) The watcher
+      prompt lifecycle list now describes `closed` (retained history, terminal like
+      merged, never satisfies a dependency, reopen or drop the dependency) so a watcher
+      session cannot read a retired PR as one to merge. Spec synced (R11 items 39-41,
+      §5). Full suite 4543 passed, 1 skipped (/pm-captures/review-8820-i2/full-suite.log).
+      No code behavior changed; the rest of the PR re-reviewed as-is. Two items from
+      i11/i12 remain for the user: (a) A4 cross-PR — pr-3d1fa55/#217 _reclaim_terminal_pr_windows
+      would reclaim live windows/containers for `closed` PRs on every 5-minute sync;
+      the note there asks #217 to limit the sweep to `merged`; (b) pm/plans/plan-a35369f.md
+      still carries the stale --delete-branch premise (marked with a note bullet).
+      (2026-10-29)'
+    created_at: '2026-10-29T02:50:42Z'
+    last_edited: '2026-10-29T02:50:42Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
