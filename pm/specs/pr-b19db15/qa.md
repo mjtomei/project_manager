@@ -25,9 +25,10 @@ recording-recipe bugs that any worker following the recipe hits:
   in the tmux recipe the target session is a witness only while it lives);
 - the CLI no-TTY scaffold writes the cast where the render reads it;
 - the tmux pm-session poll is bounded and waits on the computed session
-  (`tmux has-session -t "$TARGET"`), not on any `pm-` session (which would
-  also match the recipe's own `pm-recorder`); the web-UI `until curl` poll is
-  bounded, bounds each attempt, and stops the server it started;
+  (`tmux has-session -t "=$TARGET"`, exact since R37), not on any `pm-`
+  session (which would also match the recipe's own `pm-recorder`); the
+  web-UI `until curl` poll is bounded, bounds each attempt, and stops the
+  server it started;
 - the render steps delete this run's outputs before rendering and check the
   mp4 afterwards, so a failed render ends with no video and a clear error
   instead of the previous run's mp4 (and the CLI scaffold documents the
@@ -89,6 +90,17 @@ recording-recipe bugs that any worker following the recipe hits:
   into `/scenarios/1/web-ui` at the filesystem root, which `mkdir -p` creates
   when the worker is root — the capture then lands outside the per-PR
   captures directory while every later check passes on those files.
+- a renderer that writes nothing is not an encoder failure (review loop 7c9c
+  i11): both recording recipes' render blocks check the cast before `agg` and
+  the mp4 after `ffmpeg`, but not the gif between them, so an `agg` that
+  exits 0 without writing its output reached ffmpeg as a missing input and
+  the run said "ffmpeg failed on the gif" — the worker is sent to the encoder
+  for a renderer that wrote nothing (verified with the recipes' own blocks
+  and a stub `agg`; real ffmpeg's "No such file or directory" was the only
+  hint). The gif is checked (`[ -s "$cast.gif" ]`) before the encode and the
+  failure names `agg`. The re-QA re-checks it in S21/S22: with an `agg` that
+  exits 0 and writes no gif, the render must say "agg wrote no gif" and must
+  not blame ffmpeg.
 - a completion check that cannot tell a finished recording from a dead one
   (review loop 7c9c i5): the tmux stop step's failed detach is a hard failure
   only while the pm session it was attaching to is still there — a recorder

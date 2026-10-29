@@ -1237,6 +1237,48 @@ def test_render_names_a_missing_encoder(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path):
+    """A gif that was never written is not an ffmpeg failure.
+
+    ``agg``'s own exit status is the handle for a render that failed, but a
+    renderer can also report success and write nothing — the shape the final
+    ``test -s`` on the mp4 guards for the encoder. The gif is the *next*
+    stage's input, so without its own check that case surfaces as "ffmpeg
+    failed on the gif" and sends the worker to the encoder for a renderer
+    that wrote nothing (verified with the recipes' own blocks and a stub
+    ``agg`` that exits 0 without writing: both printed exactly that). The
+    same misdiagnosis as reporting a missing cast as an ``agg`` problem, and
+    as the web-UI finalize step's missing webm (R19), one stage over.
+    """
+    # Model ffmpeg's real contract: it fails on a missing input. The default
+    # stub writes its output unconditionally, which would hide the
+    # misdiagnosis behind a successful-looking encode.
+    ffmpeg_body = (
+        'in=; out=\n'
+        'while [ $# -gt 0 ]; do\n'
+        '  case "$1" in -i) in=$2; shift 2 ;; *) out=$1; shift ;; esac\n'
+        'done\n'
+        '[ -f "$in" ] || { echo "ffmpeg: $in: No such file or directory" >&2; '
+        'exit 1; }\n'
+        'printf mp4 > "$out"\n')
+    r, mp4, gif = _run_render(name, tmp_path, agg_body="exit 0\n",
+                              ffmpeg_body=ffmpeg_body)
+
+    assert r.returncode != 0, (
+        f"{name}: a render whose renderer wrote no gif was reported as a "
+        "successful render")
+    assert "render produced no mp4" in r.stderr, r.stderr
+    assert "agg wrote no gif" in r.stderr, (
+        f"{name}: the failure does not name the renderer that wrote nothing: "
+        + r.stderr)
+    assert "ffmpeg failed" not in r.stderr, (
+        f"{name}: a gif that was never written is reported as an ffmpeg "
+        "failure: " + r.stderr)
+    assert not mp4.exists()
+    assert not gif.exists()
+
+
+@pytest.mark.parametrize("name", RECIPES)
 def test_render_says_when_there_is_no_cast(name, tmp_path):
     """A missing cast is not an `agg` problem, and must not send the worker there.
 

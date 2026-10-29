@@ -757,6 +757,17 @@ command -v ffmpeg >/dev/null || {
 }
 agg --idle-time-limit 2 "$cast" "$cast.gif" || render_fail \
     "agg failed on the cast — is 'agg' installed?"
+# The gif is the *next* stage's input, so check it exists before handing it
+# to ffmpeg — the rule the cast check above applies one stage earlier. An
+# `agg` that reports success and writes nothing (or a 0-byte gif) otherwise
+# surfaces below as "ffmpeg failed on the gif", which sends the worker to the
+# encoder for a renderer that wrote nothing: the same misdiagnosis as
+# reporting a missing cast as an `agg` problem (verified with this block and
+# a stub `agg` that exits 0 without writing: the run said "ffmpeg failed on
+# the gif"). The final `test -s` on the mp4 catches the same shape for the
+# encoder, one stage further on.
+[ -s "$cast.gif" ] || render_fail \
+    "agg wrote no gif (the renderer reported success and wrote nothing)"
 # 2x nearest-neighbor upscale for crisp text — but only while the result
 # stays within iOS hardware-decode limits (4096x2304, H.264 level 5.1).
 # A pane large enough to blow that budget is already crisp at native
