@@ -239,11 +239,16 @@ already drops it because the status is no longer `qa`.
   INFO line per distinct completed verdict, so the 5 s poll does not spam
   the log), and advances only on a genuine completion. If the worker cannot
   be spawned the in-flight marker is cleared (the next tick reports the
-  failure instead of "checking base integration" forever). A base return
-  whose rework never launched is caught up from the idle poll regardless of
-  auto-start (the launch claim keeps one owner; `check_and_start` only
-  drives in-scope PRs, so a manual loop on a non-target PR would otherwise
-  strand its rework). That catch-up is **retryable**, not one-shot: a claim
+  failure instead of "checking base integration" forever); a check still in
+  flight after `BASE_CHECK_IN_FLIGHT_SECONDS` is expired and re-run (the
+  worker fetches the base and `git fetch` has no timeout of its own, so a
+  hung network call would otherwise pin the handoff until a restart), and a
+  superseded worker's late write is dropped rather than replacing the newer
+  check's result. A base return whose rework never launched is caught up
+  from the idle poll regardless of auto-start (the launch claim keeps one
+  owner; `check_and_start` only drives in-scope PRs, so a manual loop on a
+  non-target PR would otherwise strand its rework). That catch-up is
+  **retryable**, not one-shot: a claim
   still held (the gate's own `pm pr start` is running) or one released by a
   failed launch (`release_impl_claim` keeps `awaiting`) is re-attempted on a
   later tick, throttled to `BASE_LAUNCH_RETRY_SECONDS` because each attempt
@@ -429,6 +434,10 @@ No unresolved ambiguities.
     workdir" in the TUI completion tick: the git helpers would otherwise
     raise `FileNotFoundError` (they run with the workdir as their cwd)
     inside the shared poll timer, breaking QA/sign-off polling for every PR.
+24. a completion check still in flight after `BASE_CHECK_IN_FLIGHT_SECONDS`
+    is expired and re-run (the handoff is not pinned until a restart), and
+    the expired worker's late write does not replace the newer check's
+    result.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

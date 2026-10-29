@@ -1490,6 +1490,19 @@ BASE_CHECK_POLL_SECONDS = 15.0
 # retried on every 5 s poll tick.
 BASE_LAUNCH_RETRY_SECONDS = 15.0
 
+# How long a completion check may stay "in flight" before the tick stops
+# trusting the marker.  The worker fetches the base (``git fetch`` has no
+# timeout of its own) and may relaunch implementation, so a hung fetch would
+# otherwise pin the handoff at "checking base integration" until a restart —
+# the same stuck handoff the spawn-failure path already clears.  Expiring is
+# safe: a second check overlaps the first, and both ``impl_completion``
+# outcomes are idempotent (an unchanged pair never bounces twice, resolving
+# an already-resolved return is a no-op), so a stale worker's late write only
+# replaces a verdict with the one it computed for the same episode/turn.
+# Above the worst *legitimate* run (the 300 s integration repo lock plus the
+# 300 s ``pm pr start`` the gate allows) so only a genuine hang expires it.
+BASE_CHECK_IN_FLIGHT_SECONDS = 900.0
+
 
 def _base_completion_tick(app, pr_id: str, pr: dict,
                           tracker) -> tuple[bool, str, bool]:
@@ -1523,7 +1536,16 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
         st = {}
     now = time.monotonic()
     if st.get("in_flight"):
-        return False, "checking base integration", False
+        started = float(st.get("started") or 0.0)
+        if now - started < BASE_CHECK_IN_FLIGHT_SECONDS:
+            return False, "checking base integration", False
+        # The worker never came back (a hung fetch has no timeout of its
+        # own).  Drop the marker so the handoff retries instead of waiting
+        # for a restart; the still-running worker's eventual write is safe
+        # (see BASE_CHECK_IN_FLIGHT_SECONDS).
+        _log.warning("impl_idle: %s base check still in flight after %.0fs; "
+                     "re-checking", pr_id, now - started)
+        st = {}
     idle_since = tracker.idle_since(pr_id)
     if st.get("at") and now - float(st["at"]) < BASE_CHECK_POLL_SECONDS:
         # The cached verdict belongs to the idle turn it was computed for: a
@@ -1555,7 +1577,11 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     # must not re-log an unchanged reason (a new episode or a new idle turn
     # reset ``st``, so a fresh verdict is logged again).
     logged = st.get("logged_reason")
-    checks[pr_id] = {**st, "in_flight": True, "started": now,
+    # ``started`` doubles as this attempt's token: a check whose marker has
+    # been replaced (a later tick expired it, or the episode changed) must not
+    # publish its verdict over the newer one.
+    token = now
+    checks[pr_id] = {**st, "in_flight": True, "started": token,
                      "episode": episode}
 
     def _run():
@@ -1573,6 +1599,10 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
             # the handoff is waiting without the poll spamming the log.
             _log.info("impl_idle: %s base rework not complete: %s",
                       pr_id, reason)
+        if (checks.get(pr_id) or {}).get("started") != token:
+            _log.debug("impl_idle: %s dropped a superseded base check "
+                       "(%s)", pr_id, reason)
+            return
         checks[pr_id] = {"in_flight": False, "at": time.monotonic(),
                          "episode": episode, "idle_since": idle_since,
                          "ok": ok, "reason": reason, "resume_loop": resume,

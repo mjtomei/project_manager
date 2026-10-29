@@ -231,6 +231,73 @@ def test_completion_tick_background_test_is_not_completion(tmp_path):
     assert "unchanged" in why
 
 
+def test_completion_tick_recovers_from_a_stale_in_flight_check(tmp_path):
+    """A worker that never returns must not pin the handoff forever.
+
+    The check fetches the base, and ``git fetch`` has no timeout of its own:
+    a hung network call would otherwise leave the in-flight marker set and
+    every later tick reporting "checking base integration" until a restart.
+    Once the marker is older than ``BASE_CHECK_IN_FLIGHT_SECONDS`` a fresh
+    check runs instead.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
+    app = _app(tmp_path, [pr])
+    app.run_worker.side_effect = lambda fn, **kw: fn()
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
+    app._base_completion_checks["pr-001"] = {
+        "in_flight": True,
+        "started": time.monotonic()
+                   - (review_loop_ui.BASE_CHECK_IN_FLIGHT_SECONDS + 1),
+        "episode": pr["base_return"]["ts"],
+        "idle_since": old,
+    }
+    done = base_check.CompletionResult(True, "clean")
+    with patch("pm_core.base_check.git_op_in_progress", return_value=None), \
+         patch("pm_core.base_check.tracked_dirty", return_value=False), \
+         patch("pm_core.base_check.impl_completion",
+               return_value=done) as check:
+        first = review_loop_ui._base_completion_tick(
+            app, "pr-001", pr, _tracker(old))
+    assert "checking" in first[1]
+    check.assert_called_once()
+    # The re-run's verdict is recorded, so the next tick acts on it.
+    assert app._base_completion_checks["pr-001"]["ok"] is True
+
+
+def test_completion_tick_drops_a_superseded_workers_verdict(tmp_path):
+    """A late result from an expired check must not replace a newer one.
+
+    The expiry above starts a second check while the first may still be
+    running; the older worker's write has to be ignored, or a verdict
+    computed for an older tree could be reused by the tick that is waiting
+    on the new one.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
+    app = _app(tmp_path, [pr])
+    workers: list = []
+    app.run_worker.side_effect = lambda fn, **kw: workers.append(fn)
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
+    done = base_check.CompletionResult(True, "clean")
+    with patch("pm_core.base_check.git_op_in_progress", return_value=None), \
+         patch("pm_core.base_check.tracked_dirty", return_value=False), \
+         patch("pm_core.base_check.impl_completion", return_value=done):
+        review_loop_ui._base_completion_tick(app, "pr-001", pr, _tracker(old))
+        assert len(workers) == 1
+        # A later tick expired the marker and started its own check.
+        newer = time.monotonic()
+        app._base_completion_checks["pr-001"] = {
+            "in_flight": True, "started": newer,
+            "episode": pr["base_return"]["ts"], "idle_since": old,
+        }
+        workers[0]()  # the expired worker finishes late
+    entry = app._base_completion_checks["pr-001"]
+    assert entry["in_flight"] is True and entry["started"] == newer
+
+
 # --- QA poll cleanup -------------------------------------------------------
 
 def test_poll_qa_state_drops_a_base_returned_run(tmp_path):
@@ -622,7 +689,11 @@ def test_poll_impl_idle_registers_from_a_shared_transcript_after_restart(
     with patch("pm_core.tui.review_loop_ui._find_impl_pane",
                return_value="%1"), \
          patch("pm_core.tui.auto_start.get_transcript_dir",
-               return_value=fresh):
+               return_value=fresh), \
+         patch("pm_core.tui.review_loop_ui._catch_up_base_impl") as catch_up:
         review_loop_ui._poll_impl_idle(app)
 
+    # The catch-up itself is covered elsewhere; here it must not leak an
+    # unawaited worker coroutine into the rest of the suite.
+    catch_up.assert_called_once_with(app, "pr-001")
     assert tracker.register.call_args[0][2] == str(link)
