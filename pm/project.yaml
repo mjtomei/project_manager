@@ -42665,6 +42665,22 @@ prs:
       the recorder view named <session>~N.'
     created_at: '2026-10-29T07:16:02Z'
     last_edited: '2026-10-29T07:16:02Z'
+  - id: note-86c7448
+    text: 'S131 refine (2026-10-29, HEAD 5f204dc2, code only): (1) /pm-captures/scenarios/123|124|126
+      scripts hard-code /scratch/s123|s124|s126, which are gone; copy them and re-point
+      the paths. (2) A plain `pm tui restart` drops auto-start, and ticks read only
+      their own transcripts/auto-sequence dir. So a SIGNOFF_REQA from a TUI-launched
+      router that is not yet routed at the restart stays in sign_off until `pm autostart
+      add` re-adopts it. Use --breadcrumb, or fire the plain restart after the hop.
+      (3) "A owes REQA, nothing running" cannot be staged because every starter fires
+      at once. Stage it as a REQA deferred behind a live `pm qa run`, and aim the
+      project.yaml hold at that run''s end (`ended_at`). (4) Control 4aff1dd4 ticks
+      never read qa_run.json (resume snapshot only), so a tick deferring to a finished
+      TUI run is not expected there. HEAD has no user-visible "driven by another process"
+      line. (5) While project.yaml is busy, each TUI owed-start claim blocks the event
+      loop for up to the 2 s lock timeout, about every 5 s.'
+    created_at: '2026-10-29T05:57:33Z'
+    last_edited: '2026-10-29T05:57:33Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
