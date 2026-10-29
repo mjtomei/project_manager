@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T10:36:27.196237+00:00'
+  updated_at: '2026-10-29T10:51:05.380037+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42791,6 +42791,23 @@ prs:
       J run numbers scenarios 3/4 by design (_next_scenario_offset).'
     created_at: '2026-10-29T10:36:27Z'
     last_edited: '2026-10-29T10:36:27Z'
+  - id: note-a9894a9
+    text: 'S136 refine (HEAD bb72f6f8 = 74cebe25 code), from reading the code. (1)
+      RQ57 in container mode: the code predicts the Then "dead run scenario windows
+      killed" fails. Container-mode qa-<pr>-sN windows (N>=1) open with cwd = the
+      PR workdir (_launch_scenarios_in_containers: new_window_get_pane(cwd=workdir_path)).
+      kill_windows_of_run only kills panes whose pane_current_path is inside the QA
+      workdir. So the restart kills only the host qa-<pr>-s0. The held refiner -sN
+      window and its container live on until z t. z t then kills the stale windows
+      at the start of planning (the main qa-<pr> window exists), and cleanup_orphaned_qa_containers
+      removes the dead containers, unless another PR has a qa-*-sN window (pr-81a249e).
+      Keep other PRs off QA in that setup. (2) pm qa run skips that cleanup (planning_phase=False),
+      which is why 85f58e5a is needed. (3) Story 2 needs Q (worker routed) and A (every
+      role routed), as in S129. R has both QA roles routed. (4) /scratch/s129, /scratch/s130
+      and /tmp/pm-venv are absent in this container; recreate the secrets, trees and
+      venv.'
+    created_at: '2026-10-29T10:51:05Z'
+    last_edited: '2026-10-29T10:51:05Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
