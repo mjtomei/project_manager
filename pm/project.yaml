@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T08:40:33.433434+00:00'
+  updated_at: '2026-10-29T09:09:41.415905+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38145,6 +38145,28 @@ prs:
       Test servers torn down; no processes left.'
     created_at: '2026-10-29T08:40:19Z'
     last_edited: '2026-10-29T08:40:33Z'
+  - id: note-ab1f802
+    text: 'QA S14 PASS (2026-10-29): failed archive and pruned native transcript never
+      block the workflow. Story 1 (archive/ chmod 0555 before the first return): the
+      rework launch logs "transcript: archiving .../impl-<pr>.jsonl -> archive/...
+      failed: [Errno 13] Permission denied" then "could not archive ... before reuse;
+      replacing it", and still re-points the canonical at the new session; canonical
+      is a live symlink to the rework sid, the pre-return session stays readable at
+      its native path, archive/ stays empty, no traceback/FileExistsError, run advances
+      to the next review loop and a second router launch. Story 2 (archive writable
+      again): the outgoing rework session is archived as archive/impl-<pr>.<sid>.jsonl
+      (symlink to the same native JSONL, cmp identical), canonical moves to a third
+      sid, two distinct readable archive entries, no duplicates. Story 3 (dangling
+      canonical signoff-<pr>.jsonl, native pruned): launch archives the dangling link
+      to archive/signoff-<pr>.<gone-sid>.jsonl (itself dangling), re-points the canonical
+      at the new session, never reads the pruned SIGNOFF_MERGE as a verdict (routes
+      SIGNOFF_IMPL -> impl, Status in_progress, no coerced line), and the new session
+      is later archived with SIGNOFF_IMPL. tests/test_transcript_archive.py 35 passed.
+      Captures /pm-captures/scenarios/14/{story1,story2,story3}/. Note: pr-9966785
+      (stale signoff_return.awaiting after a rework launch) reproduced in all three
+      stories; one R reload cleared it each time — unrelated to this PR.'
+    created_at: '2026-10-29T09:09:41Z'
+    last_edited: '2026-10-29T09:09:41Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
