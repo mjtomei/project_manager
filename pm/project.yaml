@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T02:36:45.689377+00:00'
+  updated_at: '2026-10-29T02:38:33.249862+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42172,6 +42172,14 @@ prs:
       disable leak). Do not claim it.'
     created_at: '2026-10-29T02:36:45Z'
     last_edited: '2026-10-29T02:36:45Z'
+  - id: note-088814a
+    text: 'PUSH BLOCKED from impl container: /run/pm-push-proxy is empty (host push-proxy
+      daemon gone) and the container has no git credentials; direct GitHub push fails
+      "could not read Username". The fix is committed locally on pm/pr-574e851-bug-never-fall-back-to-host-execution-when-contain
+      (0a10c42c, plus this note commit). Host action: restart the workdir push proxy
+      (relaunch/reuse the container) or push the branch; then run QA.'
+    created_at: '2026-10-29T02:38:33Z'
+    last_edited: '2026-10-29T02:38:33Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
