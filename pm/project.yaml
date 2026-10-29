@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T05:01:51.721124+00:00'
+  updated_at: '2026-10-29T05:54:26.490428+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4815,6 +4815,43 @@ prs:
       was touched.'
     created_at: '2026-10-29T05:01:51Z'
     last_edited: '2026-10-29T05:01:51Z'
+  - id: note-3fadfed
+    text: 'Review loop d1c0 i8 (commit 8b49f996; full suite 4588 passed / 1 skipped).
+      No requirement changes. (1) pm session kill unlinked a live private server socket:
+      the branch that kills a session found on its own private socket still unlinked
+      unconditionally (on_private or ...), unlike the not-found and legacy branches,
+      which d1c0 i1/i2 gated on server_alive(). A server can survive the kill (a stray
+      or hand-made session on that socket, or a failed kill-session) and unlinking
+      it strands its clients; all branches now share one rule - remove the file only
+      when no server answers on it. Tests: private kill keeps a socket a server still
+      answers on, and removes the emptied one. (2) _find_live_tui_pane carried the
+      master-integration sess = session fallback whose comment claimed _find_tui_pane
+      returns (None, None) for a session with no tui entry; the explicit-session branch
+      has returned the base name unconditionally since that same change, so the branch
+      was unreachable and the comment misleading - removed, and the test docstring
+      corrected. (3) Corrected the _resolve_start_session_name docstring: a plain
+      pm session inside a shared session reattaches because the ambient session is
+      adopted as-is, not because its share mode is inherited (_session_start clears
+      PM_SHARE_MODE). (4) R4.4 was only checked as a source literal; new TestQaStatusSocketRouting
+      imports the standalone qa_status module (logging.basicConfig patched out) and
+      asserts _switch_to_window/_find_attached_session build tmux -S <PM_TMUX_SOCKET>
+      argv, accept a $TMUX value only when it names a pm socket, and leave an ordinary
+      tmux session alone. Validation: full suite 4588 passed / 1 skipped (scratch
+      pytest<9 + markdown, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared); pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a
+      disposable socket (private server, session env, global env, hooks correct; default
+      server untouched). Residual notes unchanged and non-blocking: uid ownership
+      check only on pm session start; the /tmp/pm-sessions literal stays duplicated
+      in wrapper._mark_tmux_socket and qa_status._tmux_argv by design; pane IDs are
+      not globally unique across servers but every consumer resolves a pane with its
+      session/socket; R5b relies on the pane registry file; the TUI connect screen
+      keeps a bare tmux attach -t <name> only as an unreachable last resort. One new
+      inert note: _session_start is_shared comes from the flags, so an ambient shared
+      session adopted by a plain pm session is still treated as private for the socket-ownership
+      check - unreachable for a joining user (R5b needs a local pane registry) and
+      harmless for the owner.'
+    created_at: '2026-10-29T05:54:26Z'
+    last_edited: '2026-10-29T05:54:26Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
