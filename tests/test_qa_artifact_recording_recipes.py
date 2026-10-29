@@ -2446,6 +2446,10 @@ case "$sub" in
         *@pm_capture_dir*)
             [ -f "$STATE/claim.$s" ] && { cat "$STATE/claim.$s"; exit 0; }
             exit 1 ;;
+        # The server's prefix (step 5's detach key is this, not a literal
+        # C-b). A real server always answers, C-b by default; STUB_PREFIX
+        # models a ~/.tmux.conf that sets another one.
+        *prefix*) printf '%s\n' "${STUB_PREFIX:-C-b}"; exit 0 ;;
       esac
       exit 0 ;;
   set-option)
@@ -2468,6 +2472,16 @@ case "$sub" in
       s=$(val -t "$@")
       # `stuck`: the recorder never goes away, so a stop wait runs out.
       [ "$STUB_MODE" = stuck ] && exit 0
+      # `prefix`: only the server's own prefix followed by `d` reaches the
+      # attach client and ends the recording. Anything else is ordinary input
+      # to the attached TUI (verified live on a server with `prefix C-\`: the
+      # recorder stayed up and the pane showed the keys). The last two
+      # arguments are the prefix and `d`.
+      if [ "$STUB_MODE" = prefix ]; then
+          last2=""; last1=""
+          for a in "$@"; do last2=$last1; last1=$a; done
+          [ "$last2" = "${STUB_PREFIX:-C-b}" ] || exit 0
+      fi
       rm -f "$STATE/$s"
       [ "$STUB_MODE" = detachfail ] && exit 1
       exit 0 ;;
@@ -3052,6 +3066,32 @@ class TestCaptureFlowExecution:
             "a detach that failed because the recorder was already gone was "
             "reported as a finished recording")
         assert "incomplete" in r.stderr, r.stderr
+
+    def test_tmux_detach_uses_the_servers_prefix(self, tmp_path):
+        """The detach key is the server's prefix, not a hard-coded ``C-b``.
+
+        ``~/.tmux.conf`` may set another prefix (the dev container this recipe
+        was exercised in sets ``C-\\``), and the attach client then treats
+        ``C-b d`` as ordinary input to the TUI: verified live, the recorder
+        stayed up, the pane showed the keys, and the stop wait ran out its
+        bound and reported a timeout that named neither cause. Step 5 asks the
+        server for its prefix and sends that. Against the pre-fix recipe (a
+        literal ``C-b``) this run times out with the recorder still up.
+        """
+        r, _cast = _run_block(
+            _stop_block("tmux-screen-recording.md"), "prefix", tmp_path,
+            target=True, sessions=("pm-recorder",),
+            files={"recording.cast": '{"version": 2}\n',
+                   "recorder.status": "0\n",
+                   "transcript.log": "pane output\n"},
+            env_extra={"STUB_PREFIX": "C-a"})
+        assert r.returncode == 0, r.stderr
+        assert not (tmp_path / "state" / "pm-recorder").exists(), (
+            "the detach did not end the recorder: the key sent was not the "
+            "prefix this server uses")
+        assert "show-options -gv prefix" in _recipe_text(
+            "tmux-screen-recording.md"), (
+            "step 5 does not ask the server for its prefix")
 
     def test_tmux_recording_that_ends_with_the_session_passes(self, tmp_path):
         """Both gone before the detach is a legitimate finish, not a failure.

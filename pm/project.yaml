@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-28T23:38:29.296842+00:00'
+  updated_at: '2026-10-29T00:12:27.318357+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33295,6 +33295,37 @@ prs:
       pm_core/ change.'
     created_at: '2026-10-28T23:38:29Z'
     last_edited: '2026-10-28T23:38:29Z'
+  - id: note-84f244b
+    text: 'Review loop 9265 i3: two leftovers in the kept tmux recipe scope, both
+      the PR own class (a handle that matches the wrong thing, and a name shared by
+      every run on one server). (1) Step 5 sent a hard-coded C-b d, but the detach
+      key is the prefix the server uses. Verified live (real tmux 3.4 on a private
+      server whose ~/.tmux.conf sets prefix C-\, this host own prefix, real asciinema
+      2.4.0, the recipe own step-3 recorder and step-5 block extracted verbatim):
+      with C-b d the recorder was still up 3 s later and the pane showed ^Bd (the
+      keys landed in the attached TUI as input), so the stop wait ran out its 30 s
+      bound, exited 1 with "recorder did not exit within 30s", wrote no recorder.status
+      and left a 4.6 KB cast of the wrong 30 s; with the derived prefix (tmux show-options
+      -gv prefix) the same run exits 0 with status 0 and a 4.3 KB cast. The same pair
+      reproduced with C-a as the server prefix. Step 5 now derives the prefix (falling
+      back to C-b only when the server is gone) and the stop-timeout message names
+      the key it sent. (2) The pm-recorder session name is shared by every run on
+      one tmux server: step 0 kills a concurrent run recorder and step 5 detaches
+      it. Both runs fail loudly rather than sharing evidence, so this is recorded
+      in the step-0 prose (run captures in sequence, or each on its own server via
+      a private TMUX_TMPDIR) rather than fixed with a per-run session name, which
+      would have to be re-derived in four separate pastes and in the execution harness.
+      Tests: 1 execution case (the stop block alone against a stub server reporting
+      C-a, whose send-keys ends the recording only for the prefix the server reports)
+      plus a text assertion that the block asks for it; the case fails against HEAD
+      recipe (checked by restoring it in place, then restoring the post-fix copy)
+      with the stop timeout. File 148 pass; related suites 188 pass; full suite 4003
+      passed, 1 skipped, 92 deselected. Evidence: captures/pr-b19db15/review-9265-i3/
+      (probe.log with the pre/post live runs, scripts/ with both step-5 blocks, the
+      live driver and three prefix probes). impl.md R26 + Files/verification/evidence
+      and qa.md updated. No pm_core change.'
+    created_at: '2026-10-29T00:12:27Z'
+    last_edited: '2026-10-29T00:12:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

@@ -54,7 +54,14 @@ earlier run left behind, then creates the capture directory with
 `mkdir -p <capture-dir>`. All of them matter. A leftover `pm-recorder`
 session makes step 3's `new-session` fail with "duplicate session", and the
 readiness wait below would then pass on the *previous* run's attach
-client. `asciinema rec` reports "asciicast saved" and exits 0 even when the
+client. That name is shared by every run on the same tmux server, so two
+captures must not run at once on one server: the later run's step 0 ends the
+earlier run's recorder, and the earlier run's step 5 detaches the later one.
+Run captures one after the other, or give each worker its own server with a
+private `TMUX_TMPDIR`. (Both runs then fail loudly — a recorder that vanished
+mid-scenario is a failure in step 5 — rather than reading each other's
+evidence, but the capture is lost either way.) `asciinema rec` reports
+"asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
 capture that wrote nothing. A leftover cast is worse in the other
 direction: without `--overwrite`, `asciinema rec` aborts with "recording
@@ -368,6 +375,10 @@ if [ -z "$TARGET" ]; then
         "step with pm on PATH, in the project directory" >&2
     exit 1
 fi
+# The key that detaches the attach client is the prefix *this server* uses,
+# not a hard-coded C-b; it is read just before the send below. Initialised
+# here so the stop-timeout message can always name the key it relied on.
+detach_key=C-b
 if ! tmux has-session -t pm-recorder 2>/dev/null; then
     if tmux has-session -t "$TARGET" 2>/dev/null; then
         echo "recorder exited while the TUI was still running — the cast is" \
@@ -394,7 +405,18 @@ else
     # `test -s` then passes on the truncated cast — a run reported as a
     # successful recording although it is not one. Treat the failed detach as
     # the same failure as above.
-    tmux send-keys -t pm-recorder C-b d || {
+    #    The key is the server's prefix, not a hard-coded C-b:
+    #    `~/.tmux.conf` may set another one (the dev container this recipe was
+    #    last exercised in sets `C-\`), and then `C-b d` is ordinary input to
+    #    the TUI — verified live, the recorder stayed up, the pane showed
+    #    `^Bd`, and the stop wait below ran out its bound and reported a
+    #    timeout that named neither cause. The attach client reads the prefix
+    #    from that same config and the server's global option carries it, so
+    #    ask tmux. An empty answer (the server is gone) falls back to the
+    #    default, and the send then fails as before.
+    detach_key=$(tmux show-options -gv prefix 2>/dev/null)
+    [ -n "$detach_key" ] || detach_key=C-b
+    tmux send-keys -t pm-recorder "$detach_key" d || {
         echo "recorder exited before the detach — the cast is incomplete," \
             "not a finished recording" >&2
         tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
@@ -407,7 +429,8 @@ while tmux has-session -t pm-recorder 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         tmux capture-pane -p -t pm-recorder \
             > <capture-dir>/recorder-pane.log 2>/dev/null || true
-        echo "recorder did not exit within 30s — the pane is saved in" \
+        echo "recorder did not exit within 30s — the detach key" \
+            "('$detach_key d') did not end it; the pane is saved in" \
             "<capture-dir>/recorder-pane.log" >&2
         tmux kill-session -t pm-recorder 2>/dev/null
         tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe

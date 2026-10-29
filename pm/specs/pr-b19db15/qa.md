@@ -170,6 +170,12 @@ session, stop the recorder, and render the cast,
   recorder live on; and driving from a
   fresh shell re-derives `$TARGET` (an empty one is refused), so the keys
   cannot auto-detect and drive a different TUI than the one recorded;
+- the stop step detaches with the prefix the server reports
+  (`tmux show-options -gv prefix`), not a literal `C-b`: on a host whose
+  `~/.tmux.conf` sets another prefix (this dev container sets `C-\`) the
+  recording still ends, the cast is flushed and the run passes, where a
+  literal `C-b` leaves the recorder up until the 30 s bound with the keys
+  landing in the TUI as input (verified live both ways);
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files; a
   capture that fails leaves no `recording.mp4`/`recording.gif` from the
   earlier run behind (the render step's cleanup never runs on that path), and
