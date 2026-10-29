@@ -169,6 +169,12 @@ class ReviewLoopState:
     # may pre-retry rediscovery adopt a transcript/verdict it finds: before
     # that, any existing transcript belongs to an earlier loop run.
     iteration_attempted: bool = False
+    # True from a failed launch attempt until the next attempt starts.  The
+    # failed child already wrote the iteration's transcript symlink (to a
+    # session that never ran), so a resumed loop (an auto-start re-arm, a
+    # restart inside the backoff) must not wait on it as an in-flight
+    # launch: nothing of this loop is in flight (S133).
+    last_attempt_failed: bool = False
     # Session id of the iteration's transcript symlink *before* this loop
     # first attempted the iteration.  The transcript dir outlives a loop,
     # so after a failed launch that symlink can still point at an earlier
@@ -1018,10 +1024,15 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     if session:
         window_name = _compute_review_window_name(pr_data)
         if not _find_review_claude_pane(session, window_name,
-                                        pr_data.get("workdir")):
+                                        pr_data.get("workdir")) \
+                and not (state.last_attempt_failed
+                         and state.retry_iteration == state.iteration):
             # A launch still in flight at the restart has no window yet
             # (container mode opens it once the container exists): wait
             # for it rather than relaunch a second review over it (S82).
+            # Not after this iteration's last attempt failed: its symlink
+            # is that dead attempt's, and waiting on it held every
+            # re-armed episode for the whole launch timeout (S133).
             _wait_for_launching_window(
                 session, window_name,
                 f"{transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl")
@@ -1173,6 +1184,7 @@ def _clear_launch_failure(state: ReviewLoopState) -> None:
     state.last_launch_error = ""
     state.last_launch_artifact = None
     state.launch_retryable = False
+    state.last_attempt_failed = False
     # The TUI announces each retry attempt once, keyed on the attempt
     # number.  The key is per episode (attempts restart at 1), so a new
     # episode must forget what the previous one announced — otherwise its
@@ -1325,6 +1337,7 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         # From here on a transcript/verdict for this iteration may be ours:
         # rediscovery may adopt it instead of launching a duplicate.
         state.iteration_attempted = True
+        state.last_attempt_failed = False
         # Each launch attempt gets its own bounded grace for a pane that is
         # still starting.  A counter carried over from an earlier attempt
         # would replace a just-started session on the first pending check of
@@ -1340,6 +1353,7 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
         except ReviewHoldError:
             raise
         except ReviewLaunchError as e:
+            state.last_attempt_failed = True
             state.last_launch_error = str(e)
             state.last_launch_artifact = e.artifact
             state.launch_retryable = e.retryable

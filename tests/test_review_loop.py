@@ -508,6 +508,60 @@ class TestAdoptWaitsForInFlightLaunch:
         assert out is None
         assert clock.now == _IN_FLIGHT_SYMLINK_GRACE
 
+    def test_failed_attempts_symlink_is_not_waited_on(self, tmp_path):
+        """S133: after this iteration's last launch attempt failed (an
+        auto-start re-arm, a restart inside the backoff), its dangling
+        symlink is that dead attempt's: nothing is in flight to wait for."""
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        poll.assert_not_called()
+        assert clock.sleeps == 0
+
+    def test_failed_attempt_of_an_earlier_iteration_still_waits(self, tmp_path):
+        from pm_core.review_loop import _LAUNCH_TIMEOUT
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 0  # the flag is about another iteration
+        state.last_attempt_failed = True
+        out, poll, find, clock = self._adopt(state, tdir, [None] * 500)
+        assert out is None
+        assert clock.now == _LAUNCH_TIMEOUT
+
+    def test_rearmed_loop_relaunches_at_once(self, tmp_path):
+        """S133: a re-armed LAUNCH_FAILED loop resumed at iteration 1 with no
+        history relaunched only after waiting the whole launch timeout on
+        the failed attempt's symlink.  It now relaunches straight away."""
+        from pm_core.review_loop import AttemptDiscovery
+        state, tdir = self._setup(tmp_path)
+        state.retry_iteration = 1
+        state.last_attempt_failed = True
+        state.latest_verdict = "LAUNCH_FAILED"
+        clock = _Clock()
+        at_launch = []
+
+        def relaunch(*_a, **kw):
+            at_launch.append(clock.now)
+            return "**PASS**"
+
+        with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
+             patch("pm_core.review_loop._find_claude_pane", return_value=None), \
+             patch("pm_core.review_loop._discover_iteration",
+                   return_value=AttemptDiscovery("launch")), \
+             patch("pm_core.review_loop._claim_launch", return_value=True), \
+             patch("pm_core.review_loop._pr_is_terminal", return_value=False), \
+             patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
+             patch("pm_core.review_loop.time.sleep", clock.sleep), \
+             patch("pm_core.review_loop._run_claude_review",
+                   side_effect=relaunch) as run:
+            result = run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir=tdir)
+        assert run.call_count == 1
+        assert run.call_args.kwargs["iteration"] == 1
+        assert at_launch == [0.0]
+        assert result.latest_verdict == VERDICT_PASS
+        assert result.last_attempt_failed is False
+
     def test_resumed_loop_does_not_relaunch_late_window(self, tmp_path):
         state, tdir = self._setup(tmp_path)
         clock = _Clock()

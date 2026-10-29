@@ -258,6 +258,7 @@ def save_breadcrumb(app) -> None:
             "retry_ready_at": rstate.retry_ready_at,
             "last_session_id": rstate.last_session_id,
             "iteration_attempted": rstate.iteration_attempted,
+            "last_attempt_failed": rstate.last_attempt_failed,
             "stale_session_id": rstate.stale_session_id,
             "stale_pane_session_id": rstate.stale_pane_session_id,
             # Which retry attempt the user has already been told about: a
@@ -430,6 +431,8 @@ async def consume_breadcrumb(app) -> None:
                 last_session_id=loop_data.get("last_session_id", "") or "",
                 iteration_attempted=bool(
                     loop_data.get("iteration_attempted", False)),
+                last_attempt_failed=bool(
+                    loop_data.get("last_attempt_failed", False)),
                 stale_session_id=loop_data.get("stale_session_id", "") or "",
                 stale_pane_session_id=(
                     loop_data.get("stale_pane_session_id", "") or ""),
