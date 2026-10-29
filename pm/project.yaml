@@ -36558,6 +36558,19 @@ prs:
       No force-push, no reset, master untouched. Ready for native review/QA.'
     created_at: '2026-10-29T02:10:43Z'
     last_edited: '2026-10-29T02:10:43Z'
+  - id: note-141d0e7
+    text: 'impl integration test clarification: the full-suite evidence rerun (captures/pr-62fdd54/impl/integration-4a74d880/full-suite.txt)
+      shows 4518 passed, 1 skipped, 1 failed — tests/test_push_proxy.py::TestPushProxyLifecycle::test_get_proxy_socket_path,
+      "PushProxyError: The daemon did not become ready." That module is byte-identical
+      to origin/master, the failing test varies between runs, it passes in isolation
+      (0.13s), and pristine origin/master passes the whole module (158 passed). It
+      is a subprocess-readiness flake under a long run, not this merge. The clean
+      post-merge run was 4519 passed, 1 skipped, 0 failed; the only real failure
+      (master''s new test_auto_sequence_does_not_launch_over_a_loop_lease needing
+      a live-session fixture for the R9 guard) is fixed in 89bc9ade. See README.md
+      in that capture directory.'
+    created_at: '2026-10-29T02:35:00Z'
+    last_edited: '2026-10-29T02:35:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
