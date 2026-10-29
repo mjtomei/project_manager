@@ -36544,6 +36544,20 @@ prs:
       tmux-isolation fix. Do not relaunch old QA fixture workers.'
     created_at: '2026-10-29T01:33:53.678599+00:00'
     last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-695b6f6
+    text: 'impl re-integration (2026-10-29 restart authorization): merged origin/master@4a74d88085ed
+      into this branch (merge 6eb46aaa, parents 3e96ffe3 + 4a74d880) on top of the
+      earlier 89e3c501 integration. qa_loop.py keeps the pre-planning _sync_pr_branch
+      call, the planner build after the sync and its provider-env transport (env_out=planner_env
+      -> tmux new_window(env=planner_env)), master _remote_branch_sha(timeout=120),
+      and both planning_base and master held-run/owed-REQA resume fields. project.yaml
+      is the union of both PR lists (517, no duplicates). master test_auto_sequence_does_not_launch_over_a_loop_lease
+      now models a live session (89bc9ade) for the R9 guard. Tests: full suite 4519
+      passed, 1 skipped, 0 failed; test_qa_branch_sync 31; qa_loop+qa_resume 146;
+      handoff/auto-sequence/signoff/CLI/input-required 282. Evidence: captures/pr-62fdd54/impl/integration-4a74d880/.
+      No force-push, no reset, master untouched. Ready for native review/QA.'
+    created_at: '2026-10-29T02:10:43Z'
+    last_edited: '2026-10-29T02:10:43Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
