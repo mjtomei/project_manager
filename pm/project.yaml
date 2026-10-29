@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T00:12:27.318357+00:00'
+  updated_at: '2026-10-29T00:51:36.806568+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33326,6 +33326,39 @@ prs:
       and qa.md updated. No pm_core change.'
     created_at: '2026-10-29T00:12:27Z'
     last_edited: '2026-10-29T00:12:27Z'
+  - id: note-4ae0b89
+    text: 'Review loop 9265 i4: three leftovers in the kept recipe scope, all the
+      PR own class, all reproduced live. (1) The web-UI port pre-check treated every
+      curl failure as "free"; only "connection refused" (exit 7) means that. Verified
+      with a socket that accepts and never answers: the pre-check timed out (28),
+      passed, the app could not bind, and the block reported "app did not answer on
+      ... within 120s — check its startup output" at the deadline and killed the app
+      it started (probe shortened the deadline to 2s, as the tests do). A wrong URL
+      (6) and a missing curl (127) were the same misdiagnosis. The pre-check now stops
+      on any status other than 7, naming curl exit and the ss -ltnp hunt; post-fix
+      the same listener is refused in 5.0s and no app starts. (2) A relative <capture-dir>
+      was accepted: tmux runs pipe-pane command in the pm session directory (verified:
+      a pipe attached from /tmp/b with cat >> rel.log wrote /tmp/a/rel.log), while
+      step 5 test -s runs in its own shell; verified with <capture-dir>=relcap, the
+      stop step pasted from another directory answered "asciinema wrote no cast" while
+      the cast sat in the worker directory. Step 0 of both recording recipes, plus
+      the CLI preamble and scaffold (separate pastes), now refuse a relative path
+      with the reason before creating anything; an absolute path or one starting with
+      ~/ is accepted. (3) The CLI stop step timeout and mistyped-bound branches ran
+      kill-server, so the larger-bound re-run they prescribe met a torn-down pane:
+      verified with a one-shot sleep 6 recorded and RECORDER_STOP_TIMEOUT=1, the timeout
+      killed the server and the re-run with 60 answered "recorder status is missing"
+      — the recording was gone. Both branches now leave the recorder running and say
+      so (and name kill-server for a genuinely stuck recording); post-fix the re-run
+      exits 0 with status 0 and the pane is still saved on the timeout. Nominal flows
+      re-verified live (tmux rc 0, status 0, claim released). Tests: 5 new cases,
+      all failing against HEAD recipes (checked by restoring them in place, then restoring
+      the post-fix copies); file 153 pass; related suites 175 pass; full suite 4008
+      passed, 1 skipped, 92 deselected. impl.md R27 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T00:51:36Z'
+    last_edited: '2026-10-29T00:51:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
