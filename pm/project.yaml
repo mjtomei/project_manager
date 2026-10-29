@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T16:20:13.005653+00:00'
+  updated_at: '2026-10-29T17:07:02.909871+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37234,6 +37234,36 @@ prs:
       work stays dropped.'
     created_at: '2026-10-29T16:20:12Z'
     last_edited: '2026-10-29T16:20:12Z'
+  - id: note-b15bb4b
+    text: 'Review loop ebd1 i12: one leftover in the kept web-UI-recipe scope, the
+      PR''s own class (stale evidence presented as this run''s), plus two statements
+      that disagreed with the code. (1) Step 2''s attempt cleanup (the paste used
+      when a driver is adapted and retried) cleared this attempt''s mp4/*.webm/trace/dom/png/manifest
+      but not the Layer 2 protocol logs: an attempt that already ran the protocol
+      block leaves http.log and sse.log, which the manifest''s `## Files` names as
+      this capture''s evidence, and the protocol layer is *supplementary* so a retry
+      need not re-run it -- the retried capture then presents the earlier attempt''s
+      route snapshots and event stream as this run''s. Step 1 already clears them
+      for a fresh run for exactly that reason; the step-2-only retry was the one path
+      that did not. Verified with the recipe''s own block: pre-fix exits 1 with "the
+      driver failed" leaving driver.mjs, node_modules, http.log, sse.log; post-fix
+      leaves only the input and the link. Fix: ./http.log ./sse.log join the cleanup;
+      test_web_ui_driver_failure_is_reported_and_clears_stale_outputs seeds them and
+      requires them gone (fails against the pre-fix block). (2) The test module docstring
+      still described the agg install as "guarded on `command -v agg`" -- the pre-R52
+      state i11 replaced with `agg --version`; i11 updated the per-test docstrings
+      and the recipes but missed the module header. (3) The tmux step-2 comment claimed
+      "every claim handle below takes" the exact =...:0.0 form; the cross-session
+      scan keeps a bare -t "$s" and is correct there (names come from list-sessions,
+      exact match wins, and a grouped <base>~N session carries no claim -- verified
+      on tmux 3.2a). Tests: file 211 passed; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 4605 passed, 1 skipped, 92 deselected, 0 failed (410.20 s). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-ebd1-i12/ (probe.log, suite.log, README.md,
+      scripts/). impl.md R53 + Files/verification/evidence and qa.md updated. No pm_core/
+      change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T17:07:02Z'
+    last_edited: '2026-10-29T17:07:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
