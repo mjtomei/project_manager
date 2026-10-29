@@ -26365,6 +26365,31 @@ prs:
       in workdir") — commit master before a PASS-path QA run.'
     created_at: '2026-10-29T01:12:45Z'
     last_edited: '2026-10-29T01:12:45Z'
+  - id: note-3fa2b74
+    text: 'QA S28 (stop during QA finalize) — PASS, no code changes. Verified live
+      on the TUI with fake-claude: a `zz t` stop while the finalize pane is polling
+      ends the run as STOPPED, not the pre-finalize PASS — "QA finalize: stopped before
+      an outcome ... reporting STOPPED", "QA complete for <pr>: STOPPED (finalize=None)",
+      TUI log "QA stopped during finalize" + "QA stopped for <pr> — no verdict recorded",
+      dashboard Overall: STOPPED bold+dim with no ERROR block and the scenario row
+      still PASS, no QA note, PR stays qa, and the finalize pane is left open (3 panes
+      alive). Auto-start then holds it ("waiting/qa qa STOPPED — last QA run was stopped;
+      press t / z t to re-run QA") across three idempotent `pm autostart add` passes
+      with no relaunch (same qa window id and pane ids). A following `z t` fresh start
+      kills the stale windows, replans, and completes PASS [finalize: FINALIZE_DONE]
+      → hand-off to sign_off with a QA PASS note. Captures: /pm-captures/scenarios/28/.
+      Two harness caveats for the next run: (1) /tmp/pm-venv is shared across parallel
+      QA scenarios and its editable pointer gets rewritten by other runs, so always
+      `export PYTHONPATH=<this clone>` — without it `pm set verdict-recovery-max-attempts`
+      reports "Unknown setting" and `pm` silently runs another scenario''s clone;
+      (2) with several clients attached to the shared tmux server, `pm autostart ...`
+      run from a helper pane can resolve `_get_current_pm_session()` to another client''s
+      session (it printed the outer project''s 17 targets once) — use `env -u TMUX
+      -u TMUX_PANE pm autostart ...` to pin it. Also: `pipe-pane -o` does not replace
+      an existing pipe, so a re-armed transcript pipe keeps writing to the old (deleted)
+      inode.'
+    created_at: '2026-10-29T01:12:36Z'
+    last_edited: '2026-10-29T01:12:36Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
