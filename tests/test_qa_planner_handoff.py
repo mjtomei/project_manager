@@ -457,6 +457,67 @@ class TestRunQaSyncHandoff:
         assert launched["changes"] == ["app.py"]
 
 
+class TestDeadRunDoesNotAdoptReplacementWindow:
+    """A run whose QA window was replaced must not touch the new one.
+
+    Live failure (QA S30, story 2): `pm pr auto-sequence B` launches a
+    detached run; the user runs `pr qa fresh B` (``z t``), which kills the
+    old window and creates a new one for the replacement run.  The old run
+    noticed its planner pane gone, but Phase 2 re-resolved the QA window
+    *by name*, found the replacement's window, and split the
+    replacement's planner pane.  The replacement's window then showed the
+    dead run's "No parseable scenarios" dashboard beside the live one
+    (and a third pane once the replacement finished).
+    """
+
+    def test_replaced_window_is_left_to_the_new_run(
+            self, tmp_path, monkeypatch):
+        added = MagicMock()
+        (tmp_path / "qa").mkdir()
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=None, idle_events=0,
+            extra_patches=(
+                # The planner pane died (its window was killed by the
+                # fresh start) and a window with the QA name exists again.
+                patch("pm_core.tmux.pane_exists", return_value=False),
+                patch("pm_core.tmux.find_window_by_name",
+                      return_value={"index": 3, "id": "@99"}),
+                # The replacement window's live planner pane: pre-fix the
+                # dead run adopts this and splits it.
+                patch("pm_core.tmux.get_pane_indices",
+                      return_value=[("%50", 0)]),
+                patch("pm_core.qa_loop._add_status_pane", added),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux"),
+            ))
+        # The dead run still records its own verdict...
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert state.running is False
+        # ...but never splits the replacement run's pane.
+        added.assert_not_called()
+
+    def test_vanished_window_is_recreated_when_name_is_free(
+            self, tmp_path, monkeypatch):
+        """The execution-only restart path still recreates a missing window."""
+        added = MagicMock()
+        recreated = MagicMock(return_value="%77")
+        (tmp_path / "qa").mkdir()
+        # No window with the QA name: the run must recreate it and show its
+        # status, not silently drop the surface.
+        _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=None, idle_events=0,
+            extra_patches=(
+                patch("pm_core.tmux.pane_exists", return_value=False),
+                patch("pm_core.tmux.new_window_get_pane", recreated),
+                patch("pm_core.qa_loop._add_status_pane", added),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux"),
+            ))
+        recreated.assert_called_once()
+        added.assert_called_once()
+        assert added.call_args[0][1] == "%77"
+
+
 class TestQAPlanProblem:
     def test_complete_plan_ok(self):
         sc = parse_qa_plan(FULL_PLAN)

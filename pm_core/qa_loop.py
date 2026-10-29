@@ -4622,7 +4622,25 @@ def run_qa_sync(
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
     # Ensure the main QA window exists (has the planner pane)
-    planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
+    if planner_pane and not tmux_mod.pane_exists(planner_pane):
+        # This run's planner pane is gone, so its QA window is gone with it
+        # (killing a window kills its panes).  A window with the same name
+        # now belongs to a *replacement* run for this PR — typically a
+        # `z t` / fresh start that killed this run's window.  Adopting it
+        # would split the replacement's planner pane and leave its window
+        # showing this dead run's status dashboard beside the live one, so
+        # only recreate a window when the name is actually free (the
+        # execution-only restart path).
+        if tmux_mod.find_window_by_name(session, window_name):
+            _log.info(
+                "QA window for %s was replaced by another run; not "
+                "adopting it for this run's status", state.pr_id)
+            planner_pane = None
+        else:
+            planner_pane = _ensure_qa_main_pane(
+                session, window_name, workdir_path)
+    else:
+        planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
 
     # Write initial status file and add the status pane before launching
     # scenarios — scenario launch blocks until all concretizers finish, so
