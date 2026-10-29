@@ -39458,7 +39458,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-29T06:03:18.827837+00:00'
+  updated_at: '2026-10-29T06:27:56.577054+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40046,6 +40046,21 @@ prs:
       tick re-checks the transcript tail every tick.'
     created_at: '2026-10-29T05:33:55Z'
     last_edited: '2026-10-29T05:33:55Z'
+  - id: note-f254614
+    text: 'Refined QA scenario 16 (fresh reset vs held QA / obsolete downstream state)
+      — two corrections for the next run. (1) The drafted SIGNOFF_IMPL story is not
+      drivable from the user surface: an open signoff_return awaiting impl implies
+      status in_progress, and pm autostart fresh / z a rejects an in_progress PR without
+      a fresh marker (not_later_stage: already in implementation; use autostart add),
+      so the reset that closes the return cannot be reached. reset_pr''s return-closure
+      is pinned by tests/test_autostart_fresh.py::TestReset::test_rewinds_and_supersedes_old_evidence
+      and has no deterministic user flow. (2) The fresh reset does not kill the old
+      qa-<pr> tmux window (retire_in_memory kills only the review window): the held
+      run is stopped and superseded, its dashboard drops INPUT_REQUIRED (waiting)
+      within ~5 s, and the stale QA window is retired when the new attempt''s QA run
+      starts. Do not file the surviving QA window as a bug.'
+    created_at: '2026-10-29T05:42:47Z'
+    last_edited: '2026-10-29T05:42:47Z'
   - id: note-7f008ec
     text: 'QA S15 (fresh autostart under the merged wait-for-merge model) PASS, all
       4 stories, no code change. Captures: /pm-captures/scenarios/15/{01-fresh-wait-for-merge,02-repeat-policy-preservation,03-cli-conflict-and-alias,04-help-surfaces}.
@@ -40073,6 +40088,29 @@ prs:
       hands off immediately).'
     created_at: '2026-10-29T06:03:18Z'
     last_edited: '2026-10-29T06:03:18Z'
+  - id: note-c21e9b8
+    text: 'QA S16 (2026-10-29, HEAD f556c61e, fake-claude backend): 3 of 4 stories
+      pass; the 4th is the SIGNOFF_IMPL story already flagged in note-f254614 and
+      is still not drivable. (1) Held INPUT_REQUIRED QA + pm autostart fresh: reset
+      from qa (fresh: pr-939cab6 (qa → in_progress)), row becomes "fresh autostart:
+      waiting for the current implementation turn after feedback", marker attempt
+      1 armed, the old run superseded and its qa_resume.json cleared; the stale qa-*
+      windows are retired by the new attempt QA planning sweep (06:11:12), not at
+      reset — matches note-f254614, not filed as a bug. After the handoff a new QA
+      run starts its own Scenario 0 (new run dir pr-939cab6-abd8a34184c26ff3) instead
+      of resuming the held run. (2) TUI restart while waiting: the Re-adopting held
+      QA run count is unchanged, the attempt is resumed ("resumed fresh attempt …
+      waiting for its implementation handoff"), and exactly one review starts after
+      the turn. (3) SIGNOFF_MERGE at the merge gate: reset from sign_off, approval
+      archived once in signoff_history (fresh-autostart) and invalidated, QA note/captures/native
+      JSONL kept (only the driver-side signoff symlink/.head retired), then new review
+      → new QA PASS → new sign-off → parked ready-to-merge, never merged. (4) SIGNOFF_IMPL
+      return: awaiting=impl lives 162 ms before the scheduler pr start --fresh clears
+      it; pm autostart fresh on the resulting in_progress PR is refused not_later_stage
+      (exit 1), so the reset that closes the return has no user flow. Captures: /pm-captures/scenarios/16/{01,02,03,04}.
+      No code change.'
+    created_at: '2026-10-29T06:27:56Z'
+    last_edited: '2026-10-29T06:27:56Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
