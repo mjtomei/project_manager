@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T20:09:17.188131+00:00'
+  updated_at: '2026-10-29T20:43:59.818017+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37404,6 +37404,34 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T20:09:17Z'
     last_edited: '2026-10-29T20:09:17Z'
+  - id: note-aa469a8
+    text: 'Review loop ebd1 i17: one leftover in the kept web-UI-recipe scope, the
+      PR own class (a step that cannot do its job must say so where it fails). The
+      driver block guards its capture directory with `cd "$CAPDIR"` and only then
+      checks `-w`/`-x`, so a directory that exists and cannot be *entered* (mode 400)
+      fails the `cd` with "Permission denied" and the block reports "capture directory
+      … does not exist — create it and run step 1" — the worker is sent to create
+      a directory that is already there and to re-run the step that created it, while
+      the finalize and Layer 2 blocks, which never `cd`, name the same directory "cannot
+      be written". Verified live in this container (uid 1000) with the recipe own
+      fenced block and a mode-400 directory: pre-fix rc 1 with that message after
+      bash own "Permission denied"; post-fix rc 1 with "capture directory … cannot
+      be written — … check the path and its permissions", and a missing directory
+      still gets "does not exist". Fix: `-d` first, then `-w`/`-x` (`-x` is the half
+      the `cd` needs), then the `cd`, whose failure now says the directory "could
+      not be entered — it may have been removed after the checks above". Tests: test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_enter
+      (mode 400, skips under root; fails against the pre-fix block, recipe restored
+      in place then restored). File 228 passed (was 227); full suite env -u PM_HOST_HOME
+      PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py -> 4622 passed, 1 skipped, 92 deselected,
+      0 failed (378.68 s). Also corrected two statements that disagreed with the code:
+      the qa.md step-2 attempt-cleanup list omitted http.log/sse.log (which R53 added
+      to the block), and both recording recipes quoted asciinema abort as "recording
+      already exists", which asciinema 2.1.0 does not print — verified live: "asciinema:
+      <path> already exists, aborting". impl.md R58 + Files/verification and qa.md
+      updated. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T20:43:59Z'
+    last_edited: '2026-10-29T20:43:59Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
