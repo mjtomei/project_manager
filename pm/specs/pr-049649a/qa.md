@@ -187,12 +187,23 @@ project), stays off, and A's running auto-start is unaffected.
    --no-import`, then several PRs including a dependency chain, at least one
    unrelated eligible PR, and one PR outside the targets that is signed off /
    merge-ready.
-2. Run the TUI in a tmux session (`pm session`), drive it with `pm tui send`,
-   `pm autostart ...`, and `pm tui restart [--breadcrumb]`.
-3. Fake the Claude sessions with `pm fake-claude config set` so no real model
+2. **Isolation is mandatory (2026-10-29 test-session-leak incident).**  Run
+   every test command with `HOME=<fixture-home>` (so `pm_home()` is
+   `<fixture-home>/.pm`, not the shared `~/.pm`) and `PM_TMUX_SOCKET=<unique
+   socket path>` (pm's tmux wrapper routes every call there).  Do not inherit
+   `TMUX`/`TMUX_PANE`, do not run global `tmux set-environment`, do not write
+   the shared `~/.pm` breadcrumb/reply files, and never kill or reconfigure
+   the user's real `pm-project_manager-*` session.  Verify fixture ownership
+   (socket path, PM home, session name) before every destructive step and
+   clean up only the dedicated socket/home.  If isolation cannot be
+   established, report INPUT_REQUIRED instead of proceeding.
+3. Run the TUI in the dedicated test tmux session (`pm session`), drive it
+   with `pm tui send`, `pm autostart ...`, and `pm tui restart
+   [--breadcrumb]`.
+4. Fake the Claude sessions with `pm fake-claude config set` so no real model
    calls are made; use a no-verdict (`_all: {}`) config for panes that should
    stay open (watcher, impl).
-4. Never run whole-backlog starts or merges against a live PM project; all
+5. Never run whole-backlog starts or merges against a live PM project; all
    fixtures are throwaway and merges are faked/no-op where possible.
 
 ## Edge cases
