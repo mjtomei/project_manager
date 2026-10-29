@@ -515,6 +515,7 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             _claude_write_dir = None
 
         _stag = pm_session.removeprefix("pm-") if pm_session else None
+        env: dict[str, str] = {}
         claude_cmd = build_claude_shell_cmd(
             prompt=signoff_prompt,
             transcript=transcript,
@@ -525,7 +526,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             effort=_resolution.effort,
             session_type="signoff",
             session_tag=_stag,
-            container=is_container_mode_enabled())
+            container=is_container_mode_enabled(),
+            env_out=env)
 
         branch = pr_entry.get("branch", "")
         if is_container_mode_enabled():
@@ -539,7 +541,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             allowed_push_branch=branch,
             session_tag=_stag,
             pr_id=pr_id,
-            provider=_resolution.provider)
+            provider=_resolution.provider,
+            env=env)
 
         # background -> don't steal focus (auto-sequence); explicit switch below
         # moves exactly the sessions that were watching the old window.
@@ -550,7 +553,8 @@ def launch_signoff_window(data: dict, pr_entry: dict, *, fresh: bool = False,
             # report.html directly; the report carries the diff inline and
             # the dashboard surfaces it. No separate evidence pane needed.
             claude_pane = tmux_mod.new_window_get_pane(
-                pm_session, window_name, claude_cmd, workdir, switch=switch)
+                pm_session, window_name, claude_cmd, workdir, switch=switch,
+                env=env)
             if not claude_pane:
                 print(f"Sign-off window: failed to create tmux window '{window_name}'.")
                 return
@@ -771,32 +775,69 @@ def parse_ts(value):
 
 RETURN_LAUNCH_CLAIM_SECONDS = 180
 # Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
-# needs one launcher.  A QA return is guarded by the QA loop's running check;
-# ``pm pr auto-sequence`` also claims it, but only after its provider check
-# passes (a refused launch must leave it unclaimed for the tick after a fix).
+# needs one launcher.  The claim is written in the same locked update as the
+# transition (:func:`build_return_record`), so only catch-up paths call
+# :func:`claim_return_launch` for them.
+#
+# ``qa`` is deliberately NOT here.  Its claim is taken by every *starter*
+# (qa_loop_ui.start_owed_reqa, the auto-sequence QA hop, auto-start), never
+# by the sign-off hop that performs the transition: that hop may have to
+# defer behind a live ``pm qa run``, and holding the claim would block the
+# owed start for the whole RETURN_LAUNCH_CLAIM_SECONDS after that run ends.
+# ``pm pr auto-sequence`` claims only after its provider check passes (a
+# refused launch must leave it unclaimed for the tick after a fix).
 _CLAIMED_RETURN_HOPS = ("impl", "review")
 # How long a launcher whose session opened keeps waiting for project.yaml's
 # lock to clear ``awaiting`` (S77: a holder past the 2 s timeout left it set).
 RETURN_CLEAR_WAIT_SECONDS = RETURN_LAUNCH_CLAIM_SECONDS
 
 
-def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
+def claim_return_launch(root: Path, pr_id: str, hop: str,
+                        require_status: str | None = None) -> bool:
     """Take the launch of the routed *hop*'s fresh session (one winner).
 
     Several drivers act on ``awaiting`` (the TUI routing a verdict or
     catching up after a restart, every ``pm pr auto-sequence`` tick).  The
     impl and review relaunches are ``--fresh`` — each kills the window it
     finds — so two concurrent launchers kill each other's session and leave
-    duplicates behind.  The first caller records a claim
-    and launches; later callers see it and leave the launch alone.  The
-    driver that performs the hop holds the claim from the transition on
+    duplicates behind.  A QA return's relaunch starts a whole loop (windows,
+    verifier, finalizer), so it needs the same single-owner gate.  The first
+    caller records a claim and launches; later callers see it and leave the
+    launch alone.
+
+    For the hops in :data:`_CLAIMED_RETURN_HOPS` the driver that performs
+    the hop holds the claim from the transition on
     (:func:`build_return_record`), so only catch-up paths (restart, an
-    ``awaiting`` tick) call this.
+    ``awaiting`` tick) call this.  A ``qa`` claim is taken by every starter
+    instead, because the hop that defers behind a live QA run must not hold
+    one — see that constant.
+
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
+
+    *require_status* additionally requires the PR to still be in that
+    status, in the same locked update: a return that an out-of-band
+    transition superseded must not be launched off a stale read.
     """
     from datetime import datetime, timezone
     won = {"ok": False}
+
+    # Cheap snapshot pre-check before the locked update.  ``locked_update``
+    # rewrites the whole file even when its callback declines, and the TUI's
+    # owed-REQA reconciler retries every ~5 s while another driver's fresh
+    # claim is outstanding (up to RETURN_LAUNCH_CLAIM_SECONDS) — a fsynced
+    # rewrite of a large project.yaml on the event loop per tick.  A snapshot
+    # that already shows the claim unwinnable (awaiting cleared, status moved
+    # on, a fresh claim) is safe to trust: a stale snapshot only falls through
+    # to the atomic path below, which decides for real.
+    try:
+        snapshot = store.get_pr(store.load(root), pr_id)
+    except Exception:
+        snapshot = None       # unreadable: let the locked update decide/report
+    else:
+        if not _launch_claimable(snapshot, hop, require_status,
+                                 datetime.now(timezone.utc)):
+            return False
 
     def _apply(data):
         # Read the clock under the lock: a claimant that waited on it would
@@ -804,12 +845,10 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
         # see that claim as from the future (not fresh), and launch too.
         now = datetime.now(timezone.utc)
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff_return")
-        if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+        if not _launch_claimable(pr, hop, require_status, now):
             return
-        if _claim_fresh(rec, hop, now):
-            return
-        rec["launch_claim"] = {"hop": hop, "at": now.isoformat()}
+        pr["signoff_return"]["launch_claim"] = {
+            "hop": hop, "at": now.isoformat()}
         won["ok"] = True
 
     try:
@@ -828,6 +867,23 @@ def _claim_fresh(rec: dict, hop: str, now) -> bool:
     except (TypeError, ValueError):
         return False
     return claim.get("hop") == hop and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS
+
+
+def _launch_claimable(pr: dict | None, hop: str, require_status: str | None,
+                      now) -> bool:
+    """Whether *pr*'s return record can still be claimed for *hop* now.
+
+    False when there is nothing to launch (no open return awaiting *hop*, or
+    the PR left *require_status*) and when another driver's claim is still
+    fresh — the three cases where a claim attempt would be a no-op.
+    """
+    rec = (pr or {}).get("signoff_return")
+    if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+        return False
+    if require_status is not None \
+            and (pr or {}).get("status") != require_status:
+        return False
+    return not _claim_fresh(rec, hop, now)
 
 
 def return_launch_claimed(pr: dict | None, hop: str) -> bool:
@@ -864,7 +920,6 @@ def clear_return_awaiting(root: Path, pr_id: str, hop: str,
         rec = (pr or {}).get("signoff_return")
         return (isinstance(rec, dict) and rec.get("awaiting") == hop
                 and (ts is None or rec.get("ts") == ts))
-
     def _apply(data):
         pr = store.get_pr(data, pr_id)
         if _waiting(pr):

@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from pm_core.tui.app import _own_session_name
+from pm_core.tui.app import current_session_name
 
 pytestmark = pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
 
@@ -25,6 +25,7 @@ def tmux_server(tmp_path, monkeypatch):
 
 def _tui_pane(t, session, monkeypatch):
     pane = t("list-panes", "-t", f"={session}:", "-F", "#{pane_id}").split()[0]
+    monkeypatch.setenv("TMUX", "/x,1,0")
     monkeypatch.setenv("TMUX_PANE", pane)
     return pane
 
@@ -37,17 +38,17 @@ def test_grouped_view_session_does_not_rename_the_tui(tmux_server, monkeypatch):
     t("new-session", "-d", "-t", "pm-proj-abc", "-s", "v118")
     # Precondition: tmux itself names the view for the TUI's pane.
     assert t("display-message", "-p", "-t", pane, "#{session_name}") == "v118"
-    assert _own_session_name() == "pm-proj-abc"
+    assert current_session_name() == "pm-proj-abc"
 
 
 def test_pm_tilde_group_and_plain_session(tmux_server, monkeypatch):
     t = tmux_server
     t("new-session", "-d", "-s", "pm-proj-abc", "sleep 60")
     _tui_pane(t, "pm-proj-abc", monkeypatch)
-    assert _own_session_name() == "pm-proj-abc"
+    assert current_session_name() == "pm-proj-abc"
     time.sleep(1.1)
     t("new-session", "-d", "-t", "pm-proj-abc", "-s", "pm-proj-abc~1")
-    assert _own_session_name() == "pm-proj-abc"
+    assert current_session_name() == "pm-proj-abc"
 
 
 def test_popup_from_grouped_view_resolves_the_pm_session(tmux_server, monkeypatch):

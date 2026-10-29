@@ -52,6 +52,7 @@ Provider resolution order:
 """
 
 import os
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -309,7 +310,13 @@ class ProviderConfig:
         return env
 
     def env_vars(self) -> dict[str, str]:
-        """Return environment variables needed to use this provider."""
+        """Return environment variables needed to use this provider.
+
+        Values are resolved (``${VAR}`` references are expanded).  They are
+        for the launched process's environment only: callers must not
+        interpolate them into a shell command string, because that string is
+        logged and kept as the tmux ``#{pane_start_command}``.
+        """
         if self.type == "router":
             # Never an API key or token: the router injects the account's
             # credentials itself.  Pin Claude Code's alias/background
@@ -333,7 +340,6 @@ class ProviderConfig:
                     and SUBAGENT_FORCE_ENV not in self.env):
                 env.pop(SUBAGENT_FORCE_ENV, None)
             return env
-
         if self.type in ("claude", "local"):
             env: dict[str, str] = {}
             if self.api_base:
@@ -583,27 +589,27 @@ def providers_lock():
 def save_providers(data: dict[str, Any]) -> None:
     """Write the providers config to ~/.pm/providers.yaml.
 
-    Written to a temp file and renamed over the old one, so a reader never
-    sees a truncated file; a symlinked providers.yaml keeps its link (the
-    target is replaced) and an existing file keeps its mode.  Callers that
-    read, change and save hold :func:`providers_lock`.
+    The file may hold a literal API key, so it is always owner-only
+    (0600).  A private temporary file in the same directory is replaced
+    onto the target: ``mkstemp`` creates at 0600 regardless of the umask,
+    and ``os.replace`` swaps the inode, which also tightens an existing
+    permissive file (``write_text`` truncates in place and would leave its
+    mode alone) and means a reader never sees a truncated file.  Swapping
+    the inode also means a symlinked target is replaced by a regular file
+    rather than written through — safer for a credentials file, and
+    intentional.  Callers that read, change and save hold
+    :func:`providers_lock`.
     """
-    import stat
-    import tempfile
     import yaml
+
     path = _providers_path()
-    target = os.path.realpath(path)
     text = yaml.dump(data, default_flow_style=False, sort_keys=False)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
-                               prefix=".providers.", suffix=".tmp")
+    fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w") as f:
-            f.write(text)
-        try:
-            os.chmod(tmp, stat.S_IMODE(os.stat(target).st_mode))
-        except FileNotFoundError:
-            pass
-        os.replace(tmp, target)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)

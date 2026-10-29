@@ -1806,3 +1806,66 @@ and filters through `usable_prs`. project.yaml was merged by id
 the merge tree: 4353 passed, 1 skipped; the 12 failures were all
 test_markdown_render (env-only missing `markdown`; 13 passed with it on a
 --target path). Logs: `/pm-captures/integration-249-master-450a6362/`.
+
+Master integration 2026-10-29 (origin/master 4a74d880: #254, #256, #259,
+#261, #262, #263, #264, #268, #270, #271, #273, #255, #276), after the
+test-session leak restart. Reconciled as follows; everything else kept
+both sides.
+- Provider env (#268, pr-84ebabf): master's `env_out` channel replaces
+  this branch's secret-file expansion (`_secret_env_ref`,
+  `discard_secret_env_files`, `_redacted` removed).  Every provider value,
+  router ones included, leaves `build_claude_shell_cmd` through `env_out`
+  and reaches the pane via the private env file (`tmux._wrap_cmd_env`,
+  `container.build_exec_cmd(env=)` by name).  The command keeps only
+  names: `env -u <routing var>` from `providers.launch_env` (R9), the
+  router's container bridge-ensure prefix and its host `launcher`.  A
+  router provider without `env_out` raises ValueError (its
+  ANTHROPIC_BASE_URL would otherwise be dropped and the session run on
+  the launching shell's account); every call site passes it.  This also
+  closes pr-740ae41 (secrets inlined on no-workdir launches, left behind
+  by refused launches).
+- providers.yaml save (#273, pr-294e53d): master's always-0600 save wins;
+  a symlinked providers.yaml is replaced by a regular file (its spec A3),
+  not written through as S98 had it.  The sidecar `providers_lock` stays.
+- Run records (#276, pr-db3bf10): this branch's record set wins as
+  note-ae7cf29 asks (per-session `_own_run_records`, launch records,
+  `run_overlaps_own_run`, `own_run_started_since`, `own_run_driven`,
+  `instruction_run_live`), plus master's `end_run_record`: an `ended_at`
+  record no longer names a driver (`run_driven_elsewhere`,
+  `instruction_run_live`).  A resumed run updates the existing record's
+  owner (`write_run_record(adopt=True)`), keeping its start time and
+  session.
+- Owed sign-off REQA (#276): master's durable path replaces the in-memory
+  `defer_reqa_start` / `_reqa_waiting` (note-ae7cf29 item 2).  The sign-off
+  hop, auto-start and the reconciler start it through
+  `qa_loop_ui.start_owed_reqa` (claim with `require_status="qa"`);
+  `start_qa` consumes the obligation only once the run will start (after
+  `_enter_qa_status`), keeping this branch's lock-timeout/NO_WAIT clear and
+  `_ui_return_clear` retry.  `pm pr auto-sequence` keeps this branch's
+  driver checks (start records, `_qa_run_driven`, provider pre-check
+  before claiming) and adds master's `run_driven_elsewhere`,
+  `_qa_run_owned_elsewhere` and `require_status` claims; a hop that meets
+  a live run prints "sign_off: re-qa deferred: a QA run is in flight".
+  S127's restart expectation is now master's contract (one owed run after
+  the live run ends, also with auto-start off; note-ae7cf29 item 1).
+- Held INPUT_REQUIRED runs (#271): `_execute_and_finalize`'s hold loop
+  keeps this branch's pre-publish snapshot (S47/S69) and finalizer
+  provider check (skipped for a restored held run, which runs no
+  finalizer); the TUI completion keeps `_on_qa_complete`'s retry result
+  and `_ui_pending`, with master's held/reopen guards.  Only a superseded
+  run stops writing its snapshot: `supersede_run` (`z t`, now over a held
+  run too) sets master's `superseded` flag beside `stop_requested`, and a
+  plain user stop keeps master's behaviour (the hold persists its settled
+  wait).  Snapshot writes take the run's `_resume_lock` then master's
+  `_RESUME_WRITE_LOCK` (the order `supersede_run` → `clear_resume_file`
+  uses); the file is serialized before either lock is taken.
+- Review launches (#259): master's retry/artifact/`_discover_iteration`
+  design, with this branch's child timeout (+ lock timeout + sign-off
+  return clear wait, S81) and the in-flight launch wait before discovery
+  on a restart (S82).  A route-down launch is now LAUNCH_FAILED (retryable,
+  one error line, artifact) rather than ERROR.
+- Push proxy (#255/#262): master's version (cross-process start lock,
+  socket inode ownership) supersedes this branch's in-process spawn locks;
+  the proxy is still spawned from `/` with pm's root first on PYTHONPATH.
+- TUI pidfile (#263): `current_session_name()` resolves a grouped view
+  through its session group (S118), replacing `_own_session_name`.

@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pm_core.paths import configure_logger, log_shell_command
+from pm_core.paths import configure_logger, log_shell_command, write_env_file
 from pm_core.prompt_bounds import (
     PROMPT_ARG_LIMIT, PromptTooLargeError, prompt_bytes,
 )
@@ -291,7 +291,7 @@ def _resolve_provider(provider: str | None = None, model: str | None = None):
     overrides the provider's).  The routing environment is built from that
     selection, as build_claude_shell_cmd's (providers.launch_env).
     """
-    from pm_core.providers import get_provider, is_secret_env_var, launch_env
+    from pm_core.providers import get_provider, launch_env
     provider_cfg = get_provider(provider, strict=bool(provider))
     model_flag = model or provider_cfg.model_flag()
     provider_env, unset = launch_env(provider_cfg, provider_cfg.env_vars(),
@@ -725,8 +725,11 @@ def launch_claude(prompt: str, session_key: str, pm_root: Path,
               cmd[:6], cwd, session_key, session_id[:8] + "...")
 
     log_shell_command(cmd, prefix="claude")
-    # Log the environment variables passed to the claude CLI (filtered for ANTHROPIC_/OPENAI_ prefixes)
-    _log.debug("Claude env vars: %s", {k: v for k, v in (run_env or {}).items() if k.startswith('ANTHROPIC_') or k.startswith('OPENAI_')})
+    # Log the names (never the values) of the provider env vars passed to
+    # the claude CLI: this is a debug log and API keys live here.
+    _log.debug("Claude env vars: %s", sorted(
+        k for k in (run_env or {})
+        if k.startswith("ANTHROPIC_") or k.startswith("OPENAI_")))
     try:
         result = subprocess.run(cmd, cwd=cwd, env=run_env)
         returncode = result.returncode
@@ -886,6 +889,7 @@ def build_claude_shell_cmd(
     write_dir: str | None = None,
     session_type: str | None = None,
     container: bool = False,
+    env_out: dict[str, str] | None = None,
 ) -> str:
     """Build a claude shell command string with proper flags and logging.
 
@@ -924,6 +928,17 @@ def build_claude_shell_cmd(
             then starts the in-container bridge forwarder first and never
             starts claude if it fails; on the host a router provider's
             ``launcher`` replaces the ``claude`` executable.
+        env_out: Receives the provider environment variables.  They are
+            **never** interpolated into the returned command: that string is
+            logged (``log_shell_command``), stored as the tmux
+            ``#{pane_start_command}`` and kept in the pane registry.  Callers
+            must transport the values through the launched process's
+            environment: ``tmux`` pane helpers write a private env file the
+            pane sources (``env=`` argument), foreground launches use
+            ``os.execvpe(..., env=...)``, and ``send_keys`` sources the same
+            kind of file.  Only the names of the routing variables the
+            launch unsets (``env -u NAME``) appear in the command.  A router
+            provider requires it (ValueError otherwise).
 
     An explicitly named *provider* that is not configured raises
     :class:`~pm_core.providers.ProviderNotFoundError` instead of silently
@@ -944,8 +959,9 @@ def build_claude_shell_cmd(
         transcript_path.symlink_to(target)
         _log.info("transcript: symlink %s -> %s", transcript_path, target)
 
-    # Resolve provider configuration
-    from pm_core.providers import get_provider, is_secret_env_var, launch_env
+    # Resolve provider configuration.  Values stay out of the command string
+    # (see ``env_out``); the caller transports them via the process env.
+    from pm_core.providers import get_provider, launch_env
     provider_cfg = get_provider(provider, strict=bool(provider))
     # Explicit model param overrides provider's model_flag
     effective_model = model or provider_cfg.model_flag()
@@ -964,25 +980,22 @@ def build_claude_shell_cmd(
     # this session's model or account (providers.launch_env).
     provider_env, unset = launch_env(provider_cfg, provider_env,
                                      effective_model)
-
-    env_prefix = ""
-    # (inline text, logged text) for secret values that could not be moved
-    # to a file: the debug log gets the redacted form.
-    redact: list[tuple[str, str]] = []
     if provider_env:
-        parts = []
-        for k, v in provider_env.items():
-            part = f"{k}={shlex.quote(v)}"
-            if v and is_secret_env_var(k):
-                ref = _secret_env_ref(v, cwd, write_dir)
-                if ref:
-                    part = f"{k}={ref}"
-                else:
-                    redact.append((part, f"{k}=<redacted>"))
-            parts.append(part)
-        env_prefix = " ".join(parts) + " "
-    if unset:
-        env_prefix = "env " + "".join(f"-u {v} " for v in unset) + env_prefix
+        if env_out is not None:
+            env_out.update(provider_env)
+        elif provider_cfg.type == "router":
+            # Without its environment (ANTHROPIC_BASE_URL) a routed session
+            # would run on whatever account the launching shell carries.
+            raise ValueError(
+                f"provider {provider!r} is a router: the caller must pass "
+                "env_out so its environment reaches the launched process")
+        else:
+            _log.warning(
+                "provider %r needs env vars (%s) but the caller did not pass "
+                "env_out; they will not reach the launched process",
+                provider or "<default>", ", ".join(sorted(provider_env)))
+    # Only names: unsetting carries no value.
+    env_prefix = ("env " + "".join(f"-u {v} " for v in unset)) if unset else ""
 
     from pm_core.paths import skip_permissions_enabled, fake_claude_config_for_type
     fc_config = fake_claude_config_for_type(session_type, session_tag)
@@ -995,7 +1008,7 @@ def build_claude_shell_cmd(
                                       session_type=session_type,
                                       session_tag=session_tag)
         cmd = env_prefix + shlex.quote(_FAKE_CLAUDE_BIN) + " " + " ".join(shlex.quote(a) for a in fake_args)
-        log_shell_command(_redacted(cmd, redact), prefix="claude")
+        log_shell_command(cmd, prefix="claude")
         return cmd
     else:
         # Host launches establish workspace trust here, at the one boundary
@@ -1079,53 +1092,7 @@ def build_claude_shell_cmd(
             escaped = prompt.replace("'", "'\\''")
             cmd += f" '{escaped}'"
 
-    log_shell_command(_redacted(cmd, redact), prefix="claude")
-    return cmd
-
-
-def _secret_env_ref(value: str, cwd: str | None,
-                    write_dir: str | None) -> str | None:
-    """Shell text that expands to *value* without containing it.
-
-    The value goes to a 0600 file under the workdir's ``pm/prompts/`` (as
-    the prompt does) that the expansion reads and deletes as claude starts,
-    so the pane's start command and pm's debug log never carry it.  None
-    when there is no workdir to write it in (the caller then inlines it).
-    """
-    host_dir = Path(write_dir) if write_dir else (Path(cwd) if cwd else None)
-    if host_dir is None or not host_dir.is_dir():
-        return None
-    name = f"pm_env_{uuid.uuid4().hex}"
-    try:
-        subdir = host_dir / "pm" / "prompts"
-        subdir.mkdir(parents=True, exist_ok=True)
-        fd = os.open(subdir / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                     0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(value)
-    except OSError:
-        return None
-    ref = shlex.quote(str((Path(cwd) if cwd else host_dir)
-                          / "pm" / "prompts" / name))
-    return f'"$(cat {ref}; rm -f {ref})"'
-
-
-_SECRET_ENV_FILE_RE = re.compile(r"/pm/prompts/(pm_env_[0-9a-f]{32})\b")
-
-
-def discard_secret_env_files(cmd: str, write_dir: str) -> None:
-    """Delete the secret env files *cmd* reads (they sit under
-    ``<write_dir>/pm/prompts/``) when it will never run."""
-    for name in set(_SECRET_ENV_FILE_RE.findall(cmd)):
-        try:
-            (Path(write_dir) / "pm" / "prompts" / name).unlink()
-        except OSError:
-            pass
-
-
-def _redacted(cmd: str, redact: list[tuple[str, str]]) -> str:
-    for inline, logged in redact:
-        cmd = cmd.replace(inline, logged)
+    log_shell_command(cmd, prefix="claude")
     return cmd
 
 
@@ -1249,8 +1216,25 @@ def launch_claude_in_tmux(pane_target: str, prompt: str, cwd: str | None = None,
     ``build_claude_shell_cmd``).
     """
     from pm_core.tmux import send_keys
-    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd, session_type=session_type)
-    send_keys(pane_target, cmd)
+    env: dict[str, str] = {}
+    cmd = build_claude_shell_cmd(prompt=prompt, cwd=cwd,
+                                 session_type=session_type, env_out=env)
+    if env:
+        # send_keys types into an existing shell, which has no pane-env
+        # channel, so the values are handed over in a 0600 file that the
+        # command sources and removes before claude starts.  sh -c so the
+        # POSIX prefix also works when the pane's shell is fish.
+        prefix, path = write_env_file(env)
+        try:
+            send_keys(pane_target, f"sh -c {shlex.quote(prefix + cmd)}")
+        except Exception:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            raise
+    else:
+        send_keys(pane_target, cmd)
 
 
 def launch_bridge_in_tmux(prompt: str | None, cwd: str, session_name: str) -> str:

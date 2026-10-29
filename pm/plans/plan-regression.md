@@ -26,7 +26,7 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 - **Notes infrastructure** (`pr-83b98d5`, merged): `notes.txt` has sections including `Watcher`. `notes_for_prompt(root, "watcher")` returns the General + Watcher blocks already; new watchers get user-specified guidance for free without any per-watcher work. Users can leave guidance like "always run the auth-regression test daily" or "prioritize fixing memory leaks before UI polish" and it flows into every tick automatically.
 - **Regression test list**: `pm/qa/regression/*.md`, loaded by `qa_instructions.list_all()`, launched via `launch_qa_item()` (`pm_core/tui/pane_ops.py`).
 - **Verdict collection**: `poll_for_verdict()` (`pm_core/loop_shared.py`) and `extract_verdict_from_transcript()` (`pm_core/verdict_transcript.py`).
-- **Plans as pools**: a "pool of PRs" is just a pm plan (`plan=bugs`, `plan=ux`). No new pool construct, no priority field. Watchers judge priority dynamically each tick using prompt-supplied generic guidance plus user notes from the Watcher section.
+- **Plans as pools**: a "pool of PRs" is just a pm plan (`plan=bugs`, `plan=ux`). No new pool construct, no priority field. Watchers judge priority dynamically each tick using prompt-supplied generic guidance plus user notes from the Watcher section, always ranking security and critical-incident risk first (see **Prioritization** below).
 - **Unified pm log** (`pr-9bf8b0b`, merged) is available for project-wide visibility; per-watcher continuity uses dedicated text files at `pm/watchers/<name>.log` so each watcher's tick has tight, relevant context to read.
 
 ## Architecture
@@ -34,12 +34,23 @@ The autonomous loops are deliberately built on existing primitives. New code is 
 **Three watchers**, each a `BaseWatcher` subclass with its own interval, prompt generator, and work log:
 
 1. **Discovery supervisor** (`pr-271cb3a`) — schedules runs of the existing regression tests at `pm/qa/regression/*.md`. Test sessions themselves file findings via `pm pr add` (taught by `pr-47940bc`); the supervisor reconciles post-hoc (dedup, route confirmation, work-log).
-2. **Bug-fix implementation watcher** (`pr-e3a711c`) — drives the bug-fix flow against `plan=bugs`. Picks the best candidate dynamically each tick, advances PRs through `pm pr auto-sequence`, auto-merges on QA PASS.
+2. **Bug-fix implementation watcher** (`pr-e3a711c`) — drives the bug-fix flow against `plan=bugs`. Picks the best candidate dynamically each tick (security and critical-incident bugs first), advances PRs through `pm pr auto-sequence`, auto-merges on QA PASS.
 3. **Improvement-fix implementation watcher** (`pr-d39a7fb`) — same shape against `plan=ux`. Gated merge — PRs that PASS QA are held for a human taste check.
 
-> **Phase 11 generalization:** replace the plan-specific watchers and programmatic phase engine with agent-controlled execution and plan supervision. Participating sessions record handoffs and request next actions; watchers inspect tmux, reconcile gaps, maintain plans and choose priorities. Discovery continues to generate findings and reusable regressions. PM provides launches and shared operations without requiring hooks or automatic state detection. See Phase 11 and [[plan-delivery]].
+> **Phase 11 generalization:** replace the plan-specific watchers and programmatic phase engine with agent-controlled execution and plan supervision. Participating sessions record handoffs and request next actions; watchers inspect tmux, reconcile gaps, maintain plans and choose priorities, security and critical-incident risk first. Discovery continues to generate findings and reusable regressions. PM provides launches and shared operations without requiring hooks or automatic state detection. See Phase 11 and [[plan-delivery]].
 
 **Prioritization is dynamic.** Each watcher tick judges priority based on prompt-supplied generic guidance (severity, recurrence, age, taste signals) plus user-specified guidance automatically injected from `notes.txt` Watcher section. No persisted priority field, no separate pool config.
+
+**Security and critical-incident risk come first.** Before weighing anything else, a watcher ranks first any security issue or bug that could cause a critical incident. Examples:
+- credential exposure;
+- code from a container or PR workdir running on the host;
+- rewriting or deleting shared branches;
+- silent loss or reversion of work;
+- corruption of project state or QA/sign-off evidence;
+- unreviewed code reaching the base branch;
+- actions landing on an unrelated process or session.
+
+Judge these by their worst plausible outcome, not by how often they have been seen or how mild the observed symptom was. On 2026-10-27, a pending bug whose only observed symptom had been three dropped local commits (`pr-8cdbe60`) let a container rewind GitHub `master` and delete 223 branches. The tick records why it ranked each such bug where it did. Discovery and review sessions that find one should say so in the bug's title or first line, so the next tick can't miss it.
 
 **Work logs** live at `pm/watchers/discovery.log`, `pm/watchers/bug-fix-impl.log`, `pm/watchers/improvement-fix-impl.log`. Each tick's prompt instructs Claude to read the log first for context and append a one-line summary before exiting. Continuity between ticks lives in the file. *(Phase 11 recasts the plan-watcher logs as plan notes carried in the plan files — see the generalization note above.)*
 
@@ -343,6 +354,8 @@ Switch QA scenarios from "instruction (setup) + artifact recipe (drive/capture)"
 ### PR: QA scenario planner authors a new regression test when none fits
 `pr-2680fbf` (depends on: pr-06a96fa)
 
+**Required delivery prerequisite (2026-10-26):** the user requires automatic authoring for the new sign-off feature. This PR and its regression-binding prerequisite `pr-06a96fa` must be adopted before [[plan-delivery]] D3's bug-fix handoff and D9's initial auto-fix qualification. Sign-off prompt/report PR `pr-5f4f595` depends on this PR. Demonstrate a missing-regression finding leading through the authorized flow to a durable newly authored regression, execution with independently checked evidence, and later reuse without duplicate authoring. The sign-off PR retains its required human review of the entire prompt and its recipe modification/removal recommendations. Corpus migration can still land independently; authoring-time mock selection and the broader bridge remain later work.
+
 When the planner classifies a scenario's flow and no existing regression test in `pm/qa/regression/` drives that flow, it authors a new regression test as part of the QA run instead of falling through to INSTRUCTION+ARTIFACT scaffolding. Planner emits `NEW_REGRESSION: <slug>` alongside the existing `REGRESSION: <id>` field; a sub-step drafts `pm/qa/regression/<slug>.md` following existing conventions; the scenario binds to the drafted regression by slug. The drafted file commits to the PR's branch and is automatically in scope for the discovery supervisor (`pr-271cb3a`) on subsequent ticks. This is the step that makes the regression library compound — without it, the planner takes the easy INSTRUCTION+ARTIFACT path and the library never accumulates new drivers. This is also the load-bearing surface for mocks awareness — see `pr-51586d2`.
 
 ### PR: Mocks awareness in the new-regression authoring flow
@@ -377,6 +390,8 @@ This is a corpus refactor, not a new mechanism (the recipe format shipped earlie
 
 ### PR: QA library auditor — propose regression-test fills (with attached mocks)
 `pr-f4dc8a2` (pending)
+
+**Required at initial project load-in (2026-10-26):** [[plan-delivery]] D5/D8 onboarding and D9's external tmux campaign require this auditor. Run it after identifying the project/revision and existing tests/library, before choosing the first software implementation, QA or autonomous repair. An absent PM regression library is an initial coverage-inventory case, not a reason to skip the scan. Report existing coverage, missing regressions, stale/duplicate recipes, setup requirements and unknowns; prioritize selected gaps for the `pr-2680fbf` authoring flow and retain unresolved findings. Preserve existing test assets and human decisions. A completed audit is not a claim that its proposed tests have been executed or all gaps fixed. Re-import reuses prior findings and assesses changes without duplication. Audit each external repository separately and link its report from the parent; this does not require a cross-project scanning engine. Research findings use appropriate checks within the same PR review/QA flow; human collaboration takes place in the implementation session when needed. The auditor can land independently of automatic authoring; the complete delivery flow validates their handoff.
 
 Static project-wide counterpart to `pr-2680fbf` (which authors regressions on-demand per scenario). Scans the project's user-visible surfaces (CLI subcommands, TUI keybindings, watcher entrypoints, backends), intersects with what `pm/qa/regression/` already covers, and proposes a markdown audit report with three tiers reflecting the Phase 10 hierarchy:
 
@@ -459,6 +474,17 @@ The human-facing surface for sign-off — the per-PR report plus the dashboard t
 **Dashboard:** A single top-level HTML index where all PRs are reviewed **by behavior + short status summaries** — fits the BDD goal. Lists every PR with a one-line behavior/status summary linking to its per-PR `report.html`; simple client-side **filtering** by merged/unmerged and by status, so reports for both merged and unmerged PRs are reviewable and each PR's position in the flow is visible. **Detect-missing**: when a per-PR report is absent (never generated, or removed by a future GC) the index shows that state instead of a dead link, with a **regenerate flow** to rebuild it on demand from retained verdicts/evidence (re-running a capture only if needed). Static export (open a file, no server) is the v1 lean; co-located with the captures.
 
 **Reachable context.** The interface surfaces the written record alongside the behavior, so a reviewer can sign off without leaving it: each PR's **description** and **PR notes**, and per plan the **plan notes** (the plan auto-start watcher's continuity, recast from the old work logs in `pr-ff9b728`). PR descriptions/notes are available today; plan notes land with `pr-ff9b728`.
+
+### PR: Sign-off report improvements, plan feedback and whole-prompt review
+`pr-5f4f595` (depends on: pr-8e693f6, pr-2680fbf)
+
+Extend the report prompt with evidence-backed recommendations for code refactoring/architecture, missing regressions or recipes, and modifying, consolidating, replacing or removing recipes that caused difficulties. Require the user's review of the entire rendered sign-off prompt, including its recent additions and composed context, before accepting this PR.
+
+Also ask: **"Given the result of this PR, does the plan need to change, and is there any new work worth proposing?"** Consider changed assumptions, goals, priorities, ordering, dependencies and obsolete work. Explain each proposed change using the PR's findings; link the affected plan and any existing or proposed follow-up PRs, and accept an explicit no-change/no-new-work answer when justified. Separate actual acceptance blockers from optional next work.
+
+An ordinary PR can be an exploration whose deliverable is findings, decisions and candidate next PRs. Plans may grow from those results instead of predefining every PR. Mechanical work can run through the existing flow; research requiring judgment uses human-agent collaboration in that PR's implementation session, then the same review/QA/sign-off stages. PRs already can create PRs using existing PM commands. This addition changes sign-off guidance and report content; it does not require new PR types, a separate research lifecycle or new spawning functionality. Use current operations for authorized plan edits and follow-up entries, preserve existing gates, and do not interpret a proposal as permission to start unrelated work.
+
+Validate the prompt/report using a supported plan revision, an exploratory PR proposing new work, a matching existing follow-up that should be reused, and a result warranting no change. Preserve the regression-authoring dependency, recipe-change guidance and full human prompt-review requirement.
 
 ### PR: Plan auto-start watcher — replace the phase engine with agent control
 `pr-ff9b728` (depends on: pr-2d5f712)

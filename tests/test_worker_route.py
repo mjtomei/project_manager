@@ -195,19 +195,47 @@ class TestResolveProvider:
         assert run_env["ANTHROPIC_AUTH_TOKEN"] == "ollama"
 
 
+class Launch(str):
+    """A built command plus the environment it hands its pane (``env_out``)."""
+
+    env: dict[str, str]
+
+
+def _launch(**kw) -> Launch:
+    """``build_claude_shell_cmd`` with its ``env_out`` attached."""
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    env: dict[str, str] = {}
+    cmd = Launch(build_claude_shell_cmd(env_out=env, **kw))
+    cmd.env = env
+    return cmd
+
+
+def _sourced(cmd: str, body: str | None = None) -> str:
+    """*body* (default: *cmd*) as *cmd*'s pane runs it: its ``env_out``
+    file sourced first, as tmux's ``_wrap_cmd_env`` and
+    ``launch_claude_in_tmux`` hand the values over."""
+    body = cmd if body is None else body
+    env = getattr(cmd, "env", None)
+    if not env:
+        return body
+    from pm_core.paths import write_env_file
+    prefix, _path = write_env_file(env)
+    return prefix + body
+
+
 class TestBuildShellCmd:
     def _build(self, **kw):
-        from pm_core.claude_launcher import build_claude_shell_cmd
         with patch("pm_core.paths.skip_permissions_enabled", return_value=False), \
              patch("pm_core.paths.fake_claude_config_for_type", return_value=None), \
              patch("pm_core.claude_launcher.log_shell_command"):
-            return build_claude_shell_cmd(**kw)
+            return _launch(**kw)
 
     def test_host_worker_cmd(self, pm_home_dir):
         _write_providers(pm_home_dir, api_base="http://127.0.0.1:8790")
         cmd = self._build(provider=ROUTE, effort="high", session_id="s" * 8)
         assert cmd.startswith("env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN ")
-        assert " ANTHROPIC_BASE_URL=http://127.0.0.1:8790 " in cmd
+        assert cmd.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8790"
+        assert "ANTHROPIC_BASE_URL=" not in cmd  # values travel in env_out
         assert f" claude --model {MODEL} --effort high --session-id" in cmd
         assert "route_bridge" not in cmd
         assert "credentials" not in cmd
@@ -246,7 +274,7 @@ class TestBuildShellCmd:
         with patch("pm_core.route_bridge.tcp_connectable",
                    side_effect=AssertionError("router probed")):
             cmd = self._build(provider=ROUTE)
-        assert f"ANTHROPIC_BASE_URL=http://127.0.0.1:{port} " in cmd
+        assert cmd.env["ANTHROPIC_BASE_URL"] == f"http://127.0.0.1:{port}"
 
     def test_container_cmd_ensures_bridge_first(self, pm_home_dir):
         _write_providers(pm_home_dir, api_base="http://localhost:8790",
@@ -257,7 +285,7 @@ class TestBuildShellCmd:
         # container's cwd (/workspace) may hold a different pm_core.
         assert ensure == ("python3 -I /opt/pm-src/pm_core/route_bridge.py "
                           "ensure /run/pm-route/router.sock 8790 claude-work")
-        assert "ANTHROPIC_BASE_URL=http://127.0.0.1:8790 " in rest
+        assert cmd.env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8790"
         assert " claude --model" in rest  # host launcher is not used inside
         assert "claude-mixed" not in cmd
 
@@ -276,9 +304,9 @@ class TestBuildShellCmd:
                        "-u ANTHROPIC_DEFAULT_FABLE_MODEL "
                        "-u ANTHROPIC_SMALL_FAST_MODEL "
                        "-u CLAUDE_CODE_AUTO_MODE_MODEL -u PM_ROUTE_BASE_URL "
-                       "CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
-                       "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 "
                        "claude --model claude-opus-5-5 --effort high")
+        assert cmd.env == {"CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5",
+                           "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
 
     def test_oversized_prompt_on_route_runs_from_file(self, pm_home_dir,
                                                       tmp_path):
@@ -331,23 +359,25 @@ class TestBuildShellCmd:
                 env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE"))
 
     def test_fake_claude_has_no_ensure_step(self, pm_home_dir):
-        from pm_core.claude_launcher import build_claude_shell_cmd
         _write_providers(pm_home_dir)
         with patch("pm_core.paths.fake_claude_config_for_type",
                    return_value={"verdicts": {"PASS": 1}}), \
              patch("pm_core.claude_launcher.log_shell_command"):
-            cmd = build_claude_shell_cmd(provider=ROUTE, container=True,
-                                         session_type="qa_scenario")
+            cmd = _launch(provider=ROUTE, container=True,
+                          session_type="qa_scenario")
         assert "fake-claude" in cmd
         assert "route_bridge" not in cmd
 
 
 def _cmd_env(cmd: str) -> dict[str, str]:
-    """The ``NAME=value`` assignments a built command sets for claude."""
+    """The values a built command sets for claude: its ``env_out`` (and any
+    ``NAME=value`` assignment in the string, e.g. a probe command)."""
     import re
     import shlex
-    return dict(w.split("=", 1) for w in shlex.split(cmd)
-                if re.match(r"[A-Z_][A-Z0-9_]*=", w))
+    env = dict(w.split("=", 1) for w in shlex.split(cmd)
+               if re.match(r"[A-Z_][A-Z0-9_]*=", w))
+    env.update(getattr(cmd, "env", None) or {})
+    return env
 
 
 class TestClassifierRoute:
@@ -369,7 +399,8 @@ class TestClassifierRoute:
         """What *var* is in claude's environment when *cmd* runs."""
         import re
         exe = re.search(r" claude(?= |$)", cmd)  # the executable word
-        probe = cmd[:exe.start()] + f" sh -c 'echo \"${{{var}-unset}}\"'"
+        probe = _sourced(cmd, cmd[:exe.start()]
+                         + f" sh -c 'echo \"${{{var}-unset}}\"'")
         return subprocess.run(["sh", "-c", probe], capture_output=True,
                               text=True, check=True).stdout.strip()
 
@@ -573,7 +604,7 @@ class TestInheritedRoutingEnv:
         """claude's environment when *cmd* runs in a real shell."""
         import re
         exe = re.search(r" (claude|\S*fake-claude)(?= |$)", cmd)
-        probe = cmd[:exe.start()] + " env -0"
+        probe = _sourced(cmd, cmd[:exe.start()] + " env -0")
         out = subprocess.run(["sh", "-c", probe], capture_output=True,
                              check=True).stdout.decode()
         return dict(e.split("=", 1) for e in out.split("\0") if "=" in e)
@@ -756,11 +787,10 @@ class TestInheritedRoutingEnv:
         assert run_env["ANTHROPIC_DEFAULT_FABLE_MODEL"] == f"{MODEL}[1m]"
 
     def test_fake_claude_gets_the_same_env(self, routed_parent):
-        from pm_core.claude_launcher import build_claude_shell_cmd
         with patch("pm_core.paths.fake_claude_config_for_type",
                    return_value={"verdicts": {"PASS": 1}}), \
              patch("pm_core.claude_launcher.log_shell_command"):
-            cmd = build_claude_shell_cmd(session_type="qa_scenario")
+            cmd = _launch(session_type="qa_scenario")
         assert "fake-claude" in cmd
         self._assert_no_route(self._claude_env(cmd))
 
@@ -886,13 +916,11 @@ class TestSubagentPin:
         assert self._pin(cmd) == (MODEL, "1")
 
     def test_fake_claude_gets_the_same_env(self, pm_home_dir):
-        from pm_core.claude_launcher import build_claude_shell_cmd
         _write_providers(pm_home_dir)
         with patch("pm_core.paths.fake_claude_config_for_type",
                    return_value={"verdicts": {"PASS": 1}}), \
              patch("pm_core.claude_launcher.log_shell_command"):
-            cmd = build_claude_shell_cmd(provider=ROUTE,
-                                         session_type="qa_scenario")
+            cmd = _launch(provider=ROUTE, session_type="qa_scenario")
         assert "fake-claude" in cmd
         assert self._pin(cmd) == (MODEL, "1")
 
@@ -1024,10 +1052,11 @@ class TestRoleIsolation:
             qa_loop._launch_scenario_0(state, PROJECT, {"id": "pr-1"}, "sess",
                                        repo_root=tmp_path, workdir_path=str(tmp_path))
         cmd = nw.call_args[0][2]
+        env = nw.call_args.kwargs["env"]
         assert " claude" in cmd and "--model claude-opus-5-5" in cmd
         assert "ANTHROPIC_BASE_URL" not in cmd and "work/" not in cmd
-        assert ("CLAUDE_CODE_SUBAGENT_MODEL=claude-opus-5-5 "
-                "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 ") in cmd
+        assert env == {"CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5",
+                       "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
 
     def test_refiner_and_worker_commands_routed(self, pm_home_dir, tmp_path):
         from pm_core import qa_loop
@@ -1039,17 +1068,21 @@ class TestRoleIsolation:
              patch("pm_core.claude_launcher.prepare_workspace"), \
              patch("pm_core.qa_loop._write_scenario_capture_file"), \
              patch("pm_core.prompt_gen.generate_qa_child_prompt", return_value="p"):
-            ref = qa_loop._build_concretize_cmd(sc, {}, PROJECT, cwd=str(tmp_path))
+            ref_env: dict[str, str] = {}
+            ref = qa_loop._build_concretize_cmd(sc, {}, PROJECT, cwd=str(tmp_path),
+                                                env_out=ref_env)
+            run_env: dict[str, str] = {}
             run, _ = qa_loop._build_scenario_run_cmd(
                 sc, state, PROJECT, str(tmp_path / "t.jsonl"),
                 qa_loop._resolve_qa_model({}, PROJECT, "qa_scenario"),
-                session="sess", workdir_path=str(tmp_path))
+                session="sess", workdir_path=str(tmp_path), env_out=run_env)
             ver = resolve_model_and_provider("qa_verification", project_data=PROJECT)
-        for cmd in (ref, run):
+        for cmd, env in ((ref, ref_env), (run, run_env)):
             assert f"--model {MODEL}" in cmd and "--effort high" in cmd
-            assert "ANTHROPIC_BASE_URL=http://127.0.0.1:1" in cmd
-            assert (f"CLAUDE_CODE_SUBAGENT_MODEL={MODEL} " in cmd
-                    and "CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 " in cmd)
+            assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:1"
+            assert (env["CLAUDE_CODE_SUBAGENT_MODEL"],
+                    env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]) == (MODEL, "1")
+            assert "ANTHROPIC_BASE_URL=" not in cmd
         assert ver.provider is None
 
     def test_container_worker_cmd_uses_bridge(self, pm_home_dir, tmp_path):
@@ -1063,11 +1096,16 @@ class TestRoleIsolation:
              patch("pm_core.qa_loop._write_scenario_capture_file"), \
              patch("pm_core.prompt_gen.generate_qa_child_prompt", return_value="p"), \
              patch("pm_core.container._get_runtime", return_value="podman"):
+            env: dict[str, str] = {}
             run, _ = qa_loop._build_scenario_run_cmd(
                 sc, state, PROJECT, str(tmp_path / "t.jsonl"),
                 qa_loop._resolve_qa_model({}, PROJECT, "qa_scenario"),
-                session=None, workdir_path=str(tmp_path))
-        assert run.startswith("podman exec -it pm-qa-x bash -c ")
+                session=None, workdir_path=str(tmp_path), env_out=env)
+        # Values reach the exec'd claude by name (``-e NAME``) from the
+        # pane's environment.
+        assert run.startswith("podman exec -it -e ANTHROPIC_BASE_URL ")
+        assert " pm-qa-x bash -c " in run
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:1"
         assert "route_bridge.py ensure /run/pm-route/router.sock 1" in run
 
 
@@ -1366,6 +1404,12 @@ class TestBridge:
 # QA loop: no route gating
 # ---------------------------------------------------------------------------
 
+def _hit(verdict):
+    """What ``find_verdict_turn`` returns for a turn ending in *verdict*."""
+    from pm_core.verdict_transcript import VerdictHit
+    return VerdictHit(verdict=verdict, text=verdict) if verdict else None
+
+
 def _api_error_record(uid):
     """A transcript record as Claude Code writes it when a request still
     fails after its own retries and the turn ends on the error."""
@@ -1430,10 +1474,8 @@ class TestPollLoopNoRouteGating:
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
              patch("pm_core.hook_events.read_event", return_value=ev), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   return_value="PASS"), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=_hit("PASS")), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.worker_route.check_route",
                    side_effect=AssertionError("route checked")), \
@@ -1488,10 +1530,8 @@ class TestPollLoopNoRouteGating:
         with patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
              patch("pm_core.hook_events.read_event", return_value=ev), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   return_value="PASS"), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=_hit("PASS")), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.qa_loop._launch_scenarios_in_tmux",
                    side_effect=err):
@@ -1519,10 +1559,8 @@ class TestPollLoopNoRouteGating:
         with patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop._VERDICT_GRACE_PERIOD", 0), \
              patch("pm_core.hook_events.read_event", return_value=ev), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   return_value="PASS"), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=_hit("PASS")), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
              patch("pm_core.qa_loop._relaunch_scenario_window",
@@ -1815,10 +1853,8 @@ class TestPollLoopNoRouteGating:
                    return_value=120), \
              patch("pm_core.hook_events.read_event",
                    side_effect=lambda sid: next(events)), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=lambda *a: next(verdicts)), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=lambda *a: _hit(next(verdicts))), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.send_keys",
                    side_effect=lambda p, m: sent.append(m)), \
@@ -1857,10 +1893,8 @@ class TestPollLoopNoRouteGating:
                    return_value=120), \
              patch("pm_core.hook_events.read_event",
                    side_effect=lambda sid: next(events)), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=lambda *a: next(verdicts)), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=lambda *a: _hit(next(verdicts))), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.send_keys", side_effect=send):
             self._poll(state, tmp_path)
@@ -1897,10 +1931,8 @@ class TestPollLoopNoRouteGating:
              patch("pm_core.hook_events.read_event",
                    return_value={"event_type": "idle_prompt",
                                  "timestamp": t0}), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   return_value="PASS"), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=_hit("PASS")), \
              patch("pm_core.tmux.pane_exists", return_value=True), \
              patch("pm_core.tmux.send_keys", side_effect=send), \
              patch("pm_core.qa_loop._is_verification_enabled",
@@ -1947,10 +1979,8 @@ class TestPollLoopNoRouteGating:
              patch("pm_core.hook_events.read_event",
                    return_value={"event_type": "idle_prompt",
                                  "timestamp": t0}), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   return_value="PASS"), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   return_value=_hit("PASS")), \
              patch("pm_core.tmux.pane_exists",
                    side_effect=lambda p: p not in dead), \
              patch("pm_core.tmux.send_keys",
@@ -1999,11 +2029,9 @@ class TestPollLoopNoRouteGating:
              patch("pm_core.hook_events.read_event", side_effect=lambda sid: {
                  "event_type": "idle_prompt",
                  "timestamp": t0 + (sid == "sid-2")}), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=lambda *a: (
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=lambda *a: _hit(
                        "PASS" if sc.session_id == "sid-2" else None)), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=""), \
              patch("pm_core.tmux.pane_exists",
                    side_effect=lambda p: p != "%5"), \
              patch("pm_core.tmux.send_keys") as send:
@@ -2299,7 +2327,8 @@ def test_workflow_container_route_mount_and_fail_closed(pm_home_dir, monkeypatch
     create = Mock()
     monkeypatch.setattr(cm, "create_container", create)
     monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
-    monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path", lambda name: None)
+    monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path",
+                        lambda name, **kw: None)
     monkeypatch.setattr(worker_route, "check_route",
                         Mock(side_effect=AssertionError("route checked")))
     monkeypatch.setattr(route_bridge, "tcp_connectable",
@@ -2356,7 +2385,8 @@ def test_unrouted_provider_reuses_a_running_container_untouched(pm_home_dir, mon
     create = Mock()
     monkeypatch.setattr(cm, "create_container", create)
     monkeypatch.setattr(cm, "build_exec_cmd", lambda name, cmd, **kw: cmd)
-    monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path", lambda name: None)
+    monkeypatch.setattr("pm_core.push_proxy.get_proxy_socket_path",
+                        lambda name, **kw: None)
     assert cm.wrap_claude_cmd("CMD", "/w", provider="claude") == ("CMD", "impl-test")
     has_mount.assert_not_called()
     assert create.call_args.kwargs["extra_rw_mounts"] == {}
@@ -2910,7 +2940,7 @@ def test_reqa_hop_refused_then_fixed_launches_over_judged_window(
 
     # The driver has not cleared ``awaiting`` yet: a second tick leaves it.
     result, popen = _reqa_tick(tmp_path, data, status_path=old)
-    assert result.output.strip() == "running: qa"
+    assert result.output.strip() == "running: qa (launch claimed)"
     popen.assert_not_called()
 
     # Once the driver starts (clears ``awaiting``) its window is the run's.
@@ -2931,7 +2961,7 @@ def test_reqa_hop_claims_its_launch(pm_home_dir, tmp_path):
     assert "sign_off: re-qa" in result.output
     popen.assert_called_once()
     result, popen = _reqa_tick(tmp_path, data, status_path=old, window=False)
-    assert result.output.strip() == "running: qa"
+    assert result.output.strip() == "running: qa (launch claimed)"
     popen.assert_not_called()
 
 
@@ -3055,6 +3085,8 @@ def test_verifier_setup_error_stops_the_run_without_flagging_the_worker(
             patch("pm_core.hook_events.read_event", return_value=event), \
             patch.object(qa_loop, "extract_verdict_from_transcript",
                          return_value="PASS"), \
+            patch.object(qa_loop, "find_verdict_turn",
+                         return_value=_hit("PASS")), \
             patch("pm_core.tmux.capture_pane", return_value="PASS"), \
             patch("pm_core.tmux.pane_exists", return_value=True), \
             patch.object(qa_loop, "_is_verification_enabled", return_value=True):
@@ -3121,6 +3153,8 @@ def test_verifier_setup_error_keeps_verifications_settled_beside_it(
             patch("pm_core.hook_events.read_event", return_value=event), \
             patch.object(qa_loop, "extract_verdict_from_transcript",
                          return_value="PASS"), \
+            patch.object(qa_loop, "find_verdict_turn",
+                         return_value=_hit("PASS")), \
             patch("pm_core.tmux.pane_exists", return_value=True), \
             patch.object(qa_loop, "_is_verification_enabled", return_value=True):
         with pytest.raises(ProviderNotFoundError, match="missing-route"):
@@ -3235,7 +3269,7 @@ def test_reqa_hop_leaves_a_launch_another_tick_claimed(pm_home_dir, tmp_path):
     with patch("pm_core.signoff.claim_return_launch", return_value=False):
         result, popen = _reqa_tick(tmp_path, data, status_path=old)
     assert result.exit_code == 0, result.output
-    assert "sign_off: re-qa" in result.output
+    assert result.output.strip() == "running: qa (launch claimed)"
     popen.assert_not_called()
 
 
@@ -3247,10 +3281,11 @@ def test_reqa_hop_leaves_a_launch_another_tick_claimed(pm_home_dir, tmp_path):
 @pytest.mark.parametrize("container", [False, True])
 def test_secret_env_values_stay_out_of_the_command_and_log(
         pm_home_dir, tmp_path, monkeypatch, container):
-    """A provider env value that may be a credential is read from a 0600
-    file the command deletes, never written into the pane command or
-    pm's debug log (S98: x-team:secretvalue in both)."""
-    import subprocess
+    """A provider env value that may be a credential never reaches the pane
+    command or pm's debug log (S98: x-team:secretvalue in both): every
+    provider value travels in ``env_out`` (pr-84ebabf), which the pane
+    helpers hand over in a private file; the command only names the
+    routing variables it unsets."""
     from pm_core.claude_launcher import build_claude_shell_cmd
     _write_providers(pm_home_dir, env={
         "ANTHROPIC_CUSTOM_HEADERS": "x-team:secretvalue", "EXTRA_FLAG": "1"})
@@ -3259,33 +3294,42 @@ def test_secret_env_values_stay_out_of_the_command_and_log(
     wd = tmp_path / "wd"
     wd.mkdir()
     logged = []
+    env: dict[str, str] = {}
     with patch("pm_core.claude_launcher.log_shell_command",
                lambda cmd, **kw: logged.append(cmd)):
         cmd = build_claude_shell_cmd(
             provider=ROUTE, cwd=str(wd), session_type="impl",
-            container=container)
+            container=container, env_out=env)
     assert "secretvalue" not in cmd and "secretvalue" not in logged[0]
-    assert "EXTRA_FLAG=1" in cmd
-    files = list((wd / "pm" / "prompts").glob("pm_env_*"))
-    assert len(files) == 1 and files[0].stat().st_mode & 0o777 == 0o600
-    # The assignment expands to the value and removes the file.
-    m = re.search(r'ANTHROPIC_CUSTOM_HEADERS=("\$\(cat [^)]*\)")', cmd)
-    out = subprocess.run(["bash", "-c", f"printf %s {m.group(1)}"],
-                         capture_output=True, text=True).stdout
-    assert out == "x-team:secretvalue"
-    assert not files[0].exists()
+    assert "EXTRA_FLAG=1" not in cmd
+    assert env["ANTHROPIC_CUSTOM_HEADERS"] == "x-team:secretvalue"
+    assert env["EXTRA_FLAG"] == "1"
+    assert not list((wd / "pm" / "prompts").glob("pm_env_*"))
 
 
-def test_secret_env_value_without_a_workdir_is_redacted_in_the_log(
+def test_secret_env_value_without_a_workdir_stays_out_too(
         pm_home_dir, monkeypatch):
+    """pr-740ae41: with no workdir the value was inlined (and only the log
+    redacted).  It now leaves through ``env_out`` like any other."""
     from pm_core.claude_launcher import build_claude_shell_cmd
     _write_providers(pm_home_dir, env={"MY_TOKEN": "tok-123"})
     logged = []
+    env: dict[str, str] = {}
     with patch("pm_core.claude_launcher.log_shell_command",
                lambda cmd, **kw: logged.append(cmd)):
-        cmd = build_claude_shell_cmd(provider=ROUTE, session_type="impl")
-    assert "MY_TOKEN=tok-123" in cmd
-    assert "tok-123" not in logged[0] and "MY_TOKEN=<redacted>" in logged[0]
+        cmd = build_claude_shell_cmd(provider=ROUTE, session_type="impl",
+                                     env_out=env)
+    assert "tok-123" not in cmd and "tok-123" not in logged[0]
+    assert env["MY_TOKEN"] == "tok-123"
+
+
+def test_router_launch_without_env_out_is_refused(pm_home_dir):
+    """A routed session whose environment cannot reach its process would
+    run on whatever account the launching shell carries."""
+    from pm_core.claude_launcher import build_claude_shell_cmd
+    _write_providers(pm_home_dir)
+    with pytest.raises(ValueError, match="env_out"):
+        build_claude_shell_cmd(provider=ROUTE, session_type="impl")
 
 
 def test_concurrent_provider_edits_lose_nothing(pm_home_dir):
@@ -3314,19 +3358,24 @@ def test_concurrent_provider_edits_lose_nothing(pm_home_dir):
         list(ex.map(edit, names))
     data = yaml.safe_load((pm_home_dir / "providers.yaml").read_text())
     assert all(data["providers"][n].get("effort") == "low" for n in names)
-    assert not list(pm_home_dir.glob(".providers.*.tmp"))
+    assert not list(pm_home_dir.glob(".providers.yaml.pm-*"))
 
 
-def test_save_providers_keeps_a_symlink_and_the_file_mode(pm_home_dir, short_dir):
+def test_save_providers_writes_a_private_regular_file(pm_home_dir, short_dir):
+    """providers.yaml may hold a literal API key: a save always leaves an
+    owner-only regular file, replacing a symlink rather than writing through
+    it (pr-294e53d, A3)."""
     from pm_core import providers
     real = short_dir / "dotfiles-providers.yaml"
     real.write_text("providers: {}\n")
-    real.chmod(0o600)
-    (pm_home_dir / "providers.yaml").symlink_to(real)
+    real.chmod(0o644)
+    path = pm_home_dir / "providers.yaml"
+    path.symlink_to(real)
     providers.save_providers({"providers": {"a": {"type": "local"}}})
-    assert (pm_home_dir / "providers.yaml").is_symlink()
-    assert "a:" in real.read_text()
-    assert real.stat().st_mode & 0o777 == 0o600
+    assert not path.is_symlink()
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert "a:" in path.read_text()
+    assert real.read_text() == "providers: {}\n"
 
 
 @pytest.mark.parametrize("out,why", [
@@ -3348,11 +3397,12 @@ def test_live_probe_failure_names_the_models(out, why, capsys):
     assert f"Live: FAILED — {why}" in capsys.readouterr().err
 
 
-def test_refused_launch_deletes_its_secret_env_file(pm_home_dir, tmp_path,
-                                                    monkeypatch):
+def test_refused_launch_leaves_no_secret_env_file(pm_home_dir, tmp_path,
+                                                  monkeypatch):
     """S98: a refused launch left the 0600 file with the header value in
     the workdir's untracked pm/prompts/.  A container launch whose route
-    bridge cannot be set up is refused the same way."""
+    bridge cannot be set up is refused before any pane (and so any private
+    env file) exists."""
     from pm_core import container as cm
     from pm_core.claude_launcher import build_claude_shell_cmd
     _write_providers(pm_home_dir, env={"ANTHROPIC_CUSTOM_HEADERS": "x:s"})
@@ -3364,10 +3414,12 @@ def test_refused_launch_deletes_its_secret_env_file(pm_home_dir, tmp_path,
                         lambda cfg: (_ for _ in ()).throw(OSError("denied")))
     wd = tmp_path / "wd"
     wd.mkdir()
+    env: dict[str, str] = {}
     with patch("pm_core.claude_launcher.log_shell_command"):
         cmd = build_claude_shell_cmd(provider=ROUTE, cwd=str(wd),
-                                     session_type="impl", container=True)
-    assert len(list((wd / "pm" / "prompts").glob("pm_env_*"))) == 1
+                                     session_type="impl", container=True,
+                                     env_out=env)
+    assert "x:s" not in cmd and env["ANTHROPIC_CUSTOM_HEADERS"] == "x:s"
     with pytest.raises(cm.ContainerError):
-        cm.wrap_claude_cmd(cmd, str(wd), provider=ROUTE)
+        cm.wrap_claude_cmd(cmd, str(wd), provider=ROUTE, env=env)
     assert not list((wd / "pm" / "prompts").glob("pm_env_*"))

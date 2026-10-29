@@ -1,5 +1,6 @@
 """Tests for pm_core.review_loop and pm_core.prompt_gen review loop prompt."""
 
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -316,6 +317,66 @@ class TestRunReviewLoopSync:
         mock_review.assert_called_once()
 
 
+# --- pr-e040aeb: a failed next-iteration launch is retried -----------------
+
+def test_failed_launch_is_retried_not_terminal(tmp_path, monkeypatch):
+    """The next iteration's ``pm pr review`` child fails (the historical
+    window is closed, container setup then fails).  Pre-fix this ended the
+    loop with ERROR on the first attempt; the fix retries the same
+    iteration and collects its own verdict."""
+    import uuid
+
+    from pm_core import review_loop as rl
+    from pm_core import tmux
+
+    monkeypatch.setattr(rl, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(tmux, "session_exists", lambda _s: True)
+    monkeypatch.setattr(rl, "_find_claude_pane", lambda *a, **k: "%9")
+    monkeypatch.setattr(rl, "_find_review_claude_pane", lambda *a, **k: "%9",
+                        raising=False)
+    monkeypatch.setattr(rl, "_poll_for_verdict", lambda *a, **k: "**PASS**")
+    # Post-fix seams: discovery says nothing is live; retries are instant.
+    if hasattr(rl, "_discover_iteration"):
+        monkeypatch.setattr(
+            rl, "_discover_iteration",
+            lambda *a, **k: rl.AttemptDiscovery("launch"))
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_BASE", 0.0)
+        monkeypatch.setattr(rl, "REVIEW_LAUNCH_BACKOFF_MAX", 0.0)
+        monkeypatch.setattr(rl, "_WINDOW_WAIT", 0.0)
+        monkeypatch.setattr(rl, "_pr_is_terminal", lambda *a, **k: False)
+        monkeypatch.setattr(rl, "_claim_launch", lambda *a, **k: True)
+
+    calls = []
+
+    def fake_run(cmd, **_kw):
+        # Only the launch child counts: ``rl.subprocess`` *is* the global
+        # ``subprocess`` module, so the episode-start pane snapshot's ambient
+        # ``tmux display-message`` probe would otherwise consume the "first
+        # call fails" slot — the loop would succeed on its first real launch
+        # and this test would pass without ever exercising a retry.
+        if "--review-loop" not in cmd:
+            return MagicMock(returncode=0, stdout="", stderr="")
+        calls.append(cmd)
+        if len(calls) == 1:
+            return MagicMock(returncode=1, stdout="",
+                             stderr="Failed to create container")
+        # The child created the iteration transcript before running Claude.
+        t = cmd[cmd.index("--transcript") + 1]
+        link = Path(t)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(link.parent / f"{uuid.uuid4()}.jsonl")
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rl.subprocess, "run", fake_run)
+
+    state = ReviewLoopState(pr_id="pr-001")
+    run_review_loop_sync(state, str(tmp_path), _PR_DATA,
+                         transcript_dir=str(tmp_path))
+    assert len(calls) == 2, "the failed launch must be retried, not terminal"
+    assert state.iteration == 1
+    assert state.latest_verdict == VERDICT_PASS
+
+
 class TestResumeInFlightIteration:
     """A breadcrumb-resumed loop adopts the iteration still running in its
     review window instead of relaunching (which killed the window)."""
@@ -395,8 +456,11 @@ class TestAdoptWaitsForInFlightLaunch:
             target.write_text("{}\n")
         if symlink:
             (tdir / "review-pr-001-i1.jsonl").symlink_to(target)
+        # The breadcrumb restores ``iteration_attempted``: the pre-restart
+        # loop had started this iteration's launch.
         state = ReviewLoopState(pr_id="pr-001", iteration=1,
-                                _transcript_dir=str(tdir))
+                                _transcript_dir=str(tdir),
+                                iteration_attempted=True)
         return state, str(tdir)
 
     def _adopt(self, state, tdir, panes):
@@ -415,8 +479,9 @@ class TestAdoptWaitsForInFlightLaunch:
 
     def test_adopts_window_that_opens_after_restart(self, tmp_path):
         state, tdir = self._setup(tmp_path)
+        # (discovery looks the window's pane up again once it opened)
         out, poll, find, clock = self._adopt(
-            state, tdir, [None] * 12 + ["%7"])
+            state, tdir, [None] * 12 + ["%7"] * 3)
         assert out == "**PASS**"
         assert poll.call_args.args[0] == "%7"
         assert clock.sleeps == 11  # the first of the 12 misses is the pre-wait lookup
@@ -448,7 +513,7 @@ class TestAdoptWaitsForInFlightLaunch:
         clock = _Clock()
         with patch("pm_core.review_loop._get_pm_session", return_value="pm-s"), \
              patch("pm_core.review_loop._find_claude_pane",
-                   side_effect=[None, None, "%7"]), \
+                   side_effect=[None, None] + ["%7"] * 5), \
              patch("pm_core.review_loop.time.monotonic", clock.monotonic), \
              patch("pm_core.review_loop.time.sleep", clock.sleep), \
              patch("pm_core.hook_events.read_event", return_value=None), \
@@ -701,8 +766,9 @@ class TestGenerateReviewPromptInputRequired:
 
 def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
     """A ``pm pr review`` launch that exits non-zero (a work route down)
-    ends the loop with an ERROR verdict naming the child's stderr, and is
-    logged without a traceback (S84: one per launch in the pm debug log)."""
+    ends the loop with a LAUNCH_FAILED verdict (pr-e040aeb: retryable, not
+    an agent verdict) naming the child's stderr, and is logged without a
+    traceback (S84: one ERROR line in the pm debug log)."""
     import logging
     from pm_core import review_loop
     err = "work route 'w' unavailable: router not reachable at 127.0.0.1:1"
@@ -715,14 +781,17 @@ def test_launch_failure_is_an_error_verdict_without_traceback(caplog):
     try:
         with patch.object(review_loop.subprocess, "run", return_value=MagicMock(
                 returncode=1, stdout="", stderr=err)), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_BASE", 0.01), \
+                patch.object(review_loop, "REVIEW_LAUNCH_BACKOFF_MAX", 0.01), \
                 patch.object(review_loop, "_run_claude_review", side_effect=launch_only):
             state = ReviewLoopState(pr_id="pr-001")
             run_review_loop_sync(state, "/tmp", _PR_DATA, transcript_dir="/tmp")
     finally:
         logger.removeHandler(caplog.handler)
-    assert state.latest_verdict == "ERROR"
+    assert state.latest_verdict == review_loop.VERDICT_LAUNCH_FAILED
     assert state.latest_output == f"Review window launch failed (rc=1): {err}"
-    failed = [r for r in caplog.records if "review failed on iteration" in r.getMessage()]
+    failed = [r for r in caplog.records
+              if "review launch failed on iteration" in r.getMessage()]
     assert len(failed) == 1 and err in failed[0].getMessage()
     assert caplog.records and all(r.exc_info is None for r in caplog.records)
 

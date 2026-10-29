@@ -743,8 +743,13 @@ def test_tui_qa_pass_not_handed_to_signoff_while_reqa_awaits(tmp_path):
     app._auto_start = True
     app._auto_start_targets = {PR: st.make_target_record("t")}
     app._auto_start_run_id = "run"
+    # The owed start is claim-gated now (one owner across the TUI tick, a
+    # restart, another TUI and pm pr auto-sequence).  This fake has no
+    # project.yaml to claim in, so take the claim as won — the claim itself
+    # is covered by tests/test_owed_reqa.py.
     with patch.object(auto_start, "recorded_qa_verdict", return_value="PASS"), \
          patch.object(signoff_ui, "start_signoff") as ss, \
+         patch("pm_core.signoff.claim_return_launch", return_value=True), \
          patch("pm_core.tui.qa_loop_ui.start_qa") as sq:
         signoff_ui.advance_all(app, [p])
         auto_start._auto_start_qa_loops(app, [p])

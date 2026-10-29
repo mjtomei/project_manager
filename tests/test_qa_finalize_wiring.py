@@ -126,7 +126,7 @@ def test_run_qa_finalize_pane_opens_the_qa_window_when_it_is_gone(
                         pytest.fail("no QA window to split"))
     monkeypatch.setattr(
         tmux_mod, "new_window_get_pane",
-        lambda session, name, cmd, cwd, switch=True:
+        lambda session, name, cmd, cwd, switch=True, env=None:
         calls.append(("new_window", session, name, cmd, switch)) or "%9")
     state = QALoopState(pr_id="x")
     state.scenario_verdicts = {1: "PASS"}

@@ -12,6 +12,7 @@ Keybindings (mapped to the ``d`` key — "Review" — in the TUI):
 """
 
 import os
+import time
 
 from pm_core.paths import configure_logger
 from rich.markup import escape
@@ -21,9 +22,15 @@ from pm_core.autostart_state import held_by_text
 from pm_core.review_loop import (
     ReviewLoopState,
     start_review_loop_background,
+    _release_lease,
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_KILLED,
+    VERDICT_LAUNCH_FAILED,
+    VERDICT_HOLD,
+    VERDICT_CLOSED,
+    VERDICT_ERROR,
 )
 
 _log = configure_logger("pm.tui.review_loop_ui")
@@ -33,9 +40,12 @@ VERDICT_ICONS = {
     VERDICT_PASS: "[green bold]✓ PASS[/]",
     VERDICT_NEEDS_WORK: "[red bold]✗ NEEDS_WORK[/]",
     VERDICT_INPUT_REQUIRED: "[red bold]⏸ INPUT_REQUIRED[/]",
-    "KILLED": "[red bold]☠ KILLED[/]",
+    VERDICT_KILLED: "[red bold]☠ KILLED[/]",
     "TIMEOUT": "[red bold]⏱ TIMEOUT[/]",
-    "ERROR": "[red bold]! ERROR[/]",
+    VERDICT_ERROR: "[red bold]! ERROR[/]",
+    VERDICT_LAUNCH_FAILED: "[red bold]↻ LAUNCH_FAILED[/]",
+    VERDICT_HOLD: "[yellow bold]⏸ HOLD[/]",
+    VERDICT_CLOSED: "[dim]· CLOSED[/]",
     "": "[dim]—[/]",
 }
 
@@ -74,6 +84,10 @@ def stop_loop_or_fresh_review(app) -> None:
     loop = app._review_loops.get(pr_id)
     if loop and loop.running:
         loop.stop_requested = True
+        # Hand the cross-driver launch lease to the fresh loop now; waiting
+        # for the old thread to exit would make the new loop's first claim
+        # fail against a still-live lease.
+        _release_lease(loop)
         # Kill the review window so the running iteration's
         # _poll_for_verdict (which doesn't check stop_requested)
         # detects pane-gone, raises PaneKilledError, and the loop
@@ -132,6 +146,9 @@ def start_or_stop_loop(app) -> None:
     superseded = bool(existing and existing.running)
     if superseded:
         existing.stop_requested = True
+        # Release the old loop's launch lease immediately so the new loop's
+        # first claim does not lose to a loop that is already stopping.
+        _release_lease(existing)
         # Force the running iteration to terminate now: the
         # _run_claude_review path blocks in _poll_for_verdict (which
         # doesn't check stop_requested) until the pane is gone.
@@ -166,7 +183,7 @@ def start_or_stop_loop(app) -> None:
 def _start_loop(app, pr_id: str, pr: dict | None,
                 transcript_dir: str,
                 resume_state: ReviewLoopState | None = None,
-                superseded: bool = False) -> None:
+                superseded: bool = False) -> bool:
     """Start a review loop for the given PR.
 
     ``transcript_dir`` is required — hook-driven verdict polling needs a
@@ -183,21 +200,25 @@ def _start_loop(app, pr_id: str, pr: dict | None,
     PR was killed to make room for this one — only changes the
     user-visible status message so it's clear this is a fresh restart
     rather than a brand-new launch.
+
+    Returns False when the loop was not started (missing PR/workdir, no
+    tmux, unusable transcript dir) so callers that pre-cleared retry state
+    can restore it instead of stranding the target.
     """
     from pm_core import tmux as tmux_mod
 
     if not pr:
         app.log_message(f"PR {pr_id} not found")
-        return
+        return False
 
     if not tmux_mod.in_tmux():
         app.log_message("Review loop requires tmux. Use 'pm session' to start.")
-        return
+        return False
 
     workdir = pr.get("workdir")
     if not workdir:
         app.log_message(f"No workdir for {pr_id}. Start the PR first.")
-        return
+        return False
 
     # Ensure the transcript directory exists on disk.  Fail fast here
     # (before launching a podman container + review pane) if creation
@@ -210,7 +231,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
             f"[red]Cannot create transcript dir[/] {transcript_dir}: {e}"
         )
         _log.warning("_start_loop: mkdir %s failed: %s", transcript_dir, e)
-        return
+        return False
 
     # Get pm_root for launching the review window
     pm_root = str(store.find_project_root())
@@ -221,8 +242,12 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         state.stop_requested = False
         state._ui_notified_done = False
         state._ui_notified_input = False
+        # ``_ui_notified_retry`` is deliberately *not* reset here: it is
+        # persisted in the breadcrumb so a merge restart mid-episode does
+        # not re-announce a retry the user already saw.  It is cleared at
+        # each new retry episode's start (``_clear_launch_failure``), and
+        # the auto-start re-arm clears it explicitly.
         app._review_loops[pr_id] = state
-        mode_label = f"resumed at iteration {state.iteration}"
         _log.info("review_loop_ui: resuming loop for %s at iteration %d", pr_id, state.iteration)
     else:
         state = ReviewLoopState(pr_id=pr_id)
@@ -250,15 +275,28 @@ def _start_loop(app, pr_id: str, pr: dict | None,
                          iteration=state.iteration,
                          loop_id=state.loop_id)
 
-    # Start the background loop
-    start_review_loop_background(
-        state=state,
-        pm_root=pm_root,
-        pr_data=pr,
-        on_iteration=lambda s: _on_iteration_from_thread(app, s),
-        on_complete=lambda s: _on_complete_from_thread(app, s),
-        transcript_dir=transcript_dir,
-    )
+    # Start the background loop.  Mark it running *synchronously* before the
+    # thread is created: the 1 s poll (and a second starter, e.g. the
+    # breadcrumb resume after `check_and_start` re-armed the same loop) would
+    # otherwise see a non-running loop for a tick, re-announce a stale
+    # terminal verdict, or start a duplicate loop thread.
+    state.running = True
+    try:
+        start_review_loop_background(
+            state=state,
+            pm_root=pm_root,
+            pr_data=pr,
+            on_iteration=lambda s: _on_iteration_from_thread(app, s),
+            on_complete=lambda s: _on_complete_from_thread(app, s),
+            transcript_dir=transcript_dir,
+        )
+    except Exception:
+        # The thread never started (e.g. resource exhaustion).  Leaving
+        # ``running`` set would make the poller and the auto-start scheduler
+        # treat a dead loop as live and never retry it.
+        state.running = False
+        raise
+    return True
 
 
 def _stop_loop(app, pr_id: str) -> None:
@@ -318,6 +356,9 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                     finalize_transcript(p)
 
     from pm_core import runtime_state as _rs
+    # Release this loop's cross-driver launch lease (only if we still hold
+    # it; a superseding loop owns its own).
+    _release_lease(state)
     if not _is_active_loop(state):
         # We were superseded by a fresh loop; don't overwrite its
         # 'running' entry with our terminal (often KILLED) verdict.
@@ -325,16 +366,46 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
                    "superseded loop_id=%s verdict=%s",
                    state.loop_id, state.latest_verdict)
         return
-    # ERROR/KILLED are runtime failures, not clean completions; record
-    # them as state="failed" so the popup spinner can distinguish a
-    # successful loop end from a failure and surface the verdict to the
-    # user instead of silently dismissing.
+    # ERROR/KILLED/LAUNCH_FAILED/HOLD are runtime failures, not clean
+    # completions; record them as state="failed" so the popup spinner can
+    # distinguish a successful loop end from a failure and surface the
+    # verdict to the user instead of silently dismissing.
     final_state = ("failed"
-                   if state.latest_verdict in ("ERROR", "KILLED")
+                   if state.latest_verdict in (
+                       VERDICT_ERROR, VERDICT_KILLED, VERDICT_LAUNCH_FAILED,
+                       VERDICT_HOLD)
                    else "done")
-    _rs.set_action_state(state.pr_id, "review-loop", final_state,
-                         iteration=state.iteration,
-                         verdict=state.latest_verdict)
+    extras = {
+        "iteration": state.iteration,
+        "verdict": state.latest_verdict,
+    }
+    if state.latest_verdict == VERDICT_LAUNCH_FAILED:
+        extras.update(
+            retryable=bool(getattr(state, "launch_retryable", False)),
+            attempts=int(getattr(state, "launch_attempts", 0) or 0),
+            error=getattr(state, "last_launch_error", "") or "",
+            artifact=getattr(state, "last_launch_artifact", None),
+            retry_ready_at=getattr(state, "retry_ready_at", 0.0) or 0.0,
+        )
+    elif state.latest_verdict == VERDICT_HOLD:
+        # The hold's own message (the trust/permission prompt) — not a stale
+        # launch error from an earlier attempt of the same episode.  The
+        # artifact and the re-arm deadline belong to that failed attempt,
+        # not to a hold, so they are dropped with it.
+        extras.update(
+            retryable=False,
+            error=(state.latest_output
+                   or getattr(state, "last_launch_error", "") or ""),
+            artifact=None,
+            retry_ready_at=None,
+        )
+    else:
+        # A clean (or non-launch-failure) completion must not leave a prior
+        # episode's retry evidence in runtime_state, or `pm autostart
+        # status` / the runs popup would keep reporting a stale artifact.
+        extras.update(retryable=None, attempts=None, error=None,
+                      artifact=None, retry_ready_at=None)
+    _rs.set_action_state(state.pr_id, "review-loop", final_state, **extras)
 
 
 def _is_active_loop(state: ReviewLoopState) -> bool:
@@ -366,13 +437,15 @@ def _ensure_poll_timer(app) -> None:
 
 
 def _qa_needs_poll(app) -> bool:
-    """True while a QA loop is running or its completion is unprocessed.
+    """True while a QA loop is running, held for an INPUT_REQUIRED
+    follow-up, or its completion is unprocessed.
 
     ``poll_qa_state`` handles a finished run over two ticks (completion
     message and lifecycle first, then the runtime_state verdict and the
     ``_qa_loops`` removal), so the timer must outlive ``running``.
     """
-    return any(s.running or s.latest_verdict for s in app._qa_loops.values())
+    return any(s.running or s.held or s.latest_verdict
+               for s in app._qa_loops.values())
 
 
 def ensure_animation_timer(app) -> None:
@@ -385,6 +458,9 @@ def ensure_animation_timer(app) -> None:
         pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
         for pr in (app._data.get("prs") or [])
     )
+    # A held QA run (waiting for INPUT_REQUIRED follow-up) has
+    # ``running=False`` but still needs the poll timer to collect its
+    # follow-up and process the reopened result.
     qa_running = _qa_needs_poll(app)
     if has_active or any(s.running for s in app._review_loops.values()) or qa_running:
         _ensure_poll_timer(app)
@@ -407,6 +483,20 @@ def _poll_loop_state(app) -> None:
         raise
 
 
+def _retry_backoff_pending(state) -> bool:
+    """Whether *state* is sleeping out a failed-launch retry backoff.
+
+    ``next_retry_at`` is set to a future timestamp when a failed launch
+    schedules its retry and cleared when an attempt succeeds or a new
+    episode starts, so a future value means the next attempt has not been
+    launched yet.
+    """
+    try:
+        return float(getattr(state, "next_retry_at", 0.0) or 0.0) > time.time()
+    except (TypeError, ValueError):
+        return False
+
+
 def _poll_loop_state_inner(app) -> None:
     """Inner implementation of poll loop state."""
     any_running = False
@@ -423,6 +513,40 @@ def _poll_loop_state_inner(app) -> None:
                     f"interact with Claude in the review pane",
                     sticky=30,
                 )
+            # A failed launch that is being retried: surface each new
+            # attempt (bounded, so this cannot spam forever).  Gated on a
+            # recorded error so a normal first attempt (which also has
+            # launch_attempts == 1) is never announced as a retry.  The
+            # recorded error belongs to the attempt that just failed, not
+            # to the one starting now, so it is labelled as the previous
+            # failure rather than reading as this attempt's outcome.
+            #
+            # While the loop waits out a retry backoff, ``launch_attempts``
+            # still names the attempt that just failed and ``next_retry_at``
+            # is in the future; the upcoming attempt is ``attempts + 1``.
+            # Announce it then rather than waiting to observe the
+            # incremented counter: an attempt that starts and fails inside
+            # one poll tick (a container launch that dies in milliseconds)
+            # would otherwise never be announced — QA saw the final
+            # attempt-3 notice silently swallowed on every exhausted episode.
+            attempts = int(getattr(state, "launch_attempts", 0) or 0)
+            err = (getattr(state, "last_launch_error", "") or "").strip()
+            upcoming = (attempts + 1 if _retry_backoff_pending(state)
+                        else attempts)
+            if upcoming > 1 and err \
+                    and upcoming != state._ui_notified_retry:
+                state._ui_notified_retry = upcoming
+                # ``err`` is the launch child's own stderr: the log line is
+                # Rich markup, so escape it — an unescaped ``[podman]`` is
+                # swallowed and an unbalanced tag raises MarkupError (which
+                # log_message drops), silently hiding the failure.
+                msg = (f"[yellow]Review launch retry[/] for {state.pr_id} "
+                       f"(attempt {upcoming}; attempt {upcoming - 1} failed: "
+                       f"{escape(err[:200])})")
+                artifact = getattr(state, "last_launch_artifact", None)
+                if artifact:
+                    msg += f"\n  Artifact: {escape(str(artifact))}"
+                app.log_message(msg, sticky=15)
         elif not state._ui_notified_done:
             state._ui_notified_done = True
             newly_done.append(state)
@@ -477,23 +601,100 @@ def _announce_loop_done(app, state) -> None:
         f"Review loop done for {state.pr_id}: {verdict_icon} "
         f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
     )
-    if state.latest_verdict == "ERROR" and state.latest_output:
-        # Truncate for display but show enough to be useful
-        # Text, not markup: a route remedy naming ".../creds[work]/..."
-        # lost "[work]", and a "[/...]" would refuse the whole line.
+    if state.latest_verdict in (VERDICT_ERROR, VERDICT_LAUNCH_FAILED,
+                                VERDICT_HOLD) and state.latest_output:
+        # Truncate for display but show enough to be useful.  Text, not
+        # markup: the output is the child's own stderr, and a route remedy
+        # naming ".../creds[work]/..." lost "[work]" while a "[/...]" would
+        # refuse the whole line.
         err_text = escape(state.latest_output[:300])
         msg += f"\n  Error: {err_text}"
+        # The artifact belongs to a *failed launch attempt*.  A HOLD is
+        # the trust/permission prompt the pane sits at (latest_output);
+        # attaching an earlier attempt's artifact would point a human at
+        # the wrong evidence — the runtime_state mirror and
+        # `pm autostart status` already drop it for a hold.
+        if state.latest_verdict == VERDICT_LAUNCH_FAILED:
+            artifact = getattr(state, "last_launch_artifact", None)
+            if artifact:
+                msg += f"\n  Artifact: {escape(str(artifact))}"
         from pm_core.paths import command_log_file
         msg += f"\n  See log: {command_log_file()}"
+        if state.latest_verdict == VERDICT_LAUNCH_FAILED:
+            if getattr(state, "launch_retryable", False):
+                if _retry_rearm_applies(app, state):
+                    msg += ("\n  Will retry automatically; a manual "
+                            "'review-loop start' also retries.")
+                else:
+                    # Auto-start is not managing this PR (manual loop, out
+                    # of scope, disabled, or the episode cap): nothing will
+                    # re-arm it, so do not promise an automatic retry.
+                    msg += ("\n  Run 'review-loop start' to retry "
+                            "(auto-start is not retrying this PR).")
+            else:
+                msg += "\n  Needs attention before it can be retried."
     # Held as well: the hand-off logs its own held confirmations in the
     # same frame ("skipping QA", "→ sign-off", an "Error:"), which otherwise
     # replaced this line before it ever painted (S53).
     from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS
     app.log_message(msg, sticky=10, hold=CONFIRM_HOLD_SECONDS)
 
+    # A retryable launch failure must not strand an auto-start target:
+    # schedule one scheduler pass after the cooldown.  Cancellation,
+    # holds and non-retryable failures never re-arm.
+    if state.latest_verdict == VERDICT_LAUNCH_FAILED \
+            and getattr(state, "launch_retryable", False):
+        _schedule_retry_rearm(app, state)
+
     # Auto-start next step: review pass → QA (then QA pass → merge)
     if state.latest_verdict == VERDICT_PASS:
         _start_qa_after_review(app, state.pr_id)
+
+
+
+def _retry_rearm_applies(app, state: ReviewLoopState) -> bool:
+    """Whether auto-start will re-arm this loop after its cooldown.
+
+    Only auto-start targets re-arm, and only while the episode cap allows
+    another one; a manual loop (or one outside the target set) keeps its
+    explicit retryable failure for the user.
+    """
+    from pm_core.tui import auto_start as _auto_start
+    try:
+        if not _auto_start.is_enabled(app) \
+                or not _auto_start.in_scope(app, state.pr_id):
+            return False
+    except Exception:
+        return False
+    episodes = int(getattr(state, "retry_episodes", 0) or 0)
+    return episodes < _auto_start.MAX_REVIEW_LAUNCH_RETRY_EPISODES
+
+
+def _schedule_retry_rearm(app, state: ReviewLoopState) -> None:
+    """Run one auto-start pass when a retryable launch failure may re-arm.
+
+    The TUI has no periodic auto-start pass; without this a target whose
+    review launch exhausted its bounded retries would sit until an
+    unrelated event (the original bug).  Only auto-start targets re-arm;
+    manual loops keep the explicit failure for the user.
+    """
+    if not _retry_rearm_applies(app, state):
+        return
+    from pm_core.tui import auto_start as _auto_start
+    set_timer = getattr(app, "set_timer", None)
+    if set_timer is None or getattr(app, "_review_retry_timer", None) is not None:
+        return
+    delay = max(1.0, (getattr(state, "retry_ready_at", 0.0) or 0.0)
+                - time.time())
+
+    def _fire():
+        app._review_retry_timer = None
+        try:
+            app.run_worker(_auto_start.check_and_start(app))
+        except Exception:
+            _log.exception("review_loop_ui: retry re-arm pass failed")
+
+    app._review_retry_timer = set_timer(delay, _fire)
 
 
 def _refresh_tech_tree(app) -> None:
@@ -527,41 +728,13 @@ def _pending_auto_qa(app) -> dict:
     return pending
 
 
-def _reqa_waiting(app) -> set:
-    """PRs a sign-off REQA routed back to QA while another process drove a
-    QA run of them: their pending start is owed whatever drives the PR."""
-    waiting = getattr(app, "_reqa_waiting", None)
-    if not isinstance(waiting, set):
-        waiting = set()
-        app._reqa_waiting = waiting
-    return waiting
-
-
-def defer_reqa_start(app, pr_id: str) -> None:
-    """Start the QA a sign-off REQA asked for once the run another process
-    drives (a ``pm qa run`` the user started) is over.
-
-    Starting now would kill that run's windows as stale and run a second
-    loop beside it (S117); the poll tick retries like a review → QA
-    hand-off that met such a run.
-    """
-    reason = "the QA run another process drives"
-    _pending_auto_qa(app)[pr_id] = ("driven", reason)
-    _reqa_waiting(app).add(pr_id)
-    _log.info("signoff: %s REQA; QA starts once %s ends", pr_id, reason)
-    app.log_message(escape(
-        f"Sign-off REQA for {pr_id} — QA starts once {reason} ends"),
-        sticky=10)
-    _ensure_poll_timer(app)
-
-
 def _qa_handoff_wanted(app, pr_id: str) -> bool:
-    """Self-driving (zz t) still owns the PR, auto-start still covers it,
-    or a sign-off REQA is still owed its QA run."""
+    """Self-driving (zz t) still owns the PR, or auto-start still covers it.
+
+    (A sign-off REQA's owed run is not a hand-off: the return record keeps
+    it on disk and qa_loop_ui.reconcile_owed_reqa starts it.)"""
     from pm_core.tui import auto_start as _auto_start
     if getattr(app, "_self_driving_qa", {}).get(pr_id):
-        return True
-    if pr_id in _reqa_waiting(app):
         return True
     return _auto_start.is_enabled(app) and _auto_start.in_scope(app, pr_id)
 
@@ -581,7 +754,6 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     entry = pending.get(pr_id)
     if entry is not None and not _qa_handoff_wanted(app, pr_id):
         pending.pop(pr_id, None)
-        _reqa_waiting(app).discard(pr_id)
         _log.info("auto_qa: pending QA hand-off for %s dropped (no longer "
                   "self-driving or in auto-start scope)", pr_id)
         return
@@ -591,35 +763,29 @@ def _start_qa_after_review(app, pr_id: str) -> None:
     else:
         result = _maybe_start_qa(app, pr_id)
     if result is None:
-        _reqa_waiting(app).discard(pr_id)
         if pending.pop(pr_id, None) is not None:
             _log.info("auto_qa: pending QA hand-off for %s done", pr_id)
         return
     if pending.get(pr_id) != result:
         pending[pr_id] = result
         stage, reason = result
-        # A sign-off REQA start waits here too: name what owes the QA run
-        # (S120: "Review PASS" was logged for a REQA's deferred start).
-        reqa = pr_id in _reqa_waiting(app)
-        cause = "Sign-off REQA" if reqa else "Review PASS"
-        log_cause = "sign-off REQA" if reqa else "review passed"
         if stage == "driven":
-            _log.info("auto_qa: %s %s; QA starts once %s ends", pr_id,
-                      log_cause, reason)
+            _log.info("auto_qa: %s review passed; QA starts once %s ends",
+                      pr_id, reason)
             app.log_message(escape(
-                f"{cause} for {pr_id} — QA starts once {reason} ends"),
+                f"Review PASS for {pr_id} — QA starts once {reason} ends"),
                 sticky=10)
             return
         locked = reason == store.LOCK_BUSY_REASON
-        _log.warning("auto_qa: %s %s; QA %s waits until "
-                     "project.yaml %s: %s", pr_id, log_cause,
+        _log.warning("auto_qa: %s review passed; QA %s waits until "
+                     "project.yaml %s: %s", pr_id,
                      "start" if stage == "launch" else "transition",
                      "is unlocked" if locked else "loads again", reason)
         # Sticky: the "Review loop done … PASS" line logged just before is
         # sticky too, and would otherwise hide this one (S48: logged only
         # as "hidden by sticky message").  It names the review PASS itself.
         app.log_message(escape(
-            f"{cause} for {pr_id} — waiting for project.yaml "
+            f"Review PASS for {pr_id} — waiting for project.yaml "
             f"{'to be unlocked' if locked else 'to load'} to start QA: "
             f"{reason}"), sticky=10)
 
@@ -815,13 +981,13 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
     never trigger merges — merge is an auto-start-only action.
 
     Sign-off gate first: without a fresh ``SIGNOFF_MERGE`` on the current
-    HEAD nothing merges and nothing claims "ready to merge" — a ``qa`` (or
-    skip_qa ``in_review``) PR is handed to the sign-off step instead, and a
-    ``sign_off`` PR is left to the sign-off driver (``signoff_ui``).
+    HEAD nothing merges and nothing claims "waiting for manual merge" — a
+    ``qa`` (or skip_qa ``in_review``) PR is handed to the sign-off step
+    instead, and a ``sign_off`` PR is left to the sign-off driver
+    (``signoff_ui``).
 
-    Then the effective merge hold (``auto_start.merge_hold``: an explicit
-    stop-before-merge mark from O / the CLI, or a ``wait_for_merge`` target
-    whose closure contains the PR) stops with the "ready to merge" /
+    Then the effective merge hold (``auto_start.merge_hold``: a
+    ``wait_for_merge`` target whose closure contains the PR) stops with the
     "waiting for manual merge" line; otherwise runs
     ``pm pr merge --resolve-window --background <pr_id>`` synchronously,
     then triggers ``auto_start.check_and_start()`` to kick off newly-ready
@@ -862,22 +1028,18 @@ def _maybe_auto_merge(app, pr_id: str) -> None:
                       "— not merging", pr_id, status)
         return
 
-    # Effective merge hold: an explicit per-PR stop (O / CLI default) or a
-    # wait-for-merge target needing this PR.  Either wins even when an
-    # auto-merge target depends on this PR.
+    # Effective merge hold: a wait-for-merge target needing this PR.  It
+    # wins even when an auto-merge target depends on this PR.
     hold = _auto_start.merge_hold(app, pr_id)
     if hold:
         _log.info("auto_merge: %s held (%s) — skipping merge", pr_id,
                   held_by_text(hold))
-        # The stop line is printed once per (verdict, sha, policy) and is
+        # The wait line is printed once per (verdict, sha, policy) and is
         # the user's cue to press g, so force it past a sticky message (e.g.
         # "Review loop done" right before a fast skip_qa sign-off) and hold
         # it against same-frame follow-ons (another target's merge lines).
-        if hold.get("explicit"):
-            tail = "ready to merge (auto-sequence armed — press 'g' to merge)"
-        else:
-            tail = ("waiting for manual merge (wait-for-merge: "
-                    f"{', '.join(hold['targets'])}) — press 'g' to merge")
+        tail = ("waiting for manual merge (wait-for-merge: "
+                f"{', '.join(hold['targets'])}) — press 'g' to merge")
         app.log_message(
             f"[green bold]✓ {pr_id} signed off[/] (SIGNOFF_MERGE @ {sha[:8]}) "
             f"— {tail}",
