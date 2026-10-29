@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T05:07:25.829470+00:00'
+  updated_at: '2026-10-29T06:02:09Z'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39597,6 +39597,41 @@ prs:
       casts+mp4, story5 CLI status cast+mp4, per-story status/log/sample evidence).'
     created_at: '2026-10-29T05:07:25Z'
     last_edited: '2026-10-29T05:07:25Z'
+  - id: note-3ada909
+    text: 'QA scenario 27 (a wait in a pane the loop adopted from another driver)
+      PASS at 6faf7496 — live TUI + interactive stand-in, all six triples on a throwaway
+      local-backend project. (1) In-flight adoption: another driver replaced the review
+      window (pm pr review --fresh --review-loop --review-iteration 1 --transcript
+      <other-driver>/review-<PR>-i1.jsonl) while iteration 1 was in flight with no
+      verdict; pane A died, pane B asked INPUT_REQUIRED; `pm tui restart --breadcrumb`
+      2.4 s later logged `iteration 1 verdict=INPUT_REQUIRED`, status read waiting
+      / review INPUT_REQUIRED (iteration 1) ir=true fu=false resuming=false, tree
+      ⏸1, popup WAITING #1, one window, stand-in count 2, no new relauncher. (2) Answering
+      in pane B cleared the wait (answered; follow-up running, ⟳1) and NEEDS_WORK
+      was read from pane B''s transcript (`hook-driven follow-up verdict NEEDS_WORK`)
+      -> exactly one iteration 2 (⟳2). (3) Recorded-wait re-adoption: iteration 1
+      ended INPUT_REQUIRED in pane A, another driver replaced the window, the loop''s
+      own symlink still named dead session A; after `pm tui restart --breadcrumb`
+      the log read `adopting INPUT_REQUIRED wait for <PR> iteration 1 (transcript=~/.claude/projects/<mangled>/<session
+      B>.jsonl, unanswered)` — pane B''s session, NOT the loop''s own review-<PR>-i1.jsonl
+      — status stayed waiting with the same window/pane, count 2, no relauncher, no
+      iteration 2. (4) Second restart sampled at 0.2 s: 35 waiting samples + exactly
+      1 brief `running / review resuming (iteration 1)` (resuming=true, ir=false,
+      fu=false), no KILLED, pane text byte-identical. (5) `pm pr auto-sequence` ->
+      `running: review (owned by loop:<id>)`, no launch, no second loop, wait unchanged.
+      (6) Answer in pane B then PASS -> `Review loop done for <PR>: ✓ PASS (1 iteration)`,
+      no iteration 2. Tests: test_review_input_required_state + test_verdict_transcript
+      98 passed (incl. test_restart_during_wait_on_another_drivers_transcript). Captures
+      /pm-captures/scenarios/27/{storyA,storyB,cli-standdown}. Harness: private HOME
+      + PM_TMUX_SOCKET + a private bin dir holding the stand-in as `fake-claude` first
+      on PATH at `pm session` time (shared ~/.local/bin shim untouched); the other-driver
+      `pm pr review --fresh` must run from a pane inside the pm session (in_tmux gate)
+      and selects the new window, so pin the recorder to `<sess>:main`; the in-flight
+      restart has a ~15 s window (poll_for_verdict wait_for_event timeout) — chain
+      the replacement and the restart in one shell line; name the recorder session
+      non-pm-* and non-grouped (a grouped pm-rec session changes _get_pm_session()).'
+    created_at: '2026-10-29T06:02:09Z'
+    last_edited: '2026-10-29T06:02:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
