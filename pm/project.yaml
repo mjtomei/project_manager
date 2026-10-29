@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T08:06:31.562944+00:00'
+  updated_at: '2026-10-29T08:41:13.779513+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36767,6 +36767,46 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T08:06:31Z'
     last_edited: '2026-10-29T08:06:31Z'
+  - id: note-649acc8
+    text: 'Review loop 7c9c i11: one leftover in the kept recipe scope, the PR own
+      class (a failure that names the wrong stage), in both recording recipes render
+      blocks. The block checks its input at every stage — the cast before agg, the
+      encoder presence before the encode, the encoder exit status, and the mp4 at
+      the end (which is what catches a renderer that reports success and writes nothing,
+      R12) — except between agg and ffmpeg. An agg that exits 0 without writing its
+      output (or a 0-byte gif) therefore reached ffmpeg as a missing input, and the
+      run reported "render produced no mp4 — ffmpeg failed on the gif", sending the
+      worker to inspect the encoder for a renderer that wrote nothing. Verified with
+      both recipes own extracted render blocks and a stub agg that exits 0 without
+      writing: pre-fix both exit 1 with real ffmpeg "…recording.cast.gif: No such
+      file or directory" above "render produced no mp4 — ffmpeg failed on the gif";
+      post-fix both stop with "render produced no mp4 — agg wrote no gif (the renderer
+      reported success and wrote nothing)" and never invoke ffmpeg. This is the misdiagnosis
+      R19 fixed for a missing webm and R23 for a missing encoder, one stage over;
+      the cast check one line above is the same rule applied earlier. Both blocks
+      now check [ -s "$cast.gif" ] after the agg line (render_fail removes the partial
+      outputs as before), and the nominal render is unchanged (rc 0, mp4 written,
+      gif dropped). Tests: test_render_names_a_renderer_that_writes_no_gif, both recipes,
+      driven with an ffmpeg stub that models the real contract (fails on a missing
+      input — the default stub writes its output unconditionally and would hide the
+      misdiagnosis); both fail against HEAD blocks with the "ffmpeg failed on the
+      gif" message (checked by restoring them in place, then restoring the post-fix
+      copies) and pass with the check. File 177 pass; related suites (test_qa_artifact_web_ui_recording,
+      test_qa_instructions, test_qa_loop) 352 together with the file; full suite env
+      -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py -> 4571 passed, 1 skipped, 92 deselected,
+      0 failed (436 s, with the markdown dep on the scratch path). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-7c9c-i11/ (probe.log with the pre/post runs
+      of both recipes and the nominal run, README.md, scripts/ with the pre/post render
+      blocks and the stubs). Also, same class in text: R37/R39 replaced the tmux recipe
+      bare session handles with =, but the spec own requirement bodies and qa.md summary
+      bullet still prescribed the bare forms — tmux kill-session -t pm-recorder (R2),
+      tmux has-session -t pm-recorder (R4) and tmux has-session -t "$TARGET" (R6,
+      qa.md). They now name the exact handles and point at the R-entry that changed
+      them. No behaviour change. impl.md R40 + Files/verification/evidence and qa.md
+      updated. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T08:41:13Z'
+    last_edited: '2026-10-29T08:41:13Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
