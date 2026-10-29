@@ -22,8 +22,14 @@ This PR adds:
 - Sign-off prompt / dashboard / merge gate bound to the manifest's run.
 
 The routing half of the original bug (which PR owns the `/pm-captures` mount)
-is #264 and is **not** in scope here; on this branch `captures_dir` is still
-the pre-#264 fail-open form, so the evidence-side defenses are what must hold.
+is #264/pr-1e9c117 and is **not** in scope here. That routing has since landed
+on `origin/master` and this branch was merged with it (2026-10-29), so
+`captures_dir` now **fails closed**: a nested project whose `PM_CAPTURES_PR`
+is unset no longer receives the enclosing PR's mount. The evidence-side
+defenses this PR adds must therefore hold for (a) records written before the
+routing fix, (b) a running controller that still carries the old fail-open
+routing, and (c) a captures tree that is damaged or hand-edited. See R8 for
+how to reach the incident's write path on this branch.
 
 ## 1. Requirements (Given / When / Then)
 
@@ -87,10 +93,17 @@ the pre-#264 fail-open form, so the evidence-side defenses are what must hold.
 
 ### R8 — The original incident no longer reproduces
 - **GIVEN** an outer QA run for a PR, and a second actor — a nested
-  fake-Claude QA fixture / nested pm project (an older controller that leaves
-  `PM_CAPTURES_PR` unset, so it resolves the enclosing PR's `/pm-captures`
-  mount) — writing its own scenario records and manifest into that tree
-  *while the outer run is live*,
+  fake-Claude QA fixture / nested pm project — writing its own scenario
+  records and manifest into that tree *while the outer run is live*.
+  With #264's fail-closed routing on this branch, a nested project whose
+  `PM_CAPTURES_PR` is unset can no longer reach the enclosing mount, so drive
+  the incident's write path by having the fixture write
+  `scenarios/<n>/scenario.json`, `verdict.md` and `qa_manifest.json` into the
+  enclosing captures dir directly — the pre-fix controller's effect.
+  Do **not** reproduce it by exporting `PM_CAPTURES_PR=<fixture PR id>`
+  against a real captures tree: that marker makes `_captures_root_is_ours`
+  treat the mount as the fixture's own, so the nested run would quarantine the
+  enclosing PR's genuine records — the one thing this PR must never do.
   **WHEN** the outer run completes and the operator inspects the evidence,
   **THEN**:
   - the outer PR's membership is still the outer run's scenarios (recovered

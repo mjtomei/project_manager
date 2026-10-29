@@ -75,11 +75,13 @@ _META_CONTENT_RE = re.compile(
 _HEAD_READ_CAP = 256 * 1024
 
 
-def _extract_verdict(report_path: Path) -> str:
-    """Read the sign-off verdict from a ``report.html``'s `<head>` meta tag.
+def _read_report_head(report_path: Path) -> str:
+    """The report's ``<head>`` region, or ``""`` when it is unreadable.
 
-    Returns the keyword (``SIGNOFF_MERGE`` etc.) or ``""`` when the file is
-    missing, unreadable, or has no ``pm-signoff-verdict`` meta tag.
+    One read per report per dashboard render: the verdict tag and every
+    ``pm-signoff-*`` tag (including the QA-run binding) come from the same
+    head text, and the cap above exists so a multi-MB report body is never
+    slurped for them.
     """
     try:
         with report_path.open("r", encoding="utf-8", errors="replace") as fh:
@@ -90,12 +92,25 @@ def _extract_verdict(report_path: Path) -> str:
     # (e.g. inside the routing-definitions section a verbose report might
     # quote) would be a false match.
     head_end = text.lower().find("</head>")
-    head = text if head_end < 0 else text[:head_end]
+    return text if head_end < 0 else text[:head_end]
+
+
+def _verdict_from_head(head: str) -> str:
+    """The ``pm-signoff-verdict`` keyword in a report head, or ``""``."""
     for tag in _META_TAG_RE.findall(head):
         if _META_NAME_RE.search(tag):
             m = _META_CONTENT_RE.search(tag)
             return m.group(1).upper() if m else ""
     return ""
+
+
+def _extract_verdict(report_path: Path) -> str:
+    """Read the sign-off verdict from a ``report.html``'s `<head>` meta tag.
+
+    Returns the keyword (``SIGNOFF_MERGE`` etc.) or ``""`` when the file is
+    missing, unreadable, or has no ``pm-signoff-verdict`` meta tag.
+    """
+    return _verdict_from_head(_read_report_head(report_path))
 
 
 _ANY_META_NAME_RE = re.compile(
@@ -104,21 +119,9 @@ _ANY_META_CONTENT_RE = re.compile(
     r'content\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.IGNORECASE)
 
 
-def extract_signoff_meta(report_path: Path) -> dict[str, str]:
-    """All ``pm-signoff-*`` meta tags in a report's ``<head>``.
-
-    Keys drop the ``pm-signoff-`` prefix (``verdict``, ``head``, ``base``,
-    ``reason``); values are HTML-unescaped.  Empty when the file is missing
-    or unreadable.
-    """
+def _meta_from_head(head: str) -> dict[str, str]:
+    """Every ``pm-signoff-*`` meta tag in a report head, keyed without prefix."""
     import html as _html
-    try:
-        with report_path.open("r", encoding="utf-8", errors="replace") as fh:
-            text = fh.read(_HEAD_READ_CAP)
-    except (OSError, ValueError):
-        return {}
-    head_end = text.lower().find("</head>")
-    head = text if head_end < 0 else text[:head_end]
     out: dict[str, str] = {}
     for tag in _META_TAG_RE.findall(head):
         name = _ANY_META_NAME_RE.search(tag)
@@ -131,7 +134,17 @@ def extract_signoff_meta(report_path: Path) -> dict[str, str]:
     return out
 
 
-def _report_qa_run_binding(pr_id: str, report_path: Path,
+def extract_signoff_meta(report_path: Path) -> dict[str, str]:
+    """All ``pm-signoff-*`` meta tags in a report's ``<head>``.
+
+    Keys drop the ``pm-signoff-`` prefix (``verdict``, ``head``, ``base``,
+    ``reason``); values are HTML-unescaped.  Empty when the file is missing
+    or unreadable.
+    """
+    return _meta_from_head(_read_report_head(report_path))
+
+
+def _report_qa_run_binding(pr_id: str, meta: dict[str, str],
                            captures_root_dir: Path) -> tuple[str, str, bool]:
     """``(run the report reviewed, the PR's current run, stale?)``.
 
@@ -144,7 +157,7 @@ def _report_qa_run_binding(pr_id: str, report_path: Path,
     """
     from pm_core import captures
 
-    run = extract_signoff_meta(report_path).get("qa-run", "")
+    run = meta.get("qa-run", "")
     if not run:
         return "", "", False
     manifest = captures.read_manifest(captures_root_dir / pr_id, pr_id=pr_id)
@@ -164,9 +177,14 @@ def gather_dashboard_rows(data: dict,
         status = pr.get("status", "")
         report_path = captures_root_dir / pr_id / "report.html"
         if report_path.is_file():
-            verdict = _extract_verdict(report_path)
+            # One read of the report head per PR: the verdict and the QA-run
+            # binding both live in it, and the dashboard re-renders on every
+            # request (no cache), so a second read of up to ``_HEAD_READ_CAP``
+            # per PR is pure waste.
+            head = _read_report_head(report_path)
+            verdict = _verdict_from_head(head)
             qa_run, qa_current_run, qa_run_stale = _report_qa_run_binding(
-                pr_id, report_path, captures_root_dir)
+                pr_id, _meta_from_head(head), captures_root_dir)
             try:
                 mtime = report_path.stat().st_mtime
             except OSError:

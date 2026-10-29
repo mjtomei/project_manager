@@ -638,6 +638,23 @@ def _qa_scenarios_pointer() -> str:
     return f"read {_QA_SCENARIOS_READER}"
 
 
+def _status_scenario_entries(status: dict) -> list:
+    """The ``qa_status.json`` scenario entries, as a list.
+
+    The status file lives in an ephemeral workdir that a crash, a partial
+    write or a hand edit can leave damaged, so a ``scenarios`` value that is
+    not a list (a bare int from a truncated write, a string) must not turn
+    prompt generation into a ``TypeError`` — the sign-off session would lose
+    the whole QA block, which is the surface that tells it which run the
+    evidence belongs to.  A mapping is tolerated (older shapes); anything
+    else contributes no entries.
+    """
+    value = status.get("scenarios")
+    if isinstance(value, dict):
+        value = list(value.values())
+    return value if isinstance(value, list) else []
+
+
 def _qa_run_binding(pr_id: str, status: dict, status_path,
                     listing_expected: bool = True,
                     session_tag: str | None = None) -> list[str]:
@@ -730,9 +747,7 @@ def _qa_run_binding(pr_id: str, status: dict, status_path,
     # Scenario 0 is the interactive window: it stays in qa_status.json (the
     # display contract) but is deliberately not a manifest member, so
     # comparing the two listings verbatim would warn on every normal run.
-    listed = status.get("scenarios") or []
-    if isinstance(listed, dict):
-        listed = list(listed.values())
+    listed = _status_scenario_entries(status)
     listed_idx = [i for s in listed
                   if (i := captures.member_index(s)) is not None and i != 0]
     if manifest_idx and listed_idx and set(manifest_idx) != set(listed_idx):
@@ -811,10 +826,8 @@ def _signoff_qa_scenarios_parts(pr_id: str,
         return _qa_head_without_status(
             "_qa_status.json unreadable — read the captures dir directly._",
             pr_id, latest, session_tag)
-    scenarios = data.get("scenarios") or []
-    if isinstance(scenarios, dict):
-        scenarios = list(scenarios.values())
-    valid = [s for s in scenarios if isinstance(s, dict)]
+    valid = [s for s in _status_scenario_entries(data)
+             if isinstance(s, dict)]
     head_lines = [f"Overall QA verdict: **{data.get('overall') or '?'}**"]
     if data.get("error"):
         # Normalise whitespace but keep every character.  The error is

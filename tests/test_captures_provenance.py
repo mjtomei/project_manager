@@ -1095,6 +1095,33 @@ def test_signoff_qa_block_survives_a_non_mapping_status_file(tmp_path,
     assert "listed below" not in head
 
 
+def test_signoff_qa_block_survives_a_non_list_status_scenarios(
+        tmp_path, monkeypatch):
+    """A truncated or hand-edited ``qa_status.json`` can carry a non-list
+    ``scenarios`` value (a bare int, a string).  Iterating it used to raise
+    ``TypeError: 'int' object is not iterable`` and take the whole QA block —
+    the only thing that tells the session which run its evidence belongs to —
+    down with it, so the block must treat it as "no listing" and still bind
+    the run from the manifest."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    captures.write_manifest(root, pr_id="pr-x", run_id="run1",
+                            scenarios=[{"index": 1, "title": "one"}])
+    status = tmp_path / "qa_status.json"
+    status.write_text(json.dumps({
+        "pr_id": "pr-x", "run_id": "run1", "overall": "PASS", "scenarios": 5,
+    }), encoding="utf-8")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+
+    head, listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+
+    assert "QA run: `run1`" in head
+    assert listing == ""
+    # No false membership disagreement from an unreadable status listing.
+    assert "disagree" not in head
+
+
 def test_signoff_qa_block_binds_the_run_without_a_status_file(tmp_path,
                                                               monkeypatch):
     """The live status file can be gone (its QA workdir was reaped) while the
