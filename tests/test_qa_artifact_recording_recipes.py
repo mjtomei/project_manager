@@ -99,6 +99,12 @@ hits, regardless of how it waits for a background job:
   recorded so the teardown cannot signal a recycled one, and the web-UI
   finalize step names a missing ``ffmpeg`` instead of reporting it as a
   failed transcode of the driver's webm;
+- an input that exists but is empty is not an input, and that holds for the
+  web-UI driver too: the driver block's "is ``driver.mjs`` here" check is
+  ``-s``, not ``-f``, because an empty file is a *valid* ES module —
+  ``node driver.mjs`` exits 0 having run nothing, so the block reports
+  success and the finalize step then blames the driver's ``recordVideo``
+  option with a re-run that passes again;
 - a remedy that runs but cannot work says so: the ``agg`` install stops when
   the binary it just downloaded still does not resolve (``~/.local/bin`` not
   on ``PATH``), instead of exiting 0 and sending the worker back to the same
@@ -2411,7 +2417,9 @@ def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
-def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path):
+@pytest.mark.parametrize("driver_shape", ["absent", "empty"],
+                         ids=["no-file", "0-byte-file"])
+def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path, driver_shape):
     """A driver that was never saved is not a driver that ran and failed.
 
     Step 2's prose says to save the skeleton as ``driver.mjs`` in the capture
@@ -2422,11 +2430,29 @@ def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path):
     driver that is simply absent (or was saved in the workdir instead of the
     capture directory). That is the same misdiagnosis as reporting a missing
     webm as an encoder failure. The block names the missing input instead.
+
+    Both shapes of "there is nothing to run" are exercised, because they take
+    different paths through the check: no file at all, and the **0-byte**
+    ``driver.mjs`` a failed save leaves behind. Only the first was modelled,
+    so ``-f`` passed the second — and an empty file is a *valid* ES module:
+    ``node driver.mjs`` exits 0 having run nothing (verified), the block
+    reports success, and the finalize step then says "the driver wrote no
+    video; re-run step 2 and check the driver's recordVideo option" — a
+    remedy that cannot work, because step 2 passes again. The check is ``-s``
+    for that reason, the rule every stage-input check in the recording
+    recipes' render blocks follows (an artifact that exists but is empty is
+    not an input).
     """
     capdir = tmp_path / "cap"
-    capdir.mkdir()                    # empty: no driver.mjs was saved
+    capdir.mkdir()                    # no driver.mjs was saved
+    if driver_shape == "empty":
+        (capdir / "driver.mjs").write_text("")
     r = _run_driver_block(capdir, _fake_playwright(tmp_path / "global"))
-    assert r.returncode != 0, "the block ran with no driver.mjs to run"
+    assert r.returncode != 0, (
+        "the block ran with no driver.mjs to run"
+        if driver_shape == "absent" else
+        "an empty driver.mjs is a valid ES module, so `node` exits 0 having "
+        "run nothing and the block reports success: " + r.stdout)
     assert "there is no driver.mjs" in r.stderr, (
         "a missing driver.mjs is not named: " + r.stderr)
     assert "the driver failed" not in r.stderr, (

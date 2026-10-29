@@ -120,8 +120,10 @@ recording-recipe bugs that any worker following the recipe hits:
   claims a leftover recorder session would pass the readiness wait — the
   start check stops a duplicate `new-session` before that.
 - a missing input is not a failed job (review loop 7c9c i4): the web-UI
-  driver block refuses a missing `driver.mjs` with "there is no driver.mjs in
-  …" instead of letting `node driver.mjs` fail and reporting "the driver
+  driver block refuses a missing `driver.mjs` — or an empty one, which is a
+  valid ES module that `node` runs successfully (review loop ebd1 i10, below)
+  — with "there is no driver.mjs in …" instead of letting `node driver.mjs`
+  fail and reporting "the driver
   failed — this run's video, trace and screenshots are incomplete", which
   sends the worker to debug a file that was never saved; and its Playwright
   resolution failure says to remove a `node_modules` that does not hold the
@@ -213,6 +215,18 @@ recording-recipe bugs that any worker following the recipe hits:
   the CLI preamble block (the one fenced block no case executed) is run too.
   No recipe change, so no scenario gains a new surface; the re-QA may re-check
   the empty-artifact shapes in S21/S22 (cast, gif, mp4) and S26 (webm).
+
+- an input that exists but is empty is not an input — the driver included
+  (review loop ebd1 i10): the web-UI driver block checked `[ -f driver.mjs ]`,
+  so a **0-byte** `driver.mjs` (a save that wrote nothing) passed. An empty
+  file is a *valid* ES module: `node driver.mjs` exits 0 having run nothing,
+  the block reports success, and the finalize step then says "there is no webm
+  to transcode — the driver wrote no video; re-run step 2 and check the
+  driver's recordVideo option" — a remedy that cannot work, because step 2
+  passes again and `recordVideo` was never the problem (verified with the
+  recipe's own two blocks). The check is `-s`, the rule every stage-input
+  check in the render/finalize blocks already follows, and the message names
+  the empty file where it is. No nominal flow changes.
 
 - the manifest example has to name the files the run keeps (review loop
   ebd1 i4): the web-UI `## Files` example listed the `node_modules` link but
@@ -318,6 +332,9 @@ manifest example: it must list `server.pid` and `recording.webm` beside the
 files it already named (R45). S26 also re-checks the driver block's two new
 messages: pasting step 2 with no `driver.mjs` in the capture directory must
 stop with "there is no driver.mjs in …" (not "the driver failed"), and a
+0-byte `driver.mjs` must stop with the same message instead of reporting
+success (a run that then reached the finalize step would be told to check the
+driver's `recordVideo` option, which a re-run of step 2 cannot fix), and a
 capture directory holding a `node_modules` that does not resolve Playwright
 must fail with the resolution message that names removing it first; after
 that removal and the link, the same block must run the driver. The older

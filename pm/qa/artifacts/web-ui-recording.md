@@ -282,10 +282,19 @@ rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png ./manifest.md
 # failure, and it sends the worker to debug a driver that is simply not there
 # (or was saved in the workdir instead of the capture directory). Name the
 # missing input where it is missing.
-[ -f driver.mjs ] || {
-    echo "there is no driver.mjs in $CAPDIR — save the recipe's driver" \
-        "skeleton as driver.mjs here (step 2's prose) before running this" \
-        "block" >&2
+# The check is `-s`, not `-f`: an empty `driver.mjs` — a save that wrote
+# nothing, e.g. a heredoc or editor write that failed part-way — is a *valid*
+# ES module, so `node driver.mjs` exits 0 having run nothing, this block
+# reports success, and the finalize step then says "the driver wrote no video;
+# re-run step 2 and check the driver's recordVideo option": a remedy that
+# cannot work, since step 2 passes again and `recordVideo` was never the
+# problem. Same rule as every stage-input check in the recording recipes'
+# render blocks (an artifact that exists but is empty is not an input), and the
+# same misdiagnosis as the missing file above, one shape over.
+[ -s driver.mjs ] || {
+    echo "there is no driver.mjs in $CAPDIR (or it is empty) — save the" \
+        "recipe's driver skeleton as driver.mjs here (step 2's prose) before" \
+        "running this block" >&2
     exit 1
 }
 # The driver is a Node.js program, and this block's only tools are `node` and
