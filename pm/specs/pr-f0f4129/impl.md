@@ -256,7 +256,11 @@ already drops it because the status is no longer `qa`.
   check's result. A base return whose rework never launched is caught up
   from the idle poll regardless of auto-start (the launch claim keeps one
   owner; `check_and_start` only drives in-scope PRs, so a manual loop on a
-  non-target PR would otherwise strand its rework). That catch-up is
+  non-target PR would otherwise strand its rework). The same catch-up runs
+  when the PR has **no impl pane at all** (the gate's `--fresh` killed the
+  old window and the launch failed, or the user closed it): there is no idle
+  turn then, so an idle-gated catch-up alone would never fire, and the CLI
+  auto-sequence already relaunches on that signal (`gone`). That catch-up is
   **retryable**, not one-shot: a claim
   still held (the gate's own `pm pr start` is running) or one released by a
   failed launch (`release_impl_claim` keeps `awaiting`) is re-attempted on a
@@ -278,6 +282,14 @@ already drops it because the status is no longer `qa`.
   is already running for the PR. `review_loop` maps exit code 3 to
   `VERDICT_BASE_CONFLICT` and stops the loop without recording an iteration;
   the icon/log path treats it as a clean completion (not ERROR).
+  The cheap no-op paths must not rewrite `project.yaml`:
+  `resolve_return` (called on every clean review/QA gate) and
+  `ensure_impl_status` (called from the TUI event loop and every gate)
+  pre-read and skip the `locked_update` when there is no open return to close
+  / no raced `in_review`/`qa` status to repair. `project.yaml` is large and
+  git-tracked, and a `locked_update` takes the global lock and rewrites the
+  whole file (~1 s on a 500-PR project), so an unconditional write here both
+  stalls the event loop and competes with the TUI's own 2 s lock budget.
 - **R14 — Inspection.** `pm pr show` prints a `## Base integration return`
   section (verdict, stage, HEAD/base, attempt, reason, conflict paths,
   apply error) so the handoff is inspectable. `autostart_state._derive`
@@ -453,6 +465,10 @@ No unresolved ambiguities.
 26. `max_iterations` bounds the iterations this run performs: a loop seeded
     at iteration 48 with `max_iterations=3` runs three iterations (48→51)
     instead of zero.
+27. `resolve_return` / `ensure_impl_status` skip the `locked_update` when
+    there is nothing to change (no open return / status already
+    `in_progress`), and still mutate when there is — the no-op must not
+    rewrite the large git-tracked `project.yaml` on every clean gate.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
@@ -484,7 +500,9 @@ rework catch-up is retried: a held/released claim leaves the idle turn
 unconsumed (no `mark_active`) and is re-attempted after
 `BASE_LAUNCH_RETRY_SECONDS` (throttled, not once per poll tick), and a
 successful in-process relaunch reloads `app._data` so the completion check is
-reachable.
+reachable. The catch-up also runs when the PR has no impl pane at all (an
+`awaiting: impl` return with the window gone), and does not run for a PR with
+no return just because its pane is missing.
 
 ## 6. Out of scope
 

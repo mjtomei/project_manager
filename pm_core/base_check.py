@@ -426,6 +426,12 @@ def return_to_impl(root: Path, pr_id: str, record: dict, stage: str,
     return won["rec"]
 
 
+def _status_needs_repair(pr: dict | None) -> bool:
+    """Whether a PR with an open return was left in a downstream phase."""
+    return (pr is not None and open_return(pr) is not None
+            and pr.get("status") in ("in_review", "qa"))
+
+
 def ensure_impl_status(root: Path, pr_id: str) -> None:
     """Keep a PR with an open return in ``in_progress``.
 
@@ -435,12 +441,17 @@ def ensure_impl_status(root: Path, pr_id: str) -> None:
     """
     def _apply(d):
         pr = store.get_pr(d, pr_id)
-        if pr is not None and open_return(pr) is not None \
-                and pr.get("status") in ("in_review", "qa"):
+        if _status_needs_repair(pr):
             pr["status"] = "in_progress"
             _stamp(pr, "in_progress")
 
     try:
+        # Pre-read: the common case is a PR already in_progress, and a
+        # ``locked_update`` takes the project.yaml lock and rewrites the whole
+        # (large, git-tracked) file for nothing.  This runs from the TUI event
+        # loop and from every gate, so the no-op must stay cheap.
+        if not _status_needs_repair(store.get_pr(store.load(root), pr_id)):
+            return
         store.locked_update(root, _apply)
     except Exception as e:  # pragma: no cover - best effort
         _log.warning("base_check: status fix for %s failed: %s", pr_id, e)
@@ -463,6 +474,13 @@ def resolve_return(root: Path, pr_id: str, reason: str = "") -> bool:
         closed["ok"] = True
 
     try:
+        # Pre-read (same rule as ``ensure_impl_status``): the clean path calls
+        # this on every review/QA gate, and there is usually no open return to
+        # close — a locked_update would take the lock and rewrite the whole
+        # file for nothing.  ``clear_return_awaiting`` above already guards
+        # its update this way.
+        if open_return(store.get_pr(store.load(root), pr_id)) is None:
+            return False
         store.locked_update(root, _apply)
     except Exception as e:
         _log.warning("base_check: resolve for %s failed: %s", pr_id, e)
@@ -1061,6 +1079,14 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
                 False, "still conflicts with the moved base")
 
         resolve_return(root, pr_id, reason=integration.summary(record))
+        # Record the clean verdict like the writer-launch gate does: without
+        # it the PR keeps the last *failed* (retryable) ``base_check`` record
+        # after a successful completion, so ``_retry_open`` keeps suppressing
+        # the next gate's fetch until that record's backoff expires, and a
+        # reader of the stored record (project.yaml / ``pm autostart status``
+        # diagnostics) still sees a probe failure for an episode that is over.
+        _record_decision(root, pr_id, record,
+                         rec.get("stage") or STAGE_REVIEW, PROCEED)
         return CompletionResult(True, integration.summary(record), resume_loop)
     except Exception as e:
         _log.exception("base_check: completion check for %s failed", pr_id)

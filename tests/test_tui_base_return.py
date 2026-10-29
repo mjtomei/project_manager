@@ -697,3 +697,48 @@ def test_poll_impl_idle_registers_from_a_shared_transcript_after_restart(
     # unawaited worker coroutine into the rest of the suite.
     catch_up.assert_called_once_with(app, "pr-001")
     assert tracker.register.call_args[0][2] == str(link)
+
+
+def test_poll_impl_idle_catches_up_base_rework_without_a_pane(tmp_path):
+    """A returned PR with no impl pane at all must still get its relaunch.
+
+    The idle poll is the only driver for a manual TUI session (auto-start
+    off), and its catch-up used to require a pane to be idle.  When the gate's
+    ``--fresh`` relaunch killed the old window and then failed (or the user
+    closed it), there is no pane and therefore no idle turn: the PR would sit
+    with ``awaiting: impl``, every gate refusing the review and nothing ever
+    relaunching implementation.  The CLI auto-sequence already relaunches on
+    this signal (``gone``); the TUI must match.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr("in_progress", base_return=_return(awaiting="impl"))
+    app = _app(tmp_path, [pr])
+    app._session_name = "pm-test"
+    app._pending_merge_prs = set()
+    tracker = app._pane_idle_tracker
+    tracker.is_tracked.return_value = False
+    tracker.is_gone.return_value = True
+
+    with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+               return_value=None), \
+         patch("pm_core.tui.review_loop_ui._catch_up_base_impl") as catch_up:
+        review_loop_ui._poll_impl_idle(app)
+    catch_up.assert_called_once_with(app, "pr-001")
+
+
+def test_poll_impl_idle_does_not_relaunch_without_a_return(tmp_path):
+    """A missing pane is not by itself a base-rework relaunch."""
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr("in_progress")
+    app = _app(tmp_path, [pr])
+    app._session_name = "pm-test"
+    app._pending_merge_prs = set()
+    app._pane_idle_tracker.is_tracked.return_value = False
+
+    with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+               return_value=None), \
+         patch("pm_core.tui.review_loop_ui._catch_up_base_impl") as catch_up:
+        review_loop_ui._poll_impl_idle(app)
+    catch_up.assert_not_called()

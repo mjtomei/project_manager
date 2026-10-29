@@ -427,6 +427,10 @@ def test_completion_after_reconciled_base_resolves_the_return(w):
     assert p["base_return"]["resolved_at"]
     assert p["base_return"]["awaiting"] is None
     assert base_check.open_return(p) is None
+    # The clean verdict replaces the conflict/retry record, so `pm pr show`
+    # and the next gate's retry suppression do not read a stale episode.
+    assert p["base_check"]["decision"] == base_check.PROCEED
+    assert p["base_check"]["retryable"] is False
 
 
 def test_review_loop_bounce_records_and_reports_resume_loop(w):
@@ -1208,3 +1212,39 @@ def test_pr_review_iteration_does_not_start_beside_a_return_during_the_gate(w):
     window.assert_not_called()
     assert pr(w)["status"] == "in_progress"
     assert base_check.open_return(pr(w)) is not None
+
+
+def test_resolve_and_status_repair_skip_the_write_when_nothing_changes(w):
+    """The clean path must not rewrite project.yaml for a no-op.
+
+    ``gate`` calls ``resolve_return`` on every clean review/QA gate and the
+    TUI calls ``ensure_impl_status`` from the event loop.  Both used to take
+    the project.yaml lock and rewrite the whole (large, git-tracked) file
+    even when there was no open return to close / no raced status to repair.
+    """
+    set_pr(w, status="in_progress")
+    with patch("pm_core.base_check.store.locked_update") as update:
+        assert base_check.resolve_return(w.pm_dir, PR) is False
+        base_check.ensure_impl_status(w.pm_dir, PR)
+    update.assert_not_called()
+
+    # With something to do, the update still runs (once each).
+    set_pr(w, status="in_review",
+           base_return={"verdict": base_check.VERDICT_BASE_CONFLICT,
+                        "awaiting": "impl", "resolved_at": None})
+    with patch("pm_core.base_check.store.locked_update") as update:
+        base_check.ensure_impl_status(w.pm_dir, PR)
+    assert update.call_count == 1
+    # The mutation itself still happens when the update is not stubbed.
+    base_check.ensure_impl_status(w.pm_dir, PR)
+    assert pr(w)["status"] == "in_progress"
+    with patch("pm_core.base_check.store.locked_update") as update:
+        base_check.resolve_return(w.pm_dir, PR, reason="clean")
+    assert update.call_count == 1
+    assert base_check.resolve_return(w.pm_dir, PR, reason="clean") is True
+    assert base_check.open_return(pr(w)) is None
+    assert pr(w)["base_return"]["resolved_reason"] == "clean"
+    # And once it is resolved, the next call is the cheap no-op again.
+    with patch("pm_core.base_check.store.locked_update") as update:
+        assert base_check.resolve_return(w.pm_dir, PR) is False
+    update.assert_not_called()

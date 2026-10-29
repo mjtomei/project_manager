@@ -1217,6 +1217,17 @@ def _poll_impl_idle(app) -> None:
         if not tracker.is_tracked(pr_id) or tracker.is_gone(pr_id):
             pane_id = _find_impl_pane(session, window_name)
             if not pane_id:
+                # A base return whose rework session is not there to watch
+                # (the gate's ``--fresh`` killed the old window and the
+                # launch failed, or the user closed it) has no idle turn, so
+                # the completion check below never runs.  The CLI
+                # auto-sequence relaunches on exactly this signal; without
+                # the same catch-up here a manual TUI session (auto-start
+                # off) would have no driver at all.  The launch claim still
+                # guarantees one owner.
+                from pm_core import base_check as _bc
+                if _bc.return_awaiting(pr) == "impl":
+                    _catch_up_base_impl(app, pr_id)
                 continue
             tdir = _auto_start.get_transcript_dir(app)
             if not tdir:
