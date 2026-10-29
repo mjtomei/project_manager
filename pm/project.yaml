@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T18:12:15.489800+00:00'
+  updated_at: '2026-10-29T18:41:44.369689+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37303,6 +37303,39 @@ prs:
       change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T18:12:15Z'
     last_edited: '2026-10-29T18:12:15Z'
+  - id: note-ccacaa8
+    text: 'Review loop ebd1 i14: one leftover in the kept web-UI-recipe scope, the
+      PR''s own class (a step that cannot do its job must say so where it fails) —
+      and the one recipe R54 did not reach. Step 1 guards the capture directory by
+      creating it (`mkdir -p … ||`) and its comment promises to stop the run because
+      "several of them report success while writing nothing"; a directory that exists
+      and cannot be written is that state one shape over and `mkdir -p` answers 0
+      for it. Verified live in this container with a mode-500 capture directory and
+      the recipe''s own fenced blocks extracted verbatim: (1) step 1 exits 0, starts
+      the app, writes no `server.pid` and leaves the previous run''s recording.mp4/recording.webm/manifest.md/screenshots
+      in place — the stale clear never ran and the teardown later refuses for a missing
+      pid; (2) the driver block exits 1 with "playwright does not resolve beside driver.mjs
+      — … link the global install" after `ln` printed Permission denied (a remedy
+      that cannot work); (3) the finalize block exits 1 with "transcode produced no
+      mp4 — …", blaming the encoder and the recording; (4) the Layer 2 block exits
+      0 having written neither http.log nor sse.log — the silent success its own guard
+      comment describes, which its `[ -d "$CAPDIR" ]` check cannot see. Fix: all four
+      blocks require `[ -w "$CAPDIR" ] && [ -x "$CAPDIR" ]` and stop with "capture
+      directory … cannot be written — … check the path and its permissions" (R54''s
+      wording) — step 1 right after its `mkdir` guard (before the stale clear), the
+      driver/finalize/Layer 2 blocks after their existing missing-directory check.
+      Tests: `test_an_unwritable_capture_dir_stops_the_start` (new `capdir_mode` knob
+      on `_run_web_ui_start`) and `test_web_ui_{driver,finalize,layer2}_block_refuses_a_capture_dir_it_cannot_write`;
+      all four fail against the pre-fix recipe (restored in place) and pass after
+      it; the permission shapes skip under root. File 222 passed (was 218); full suite
+      env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py -> 4616 passed, 1 skipped, 92 deselected,
+      0 failed (405.84 s). Evidence: $(pm qa captures-path pr-b19db15)/review-ebd1-i14/
+      (probe.log, mutation-check.log, suite.log, README.md, scripts/). impl.md R55
+      + Files/verification/evidence and qa.md updated. No pm_core/ change; the dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T18:41:44Z'
+    last_edited: '2026-10-29T18:41:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
