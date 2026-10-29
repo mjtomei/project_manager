@@ -135,6 +135,19 @@ recording-recipe bugs that any worker following the recipe hits:
   does and both remedies it offers (the global link, `npm i playwright`) need
   node — a remedy that cannot work, repeated. The Tooling section names
   Node.js alongside Playwright, Chromium and `ffmpeg`.
+- a session handle is not exact without tmux's `=` either (review loop 7c9c
+  i10): the tmux recipe's *recorder* handles were bare, and pm's sessions are
+  `pm-<repo>-<hash>`, so a repo named `recorder…` has a session a bare
+  `pm-recorder` target prefix-matches (verified on tmux 3.2a). Step 0's clear
+  runs on every capture and killed it silently; a dead recorder could be
+  replaced by it in the readiness check (its pane read as "the TUI drew"),
+  receive the detach key, and be killed at the stop timeout; and the recorder
+  pane's own `tmux attach` was bare, so a target that ended landed the attach
+  on a grouped `<base>~N` session and the run reported it as success. Every
+  recorder handle now names `=pm-recorder` (with the `:0.0` pane spec for
+  `capture-pane`/`send-keys`, which need it to honour `=`) and the attach
+  names `=$TARGET`. The CLI recipe's `-t rec` stays plain: its `-L scaffold`
+  socket is recipe-private and every session on it is named `rec`.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.

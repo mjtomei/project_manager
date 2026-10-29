@@ -442,7 +442,7 @@ class TestRecipes:
 
     @pytest.mark.parametrize("name,cleanup,start", [
         ("tmux-screen-recording.md",
-         "kill-session -t pm-recorder", "new-session -d -s pm-recorder"),
+         'kill-session -t "=pm-recorder"', "new-session -d -s pm-recorder"),
         ("cli-recording.md", "kill-session -t rec", "new-session -d -s rec"),
     ])
     def test_stale_recorder_is_cleared_before_start(self, name, cleanup, start):
@@ -476,6 +476,46 @@ class TestRecipes:
             assert kill_server and kill_server.start() > start_at, (
                 "cli-recording: kill-server before new-session races the "
                 "server's exit; clear the session instead")
+
+    def test_tmux_session_handles_are_exact(self):
+        """Every session target needs tmux's ``=``, not a bare name.
+
+        A bare name is *prefix*-matched when no session has the whole name
+        (verified on tmux 3.2a), and the tmux server this recipe runs on is
+        the one pm uses: pm's sessions are ``pm-<repo>-<hash>``, so a project
+        whose repo name starts with ``recorder`` has a session a bare
+        ``pm-recorder`` target matches. Step 0's clear runs on every capture,
+        when no exact recorder exists — verified live: the recipe's own step 0
+        killed a ``pm-recorder-abc123`` session (standing in for another
+        project's pm TUI session, or this capture's own target when the repo
+        is named ``recorder``) and took the server down with it, silently
+        (``2>/dev/null``, ``|| true``). The other handles are the same class:
+        with this run's recorder gone, a prefix session would satisfy the
+        readiness check (its pane read as "the TUI drew"), receive the detach
+        key, and be killed at the stop timeout. ``capture-pane`` and
+        ``send-keys`` only honour ``=`` with an explicit pane spec (verified:
+        ``-t "=pm-recorder"`` answers "can't find pane" while
+        ``-t "=pm-recorder:0.0"`` resolves). The attach is the handle that
+        actually records: bare, it lands on a grouped ``<base>~N`` session
+        when the target has ended, and the run reports that as success.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        for bare in ("has-session -t pm-recorder",
+                     "capture-pane -p -t pm-recorder",
+                     "send-keys -t pm-recorder",
+                     "kill-session -t pm-recorder",
+                     "attach -t $TARGET"):
+            assert bare not in block, (
+                f"tmux recipe targets a session with a bare name ({bare!r}), "
+                "which tmux prefix-matches — it would act on another session "
+                "(pm's pm-recorder-<hash>, or a grouped <base>~N)")
+        for exact in ('has-session -t "=pm-recorder"',
+                      'capture-pane -p -t "=pm-recorder:0.0"',
+                      'send-keys -t "=pm-recorder:0.0"',
+                      'kill-session -t "=pm-recorder"',
+                      "attach -t =$TARGET"):
+            assert exact in block, (
+                f"tmux recipe does not use the exact session handle {exact!r}")
 
     def test_transcript_pipe_can_be_reattached(self):
         """``pipe-pane -o`` is a silent no-op while a pipe is already attached.
@@ -527,7 +567,7 @@ class TestRecipes:
         block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
         seg = block[block.index("new-session -d -s pm-recorder"):
                     block.index("pm tui send")]
-        assert "! tmux has-session -t pm-recorder" in seg, (
+        assert '! tmux has-session -t "=pm-recorder"' in seg, (
             "tmux recipe does not notice a recorder that exits before drawing")
         assert "recorder exited before it drew" in seg
         assert "exit 1" in seg, "a dead recorder is not reported as a failure"
@@ -555,7 +595,7 @@ class TestRecipes:
         assert re.search(r"^sleep ", settle, re.M), (
             "tmux recipe treats the first pane content as a drawn TUI with no "
             "settle window, so a failed attach's error text passes readiness")
-        assert "! tmux has-session -t pm-recorder" in settle, (
+        assert '! tmux has-session -t "=pm-recorder"' in settle, (
             "tmux recipe does not re-check the recorder after it drew")
         assert "recorder exited before it drew" in settle
         assert "exit 1" in settle, (
@@ -576,8 +616,8 @@ class TestRecipes:
         """
         block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
         seg = block[block.index("# 5."):
-                    block.index("tmux send-keys -t pm-recorder")]
-        assert "! tmux has-session -t pm-recorder" in seg, (
+                    block.index('tmux send-keys -t "=pm-recorder:0.0"')]
+        assert '! tmux has-session -t "=pm-recorder"' in seg, (
             "tmux recipe detaches without noticing that the recorder is "
             "already gone, so a truncated cast passes the `test -s` check")
         assert 'tmux has-session -t "=$TARGET"' in seg, (
@@ -2789,8 +2829,10 @@ case "$sub" in
       done
       exit 0 ;;
   send-keys)
+      # The target may carry a pane spec (`=pm-recorder:0.0`), which real tmux
+      # resolves against the session part — same as `pipe-pane` above.
       s=$(val -t "$@")
-      r=$(resolve "$s")
+      r=$(resolve "${s%%:*}")
       [ -z "$r" ] && exit 0
       # `stuck`: the recorder never goes away, so a stop wait runs out.
       [ "$STUB_MODE" = stuck ] && exit 0
@@ -3249,6 +3291,53 @@ class TestCaptureFlowExecution:
         assert "no session named exactly" in r.stderr, r.stderr
         assert not (tmp_path / "state" / "claim.pm-test~1").exists(), (
             "step 2 wrote its claim on the prefix-matched grouped session")
+
+    def test_step_zero_does_not_kill_a_pm_session_that_shares_the_prefix(
+            self, tmp_path):
+        """The recorder clear must not match another session by prefix.
+
+        Step 0 clears a leftover recorder on every capture, and the server it
+        runs on is pm's own: pm names sessions ``pm-<repo>-<hash>``, so a repo
+        whose name starts with ``recorder`` has a session a bare
+        ``pm-recorder`` target prefix-matches (verified on tmux 3.2a: a bare
+        ``kill-session -t pm-recorder`` killed a ``pm-recorder-abc123``
+        session). When the capture's own repo is named ``recorder`` that is
+        the target session the scenario prepared; otherwise it is another
+        project's TUI session — and ``2>/dev/null`` with ``|| true`` hides
+        the kill. The clear has to name the exact session.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")),
+            "nostart", tmp_path, target=True,
+            sessions=("pm-recorder-abc123",))
+        assert r.returncode != 0, r.stderr
+        assert "could not start the recorder session" in r.stderr, r.stderr
+        assert (tmp_path / "state" / "pm-recorder-abc123").exists(), (
+            "the capture's step 0 killed a session that merely starts with "
+            "pm-recorder (a pm session for a repo named recorder-...), so it "
+            "destroys another project's TUI session on every capture")
+
+    def test_a_prefix_session_is_not_the_recorder(self, tmp_path):
+        """A recorder that died must not be replaced by a prefix session.
+
+        ``has-session -t pm-recorder`` prefix-matches when this run's recorder
+        is gone, so a session named ``pm-recorder-<hash>`` (pm's name for a
+        repo called ``recorder...``) satisfied the readiness check: its pane
+        read as "the TUI drew", the detach key went into it, and the stop
+        timeout killed it. The readiness and stop handles have to ask for the
+        exact recorder session, so a dead recorder fails where it died.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")),
+            "failedattach", tmp_path, target=True,
+            sessions=("pm-recorder-abc",))
+        assert r.returncode != 0, r.stderr
+        assert "recorder exited before it drew" in r.stderr, (
+            "the readiness check took a prefix session for the recorder: "
+            + r.stderr)
+        assert (tmp_path / "state" / "pm-recorder-abc").exists(), (
+            "the run drove and killed a session that merely starts with "
+            "pm-recorder instead of failing on its own dead recorder")
 
     def test_step_two_refuses_an_empty_target(self, tmp_path):
         """Pasted alone with no session name, step 2 must not guess a session.

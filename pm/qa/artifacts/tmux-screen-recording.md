@@ -59,10 +59,15 @@ transcript somewhere these steps never look (step 0 refuses one rather than
 failing later as an empty transcript). A leftover `pm-recorder`
 session makes step 3's `new-session` fail with "duplicate session" — step 3
 reports that as a start failure, so the run stops there instead of passing
-the readiness wait on the *previous* run's attach client. That name is shared
-by every run on the same tmux server, so two
-captures must not run at once on one server: the later run's step 0 ends the
-earlier run's recorder, and the earlier run's step 5 detaches the later one.
+the readiness wait on the *previous* run's attach client. The clear names the
+session exactly (`=pm-recorder`): a bare name is prefix-matched when no
+session has the whole name, and pm's own sessions are `pm-<repo>-<hash>`, so
+a repo whose name starts with `recorder` would otherwise lose its pm session
+here — and this capture's target session is exactly that when the repo is
+named `recorder`. That name is shared by every run on the same tmux server,
+so two captures must not run at once on one server: the later run's step 0
+ends the earlier run's recorder, and the earlier run's step 5 detaches the
+later one.
 Run captures one after the other, or give each worker its own server with a
 private `TMUX_TMPDIR`. (Both runs then fail loudly — a recorder that vanished
 mid-scenario is a failure in step 5 — rather than reading each other's
@@ -133,7 +138,18 @@ mkdir -p <capture-dir> || {
 # on its way out — and that run then fails as "recorder exited while the TUI
 # was still running", a failure it cannot connect to this block. (The
 # absolute-path guard above comes first for the same reason.)
-tmux kill-session -t pm-recorder 2>/dev/null || true
+# The target carries tmux's `=` so it is exact. A bare `pm-recorder` is
+# *prefix*-matched when no session has the whole name (verified on tmux 3.2a:
+# a bare target killed a `pm-recorder-abc123` session and took the server down
+# with it), and pm names its sessions `pm-<repo>-<hash>` — so a project whose
+# repo name starts with `recorder` has a pm session that this clear would
+# kill. That is the capture's own target session when the repo is
+# named `recorder`, and another project's TUI session otherwise; the
+# `2>/dev/null` hid the kill. Every recorder-session handle below takes the
+# same `=` (the pane-target commands need the `:0.0` pane spec for it to
+# resolve), so none of them can act on a session that merely starts with the
+# name.
+tmux kill-session -t "=pm-recorder" 2>/dev/null || true
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
@@ -342,9 +358,16 @@ tmux pipe-pane -t "=$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
 #    bad option) are what a failed run needs, and every failure path below
 #    tears the pane down. The attach's own errors still go through the pty
 #    and stay visible in the pane and the cast.
+#    The attach names the target exactly (`=`) for the same reason every other
+#    handle does: a bare name is prefix-matched when the target session is
+#    gone, so the attach would land on a grouped `<base>~N` session and the
+#    run would record that instead of the session it targeted — with the
+#    step-5 witness (exact) seeing only that the target ended. Exact, the
+#    attach fails, asciinema exits, and the readiness check below reports the
+#    recorder that never drew.
 tmux new-session -d -s pm-recorder -x 200 -y 50 \
     "asciinema rec --quiet <capture-dir>/recording.cast \
-        -c 'tmux attach -t $TARGET' 2> <capture-dir>/recorder-stderr.log; \
+        -c 'tmux attach -t =$TARGET' 2> <capture-dir>/recorder-stderr.log; \
         echo \$? > <capture-dir>/recorder.status" || {
     # tmux could not create the session at all (server gone or refusing,
     # a duplicate session left by a concurrent run, a bad option): the pane
@@ -367,22 +390,22 @@ tmux new-session -d -s pm-recorder -x 200 -y 50 \
 # treating it as done would report a useless capture as success.
 deadline=$(( $(date +%s) + 30 ))
 while :; do
-    if ! tmux has-session -t pm-recorder 2>/dev/null; then
+    if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
         echo "recorder exited before it drew — see the cast and" \
             "<capture-dir>/recorder-stderr.log" >&2
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
         exit 1
     fi
-    tmux capture-pane -p -t pm-recorder 2>/dev/null \
+    tmux capture-pane -p -t "=pm-recorder:0.0" 2>/dev/null \
         | grep -q '[^[:space:]]' && break
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        tmux capture-pane -p -t pm-recorder \
+        tmux capture-pane -p -t "=pm-recorder:0.0" \
             > <capture-dir>/recorder-pane.log 2>/dev/null || true
         echo "recorder did not come up within 30s — the pane is saved in" \
             "<capture-dir>/recorder-pane.log, asciinema's own error (if any)" \
             "in recorder-stderr.log" >&2
-        tmux kill-session -t pm-recorder 2>/dev/null
+        tmux kill-session -t "=pm-recorder" 2>/dev/null
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
         exit 1
@@ -397,7 +420,7 @@ done
 # milliseconds before the recorder exits, so confirm the recorder is still
 # alive a moment later before treating the content as a drawn TUI.
 sleep 0.3
-if ! tmux has-session -t pm-recorder 2>/dev/null; then
+if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
     echo "recorder exited before it drew — see the cast and" \
         "<capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
@@ -440,9 +463,9 @@ fi
 #    function lives in this paste, which is self-contained, so the sends
 #    below can call it.
 send_failed() {
-    tmux capture-pane -p -t pm-recorder \
+    tmux capture-pane -p -t "=pm-recorder:0.0" \
         > <capture-dir>/recorder-pane.log 2>/dev/null || true
-    tmux kill-session -t pm-recorder 2>/dev/null
+    tmux kill-session -t "=pm-recorder" 2>/dev/null
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
     tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
     echo "pm tui send failed — the TUI is gone, so this scenario step never" \
@@ -486,10 +509,15 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    server), and pm creates `<base>~N` grouped sessions (as does any project
 #    whose name starts with this one). The witness decides whether the TUI is
 #    still there, so it has to answer for the session this run targeted and
-#    not for whichever session tmux would pick. The claim release stays a
-#    plain name: step 2 refuses a non-exact target, so no run holds a claim
-#    on a grouped session, and a release against a session that is gone is a
-#    no-op.
+#    not for whichever session tmux would pick. The recorder's own handles
+#    take the `=` too: a bare `pm-recorder` is prefix-matched when this run's
+#    recorder is gone, and pm's `pm-<repo>-<hash>` session for a repo named
+#    `recorder…` would then stand in for it — the readiness check would take
+#    that pane as "the TUI drew", the detach would be sent into another
+#    project's session, and the stop timeout would kill it. The claim release
+#    stays a plain name: step 2 refuses a non-exact target, so no run holds a
+#    claim on a grouped session, and a release against a session that is gone
+#    is a no-op.
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \
@@ -500,7 +528,7 @@ fi
 # not a hard-coded C-b; it is read just before the send below. Initialised
 # here so the stop-timeout message can always name the key it relied on.
 detach_key=C-b
-if ! tmux has-session -t pm-recorder 2>/dev/null; then
+if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
     if tmux has-session -t "=$TARGET" 2>/dev/null; then
         echo "recorder exited while the TUI was still running — the cast is" \
             "incomplete, not a finished recording" >&2
@@ -545,7 +573,7 @@ else
     #    default, and the send then fails as before.
     detach_key=$(tmux show-options -gv prefix 2>/dev/null)
     [ -n "$detach_key" ] || detach_key=C-b
-    if ! tmux send-keys -t pm-recorder "$detach_key" d; then
+    if ! tmux send-keys -t "=pm-recorder:0.0" "$detach_key" d; then
         if tmux has-session -t "=$TARGET" 2>/dev/null; then
             echo "recorder exited before the detach — the cast is incomplete," \
                 "not a finished recording" >&2
@@ -561,16 +589,16 @@ else
     fi
 fi
 deadline=$(( $(date +%s) + 30 ))
-while tmux has-session -t pm-recorder 2>/dev/null; do
+while tmux has-session -t "=pm-recorder" 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        tmux capture-pane -p -t pm-recorder \
+        tmux capture-pane -p -t "=pm-recorder:0.0" \
             > <capture-dir>/recorder-pane.log 2>/dev/null || true
         echo "recorder did not exit within 30s — the detach key" \
             "('$detach_key d') did not end it. The recorder is killed below," \
             "so it never writes recorder.status and the cast stops here:" \
             "incomplete, not a finished recording — re-record the scenario." \
             "The pane is saved in <capture-dir>/recorder-pane.log" >&2
-        tmux kill-session -t pm-recorder 2>/dev/null
+        tmux kill-session -t "=pm-recorder" 2>/dev/null
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
         tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
         exit 1
@@ -622,7 +650,7 @@ test -s <capture-dir>/transcript.log || {
     exit 1
 }
 tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-tmux kill-session -t pm-recorder 2>/dev/null || true   # already gone if it exited
+tmux kill-session -t "=pm-recorder" 2>/dev/null || true   # already gone if it exited
 # Release this run's capture-directory claim (step 2) last: a later run in
 # this session may record into another directory, and while the claim is set
 # this run's cleanup must not be able to stop *that* run's pipe — so the pipe

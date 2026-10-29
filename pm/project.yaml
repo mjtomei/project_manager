@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T07:29:21.846717+00:00'
+  updated_at: '2026-10-29T08:06:31.562944+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36728,6 +36728,45 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T07:29:21Z'
     last_edited: '2026-10-29T07:29:21Z'
+  - id: note-33b2ecd
+    text: 'Review loop 7c9c i10: one leftover in the kept tmux-recipe scope, the PR''s
+      own class (a handle that matches the wrong thing) — the recorder''s session
+      handle is prefix-matched too, and R37 fixed only the target''s. pm names sessions
+      `pm-<repo>-<hash>` (paths.get_session_tag), so a repo named `recorder…` has
+      a session a bare `pm-recorder` target matches (verified on tmux 3.2a: with only
+      `pm-recorder-abc123` on the server, `has-session -t pm-recorder` exits 0, `capture-pane`
+      prints its pane, `send-keys` delivers into it, and `kill-session` kills it and
+      takes the server down). (1) Step 0''s clear runs on every capture, when no exact
+      recorder exists, so it killed any session starting with the name — another project''s
+      pm TUI session, or this capture''s own target session when the repo is named
+      `recorder`; verified with the recipe''s own step-0 block (pre-fix left only
+      `pm-test`, post-fix leaves `pm-recorder-abc123` alive). (2) With this run''s
+      recorder gone, a prefix session stood in for it in the readiness check (its
+      pane read as "the TUI drew"), received the detach key, and was killed at the
+      stop timeout. (3) The recorder pane''s `tmux attach` was the one target handle
+      R37 left bare: with only `pm-test~1` on the server, `attach -t pm-test` proceeds
+      while `-t ''=pm-test''` answers "can''t find session", so a target that ended
+      between step 2 and the attach was recorded as a grouped session and reported
+      as success. Every recorder handle now names `=pm-recorder` (`capture-pane`/`send-keys`
+      with the `:0.0` pane spec, which they need to honour `=`) and the attach names
+      `=$TARGET`. Tests: three new cases, all failing against HEAD''s recipe (restored
+      in place, then the post-fix copy) — the text check that no bare session handle
+      remains, the whole block with a `pm-recorder-abc123` session (must fail at the
+      start check and leave it alive), and a dead recorder beside a `pm-recorder-abc`
+      session (must fail at "recorder exited before it drew" and leave it alive);
+      the stub tmux''s `send-keys` now strips the pane spec before resolving, as real
+      tmux does. Nominal flow re-run end to end (real tmux 3.2a + asciinema 2.1.0:
+      rc 0, 3035-byte cast, `recorder.status` 0, 126-byte transcript, claim released).
+      File 175 pass; related suites (`test_qa_artifact_web_ui_recording`, `test_qa_instructions`,
+      `test_qa_loop`) 350 together with the file; full suite `env -u PM_HOST_HOME
+      PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py` -> 4569 passed, 1 skipped, 92 deselected,
+      0 failed (396 s, with the `markdown` dep on the scratch path). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-7c9c-i10/. impl.md R39 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T08:06:31Z'
+    last_edited: '2026-10-29T08:06:31Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
