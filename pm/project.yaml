@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T06:04:29.395738+00:00'
+  updated_at: '2026-10-29T06:33:02.930606+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39632,6 +39632,39 @@ prs:
       non-pm-* and non-grouped (a grouped pm-rec session changes _get_pm_session()).'
     created_at: '2026-10-29T06:02:09Z'
     last_edited: '2026-10-29T06:04:29Z'
+  - id: note-d76eff7
+    text: 'QA scenario 28 (non-text answers) PASS at 6faf7496, live TUI + interactive
+      stand-in on a throwaway local-backend project, 5/5 triples. (1) An image-only
+      type:"user" record clears the wait (first new sample running / review iteration
+      1 (INPUT_REQUIRED answered; follow-up running), ir=false fu=true, running-wait
+      marker turns to the iteration marker; same window/pane, no relaunch); the verdict-less
+      prose reply re-arms ONCE (1 "idle after the answer" line, one extra notice,
+      frozen over 10 s of idle refreshes); the later text answer clears again and
+      NEEDS_WORK -> iteration 2 exactly once. (2) Image then a real verdict: only
+      running shapes between the image and iteration 2, one verdict line / one iteration
+      2 / one relauncher / one review window, 222 iteration-2 samples with no second
+      wait marker and no iteration 3. (3) empty text, whitespace, empty-string and
+      tool_result (50 passed/yes/PASS/INPUT_REQUIRED) records: wait unchanged after
+      each, counters byte-identical at all five steps, 276 waiting/input_required=true
+      samples with no flip back to running; PASS inside a tool result is not a verdict.
+      (4) a /model echo is neither an answer nor a task boundary; the real answer
+      then clears the wait. (5) verdict+echo in one read: NEEDS_WORK -> one iteration
+      2, never stuck on follow-up, no re-armed wait; PASS variant completes with a
+      PASS loop-done line and no iteration 2. Pre-fix 92dd7752: the three new regressions
+      fail ("the image answer INPUT_REQUIRED question was re-delivered"); at head
+      the two test files are 98 passed. Captures /pm-captures/scenarios/28/. Harness
+      notes for the next runner: (a) private HOME + dedicated PM_TMUX_SOCKET + a stand-in
+      at /scratch/s28/bin/fake-claude first on PATH (the shared /home/pm/.local/bin
+      shim was NOT touched) - the stub must delegate for any cwd outside the test
+      tag or parallel scenarios break; (b) the pm autostart status samplers must be
+      truncated per triple or the counts/transitions blur across resets; (c) a single-entry
+      stub-script.json is reused by later launches (script[min(n,len-1)]), so iteration
+      2 repeats the INPUT_REQUIRED question - give later iterations their own entry
+      when you need them quiet; (d) agg is not installed in the container: download
+      agg-aarch64-unknown-linux-gnu; (e) the TUI log pane is a split in the main window
+      and stays open - kill the pane id to restore the tree view before recording.'
+    created_at: '2026-10-29T06:33:02Z'
+    last_edited: '2026-10-29T06:33:02Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
