@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T06:38:52.969414+00:00'
+  updated_at: '2026-10-29T07:29:21.846717+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36670,6 +36670,64 @@ prs:
       change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T06:38:52Z'
     last_edited: '2026-10-29T06:38:52Z'
+  - id: note-d59a6f8
+    text: 'Review loop 7c9c i9: two leftovers in the kept recipe scope, both the PR''s
+      own class (a wait that matches the wrong thing, and a remedy that cannot work),
+      both reproduced live in this container on tmux 3.2a. (1) Step 1''s readiness
+      wait said it waits "on that exact session", but `tmux has-session -t "$TARGET"`
+      is not exact: tmux matches a session target by *prefix* when no session has
+      the whole name (verified: `has-session -t pm-test` exits 0 with only `pm-test~1`
+      on the server; `-t pm` matches `pm-testX`), and pm itself creates exactly those
+      grouped `base~N` sessions (pane_layout.py / pane_registry.base_session_name).
+      With only `pm-test~1` on the server and a `pm session` that created nothing,
+      the wait passed at once, step 2 claimed and piped that session, the recorder
+      attached to it, and the run exited 0 with a cast, recorder.status 0 and a transcript
+      — a complete, successful capture of a session pm never started, with the step-1
+      failure path unreachable. Step 2''s claim could land on the grouped session
+      the same way (`show-options`/`set-option` do not accept `=`, verified: "no such
+      session: =pm-test"), and once the target exists exact match wins, so that claim
+      is invisible and two runs can claim one capture directory. The recipe now uses
+      `-t "=$TARGET"` for step 1''s wait, step 2''s pipe attach and step 5''s two
+      witness checks and every best-effort pipe stop, and step 2 asserts `has-session
+      -t "=$TARGET"` before it reads the claim (refusing a target that is not an exact
+      session, with a message naming the grouped session); exact-match-wins then makes
+      the plain `show-options`/`set-option` claim targets mean what they say. Post-fix
+      the same grouped-only run fails at "pm session pm-test did not appear within
+      60s" and touches no claim; the nominal flow is unchanged (rc 0, 2816-byte cast,
+      status 0, 50-byte transcript, claim released). (2) The web-UI driver block checked
+      CAPDIR, APP_URL, driver.mjs and the Playwright resolution but never that `node`
+      exists, although `node` and `ln` are its only tools: with a PATH holding the
+      shell and its other tools but no `node`, the import check failed and the block
+      printed "playwright does not resolve beside driver.mjs", offering the global
+      link and `npm i playwright` — both need the missing runtime — and it created
+      the `node_modules` link on the way (verified). The block now stops with "node
+      is not installed — driver.mjs runs under Node.js; install it …" after the driver.mjs
+      check and before the link, and the Tooling section names Node.js; with `node`
+      present the block is unchanged ("playwright ok", driver runs, rc 0). Also fixed:
+      the tmux stop-timeout message now says the recorder is killed and the cast stops
+      there (incomplete, not a finished recording, re-record) — it was the one step-5
+      branch that left a truncated cast behind without saying it was truncated. Tests:
+      the stub `tmux` now resolves session targets the way real tmux does (exact name,
+      then prefix; `=` forced exact), which is what makes the new execution cases
+      meaningful — the whole capture block with only `pm-test~1` on the server must
+      fail at the readiness wait (against HEAD it exits 0), and step 2 alone must
+      refuse and leave no claim on `pm-test~1` (against HEAD it claims it); `test_web_ui_driver_block_names_a_missing_node`
+      runs the driver block with no `node` on PATH and requires the runtime message,
+      no Playwright misdiagnosis and no link; the tmux stop-timeout case now also
+      requires "incomplete"; and the text assertions that pinned the old bare target
+      now require the `=` form. All four fail against HEAD''s recipes (checked by
+      restoring them in place, then restoring the post-fix copies). File 172 pass;
+      related suites (test_qa_artifact_web_ui_recording, test_qa_instructions, test_qa_loop)
+      347 together with the file; full suite `env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py`
+      -> 4566 passed, 1 skipped, 92 deselected, 0 failed (414 s, with the `markdown`
+      dep on the scratch path). Evidence: $(pm qa captures-path pr-b19db15)/review-7c9c-i9/
+      (probe.log with the live runs, README.md, scripts/ with the extracted pre/post
+      blocks, the driver blocks and the stub pm). impl.md R37/R38 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T07:29:21Z'
+    last_edited: '2026-10-29T07:29:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

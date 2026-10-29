@@ -118,6 +118,23 @@ recording-recipe bugs that any worker following the recipe hits:
   "recorder exited while the TUI was still running" / "recorder status is
   missing" — a failure it could not connect to the other worker's paste. A
   refused block now makes no tmux call at all.
+- a session target is not exact without tmux's `=` (review loop 7c9c i9):
+  `has-session -t <name>` is matched by *prefix* when no session has the whole
+  name (verified on tmux 3.2a: `-t pm-test` exits 0 with only `pm-test~1` on
+  the server), and pm creates exactly those grouped `<base>~N` sessions — so
+  the tmux recipe's readiness wait, its claim read/write and pipe attach, and
+  its step-5 witness and pipe stops all name the session with `=`. With only a
+  grouped session on the server the old block recorded and reported *it* and
+  exited 0 while `pm session` had created nothing; the fixed block fails at the
+  readiness wait. `show-options`/`set-option` do not accept `=`, so step 2
+  asserts the exact session first and lets exact-match-wins make its plain
+  claim targets mean what they say.
+- a missing runtime is not a missing package (review loop 7c9c i9): the web-UI
+  driver block checks `command -v node` before it links anything, because
+  without the runtime its import check fails exactly as a missing Playwright
+  does and both remedies it offers (the global link, `npm i playwright`) need
+  node — a remedy that cannot work, repeated. The Tooling section names
+  Node.js alongside Playwright, Chromium and `ffmpeg`.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.

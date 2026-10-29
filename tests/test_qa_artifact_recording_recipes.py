@@ -401,18 +401,23 @@ class TestRecipes:
         ``tmux ls | grep '^pm-'`` also matches ``pm-recorder`` — the session
         this very recipe creates — and any other project's pm session, so
         the wait can pass before the target exists and its failure path
-        never fires. ``tmux has-session -t "$TARGET"`` is the actual
+        never fires. ``tmux has-session -t "=$TARGET"`` is the actual
         handle; an empty target must be rejected first because
-        ``tmux has-session -t ''`` succeeds.
+        ``tmux has-session -t ''`` succeeds, and the `=` is what makes the
+        handle exact — a bare name is prefix-matched, so it would also pass
+        on pm's grouped ``<base>~N`` session.
         """
         block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
-        assert 'has-session -t "$TARGET"' in block, (
-            "tmux recipe does not wait on the computed session handle")
+        assert 'has-session -t "=$TARGET"' in block, (
+            "tmux recipe does not wait on the exact computed session handle")
+        assert 'has-session -t "$TARGET"' not in block, (
+            "tmux recipe targets the session by bare name, which tmux "
+            "prefix-matches (it matches pm's grouped <base>~N session)")
         assert "grep -q '^pm-'" not in block and "until tmux ls" not in block, (
             "tmux recipe still matches any pm- session (incl. pm-recorder)")
         target = block.index("TARGET=$(pm session name)")
         guard = block.index('[ -n "$TARGET" ]')
-        wait = block.index('until tmux has-session -t "$TARGET"')
+        wait = block.index('until tmux has-session -t "=$TARGET"')
         assert target < guard < wait, (
             "the empty-TARGET guard must come before the has-session wait")
 
@@ -575,9 +580,11 @@ class TestRecipes:
         assert "! tmux has-session -t pm-recorder" in seg, (
             "tmux recipe detaches without noticing that the recorder is "
             "already gone, so a truncated cast passes the `test -s` check")
-        assert 'tmux has-session -t "$TARGET"' in seg, (
+        assert 'tmux has-session -t "=$TARGET"' in seg, (
             "tmux recipe cannot tell a recorder that died mid-scenario apart "
-            "from one that ended because the session ended")
+            "from one that ended because the session ended (and a bare name "
+            "is prefix-matched, so pm's grouped <base>~N session would stand "
+            "in for the target)")
         assert "incomplete" in seg and "exit 1" in seg, (
             "a recorder that died mid-scenario is not reported as a failure")
 
@@ -2130,6 +2137,45 @@ def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path):
     assert "driver saw" not in r.stdout, r.stdout
 
 
+def test_web_ui_driver_block_names_a_missing_node(tmp_path):
+    """Without ``node`` the block blames Playwright and offers dead remedies.
+
+    The block's only tools are ``node`` and (when it links) ``ln``. Verified
+    with a PATH that has no ``node``: the import check failed and the block
+    printed "playwright does not resolve beside driver.mjs", offering the
+    global link and ``npm i playwright`` — both of which need the runtime that
+    is missing, so the worker repeats a remedy that cannot work (the shape
+    R31/R32 fixed for the ``agg`` install and the nested ``node_modules``).
+    It also created the ``node_modules`` link on the way. A missing
+    prerequisite has to be named where it is missing, and nothing should be
+    created for a run that cannot happen.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    # A PATH with the shell and the block's other external tools, but no node.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for tool in ("bash", "rm", "ln", "cat", "sleep"):
+        src = shutil.which(tool)
+        if src:
+            (bindir / tool).symlink_to(src)
+    env = {"PATH": str(bindir), "CAPDIR": str(capdir),
+           "APP_URL": "http://localhost:1", "HOME": str(tmp_path)}
+
+    r = subprocess.run(["bash"], input=_web_ui_driver_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode != 0, (
+        "the driver block reported success with no node to run the driver")
+    assert "node is not installed" in r.stderr, (
+        "a missing node is not named: " + r.stderr)
+    assert "playwright does not resolve" not in r.stderr, (
+        "a missing node is reported as a Playwright resolution failure, and "
+        "every remedy that message offers needs node: " + r.stderr)
+    assert not os.path.lexists(capdir / "node_modules"), (
+        "the block linked node_modules for a run that cannot happen")
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_remedy_handles_an_existing_node_modules(tmp_path):
     """The offered link must work when a broken ``node_modules`` is in the way.
@@ -2645,6 +2691,27 @@ while [ "$1" = "-L" ]; do shift 2; done
 sub=$1; shift
 val() { f=$1; shift; while [ $# -gt 0 ]; do
           if [ "$1" = "$f" ]; then echo "$2"; return; fi; shift; done; }
+# Session-target resolution, the way real tmux does it (3.2a, verified): an
+# exact name wins, and when no session has the whole name the target is
+# matched by *prefix* — `has-session -t pm-test` exits 0 with only
+# `pm-test~1` on the server, which is how pm's grouped `base~N` sessions get
+# picked up. A leading `=` forces an exact match; `has-session` and
+# `pipe-pane` honour it, while `show-options`/`set-option` do not (verified:
+# "no such session: =pm-test"). Echoes the resolved name, or fails.
+resolve() {
+    t=$1; exact=0
+    case "$t" in =*) exact=1; t=${t#=} ;; esac
+    [ -z "$t" ] && return 1
+    [ -f "$STATE/$t" ] && { echo "$t"; return 0; }
+    [ "$exact" = 1 ] && return 1
+    for f in "$STATE"/*; do
+        [ -e "$f" ] || continue
+        b=${f##*/}
+        case "$b" in pane|sends|pipeclaim|claim.*) continue ;; esac
+        case "$b" in "$t"*) echo "$b"; return 0 ;; esac
+    done
+    return 1
+}
 case "$sub" in
   has-session)
       # Real tmux (3.2a, verified) *succeeds* for `-t ''` — the empty target
@@ -2653,19 +2720,23 @@ case "$sub" in
       # legitimate finish.
       s=$(val -t "$@")
       [ -z "$s" ] && exit 0
-      [ -f "$STATE/$s" ] && exit 0 || exit 1 ;;
-  kill-session) s=$(val -t "$@"); rm -f "$STATE/$s" "$STATE/claim.$s"; exit 0 ;;
+      resolve "$s" >/dev/null && exit 0 || exit 1 ;;
+  kill-session)
+      s=$(val -t "$@")
+      r=$(resolve "$s") || exit 0
+      rm -f "$STATE/$r" "$STATE/claim.$r"; exit 0 ;;
   kill-server)  rm -f "$STATE/rec" "$STATE/pm-recorder" "$STATE/claim.rec" \
                      "$STATE/claim.pm-recorder"; exit 0 ;;
   pipe-pane)
       s=$(val -t "$@")
-      if [ ! -f "$STATE/${s%%:*}" ]; then
+      r=$(resolve "${s%%:*}")
+      if [ -z "$r" ]; then
           echo "can't find session: $s" >&2; exit 1
       fi
       # Record the session claim *as the pipe is attached*: the recipe has to
       # take the capture-directory claim before this call, or a second run can
       # pass the same check and take the pipe over in the gap.
-      cat "$STATE/claim.${s%%:*}" 2>/dev/null > "$STATE/pipeclaim" || true
+      cat "$STATE/claim.$r" 2>/dev/null > "$STATE/pipeclaim" || true
       # `pipefail`: the attach itself fails. `notranscript`: the attach is
       # accepted but nothing is ever written, which only the end-of-run check
       # can catch.
@@ -2687,9 +2758,11 @@ case "$sub" in
   # `set-option -u` round-trip; a grouped session does not inherit it).
   show-options)
       s=$(val -t "$@")
+      r=$(resolve "$s")
       case "$*" in
         *@pm_capture_dir*)
-            [ -f "$STATE/claim.$s" ] && { cat "$STATE/claim.$s"; exit 0; }
+            [ -n "$r" ] && [ -f "$STATE/claim.$r" ] && {
+                cat "$STATE/claim.$r"; exit 0; }
             exit 1 ;;
         # The server's prefix (step 5's detach key is this, not a literal
         # C-b). A real server always answers, C-b by default; STUB_PREFIX
@@ -2699,11 +2772,13 @@ case "$sub" in
       exit 0 ;;
   set-option)
       s=$(val -t "$@")
+      r=$(resolve "$s")
+      [ -z "$r" ] && { echo "no such session: $s" >&2; exit 1; }
       case " $* " in
-        *" -u "*) rm -f "$STATE/claim.$s"; exit 0 ;;
+        *" -u "*) rm -f "$STATE/claim.$r"; exit 0 ;;
       esac
       for a in "$@"; do v=$a; done
-      printf '%s\n' "$v" > "$STATE/claim.$s"
+      printf '%s\n' "$v" > "$STATE/claim.$r"
       exit 0 ;;
   list-sessions)
       for f in "$STATE"/*; do
@@ -2715,6 +2790,8 @@ case "$sub" in
       exit 0 ;;
   send-keys)
       s=$(val -t "$@")
+      r=$(resolve "$s")
+      [ -z "$r" ] && exit 0
       # `stuck`: the recorder never goes away, so a stop wait runs out.
       [ "$STUB_MODE" = stuck ] && exit 0
       # `prefix`: only the server's own prefix followed by `d` reaches the
@@ -2727,7 +2804,7 @@ case "$sub" in
           for a in "$@"; do last2=$last1; last1=$a; done
           [ "$last2" = "${STUB_PREFIX:-C-b}" ] || exit 0
       fi
-      rm -f "$STATE/$s"
+      rm -f "$STATE/$r"
       # `detachboth`/`detachbothbad`: the detach races the pm session's own
       # end. The attach followed the session out, so the recorder is already
       # gone when the key is sent (`send-keys` fails) and the session it was
@@ -3130,6 +3207,49 @@ class TestCaptureFlowExecution:
         assert "can't find session" not in r.stderr, (
             "a clean run prints a tmux error while stopping the transcript pipe")
 
+    def test_tmux_readiness_wait_requires_the_exact_session(self, tmp_path):
+        """``has-session -t <name>`` is not exact: tmux falls back to a prefix.
+
+        Verified on tmux 3.2a: with only ``pm-test~1`` on the server,
+        ``has-session -t pm-test`` exits 0. pm creates exactly those sessions —
+        a grouped ``<base>~1``/``~2`` per extra co-viewing client — so the
+        readiness wait passed on the grouped session while ``pm session`` had
+        not created the target at all. The run then recorded that session,
+        exited 0 and reported a capture of a session pm never started
+        (verified live: rc 0, cast, ``recorder.status`` 0, transcript, with
+        ``pm-test~1`` the only session on the server), and the step-1 failure
+        path could not fire. The wait has to ask for the exact session.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, sessions=("pm-test~1",))
+        assert r.returncode != 0, (
+            "the readiness wait passed on the grouped session pm-test~1 while "
+            "the target session did not exist, so the run recorded and "
+            "reported a session pm never created")
+        assert "did not appear within" in r.stderr, r.stderr
+
+    def test_step_two_refuses_a_target_that_is_not_an_exact_session(
+            self, tmp_path):
+        """A bare target is prefix-matched, so a missing one is not a no-op.
+
+        Step 2 reads and writes the capture-directory claim on ``$TARGET``.
+        With only ``pm-test~1`` on the server, a bare ``-t pm-test`` resolved
+        to the grouped session (verified on tmux 3.2a), so the claim landed
+        there — and once the real session exists, exact match wins and that
+        claim is invisible, which is the two-runs-one-directory collision the
+        claim exists to prevent. ``show-options``/``set-option`` do not accept
+        ``=``, so the step asserts the exact session first.
+        """
+        r, _cast = _run_block(_step_two_block(), "ok", tmp_path,
+                              sessions=("pm-test~1",))
+        assert r.returncode != 0, (
+            "step 2 claimed a capture directory on the grouped session "
+            "pm-test~1 while the target session did not exist")
+        assert "no session named exactly" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test~1").exists(), (
+            "step 2 wrote its claim on the prefix-matched grouped session")
+
     def test_step_two_refuses_an_empty_target(self, tmp_path):
         """Pasted alone with no session name, step 2 must not guess a session.
 
@@ -3443,6 +3563,15 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, r.stderr
         assert "did not exit within" in r.stderr, r.stderr
         assert "recorder-pane.log" in r.stderr, r.stderr
+        # This branch kills the recorder, so the cast stops where it stopped
+        # and `recorder.status` is never written. Every other step-5 failure
+        # says the recording is incomplete; this one used to leave a truncated
+        # cast in the capture directory with no statement that it is truncated
+        # — a worker could render it or list it as this run's evidence.
+        assert "incomplete" in r.stderr, (
+            "the stop timeout leaves a truncated cast behind but never says "
+            "it is truncated, so the worker can present it as this run's "
+            "recording: " + r.stderr)
         log = cast.parent / "recorder-pane.log"
         assert log.exists() and "TUI drawn" in log.read_text(), (
             "the stop failure did not save what the recorder drew")
@@ -3883,7 +4012,7 @@ class TestCaptureFlowExecution:
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [
-    ("tmux-screen-recording.md", 'until tmux has-session -t "$TARGET"', None),
+    ("tmux-screen-recording.md", 'until tmux has-session -t "=$TARGET"', None),
     ("web-ui-recording.md", "until curl", "--max-time"),
 ])
 def test_readiness_waits_are_bounded(name, marker, probe_bound):

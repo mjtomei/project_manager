@@ -26,6 +26,10 @@ under `/opt/ms-playwright` — and advertises the global install through
 `driver.mjs` (an ES module, as below) therefore has to resolve the package
 locally; step 2 links it beside the driver and checks the import. Elsewhere,
 install with `npm i playwright && npx playwright install --with-deps chromium`.
+The driver runs under `node`, so Node.js has to be on `PATH` too — step 2
+checks for it before it links anything, because without the runtime the import
+check fails exactly as a missing Playwright does and both remedies it offers
+(the global link, `npm i playwright`) need the thing that is missing.
 
 The finalize step (step 3) transcodes with `ffmpeg`, which the QA container
 image ships; install it (`apt-get install ffmpeg`) on a host without it. The
@@ -251,6 +255,19 @@ rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png
     echo "there is no driver.mjs in $CAPDIR — save the recipe's driver" \
         "skeleton as driver.mjs here (step 2's prose) before running this" \
         "block" >&2
+    exit 1
+}
+# The driver is a Node.js program, and this block's only tools are `node` and
+# (when it links) `ln`. Without the runtime the import check below fails the
+# same way a missing Playwright does — "playwright does not resolve beside
+# driver.mjs" — and every remedy that message offers (link the global install,
+# or `npm i playwright`) needs the runtime that is not there: a remedy that
+# cannot work, repeated, in the shape R31/R32 fixed for the `agg` install and
+# the nested `node_modules`. Name the missing runtime where it is missing, and
+# before the link below so a run without `node` creates nothing.
+command -v node >/dev/null || {
+    echo "node is not installed — driver.mjs runs under Node.js; install it" \
+        "(e.g. 'apt-get install nodejs') and re-run this step" >&2
     exit 1
 }
 # The driver is an ES module, and Node's ES-module resolver ignores
