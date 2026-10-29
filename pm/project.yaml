@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T03:43:48.390953+00:00'
+  updated_at: '2026-10-29T04:12:53.580152+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14634,6 +14634,26 @@ prs:
       empty). Full suite 4546 passed, 1 skipped, 0 failed (/pm-captures/review-b320-i1/full-suite.log).'
     created_at: '2026-10-29T03:43:30Z'
     last_edited: '2026-10-29T03:43:48Z'
+  - id: note-7852903
+    text: 'Review e89f i1: no change to the close contract itself. (1) `_record_status_timestamp`''s
+      new `previous_status` parameter is now keyword-only (`def ...(pr_entry, status=None,
+      *, previous_status=None)`), so a positional slip cannot masquerade as a previous
+      status; every caller already passed it by keyword. (2) The helper''s `closed_at`
+      contract — fresh closure stamps, re-stating `closed` keeps the original time,
+      every other transition drops it, an updated_at-only call leaves it alone — is
+      now pinned directly in `tests/test_cli_helpers.py::TestRecordStatusTimestampClosedAt`
+      (6 tests) rather than only through the CLI paths in test_pr_close.py. (3) Cross-PR
+      note note-e309863 on pr-77c4f91 adds two more id-indexing sites to that bug''s
+      fix surface (`pm pr add`''s duplicate scan and `_apply_pr_edit`''s dependency
+      validation). Full suite 4556 passed, 1 skipped (markdown on PYTHONPATH, PM_HOST_HOME
+      unset). Re-ran the post-fix repro on this head: entry/notes/branch/workdir retained,
+      no --delete-branch, dependent warned, active_pr moved. Observations left as-is
+      (spec §6 scope): `--remove` orphans live tmux/container resources that `pm pr
+      cleanup --resources` can no longer resolve (its message names only the workdir);
+      `store._validate_pr_statuses` backfills created_at/updated_at from merged_at/reviewed_at/started_at
+      but not closed_at.'
+    created_at: '2026-10-29T04:12:53Z'
+    last_edited: '2026-10-29T04:12:53Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
@@ -39948,7 +39968,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
-  updated_at: '2026-10-28T08:58:17.839283+00:00'
+  updated_at: '2026-10-29T04:09:33.660061+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39963,6 +39983,15 @@ prs:
       its dependent scan; the store helper is the remaining gap.'
     created_at: '2026-10-28T08:58:17Z'
     last_edited: '2026-10-28T08:58:17Z'
+  - id: note-e309863
+    text: 'Two more id-indexing sites of the same class (from pr-62ad13d review e89f
+      i1): `pm pr add`''s duplicate scan (iterates data["prs"] and reads p["title"],
+      then builds fresh_ids = {p["id"] ...}) and the $EDITOR apply path `_apply_pr_edit`''s
+      dependency validation (existing_ids = {p["id"] for p in (data.get("prs") or
+      [])}). Both raise KeyError on a hand-edited entry with no usable id, before
+      any write. Include them in the fix surface alongside store.get_pr/get_plan.'
+    created_at: '2026-10-29T04:09:33Z'
+    last_edited: '2026-10-29T04:09:33Z'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy

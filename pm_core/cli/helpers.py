@@ -446,7 +446,7 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str | None = None,
+def _record_status_timestamp(pr_entry: dict, status: str | None = None, *,
                              previous_status: str | None = None) -> None:
     """Record timestamps on *pr_entry*.
 
@@ -465,7 +465,8 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None,
     closure records one — pass *previous_status* so a repeat close (or an
     edit that re-states ``closed``) keeps the original closure time, and so
     an entry closed before the field existed keeps none instead of inventing
-    one.
+    one.  It is keyword-only: every caller passes a status it computed, and a
+    positional slip would silently look like a previous status.
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now

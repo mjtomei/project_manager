@@ -261,6 +261,53 @@ class TestRecordStatusTimestamp:
 
 
 # ---------------------------------------------------------------------------
+# _record_status_timestamp — closed_at is history, not a status cache
+# ---------------------------------------------------------------------------
+
+
+class TestRecordStatusTimestampClosedAt:
+    """``_record_status_timestamp`` owns the ``closed_at`` invariant
+    (pr-62ad13d): a fresh closure stamps it, re-stating ``closed`` keeps the
+    original time, and any other transition drops it — so the field can never
+    describe a status the PR is not in.  The CLI-level paths are covered in
+    ``test_pr_close.py``; these pin the contract at its single owner."""
+
+    def test_fresh_closure_stamps_closed_at(self):
+        entry = {"status": "in_review"}
+        _record_status_timestamp(entry, "closed", previous_status="in_review")
+        assert entry["closed_at"] == entry["updated_at"]
+
+    def test_restating_closed_keeps_the_original_time(self):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, "closed", previous_status="closed")
+        assert entry["closed_at"] == "2024-01-01T00:00:00+00:00"
+        # updated_at still moves — the repeat action is recorded.
+        assert entry["updated_at"] != "2024-01-01T00:00:00+00:00"
+
+    def test_reopen_drops_closed_at(self):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, "pending", previous_status="closed")
+        assert "closed_at" not in entry
+
+    @pytest.mark.parametrize("status", ["in_progress", "in_review", "qa",
+                                        "sign_off", "merged"])
+    def test_every_other_transition_drops_closed_at(self, status):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry, status, previous_status="closed")
+        assert "closed_at" not in entry
+
+    def test_updated_at_only_call_leaves_closed_at_alone(self):
+        entry = {"status": "closed", "closed_at": "2024-01-01T00:00:00+00:00"}
+        _record_status_timestamp(entry)  # e.g. a note/plan edit, no status change
+        assert entry["closed_at"] == "2024-01-01T00:00:00+00:00"
+
+    def test_previous_status_is_keyword_only(self):
+        entry = {"status": "in_review"}
+        with pytest.raises(TypeError):
+            _record_status_timestamp(entry, "closed", "in_review")
+
+
+# ---------------------------------------------------------------------------
 # _record_status_timestamp without status (updated_at only)
 # ---------------------------------------------------------------------------
 

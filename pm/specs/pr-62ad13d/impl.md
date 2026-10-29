@@ -311,7 +311,12 @@ workdirs are touched.
     `test_editor_reopen_drops_the_closure_time`,
     `test_restating_closed_keeps_the_closure_time` and
     `test_merge_discovered_after_close_drops_the_closure_time` (all three
-    fail on the previous head).
+    fail on the previous head).  The helper's contract is also pinned
+    directly in `tests/test_cli_helpers.py::TestRecordStatusTimestampClosedAt`
+    (review e89f i1): fresh closure stamps, restating keeps, every other
+    transition drops, an updated_at-only call leaves it alone, and
+    `previous_status` is keyword-only so a positional slip cannot masquerade
+    as a previous status.
 32. Closing a never-started PR (review c02f i13): a `pending` PR with no
     workdir closes normally (status `closed`, `closed_at` set, `active_pr`
     becomes `None`), since the lifecycle action is about the record rather
@@ -529,8 +534,10 @@ No **[UNRESOLVED]** ambiguities.
   — cleanup steps use `--remove`.
 - `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`
   (`TestGitHubCloseResilience` rewrite), `tests/test_sync_merge_integrity.py`
-  (TUI startup-sync closed race), and `tests/test_fake_github.py` (the
-  `--delete-branch` emulation).
+  (TUI startup-sync closed race), `tests/test_fake_github.py` (the
+  `--delete-branch` emulation), and `tests/test_cli_helpers.py`
+  (`TestRecordStatusTimestampClosedAt` — the helper's `closed_at` contract,
+  review e89f i1).
 
 ## 6. Out of scope
 
