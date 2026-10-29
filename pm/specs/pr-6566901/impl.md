@@ -318,9 +318,18 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   (`stop_check()` true inside the catch) is teardown, not a missing outcome:
   it returns `None` (the unfinalized result), like the `not content` path, so
   a user-stopped run never surfaces `[finalize: NO_VERDICT]`.
-* **refiner** (`_concretize_scenario`) — pass a block outcome request;
-  catch → `(None, "no refiner outcome: …")`; teach
-  `_concretize_failure_label` to pass that prefix through unchanged.
+* **refiner** (`_concretize_scenario`) — pass a block outcome request and
+  the caller's `stop_check`; catch → `(None, "no refiner outcome: …")`; teach
+  `_concretize_failure_label` to pass that prefix through unchanged.  The
+  concretizer is the last poller that could turn a user stop into a
+  missing-outcome failure: the poll is given `stop_check` (so a stopping run
+  never nudges the refiner session), and an exhaustion that lands while
+  stopping returns `(None, None)` — teardown, not a refiner failure — so no
+  per-scenario INPUT_REQUIRED reason is recorded.  `_concretize_and_launch`
+  (both the tmux and container launchers) returns before the concretizer
+  runs and again before the worker is split when `state.stop_requested`, so
+  a stop during concretization leaves the scenario unverdicted and the run
+  ends in the `STOPPED` teardown rather than spawning a worker.
 * **verifier** (`_verify_single_scenario`) — pass verifier-specific
   outcome/resume requests (`VERIFIED` / the `FLAGGED_START…FLAGGED_END`
   block, hoisted to module constants); catch →
@@ -637,7 +646,9 @@ into this branch. The conflict resolution keeps both sides' behaviour:
   returns `"completed"` and is never nudged (unit, `poll_for_verdict`, and
   QA-tick-loop cases). Also holds the loop wiring tests below.
 * `tests/test_loop_recovery.py` (review/watcher wiring): exhaustion →
-  `NO_VERDICT`, history entry, callback fired; QA refiner label, verifier
+  `NO_VERDICT`, history entry, callback fired; QA refiner label (and
+  `(None, None)` — not a `no refiner outcome` reason — when the stop lands
+  inside recovery, with the poll itself given the stop check), verifier
   reason (initial poll and the machine-driven re-check follow-up, which must
   call the shared poller rather than the unbounded human wait), finalize
   `NO_VERDICT` (and `None` — not `NO_VERDICT` — when the stop lands inside

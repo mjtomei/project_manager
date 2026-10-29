@@ -2075,6 +2075,7 @@ def _concretize_scenario(
     session_id: str,
     scenario_cwd: str,
     instruction_content: str | None = None,
+    stop_check: Callable[[], bool] | None = None,
 ) -> tuple[str | None, str | None]:
     """Poll a concretization pane and return its outcome.
 
@@ -2087,6 +2088,14 @@ def _concretize_scenario(
         caller falls back to the planner's draft steps.
 
     The pane is left open for user review.
+
+    *stop_check* makes a user stop a clean teardown: the poll stops
+    nudging/waiting immediately, and a bounded-recovery exhaustion that
+    lands during the stop returns ``(None, None)`` instead of a
+    ``no refiner outcome`` reason.  Otherwise a stopped run would record
+    a per-scenario INPUT_REQUIRED failure — and a QA note — for a run the
+    user cancelled (the same spurious-exhaustion-on-teardown class the
+    other pollers guard against).
     """
     from pm_core.claude_launcher import transcript_path_for
 
@@ -2101,12 +2110,21 @@ def _concretize_scenario(
             grace_period=_CONCRETIZE_GRACE,
             log_prefix=f"qa-concretize-{scenario.index}",
             workdir=scenario_cwd,
+            stop_check=stop_check,
             outcome_request=build_block_outcome_request(_CONCRETIZE_BLOCKS),
             resume_request=build_block_resume_request(_CONCRETIZE_BLOCKS),
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)
     except VerdictRecoveryExhausted as e:
+        if stop_check is not None and stop_check():
+            # The run is being torn down.  ``handle`` checks its deferral
+            # bound before its own ``stop_check``, so a stop that landed
+            # while it was deciding can surface here as an exhaustion;
+            # teardown is not a refiner failure, so record nothing.
+            _log.info("Concretization for scenario %d stopped during "
+                      "recovery", scenario.index)
+            return None, None
         # The refiner never emitted REFINED_STEPS_END / REFINER_REJECT_END
         # and bounded recovery is exhausted.  Surface a distinct reason so
         # this is not mislabelled as a deliberate refiner rejection.
@@ -2525,12 +2543,25 @@ def _launch_scenarios_in_tmux(
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
+        if state.stop_requested:
+            # A stop that landed between preparing this scenario and its
+            # concretizer thread starting: never launch a worker for a run
+            # that is being torn down.
+            return
         refined_steps, reject_reason = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
             scenario_cwd=scenario_cwd,
             instruction_content=instruction_content,
+            stop_check=lambda: state.stop_requested,
         )
+        if state.stop_requested:
+            # Teardown: no worker launch, no verdict, no reason — the run
+            # ends STOPPED (see ``_execute_and_finalize``'s
+            # ``stopped_clean``), not INPUT_REQUIRED.
+            _log.info("Scenario %d: stopped before worker launch",
+                      scenario.index)
+            return
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
@@ -2778,12 +2809,25 @@ def _launch_scenarios_in_containers(
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
+        if state.stop_requested:
+            # A stop that landed between preparing this scenario and its
+            # concretizer thread starting: never launch a worker for a run
+            # that is being torn down.
+            return
         refined_steps, reject_reason = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
             scenario_cwd=container_workdir,
             instruction_content=instruction_content,
+            stop_check=lambda: state.stop_requested,
         )
+        if state.stop_requested:
+            # Teardown: no worker launch, no verdict, no reason — the run
+            # ends STOPPED (see ``_execute_and_finalize``'s
+            # ``stopped_clean``), not INPUT_REQUIRED.
+            _log.info("Scenario %d: stopped before worker launch",
+                      scenario.index)
+            return
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
@@ -3628,7 +3672,7 @@ def _poll_tmux_verdicts(
         _drop_recovery(scenario.index)
 
     def _retire_if_exhausted(scenario: QAScenario,
-                             exc: VerdictRecoveryExhausted) -> str | None:
+                             exc: VerdictRecoveryExhausted) -> VerdictHit | None:
         """Retire a worker whose bounded recovery is exhausted.
 
         Both exhaustion sites — the post-nudge response deadline

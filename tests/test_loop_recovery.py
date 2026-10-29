@@ -954,6 +954,34 @@ class TestQARecoveryWiring:
         assert label == reason
         assert "refiner rejected" not in label
 
+    def test_concretize_stop_during_recovery_is_not_a_refiner_failure(
+            self, tmp_path):
+        """A user stop must not record a per-scenario INPUT_REQUIRED reason.
+
+        ``handle`` checks its deferral bound before its own ``stop_check``,
+        so a stop that lands while the concretizer's recovery is deciding
+        surfaces as an exhaustion.  Recording it would turn a cancelled run
+        into a missing-outcome failure (and a QA note), the same class the
+        planner / tick loop / finalize / review / watcher paths guard.
+        """
+        from pm_core import qa_loop
+
+        scenario = qa_loop.QAScenario(index=1, title="S", focus="f")
+        with patch("pm_core.qa_loop.poll_for_verdict",
+                   side_effect=VerdictRecoveryExhausted(
+                       "no refiner block", attempts=3)) as polled, \
+             patch("pm_core.claude_launcher.transcript_path_for",
+                   return_value=tmp_path / "x.jsonl"):
+            refined, reason = qa_loop._concretize_scenario(
+                scenario, {}, {}, "%1", str(uuid.uuid4()), str(tmp_path),
+                stop_check=lambda: True)
+
+        assert (refined, reason) == (None, None)
+        # The poll itself is bounded by the stop too, so a stopped run never
+        # nudges the concretizer session.
+        assert polled.call_args.kwargs["stop_check"] is not None
+        assert polled.call_args.kwargs["stop_check"]() is True
+
     def test_finalize_exhaustion_returns_no_verdict(self, tmp_path):
         from pm_core import qa_loop
         from pm_core.qa_loop import QALoopState
