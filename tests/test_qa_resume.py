@@ -1879,16 +1879,47 @@ def test_mark_result_recorded_touches_only_its_own_runs_snapshot(tmp_path):
     recorded, and only when this process has a pm session to name."""
     qa_dir = _seed_run(tmp_path, overall=VERDICT_PASS)
     f = _resume_file_path(qa_dir)
-    loop = json.loads(f.read_text())["loop_id"]
     before = f.read_text()
-    qa_loop.mark_result_recorded(qa_dir, "another-loop")
+    other = build_resume_state(json.loads(before))
+    other.loop_id = "another-loop"
+    qa_loop.mark_result_recorded(other)
     assert f.read_text() == before
+    state = build_resume_state(json.loads(before))
     with patch.object(qa_loop, "get_pm_session", return_value=None):
-        qa_loop.mark_result_recorded(qa_dir, loop)
+        qa_loop.mark_result_recorded(state)
     assert f.read_text() == before
-    qa_loop.mark_result_recorded(qa_dir, loop)
+    assert state.result_recorded_by is None
+    qa_loop.mark_result_recorded(state)
     assert (json.loads(f.read_text())["result_recorded_by"]
             == "project_manager-deadbeef")
+    assert state.result_recorded_by == "project_manager-deadbeef"
+
+
+def test_held_runs_later_snapshots_keep_the_recorded_by_mark(tmp_path):
+    """A held INPUT_REQUIRED run keeps writing snapshots after the TUI
+    recorded its result (a repeated wait, a dropped attempt, the settled
+    hold, a reopen).  Each rewrite must keep which session recorded it, or
+    another clone could claim and finish a run whose note is not in its
+    project.yaml (S49); a re-adopted run carries the mark into its own
+    rewrites."""
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_INPUT_REQUIRED)
+    state = build_resume_state(
+        json.loads(_resume_file_path(qa_dir).read_text()))
+    loop = state.loop_id
+    with patch.object(qa_loop, "get_pm_session", return_value="pm-clone-a"):
+        qa_loop.mark_result_recorded(state)
+    state.waiting_for_input = {1}                       # a hold rewrite
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    data = json.loads(_resume_file_path(qa_dir).read_text())
+    assert data["result_recorded_by"] == "clone-a"
+    assert data["waiting_for_input"] == [1]
+    assert qa_loop.claim_resume_file(qa_dir, loop) is None
+
+    readopted = build_resume_state(data)
+    assert readopted.result_recorded_by == "clone-a"
+    _write_resume_file(readopted, use_containers=False, concurrency_cap=0)
+    assert json.loads(_resume_file_path(qa_dir).read_text())[
+        "result_recorded_by"] == "clone-a"
 
 
 def test_completion_marks_its_snapshot_and_the_launching_clone_records_no_second_note(

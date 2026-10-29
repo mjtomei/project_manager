@@ -898,7 +898,7 @@ def _record_completion(app, state: QALoopState) -> bool:
     # re-processes it (S49).
     if state.qa_workdir:
         from pm_core import qa_loop
-        qa_loop.mark_result_recorded(state.qa_workdir, state.loop_id)
+        qa_loop.mark_result_recorded(state)
     return True
 
 

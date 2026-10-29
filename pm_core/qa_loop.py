@@ -269,6 +269,10 @@ class QALoopState:
     # Whether the TUI has recorded/transitioned the current result.  Persisted
     # so a restart during the hold does not duplicate the QA note/transition.
     completion_processed: bool = False
+    # The pm session whose project.yaml holds this run's recorded result
+    # (mark_result_recorded, S49).  Persisted with every snapshot so a held
+    # run's later rewrites keep it.
+    result_recorded_by: str | None = None
     # PR-head moves observed when a held scenario's follow-up arrives.  A new
     # source head is never promoted on the old run's approval: non-empty
     # forces NEEDS_WORK and returns the PR through review.
@@ -1026,8 +1030,9 @@ def _write_status_file(status_path: Path, pr_id: str,
 _RESUME_FILENAME = "qa_resume.json"
 
 # Serializes the resume snapshot's full rewrite (held-loop heartbeat) with
-# the TUI's read-modify-write in mark_completion_processed, so a slow
-# heartbeat cannot clobber a flag the TUI just persisted.
+# the TUI's read-modify-writes in mark_completion_processed and
+# mark_result_recorded, so a slow heartbeat cannot clobber a flag the TUI
+# just persisted.
 _RESUME_WRITE_LOCK = threading.Lock()
 
 
@@ -1125,6 +1130,7 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "held": bool(state.held),
         "completion_processed": bool(state.completion_processed),
         "latest_verdict": state.latest_verdict or "",
+        "result_recorded_by": state.result_recorded_by,
         "input_wait_code_changes": list(state.input_wait_code_changes),
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
@@ -1145,12 +1151,13 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
             # while this snapshot was being built or waiting for the lock.
             if state.superseded:
                 return
-            # These two are set by the TUI thread (mark_completion_processed)
-            # while the held loop writes snapshots.  Re-read them under the
-            # lock so a snapshot built from an older state cannot clobber a
-            # flag the TUI just persisted.
+            # These are set by the TUI thread (mark_completion_processed,
+            # mark_result_recorded) while the held loop writes snapshots.
+            # Re-read them under the lock so a snapshot built from an older
+            # state cannot clobber a flag the TUI just persisted.
             fresh = {"completion_processed": bool(state.completion_processed),
-                     "latest_verdict": state.latest_verdict or ""}
+                     "latest_verdict": state.latest_verdict or "",
+                     "result_recorded_by": state.result_recorded_by}
             if any(data.get(k) != v for k, v in fresh.items()):
                 data.update(fresh)
                 text = json.dumps(data, indent=2)
@@ -1297,8 +1304,7 @@ def own_session_tag() -> str | None:
     return sess[3:] if sess and sess.startswith("pm-") else None
 
 
-def mark_result_recorded(qa_workdir: str | Path | None,
-                         loop_id: str | None) -> None:
+def mark_result_recorded(state: QALoopState) -> None:
     """Note in a finished run's snapshot which pm session recorded its
     result (transition, QA note) in its project.yaml.
 
@@ -1309,12 +1315,16 @@ def mark_result_recorded(qa_workdir: str | Path | None,
     adopting TUI died the launching clone's TUI recovered the run as its
     own and recorded it again in its project.yaml (S49).  A run recorded
     elsewhere is that session's to finish (claim_resume_file refuses it).
-    Written under the claim lock; best-effort."""
+
+    Also kept on *state*, so a held run's later snapshots carry it.
+    Written under the claim lock and the snapshot write lock (the held loop
+    rewrites the snapshot from another thread); best-effort."""
     import fcntl
     tag = own_session_tag()
-    if not qa_workdir or not tag:
+    if not state.qa_workdir or not tag:
         return
-    path = _resume_file_path(qa_workdir)
+    state.result_recorded_by = tag
+    path = _resume_file_path(state.qa_workdir)
     try:
         fd = os.open(path.with_name("qa_resume.claim"),
                      os.O_CREAT | os.O_RDWR, 0o644)
@@ -1322,17 +1332,18 @@ def mark_result_recorded(qa_workdir: str | Path | None,
         return
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
-        data = _load_resume_file(qa_workdir)
-        if (data is None or data.get("loop_id") != loop_id
-                or data.get("result_recorded_by") == tag):
-            return
-        data["result_recorded_by"] = tag
-        tmp = path.with_name("qa_resume.claim.tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        tmp.rename(path)
+        with _RESUME_WRITE_LOCK:
+            data = _load_resume_file(state.qa_workdir)
+            if (data is None or data.get("loop_id") != state.loop_id
+                    or data.get("result_recorded_by") == tag):
+                return
+            data["result_recorded_by"] = tag
+            tmp = path.with_name("qa_resume.claim.tmp")
+            tmp.write_text(json.dumps(data, indent=2))
+            tmp.rename(path)
     except OSError:
         _log.warning("QA: could not mark the result recorded in %s",
-                     qa_workdir, exc_info=True)
+                     state.qa_workdir, exc_info=True)
     finally:
         os.close(fd)
 
@@ -1716,6 +1727,7 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     }
     state.held = bool(resume_data.get("held"))
     state.completion_processed = bool(resume_data.get("completion_processed"))
+    state.result_recorded_by = resume_data.get("result_recorded_by") or None
     state.latest_verdict = resume_data.get("latest_verdict") or ""
     state.input_wait_code_changes = list(
         resume_data.get("input_wait_code_changes") or [])

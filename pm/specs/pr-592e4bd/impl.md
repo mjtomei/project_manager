@@ -954,6 +954,13 @@ below (item 42 records the suites up to 3738).
     session; both guards are defensive, since every run has its own QA
     workdir (review loop 679d i3,
     `test_mark_result_recorded_touches_only_its_own_runs_snapshot`).
+    The mark is also kept on the run's state (`result_recorded_by`,
+    restored by `build_resume_state`) and written with every snapshot, and
+    `mark_result_recorded` takes `_RESUME_WRITE_LOCK` inside the claim
+    lock: a held INPUT_REQUIRED run keeps rewriting its snapshot after the
+    TUI recorded its result (repeated wait, dropped attempt, settled hold,
+    reopen), and each rewrite dropped the mark (review loop 0897 i2,
+    `test_held_runs_later_snapshots_keep_the_recorded_by_mark`).
     Cost: if the recording clone never returns, its
     pending follow-up stays undone, as for any foreign snapshot.  Tests
     (each mutation-checked) are in `tests/test_qa_resume.py`:
