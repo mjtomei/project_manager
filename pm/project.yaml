@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T05:14:35.187695+00:00'
+  updated_at: '2026-10-29T06:03:38.118383+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35017,6 +35017,31 @@ prs:
       and real sessions untouched.'
     created_at: '2026-10-29T05:14:35Z'
     last_edited: '2026-10-29T05:14:35Z'
+  - id: note-024bb62
+    text: 'QA S7 (2026-10-29): PASS. S1 — outer QA run (throwaway project, own tmux
+      socket + HOME, PM_CAPTURES_PR=pr-1ae1d2d, captures on the host path) driven
+      from the TUI; a second actor wrote scenarios/2 (pr-fixture/fixturerun) and a
+      foreign root qa_manifest.json at 05:40:39 while the run was live. The completion
+      sync quarantined it to scenarios/_foreign/8ea5dd0b56443354-2 with sha256 identical
+      to the bytes written, re-published the root pointer as pr-37258ad / run 8ea5dd0b56443354
+      / overall PASS with only Scenario 1, and left scenarios/1 intact and stamped;
+      pm qa evidence was clean (exit 0, no fixture titles). S2 — post-run clobber
+      of the root pointer: the reader still printed the outer run and Scenario 1 from
+      qa_runs/<run>.json (sha256 -c OK after the clobber), named pr-fixture in Anomalies,
+      exit 0. S3 — tests/test_captures_provenance.py 77 passed, all 11 named tests
+      present in the collection. S4 — a nested pm project with PM_CAPTURES_PR unset
+      ran its own QA to completion; captures-path stayed on its own host path, the
+      full-tree snapshot across the run window shows the only new files under /pm-captures
+      were scenarios/8 (a parallel QA scenario of THIS PR, prompt written 05:54, before
+      the nested run), no pr-946e060 mention anywhere in the enclosing tree outside
+      scenario 7s own capture dir, no qa_manifest.json / qa_runs / scenarios/_foreign
+      under the mount, and pm qa evidence pr-1ae1d2d byte-identical to the pre-run
+      baseline. Captures: /pm-captures/scenarios/7/{outer-run-tui,story1-quarantine-and-evidence,story2-post-run-clobber,story3-provenance-tests,story4-nested-run-tui,story4-nested-shared-mount}.
+      For the next round: /pm-captures still has no qa_manifest.json — the enclosing
+      controller runs pre-PR code, so the enclosing-run membership Then can only be
+      exercised once the loop itself runs this branch.'
+    created_at: '2026-10-29T06:03:38Z'
+    last_edited: '2026-10-29T06:03:38Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
