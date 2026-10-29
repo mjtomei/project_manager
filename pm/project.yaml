@@ -39458,7 +39458,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-29T06:54:06.953984+00:00'
+  updated_at: '2026-10-29T07:10:24.279968+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40142,6 +40142,41 @@ prs:
       cast (use --overwrite when re-recording a capture dir). Captures: /pm-captures/scenarios/17/{01-permission-prompt,02-restart-missing-link,03-store-lock-pending,04-dangling-link}.'
     created_at: '2026-10-29T06:54:06Z'
     last_edited: '2026-10-29T06:54:06Z'
+  - id: note-04f1564
+    text: 'QA scenario 18 (launch-lease release / late old-loop results) — 2 of 3
+      stories pass, 1 scenario-authoring conflict. (1) Story 1 (feedback turn in flight)
+      PASS end-to-end: reset line + waiting line, review window closed, old loop KILLED
+      14 s later, no review while waiting, one successor iteration 1 after the turn
+      finished (polling +3 s), PASS → QA. (2) Story 2 PASS at the intended timing
+      (press `z a` ~2.5 s after iteration 1''s review window appears, i.e. once the
+      old loop is polling its own pane %7): successor iteration 1 at +0 s, polling
+      pane %9 at +3 s (prompt, never ~15 s, never a stand-down), and the old loop''s
+      `pane killed on iteration 1` / `loop complete … verdict=KILLED iterations=1`
+      land at +15 s — after the successor''s iteration 1 — with the successor still
+      reaching PASS → QA; no second window, no LAUNCH_FAILED, no NEEDS_WORK. NOTE
+      for future runs: pressing the chord ~0.007 s after the window appears (inside
+      the old loop''s 2 s post-launch window wait) is tighter than the Then describes
+      and takes a different path — the old loop re-resolves the review window by name,
+      polls the successor''s pane %9, and completes verdict=PASS itself; the runtime
+      loop_id sentinel fences it (one set_action_state done, one auto_qa transition),
+      so no state impact, but the KILLED lines never appear. Captures /pm-captures/scenarios/18/{story1,story2,story2b}.
+      (3) Story 3 Then conflict, not a product defect: its Given is "impl turn already
+      complete", so the first `z a` hands off synchronously and the PR is back in
+      `in_review` when the second `z a` lands 1.1 s later — two resets, `fresh_autostart.attempt:
+      2`. impl.md requirement 3 says "A fresh request while the PR is in a later stage
+      (in_review/qa/sign_off) starts a new attempt", so the Then''s "one reset, one
+      attempt, second request reports already waiting" is unreachable from that Given.
+      Control run with the turn actually in flight (s3b): one reset, second request
+      logs "Auto-start fresh: <pr>: already waiting for its implementation turn",
+      attempt 1 with requested_at unchanged, exactly one successor review, PASS →
+      QA. The rest of story 3 held in both runs: one review window at the end, no
+      duplicate/standing-down/LAUNCH_FAILED, and the impl pane untouched (window @4,
+      pane %5, pid 4960 identical; same impl-pr-<pr>.jsonl; no new impl launch; typed
+      draft still in scrollback). Needs a human decision: amend story 3''s Given/Then,
+      or defer the immediate handoff in the product. Captures /pm-captures/scenarios/18/story3
+      (plus pm-debug-3b.log).'
+    created_at: '2026-10-29T07:10:24Z'
+    last_edited: '2026-10-29T07:10:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
