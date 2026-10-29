@@ -82,3 +82,34 @@ def test_empty_verdict_writes_done_state(tmp_path, monkeypatch):
 
     entry = runtime_state.get_action_state("pr-stop1", "review-loop")
     assert entry["state"] == "done"
+
+
+def test_done_line_counts_the_iterations_this_loop_performed():
+    """The completion line reports performed iterations, not the seeded counter.
+
+    A fresh loop continues numbering from the PR's existing iteration
+    transcripts, so a base bounce before its first iteration leaves
+    ``state.iteration`` at the earlier count.  The line must not read
+    "⇤ BASE_CONFLICT (12 iterations)" for a loop that ran none.
+    """
+    from pm_core.review_loop import VERDICT_BASE_CONFLICT
+    from pm_core.tui import review_loop_ui
+
+    app = MagicMock()
+    state = ReviewLoopState(pr_id="pr-long", running=False, iteration=12,
+                            latest_verdict=VERDICT_BASE_CONFLICT)
+    state.iterations_performed = 0
+    app._review_loops = {"pr-long": state}
+    app._impl_poll_counter = 0
+    app._qa_loops = {}
+    app._data = {"prs": []}
+    app._watcher_manager.is_any_running.return_value = False
+    app._review_loop_timer = None
+    with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+            patch("pm_core.tui.watcher_ui.poll_watcher_state"), \
+            patch("pm_core.tui.qa_loop_ui.poll_qa_state"):
+        review_loop_ui._poll_loop_state_inner(app)
+    done = [c[0][0] for c in app.log_message.call_args_list
+            if "Review loop done" in c[0][0]]
+    assert done and "(0 iterations)" in done[0]
+    assert "BASE_CONFLICT" in done[0]

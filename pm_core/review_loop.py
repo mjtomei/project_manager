@@ -1433,6 +1433,15 @@ def run_review_loop_sync(
     # transcripts — a long-lived PR that keeps bouncing between review and
     # implementation.  ``start_iteration`` is the counter this pass began at.
     start_iteration = state.iteration
+    # Iterations this pass actually performs, for the completion message.  The
+    # absolute counter is seeded from the PR's existing transcripts
+    # (``next_review_iteration``), so it does not say how much *this* loop ran:
+    # a base bounce before the first iteration leaves it at the number of
+    # earlier iterations, and "⇤ BASE_CONFLICT (12 iterations)" would report
+    # twelve reviews for a loop that ran none.  History entries are appended
+    # once per completed iteration (an adopted iteration included) and never
+    # for a refused launch, so their delta is the performed count.
+    history_start = len(state.history)
 
     try:
         while state.iteration - start_iteration < max_iterations or adopt:
@@ -1587,6 +1596,7 @@ def run_review_loop_sync(
             _log.warning("review_loop: hit max iterations (%d)", max_iterations)
 
     finally:
+        state.iterations_performed = max(0, len(state.history) - history_start)
         state.running = False
         _release_lease(state)
 

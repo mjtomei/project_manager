@@ -324,7 +324,12 @@ already drops it because the status is no longer `qa`.
   `_resume_returned_loop` does not start a second loop when one
   is already running for the PR. `review_loop` maps exit code 3 to
   `VERDICT_BASE_CONFLICT` and stops the loop without recording an iteration;
-  the icon/log path treats it as a clean completion (not ERROR).
+  the icon/log path treats it as a clean completion (not ERROR), and the
+  completion line reports the iterations *this loop performed*
+  (`iterations_performed`, recorded by `run_review_loop_sync`) rather than the
+  absolute counter — a fresh loop is seeded from the PR's existing iteration
+  transcripts, so a bounce before its first iteration would otherwise read
+  "⇤ BASE_CONFLICT (12 iterations)" for a loop that ran none.
   The cheap no-op paths must not rewrite `project.yaml`:
   `resolve_return` (called on every clean review/QA gate) and
   `ensure_impl_status` (called from the TUI event loop and every gate)
@@ -537,6 +542,11 @@ No unresolved ambiguities.
     resolved) open return, so a later tick does not re-enter the base-return
     branch (a full `store.load` per check, forever) and a manual `zz d` is
     not refused on stale data.
+33. the completion line counts the iterations the loop performed: a fresh
+    loop seeded at iteration 12 that bounces before its first iteration
+    reports 0 iterations (`iterations_performed` is 0 even though the
+    counter stays 12), while a loop that runs three iterations reports 3; a
+    state without the recorded count keeps the counter rendering.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
@@ -571,6 +581,14 @@ successful in-process relaunch reloads `app._data` so the completion check is
 reachable. The catch-up also runs when the PR has no impl pane at all (an
 `awaiting: impl` return with the window gone), and does not run for a PR with
 no return just because its pane is missing.
+
+The loop's completion line counts the iterations *this loop performed*
+(`ReviewLoopState.iterations_performed`, set by `run_review_loop_sync` from
+the history delta): a fresh loop continues numbering from the PR's existing
+transcripts, so the absolute counter reports earlier loops' work — a base
+bounce before the first iteration would read "(12 iterations)" for a loop
+that ran none. A state without the recorded count (a hand-built test state)
+keeps the old counter rendering.
 
 ## 6. Out of scope
 

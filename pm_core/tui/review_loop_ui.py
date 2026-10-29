@@ -515,6 +515,24 @@ def _retry_backoff_pending(state) -> bool:
         return False
 
 
+def _done_iteration_count(state) -> int:
+    """How many iterations the finished loop performed, for the log line.
+
+    Not ``state.iteration``: a fresh loop is seeded from the PR's existing
+    iteration transcripts (``next_review_iteration``, so evidence is never
+    overwritten), so the absolute counter also names earlier loops' work.  A
+    base-conflict bounce before the first iteration would otherwise report
+    "⇤ BASE_CONFLICT (12 iterations)" for a loop that ran none.
+    ``run_review_loop_sync`` records the performed count on the state;
+    hand-built states (tests, a breadcrumb without it) fall back to the
+    counter as before.
+    """
+    performed = getattr(state, "iterations_performed", None)
+    if performed is None:
+        return int(getattr(state, "iteration", 0) or 0)
+    return max(0, int(performed))
+
+
 def _poll_loop_state_inner(app) -> None:
     """Inner implementation of poll loop state."""
     any_running = False
@@ -591,9 +609,10 @@ def _poll_loop_state_inner(app) -> None:
     # Announce completed loops and auto-merge passing PRs
     for state in newly_done:
         verdict_icon = VERDICT_ICONS.get(state.latest_verdict, state.latest_verdict)
+        count = _done_iteration_count(state)
         msg = (
             f"Review loop done for {state.pr_id}: {verdict_icon} "
-            f"({state.iteration} iteration{'s' if state.iteration != 1 else ''})"
+            f"({count} iteration{'s' if count != 1 else ''})"
         )
         if state.latest_verdict in (VERDICT_ERROR, VERDICT_LAUNCH_FAILED,
                                     VERDICT_HOLD) and state.latest_output:

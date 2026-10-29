@@ -276,6 +276,7 @@ class TestRunReviewLoopSync:
                                       transcript_dir="/tmp", max_iterations=3)
         assert mock_review.call_count == 3
         assert result.iteration == 51
+        assert result.iterations_performed == 3
         assert result.latest_verdict == VERDICT_NEEDS_WORK
 
     @patch("pm_core.review_loop._run_claude_review")
@@ -701,6 +702,38 @@ class TestBaseConflictIteration:
         assert result.history == []
         assert result.iteration == 0
         assert result.running is False
+
+    @patch("pm_core.review_loop._run_claude_review")
+    def test_base_conflict_on_a_long_lived_pr_performed_nothing(
+            self, mock_review):
+        """The completion message must not claim the earlier iterations.
+
+        A fresh loop is seeded from the PR's existing transcripts, so a bounce
+        before its first iteration leaves the absolute counter at the number
+        of earlier iterations.  The TUI's "Review loop done … (N iterations)"
+        line reads the performed count, which is zero here — otherwise a PR
+        with 12 prior transcripts reports twelve reviews for a loop that ran
+        none.
+        """
+        from pm_core.review_loop import BaseConflictError, VERDICT_BASE_CONFLICT
+        from pm_core.tui.review_loop_ui import _done_iteration_count
+        mock_review.side_effect = BaseConflictError("base_conflict: x")
+        state = ReviewLoopState(pr_id="pr-001", iteration=12,
+                                adopt_in_flight=False)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                      transcript_dir="/tmp")
+        assert result.latest_verdict == VERDICT_BASE_CONFLICT
+        assert result.iteration == 12          # numbering is preserved
+        assert result.iterations_performed == 0
+        assert _done_iteration_count(result) == 0
+
+    def test_done_iteration_count_falls_back_to_the_counter(self):
+        """A state without the recorded count keeps the previous rendering."""
+        from pm_core.tui.review_loop_ui import _done_iteration_count
+        state = ReviewLoopState(pr_id="pr-001", iteration=3)
+        assert _done_iteration_count(state) == 3
+        state.iterations_performed = 0
+        assert _done_iteration_count(state) == 0
 
     def test_launch_rc3_raises_base_conflict(self, tmp_path):
         from pm_core.review_loop import BaseConflictError, _launch_review_window
