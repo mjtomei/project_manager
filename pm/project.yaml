@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T11:05:28.789181+00:00'
+  updated_at: '2026-10-29T11:28:53.518832+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14869,6 +14869,32 @@ prs:
       transcript.log, manifest.md, drive-stories.sh).'
     created_at: '2026-10-29T11:05:28Z'
     last_edited: '2026-10-29T11:05:28Z'
+  - id: note-06fa0c4
+    text: 'QA S14 (address forms, never-started PRs, odd/malformed records): PASS,
+      no code change. Verified end-to-end against the fake-github stand-in on this
+      head (b34f7bf63) in an isolated sandbox (own HOME, PATH without the push-proxy
+      git wrapper or claude). Story 1: `pm pr close "#2"` and `pm pr close 3` both
+      print Closing/GitHub-closed/Closed #N + Kept/Reopen/Cleanup; entries, workdirs
+      and stand-in branch refs all survive, stand-in #2/#3 CLOSED with next_number
+      unchanged, `pm pr list` keeps both as [closed]. Story 2: no-argument close of
+      the never-started active PR C prints `Using active PR:` then the Kept line with
+      only the branch reference (no workdir, no Cleanup), makes no GitHub call (stand-in
+      fingerprint byte-identical), creates no branch on the stand-in remote, and clears
+      active_pr to null. Story 3: D with a deleted workdir keeps the exact missing
+      path and `pm pr list --workdirs` reports (missing) without recreating or pruning
+      it; E started with --workdir /scratch/s14/outside keeps that path and its target
+      tree sha256 listing is identical before/after. Story 4: with an id-less entry
+      appended after A, `pm pr close <A-id>` exits 0 with full normal output, warns
+      only the real dependent R (plus Hint), and `pm pr show` still reports closed.
+      Recorded, not scored: `pm pr list` (and close-by-GitHub-number) still raises
+      KeyError: id in store.get_pr/pr_list when an id-less entry is present - pre-existing,
+      outside this scenario Then; recipe caveats preserved from the earlier refiner
+      note: quote "#N" (unquoted is a bash comment and closes the active PR), and
+      the stand-in PR head reads branch-N so check branch survival against the registry
+      Branch value. Evidence: /pm-captures/scenarios/14/{close-by-number,never-started,odd-workdirs,malformed-record}/.
+      tests/test_pr_close.py 62 passed.'
+    created_at: '2026-10-29T11:28:53Z'
+    last_edited: '2026-10-29T11:28:53Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
