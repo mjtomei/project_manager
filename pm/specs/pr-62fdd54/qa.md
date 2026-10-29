@@ -128,7 +128,9 @@ normally.
 Each of the following stops QA before planning with INPUT_REQUIRED, changes
 nothing, and leaves an `overall` verdict of INPUT_REQUIRED in
 `qa_status.json`; the message names the concrete problem and the concrete
-remedy:
+remedy. A hold that quotes git's own output is flattened to a single
+sentence with one full stop, so the TUI log line and the QA note show the
+whole message (not just git's first line, and not "exists.. Restart QA"):
 
 - **Dirty conflict:** a tracked local edit that the incoming change would
   overwrite → the hold names the file and says the fast-forward was refused;
