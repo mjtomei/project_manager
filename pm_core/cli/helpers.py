@@ -1382,7 +1382,9 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     If session is provided, uses that. Otherwise:
     - If in a pm- tmux session, uses current session
     - Otherwise, tries to find session matching current directory
-    - Falls back to scanning every pm server for a live TUI pane
+    - Falls back to scanning pm servers for a live TUI pane; when one of the
+      two branches above identified a session, only *that* session's server
+      is scanned (see the note on ``identified`` below).
     """
     # The scan below re-points PM_TMUX_SOCKET at each server it probes, and
     # the cwd branch selects a server before that scan runs, so read the
@@ -1397,6 +1399,13 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         _select_session_socket(base)
         return _recorded_tui_pane(base), base
 
+    # The session one of the branches below actually identified, if any.
+    # The fallback scan is scoped to it: pane ids are only unique per tmux
+    # server and ``pm tui send`` delivers keys unscoped, so resolving to a
+    # *different* pm session's live ``pm _tui`` pane would drive the wrong
+    # TUI — the cross-session damage this whole change exists to prevent.
+    identified: str | None = None
+
     # If in a pm session, use current
     if tmux_mod.in_tmux():
         try:
@@ -1409,6 +1418,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             current_session = ""
         if current_session.startswith("pm-"):
             base = pane_registry.base_session_name(current_session)
+            identified = base
             pane_id = _registry_tui_pane(base)
             if pane_id:
                 return pane_id, base
@@ -1423,15 +1433,24 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         # instead of crashing (same contract as find_session_server).
         session_running = False
     if session_running:
+        # Inside a pm session the ambient one stays the fallback target
+        # (that is the server the pre-isolation scan would have used);
+        # otherwise the running cwd session is.
+        identified = identified or expected_session
         pane_id = _registry_tui_pane(expected_session)
         if pane_id:
             return pane_id, expected_session
 
-    # Fall back to scanning every pm server (private sockets + legacy
-    # default) for a session with a live registered TUI pane.  The scan
+    # Fall back to scanning pm servers (private sockets + legacy default)
+    # for a session with a live registered TUI pane.  Only the identified
+    # session's own server is eligible when there is one; with no session
+    # identified at all (a plain shell) every server is scanned, which is
+    # what makes `pm tui view` work from outside a pm session.  The scan
     # re-points PM_TMUX_SOCKET at each server in turn; the value captured
     # on entry is restored below if nothing is found.
     servers = tmux_mod.list_pm_sessions()
+    if identified is not None:
+        servers = [info for info in servers if info["name"] == identified]
     for info in servers:
         _use_tmux_socket(info["socket"])
         pane_id = _registry_tui_pane(info["name"])

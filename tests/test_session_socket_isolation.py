@@ -955,6 +955,51 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == ("%7", "pm-target")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
 
+    def test_fallback_never_crosses_to_another_pm_session(self, monkeypatch):
+        """A fallback must stay on the identified session's server.
+
+        Pane ids are only unique per tmux server and ``pm tui send``
+        delivers keys unscoped, so resolving to a *different* pm session's
+        live ``pm _tui`` pane would drive the wrong TUI — the cross-session
+        damage this PR exists to prevent.  Here pm-a's own TUI pane is
+        unregistered (heal testing) and pm-b sorts first, so an unscoped
+        scan would return pm-b's pane.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        # Empty (falsy) and restored by monkeypatch, so the socket the scan
+        # selects cannot leak into the next test.
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a~1")
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [{"name": "pm-b", "socket": "/tmp/b",
+                                      "attached": 0, "shared": False},
+                                     {"name": "pm-a", "socket": "/tmp/a",
+                                      "attached": 0, "shared": False}])
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(
+            helpers.tmux_mod, "_tmux_cmd",
+            lambda *a, **kw: ["tmux", os.environ.get("PM_TMUX_SOCKET", "")])
+
+        def fake_run(cmd, **kwargs):
+            if cmd[1] == "/tmp/a":
+                return MagicMock(returncode=0,
+                                 stdout='%2 pm-a~1 "pm _tui"\n')
+            return MagicMock(returncode=0, stdout='%1 pm-b "pm _tui"\n')
+
+        monkeypatch.setattr(helpers.subprocess, "run", fake_run)
+
+        assert helpers._find_tui_pane() == ("%2", "pm-a")
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/a"
+
     def test_explicit_session_selects_its_server(self, monkeypatch, tmp_path):
         from pm_core.cli import helpers
         from pm_core import pane_registry

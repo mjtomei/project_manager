@@ -84,9 +84,13 @@ sessions today).
    and marks shared sessions. Stale/foreign sockets are skipped, not fatal.
 4. `pm_core/cli/helpers.py::_find_tui_pane()` (used by every `pm tui`
    subcommand) resolves the server for an explicit `--session`, the current
-   pane, the cwd-derived session, and finally scans all pm servers for a
-   live TUI pane. It selects `PM_TMUX_SOCKET` for the found session before
-   returning, so callers' `tmux_mod` calls hit the right server.
+   pane, the cwd-derived session, and finally scans pm servers for a live
+   TUI pane. It selects `PM_TMUX_SOCKET` for the found session before
+   returning, so callers' `tmux_mod` calls hit the right server. The final
+   scan covers *all* servers only when neither branch above identified a
+   session (a plain shell); when one did, it is scoped to that session's
+   server, because pane ids are per server and `pm tui send` delivers keys
+   unscoped (review-loop 7af7 i1).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
@@ -1121,5 +1125,38 @@ disposable socket with `TMUX_TMPDIR` on a scratch dir: private server
 created, `PM_TMUX_SOCKET` in the session env, the global env and the
 hooks, default server untouched.  No live session, server or shared host
 configuration was touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop 7af7 i1)
+
+Verification pass over the integrated head; no requirement changes.  One
+cross-session hazard in TUI-pane discovery — the failure mode this PR
+exists to remove, reintroduced by the R3.4 fallback:
+
+1. **The cross-server fallback in `_find_tui_pane()` could resolve to a
+   *different* pm session's TUI.**  R3.4 says the scan falls back to "all
+   pm servers for a live TUI pane", and that is right for a plain shell
+   (`pm tui view` with no session anywhere).  But the scan was unconditional,
+   so when the process *was* inside a pm session whose registered TUI pane
+   was gone (heal testing, a respawn that did not update the registry), the
+   loop walked `/tmp/pm-sessions` in sorted order and returned the first
+   server's live `pm _tui` pane.  Pane ids are only unique per server and
+   `pm tui send` delivers keys unscoped, so `pm tui send g` from inside
+   `pm-a` could drive `pm-b`'s TUI — the cross-session damage this change
+   exists to prevent.  Before this PR the same fallback ran `list-panes -a`
+   on the *ambient* server, so it could only ever find the current
+   session's pane; scanning per-socket servers silently widened it.
+   `_find_tui_pane()` now records the session its branches identified (the
+   in-tmux pm session, else a running cwd-derived session) and scopes both
+   the registry scan and the last-resort `pm _tui` scan to that session's
+   server.  With no session identified (a plain shell) every server is
+   still scanned, so `pm tui view` from outside pm keeps working.  Test:
+   `test_fallback_never_crosses_to_another_pm_session` (verified to fail
+   without the scope: it returned `pm-b`'s pane).
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration).  No live session, server or shared host
+configuration was touched; the new test is unit-level.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
