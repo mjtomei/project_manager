@@ -38197,7 +38197,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-29T03:16:55.318537+00:00'
+  updated_at: '2026-10-29T03:51:57.421380+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -38386,6 +38386,37 @@ prs:
       verification" residual is unchanged. (2026-10-29T03:20:00Z)'
     created_at: '2026-10-29T03:16:55Z'
     last_edited: '2026-10-29T03:16:55Z'
+  - id: note-a7fc305
+    text: 'Review-loop cd51 i2 (2026-10-29): fixed a second path for the E9/R9a "do
+      not resurrect a cleared INPUT_REQUIRED" regression. i1 guarded it with a loop-local
+      set, but a held run scans for dropped waits in _hold_for_follow_up and hands
+      the dropped scenario to a *fresh* _poll_tmux_verdicts invocation (and the controller
+      can restart in between), so the guard was empty in exactly the cases it exists
+      for: the reopened loop re-read the dead worker INPUT_REQUIRED out of its transcript
+      and settled the scenario terminally with no worker left to answer. The guard
+      now lives on the state (QALoopState.dropped_wait_verdicts), is persisted in
+      qa_resume.json, is set where _scan_waiting_scenarios records a drop, and is
+      cleared when a background launch reports that a new worker started (or the wait
+      is settled terminally). Tests: test_hold_dropped_wait_is_relaunched_not_recollected
+      (drops in the hold scan, then runs the reopened loop; fails before the fix)
+      and test_dropped_wait_guard_survives_a_restart. Spec updated: impl.md R9a +
+      E9a. Full suite (scratch venv, PATH=/usr/bin:$PATH): 4515 passed, 1 skipped,
+      1 failed - only test_hook_events::test_installer_writes_standalone_receiver,
+      verified failing on origin/master in a detached worktree too. Not changed, deliberately:
+      (a) verification_failures is still in-memory only, so a restart during a flagged
+      re-evaluation re-collects the stale PASS and re-runs the verifier (bounded by
+      qa-verify-retries, converges to NEEDS_WORK rather than a false PASS) - documented
+      in R9a; (b) the QA-open question about prompt_gen.generate_qa_child_prompt instruction
+      block (unreachable because both launch paths clear instruction_path) is untouched:
+      keeping the ref on the worker vs deleting the block is a product decision, not
+      a review fix; (c) a restart mid-concretizer now tears the attempt down and re-runs
+      the concretizer (create retry) instead of adopting it - pr-3201ea8 must run
+      any adoption before the poll loop classifies a windowless, worker-less scenario
+      as a create failure. QA note: the E9a case (a held INPUT_REQUIRED whose worker
+      pane dies) is worth a story - it exercises the hold loop plus the reopened loop,
+      not just a live-loop tick.'
+    created_at: '2026-10-29T03:51:57Z'
+    last_edited: '2026-10-29T03:51:57Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
