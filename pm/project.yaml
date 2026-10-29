@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T07:16:02.749799+00:00'
+  updated_at: '2026-10-29T08:39:11.846898+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42681,6 +42681,37 @@ prs:
       loop for up to the 2 s lock timeout, about every 5 s.'
     created_at: '2026-10-29T05:57:33Z'
     last_edited: '2026-10-29T05:57:33Z'
+  - id: note-0b61f44
+    text: 'QA S131 (2026-10-29, host, all fake-claude; HEAD cf65ae59 (host code =
+      5f204dc2) vs control 4aff1dd4 vs master 4a74d880; captures /pm-captures/scenarios/131/REPORT.md):
+      CODE CHANGE 245eb22f needs normal re-review. Found: a QA re-run the TUI started
+      and `pm tui restart` killed before its first resume snapshot (~20 s: planning
+      + refine) was stranded at qa forever: its run record names the TUI pid, which
+      the in-place exec keeps alive, and the start had consumed awaiting:qa, so ticks
+      printed running: qa, then running: qa (driven elsewhere), and nothing restarted
+      it (story 1 round 2 as specified: plain restart at the TUI "Sign-off routed"
+      line; E stuck 6 min pre-fix; master 4a74d880 strands the same way, C 50+ min).
+      Fix: at mount the TUI ends snapshot-less run records naming its own pid+start
+      (qa_loop.end_runs_orphaned_by_restart), kills that run''s qa-* windows (kill_windows_of_run;
+      scenario 0 opens before the main window that the next run''s cleanup keys on),
+      and reopens awaiting:qa when it was the owed REQA re-run (qa_loop_ui.recover_restart_killed_runs).
+      Post-fix: H got exactly one surviving run, PASS, one sign_off; the stranded
+      E was rescued by a later restart; 9 new tests fail on cf65ae59; full suite 5188
+      passed, 1 skipped on 245eb22f. Held on HEAD: S1 R1 breadcrumb restart 21 ms
+      after the verdict (one hop, one start, one dir); S2 1/5/30 s holds (ticks only
+      launch claimed, no TUI start, one start <=0.1 s after release, worst key-to-repaint
+      1990 ms, no lost key); S3 B started at once, C deferred once then one start
+      after the CLI exit, picker [working], CLI windows untouched; S4 finished TUI
+      run has ended_at, no deferral before the tick start; S5 myview: restarts print
+      session pm-<tag>, autostart status/add + tui view rc 0 from myview and base,
+      one pidfile, picker [working] both. Master: TUI restarted from myview claims
+      tui-myview.pid -> every pm autostart call owner_timeout; myview attached before
+      an auto-QA -> "No pm session found" QA ERROR; picker drops the [working] badge.
+      Control: ticks start D''s re-run at once (no deferral). Spec notes: the picker
+      has no [running] qa badge (running QA renders [working]); the TUI may log "Sign-off
+      REQA ... QA starts once ..." just after a tick''s start (allowed).'
+    created_at: '2026-10-29T08:33:42Z'
+    last_edited: '2026-10-29T08:39:11Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
