@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T00:59:41.579902+00:00'
+  updated_at: '2026-10-29T01:01:06.266319+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14216,7 +14216,7 @@ prs:
       changes; do not git checkout/restore it away. Keep DeepSeek1017/high for all
       other roles and wait_for_merge/manual gates unchanged. This note grants no new
       launch or merge authority.'
-  - id: note-3e1d9c4
+  - id: note-8036246
     text: 'Review i14: (1) The fake `gh pr close --delete-branch` now really deletes
       the head branch in the backing repo (new `FakeGitHubRepo.delete_branch`), so
       the branch-retention assertions in `test_remote_branch_still_exists_after_close`
@@ -14235,14 +14235,15 @@ prs:
       both now iterate usable_prs. Tests: test_cleanup_all_tolerates_a_malformed_entry,
       test_prune_tolerates_a_malformed_entry, test_remove_without_a_workdir_claims_only_the_branch,
       plus the new fake tests. Spec synced (R5, R7, R11 items 2/10/35/36, §5, §6).
-      Full suite 4135 passed, 1 skipped on the run covering all but the mechanical
-      `_retained_resources` helper extraction; targeted suites (test_pr_close/test_fake_github/test_pr_cleanup)
-      105 passed after it. One earlier full run hit an unrelated flake (test_push_proxy.py::test_stop_session_counts_a_hashed_proxy_once)
-      while two full suites ran concurrently — it passes in isolation and in the other
-      runs; that file is untouched by this PR. The session_models.signoff override
-      was preserved as requested.'
+      Full suite: 4135 passed, 1 skipped before the mechanical `_retained_resources`
+      extraction and 4134 passed, 1 skipped after it — the single failure in each
+      of two runs was in tests/test_push_proxy.py (a different test of the same class
+      each time, both times while two full suites ran concurrently on this machine);
+      that file is untouched by this PR and passes 158/158 on its own. Targeted suites
+      (test_pr_close/test_fake_github/test_pr_cleanup) 105 passed after the extraction.
+      The session_models.signoff override was preserved as requested.'
     created_at: '2026-10-29T00:59:41Z'
-    last_edited: '2026-10-29T00:59:41Z'
+    last_edited: '2026-10-29T01:01:06Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
