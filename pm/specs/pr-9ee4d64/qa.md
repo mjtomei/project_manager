@@ -120,6 +120,17 @@ watcher), not the helper functions.
   - merge transcripts for both PRs exist, and any superseded merge/impl/
     sign-off attempts are archived rather than lost;
   - every archive entry has a unique name; none was overwritten.
+  - Archive entry counts are a **minimum**, never an exact count: the
+    canonical link of each step names the attempt that is live *now*, and
+    the last step to finish is frozen into `archive/` as well when the run
+    ends (auto-start disabling finalizes every canonical link — R5).
+    A run with two returns therefore ends with three `impl-<pr>` and
+    three `signoff-<pr>` entries, and the canonical names are regular
+    files, not links. Measure "the canonical link names the live rework
+    attempt" at the post-return checkpoint while that step is running;
+    after the run ends, assert each pre-return session is *present* in
+    `archive/` (by session id) instead of asserting an entry count or
+    reading the canonical link.
 
 ### R8 — CLI drivers keep history too
 - **Given** a user drives a PR with repeated `pm pr auto-sequence` ticks

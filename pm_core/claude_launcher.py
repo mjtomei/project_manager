@@ -1,5 +1,6 @@
 """Launch claude CLI sessions."""
 
+import hashlib
 import json
 import logging
 import os
@@ -945,10 +946,13 @@ def build_claude_shell_cmd(
         if transcript_path.is_symlink() or transcript_path.exists():
             if archive_transcript(transcript_path) is None:
                 # Archiving failed (e.g. the archive dir is unwritable).
-                # Prefer launching over stalling the workflow; the native
-                # JSONL still exists under ~/.claude/projects.
+                # R9 of the design prefers launching over stalling the
+                # workflow, so the canonical is still replaced.  A symlink
+                # only loses the link (its native JSONL survives); a frozen
+                # regular file is the run dir's only copy, and this is the
+                # one place a launch may drop one.
                 _log.warning("transcript: could not archive %s before "
-                             "reuse", transcript_path)
+                             "reuse; replacing it", transcript_path)
             # Archiving normally moves the path away; clear any leftover
             # (an entry that already existed, or a failed removal) so the
             # symlink below cannot raise FileExistsError and kill the
@@ -1135,17 +1139,23 @@ def _transcript_stem(transcript_path: Path) -> str:
 
 
 def _archive_name(transcript_path: Path, sid: str | None,
-                  frozen: Path | None = None) -> str:
+                  frozen: Path | None = None,
+                  link_target: str | None = None) -> str:
     """Archive file name for a transcript (``<stem>.<key>.jsonl``).
 
     Symlinks are keyed by the Claude session id of their target, so the
-    same session always maps to the same immutable entry.  A finalized
-    regular file has no recoverable session id; key it on its identity
-    (mtime + size) instead.
+    same session always maps to the same immutable entry.  A link whose
+    target is not session-named is keyed on that target instead, and a
+    finalized regular file (no recoverable session id) on its identity
+    (mtime + size) — both deterministic, so re-archiving the same attempt
+    never adds a duplicate entry.
     """
     stem = _transcript_stem(transcript_path)
     if sid:
         return f"{stem}.{sid}.jsonl"
+    if link_target is not None:
+        digest = hashlib.sha256(link_target.encode()).hexdigest()
+        return f"{stem}.{digest[:12]}.jsonl"
     try:
         st = frozen.stat() if frozen is not None else None
         key = f"{st.st_mtime_ns}-{st.st_size}" if st else uuid.uuid4().hex[:12]
@@ -1293,7 +1303,8 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
                 pass
             _log.info("transcript: %s already archived at %s", p, identical)
             return identical
-    dest = adir / _archive_name(p, sid, None if is_link else p)
+    dest = adir / _archive_name(p, sid, None if is_link else p,
+                                raw if is_link else None)
     if dest.is_symlink() or dest.exists():
         if is_link and raw and dest.is_symlink():
             try:
@@ -1310,7 +1321,8 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
     return dest
 
 
-def _copy_atomic(src: Path, dest: Path) -> None:
+def _copy_atomic(src: Path, dest: Path, *,
+                 guard: Callable[[], bool] | None = None) -> bool:
     """Copy *src* to *dest* so a reader never sees a missing or partial file.
 
     The copy is written under a unique temp name beside *dest* and moved
@@ -1318,11 +1330,20 @@ def _copy_atomic(src: Path, dest: Path) -> None:
     threads of one process can finalize concurrently (a bulk sweep and a
     loop's completion), and a shared temp path would let one replace the
     other's partial copy.  A failed copy leaves *dest* untouched.
+
+    *guard* (when given) runs after the copy and immediately before the
+    replace; returning False discards the copy and leaves *dest* alone.
+    That keeps the window in which a concurrent writer can be clobbered
+    down to the single ``os.replace`` call instead of the whole copy.
+    Returns True when *dest* was replaced.
     """
     tmp = dest.with_name(f".{dest.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     try:
         shutil.copy2(src, tmp)
+        if guard is not None and not guard():
+            return False
         os.replace(tmp, dest)
+        return True
     finally:
         try:
             tmp.unlink()
@@ -1341,7 +1362,7 @@ def _freeze_archive_copy(p: Path, raw: str, target: Path,
         # *p* is itself the archive entry; finalize freezes it in place.
         return p
     adir = transcript_archive_dir(p)
-    dest = adir / _archive_name(p, sid, target)
+    dest = adir / _archive_name(p, sid, target, raw if not sid else None)
     try:
         adir.mkdir(parents=True, exist_ok=True)
         if dest.is_symlink():
@@ -1415,9 +1436,14 @@ def finalize_transcript(transcript_path: Path,
     attempt that now owns the path.
 
     * ``session_id`` (when given) must match the link target's session;
-      otherwise the link belongs to another attempt and is left live.
-    * The link is re-read immediately before replacement; a link
-      redirected in between is left untouched.
+      otherwise the link belongs to another attempt and is left live.  A
+      target that carries no session id (not a native UUID-named JSONL)
+      cannot be compared, so the link is frozen as usual.
+    * The link is re-read before and immediately before the replacement
+      (the second check runs after the copy); a link redirected in
+      between is left untouched.  The microseconds between that last
+      check and ``os.replace`` are the one window POSIX symlink semantics
+      cannot close.
 
     An immutable archive copy keyed by session id is written first, so
     the session survives even if the canonical path is later reused.
@@ -1439,20 +1465,27 @@ def finalize_transcript(transcript_path: Path,
         _log.debug("transcript: target %s does not exist, skipping finalize", target)
         return False
     _freeze_archive_copy(transcript_path, str(target), target, sid)
-    try:
-        if os.readlink(transcript_path) != raw:
-            _log.info("transcript: %s was redirected during finalize; "
-                      "leaving the new link live", transcript_path)
+
+    def _still_ours() -> bool:
+        """False once another attempt has taken the path."""
+        try:
+            return os.readlink(transcript_path) == raw
+        except OSError:
             return False
-    except OSError:
-        return False
+
     # Copy beside the path and replace atomically: readers see either the
     # live symlink or the complete frozen copy, never a missing path or a
-    # truncated one, and a failed copy leaves the link live.
+    # truncated one, and a failed copy leaves the link live.  The guard
+    # re-checks the link after the copy, so a redirect that lands during
+    # the copy is still caught.
     try:
-        _copy_atomic(target, transcript_path)
+        frozen = _copy_atomic(target, transcript_path, guard=_still_ours)
     except OSError as e:
         _log.warning("transcript: finalize %s failed: %s", transcript_path, e)
+        return False
+    if not frozen:
+        _log.info("transcript: %s was redirected during finalize; "
+                  "leaving the new link live", transcript_path)
         return False
     _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
     return True

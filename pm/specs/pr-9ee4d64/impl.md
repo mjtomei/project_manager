@@ -184,8 +184,9 @@ available in the run dir:
   - missing → `None`;
   - compute archive name: `<stem>.<sid>.jsonl` for a symlink whose target
     is a UUID-named JSONL, else `<stem>.<mtime_ns>-<size>.jsonl` for a
-    frozen file, else `<stem>.<random-12-hex>.jsonl` for a symlink whose
-    target is not UUID-named;
+    frozen file, else `<stem>.<sha256(target)[:12]>.jsonl` for a symlink
+    whose target is not UUID-named (deterministic, so re-archiving the
+    same attempt reuses the entry);
   - `archive_dir.mkdir(parents=True, exist_ok=True)`;
   - if the archive already exists, do not overwrite (if it is a symlink
     to the same target, drop only the redundant canonical link);
@@ -201,14 +202,16 @@ available in the run dir:
   - not a symlink → `False`;
   - `raw = os.readlink(path)`; `target = Path(raw)`;
   - `sid = _session_id_of_path(target)`;
-  - `if session_id and sid and sid != session_id: return False`;
+  - `if session_id and sid and sid != session_id: return False` (a target
+    with no session id cannot be compared, so it is frozen as usual);
   - `if not target.exists(): return False`;
   - write/refresh the immutable archive entry (copy) via a shared helper
     (`_freeze_archive_copy`: copy beside the entry, then `os.replace`, so
     a crash can never leave the archive without a session copy);
-  - re-read `os.readlink(path)`; if it != `raw`, return `False`;
-  - `shutil.copy2` to a unique temp beside the path, then `os.replace`
-    (atomic; a failed copy leaves the live link untouched);
+  - `shutil.copy2` to a unique temp beside the path, re-check
+    `os.readlink(path)` (a guard run *after* the copy), then `os.replace`
+    (atomic; a failed copy leaves the live link untouched; a redirect
+    during the copy discards the temp and leaves the new link live);
   - return `True`.
 - Add `finalize_transcript_dir(directory, *, skip=None) -> int`: finalize
   every top-level `*.jsonl` symlink and every `archive/*.jsonl` symlink.
@@ -219,11 +222,16 @@ available in the run dir:
 ### `pm_core/review_loop.py`
 
 - Add `iteration_transcript(transcript_dir, pr_id, loop_id, iteration)`.
-- Add `resolve_iteration_transcript(...)`: loop-scoped path if it exists,
-  else the legacy `review-<pr>-i<N>.jsonl` when that is a *link* (the
-  pre-upgrade loop's in-flight iteration), else the loop-scoped path (for
-  a new launch).  A frozen regular-file legacy transcript is a completed
-  earlier loop's iteration and is never reused.
+- Add `resolve_iteration_transcript(..., *, allow_legacy=True)`:
+  loop-scoped path if it exists, else the legacy
+  `review-<pr>-i<N>.jsonl` when that is a *link* (the pre-upgrade loop's
+  in-flight iteration), else the loop-scoped path (for a new launch).  A
+  frozen regular-file legacy transcript is a completed earlier loop's
+  iteration and is never reused.  `allow_legacy=False` is passed for a
+  *new* iteration's launch (`run_review_loop_sync` sets it from the
+  `adopt` decision): only a loop resuming an iteration that was already
+  in flight can own a legacy link, so a fresh loop (a REVIEW return
+  restarts at iteration 1) never launches over another loop's live link.
 - `run_review_loop_sync`: record
   `state.iteration_sessions[iteration] = session_id_from_transcript(path)`
   after each iteration (launched or adopted) when a session id resolves,
@@ -233,8 +241,14 @@ available in the run dir:
   resolves its iteration transcript with `resolve_iteration_transcript`,
   so every retry attempt of one iteration writes the same loop-scoped path
   and a legacy in-flight iteration is still adopted under the old name.
+  It forwards `allow_legacy` to `_discover_iteration` as well: discovery
+  and launch must name the same path, or a launch under the loop-scoped
+  name would be rediscovered through another loop's live legacy link and
+  its verdict adopted as this iteration's.
 - `_discover_iteration` / `_adopt_in_flight_review` /
-  `_wait_for_follow_up_verdict`: use `resolve_iteration_transcript`.
+  `_wait_for_follow_up_verdict`: use `resolve_iteration_transcript`
+  (`_adopt_in_flight_review` — the restart handoff — keeps the legacy
+  fallback on).
 - `_is_historical_session`: scans both the legacy
   `review-<pr>-i<N>.jsonl` names and this loop's
   `review-<pr>-<loop_id>-i<N>.jsonl` names, so a pane running an earlier
@@ -300,9 +314,10 @@ available in the run dir:
    callers that know their session id pass it.
 5. **Legacy adoption after upgrade.** `resolve_iteration_transcript`
    falls back to the legacy name only while it is a symlink (the
-   pre-upgrade in-flight iteration), so that iteration can still be
-   adopted; a frozen legacy file is a finished earlier loop's iteration
-   and a new launch always uses the loop-scoped name.
+   pre-upgrade in-flight iteration) *and* the caller is resuming such an
+   iteration (`allow_legacy`), so that iteration can still be adopted; a
+   frozen legacy file is a finished earlier loop's iteration, and a new
+   launch always uses the loop-scoped name.
 
 No **[UNRESOLVED]** ambiguities.
 
@@ -339,7 +354,7 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (31) in `tests/test_transcript_archive.py` covering:
+- New unit tests (34) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
   (legacy fallback for a live link, loop-scoped preference when both
@@ -348,7 +363,11 @@ No **[UNRESOLVED]** ambiguities.
   after a loop completion freezes an adopted legacy iteration),
   both pre-return sessions surviving two sign-off returns (R4),
   legacy-iteration live/finalize handling, the no-hardlink archive
-  fallback, a dangling link and a failed copy left alone by finalize,
+  fallback, a relative link to a non-session-named target (the
+  deterministic `<stem>.<sha256(target)[:12]>.jsonl` key, target made
+  absolute, no duplicate entry on re-archive), a dangling link and a
+  failed copy left alone by finalize, a redirect before and *during* the
+  freeze copy, a fresh loop never launching over a live legacy link,
   the live-owner skips (running review loop, running watcher, live step
   windows) for both bulk sweeps, and a stub app's non-string
   `_session_name` never reaching tmux.  One more
@@ -358,6 +377,12 @@ No **[UNRESOLVED]** ambiguities.
   `iteration_sessions` round-trip test, asserts int-keyed restoration in
   the existing consume test, and pins that a malformed (non-object)
   `iteration_sessions` value does not abort the restore.
+  `tests/test_review_launch_retry.py`: the fake that writes a transcript
+  now links the path the launcher was given (not a hardcoded legacy
+  name), and `test_retry_never_adopts_a_previous_runs_transcript` is
+  driven from a *resumed* loop — the one case that still polls the legacy
+  name — so the stale-session guard it pins stays exercised (review
+  d468 i3).
   The archive tests that exercise a pre-fix behaviour fail on the pre-fix
   tree (`git show 3699f71a:pm_core/claude_launcher.py`); the tests that
   call helpers introduced here can only fail by import on that tree, which
@@ -383,7 +408,7 @@ No **[UNRESOLVED]** ambiguities.
 - Manual repro (pre/post) recorded under
   `$CAP/impl/{pre-fix,post-fix}/` with `pm/qa/artifacts/cli-recording.md`.
 
-## Review-loop hardening (2026-10-28, iterations 94dc / 8602)
+## Review-loop hardening (2026-10-28/29, iterations 94dc / 8602 / d468)
 
 Applied on top of the design above; keep them when editing the code.
 
@@ -453,6 +478,42 @@ Applied on top of the design above; keep them when editing the code.
   hand a fresh loop (a REVIEW return) the shared name, reintroducing the
   cross-loop collision this PR removes and making the legacy name sticky
   for every later loop at that iteration.
+- `qa.md` R7 now states that archive entry counts are a minimum (review
+  d468 i3).  The run-end disable sweep freezes every canonical link, so a
+  run with two returns ends with three `impl-<pr>` / three `signoff-<pr>`
+  entries and no canonical link; the "exactly two entries + `readlink`
+  names the live attempt" reading only holds at the post-return checkpoint.
+  That ambiguity produced a QA INPUT_REQUIRED that was a scenario-text
+  conflict, not a code defect.
+- `resolve_iteration_transcript(..., allow_legacy=...)` (review d468 i3):
+  the legacy fallback is now restricted to a loop *resuming* an iteration
+  that was already in flight (`run_review_loop_sync` derives the flag from
+  its `adopt` decision, and `_run_iteration_with_retry` forwards it to
+  `_discover_iteration` so discovery and launch name the same path).
+  Previously a fresh loop's launch could resolve to another loop's live
+  legacy `review-<pr>-i<N>.jsonl` — the cross-loop collision R1 exists to
+  prevent.  A resumed loop still adopts its legacy iteration, and the
+  stale-session guard (`state.stale_session_id`) still rejects a verdict
+  that a failed launch left behind.
+- `finalize_transcript` re-checks the link **after** the freeze copy
+  (review d468 i3): `_copy_atomic(..., guard=...)` runs the readlink check
+  between the copy and `os.replace`, so a redirect that lands during a
+  long copy is no longer missed.  The remaining window is the single
+  `os.replace` call (see limitations).
+- `_archive_name`'s non-session-named fallback key is now deterministic —
+  `sha256(<absolute link target>)[:12]` (review d468 i3) instead of a
+  random suffix, so re-archiving the same attempt reuses its entry
+  (implicit requirement 2: no duplicates) and `_freeze_archive_copy` and
+  `archive_transcript` agree on the name.
+- `save_breadcrumb` copies `iteration_sessions` before serialising it and
+  `review_loop_ui._on_complete_from_thread` snapshots it and guards its
+  `iterdir()` scan (review d468 i3): the loop thread records a new
+  iteration's session concurrently, and a dict resize or a vanished run
+  dir must not abort the breadcrumb write or the completion mirror.
+- `build_claude_shell_cmd`'s failed-archive comment now states the real
+  trade-off (review d468 i3): R9 prefers replacing the canonical over
+  stalling the launch, so a frozen regular file that could not be archived
+  is the one copy a launch may drop; a symlink only loses its link.
 
 ## Known limitations (accepted)
 
@@ -473,3 +534,10 @@ Applied on top of the design above; keep them when editing the code.
   that PR runs, because the loop may be polling an adopted pre-upgrade
   iteration.  A stale legacy link from an earlier loop is therefore
   frozen by a later sweep (or the loop's completion), not during the run.
+- **Finalize's last check and `os.replace` are not atomic together.**  The
+  readlink guard runs immediately before the replace, so the unguarded
+  window is one `os.replace` call; POSIX has no compare-and-swap for a
+  symlink, and the writer is a launching child process that shares no
+  in-process lock.  A redirect landing inside that call would still be
+  clobbered; the archive copy of the replaced session is written first,
+  so no session content is lost either way.

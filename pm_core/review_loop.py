@@ -199,7 +199,8 @@ def iteration_transcript(transcript_dir: str | Path, pr_id: str,
 
 
 def resolve_iteration_transcript(transcript_dir: str | Path, pr_id: str,
-                                 loop_id: str, iteration: int) -> str:
+                                 loop_id: str, iteration: int, *,
+                                 allow_legacy: bool = True) -> str:
     """The iteration's transcript, preferring the loop-scoped path.
 
     Falls back to the legacy ``review-<pr>-i<N>.jsonl`` when a loop
@@ -212,14 +213,20 @@ def resolve_iteration_transcript(transcript_dir: str | Path, pr_id: str,
     to it would hand this loop the shared name — reintroducing the
     cross-loop collision the loop-scoped name exists to prevent, and
     making the legacy name sticky for every later loop at that iteration.
+
+    *allow_legacy* is False for a *new* iteration's launch: only a loop
+    resuming an iteration that was already in flight can own a legacy
+    link, and a fresh loop (a REVIEW return restarts at iteration 1) must
+    never launch over another loop's link even when one is still live.
     """
     path = Path(iteration_transcript(transcript_dir, pr_id, loop_id,
                                      iteration))
     if path.exists() or path.is_symlink():
         return str(path)
-    legacy = path.parent / f"review-{pr_id}-i{iteration}.jsonl"
-    if legacy.is_symlink():
-        return str(legacy)
+    if allow_legacy:
+        legacy = path.parent / f"review-{pr_id}-i{iteration}.jsonl"
+        if legacy.is_symlink():
+            return str(legacy)
     return str(path)
 
 
@@ -699,7 +706,8 @@ def _is_historical_session(state: ReviewLoopState, transcript_dir: str,
 
 def _discover_iteration(state: ReviewLoopState, pr_data: dict,
                         transcript_dir: str, iteration: int,
-                        *, allow_recovery: bool = True) -> AttemptDiscovery:
+                        *, allow_recovery: bool = True,
+                        allow_legacy: bool = True) -> AttemptDiscovery:
     """Rediscover this iteration's live attempt before launching again.
 
     Looks for an already-landed verdict, a live pane/transcript that is
@@ -721,11 +729,18 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
     same reason (``state.stale_pane_session_id``): a launch that fails
     before ``--fresh`` replaces it leaves that window (and its older
     review's verdict) in place.
+
+    ``allow_legacy`` must match the launch's choice
+    (:func:`resolve_iteration_transcript`): discovery and launch have to
+    name the same path, or a launch that used the loop-scoped name would
+    be rediscovered through another loop's live legacy link and its
+    verdict adopted as this iteration's.
     """
     pr_id = state.pr_id
     workdir = pr_data.get("workdir")
     our_transcript = resolve_iteration_transcript(
-        transcript_dir, pr_id, state.loop_id, iteration)
+        transcript_dir, pr_id, state.loop_id, iteration,
+        allow_legacy=allow_legacy)
     our_sid = None
     if allow_recovery:
         our_sid = _transcript_session_id(our_transcript)
@@ -1201,18 +1216,25 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
 
 def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                               pr_data: dict, transcript_dir: str,
-                              iteration: int) -> str:
+                              iteration: int, *,
+                              allow_legacy: bool = True) -> str:
     """Run (or adopt) one review iteration, retrying failed launches.
 
     Only a genuine launch failure is retried; a pane that disappears
     (cancellation/closure), a hold, a real verdict and a merged/closed PR
     all stop the retry.  The iteration number is never advanced by a retry.
+
+    *allow_legacy* is passed to :func:`resolve_iteration_transcript`: only
+    a loop resuming an iteration that was already in flight can own the
+    legacy ``review-<pr>-i<N>.jsonl`` link, so a new iteration's launch
+    always uses the loop-scoped name.
     """
     pr_id = state.pr_id
     # Loop-scoped, so a REVIEW return's fresh loop at iteration 1 never
     # reuses (and overwrites) an earlier loop's transcript.
     transcript = resolve_iteration_transcript(
-        transcript_dir, pr_id, state.loop_id, iteration)
+        transcript_dir, pr_id, state.loop_id, iteration,
+        allow_legacy=allow_legacy)
 
     if state.retry_iteration != iteration:
         # A different iteration: start a fresh episode.  Nothing of ours
@@ -1267,7 +1289,8 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                                         iteration,
                                         allow_recovery=(
                                             state.iteration_attempted
-                                            or state.launch_attempts > 0))
+                                            or state.launch_attempts > 0),
+                                        allow_legacy=allow_legacy)
         # Remember whose session this iteration resolved to: the *next*
         # iteration must treat a still-live pane running it as historical
         # (replaced by ``--fresh``), never adopt its verdict a second time.
@@ -1451,8 +1474,15 @@ def run_review_loop_sync(
             try:
                 output = None
                 iter_transcript: str | None = None
+                # True only while resuming an iteration that was already in
+                # flight at a restart: that is the one case where this loop
+                # can own the legacy ``review-<pr>-i<N>.jsonl`` name.  A new
+                # iteration's launch must use the loop-scoped name even if
+                # another loop's legacy link is still live.
+                resuming = False
                 if adopt:
                     adopt = False
+                    resuming = True
                     iter_transcript = resolve_iteration_transcript(
                         saved_transcript_dir, state.pr_id, state.loop_id,
                         state.iteration)
@@ -1477,14 +1507,14 @@ def run_review_loop_sync(
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
                     output = _run_iteration_with_retry(
                         state, pm_root, pr_data, transcript_dir,
-                        state.iteration,
+                        state.iteration, allow_legacy=resuming,
                     )
                     # The launch may have adopted an in-flight iteration
                     # under the legacy name; record whichever transcript
                     # this iteration actually used.
                     iter_transcript = resolve_iteration_transcript(
                         transcript_dir, state.pr_id, state.loop_id,
-                        state.iteration)
+                        state.iteration, allow_legacy=resuming)
                 if iter_transcript:
                     sid = session_id_from_transcript(iter_transcript)
                     if sid:

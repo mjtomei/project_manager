@@ -100,6 +100,31 @@ def test_archive_entries_are_immutable(env):
     assert first_archive.name in entries
 
 
+def test_archive_of_a_relative_non_session_link(env):
+    """A link to a target that is not session-named is archived under the
+    fallback key, and its relative target is made absolute so the entry
+    still resolves from the archive subdirectory."""
+    native = env.cwd / "native" / "not-a-session.jsonl"
+    native.parent.mkdir(parents=True)
+    native.write_text(_record("NON-UUID SESSION") + "\n")
+    canon = env.run / "impl-pr-abc.jsonl"
+    canon.symlink_to(os.path.relpath(native, canon.parent))
+
+    archived = cl.archive_transcript(canon)
+
+    assert archived is not None and archived.parent.name == "archive"
+    assert archived.name.startswith("impl-pr-abc.")
+    assert Path(os.readlink(archived)).is_absolute()
+    assert "NON-UUID SESSION" in archived.read_text()
+    assert not canon.is_symlink() and not canon.exists()
+
+    # The key is deterministic: re-linking the same target and archiving
+    # again reuses the entry instead of adding a duplicate.
+    canon.symlink_to(os.path.relpath(native, canon.parent))
+    assert cl.archive_transcript(canon) == archived
+    assert [p.name for p in archived.parent.iterdir()] == [archived.name]
+
+
 def test_archive_transcript_of_frozen_file(env):
     """A finalized (regular-file) transcript is archived, not deleted."""
     canon = env.run / "impl-pr-abc.jsonl"
@@ -284,7 +309,7 @@ def test_finalize_with_matching_session_freezes(env):
 
 
 def test_finalize_leaves_a_redirected_link_live(env, monkeypatch):
-    """A link redirected between read and replacement is never clobbered."""
+    """A link redirected before the replacement is never clobbered."""
     old = _native(env.cwd, _sid(), "OLD")
     new = _native(env.cwd, _sid(), "NEW")
     canon = env.run / "signoff-pr-abc.jsonl"
@@ -300,6 +325,36 @@ def test_finalize_leaves_a_redirected_link_live(env, monkeypatch):
     assert cl.finalize_transcript(canon) is False
     assert canon.is_symlink()
     assert Path(os.readlink(canon)) == new
+
+
+def test_finalize_catches_a_redirect_during_the_copy(env, monkeypatch):
+    """The link is re-checked *after* the freeze copy.
+
+    A new attempt that takes the path while the copy runs is not clobbered
+    by the replace: the guard runs immediately before ``os.replace``.
+    """
+    old = _native(env.cwd, _sid(), "OLD")
+    new = _native(env.cwd, _sid(), "NEW")
+    canon = env.run / "signoff-pr-abc.jsonl"
+    _link(canon, old)
+
+    real_copy2 = cl.shutil.copy2
+    calls = {"n": 0}
+
+    def _copy_then_redirect(src, dst, *a, **k):
+        result = real_copy2(src, dst, *a, **k)
+        calls["n"] += 1
+        if calls["n"] == 2:        # the canonical freeze copy, not the archive
+            _link(canon, new)
+        return result
+
+    monkeypatch.setattr(cl.shutil, "copy2", _copy_then_redirect)
+    assert cl.finalize_transcript(canon) is False
+    assert canon.is_symlink()
+    assert Path(os.readlink(canon)) == new
+    with new.open("a") as f:
+        f.write(_record("NEEDS_WORK") + "\n")
+    assert "NEEDS_WORK" in canon.read_text()
 
 
 def test_finalize_transcript_dir_includes_archives(env):
@@ -376,6 +431,41 @@ def test_resolve_iteration_transcript_prefers_the_loop_scoped_path(env):
     scoped.write_text("")
     assert rl.resolve_iteration_transcript(
         env.run, "pr-abc", "aaaa", 2) == str(scoped)
+
+
+def test_a_fresh_loop_never_launches_over_a_live_legacy_link(env, monkeypatch):
+    """A REVIEW return restarts at iteration 1 under a new loop id.
+
+    A *live* legacy ``review-<pr>-i1.jsonl`` link (an earlier pre-upgrade
+    loop that is still polling, or one killed without finalizing) is not
+    this loop's in-flight iteration, so the new loop must launch under its
+    own loop-scoped name and leave that link untouched.  Only a loop
+    resuming an iteration that was already in flight may adopt the legacy
+    name.
+    """
+    old_sid = _sid()
+    legacy = env.run / "review-pr-abc-i1.jsonl"
+    _link(legacy, _native(env.cwd, old_sid, "LOOP 1 IN FLIGHT"))
+
+    launched: list[str] = []
+
+    def fake_launch(pr_id, pm_root, pr_data, *, iteration, loop_id,
+                    transcript, **kwargs):
+        launched.append(transcript)
+        Path(transcript).symlink_to(_native(env.cwd, _sid(), "LOOP 2 PASS"))
+        return "**PASS**"
+
+    monkeypatch.setattr(rl, "_run_claude_review", fake_launch)
+    state = rl.ReviewLoopState(pr_id="pr-abc")
+    rl.run_review_loop_sync(
+        state, "/tmp", {"id": "pr-abc", "workdir": str(env.cwd)},
+        transcript_dir=str(env.run))
+
+    assert launched == [
+        rl.iteration_transcript(env.run, "pr-abc", state.loop_id, 1)]
+    # The earlier loop's link is untouched: still live, same session.
+    assert legacy.is_symlink()
+    assert cl.session_id_from_transcript(legacy) == old_sid
 
 
 def test_resolve_iteration_transcript_prefers_a_dangling_loop_scoped_link(env):

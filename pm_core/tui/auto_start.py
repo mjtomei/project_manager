@@ -247,10 +247,13 @@ def save_breadcrumb(app) -> None:
             "_transcript_dir": rstate._transcript_dir,
             # Session ids per iteration survive the restart so a resumed
             # loop's completion still finalizes each transcript with its
-            # ownership check (pr-9ee4d64).  JSON keys are strings.
+            # ownership check (pr-9ee4d64).  JSON keys are strings.  Copied
+            # under the dict's own iteration: the loop thread records a new
+            # iteration's session while this runs (a merge restart), and a
+            # resize during iteration would abort the whole breadcrumb.
             "iteration_sessions": {
                 str(k): v for k, v in
-                (getattr(rstate, "iteration_sessions", None) or {}).items()
+                dict(getattr(rstate, "iteration_sessions", None) or {}).items()
             },
             # Failed-launch retry episode: a restart mid-backoff must
             # continue the same bounded budget and deadline.

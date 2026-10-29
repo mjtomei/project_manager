@@ -1214,13 +1214,14 @@ def test_retry_adopts_a_verdict_that_landed_after_the_failure(tmp_path,
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
     sid = str(uuid.uuid4())
-    link = tmp_path / "review-pr-001-i1.jsonl"
     state = ReviewLoopState(pr_id=PR)
     err = ReviewLaunchError("boom", retryable=True)
 
     def fake_review(*_a, **_kw):
         # The child wrote the transcript (Claude started) before the
         # parent-side launch failed, then the recovery landed a verdict.
+        # It links the path the launcher was given, whatever its name.
+        link = Path(_kw["transcript"])
         link.symlink_to(tmp_path / f"{sid}.jsonl")
         (tmp_path / f"{sid}.jsonl").write_text(json.dumps({
             "type": "assistant",
@@ -1241,7 +1242,12 @@ def test_retry_never_adopts_a_previous_runs_transcript(tmp_path, monkeypatch):
     """A launch that fails *before* the child writes its transcript leaves
     the shared dir's older iteration-N symlink in place.  Its verdict is a
     previous run's, so it must not be recorded as this iteration's — the
-    loop retries and then reports LAUNCH_FAILED, never a fabricated PASS."""
+    loop retries and then reports LAUNCH_FAILED, never a fabricated PASS.
+
+    A *resumed* loop (iteration 1 in flight at a restart) is the case that
+    still polls the legacy name, so it is the one where the stale-session
+    guard has to hold.
+    """
     monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: None)
     sid = str(uuid.uuid4())
@@ -1250,7 +1256,7 @@ def test_retry_never_adopts_a_previous_runs_transcript(tmp_path, monkeypatch):
         "type": "assistant",
         "message": {"content": [{"type": "text", "text": "old\n\n**PASS**"}]},
     }) + "\n")
-    state = ReviewLoopState(pr_id=PR)
+    state = ReviewLoopState(pr_id=PR, iteration=1)
     err = ReviewLaunchError("container setup failed", retryable=True)
     with patch.object(review_loop, "_run_claude_review", side_effect=err) as run:
         result = _run(state, tmp_path)

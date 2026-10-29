@@ -353,8 +353,19 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
         tdir_path = Path(tdir)
         if tdir_path.is_dir():
             prefix = f"review-{state.pr_id}-{state.loop_id}-i"
-            sessions = getattr(state, "iteration_sessions", None) or {}
-            for p in tdir_path.iterdir():
+            # Snapshot: the loop thread records a new iteration's session
+            # while this runs.
+            sessions = dict(getattr(state, "iteration_sessions", None) or {})
+            try:
+                entries = list(tdir_path.iterdir())
+            except OSError:
+                # The run dir vanished (or is unreadable): nothing to
+                # finalize, and this must not abort the completion mirror
+                # below.
+                _log.debug("review_loop_ui: cannot scan %s for transcripts",
+                           tdir_path, exc_info=True)
+                entries = []
+            for p in entries:
                 if not (p.is_symlink() and p.suffix == ".jsonl"
                         and p.name.startswith(prefix)):
                     continue
