@@ -36234,7 +36234,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-29T02:48:30.503044+00:00'
+  updated_at: '2026-10-29T04:11:48.416383+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -36607,6 +36607,25 @@ prs:
       run one step behind (R7 fallback); lost-worker ownership stays pr-3201ea8.'
     created_at: '2026-10-29T02:48:30Z'
     last_edited: '2026-10-29T02:48:30Z'
+  - id: note-30b20b9
+    text: 'QA S27 (pm-only vs application-code import boundary) PASS, 3/3 stories,
+      at 23bc747c: (1) pm-only import ff 22ada6cd4061->3e9388bf9d0e with no route,
+      SIGNOFF_MERGE at the old head kept, planner+s0/s1 at 3e9388bf9d0e, QA PASS,
+      PR left qa; (2) app.py import ff 3e9388bf9d0e->634e74dfc95a then "QA returning
+      to review: upstream application code ... (app.py) was never reviewed", TUI hold
+      line "QA NEEDS_WORK for pr-95325c4 — returning to review" captured, qa_status
+      NEEDS_WORK + scenarios [], signoff invalidated (invalidated_at), no qa window,
+      workdir ff (reflog merge 634e74dfc95a: Fast-forward), upstream keeps U, a later
+      sign-off re-runs (advanced: sign_off_relaunched) instead of adopting; (3) after
+      review PASS + fresh SIGNOFF_MERGE at U, pm-only import ff 634e74dfc95a->6f6ee4659e2b
+      with no new route, signoff at U not re-invalidated, planner+workers at X with
+      the imported fix, PR stayed qa. Harness notes: QA scenario numbering continues
+      across runs on the same PR (_next_scenario_offset), so the second QA run launched
+      s-2 not s-1 (pm logs "Renumbering ... to start at 2"); and zzt is the QA LOOP
+      toggle, not a single-run stop — with no loop running the first zzt starts one.
+      Captures: /pm-captures/scenarios/27/. No product defects found.'
+    created_at: '2026-10-29T04:11:48Z'
+    last_edited: '2026-10-29T04:11:48Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
