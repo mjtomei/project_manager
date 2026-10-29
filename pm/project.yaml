@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-43090e6
+  active_pr: pr-e64ecb6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T12:38:09.236593+00:00'
+  updated_at: '2026-10-29T13:47:54.499362+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42330,6 +42330,22 @@ prs:
       still names the scenario and the runtime failure.'
     created_at: '2026-10-29T12:38:09Z'
     last_edited: '2026-10-29T12:38:09Z'
+  - id: note-e744399
+    text: 'QA S13 PASS: pm qa debug container path (preflight, create, exec, cleanup),
+      the explicitly-disabled host control, and a runtime that answers info but fails
+      create. Healthy runtime: exit 0, qa-debug-repro window start command is the
+      trap + podman rm -f + podman exec -it wrapper, pane_current_command=bash, one
+      running pm-qa-debug-repro-<8hex>, podman top shows python3 /opt/pm-src/bin/fake-claude
+      inside it, preamble visible, no host launch; hold expiry (and kill-window) removed
+      the window and the container. Disabled mode: exit 0, bare fake-claude start
+      command, pane_current_command=python3, no container, no container-mode error.
+      Shim (info/image ok, run=125): exit 1, exact cause+remedy block, no traceback,
+      no qa-debug window, no leftover container. Captures: /pm-captures/scenarios/13/{container,host-disabled,fail-closed}.
+      Fixture note for future S13 runs: keep the throwaway project on the same filesystem
+      as ~/.pm/workdirs (/tmp works, /scratch does NOT: git clone --local fails cross-device
+      and pm dies with a raw CalledProcessError traceback — filed as pr-e64ecb6).'
+    created_at: '2026-10-29T13:47:54Z'
+    last_edited: '2026-10-29T13:47:54Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -42484,6 +42500,39 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T06:47:08.079510+00:00'
   updated_at: '2026-10-29T06:47:08.079510+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-e64ecb6
+  plan: bugs
+  title: 'Bug: QA scenario workdir clone uses git clone --local, so a project repo
+    on a different filesystem than ~/.pm fails with a raw cross-device-link traceback'
+  branch: pm/pr-e64ecb6-bug-qa-scenario-workdir-clone-uses-git-clone-local
+  status: pending
+  depends_on: []
+  description: 'pm_core/qa_loop.create_scenario_workdir runs `git clone --local <repo_root>
+    <qa_workdir>/s-N/repo` (comment: fast hardlinks). git refuses --local across filesystems
+    ("fatal: failed to create link ...: Invalid cross-device link", rc 128), and run_git
+    raises CalledProcessError, so `pm qa debug` (and every QA run) dies with a raw
+    traceback instead of either working or reporting an actionable error.
+
+
+    Repro (2026-10-29, pr-574e851 QA S13): project repo at /scratch/s13-test-<ts>
+    (nvme mount), HOME on the overlay root; `pm qa debug repro --branch master` ->
+    CalledProcessError from qa_loop.py:368 (git clone --local). Same command with
+    the project under /tmp (same fs as ~/.pm/workdirs) works. Plain `git clone` (no
+    --local) succeeds cross-device by copying.
+
+
+    Suggested fix: try --local first and fall back to a plain clone on failure (keeps
+    the hardlink speedup in the common case), and/or surface a clean error. Not fixed
+    in pr-574e851 (out of scope: that PR is the fail-closed container launch boundary).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T13:47:39.297913+00:00'
+  updated_at: '2026-10-29T13:47:39.297913+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
