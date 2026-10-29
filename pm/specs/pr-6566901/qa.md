@@ -68,6 +68,14 @@ draft); and colours the dashboard's `Overall: STOPPED` dim like the other
 non-result states (`queued` / `interactive`) so a user stop cannot read as a
 missing verdict.
 
+This head also carries the failed-review-launch recovery integrated from
+pr-e040aeb (`ReviewLaunchError`, `LAUNCH_FAILED`/`HOLD`, retry with an
+artifact and a re-arm hint) and the container-mode QA launch branch; R21–R22
+and the launch/container edge cases cover them. They are part of the same
+"an expected outcome never arrives — surface it, don't hang" contract: a
+launch that never produces a session is not a missing agent verdict, and a
+user stop is never a failure.
+
 ## Setup (cross-cutting)
 
 * Install pm from this branch (`./install.sh --local`, or the venv +
@@ -346,6 +354,41 @@ outcome or note. When the user asks to view the held PR, Then the TUI says the
 run is waiting for input (or focuses its existing QA window) instead of
 starting a duplicate run.
 
+**R21 — A review that cannot start is a retryable launch failure, not a
+missing verdict.**
+Given a review loop whose authorized launch never produces a live session /
+transcript (the window dies before a session id is written, the launch command
+fails, or the launcher is unavailable), When the user starts the loop, Then the
+loop retries the *same* iteration a bounded number of times (3 attempts with
+backoff, never advancing the iteration), then ends on its own reporting
+`LAUNCH_FAILED` — not `NO_VERDICT`, not a fabricated verdict — with the concise
+error, the path to a launch artifact that retains the failed attempt's complete
+command/output, the command-log path, and, when auto-start owns the target, a
+"will retry automatically" hint; the review pane/window is left for inspection
+and no second review iteration is launched. A non-retryable auth/environment
+failure stops after one attempt (`retryable=false`) instead of retrying.
+`pm autostart status` reports the phase as a *retryable* launch failure naming
+the error and does not advance the PR; after the re-arm cooldown the scheduler
+retries the same phase. A TUI restart landing inside the retry backoff adopts
+the episode and continues the same iteration and attempt identity (no duplicate
+window, no reset budget), and once the environment is restored a fresh start
+completes normally with one new review window.
+
+**R22 — Recovery behaves the same in container mode.**
+Given a project in container mode (`nested_podman: true`), When its QA
+scenarios run in containers, Then a healthy run still completes
+`PASS`/`FINALIZE_DONE`; a container-mode worker that never emits a verdict is
+retired boundedly as `INPUT_REQUIRED` with the per-scenario "worker produced no
+verdict (<reason>)" and its own pane while a concurrent healthy container worker
+is undisturbed, and the run terminates on its own; a user stop during a
+container-mode recovery ends as `STOPPED` (no `INPUT_REQUIRED`/`NO_VERDICT`, no
+QA note, no `[finalize: NO_VERDICT]`), launches no queued container after the
+stop (and no "worker window never created (launch failed)" retirement), and the
+next fresh start cleans up the stopped run's orphaned containers and proceeds.
+The container branch of `_concretize_and_launch` is exercised: a stop before the
+concretizer or before the worker split leaves the scenario unverdicted rather
+than recording a `no refiner outcome` failure.
+
 ## Edge cases
 
 * **Idle inside the grace window.** A verdict that arrives before the review
@@ -407,6 +450,23 @@ starting a duplicate run.
 * **A sticky log line never hides an answer to a user key** (QA start /
   launch / loop confirmations, including the loop's own PASS/NEEDS_WORK
   lines).
+* **A verifier re-check that never answers is bounded.** After a `FLAGGED`
+  verdict, the machine-driven re-check sends a follow-up into the existing
+  verifier pane and polls through the bounded poller; a verifier that never
+  emits a new `VERIFIED`/`FLAGGED` ends the re-check in bounded time as
+  "verifier produced no verdict", which blocks finalize (no merge, no push)
+  rather than hanging. The fake exits on input, so the re-check ends via pane
+  death — assert the bounded failure and the blocked finalize, not which
+  internal path produced it.
+* **A launch failure is not a verdict.** `LAUNCH_FAILED`/`HOLD` are distinct
+  from `NO_VERDICT`: no review verdict is recorded, no iteration advances, and
+  auto-start re-arms a retryable launch failure instead of marking the phase
+  failed or advancing the PR.
+* **A container-mode worker's resources are per-scenario.** A verdictless
+  container worker is retired without disturbing a healthy concurrent
+  container worker (own clone, container, push proxy, pane and reason), and a
+  stopped run launches no queued container; orphaned containers are cleaned up
+  by the next start.
 
 ## Residuals (documented, not failures)
 
@@ -546,3 +606,26 @@ concurrent run is disturbed.
     change does not restart, tear down or disturb the running loops (they
     still end bounded on their own), and the next run honours the new value.
     Do not assert which budget an in-flight loop used.
+18. **Wakeup records / task-scoped extraction are not fake-drivable.**
+    `find_verdict_turn`'s walk-back across non-task wakeup records (`isMeta`
+    `/loop` ticks, `[SCHEDULED TASK - …]` notifications) — the pr-8efa789
+    coordination — is covered by unit tests. The fake writes only assistant
+    turns and `idle_prompt` hooks, so a live scenario cannot inject a
+    post-verdict wakeup record. Live scenarios assert the user-visible half
+    instead: a completed verdict is accepted without a recovery nudge, and a
+    superseded turn's verdict is not re-consumed.
+19. **Container mode is a separate harness.** It needs
+    `nested_podman: true` in the throwaway project and container mode enabled
+    through the normal surface; the pm-dev image is built on first use and
+    nested podman must be available. A container-mode scenario that cannot
+    start records the environment blocker (and the evidence) rather than
+    treating it as a PR failure. Everything else in this spec is host-mode.
+20. **Inducing a launch failure.** A review launch can be made to fail
+    without touching product code: make the launcher unavailable to newly
+    launched review panes (e.g. move the `fake-claude` shim off `PATH`, or
+    clear the review session's fake config so the launch has no working
+    `claude`), so the window appears without a transcript session id or dies
+    before one is written. Both are retryable launch failures. Restore it
+    before the "fresh start works" story. The attempt budget is 3 with 5 s
+    then 10 s backoff, so an exhausted episode is visible in well under a
+    minute.
