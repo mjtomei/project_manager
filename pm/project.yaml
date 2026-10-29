@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T03:26:24.013098+00:00'
+  updated_at: '2026-10-29T03:59:02.239476+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34902,6 +34902,33 @@ prs:
       this branch.'
     created_at: '2026-10-29T03:26:23Z'
     last_edited: '2026-10-29T03:26:23Z'
+  - id: note-23fd1b5
+    text: 'Review-loop 5297 i3 (no blocking code defects in the provenance implementation;
+      three fixes): (1) prompt_gen — a damaged qa_status.json whose `scenarios` value
+      is not a list (a bare int from a truncated/hand-edited write) raised TypeError
+      while building the QA block, taking the whole run binding down with it; both
+      readers now normalise through _status_scenario_entries and treat it as "no listing"
+      (new test test_signoff_qa_block_survives_a_non_list_status_scenarios; the TypeError
+      was reproduced before the change). (2) behavior_report — the QA-run binding
+      had doubled the per-PR report read on a no-cache HTTP dashboard (two 256 KB-capped
+      head reads); the row now reads the head once and derives verdict + meta from
+      it (_extract_verdict / extract_signoff_meta keep their signatures as thin wrappers;
+      cli/pr.py unaffected). (3) pm/specs/pr-1ae1d2d/qa.md corrected: it still claimed
+      captures_dir was the pre-#264 fail-open form, which the 2026-10-29 master merge
+      invalidated. R8 now states that #264 routing fails closed and drives the incident
+      by writing fixture records into the enclosing tree directly (the pre-fix controller''s
+      effect) — explicitly NOT by exporting PM_CAPTURES_PR=<fixture pr>, which would
+      make _captures_root_is_ours treat the mount as the fixture''s own and quarantine
+      the enclosing PR''s real records. QA S3 Part 1 already demonstrated the direct-write
+      variant, so the next QA round can re-verdict R8 against the corrected recipe.
+      Full suite after edits: 4561 passed, 1 skipped, 1 failed (test_hook_events::test_installer_writes_standalone_receiver
+      — PM_HOST_HOME=/home/matt in this container makes _install_receiver a no-op;
+      same failure on the unmodified tree). Residual unchanged for QA: the impl pre/post
+      captures are a modelled repro, so the live nested-fixture/enclosing-run check
+      still needs the next QA round. Also left a cross-PR note on pr-155f3e3 that
+      captures_dir(create=False) now exists.'
+    created_at: '2026-10-29T03:45:59Z'
+    last_edited: '2026-10-29T03:59:02Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
@@ -39401,7 +39428,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T01:15:37.606229+00:00'
-  updated_at: '2026-10-25T15:10:40.378475+00:00'
+  updated_at: '2026-10-29T03:46:09.641331+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39421,6 +39448,19 @@ prs:
       (not a per-PR dir) — decide whether this bug should be narrowed to that or closed.'
     created_at: '2026-10-25T15:10:40Z'
     last_edited: '2026-10-25T15:10:40Z'
+  - id: note-4ea1a2e
+    text: 'Cross-PR note from pr-1ae1d2d review-loop 5297 i3: the "resolution split
+      from creation" half of this bug is already implemented on pr-1ae1d2d — pm_core.paths.captures_dir()
+      and captures_root() now take create=False, which returns an existing dir (or
+      None) and never mkdirs the per-PR path; the sign-off prompt builder and the
+      new `pm qa evidence` reader already resolve through it. Reuse that mode rather
+      than adding a second reader variant when picking this up. Still open here: sessions_dir()/pm_home()/workdirs_base()
+      mkdir unconditionally, so any reader that resolves a path (e.g. _signoff_qa_scenarios_block
+      -> latest_qa_status_path -> workdirs_base) still creates ~/.pm/sessions and
+      ~/.pm/workdirs as a side effect. Note pr-1ae1d2d merges to master before this
+      work lands, so rebase onto it.'
+    created_at: '2026-10-29T03:46:09Z'
+    last_edited: '2026-10-29T03:46:09Z'
 - id: pr-bebc2e9
   plan: bugs
   title: 'Bug: pm pr edit / pm pr note delete crash on a note with a null id or text'
