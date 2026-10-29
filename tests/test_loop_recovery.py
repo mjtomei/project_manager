@@ -30,6 +30,28 @@ from pm_core.loop_shared import (
 # Transcript helpers
 # ---------------------------------------------------------------------------
 
+def _hit(verdict: str):
+    """Wrap a verdict string as the ``VerdictHit`` a transcript scan returns.
+
+    The QA tick loop scans with :func:`find_verdict_turn` (task-scoped, see
+    pr-8efa789), so the fake scans below patch that helper rather than the
+    string-returning wrapper.  ``text`` is the verdict itself: it carries no
+    ``Reason:`` line, so no reason is recorded.
+    """
+    from pm_core.verdict_transcript import VerdictHit
+
+    return VerdictHit(verdict=verdict, text=verdict, turn_id="turn-1",
+                      timestamp="2026-01-01T00:00:00Z", line_index=0)
+
+
+def _as_hits(fake_scan):
+    """Adapt a verdict-string fake to ``find_verdict_turn``'s hit/None."""
+    def _wrapped(_path, _verdicts):
+        verdict = fake_scan(_path, _verdicts)
+        return _hit(verdict) if verdict else None
+    return _wrapped
+
+
 def _write_transcript(path: Path, turns: list[tuple[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
@@ -1113,7 +1135,7 @@ class TestQARecoveryWiring:
 
         with patch("pm_core.hook_events.read_event", side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep"), \
@@ -1181,7 +1203,7 @@ class TestQARecoveryWiring:
 
         with patch("pm_core.hook_events.read_event", side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep"), \
@@ -1255,7 +1277,7 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
@@ -1338,7 +1360,7 @@ class TestQARecoveryWiring:
 
         with patch("pm_core.hook_events.read_event", side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
@@ -1425,7 +1447,7 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
@@ -1504,10 +1526,8 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=fake_extract), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=None), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=_as_hits(fake_extract)), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
@@ -1587,10 +1607,8 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=fake_extract), \
-             patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
-                   return_value=None), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=_as_hits(fake_extract)), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
@@ -1664,8 +1682,8 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=_as_hits(fake_extract)), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
@@ -1747,8 +1765,8 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=_as_hits(fake_extract)), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
              patch("pm_core.qa_loop.time.time", side_effect=fake_time), \
@@ -1831,7 +1849,7 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
@@ -1904,7 +1922,7 @@ class TestQARecoveryWiring:
                                  "timestamp": 100.0,
                                  "session_id": "sid-s1"}), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
+             patch("pm_core.qa_loop.find_verdict_turn",
                    return_value=None), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep", side_effect=fake_sleep), \
@@ -1985,8 +2003,8 @@ class TestQARecoveryWiring:
         with patch("pm_core.hook_events.read_event",
                    side_effect=fake_read_event), \
              patch("pm_core.qa_loop._get_scenario_pane", return_value="%1"), \
-             patch("pm_core.qa_loop.extract_verdict_from_transcript",
-                   side_effect=fake_extract), \
+             patch("pm_core.qa_loop.find_verdict_turn",
+                   side_effect=_as_hits(fake_extract)), \
              patch("pm_core.qa_loop._write_status_file"), \
              patch("pm_core.qa_loop.time.sleep"), \
              patch("pm_core.qa_loop.time.time", side_effect=fake_time), \

@@ -159,7 +159,10 @@ instead of hanging, the status pane shows the per-scenario verdicts, and the
 PR is not reported as QA PASS. A run with normal workers still completes
 `PASS` and proceeds to finalize, and a worker that legitimately answers
 `INPUT_REQUIRED` is accepted as a verdict — it is not nudged or exhausted,
-and QA waits for the human as before.
+and QA waits for the human as before. A held run (`waiting_for_input`, the
+pr-2c67d50 follow-up machinery this PR was merged onto) is the same case:
+the loop keeps watching that worker's pane for a follow-up and never treats
+it as a missing output, so no recovery request is typed into it.
 
 **R6 — The other QA roles surface a missing outcome distinctly.**
 Given a QA run whose refiner / verifier / finalizer never produces its

@@ -2,7 +2,7 @@
 
 The target collection is owned by the running TUI (the session scheduler);
 these commands never run a scheduler of their own.  Each command is sent
-over the existing session command queue (``trigger_tui_command``: SIGUSR2 +
+over the existing session command queue (``submit_tui_command``: SIGUSR2 +
 ``tui-<session>.cmd-queue``) as ``autostart <verb> … --reply <id>``; the TUI
 applies it on its event loop and writes a JSON reply to
 ``~/.pm/autostart-replies/<id>.json`` which this command reads back.
@@ -18,19 +18,19 @@ import json
 import os
 import secrets
 import time
-from pathlib import Path
 
 import click
 
 from pm_core import store
+from pm_core.tui_pidfile import is_zombie, read_pidfile
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_FLAGS, POLICY_STOP, POLICY_WAIT, REPLY_DIR,
+    POLICY_AUTO, POLICY_FLAGS, POLICY_WAIT, REPLY_DIR,
     TERMINAL_STATUSES, format_text,
 )
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _canonical_session, _find_tui_pane, _resolve_pr_id,
-    _tui_pidfile_for_session, state_root, trigger_tui_command,
+    _tui_pidfile_for_session, state_root, submit_tui_command,
 )
 from pm_core.paths import configure_logger, pm_home
 
@@ -74,31 +74,21 @@ def _resolve_owner(session: str | None) -> tuple[str, int]:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
                     f"TUI for session {sess} is not running (no pidfile)",
                     session=sess)
+    desc = read_pidfile(pidfile)
+    if desc is None:
+        raise _Fail(EXIT_OWNER, "owner_unavailable",
+                    f"TUI for session {sess} is not running (stale pidfile)",
+                    session=sess)
+    pid = desc.pid
     try:
-        pid = int(pidfile.read_text().strip())
         os.kill(pid, 0)
-        if _is_zombie(pid):
+        if is_zombie(pid):
             raise ProcessLookupError(pid)
-    except (ValueError, OSError):
+    except OSError:
         raise _Fail(EXIT_OWNER, "owner_unavailable",
                     f"TUI for session {sess} is not running (stale pidfile)",
                     session=sess)
     return sess, pid
-
-
-def _is_zombie(pid: int) -> bool:
-    """True when *pid* has exited but not been reaped yet.
-
-    ``kill(pid, 0)`` succeeds on a zombie, so a killed TUI whose tmux server
-    hasn't reaped it would look alive and the CLI would wait out the full
-    timeout before misreporting it as busy (``owner_timeout``).
-    """
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        return False  # no procfs (macOS) — fall back to kill(pid, 0)
-    # State is the first field after the parenthesised comm.
-    return stat.rpartition(")")[2].split()[:1] == ["Z"]
 
 
 def _validate(ids: tuple[str, ...], *, for_add: bool) -> list[str]:
@@ -139,9 +129,16 @@ def _request(session: str | None, args: list[str], timeout: float) -> dict:
     reply = pm_home() / REPLY_DIR / f"{reply_id}.json"
     cmd = " ".join(["autostart", *args, "--reply", reply_id])
     _log.info("autostart cli: session=%s pid=%d cmd=%r", sess, pid, cmd)
-    if not trigger_tui_command(sess, cmd):
+    result = submit_tui_command(sess, cmd)
+    if not result.ok:
+        # Surface the specific reason (missing capability, stale pidfile,
+        # ...) — a generic "could not signal" hides the fix ("restart the
+        # TUI") the user needs.
+        _log.warning("autostart dispatch failed: %s (%s)",
+                     result.reason, result.message)
+        fallback = f"could not signal the TUI for session {sess}"
         raise _Fail(EXIT_OWNER, "owner_unavailable",
-                    f"could not signal the TUI for session {sess}", session=sess)
+                    result.message or fallback, session=sess)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if reply.exists():
@@ -211,7 +208,8 @@ def autostart():
 
     Auto-start drives an explicit set of target PRs: it schedules the
     union of their dependency closures (shared dependencies once), runs
-    impl → review → QA for each, and stops at each target's merge policy.
+    impl → review → QA for each, then applies the target's merge policy
+    (wait for a manual merge, or auto-merge).
     Adding is additive and idempotent; removing a target never kills a
     running window or a dependency another target still needs.  An empty
     target set means auto-start is OFF (never "all pending PRs"; that is
@@ -219,20 +217,20 @@ def autostart():
 
     \b
     Policies (per target, also set by the O / A keys):
-      stop-before-merge  (--stop-before-merge, the default for new CLI
-                         targets, and O) — stop the target when ready to
-                         merge; press g after sign-off
-      auto-merge         (--auto-merge, and A) — merge via `pm pr merge`,
-                         which still enforces the sign-off gate
-      wait-for-merge     (--wait-for-merge) — hold the target AND every
-                         transitive prerequisite for a manual merge; each
-                         PR runs impl → review → QA → sign-off, then waits
+      wait-for-merge     (--wait-for-merge, the default for new targets,
+                         and O) — hold the target AND every transitive
+                         prerequisite for a manual merge; each PR runs
+                         impl → review → QA → fresh sign-off, then waits
                          for g / `pm pr merge`; that merge starts the
                          newly unblocked dependents automatically
+      auto-merge         (--auto-merge, and A) — merge via `pm pr merge`,
+                         which still enforces the sign-off gate
 
-    A dependency shared by several targets is held if any active
-    wait-for-merge target needs it or it has its own stop mark; removing
-    the target (or changing its policy) releases only the holds it caused.
+    A dependency shared by several targets is held while any active
+    wait-for-merge target needs it; removing the target (or changing its
+    policy to auto-merge) releases only the holds it caused.
+    --stop-before-merge is accepted as a deprecated alias for
+    --wait-for-merge and never creates a separate target-only hold.
 
     \b
     Examples:
@@ -250,22 +248,25 @@ def autostart():
 
 @autostart.command("add")
 @click.argument("pr_ids", nargs=-1)
-@click.option("--stop-before-merge", "stop", is_flag=True,
-              help="Stop the target before merge (default for new targets)")
-@click.option("--auto-merge", "auto", is_flag=True,
-              help="Merge automatically when ready (sign-off gate still applies)")
 @click.option("--wait-for-merge", "wait", is_flag=True,
               help="Hold the target and all its transitive prerequisites "
                    "for a manual merge (g / pm pr merge); merging one "
-                   "starts its newly ready dependents")
+                   "starts its newly ready dependents. Default for new "
+                   "targets")
+@click.option("--auto-merge", "auto", is_flag=True,
+              help="Merge automatically when ready (sign-off gate still applies)")
+@click.option("--stop-before-merge", "stop", is_flag=True,
+              help="Deprecated alias for --wait-for-merge")
 @_session_opt
 @_timeout_opt
 @_json_opt
-def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
+def autostart_add(pr_ids, wait, auto, stop, session, timeout, as_json):
     """Add PR_IDS as auto-start targets (additive, idempotent).
 
     Re-adding a target without a policy flag keeps its current policy; a
-    flag replaces it.  At most one policy flag may be given.
+    flag replaces it.  New targets default to --wait-for-merge.  At most
+    one distinct policy flag may be given.  --stop-before-merge is a
+    deprecated alias for --wait-for-merge.
 
     \b
     Run a whole dependency chain with manual merges:
@@ -277,8 +278,8 @@ def autostart_add(pr_ids, stop, auto, wait, session, timeout, as_json):
     unblocked — no further autostart command needed.
     """
     try:
-        chosen = [p for p, on in ((POLICY_STOP, stop), (POLICY_AUTO, auto),
-                                  (POLICY_WAIT, wait)) if on]
+        chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
+                                  (POLICY_AUTO, auto)) if on]
         if len(chosen) > 1:
             flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
             raise _Fail(EXIT_INVALID, "conflicting_flags",

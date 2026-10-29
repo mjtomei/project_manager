@@ -44,6 +44,9 @@ VERDICT_MARKERS = {
     "ERROR": "!",
     "NO_VERDICT": "!",
     "INPUT_REQUIRED": "⏸",
+    "LAUNCH_FAILED": "↻",
+    "HOLD": "⏸",
+    "CLOSED": "·",
 }
 
 VERDICT_STYLES = {
@@ -54,6 +57,9 @@ VERDICT_STYLES = {
     "ERROR": "bold red",
     "NO_VERDICT": "bold red",
     "INPUT_REQUIRED": "bold red",
+    "LAUNCH_FAILED": "bold red",
+    "HOLD": "bold yellow",
+    "CLOSED": "dim",
 }
 
 # Sign-off verdict markers/styles live in pm_core.signoff (single source of

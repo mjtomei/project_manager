@@ -37,6 +37,15 @@ The QA planner has its own hook loop; `_poll_tmux_verdicts` has its own
 `idle_prompt` gate. `verdict_transcript.extract_verdict_from_transcript` is
 deliberately strict (keyword alone on a line) and stays that way.
 
+The scans themselves go through `verdict_transcript.find_verdict_turn`
+(task-scoped, from pr-8efa789): it returns a `VerdictHit` (verdict, turn
+text, turn id/timestamp/line index) and ignores verdicts from an earlier
+task, so a `/loop` wakeup or Monitor postscript after the verdict does not
+hide it and a superseded turn's verdict is never re-consumed.
+`extract_verdict_from_transcript` remains the strict string wrapper. Every
+recovery `verdict_check` and last-chance re-scan uses `find_verdict_turn`
+so "is there an outcome?" and "what is the outcome?" can never disagree.
+
 ## Requirements (grounded)
 
 ### R1 — Bound the wait in `poll_for_verdict`
@@ -140,9 +149,10 @@ All four poller families use one shared helper so behaviour cannot drift.
 
 ## Implicit requirements
 
-* **Do not nudge a completed outcome.** Always try
-  `extract_verdict_from_transcript` first; recovery only runs when it returns
-  `None`. The check is repeated immediately before a nudge (`verdict_check`):
+* **Do not nudge a completed outcome.** Always try the transcript scan
+  (`find_verdict_turn`, via `extract_verdict_from_transcript`) first;
+  recovery only runs when it returns `None`. The check is repeated
+  immediately before a nudge (`verdict_check`):
   the idle hook can fire before the transcript write lands (or a completed
   turn can land during the settle window), and recovery must return
   `"completed"` rather than ask a finished session to re-emit its outcome.
@@ -543,6 +553,47 @@ unbounded.
 * **`VerdictRecoveryExhausted` is a `RuntimeError`** so any caller that has not
   been updated still fails loudly (generic `except Exception` handlers set
   `ERROR`) rather than hanging.
+
+## Integration with master (2026-10-29)
+
+`origin/master` at `4a74d88085edffcc300cb21f31777a798d647782` was merged
+into this branch. The conflict resolution keeps both sides' behaviour:
+
+* **Verdict scanning.** Master replaced the scenario/finalize scans with
+  `find_verdict_turn` (task-scoped, `VerdictHit`, pr-8efa789). Recovery
+  integrated onto that primitive: the tick loop's fresh-event scan,
+  `verdict_check`, the "completed during settle" re-scan and
+  `_retire_if_exhausted` all use `find_verdict_turn`; a hit is recorded
+  through master's `_accept_hit`, which also clears the recovery episode
+  (`_drop_recovery`). `poll_for_verdict`'s `verdict_check` and its
+  "completed" return use it too and return the verdict turn's text.
+* **INPUT_REQUIRED follow-up (pr-2c67d50).** Master's `waiting_for_input` /
+  `_accept_hit` / `_poll_waiting` / `_hold_for_follow_up` machinery is kept.
+  A scenario in `waiting_for_input` is user-bound, not a missing output: it
+  is excluded from `pending` (`_needs_polling`) and is never nudged.
+  Accepting any verdict (including `INPUT_REQUIRED`) closes its recovery
+  episode.
+* **Review launch retry / hold (pr-e040aeb).** `ReviewClosedError`,
+  `ReviewHoldError`, `ReviewLaunchError` handlers and their TUI text
+  (`LAUNCH_FAILED`, `HOLD`, artifact/retry hints) are kept alongside
+  `VerdictRecoveryExhausted`; `_format_completion_message` gained the
+  retry/artifact branches and takes the app for the auto-start re-arm hint.
+* **QA finalize hold loop.** Master's `while True:` hold/reopen structure is
+  kept and the STOPPED teardown is layered onto it: `stopped_clean` (no
+  scenario outcome) skips the finalize pane, `stopped_in_finalize` converts
+  a pre-finalize `PASS` to `STOPPED` and rewrites the status file, and
+  `input_wait_code_changes` routes a head that moved during an input wait
+  back to review. A held (restored) run still skips the duplicate finalize.
+* **Verifier re-check.** The re-verification follow-up uses
+  `poll_for_verdict` (bounded recovery) with verifier-specific requests, not
+  the unbounded human `wait_for_follow_up_verdict`; master's
+  `baseline_line` snapshot is unnecessary there because the poller waits for
+  a new idle and `find_verdict_turn` is task-scoped, so the previous round's
+  verdict is never taken as the answer. The test was rewritten to assert
+  that contract.
+* **Project registry.** `pm/project.yaml` conflicts were resolved as a union
+  of both sides' PR entries and notes (518 PRs, no duplicate ids, no lost
+  notes); `active_pr` takes master's value.
 
 ## Tests
 
