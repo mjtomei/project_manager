@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T12:25:30.540132+00:00'
+  updated_at: '2026-10-29T14:16:01.491282+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29977,6 +29977,23 @@ prs:
       no .tar.gz suffix.'
     created_at: '2026-10-29T12:25:30Z'
     last_edited: '2026-10-29T12:25:30Z'
+  - id: note-ba054bc
+    text: 'QA S40 (launch-failure recovery) PASS 5/5 — no code changes. Harness notes
+      for a re-run: (1) `pm session` must be started ONCE — a second `pm session`
+      finds the TUI pidfile taken and its pane dies, taking the session with it; (2)
+      `pm pr start` refuses until project state is on master — run `pm push`, then
+      `git merge --no-edit pm/sync-<stamp>`; (3) `tmux capture-pane -p -t <pane>`
+      can return empty for a split-second after pm writes; use `-S - -E -` and retry;
+      (4) the completion-line detail (Error:/Artifact:/See log:) is not in the sticky
+      line — open the `L` log pane or read `pm log grep`; (5) `pm log grep` treats
+      `\|` literally, so run one grep per pattern; (6) a stale ~/.pm/runtime/<pr>.json
+      failure record makes a later `pm autostart add` RE-ARM that episode (no "Review
+      loop started" line) instead of starting a fresh loop — expected, and it is the
+      same-loop-id resume the scenario describes; (7) agg is not preinstalled (v1.9.0
+      aarch64 asset is `agg-aarch64-unknown-linux-gnu`), ffmpeg 4.4.2 needs `-vsync
+      vfr`. Captures: /pm-captures/scenarios/40/{story1-launch-failed,story2-autostart-retry,story3-restart-midbackoff,story4-concurrent-ownership,story5-recovery-after-launcher-fixed}.'
+    created_at: '2026-10-29T14:16:01Z'
+    last_edited: '2026-10-29T14:16:01Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
