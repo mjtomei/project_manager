@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T00:47:45.220471+00:00'
+  updated_at: '2026-10-29T01:50:07.580281+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39485,6 +39485,30 @@ prs:
       tmux-isolation fix. Do not relaunch old QA fixture workers.'
     created_at: '2026-10-29T01:33:53.678599+00:00'
     last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-b522cdc
+    text: 'Implementation restart complete (2026-10-29). Integrated master SHA: 4a74d88085edffcc300cb21f31777a798d647782
+      — already merged by 0685f677 and still the tip of origin/master after a fresh
+      fetch, so merge-base == origin/master and no further merge was needed. Recovered
+      the interrupted session work (uncommitted at the test-session-leak incident,
+      01:04-01:08Z): image-only user records are now BOTH a human answer and a task
+      boundary. `_user_record_is_non_task` treats content with no text (a pasted image)
+      as a task via `_record_has_non_text_content`, so `is_human_prompt_record` (exactly
+      its negation) and the task-scoped `find_verdict_turn` can no longer disagree;
+      previously the image cleared the wait but the verdict scan crossed back to the
+      answered INPUT_REQUIRED question and re-delivered it on every idle (false wait
+      + notice). Committed dde08d1b (7 files): verdict_transcript predicate, review_loop
+      redundant local `import os` removed, 2 new regressions + 1 tightened predicate
+      test, impl.md R4/edge case, qa.md E8. Validation at dde08d1b: full suite 4542
+      passed, 1 skipped, 0 failed (403 s); targeted wait-state suites (test_review_input_required_state,
+      test_review_launch_retry, test_breadcrumb_review_loop, test_review_loop, test_tui_pidfile,
+      test_qa_input_required, test_autostart_multi_target, test_verdict_transcript,
+      test_autostart_disable_transcripts) 607 passed. Pre-fix check via a temp worktree
+      at 92dd7752: the 3 new/tightened tests fail there ("the image answer''s INPUT_REQUIRED
+      question was re-delivered"), so the regressions are real. Untracked verify-*-followup.md
+      evidence left in place (not committed). Not run in this phase: live TUI/stand-in
+      QA — prior QA evidence is not a pass for this head; handing off to native review.'
+    created_at: '2026-10-29T01:50:07Z'
+    last_edited: '2026-10-29T01:50:07Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
