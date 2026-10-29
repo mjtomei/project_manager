@@ -703,19 +703,26 @@ def _qa_run_binding(pr_id: str, status: dict, status_path,
     if run_id:
         lines.append(f"QA run: `{run_id}`")
     if manifest is None:
+        # Say which fact is true.  A `$CAP/qa_manifest.json` that exists but is
+        # unusable (damaged, or naming another PR with no recoverable copy) is
+        # not the same as none: the session can see the file, so telling it
+        # there is no manifest invites it to trust the very record pm refused.
+        pointer = captures.manifest_path(root) if root else None
+        why = ("a `$CAP/qa_manifest.json` exists but is not usable for this PR "
+               "(damaged, or it names another PR)"
+               if pointer is not None and pointer.is_file()
+               else "no `$CAP/qa_manifest.json` for this PR")
         if listing_expected:
             lines.append(
-                "Scenario membership is **not run-bound**: no "
-                "`$CAP/qa_manifest.json` for this PR. Treat every "
+                f"Scenario membership is **not run-bound**: {why}. Treat every "
                 "`$CAP/scenarios/<n>/` directory as unverified provenance and "
                 "cite only the scenarios listed below.")
         else:
             lines.append(
-                "Scenario membership is **not run-bound**: no "
-                "`$CAP/qa_manifest.json` for this PR, and no QA listing to "
-                "enumerate it. Treat every `$CAP/scenarios/<n>/` directory as "
-                "unverified provenance: say the evidence cannot be enumerated "
-                "rather than inferring coverage from directories.")
+                f"Scenario membership is **not run-bound**: {why}, and no QA "
+                "listing to enumerate it. Treat every `$CAP/scenarios/<n>/` "
+                "directory as unverified provenance: say the evidence cannot "
+                "be enumerated rather than inferring coverage from directories.")
         return lines
     if status_run and status_run != manifest_run:
         lines.append(

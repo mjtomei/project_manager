@@ -103,7 +103,13 @@ provenance. It must expose:
   wrong tree). Resolution: the root pointer, then
   `qa_runs/<run_id>.json`, then the newest `qa_runs/*.json` naming the PR —
   so a fixture overwriting the root pointer cannot destroy the PR's own
-  membership.
+  membership. A manifest whose `scenarios` is *present but not a list*
+  (`3`, a truncated string, a mapping) is rejected as damaged rather than
+  read as "no scenarios": normalising it would present a damaged file as a
+  run that captured no coverage, and the sign-off prompt would repeat that
+  claim. Rejecting it lets the reader recover from `qa_runs/`, and `audit`
+  names the damage (see R6). A manifest with the key *absent* is still
+  read as owning nothing.
 - `write_scenario_record(captures_root, index, record, *, pr_id, run_id)` —
   stamps `schema`, `pr_id`, `run_id`, `captured_at` onto the record and
   writes `scenario.json` atomically.
@@ -217,7 +223,9 @@ a nested fixture's record is provably not this PR's evidence.
 - `anomalies`: human-readable one-liners for foreign/unowned/orphan dirs, a
   manifest/`qa_status.json` run-id disagreement, a root `qa_manifest.json`
   that is missing, unreadable (damaged JSON — reported as damaged, not as
-  absent: the audit must say what is actually on disk), unusable, or names
+  absent: the audit must say what is actually on disk), unusable, damaged
+  (a `scenarios` value that is present but not a list — also reported as
+  damaged, not as a run with no members), or names
   another PR while the membership came from `qa_runs/` (the fixture-clobber
   signature — the audit is the surface that has to show it), and a
   **manifest member with no evidence directory**

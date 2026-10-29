@@ -557,6 +557,57 @@ def test_audit_says_a_damaged_root_manifest_is_unreadable(tmp_path):
     assert not any("no qa_manifest.json at the top" in x for x in a.anomalies)
 
 
+def test_manifest_with_a_non_list_scenario_list_is_damaged(tmp_path):
+    """A manifest whose ``scenarios`` is present but not a list (``3`` from a
+    hand edit or a partial rewrite) must not read as a run that owns nothing:
+    that would present a damaged file as a confident "no coverage" claim.
+    Rejecting it lets the reader recover from ``qa_runs/`` instead."""
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1", "scenarios": 3,
+    }), encoding="utf-8")
+
+    assert captures.read_manifest(root, pr_id="pr-x") is None
+
+    # The run's own copy still answers, so the membership is not lost.
+    (root / captures.RUNS_DIR_NAME).mkdir()
+    (root / captures.RUNS_DIR_NAME / "run1.json").write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1",
+        "scenarios": [{"index": 1, "title": "one"}],
+    }), encoding="utf-8")
+    m = captures.read_manifest(root, pr_id="pr-x")
+    assert [s["index"] for s in m["scenarios"]] == [1]
+
+
+def test_audit_says_a_damaged_scenario_list_is_damaged_not_empty(tmp_path):
+    """Same rule as unreadable JSON: say what is actually on disk.  An audit
+    that silently normalised a non-list ``scenarios`` would print "(none)" and
+    no anomaly, which is indistinguishable from a run that captured nothing."""
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1", "scenarios": 3,
+    }), encoding="utf-8")
+
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+
+    assert a.manifest is None
+    assert any("damaged" in x and "not a list" in x and "not run-bound" in x
+               for x in a.anomalies)
+    # It is not reported as absent, nor as a usable manifest with no members.
+    assert not any("no qa_manifest.json" in x for x in a.anomalies)
+
+    # With a recoverable copy the membership prints and the damage is named.
+    (root / captures.RUNS_DIR_NAME).mkdir()
+    (root / captures.RUNS_DIR_NAME / "run1.json").write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1",
+        "scenarios": [{"index": 1, "title": "one"}],
+    }), encoding="utf-8")
+    a = captures.audit(root, pr_id="pr-x", run_id="run1")
+    assert [m["index"] for m in a.members] == [1]
+    assert any("damaged" in x and "not a list" in x
+               and captures.RUNS_DIR_NAME in x for x in a.anomalies)
+
+
 # ---------------------------------------------------------------------------
 # Quarantine
 # ---------------------------------------------------------------------------
@@ -1026,6 +1077,28 @@ def test_signoff_qa_block_says_membership_unbound_without_manifest(
     assert "not run-bound" in head
 
 
+def test_signoff_qa_block_calls_an_unusable_pointer_unusable_not_absent(
+        tmp_path, monkeypatch):
+    """A `$CAP/qa_manifest.json` the reader refused (damaged, or naming
+    another PR with no recoverable copy) is not "no manifest": the session can
+    see the file, so telling it none exists invites it to trust the very
+    record pm rejected (pr-1ae1d2d)."""
+    from pm_core import paths, prompt_gen
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1", "scenarios": 3,
+    }), encoding="utf-8")
+    status = _status_file(tmp_path, "run1")
+    monkeypatch.setattr(paths, "latest_qa_status_path", lambda pr_id: status)
+    monkeypatch.setattr(paths, "captures_dir", lambda *a, **k: root)
+
+    head, _listing = prompt_gen._signoff_qa_scenarios_parts("pr-x")
+
+    assert "not run-bound" in head
+    assert "exists but is not usable" in head
+    assert "no `$CAP/qa_manifest.json` for this PR" not in head
+
+
 def test_signoff_qa_block_points_at_the_listing_when_there_is_one(
         tmp_path, monkeypatch):
     """The legacy-evidence line says "listed below" only when the
@@ -1356,3 +1429,27 @@ def test_cli_qa_evidence_reports_absent_captures_dir(tmp_path, monkeypatch):
     assert res.exit_code == 0, res.output
     assert "Captures: (none)" in res.output
     assert "no captures dir" in res.output
+
+
+def test_cli_qa_evidence_says_an_unusable_pointer_is_not_absent(tmp_path,
+                                                                monkeypatch):
+    """The summary line must agree with the anomalies below it: a
+    ``qa_manifest.json`` that exists but was refused is not "no
+    qa_manifest.json" (pr-1ae1d2d)."""
+    from click.testing import CliRunner
+    from pm_core.cli.qa import qa_evidence
+    root = _root(tmp_path)
+    (root / captures.MANIFEST_NAME).write_text(json.dumps({
+        "schema": 1, "pr_id": "pr-x", "run_id": "run1", "scenarios": 3,
+    }), encoding="utf-8")
+    data = {"prs": [{"id": "pr-x", "title": "T", "status": "sign_off"}]}
+    monkeypatch.setattr("pm_core.paths.captures_dir", lambda *a, **k: root)
+    monkeypatch.setattr("pm_core.paths.latest_qa_status_path",
+                        lambda pr_id: None)
+    monkeypatch.setattr("pm_core.cli.helpers.state_root", lambda: tmp_path)
+    monkeypatch.setattr("pm_core.store.load", lambda root: data)
+    res = CliRunner().invoke(qa_evidence, ["pr-x"])
+    assert res.exit_code == 0, res.output
+    assert "exists but is unusable" in res.output
+    assert "no qa_manifest.json — membership" not in res.output
+    assert "damaged" in res.output

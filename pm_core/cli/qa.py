@@ -280,7 +280,15 @@ def qa_evidence(pr_id: str):
     click.echo(f"PR: {canonical}")
     click.echo(f"Captures: {root if root is not None else '(none)'}")
     if audit.manifest is None:
-        click.echo("QA run: (no qa_manifest.json — membership not run-bound)")
+        # Distinguish "no manifest" from "a manifest the reader refused": the
+        # anomalies below say which, and the summary line must not contradict
+        # them by claiming the file is absent when it is sitting right there.
+        pointer = captures.manifest_path(root) if root is not None else None
+        if pointer is not None and pointer.is_file():
+            click.echo("QA run: (a qa_manifest.json exists but is unusable — "
+                       "membership not run-bound)")
+        else:
+            click.echo("QA run: (no qa_manifest.json — membership not run-bound)")
     else:
         click.echo(f"QA run: {audit.manifest_run}")
         if audit.manifest.get("overall"):

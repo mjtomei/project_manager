@@ -703,7 +703,9 @@ def report_meta(pr_id: str) -> dict[str, str]:
     """``pm-signoff-*`` meta tags of the PR's ``report.html`` (or {})."""
     from pm_core.behavior_report import extract_signoff_meta
     from pm_core.paths import captures_root
-    croot = captures_root()
+    # Reader only: looking up a report must not create the captures tree
+    # (pr-1ae1d2d added ``create=False`` for exactly this).
+    croot = captures_root(create=False)
     if not croot:
         return {}
     return extract_signoff_meta(croot / pr_id / "report.html")

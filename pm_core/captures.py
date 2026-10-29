@@ -206,9 +206,20 @@ def _valid_manifest(data, pr_id: str | None) -> dict | None:
         return None
     if not isinstance(data.get("run_id"), str) or not data["run_id"]:
         return None
-    scenarios = data.get("scenarios")
-    if not isinstance(scenarios, list):
+    if "scenarios" not in data:
+        # Absent: a manifest without the key owns nothing.  Being lenient here
+        # keeps a hand-written record readable.
         scenarios = []
+    elif not isinstance(data["scenarios"], list):
+        # Present but not a list (``3``, ``null``, a truncated string, a
+        # mapping): the file is damaged.  Reading it as "no scenarios" would
+        # present a damaged manifest as a run that captured no coverage — a
+        # confident claim about a fact the file does not state — and the
+        # sign-off prompt would tell the session the same.  Reject it so the
+        # reader falls back to ``qa_runs/`` and the audit says what is on disk.
+        return None
+    else:
+        scenarios = data["scenarios"]
     # The manifest is untrusted input — a nested fixture or a hand-edited file
     # can write into this tree — so normalise the entries once, here, instead
     # of trusting every reader to be defensive.  Non-mappings are dropped; a
@@ -302,6 +313,44 @@ def _manifest_owner(data) -> str:
     """A manifest file's claimed owner, for an anomaly that has to name it."""
     owner = data.get("pr_id") if isinstance(data, dict) else None
     return owner if isinstance(owner, str) and owner else "no PR"
+
+
+def _root_pointer_anomaly(root_present: bool, root_raw, pr_id: str, *,
+                          recovered: bool) -> str:
+    """One line saying why the root ``qa_manifest.json`` is not *pr_id*'s.
+
+    Called only when :func:`read_manifest` did not return the root pointer, so
+    every case here is a real problem; the job is to say *which* one, because
+    "absent", "damaged", "unusable" and "someone else's" are different facts
+    and the audit exists to report what is actually on disk.
+
+    *recovered* says the membership printed beside this line came from
+    ``qa_runs/`` rather than the pointer — the fixture-clobber signature,
+    which must not be hidden behind a neutral "recovered" note.
+    """
+    tail = (f"membership recovered from {RUNS_DIR_NAME}/" if recovered
+            else "scenario membership is not run-bound")
+    if not root_present:
+        lead = ("no qa_manifest.json at the top of the captures dir"
+                if recovered else "no qa_manifest.json")
+        return f"{lead} — {tail}"
+    if not isinstance(root_raw, dict):
+        # The file is there but unparseable: say "damaged", not "absent".
+        return f"the root qa_manifest.json is unreadable (damaged JSON) — {tail}"
+    owner = _manifest_owner(root_raw)
+    if owner != pr_id:
+        if recovered:
+            return (f"the root qa_manifest.json names {owner}, not {pr_id} — a "
+                    f"foreign writer overwrote the current-run pointer; {tail}")
+        return (f"the root qa_manifest.json names {owner}, not {pr_id} — "
+                "no run-bound membership for this PR")
+    if not isinstance(root_raw.get("run_id"), str) or not root_raw.get("run_id"):
+        return f"the root qa_manifest.json is unusable (no run id) — {tail}"
+    # Names this PR and its run, but :func:`_valid_manifest` still rejected it:
+    # the scenario list is present and is not a list (a hand edit, a partial
+    # rewrite).  Reported as damaged rather than as a run with no coverage.
+    return (f"the root qa_manifest.json is damaged (its scenario list is not "
+            f"a list) — {tail}")
 
 
 # ---------------------------------------------------------------------------
@@ -479,47 +528,18 @@ def audit(pr_captures_dir: Path | str | None, *,
 
     anomalies: list[str] = []
     if manifest is None:
-        if not root_present:
-            anomalies.append(
-                "no qa_manifest.json — scenario membership is not run-bound")
-        elif root_raw is None:
-            # The file is there but unparseable: say "damaged", not "absent".
-            # The audit exists to report what is actually on disk.
-            anomalies.append(
-                "the root qa_manifest.json is unreadable (damaged JSON) — "
-                "scenario membership is not run-bound")
-        elif _manifest_owner(root_raw) == pr_id:
-            anomalies.append(
-                "the root qa_manifest.json is unusable (no run id) — "
-                "scenario membership is not run-bound")
-        else:
-            anomalies.append(
-                f"the root qa_manifest.json names {_manifest_owner(root_raw)}, "
-                f"not {pr_id} — no run-bound membership for this PR")
+        anomalies.append(
+            _root_pointer_anomaly(root_present, root_raw, pr_id,
+                                  recovered=False))
     else:
         if run_id and manifest_run and manifest_run != run_id:
             anomalies.append(
                 f"the manifest belongs to QA run {manifest_run}, "
                 f"not {run_id}; the manifest is authoritative")
         if not root_ok:
-            if not root_present:
-                anomalies.append(
-                    "no qa_manifest.json at the top of the captures dir — "
-                    f"membership recovered from {RUNS_DIR_NAME}/")
-            elif root_raw is None:
-                anomalies.append(
-                    "the root qa_manifest.json is unreadable (damaged JSON) — "
-                    f"membership recovered from {RUNS_DIR_NAME}/")
-            elif _manifest_owner(root_raw) == pr_id:
-                anomalies.append(
-                    "the root qa_manifest.json is unusable (no run id) — "
-                    f"membership recovered from {RUNS_DIR_NAME}/")
-            else:
-                anomalies.append(
-                    f"the root qa_manifest.json names "
-                    f"{_manifest_owner(root_raw)}, not {pr_id} — a foreign "
-                    "writer overwrote the current-run pointer; membership "
-                    f"recovered from {RUNS_DIR_NAME}/")
+            anomalies.append(
+                _root_pointer_anomaly(root_present, root_raw, pr_id,
+                                      recovered=True))
     for i, ev in sorted(dirs.items()):
         if ev.state == FOREIGN:
             if i in member_indices:
