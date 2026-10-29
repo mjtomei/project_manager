@@ -130,7 +130,12 @@ that holds no claim, step 2 pasted from *inside* the capture directory must
 proceed and take the claim, not refuse the run as a collision. S21/S23 also
 re-check the `agg` install: with `agg` missing and `~/.local/bin` **not** on
 `PATH`, the install block must fail with the export it names rather than
-exit 0. S23 also re-checks the stop step's detach race: after the scenario
+exit 0. S21/S22 also re-check the CLI scaffold's refusal order: pasted with a
+relative or unsubstituted `<capture-dir>`, it must stop at "must be an
+absolute path" *without* clearing the host-shared `rec` session — a
+concurrent CLI capture's recorder has to survive the refused block (the
+socket name is shared by every run on the host). S23 also re-checks the stop
+step's detach race: after the scenario
 ends the pm session itself, a stop step run while the recorder is winding
 down must pass on the complete cast and `recorder.status` 0 (not report "the
 cast is incomplete"), while a recorder killed as the session ends must still

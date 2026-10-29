@@ -177,13 +177,16 @@ where the CLI runs.
 #    broken `-c` command, an unwritable cast path) are what a failed run
 #    needs, and every failure path below tears the pane down. The recorded
 #    command's own stderr still goes to the pty and is recorded.
-tmux -L scaffold kill-session -t rec 2>/dev/null || true
 # <capture-dir> has to be an absolute path or start with ~/ (the preamble
 # above explains why):
 # the pane command below and step 4's checks resolve it against whichever
 # shell pasted them, and this block is pasted whole by a worker who may never
 # have pasted the preamble. Stop here instead of writing the cast somewhere
-# step 4 does not look.
+# step 4 does not look — and before the `rec` session is cleared below: that
+# `kill-session` ends whatever capture is running on the host's shared socket,
+# so a block refused for its path must not take a concurrent run's recorder
+# down with it (the same "act only on a handle you have" rule as the rest of
+# this recipe).
 case "<capture-dir>" in
     /* | "~"/*) ;;
     *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
@@ -192,6 +195,10 @@ case "<capture-dir>" in
             "where the checks do not look" >&2
         exit 1 ;;
 esac
+# Clear the leftover `rec` session now that the path is known good (see the
+# note above): `new-session` fails with "duplicate session: rec" while it
+# exists.
+tmux -L scaffold kill-session -t rec 2>/dev/null || true
 mkdir -p <capture-dir>/<short-name> || {
     echo "could not create <capture-dir>/<short-name> — check the path and" \
         "its permissions" >&2

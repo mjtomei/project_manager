@@ -3154,6 +3154,7 @@ class TestCaptureFlowExecution:
             "pipe")
 
     @pytest.mark.parametrize("mode", [
+        "pipefail",     # step 2 could not attach the transcript pipe
         "nostart",      # step 3 could not create the recorder session
         "norec",        # the recorder never drew
         "dies",         # the recorder exited before drawing
@@ -3173,10 +3174,12 @@ class TestCaptureFlowExecution:
         with "already being recorded into …", a collision that does not
         exist; and a *different* session recording that directory is refused
         as if this run were still going. Every failure path after the claim
-        is taken therefore releases it, like the pipe-attach failure and the
-        successful finish do. A run killed outright (SIGKILL) leaves a claim
-        no path can release, which is why both refusal messages name the
-        manual clear.
+        is taken therefore releases it, like the successful finish does. The
+        pipe-attach failure (``pipefail``, step 2) is the earliest of those
+        paths and is covered here too: its own release line was the only one
+        no case exercised, so deleting it left every test green. A run killed
+        outright (SIGKILL) leaves a claim no path can release, which is why
+        both refusal messages name the manual clear.
         """
         r, _cast = _run_capture_block(
             "tmux-screen-recording.md", mode, tmp_path, target=True)
@@ -3812,6 +3815,42 @@ class TestCaptureFlowExecution:
         assert not (tmp_path / "relcap").exists(), (
             f"{name}: the block wrote into a relative capture directory "
             "before refusing it")
+
+    def test_cli_refused_capture_dir_does_not_kill_a_recorder(self, tmp_path):
+        """A refused block must not take a concurrent capture's recorder down.
+
+        The scaffold's ``-L scaffold`` socket *name* is shared by every CLI
+        capture on the host (the step-1 note says so), which is why the block
+        clears the leftover ``rec`` session with ``kill-session``. That clear
+        ran *before* the absolute-path guard, so a worker who pasted the
+        scaffold with an unsubstituted or relative ``<capture-dir>`` — the
+        exact mistake the guard exists for — ended a concurrent run's recorder
+        on its way out; that run then failed as "recorder status is missing",
+        a failure it could not connect to this block. The guard runs first
+        now, as step 0 of the tmux recipe already did.
+        """
+        block = (_scaffold_block(_recipe_text("cli-recording.md"))
+                 .replace("<capture-dir>", "relcap")
+                 .replace("<short-name>", "run")
+                 .replace("<command-to-record>", "echo hi"))
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        calls = tmp_path / "tmux-calls"
+        # Log every tmux call instead of running it: the point is whether the
+        # block touches the shared `rec` session at all.
+        _stub_tool(bindir, "tmux", f'printf "%s\\n" "$*" >> "{calls}"\n')
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+        r = subprocess.run(["bash"], input=block, env=env, cwd=str(tmp_path),
+                           capture_output=True, text=True, timeout=60)
+
+        assert r.returncode != 0, r.stderr
+        assert "must be an absolute path" in r.stderr, r.stderr
+        calls_text = calls.read_text() if calls.exists() else ""
+        assert "kill-session" not in calls_text, (
+            "the scaffold cleared the host-shared `rec` session before "
+            "refusing a capture directory it never validated, so a worker "
+            "pasting an unsubstituted path kills a concurrent capture's "
+            "recorder: " + calls_text)
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

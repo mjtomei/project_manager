@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T05:15:22.313398+00:00'
+  updated_at: '2026-10-29T05:45:50.625685+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36581,6 +36581,38 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T05:15:22Z'
     last_edited: '2026-10-29T05:15:22Z'
+  - id: note-a543825
+    text: 'Review loop 7c9c i6: two leftovers in the kept recipe scope, both the PR
+      own class. (1) The CLI no-TTY scaffold first statement was `tmux -L scaffold
+      kill-session -t rec`, *before* its absolute-path guard. The `-L scaffold` socket
+      name is shared by every CLI capture on the host (the step-1 note says so), so
+      a block pasted with an unsubstituted or relative `<capture-dir>` — the exact
+      mistake the guard exists for — ended a concurrent capture recorder and only
+      then refused; that run then failed as "recorder status is missing", a failure
+      it could not connect to this block. Verified with the recipe own block and a
+      logging stub tmux: HEAD runs `-L scaffold kill-session -t rec` and then refuses
+      with "must be an absolute path", while the fixed block makes no tmux call at
+      all; the tmux recipe step 0 already had the guard first, so this was also the
+      one place the two recipes disagreed. The guard now runs first and the `rec`
+      clear follows it, with the reason in the guard comment. (2) `test_a_failed_run_releases_its_capture_dir_claim`
+      covered nine failing modes but not `pipefail` (step 2 failed `pipe-pane`), so
+      deleting that branch claim release left the whole file green although the stale
+      claim would refuse the next attempt in the session; `pipefail` is now in the
+      parametrization, and with the release line deleted exactly that case fails (unmodified
+      branch leaves no `claim.pm-test`). Tests: one new execution case (relative `<capture-dir>`
+      against a logging stub `tmux` must make no tmux call) and the new parametrization
+      entry; both fail against HEAD recipe / the removed release (mutation-checked,
+      recipes restored in place afterwards). File 169 pass; related suites (`test_qa_artifact_web_ui_recording`,
+      `test_qa_instructions`, `test_qa_loop`) 175 pass; full suite `env -u PM_HOST_HOME
+      PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py` -> 4563 passed, 1 skipped, 92 deselected,
+      0 failed (400 s, with the `markdown` dep on the scratch path). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-7c9c-i6/ (probe.log with the pre/post scaffold
+      runs and the mutation check, README.md, scripts/ with the extracted blocks and
+      the probe driver). impl.md R34 + Files/verification/evidence and qa.md updated.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T05:45:50Z'
+    last_edited: '2026-10-29T05:45:50Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
