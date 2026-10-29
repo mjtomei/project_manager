@@ -34,7 +34,8 @@ recording-recipe bugs that any worker following the recipe hits:
   instead of the previous run's mp4 (and the CLI scaffold documents the
   escaped `bash -c` command form that actually survives its quoting). The
   render sections name `agg` as a prerequisite and carry its install line,
-  guarded on `command -v agg` so it never replaces a working binary;
+  guarded on a check that the `agg` on `PATH` runs (`agg --version`), so it
+  never replaces a working binary and does replace a truncated one;
   they also check the renderers' own exit statuses (a failed `agg`/`ffmpeg`
   leaves a partial mp4 that `test -s` accepts), say "there is no cast to
   render" when the recording wrote nothing, and the tmux recipe reports a
@@ -89,7 +90,8 @@ recording-recipe bugs that any worker following the recipe hits:
 - a remedy that runs but cannot work says so, and an empty answer never
   becomes a path (review loop 7c9c i3): both recording recipes' `agg` install
   block stops when the binary it just downloaded still does not resolve
-  (`~/.local/bin` not on `PATH`), naming the export, instead of exiting 0 and
+  (`~/.local/bin` not on `PATH`) or still does not run, naming the export or
+  the binary to remove, instead of exiting 0 and
   leaving the render to ask "is 'agg' installed?" — which sends the worker
   back to the block that already ran, in a loop; and the web-UI start block
   resolves its captures root through a checked `pm qa captures-path` and
@@ -594,9 +596,13 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   the recipe's own install line (`agg-$(uname -m)-unknown-linux-gnu`, verified
   as agg 1.9.0) has to make the same cast render to H.264; substituting a
   different renderer is not a pass. The install block is guarded on
-  `command -v agg`, so on an image that already has `agg` it must do nothing
+  `agg --version`, so on an image whose `agg` runs it must do nothing
   — re-downloading over the working binary would truncate it earlier on
-  `PATH` if the transfer failed partway. The download itself carries
+  `PATH` if the transfer failed partway — and a *truncated* `agg`, which
+  resolves and cannot run, must be replaced: a guard on `command -v agg`
+  answers that file too, so the block would no-op while the render keeps
+  asking "is 'agg' installed?" (review loop ebd1 i11, R52). The download
+  itself carries
   `--connect-timeout`/`--max-time` (a stalled transfer would otherwise hang
   the worker), and a failed transfer removes its partial file and stops with
   "could not download agg".
@@ -706,9 +712,9 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   *and* removes the `server.pid` it recorded, so a teardown afterwards cannot
   signal a recycled pid.
 - The bundled Dockerfile now installs `agg`, but the image used for QA on
-  2026-10-27 was built before that and does not have it → check
-  `command -v agg`; the recipe's install line is the remedy either way, and
-  the render prose says `agg` may be missing rather than claiming it is
+  2026-10-27 was built before that and does not have it → check that `agg`
+  runs (`agg --version`); the recipe's install line is the remedy either way,
+  and the render prose says `agg` may be missing rather than claiming it is
   always absent.
 - Two runs on one tmux server → `pm-recorder` is one session name and
   `pipe-pane` is per-pane, so the runs collide. A second run recording the

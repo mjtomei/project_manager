@@ -403,25 +403,35 @@ magnitude slower and fragile). The intermediate GIF is discarded.
 Two tools do the two stages. `ffmpeg` is in the QA image; `agg` may not be
 (the image used for QA on 2026-10-27 did not have it, although the bundled
 Dockerfile now installs it), and the block below fails instead of leaving a
-missing or stale video — so install `agg` first when `command -v agg` prints
-nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
+missing or stale video — so install `agg` first when `agg --version` fails
+(`~/.local/bin` is on `PATH` in the image; the install creates it if
 it is missing, since `curl -o` cannot; the asset is per architecture, verified
-with agg 1.9.0). The block is guarded on `command -v agg` for that reason, so
-pasting it on an image that already has `agg` does nothing — and it stops when
-the binary it just installed still does not resolve (`~/.local/bin` not on
-`PATH`), instead of exiting 0 and leaving the render to ask whether `agg` is
-installed, which sends the worker back to the same block. The render block
+with agg 1.9.0). The block is guarded on that check: a working `agg` answers
+it, so pasting the block on an image that already has `agg`
+does nothing — while a *truncated* binary, which `command -v agg` cannot see,
+is replaced instead of leaving the render's "is 'agg' installed?" pointing at
+a remedy that would do nothing. It stops when the binary it just installed
+still does not resolve (`~/.local/bin` not on `PATH`) or still does not run,
+instead of exiting 0 and leaving the render to ask the same question, which
+sends the worker back to the same block. The render block
 also checks that `ffmpeg` exists, because a missing encoder otherwise reads
 as a bad gif:
 
 ```
-# Install only when agg is missing. The bundled Dockerfile installs it, so
-# this block usually does nothing. Re-downloading over an existing agg is
-# not harmless: `~/.local/bin` comes first on PATH, and `curl -o` writes in
-# place, so a transfer that fails partway leaves a truncated binary that
-# shadows the image's working one (verified: a dropped transfer replaced a
-# working agg with a 500-byte file).
-if ! command -v agg >/dev/null; then
+# Install when agg is missing *or* the one on PATH does not run. The bundled
+# Dockerfile installs it, so this block usually does nothing. Re-downloading
+# over a *working* agg is not harmless: `~/.local/bin` comes first on PATH,
+# and `curl -o` writes in place, so a transfer that fails partway leaves a
+# truncated binary that shadows the image's working one (verified: a dropped
+# transfer replaced a working agg with a 500-byte file). A *truncated* agg is
+# the other half of that story, and the reason the guard is not
+# `command -v agg`: it still resolves, so a resolvability guard skips the
+# install, and the render's "agg failed on the cast — is 'agg' installed?"
+# sends the worker back here, where nothing happens — a remedy that cannot
+# work, in a loop. `agg --version` is the handle: a working agg answers 0
+# (verified with agg 1.9.0), while a truncated or wrong-architecture binary
+# fails to execute.
+if ! agg --version >/dev/null 2>&1; then
     mkdir -p ~/.local/bin
     # Bound the download like every other request in this recipe: a transfer
     # that stalls would otherwise hang the worker with no deadline, the same
@@ -448,6 +458,18 @@ if ! command -v agg >/dev/null; then
         echo "installed ~/.local/bin/agg but 'agg' still does not resolve —" \
             "~/.local/bin is not on PATH; add it (export" \
             "PATH=\"\$HOME/.local/bin:\$PATH\") and re-run the render" >&2
+        exit 1
+    }
+    # ... and to leave one that *runs*. A download that arrived truncated, or
+    # for another architecture, resolves and still fails to execute: the block
+    # would exit 0 with the render's "is 'agg' installed?" unchanged, the same
+    # loop one shape further in. Name the binary to remove — it is not
+    # necessarily the one just written, because `~/.local/bin` may sit after
+    # another agg on PATH — and stop instead of reporting a successful install.
+    agg --version >/dev/null 2>&1 || {
+        echo "the agg on PATH ($(command -v agg)) does not run — remove it" \
+            "('rm -f $(command -v agg)') and re-run the render; if the" \
+            "download itself is broken, install agg by another means" >&2
         exit 1
     }
 fi

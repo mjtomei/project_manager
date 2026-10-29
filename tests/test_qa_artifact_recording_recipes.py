@@ -1469,11 +1469,12 @@ def test_render_documents_how_to_get_the_renderer(name):
     # it: a worker pastes the block, so a prose-only rule is what made the
     # block replace a working `agg` (R16).
     install_block = _install_block(name)
-    assert "command -v agg" in install_block, (
-        f"{name}: the install block is not guarded on `command -v agg`, so a "
-        "worker who pastes it on an image that already has agg re-downloads "
-        "over the working binary")
-    assert (install_block.index("command -v agg")
+    assert "agg --version" in install_block, (
+        f"{name}: the install block is not guarded on a check that the agg on "
+        "PATH runs, so a truncated agg (the shape an interrupted download "
+        "leaves) resolves, the block does nothing, and the render's "
+        "\"is 'agg' installed?\" remedy is inert")
+    assert (install_block.index("agg --version")
             < install_block.index("curl -fsSL")), (
         f"{name}: the agg install guard comes after the download")
 
@@ -1488,13 +1489,15 @@ def _install_block(name):
 
 
 def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
-                       local_on_path=True):
+                       agg_body=None, local_on_path=True):
     """Run the recipe's own ``agg`` install block against stub tools.
 
-    ``agg_present`` seeds a working ``agg`` in ``~/.local/bin`` (ahead of the
-    stub PATH, as on the image). ``curl_body`` replaces the stub ``curl``.
-    ``local_on_path`` puts ``~/.local/bin`` on PATH (the image's layout); with
-    it off, the block installs a binary nothing can run.
+    ``agg_present`` seeds an ``agg`` in ``~/.local/bin`` (ahead of the stub
+    PATH, as on the image); ``agg_body`` is its body, working by default, so a
+    case can seed the truncated binary an interrupted download leaves.
+    ``curl_body`` replaces the stub ``curl``. ``local_on_path`` puts
+    ``~/.local/bin`` on PATH (the image's layout); with it off, the block
+    installs a binary nothing can run.
     Returns ``(proc, agg path, curl-called marker)``.
     """
     block = _install_block(name)
@@ -1503,7 +1506,7 @@ def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
     local.mkdir(parents=True)
     agg = local / "agg"
     if agg_present:
-        agg.write_text("#!/bin/sh\necho working\n")
+        agg.write_text(agg_body or "#!/bin/sh\necho working\n")
         agg.chmod(0o755)
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -1542,8 +1545,9 @@ def test_renderer_install_block_only_runs_when_agg_is_missing(name,
     shadows the image's working ``agg`` (verified: a dropped transfer replaced
     a working agg with a 500-byte file). The bundled Dockerfile installs
     ``agg``, so a worker pasting the remedy block on a current image would
-    take that risk for nothing — the block is guarded on ``command -v agg``,
-    matching the prose that says to install it only when that prints nothing.
+    take that risk for nothing — the block is guarded on a check a working
+    ``agg`` passes (``agg --version``), matching the prose that says to install
+    it only when that fails.
     This runs the recipe's own block both ways against a stub ``curl``.
     """
     r, agg, called = _run_install_block(name, tmp_path, agg_present=agg_present)
@@ -1561,6 +1565,58 @@ def test_renderer_install_block_only_runs_when_agg_is_missing(name,
         assert agg.read_text() == "#!/bin/sh\necho downloaded\n", agg.read_text()
         assert os.access(agg, os.X_OK), (
             f"{name}: the downloaded agg is never made executable")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_renderer_install_replaces_an_agg_that_does_not_run(name, tmp_path):
+    """A truncated `agg` resolves, so a resolvability guard makes it permanent.
+
+    The recipe's own comment records the shape: a dropped transfer replaced a
+    working ``agg`` with a 500-byte file earlier on PATH. ``command -v agg``
+    answers that file, so a guard on resolvability skips the install — and the
+    render then fails with "agg failed on the cast — is 'agg' installed?",
+    whose remedy is this very block: a remedy that cannot work, in a loop (the
+    shape R31 fixed for the binary that does not resolve, one step over).
+    ``agg --version`` is the handle: a working agg answers 0, a truncated or
+    wrong-architecture one fails to execute.
+    """
+    r, agg, called = _run_install_block(
+        name, tmp_path, agg_present=True,
+        agg_body="#!/bin/sh\nexit 126\n")     # resolves, does not run
+
+    assert called.exists(), (
+        f"{name}: the install block skipped a resolvable agg that does not "
+        "run, so the render's 'is agg installed?' remedy is inert")
+    assert agg.read_text() == "#!/bin/sh\necho downloaded\n", (
+        f"{name}: the install block did not replace the broken agg: "
+        + agg.read_text())
+    assert r.returncode == 0, r.stderr
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_renderer_install_names_an_agg_that_still_does_not_run(name, tmp_path):
+    """An install that leaves a resolvable but broken agg must not pass.
+
+    The download can arrive truncated or for another architecture: the file
+    resolves on PATH, so the resolvability check passes, and it exits 126
+    when run. The block would then exit 0 with the render's "is 'agg'
+    installed?" unchanged — the same loop its resolvability check exists to
+    stop, one shape further in. It has to name the binary and stop.
+    """
+    r, agg, called = _run_install_block(
+        name, tmp_path,
+        curl_body=f''': > "{tmp_path / "curl-called"}"
+for a in "$@"; do last=$a; done
+printf '#!/bin/sh\\nexit 126\\n' > "$last"
+''')
+
+    assert called.exists(), "the fixture did not run the install"
+    assert r.returncode != 0, (
+        f"{name}: the install block exited 0 although the agg it left does "
+        "not run, so the render sends the worker back to the same block")
+    assert "does not run" in r.stderr, r.stderr
+    assert str(agg) in r.stderr, (
+        f"{name}: the failure does not name the agg to remove: " + r.stderr)
 
 
 @pytest.mark.parametrize("name", RECIPES)
