@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T04:22:16.672590+00:00'
+  updated_at: '2026-10-29T05:08:14.368873+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34963,6 +34963,36 @@ prs:
       the direct-write variant).'
     created_at: '2026-10-29T04:22:16Z'
     last_edited: '2026-10-29T04:22:16Z'
+  - id: note-2517783
+    text: 'QA S5 (nominal end-to-end provenance) PASSED on the merged tree (e6882d0c),
+      driven through a real pm session on a private tmux socket with a fake planner/scenario/verifier/finalizer.
+      Verified: PR A pr-58117ff, run 548f8760ee230949 — qa_manifest.json has schema
+      1, pr_id, overall PASS and exactly one member ("Provenance nominal scenario":
+      PASS); qa_runs/548f8760ee230949.json is byte-identical (cmp IDENTICAL) and qa_runs/
+      holds exactly that one file; scenarios/ holds only "1", whose scenario.json
+      carries schema/pr_id/run_id/captured_at/verdict PASS, and there is no scenarios/0;
+      the run''s qa_status.json carries the same run_id and overall PASS. pm qa evidence
+      pr-58117ff prints PR, the captures path, QA run, Overall: PASS and "Scenario
+      1 — Provenance nominal scenario: PASS", with no Anomalies section and EXIT=0.
+      PR B pr-d3f87ac (never QA''d): reader exits 0 with Captures: (none), "QA run:
+      (no qa_manifest.json — membership not run-bound)", (none) membership and the
+      single anomaly "no captures dir — no QA evidence to audit"; the captures dir
+      is absent before AND after, so the reader does not conjure it. PR C pr-843e55e
+      (no QA spec): run 23bc7f0631861c45 stops at the spec gate, manifest overall
+      INPUT_REQUIRED with scenarios [], the qa_runs copy carries the same empty membership,
+      there is no scenarios/ directory at all, and the reader prints (none) with no
+      anomalies. tests/test_captures_provenance.py: 77 passed. 47/47 Then assertions
+      passed. One wording nuance for whoever writes the next scenario: the spec-gate
+      message ("QA spec was not generated during planning…") is emitted to the main
+      TUI QA log, not into a qa-<PR> window — a run that launches no scenario never
+      creates a qa-<PR> status window, only the planner pane (qa-pr-XXXX) and the
+      interactive pane (qa-pr-XXXX-s0). The gate is still unambiguous from the log
+      line plus the INPUT_REQUIRED/empty manifest. Captures: /pm-captures/scenarios/5/
+      (tui-qa-launch/, tui-spec-gate/, pm-qa-evidence/, then-checks.txt). Residual
+      R8 (a live nested fixture writing into the enclosing captures tree) still needs
+      its own round; this run did not exercise the incident path.'
+    created_at: '2026-10-29T05:08:14Z'
+    last_edited: '2026-10-29T05:08:14Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
