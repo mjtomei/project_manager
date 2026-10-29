@@ -58,7 +58,8 @@ earlier run left behind. All of them matter, and `<capture-dir>` has to be
 an absolute path (or start with `~/`): tmux runs the transcript pipe's
 command in the pm session's directory, so a relative path writes the
 transcript somewhere these steps never look (step 0 refuses one rather than
-failing later as an empty transcript). A leftover `pm-recorder`
+failing later as an empty transcript, and step 2 — the paste-alone
+re-attach — refuses it too). A leftover `pm-recorder`
 session makes step 3's `new-session` fail with "duplicate session" — step 3
 reports that as a start failure, so the run stops there instead of passing
 the readiness wait on the *previous* run's attach client. The clear names the
@@ -315,6 +316,26 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
         "whose name starts with it; run step 1 first" >&2
     exit 1
 }
+# The path has to be absolute (or ~/…) here too, not only in step 0: this
+# step is pasted on its own when a run re-attaches its transcript, and the
+# pipe's command runs in the *pm session's* directory, not the shell that
+# pasted it. A relative <capture-dir> that exists beside the worker passed the
+# writability check below, the claim was taken on the worker's canonical
+# absolute path, and the pipe then wrote somewhere else entirely — verified
+# live on tmux 3.2a: step 2 exited 0 with the claim on …/worker/relcap while
+# the session's shell answered "cannot create relcap/transcript.log:
+# Directory nonexistent", so the run had no transcript anywhere and step 5
+# reported "transcript.log is empty — the pipe-pane stream never wrote to it"
+# for a pipe that never had a writable target. Refuse it here, before the
+# claim, as step 0 does.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "the transcript pipe's command runs in the pm session's" \
+            "directory, so a relative path writes the transcript somewhere" \
+            "these steps never look; use the path step 0 created" >&2
+        exit 1 ;;
+esac
 # The capture directory has to be there and writable before anything is
 # claimed on it. Step 0 creates it, but this step is pasted on its own when a
 # run re-attaches its transcript, and `mkdir -p` answers 0 for a directory

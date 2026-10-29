@@ -96,7 +96,11 @@ hits, regardless of how it waits for a background job:
   misdiagnosed downstream: an unusable capture directory and a failed
   ``new-session`` stop the run with their own message (otherwise the failure
   reads as "recorder exited before it drew" / "asciinema wrote no cast", both
-  pointing at files that were never written), the web-UI driver block refuses
+  pointing at files that were never written), the tmux recipe's step 2 — the
+  paste-alone re-attach — refuses a relative ``<capture-dir>`` because its
+  claim is canonicalized while the pipe's command runs in the pm session's
+  directory (the transcript lands nowhere the end-of-run check looks), the
+  web-UI driver block refuses
   a capture directory it cannot enter (``cd`` fails and the link lands in the
   worker's cwd), a web-UI start that never answers removes the pid it
   recorded so the teardown cannot signal a recycled one, and the web-UI
@@ -4117,6 +4121,37 @@ class TestCaptureFlowExecution:
             f"{shape}: the refused step took the capture-directory claim")
         assert not (tmp_path / "state" / "pipeclaim").exists(), (
             f"{shape}: the refused step attached the transcript pipe")
+
+    def test_step_two_refuses_a_relative_capture_dir(self, tmp_path):
+        """Step 2's pipe runs in the pm session's directory, not the worker's.
+
+        Step 2 is pasted on its own when a run re-attaches its transcript, and
+        the absolute-path guard lived only in step 0. A relative
+        ``<capture-dir>`` that exists beside the worker passed the writability
+        check, the claim was taken on the worker's canonical absolute path, and
+        the pipe's command then ran in the *pm session's* directory, where the
+        relative path may not exist at all — verified live on tmux 3.2a: step 2
+        exited 0 with the claim on ``…/worker/relcap`` while the session's
+        shell answered "cannot create relcap/transcript.log: Directory
+        nonexistent". The run then had no transcript anywhere, and step 5
+        reported "transcript.log is empty — the pipe-pane stream never wrote to
+        it" for a pipe that never had a writable target — the exact failure
+        step 0's guard exists to prevent, in the paste a run uses to re-attach.
+        Refuse the path before the claim is taken.
+        """
+        worker = tmp_path / "worker"
+        (worker / "relcap").mkdir(parents=True)
+        block = _step_two_block().replace("<capture-dir>", "relcap")
+        r, _cast = _run_block(block, "ok", tmp_path, target=True,
+                              cwd=str(worker))
+        assert r.returncode != 0, (
+            "step 2 accepted a relative capture directory, so its claim and "
+            "the transcript pipe resolve against different directories")
+        assert "must be an absolute path" in r.stderr, r.stderr
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            "the refused step took the capture-directory claim")
+        assert not (tmp_path / "state" / "pipeclaim").exists(), (
+            "the refused step attached the transcript pipe")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_a_capture_dir_that_cannot_be_written_stops_the_run(

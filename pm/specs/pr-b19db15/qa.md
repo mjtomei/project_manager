@@ -80,7 +80,9 @@ recording-recipe bugs that any worker following the recipe hits:
   `<capture-dir>`, because tmux runs the transcript pipe in the pm session's
   directory and each paste resolves the path against its own shell, so a
   relative path writes the cast/transcript where the end-of-run checks never
-  look; and the CLI stop step's two failures (a bound that ran out, a
+  look — including the tmux recipe's step 2 pasted on its own, whose claim is
+  canonicalized while its pipe's command runs in the session's directory
+  (R56); and the CLI stop step's two failures (a bound that ran out, a
   mistyped `RECORDER_STOP_TIMEOUT`) leave the recording running, so the
   larger-bound re-run they prescribe can actually be applied instead of
   meeting a torn-down pane. (The CLI scaffold's `-L scaffold` socket name is
