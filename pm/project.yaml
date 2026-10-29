@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T05:54:26.490428+00:00'
+  updated_at: '2026-10-29T06:24:15.566829+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4852,6 +4852,34 @@ prs:
       harmless for the owner.'
     created_at: '2026-10-29T05:54:26Z'
     last_edited: '2026-10-29T05:54:26Z'
+  - id: note-232f1fe
+    text: 'Review loop d1c0 i9 (no requirement changes; full suite 4590 passed / 1
+      skipped). One test gap in the central requirement, one crash path in discovery,
+      one stale string, one import tidy. (1) R1 (every session gets a private server,
+      PM_TMUX_SOCKET propagated) had no automated coverage of the create path: everything
+      in the suite asserted pieces, and the end-to-end check lived only in the manual
+      smoke script. New TestSessionStartCreatesPrivateServer runs _session_start against
+      a disposable socket with an isolated HOME (SHARED_SOCKET_DIR and default_socket_path
+      patched to disposable paths, hooks install and attach stubbed, the TUI pane
+      replaced by sleep) and asserts the session + its ~1 group on the deterministic
+      private socket, create_session receiving that socket and a PM_TMUX_SOCKET=<socket>
+      pm _tui command, the variable in the process / session env / server global env,
+      the after-kill-pane hook installed there, the client attaching to the grouped
+      session on that socket, and nothing created on the default server. (2) _find_tui_pane
+      in-tmux branch was the last unguarded probe: with $TMUX set and no tmux binary,
+      get_session_name raised OSError out of pm tui view / pm autostart, against the
+      i2 degrade-never-crash contract. It now falls through to the cwd/cross-server
+      branches; new test_tmux_missing_inside_a_pane_degrades_to_no_session. (3) The
+      TUI help row still said "Show shared connect command" although C now shows the
+      connect command for every session (i4 fixed the docstring only). (4) pm session
+      mobile _select_session_socket import hoisted to the module-level helpers import
+      block. Re-ran pm/specs/pr-073910f/session_start_smoke.py end to end on a disposable
+      socket with TMUX_TMPDIR pointed at a scratch dir (private server, session env,
+      global env and hooks correct; default server untouched). No live session, server
+      or shared host configuration was touched. Residual notes unchanged and non-blocking
+      (see the i3/i8 sections of pm/specs/pr-073910f/impl.md).'
+    created_at: '2026-10-29T06:24:15Z'
+    last_edited: '2026-10-29T06:24:15Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
