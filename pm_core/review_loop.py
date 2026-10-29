@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Callable
 
 from pm_core.paths import configure_logger
+from pm_core.pr_utils import TERMINAL_PR_STATES
 from pm_core.loop_shared import (
     get_pm_session as _get_pm_session_shared,
     find_claude_pane as _find_claude_pane_shared,
@@ -1075,7 +1076,9 @@ def _pr_is_terminal(pr_id: str, pm_root: str | None) -> bool:
         pr = store.get_pr(data, pr_id)
     except Exception:
         return False
-    return (pr or {}).get("status") in ("merged", "closed")
+    # One terminal definition (pr_utils): `pm pr close` retains a `closed`
+    # record (pr-62ad13d), so this is the same set the sync/close guards use.
+    return (pr or {}).get("status") in TERMINAL_PR_STATES
 
 
 def _interruptible_sleep(seconds: float, state: ReviewLoopState,

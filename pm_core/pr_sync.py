@@ -16,7 +16,7 @@ from pm_core import store, git_ops, graph, gh_ops, merge_integrity
 from pm_core.backend import get_backend
 from pm_core.cli.helpers import _record_status_timestamp, _resolve_repo_dir
 from pm_core.paths import configure_logger
-from pm_core.pr_utils import usable_prs
+from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 _log = configure_logger("pm.pr_sync")
 
@@ -312,6 +312,10 @@ def sync_from_github(
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
 
+    Terminal local records win over a non-terminal GitHub state: a PR that
+    is locally ``merged`` or ``closed`` is never moved back to an active
+    status (a merge discovered on GitHub still finalizes as ``merged``).
+
     Only works with the GitHub backend and PRs that have gh_pr_number set.
 
     Args:
@@ -364,10 +368,20 @@ def sync_from_github(
             if gh_state == "MERGED" or merged_at:
                 new_status = "merged"
             elif gh_state == "CLOSED":
+                if old_status == "merged":
+                    # A local merge record is terminal: GitHub closing the PR
+                    # does not undo a merge whose evidence lives in the
+                    # registry (nor re-block the dependents it satisfied).
+                    continue
                 new_status = "closed"
             elif gh_state == "OPEN":
-                # Preserve "qa"/"sign_off" — local refinements of in_review
-                if old_status in ("qa", "sign_off"):
+                # Preserve "qa"/"sign_off" — local refinements of in_review —
+                # and the terminal records.  "closed": `pm pr close` is
+                # non-destructive, so a PR closed with --keep-github (or whose
+                # `gh pr close` failed) is still closed locally.  "merged": the
+                # merge landed outside GitHub, and rewriting it would erase the
+                # merge evidence and re-block its dependents.
+                if old_status in ("qa", "sign_off", *TERMINAL_PR_STATES):
                     continue
                 new_status = "in_progress" if is_draft else "in_review"
             else:
@@ -407,6 +421,14 @@ def sync_from_github(
             for pr in usable_prs(fresh_data.get("prs")):
                 new_status = status_updates.get(pr["id"])
                 if not new_status:
+                    continue
+                if pr.get("status") in TERMINAL_PR_STATES \
+                        and new_status != "merged":
+                    # A concurrent status write won the race with this sync:
+                    # the status_updates were computed from the pre-lock
+                    # snapshot, and a merged/closed record is terminal
+                    # (pr-62ad13d).  A merge discovered on GitHub still
+                    # finalizes normally.
                     continue
                 if pr.get("status") != new_status:
                     pr["status"] = new_status

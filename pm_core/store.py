@@ -140,12 +140,19 @@ def _validate_pr_statuses(data: dict) -> None:
             pr["status"] = "pending"
         # Backfill created_at / updated_at for PRs that predate these fields.
         # Use the best available timestamp so sorting works immediately.
+        # `closed_at` is a lifecycle timestamp too (pr-62ad13d: a closed PR is
+        # a retained record, not a deletion), so a hand-edited or imported
+        # entry that only carries it still sorts by its closure.
         if not pr.get("created_at"):
             pr["created_at"] = (pr.get("started_at")
                                 or pr.get("reviewed_at")
-                                or pr.get("merged_at"))
+                                or pr.get("merged_at")
+                                or pr.get("closed_at"))
         if not pr.get("updated_at"):
+            # Closing is the last lifecycle event, so it outranks the
+            # mid-lifecycle timestamps.
             pr["updated_at"] = (pr.get("merged_at")
+                                or pr.get("closed_at")
                                 or pr.get("reviewed_at")
                                 or pr.get("started_at"))
 

@@ -26,6 +26,7 @@ from pm_core.cli.helpers import (
     _set_share_mode_env,
     state_root,
 )
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 
 def _share_mode_options(f):
@@ -1002,8 +1003,9 @@ _SHORTCUT_FOLD_INTO: dict[str, str] = {
     "review-loop": "review",
 }
 
-# Terminal statuses — PRs in these states have no actions.
-_TERMINAL_STATUSES = {"merged", "closed"}
+# Terminal statuses — PRs in these states have no actions.  One definition
+# (pr_utils.TERMINAL_PR_STATES) shared with the sync/close guards.
+_TERMINAL_STATUSES = set(TERMINAL_PR_STATES)
 
 # Map status to the action label representing the current phase.
 _STATUS_PHASE: dict[str, str] = {

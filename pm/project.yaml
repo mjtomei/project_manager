@@ -14213,68 +14213,750 @@ prs:
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-0c530e1-cleanup-leaves-qa-review-loop-state--d465b8c2
 - id: pr-62ad13d
   plan: bugs
-  title: 'Bug: pm pr close removes the PR entry from project.yaml by default'
+  title: 'Make PR close non-destructive: retain registry history, branches and workdir'
   branch: pm/pr-62ad13d-bug-pm-pr-close-removes-the-pr-entry-from-project-
-  status: pending
+  status: in_progress
   depends_on: []
-  description: 'pm pr close (pm_core/cli/pr.py) currently removes the PR entry from
-    project.yaml entirely as part of its default behavior. The help text spells this
-    out: ''Removes the PR entry from project.yaml. By default also closes the GitHub
-    PR and deletes the remote branch if they exist.'' But this is inconsistent with
-    both (a) older closed PRs in project.yaml that retain status: closed (e.g. pr-012,
-    pr-013) and (b) how merged PRs are handled — pm pr merge sets status: merged and
-    keeps the entry around as historical record.
+  description: 'Make `pm pr close` a non-destructive lifecycle action. User clarification
+    on2026-10-28: preserve the YAML entry, the remote branch, and the local workdir.
+    Closing a PR must not automatically delete its source, uncommitted work, evidence,
+    notes, or history.
 
 
-    Result: closing a PR loses the entry, its notes, its dependencies, its description,
-    its workdir reference — everything is just gone from project state. Re-adding
-    the same PR later would have to re-establish all of that. There is also no audit
-    trail showing ''this PR existed and was closed for these reasons''; the only record
-    is the git diff of project.yaml at the close commit.
+    Current problem: pm_core/cli/pr.py removes the registry entry, calls GitHub close
+    with --delete-branch by default, and unconditionally shutil.rmtree(workdir), even
+    when --keep-branch is passed. A closed PR should remain a historical record like
+    a merged PR. Example: closing pr-d8cfa16 (#163, superseded by #167) erased the
+    explanatory note and required reconstructing the registry entry from Git.
 
 
-    Fix: invert the default. pm pr close should set status: closed and keep the entry.
-    Add an opt-in --remove (or --purge) flag for callers who really do want the entry
-    deleted, mirroring how --keep-github / --keep-branch toggle the side effects on
-    the GitHub PR and remote branch. The remove flag is the rarer case (genuinely-mistaken
-    PRs that should never have existed); the common case is ''this work is no longer
-    relevant, file it under closed.''
+    Required behavior:
+
+    - Default close sets status: closed and preserves all registry fields, notes,
+    dependencies, description, branch, and workdir reference.
+
+    - Close the GitHub PR when one exists, unless --keep-github is requested. Do NOT
+    pass --delete-branch or otherwise delete any local or remote branch.
+
+    - Preserve the workdir and all its tracked, dirty, untracked, and ignored files,
+    including captures and fixtures. Do NOT run rmtree, git clean/reset, stash/drop,
+    or cleanup as a side effect of close.
+
+    - Any cleanup must remain a separate, explicitly requested operation. Do not add
+    an automatic cleanup fallback or delayed deletion triggered merely by closing.
+    Audit close-related hooks/callers so retained resources are not silently removed
+    immediately after the command.
+
+    - If an explicit --remove/--purge option is retained for deleting a mistaken registry
+    record, document it as registry-only and keep remote branches/workdirs intact.
+    It must never become the default or an implicit cleanup authorization.
+
+    - Preserve --keep-github behavior. Keep --keep-branch accepted as a compatibility
+    no-op or clearly deprecate it; branch retention is now unconditional for close.
+    Update CLI/TUI help and user-visible messages consistently.
+
+    - Warn about dependent PRs that remain blocked by status: closed, naming them.
+    Closed PRs must not be automatically started again. Do not auto-satisfy dependencies
+    or mark them merged.
 
 
-    Concretely:
-
-    - Default behavior: set status to ''closed'', preserve the entry and all its fields
-    including notes. Still close the GitHub PR and delete the remote branch unless
-    --keep-github / --keep-branch are set. Still tear down the workdir.
-
-    - --remove flag: also delete the entry from project.yaml (current default behavior).
-
-    - The status field already supports ''closed'' as a valid value (per pm_core/cli/__init__.py
-    status enum), so no schema change is needed.
+    Regression coverage: default close retains an identical entry apart from intended
+    lifecycle fields; notes and dependency references survive; GitHub receives close
+    without delete-branch; the remote branch still exists; a workdir containing tracked
+    modifications, untracked/ignored files, and captures stays byte-identical. Cover
+    keep-github/keep-branch, no GitHub PR, absent workdir, repeat close, explicit
+    registry removal if supported, dependents, and GitHub failure without destructive
+    local fallback. Use isolated fake GitHub/local Git repositories and disposable
+    fixtures; never close real PRs or delete production branches/workdirs for testing.
 
 
-    Files: pm_core/cli/pr.py (the close command), pm_core/cli/__init__.py if any setting/help
-    text references close behavior. Tests: closing a PR by default keeps the entry
-    with status=closed and preserves all fields; --remove deletes the entry; --keep-github
-    / --keep-branch still work; closing a PR that has dependents (PRs whose depends_on
-    includes it) prints a warning naming those dependents, since with status=closed
-    they remain blocked indefinitely.
+    Files: pm_core/cli/pr.py close command, gh_ops wrapper callers as needed, relevant
+    TUI/help and regression tests. Existing schema already supports status: closed.
+    Preserve unrelated project records, live settings, all historical evidence and
+    manual merge/spec gates.
 
-
-    Motivating example from this session: pm pr close pr-d8cfa16 (#163, batched QA
-    scenario execution, superseded by #167) was used to close a PR. The entry was
-    removed and the explanatory note added just before close was lost with it. Reconstructing
-    the entry from git show HEAD:project.yaml and re-inserting with status=closed
-    manually was needed to restore the historical record.'
+    '
   agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  gh_pr: https://github.com/mjtomei/project_manager/pull/272
+  gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-05-03T13:10:13.371978+00:00'
-  started_at: null
+  updated_at: '2026-10-29T11:57:49.461340+00:00'
+  started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-close-preserve-20261028
+    created_at: '2026-10-28T05:41:33.889283+00:00'
+    last_edited: '2026-10-28T05:41:33.889283+00:00'
+    text: 'Explicit user clarification: closing must preserve the remote branch and
+      local workdir as well as the YAML entry. No automatic cleanup as part of close.
+      Earlier description retaining destructive branch/workdir defaults is superseded.'
+  - id: note-082a6c7
+    text: 'Impl: close sets status: closed (+ closed_at) and keeps entry/notes/deps/branch/workdir;
+      gh close never passes --delete-branch; workdir rmtree removed. New --remove
+      is registry-only (branch+workdir kept); --keep-branch is a deprecated no-op.
+      Closing a merged PR is refused without --remove. Dependents are named in a warning
+      but never unblocked. sync-github no longer reopens a locally closed PR on GitHub
+      OPEN. Regression: tests/test_pr_close.py; captures impl/{pre,post}-fix/default-close/.'
+    created_at: '2026-10-28T06:20:08Z'
+    last_edited: '2026-10-28T06:20:08Z'
+  - id: note-ba33cce
+    text: 'Review i3: --remove now reports "removed concurrently; nothing to remove"
+      when the entry vanished between load and lock (it no longer claims it removed
+      the record). `pm pr add` of a title+description matching a retained closed entry
+      now names the closed status and points at `pm pr edit <id> --status pending`
+      to reuse it. Tests: test_remove_noops_when_entry_removed_concurrently, test_add_hints_when_a_closed_record_is_the_duplicate.'
+    created_at: '2026-10-28T07:39:01Z'
+    last_edited: '2026-10-28T07:39:01Z'
+  - id: note-227ab5f
+    text: 'Review i4: `pm pr close --remove` on a merged PR now reports the GitHub
+      PR as merged (it is neither closed nor "open") instead of "Leaving GitHub PR
+      #N open". Added tests: default close moves active_pr off the closed entry (and
+      never moves a foreign active_pr), plus the merged-message assertion. Full suite
+      4110 passed, 1 skipped (/pm-captures/review-c02f-i4/full-suite.log).'
+    created_at: '2026-10-28T08:07:33Z'
+    last_edited: '2026-10-28T08:07:33Z'
+  - id: note-f87e7a6
+    text: 'Review i5: `--keep-github` message now says the GitHub PR is "unchanged"
+      (never "open"); `--remove` dependent warning now says the dependents reference
+      the removed record instead of implying a closed status blocks them. Closed status
+      is now durable inside the sync apply too: `sync_from_github(save_state=True)`
+      and the TUI `startup_github_sync` apply skip a status update when the fresh
+      entry is already closed (a discovered merge still finalizes), closing the race
+      where a `pm pr close` landing during the GitHub round-trip was overwritten.
+      Tests: test_remove_warns_dependents_reference_the_removed_record, test_sync_from_github_does_not_reopen_a_concurrently_closed_pr,
+      test_tui_startup_github_sync_keeps_a_concurrently_closed_pr, plus keep-github
+      message assertions. Full suite 4100 passed, 1 skipped; the 12 markdown + 1 hook
+      failures are env-only (missing markdown package; PM_HOST_HOME set) — see /pm-captures/review-c02f-i5/full-suite.log.'
+    created_at: '2026-10-28T08:39:57Z'
+    last_edited: '2026-10-28T08:39:57Z'
+  - id: note-00e89d2
+    text: 'Review i6: fixed a crash in the new dependent warning — it walked data["prs"]
+      raw after the status write, so a hand-edited entry with no `id` depending on
+      the closed PR raised KeyError from _pr_display_id (close persisted, then exit
+      1). Now uses usable_prs. Dropped RST double-backticks from the `pm pr close
+      --help` docstring (literal ``closed`` was rendering). Tests: test_malformed_dependent_entry_does_not_break_{close,remove}.
+      Full suite 4114 passed, 1 skipped; the single hook-installer failure is env-only
+      (PM_HOST_HOME set — passes with it unset). Noted the remaining store.get_pr
+      KeyError on pr-77c4f91.'
+    created_at: '2026-10-28T09:06:09Z'
+    last_edited: '2026-10-28T09:06:09Z'
+  - id: note-d6c87e5
+    text: 'Review i7: `pm pr close --remove` on a merged PR no longer asserts a GitHub
+      state it never checked. It now says the GitHub PR is "left unchanged (the PR
+      is recorded as merged)" — the local status can be hand-set or come from a local-backend
+      merge, leaving the GitHub PR open — and `--keep-github` now takes precedence
+      over the status-specific wording. Added tests: keep-github wins on a merged
+      --remove; a merge discovered on GitHub still finalizes over a concurrently closed
+      record (the closed-is-terminal guard merged exception). Spec synced (R5 --remove
+      wording, A1 precedence, R11 items 19/20/22, §5 file list). Full suite 4116 passed,
+      1 skipped; the single hook-installer failure is env-only (PM_HOST_HOME set —
+      passes with it unset).'
+    created_at: '2026-10-28T09:32:32Z'
+    last_edited: '2026-10-28T09:32:32Z'
+  - id: note-a9bb6ea
+    text: 'Review i8: (1) Repeat close of a legacy closed entry with no closed_at
+      no longer stamps "now" — only a fresh closure records one (test_repeat_close_does_not_invent_a_closure_time).
+      (2) Incidental fix in the same contract: sync_from_github could rewrite a locally
+      merged PR to in_review (GitHub OPEN) or closed (GitHub CLOSED), erasing merged_at/merge
+      evidence and re-blocking dependents; merged is now terminal in sync alongside
+      closed, at snapshot time and inside the locked apply (CLI + TUI startup sync),
+      while a merge discovered on GitHub still finalizes. 4 new tests, all fail on
+      i7 HEAD. Spec synced (R9, R11 items 24/25, A6). Full suite 4122 passed, 1 skipped
+      (/pm-captures/review-c02f-i8/full-suite.log).'
+    created_at: '2026-10-28T10:03:19Z'
+    last_edited: '2026-10-28T10:03:19Z'
+  - id: note-d6d1345
+    text: 'Review i9: (1) added pr_utils.TERMINAL_PR_STATES so the merged/closed pair
+      has one definition — used by the new sync guards (pr_sync.sync_from_github apply,
+      tui startup sync apply), the active_pr reassignment, the dependents scan, and
+      the pm pr list --open filter. (2) --remove help now says it deletes the registry
+      entry *instead of* recording the closure (it was "Also delete", which misdescribed
+      the code); still documents registry-only. (3) New test test_default_close_leaves_unrelated_records_and_settings_alone
+      pins the "preserve unrelated records/settings" requirement (other PR entry,
+      project settings except active_pr, plans). (4) Two repeat-close assertions compared
+      updated_at with >=, which is a tautology; now > (ISO-8601, same offset). Spec
+      synced (R11 item 26, §5 pr_utils.py). Full suite 4123 passed, 1 skipped (/pm-captures/review-c02f-i9/full-suite.log).'
+    created_at: '2026-10-28T10:45:33Z'
+    last_edited: '2026-10-28T10:45:33Z'
+  - id: note-8780ed3
+    text: 'Review i10: consolidated the terminal-status definition (autostart_state.TERMINAL_STATUSES
+      and cli/session._TERMINAL_STATUSES now derive from pr_utils.TERMINAL_PR_STATES;
+      pr_review/pr_qa_run_bg use the constant), stopped pr_cleanup warning "not merged"
+      for the now-normal closed input (close points users there for the explicit workdir
+      removal), made `pm pr merge <closed>` name the concrete reopen command (`pm
+      pr edit <id> --status pending`), documented terminal durability in `pm pr sync-github
+      --help`, and added a cleanup-after-close regression test. Filed pr-a3b86b7 (TUI
+      has no show-closed toggle, unlike merged) and added a cross-PR note to pr-3d1fa55:
+      its `_reclaim_terminal_pr_windows` sweep reclaims windows/containers for any
+      merged/closed PR every sync (background_sync -> do_normal_sync every 5 min),
+      i.e. an automatic cleanup triggered by closing, which this PR spec A4/R4 ruled
+      out; user decision pending on whether `closed` authorizes live-resource reclamation
+      or #217 should limit the sweep to `merged`. Full suite 4111 passed, 1 skipped,
+      13 failed (all env-only: 12 markdown-render without the markdown package, 1
+      hook installer with PM_HOST_HOME set; all 33 pass with markdown on PYTHONPATH
+      and PM_HOST_HOME unset).'
+    created_at: '2026-10-28T11:27:22Z'
+    last_edited: '2026-10-28T11:27:22Z'
+  - id: note-fe4d97a
+    text: 'Review i11: finished the single terminal-status definition — qa_loop.py''s
+      four "abort QA against a terminal PR" guards, home_window/pr_list.py''s open-only
+      filter, and pr_sync.sync_from_github''s qa/sign_off preservation tuple now use
+      pr_utils.TERMINAL_PR_STATES; no behavior change (spec R11 item 27 and §5 updated).
+      Targeted tests (test_qa_loop, test_home_window, test_pr_sync, test_sync_merge_integrity,
+      test_pr_close, test_pr_enhancements): 308 passed. Full suite 4124 passed, 1
+      skipped (/pm-captures/review-c02f-i11/full-suite.log). Two observations left
+      for the user/next iteration: (1) A4 cross-PR question still open — #217/pr-3d1fa55''s
+      _reclaim_terminal_pr_windows would reclaim live windows/containers for closed
+      PRs on every 5-minute sync, i.e. the automatic cleanup this PR''s A4/R4 rules
+      out; does closed authorize live-resource reclamation, or should #217 limit the
+      sweep to merged? (2) Bare `pm pr cleanup` (no id) auto-selects only merged PRs
+      with workdirs, so following `pm pr close`''s pointer after a close says "No
+      merged PRs with workdirs to clean up"; `pm pr cleanup <closed-id>` works. Left
+      as-is (spec §6 scopes pr_cleanup behavior out).'
+    created_at: '2026-10-28T23:52:06Z'
+    last_edited: '2026-10-28T23:52:06Z'
+  - id: note-fa88a13
+    text: 'Review i12: bare `pm pr cleanup` (no id) auto-selected only `merged` PRs,
+      so the explicit workdir-removal step `pm pr close` points at answered "No merged
+      PRs with workdirs to clean up" immediately after a close. It now offers both
+      terminal statuses (pr_utils.TERMINAL_PR_STATES + usable_prs) and the no-match/multiple
+      messages say "merged or closed"; the dirty-workdir guard/--force/--all/--prune/--resources
+      are untouched. Tests: test_bare_cleanup_auto_selects_a_closed_workdir, test_bare_cleanup_reports_when_nothing_terminal_has_a_workdir
+      (both fail on i11 HEAD). Also filled two coverage gaps with no behavior change:
+      test_repeat_close_retries_the_github_close (A6 — a repeat close re-attempts
+      `gh pr close` so a failed one can be retried, closed_at preserved) and test_default_close_clears_active_pr_when_nothing_remains
+      (A2 — pointer becomes None when no non-terminal PR remains). Spec synced (R11
+      items 8/18/30, §5, §6). Full suite 4126 passed, 1 skipped; the last two tests
+      were added after that run started and pass in test_pr_close.py (44 passed).
+      Two items still open for the user: (1) A4 cross-PR — pr-3d1fa55/#217 `_reclaim_terminal_pr_windows`
+      would reclaim live windows/containers for `closed` PRs on every 5-minute sync;
+      does `closed` authorize live-resource reclamation, or should #217 limit the
+      sweep to `merged`? (2) pm/plans/plan-a35369f.md still describes a future item
+      premised on `pm pr close` doing `gh pr close --delete-branch`; with close never
+      deleting branches that premise is stale (no PR exists for that item yet).'
+    created_at: '2026-10-29T00:13:50Z'
+    last_edited: '2026-10-29T00:13:50Z'
+  - id: note-21c2cb2
+    text: 'Review i13: (1) `pm pr edit --status pending` (the reopen path every guard
+      message names) now drops `closed_at` in both the pre-lock preview and the locked
+      apply, so the field never names a status the PR is not in and a later close
+      records a fresh closure time (test_reopening_a_closed_pr_drops_the_closure_time).
+      (2) Close output now names the two follow-ups it deliberately leaves to the
+      user: "Reopen: pm pr edit <id> --status pending" and, when a workdir is kept,
+      "Cleanup: pm pr cleanup <id> (--force discards uncommitted changes)" — pinned
+      in test_default_close_retains_entry_and_lifecycle_fields. (3) Added test_close_a_pending_pr_records_a_closure
+      (a never-started PR closes normally; active_pr -> None). (4) Marked the stale
+      premise in pm/plans/plan-a35369f.md: its ruleset item assumed `pm pr close`
+      runs `gh pr close --delete-branch`; a `note` bullet records that branch retention
+      is now unconditional and only the pm doctor/status ruleset check + user docs
+      remain. (5) A4 cross-PR resolved in the spec instead of left with the user:
+      the user clarification covers retained live resources as well as files, so `closed`
+      must not authorize #217/pr-3d1fa55 `_reclaim_terminal_pr_windows`; a cross-PR
+      note (note-4fd0759) asks #217 to limit the sweep to `merged` and leave closed
+      windows to `pm pr cleanup --resources`, with an explicit user exception needed
+      otherwise. Spec synced (R11 items 31-34, A4, §5). Full suite 4130 passed, 1
+      skipped.'
+    created_at: '2026-10-29T00:26:48Z'
+    last_edited: '2026-10-29T00:28:34Z'
+  - id: note-preserve-session-signoff-xhigh
+    created_at: '2026-10-29T00:33:35.084809+00:00'
+    last_edited: '2026-10-29T00:33:35.084809+00:00'
+    text: 'User session policy (explicit request 2026-10-28; /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-592e4bd-route-qa-execution-workers-through-c-bf21931b/AGENTS.md):
+      this DeepSeek PR uses provider:claude-work-xhigh-249 for sign-off. The local
+      session_models.signoff override is intentional, not an unintended model edit.
+      Preserve it while reviewing, committing notes, merging or reconciling registry
+      changes; do not git checkout/restore it away. Keep DeepSeek1017/high for all
+      other roles and wait_for_merge/manual gates unchanged. This note grants no new
+      launch or merge authority.'
+  - id: note-8036246
+    text: 'Review i14: (1) The fake `gh pr close --delete-branch` now really deletes
+      the head branch in the backing repo (new `FakeGitHubRepo.delete_branch`), so
+      the branch-retention assertions in `test_remote_branch_still_exists_after_close`
+      / `test_remove_deletes_only_the_registry_entry` are meaningful instead of vacuous;
+      new tests in test_fake_github.py. (2) `pm pr close --remove` now names only
+      the resources the entry actually had (`Kept: branch ...`, `workdir ...`) via
+      a shared `_retained_resources` helper instead of always claiming "branch and
+      workdir kept", and says the retained workdir is no longer tracked by pm — `pm
+      pr cleanup` resolves the registry entry, so it cannot reach it any more. (3)
+      The dependents warning now ends with the way out: reopen the closed PR or drop
+      it from the dependents depends_on; with `--remove` only the dependency drop
+      (re-adding mints a new id, leaving the old reference dangling). (4) Incidental,
+      same class as the i6 dependents fix: `pm pr cleanup --all` / `--prune` walked
+      data["prs"] raw and indexed p["id"], so a hand-edited id-less entry raised KeyError
+      — for `--all` inside the store lock, after the workdir had already been deleted;
+      both now iterate usable_prs. Tests: test_cleanup_all_tolerates_a_malformed_entry,
+      test_prune_tolerates_a_malformed_entry, test_remove_without_a_workdir_claims_only_the_branch,
+      plus the new fake tests. Spec synced (R5, R7, R11 items 2/10/35/36, §5, §6).
+      Full suite: 4135 passed, 1 skipped before the mechanical `_retained_resources`
+      extraction and 4134 passed, 1 skipped after it — the single failure in each
+      of two runs was in tests/test_push_proxy.py (a different test of the same class
+      each time, both times while two full suites ran concurrently on this machine);
+      that file is untouched by this PR and passes 158/158 on its own. Targeted suites
+      (test_pr_close/test_fake_github/test_pr_cleanup) 105 passed after the extraction.
+      The session_models.signoff override was preserved as requested.'
+    created_at: '2026-10-29T00:59:41Z'
+    last_edited: '2026-10-29T01:01:06Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-1e3cfd0
+    text: 'Implementation integration 2026-10-29: merged origin/master 4a74d88085edffcc300cb21f31777a798d647782
+      into this PR branch (merge commit ab29fb72, pushed). Only pm/project.yaml conflicted
+      — resolved as a union: kept this PR''s pr-a3b86b7 record plus master''s 8 new
+      entries (516 unique ids, no dupes; session_models.signoff override preserved).
+      Code auto-merged cleanly; master never touched pr_utils.py/store.py/graph.py/gh_ops.py/pr_cleanup.py/fake_github.py,
+      and pr_close/_record_status_timestamp/all TERMINAL_PR_STATES derivations are
+      intact. Validation: test_pr_close+test_fake_github+test_pr_cleanup 105 passed;
+      test_pr_sync+test_sync_merge_integrity+test_qa_loop+test_home_window+test_pr_enhancements+test_pr_utils+test_pr_auto_sequence
+      334 passed; full suite 4538 passed, 1 skipped, 1 failed = tests/test_push_proxy.py
+      flake under machine load (a different test of that class each run; both pass
+      alone; neither master nor this PR touched push_proxy files). Prior QA evidence
+      is not a pass for this integrated head; native review/QA to follow. Test isolation
+      observed: no real tmux session or shared host config touched, no QA fixture
+      workers relaunched.'
+    created_at: '2026-10-29T01:53:04Z'
+    last_edited: '2026-10-29T01:53:04Z'
+  - id: note-59c0d19
+    text: 'Review 8820 i1: three terminal-status gaps left by the closed-is-terminal
+      work, each with a failing-then-passing test. (1) `pm pr auto-sequence <closed>`
+      fell through every phase branch to "unknown status: closed" (exit 2) — the driver
+      a watcher session ticks read a legitimately closed PR as broken; it now reports
+      `closed` and returns (exit 0) exactly like `merged` (pr_utils.TERMINAL_PR_STATES).
+      (2) `pm pr signoff <closed>` answered with the generic "sign-off runs after
+      QA" complaint; it now names the deliberate reopen (`pm pr edit <id> --status
+      pending`) like the start/merge guards. (3) `review_loop._pr_is_terminal` was
+      the last literal ("merged","closed") check; it now uses the shared constant
+      (same two statuses, no behavior change), so the spec R11 item 27 claim covers
+      every path. Auto-sequence --help docstring tidied (terminal line, no literal
+      double-backticks). Tests: test_auto_sequence_reports_a_closed_pr_without_advancing_it,
+      test_signoff_refuses_a_closed_pr_and_names_the_reopen — both fail on the previous
+      head. Spec synced (R8, R11 items 27/37/38, §5). Full suite 4540 passed, 1 skipped,
+      1 failed = test_hook_events::test_installer_writes_standalone_receiver, env-only
+      (PM_HOST_HOME set; 20/20 pass with it unset) (/pm-captures/review-8820-i1/full-suite-final.log).
+      Smoke-tested the real CLI on a scratch project: close keeps entry/notes/branch/workdir
+      (dirty + untracked files intact), moves active_pr, warns the dependent; --remove
+      is registry-only; auto-sequence/signoff/start/merge all name the reopen. Rest
+      of the PR re-reviewed as-is — no other changes. (2026-10-29)'
+    created_at: '2026-10-29T02:30:04Z'
+    last_edited: '2026-10-29T02:30:04Z'
+  - id: note-56f7f90
+    text: 'Review 8820 i2: (1) Added test_close_does_not_tear_down_live_resources
+      — the default close and --remove never reach pr_cleanup.cleanup_pr_resources,
+      tmux.kill_window, helpers.kill_pr_windows or container.cleanup_pr_containers
+      (spies verified to fire on a direct call, so it is not vacuous), pinning A4/R4
+      which the cross-PR note to pr-3d1fa55/#217 is about. (2) Added test_close_preserves_merge_and_signoff_evidence:
+      a real signoff record (verdict/sha/report_hash/integration), a merge_integrity
+      finding, spec_pending and the qa state survive close verbatim. (3) The watcher
+      prompt lifecycle list now describes `closed` (retained history, terminal like
+      merged, never satisfies a dependency, reopen or drop the dependency) so a watcher
+      session cannot read a retired PR as one to merge. Spec synced (R11 items 39-41,
+      §5). Full suite 4543 passed, 1 skipped (/pm-captures/review-8820-i2/full-suite.log).
+      No code behavior changed; the rest of the PR re-reviewed as-is. Two items from
+      i11/i12 remain for the user: (a) A4 cross-PR — pr-3d1fa55/#217 _reclaim_terminal_pr_windows
+      would reclaim live windows/containers for `closed` PRs on every 5-minute sync;
+      the note there asks #217 to limit the sweep to `merged`; (b) pm/plans/plan-a35369f.md
+      still carries the stale --delete-branch premise (marked with a note bullet).
+      (2026-10-29)'
+    created_at: '2026-10-29T02:50:42Z'
+    last_edited: '2026-10-29T02:50:42Z'
+  - id: note-c047b42
+    text: 'Review b320 i1: (1) `closed_at` history is now owned by `_record_status_timestamp`
+      (new `previous_status` arg): any explicit transition to another status drops
+      it, and only a fresh closure stamps one. That closes two paths the i13 fix missed
+      — the `$EDITOR` form of `pm pr edit` (`_apply_pr_edit`) left a stale `closed_at`
+      on a reopen, and a merge discovered on GitHub after a local close (`pr_sync`
+      snapshot + locked apply, TUI startup sync) kept `closed_at` on a now-`merged`
+      record; restating `closed` (`pm pr edit --status closed`) no longer re-stamps
+      "now" over the original closure time (the A6 rule, now shared). `pr_close`/`pr_edit`
+      lost their hand-rolled save/restore. New tests: test_editor_reopen_drops_the_closure_time,
+      test_restating_closed_keeps_the_closure_time, test_merge_discovered_after_close_drops_the_closure_time
+      — all three fail on the previous head. (2) `pm pr close --remove --help` now
+      says a PR recorded as merged is left alone. (3) Spec: R1 helper bullet, R11
+      item 31 rewritten (the invariant is centralized, not per-site), §5 helpers.py.
+      Also corrected the A4 cross-PR note citation: the notes on pr-3d1fa55 are note-fd141d0
+      (i10) and note-c48dda1 (i13) — the note did land, but the i13 summary cited
+      a note id (note-4fd0759) that never existed (a duplicate note added this iteration
+      was deleted and the PR-3d1fa55 updated_at restored, so the registry diff is
+      empty). Full suite 4546 passed, 1 skipped, 0 failed (/pm-captures/review-b320-i1/full-suite.log).'
+    created_at: '2026-10-29T03:43:30Z'
+    last_edited: '2026-10-29T03:43:48Z'
+  - id: note-7852903
+    text: 'Review e89f i1: no change to the close contract itself. (1) `_record_status_timestamp`''s
+      new `previous_status` parameter is now keyword-only (`def ...(pr_entry, status=None,
+      *, previous_status=None)`), so a positional slip cannot masquerade as a previous
+      status; every caller already passed it by keyword. (2) The helper''s `closed_at`
+      contract — fresh closure stamps, re-stating `closed` keeps the original time,
+      every other transition drops it, an updated_at-only call leaves it alone — is
+      now pinned directly in `tests/test_cli_helpers.py::TestRecordStatusTimestampClosedAt`
+      (6 tests) rather than only through the CLI paths in test_pr_close.py. (3) Cross-PR
+      note note-e309863 on pr-77c4f91 adds two more id-indexing sites to that bug''s
+      fix surface (`pm pr add`''s duplicate scan and `_apply_pr_edit`''s dependency
+      validation). Full suite 4556 passed, 1 skipped (markdown on PYTHONPATH, PM_HOST_HOME
+      unset). Re-ran the post-fix repro on this head: entry/notes/branch/workdir retained,
+      no --delete-branch, dependent warned, active_pr moved. Observations left as-is
+      (spec §6 scope): `--remove` orphans live tmux/container resources that `pm pr
+      cleanup --resources` can no longer resolve (its message names only the workdir);
+      `store._validate_pr_statuses` backfills created_at/updated_at from merged_at/reviewed_at/started_at
+      but not closed_at.'
+    created_at: '2026-10-29T04:12:53Z'
+    last_edited: '2026-10-29T04:12:53Z'
+  - id: note-934396e
+    text: 'Review e89f i3: no change to the close contract itself. (1) The A4/R4 live-resource
+      regression test was mis-targeted: it patched `pm_core.cli.helpers.kill_pr_windows`,
+      but `pr.py` imports the name directly, so a call from `pm pr close` would not
+      have been intercepted (the i2 claim that the spies were "verified to fire on
+      a direct call" was not backed by the test). It now patches `pm_core.cli.pr.kill_pr_windows`
+      as well and ends with a positive control that fires every spy through its binding
+      (kill_pr_windows, cleanup_pr_resources, kill_window, cleanup_pr_containers),
+      so the empty call list is a real guarantee; it still asserts neither the default
+      close nor --remove reaches a teardown path and the workdir survives. (2) Spec
+      synced (R11 item 39; §5 test list gains tests/test_store_validation.py). (3)
+      Recorded two more id-indexing sites of the same class in `pm pr sync` on pr-77c4f91
+      (note-b14a12e) - the pre-lock detection loop and the locked apply - not fixed
+      here, outside this PR close/cleanup scope. Full suite 4559 passed, 1 skipped,
+      0 failed (/pm-captures/review-e89f-i3/full-suite.log; markdown on PYTHONPATH,
+      PM_HOST_HOME unset).'
+    created_at: '2026-10-29T04:44:58Z'
+    last_edited: '2026-10-29T04:44:58Z'
+  - id: note-9ec1270
+    text: 'Review e89f i4: closed-status durability in the launch commands. `pm pr
+      start` and `pm pr review` check the pre-lock snapshot, then do real work (clone/push/draft-PR
+      create; draft upgrade/workdir resolve) before writing under the lock — a `pm
+      pr close` landing in that window was overwritten: start erased `closed_at`,
+      attached a workdir and re-pointed `active_pr` at the terminal record (A2), review
+      rewrote closed -> in_review. Both applies now call the new shared `helpers._terminal_status_at_lock`
+      on the freshly loaded entry, no-op on a terminal status, and the command exits
+      1 naming it (start notes the prepared workdir is left in place) with no review
+      window opened. signoff/qa-run-bg/auto-sequence already gate their apply on the
+      expected source status, so a concurrent close no-ops there. Tests: test_start_does_not_record_a_start_on_a_concurrently_closed_pr,
+      test_review_does_not_resurrect_a_concurrently_closed_pr (both fail on the previous
+      head — probe: start claimed the active pointer, review printed "marked as in_review").
+      Spec synced (R11 item 45, implicit Lock discipline, §5). Full suite 4549 passed,
+      1 skipped, 12 failed = tests/test_markdown_render.py env-only (no `markdown`
+      package in the pm venv). Rest of the PR re-reviewed as-is — no other changes.'
+    created_at: '2026-10-29T05:11:48Z'
+    last_edited: '2026-10-29T05:11:48Z'
+  - id: note-e27c0d0
+    text: 'QA refiner (S3, closed-PR lifecycle): verified on this branch that `pm
+      pr review <closed>` exits 1 with only `PR <id> is already closed.` — unlike
+      `pm pr start`, `pm pr signoff` and `pm pr merge`, it does not name the reopen
+      command `pm pr edit <id> --status pending`. pm/specs/pr-62ad13d/qa.md R10 requires
+      that command on review too; scenario 3 records the missing hint as a deviation.
+      All other S3 expectations verified verbatim (close dependent warning/hint, unchanged
+      B status+depends_on, pr ready excludes B, start/signoff/merge messages, auto-sequence
+      prints closed exit 0, duplicate-add message).'
+    created_at: '2026-10-29T06:18:26Z'
+    last_edited: '2026-10-29T06:18:26Z'
+  - id: note-849a2db
+    text: 'QA S3 (closed-PR lifecycle, integrated head 161e6350): the scenario passed
+      its retention and dependent-blocking checks verbatim — close keeps entry/branch/workdir,
+      warns `1 dependent PR(s) remain blocked by <A>: <B> (title)` with both ways
+      out, B stays `pending` with `depends_on` intact and is not offered by `pm pr
+      ready`, and the duplicate add of A''s title+description answers `PR already
+      exists: <A>` + `It is closed; reopen it with ''pm pr edit <A> --status pending''...`
+      without creating a second entry. start/signoff/merge refuse with the reopen
+      command and auto-sequence prints `closed` exit 0 launching nothing. One deviation
+      found and fixed: `pm pr review <closed>` was the only lifecycle refusal that
+      did not name the reopen — it printed a bare `PR <id> is already closed.`, though
+      qa.md R10 requires the concrete command on review too. The `closed` branch of
+      the terminal guard now prints the same sentence as start/signoff (`merged` keeps
+      the generic form); new test `test_review_refuses_a_closed_pr_and_names_the_reopen`
+      fails on 161e6350 and passes now; impl.md item 46. Evidence: /pm-captures/scenarios/3/{close-dependents,pre-fix,post-fix,duplicate-add}/.'
+    created_at: '2026-10-29T06:36:51Z'
+    last_edited: '2026-10-29T06:36:51Z'
+  - id: note-7ab4e66
+    text: 'QA S8 (concurrent close/remove/sync/start) refinement notes — verified
+      recipe: (1) disposable HOME; install fake-github BEFORE pm init; point the project
+      repo at the fake backing repo (`pm init "$HOME/.pm/sessions/$TAG/fake-github/remote.git"
+      --backend github --no-import`) so `pm pr start` pushes the PR branch to the
+      stand-in remote. (2) Run `pm pr start` with a PATH that has a pm symlink but
+      no `claude` (e.g. `$SANDBOX/bin:/usr/bin:/bin`), else it launches a model and
+      dies "Not logged in". (3) Each concurrent actor MUST `cd "$TEST_DIR"` inside
+      its own subshell; a stray actor reads /workspace/pm/project.yaml. (4) close-vs-remove
+      always ends with the entry GONE (remove deletes the retained closed entry);
+      the losing close reports "PR not found" or "was removed concurrently; nothing
+      to close", never "Removed registry entry". (5) A hand-edited no-id dependent
+      is skipped by the warning scan (no warning names it); append it AFTER the target
+      — before the target, `store.get_pr` raises KeyError on `pr["id"]`. (6) start-vs-close
+      at ~0.1 s delay reliably hits "became closed while starting — not recording
+      the start" (3/3 rounds); ~0.5 s shows the start-wins ordering.'
+    created_at: '2026-10-29T07:39:37Z'
+    last_edited: '2026-10-29T07:39:37Z'
+  - id: note-4888ed5
+    text: 'Review e086 i1: `pm pr qa <closed>` was the last lifecycle refusal with
+      no route back — its status guard answered the generic `PR <id> has status "closed"
+      — QA requires ...`, so it now prints the same reopen sentence as start/review/signoff/merge
+      via the new `helpers._closed_reopen_hint(pr_id, purpose=None)` (merge passes
+      "to merge it") — one definition, so the five refusals cannot drift. `pr_review`''s
+      wording loses its "already" so all five read identically. The start/merge tests
+      only asserted `closed`/`reopen`, so a regression dropping the concrete command
+      would have gone unnoticed; both now pin `pm pr edit <id> --status pending` verbatim,
+      and new `test_qa_refuses_a_closed_pr_and_names_the_reopen` fails on the previous
+      head (probe-confirmed). `pm pr close --remove` help now says a merged record
+      is "never touched on GitHub" (the old "left alone" read as if the local branch/workdir
+      were involved). Spec synced (R11 item 47, §5 helpers.py). QA scenario 3 NEEDS_WORK
+      (review''s missing reopen hint, fixed in b99217f8) re-verified on this head.
+      Full suite 4563 passed, 1 skipped, 0 failed (/pm-captures/review-e086-i1/full-suite.log;
+      markdown on PYTHONPATH, PM_HOST_HOME unset).'
+    created_at: '2026-10-29T08:35:23Z'
+    last_edited: '2026-10-29T08:35:23Z'
+  - id: note-cf200fb
+    text: 'Review a81e i1: no change to the close contract itself. (1) The watcher
+      prompt''s `closed` lifecycle line (spec R11 item 41) was the only spec item
+      with no test — a rewrite of the lifecycle list could drop it and a watcher session
+      would read a retired PR as "merge it to unblock". Pinned by tests/test_watcher_loop.py::TestGenerateWatcherPrompt::test_describes_closed_as_terminal_history
+      (verified to fail when the line is stripped). (2) The `--remove` orphan note
+      was two copies of one sentence (workdir / no-workdir variants) that had to be
+      kept in sync; it is now one constructed sentence naming only what the entry
+      had — the emitted text is byte-identical, so nothing QA observed changes. (3)
+      The auto-cleanup addendum told sessions to point users at `pm pr cleanup` "to
+      remove merged PR workdirs"; a closed PR''s workdir is exactly the case `pm pr
+      close` points at now, so it reads "merged or closed PR workdirs" (R11 item 48).
+      (4) Spec §5 listed pm_core/cli/pr.py twice; the pr_cleanup bullet is folded
+      into the pr.py bullet, and the test list gains tests/test_watcher_loop.py. Re-verified
+      the contract end-to-end on a scratch project: close keeps entry/notes/branch/workdir,
+      --remove is registry-only (and warns that a removed merged PR''s dependents
+      stay blocked), qa/start/merge refusals name the reopen, cleanup stays explicit
+      and refuses a dirty workdir without --force. Both earlier open items remain
+      resolved: the A4 cross-PR note is on pr-3d1fa55 (note-fd141d0, note-c48dda1)
+      and the stale plan premise is marked in pm/plans/plan-a35369f.md. Full suite
+      4564 passed, 1 skipped, 0 failed.'
+    created_at: '2026-10-29T09:21:30Z'
+    last_edited: '2026-10-29T09:21:30Z'
+  - id: note-ca9e9c9
+    text: 'Review a81e i2: `pm pr close --remove`''s dependent warning no longer says
+      the dependents "stay blocked". That is false for the other --remove input —
+      a *merged* record: its dependents were unblocked by that merge (ready_prs selected
+      them) and deleting the record is what blocks them. It now reads "depend on the
+      removed <X> and are blocked without it", which holds for both inputs (a closed
+      record never satisfied a dependency either). Tests: test_remove_of_a_merged_pr_blocks_its_dependents
+      (ready before, blocked after, wording pinned) plus a new assertion in test_remove_warns_dependents_reference_the_removed_record
+      — both fail on the previous head (probe-verified: ''are blocked without it''
+      missing, old text read ''stay blocked''). Spec synced (R7, R11 item 49). Full
+      suite 4565 passed, 1 skipped, 0 failed (/pm-captures/review-a81e-i2/full-suite.log).
+      No other changes; the close contract itself is untouched.'
+    created_at: '2026-10-29T09:40:00Z'
+    last_edited: '2026-10-29T09:40:00Z'
+  - id: note-dab9ea8
+    text: 'QA S10 (superseded PR survives close, end to end): PASS. Sandboxed project
+      against the fake-github stand-in (no real gh/claude). `pm pr close` with no
+      id on the active in_progress PR A (pr-bb669c4) printed `Using active PR: pr-bb669c4`,
+      closed fake PR #1, recorded status: closed, and printed `Kept: registry entry,
+      branch ..., workdir ...` + Reopen/Cleanup lines; stderr carried the dependent
+      warning + hint for B (verified separately that warning/hint go to stderr, summary
+      to stdout). After close: entry/notes/plan/branch/workdir/GitHub ref unchanged,
+      workdir sha256 listing byte-identical (modified README, untracked local-notes.txt,
+      ignored .cache/, captures/ all intact), `pm pr list` shows [closed], `pm pr
+      list --open` drops A and keeps B pending with `<- [pr-bb669c4]`, stand-in remote
+      branch still resolves, fake PR #1 state CLOSED, active_pr reassigned off the
+      closed entry. Second story: `pm pr close <C> --keep-branch` on a second started
+      PR (pr-9713a73) is silent about the deprecated flag and leaves branch+workdir
+      intact — same SHA 26e6d49e in workdir, target repo and stand-in. Third: `pm
+      pr close --help` / `pm pr cleanup --help` document the retention contract, `--keep-branch`
+      deprecated no-op, `--remove` registry-only, and cleanup auto-selecting the sole
+      terminal (merged or closed) PR. Regression tests: tests/test_pr_close.py 62
+      passed. No bug found; no code change. Evidence: /pm-captures/scenarios/10/{close-default,close-keep-branch,help-contract}/
+      (cast + mp4 + manifests).'
+    created_at: '2026-10-29T10:33:38Z'
+    last_edited: '2026-10-29T10:33:38Z'
+  - id: note-242dc82
+    text: 'QA S11 (closed PR inert to every automated driver and lifecycle command,
+      head 292c738d): PASS 5/5 stories, verified at runtime in a pm session on a dedicated
+      tmux socket. auto-sequence A -> exactly `closed`, exit 0, no impl/review/QA
+      window; one watcher iteration (`pm watcher --wait 5 --max-iterations 1`, fake
+      watcher->READY) opened only the `watcher` window, printed `[10:31:04] Iteration
+      1: READY` + `Watcher finished: 1 iteration(s), last verdict: READY`, and changed
+      nothing; `pr ready` -> "No PRs are ready to start." (closed never satisfies
+      a dependency), `list --open` omits A, `list` shows A [closed], `show A` retains
+      status/branch/notes, `graph` renders A as a closed node; start/review/qa/signoff/merge
+      all exit 1 with the identical stderr sentence `PR <id> is closed — reopen it
+      first with ''pm pr edit <id> --status pending''.` (merge appends ` to merge
+      it.`), no window created, no Workdir; duplicate add of A title+description ->
+      `PR already exists` + closed-reopen hint, no second entry. Targeted tests test_pr_auto_sequence/test_watcher_loop/test_pr_close
+      171 passed. Captures: /pm-captures/scenarios/11/{auto-sequence-closed,watcher-iteration,readonly-commands,lifecycle-refusals,duplicate-add}/.'
+    created_at: '2026-10-29T10:33:43Z'
+    last_edited: '2026-10-29T10:33:43Z'
+  - id: note-5a86714
+    text: 'QA S12 (GitHub convergence) on 8892e73d: PASS. All five triples driven
+      through the real CLI against the git-backed stand-in in an isolated sandbox
+      (dedicated HOME + PM_TMUX_SOCKET, TMUX unset; no real session or shared host
+      config touched). (1) close --keep-github then sync: "No status changes.", closed_at
+      byte-identical across the sync, stand-in #1 still OPEN, B not ready. (2) discovered
+      merge: "Updated 1 PR(s). / Merged: <A>", merged_at set and closed_at dropped,
+      B becomes ready. (3) locally merged C (stand-in OPEN) and D (stand-in CLOSED):
+      "No status changes.", every merged_at byte-identical, A stays merged, stand-in
+      untouched. (4) close of merged A exits 1 with the --remove pointer; --remove
+      is registry-only ("GitHub PR #1 left unchanged (the PR is recorded as merged)",
+      branch kept, B warned and blocked), C --remove leaves #2 OPEN, D --remove --keep-github
+      prints the keep-github sentence and no "open"; pr list keeps only B and the
+      backing repo still has feat-a/feat-c/feat-d. (5) sync-github --help carries
+      the durability sentence verbatim. Evidence: /pm-captures/scenarios/12/story-full/{recording.cast,recording.mp4,transcript.log,manifest.md}.
+      Targeted regression: test_pr_sync.py + test_sync_merge_integrity.py 68 passed,
+      plus the 4 named closed/merged sync-durability tests.'
+    created_at: '2026-10-29T10:55:46Z'
+    last_edited: '2026-10-29T10:55:46Z'
+  - id: note-b140aae
+    text: 'QA S13 (closure history, head f1f4ac9d): PASS. Six Given/When/Then stories
+      driven through the real CLI on a throwaway project (/tmp/pm-qa-s13-rec, isolated
+      HOME, PYTHONPATH=/workspace; `pm which` -> /workspace/pm_core). Reopen drops
+      closed_at both via `pm pr edit --status pending` and via the $EDITOR form (a
+      wrapper that changes only the status line), and keeps the single note. A close
+      after a reopen stamps a strictly later time (T1 2026-10-29T11:02:30.669492 <
+      T2 11:02:33.474516). `pm pr edit --status closed` on an already-closed record
+      reads closed -> closed and leaves closed_at byte-identical while updated_at
+      moves. A repeat close keeps the original closed_at, moves updated_at, and adds
+      no duplicate note (`pm pr note list` = 1 line). A hand-seeded legacy record
+      (status: closed, no closed_at) keeps closed_at absent across two closes and
+      a restate; only updated_at moves, so no closure time is invented. Supporting:
+      21 closure-time tests in tests/test_pr_close.py + tests/test_cli_helpers.py
+      pass (incl. test_reopening_a_closed_pr_drops_the_closure_time, test_editor_reopen_drops_the_closure_time,
+      test_restating_closed_keeps_the_closure_time, test_repeat_close_does_not_invent_a_closure_time).
+      Evidence: /pm-captures/scenarios/13/closure-history/ (recording.mp4, recording.cast,
+      transcript.log, manifest.md, drive-stories.sh).'
+    created_at: '2026-10-29T11:05:28Z'
+    last_edited: '2026-10-29T11:05:28Z'
+  - id: note-06fa0c4
+    text: 'QA S14 (address forms, never-started PRs, odd/malformed records): PASS,
+      no code change. Verified end-to-end against the fake-github stand-in on this
+      head (b34f7bf63) in an isolated sandbox (own HOME, PATH without the push-proxy
+      git wrapper or claude). Story 1: `pm pr close "#2"` and `pm pr close 3` both
+      print Closing/GitHub-closed/Closed #N + Kept/Reopen/Cleanup; entries, workdirs
+      and stand-in branch refs all survive, stand-in #2/#3 CLOSED with next_number
+      unchanged, `pm pr list` keeps both as [closed]. Story 2: no-argument close of
+      the never-started active PR C prints `Using active PR:` then the Kept line with
+      only the branch reference (no workdir, no Cleanup), makes no GitHub call (stand-in
+      fingerprint byte-identical), creates no branch on the stand-in remote, and clears
+      active_pr to null. Story 3: D with a deleted workdir keeps the exact missing
+      path and `pm pr list --workdirs` reports (missing) without recreating or pruning
+      it; E started with --workdir /scratch/s14/outside keeps that path and its target
+      tree sha256 listing is identical before/after. Story 4: with an id-less entry
+      appended after A, `pm pr close <A-id>` exits 0 with full normal output, warns
+      only the real dependent R (plus Hint), and `pm pr show` still reports closed.
+      Recorded, not scored: `pm pr list` (and close-by-GitHub-number) still raises
+      KeyError: id in store.get_pr/pr_list when an id-less entry is present - pre-existing,
+      outside this scenario Then; recipe caveats preserved from the earlier refiner
+      note: quote "#N" (unquoted is a bash comment and closes the active PR), and
+      the stand-in PR head reads branch-N so check branch survival against the registry
+      Branch value. Evidence: /pm-captures/scenarios/14/{close-by-number,never-started,odd-workdirs,malformed-record}/.
+      tests/test_pr_close.py 62 passed.'
+    created_at: '2026-10-29T11:28:53Z'
+    last_edited: '2026-10-29T11:28:53Z'
+  - id: note-f0bb4ea
+    text: 'S16 refiner (concurrent close/remove/reopen/start/cleanup/lock) — verified
+      end-to-end on this branch with the fake-github recipe: disposable HOME; fake-github
+      installed BEFORE `pm init <fake remote.git> --backend github --no-import`; PRs
+      started with a no-claude PATH; every actor in its own `cd $TEST_DIR` subshell.
+      Observed: (1) two simultaneous `pm pr close A` both exit 0, one closed entry,
+      `closed_at` stays byte-identical on a later repeat close while `updated_at`
+      advances. (2) close vs `close --remove` ends with the entry removed whenever
+      remove applies; the losing close is either `PR ''<id>'' not found.` (rc 1) or
+      `PR <id> was removed concurrently; nothing to close.` (rc 0), never `Removed
+      registry entry`; workdir and remote branch survive. (3) close vs `pm pr edit
+      A --status pending` ends closed or pending, never pending with `closed_at`.
+      (4) a fresh `pm pr start` followed ~0.1 s later by close reliably hits the at-lock
+      guard `became closed while starting — not recording the start.` (rc 1) with
+      the prepared workdir left on disk; the start-wins ordering also ends closed.
+      (5) `pm pr cleanup --all --force` clears workdirs but NEVER removes registry
+      entries — the draft''s "entry gone when --all ran" is wrong; only `--remove`
+      removes. (6) holding `pm/project.yaml.lock` with flock for >2 s yields `Error:
+      Could not acquire lock on ... within 2.0s ...` (rc 1), registry untouched, retry
+      succeeds. One expected artifact of ordering (4): if close''s pre-lock snapshot
+      predates the concurrent start''s draft PR, that GitHub PR can stay OPEN on the
+      stand-in while the local record is closed — not an R16 violation. Scenario refined,
+      not rejected.'
+    created_at: '2026-10-29T11:46:21Z'
+    last_edited: '2026-10-29T11:46:21Z'
+  - id: note-1473c30
+    text: 'QA S16 (concurrent close/remove/reopen/start/cleanup/lock): PASS, 7/7 races,
+      executed end to end on this head in a disposable-HOME sandbox against the fake-github
+      stand-in (git_backed remote; pm shim on a PATH with no claude; every actor in
+      its own `cd $TEST_DIR` subshell; no pm session/TUI created, PM_TMUX_SOCKET sandboxed).
+      (1) two simultaneous `pm pr close A`: both exit 0, both print Closed #1 + Kept
+      lines, exactly one closed entry; a third sequential close keeps `closed_at`
+      byte-identical while `updated_at` advances; dirty workdir + remote branch +
+      fake PR CLOSED all intact; project.active_pr -> None. (2) close vs `close --remove`:
+      entry gone, `--remove` prints Removed registry entry + Kept for the resources
+      it had, workdir/branch survive, project.yaml parses with unique ids; the losing
+      close is `PR <id> not found.` (rc 1) or `was removed concurrently; nothing to
+      close.` (rc 0), never `Removed registry entry` — both orderings observed across
+      runs. (3) close vs `edit --status pending` x3 rounds: both exit 0 each round,
+      final closed or pending, never pending-with-closed_at, note/workdir/branch intact.
+      (4) start vs close at 0.1s: close wins (start rc 1 `became closed while starting
+      — not recording the start.`, workdir field null, prepared workdir left on disk);
+      start-wins ordering also exercised (start rc 0 `is now in_progress` + Work directory,
+      close then closes it with the workdir attached). (5) close vs `cleanup --force`:
+      cleanup removes the workdir, close keeps the entry and never claims a deletion;
+      final closed + closed_at + workdir null. (6) close vs `cleanup --all --force`:
+      `Cleaned N/N workdirs.`, E stays in the registry closed with workdir null —
+      --all never deletes entries. (7) held flock: close exits 1 with the exact `Could
+      not acquire lock ... within 2.0s` stderr, registry untouched (status pending,
+      updated_at unchanged), retry succeeds after release. No tracebacks anywhere;
+      no bugs found, no code changed. Evidence: /pm-captures/scenarios/16/race-suite/
+      (recording.cast+mp4 of all seven races, driver.sh, validation-run.log, race2-losing-close/)
+      and /pm-captures/scenarios/16/start-wins/ (recording of the start-wins ordering).'
+    created_at: '2026-10-29T11:57:49Z'
+    last_edited: '2026-10-29T11:57:49Z'
+  model: provider:deepseek-flash
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  effort: high
+  session_effort:
+    signoff: high
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62ad13d-bug-pm-pr-close-removes-the-pr-entry-c6fab519
 - id: pr-a5a800a
   plan: bugs
   title: 'Defensive: normalize window-size on pm session init so external ''manual''
@@ -28969,7 +29651,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/217
   gh_pr_number: 217
   created_at: '2026-05-24T21:50:28.501175+00:00'
-  updated_at: '2026-05-25T03:22:10.165069+00:00'
+  updated_at: '2026-10-29T00:29:09.264555+00:00'
   started_at: '2026-05-24T21:58:50.019678+00:00'
   reviewed_at: '2026-05-25T03:22:10.165069+00:00'
   merged_at: null
@@ -28980,6 +29662,37 @@ prs:
       a TUI restart: PASS (workdir: /home/matt/.pm/workdirs/qa/pr-3d1fa55-c66689e5322c9701)'
     created_at: '2026-05-25T04:20:49Z'
     last_edited: '2026-05-25T04:20:49Z'
+  - id: note-fd141d0
+    text: 'Cross-PR interaction from pr-62ad13d (review c02f i10): `pm pr close` now
+      retains the entry with status: closed (non-destructive close — entry/notes/branch/workdir
+      all kept). Your `_reclaim_terminal_pr_windows` sweep reclaims windows/containers
+      for any `_TERMINAL_STATUSES` PR on every sync, so a locally closed PR would
+      have its impl/review/QA windows and containers torn down on the next reload
+      — i.e. an automatic cleanup triggered by closing, which pr-62ad13d spec A4/R4
+      explicitly ruled out ("close must not tear down tmux windows/containers; that
+      is `pm pr cleanup --resources`"). Files/branch/workdir are untouched either
+      way. Please confirm with the user whether `closed` should authorize live-resource
+      reclamation (your current behavior) or whether the sweep should be limited to
+      `merged`, leaving close fully non-destructive until an explicit `pm pr cleanup
+      --resources`. pr-62ad13d spec A4 now records this interaction. Related: pr-62ad13d,
+      pr-0939d97.'
+    created_at: '2026-10-28T11:11:33Z'
+    last_edited: '2026-10-28T11:11:33Z'
+  - id: note-c48dda1
+    text: 'Cross-PR note from pr-62ad13d (review c02f i13), superseding the i10 note
+      that left this "with the user": the user clarification on pr-62ad13d is explicit
+      that "any cleanup must remain a separate, explicitly requested operation" and
+      that no "automatic cleanup fallback or delayed deletion triggered merely by
+      closing" may be added, and it covers retained live resources as well as files.
+      So `closed` must not authorize _reclaim_terminal_pr_windows: please limit the
+      sweep to `merged` and leave a closed PR''s windows/containers to the explicit
+      `pm pr cleanup --resources` (which pr-62ad13d points users at). If you believe
+      closed windows should be swept automatically, get the user''s explicit approval
+      for that exception before including `closed` in the sweep — as specced, including
+      it re-introduces exactly the close-triggered automatic cleanup pr-62ad13d A4/R4
+      rules out.'
+    created_at: '2026-10-29T00:28:25Z'
+    last_edited: '2026-10-29T00:29:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-3d1fa55-bug-terminal-status-prs-keep-their-t-c52f26ee
 - id: pr-d82e0f1
   plan: null
@@ -38250,75 +38963,78 @@ prs:
   notes: []
 - id: pr-592e4bd
   plan: improvements
-  title: Route QA scenario refinement and execution through claude-mixed work models; keep other
-    sessions on main Claude
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
   status: pending
   depends_on: []
-  description: 'The user expects the main Claude subscription to run out before reset. Integrate
-    the existing claude-mixed/work-model routing promptly so autonomous QA scenario refinement
-    and execution workers use the work account; all other PM sessions retain the main account
-    and plain Claude binary for remote control. Keep Opus5.5/high effort: work/claude-opus-5-5
-    for scenario refinement (qa_concretize) and execution (qa_scenario) workers, claude-opus-5-5
-    for the other roles unless the user changes that policy.
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
 
 
     Current integration points and gaps:
 
-    - PM already resolves models/providers independently for qa_planning, qa_scenario, qa_concretize,
-    qa_verification and qa_finalize via model_config.py, pm model set, and qa_loop._resolve_qa_model.
-    Reuse this configuration and the common launcher boundary rather than adding a parallel
-    scheduler.
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
 
-    - claude_launcher.py currently hardcodes the claude executable. The user''s host launcher
-    is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py with
-    ~/.config/claude-router/routes.json. The anthropic-work backend selects the work/ prefix,
-    strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
     on each request. Keep account credentials on the host; do not embed them in project.yaml,
     generated launch commands, logs or captures.
 
-    - Existing QA containers use slirp4netns. Probes from a real QA container failed to connect
-    to port8790 at both127.0.0.1 and host.containers.internal; the host router is up on127.0.0.1:8790.
-    Provide a tested container-compatible route/launcher using the existing host router without
-    publicly exposing the credential-bearing router or changing global networking for unrelated
-    sessions. Host QA must work too. Do not silently fall back to the main account when work
-    routing is unavailable.
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
 
-    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive QA
-    session from scenario-worker targeting so s0 stays on main/plain Claude and remains available
-    for remote control. Planning, verification, finalization, implementation, review, sign-off
-    and other interactive sessions also stay on main/plain Claude. Preserve fake-claude behavior,
-    hooks, transcript discovery and session identity.
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
 
 
     Acceptance:
 
-    A configured project can select the launcher/model route for QA scenario refinement and
-    execution workers only, with existing overrides and resumed/relaunched workers handled consistently.
-    Normal sessions retain their current main binary/account/model; no global claude replacement,
-    global account swap, or accidental model downgrade. Route selection is visible without exposing
-    credentials. Startup/auth/router errors explain the required remedy and leave a recoverable
-    state, not an unexplained human-judgment verdict or fallback billed to the main account.
-    Validate initial worker launch, replacement/retry and restart adoption, plus refinement
-    launch/retry paths and unaffected s0, planner, verifier, finalizer and review launch commands.
-    Add focused regressions and a real container/host smoke using a harmless prompt through
-    the work route when authentication is available; verify actual backend/model routing and
-    normal hooks/transcript output. Keep manual merge/spec-review gates.
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
 
 
-    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host smoke
-    through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result ok, reported model
-    work/claude-opus-5-5). Container transport and hooks/transcript smoke are still required.
-    Do not change login credentials yourself or copy tokens into containers. Host scripts claude-work-ping
-    / claude-work-expiry document the current refresh workflow; the router itself only reads
-    the token and does not refresh it.
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
 
 
-    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery changes;
-    keep this PR focused on role/account routing. No dependency on the larger Codex integration/refactor
-    is required. After merge, configure this project''s QA scenario refinement and execution
-    workers to the validated work route; leave already running sessions intact unless the user
-    requests migration.
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
 
     '
   agent_machine: null
@@ -38331,58 +39047,61 @@ prs:
   merged_at: null
   notes:
   - id: note-da1f854
-    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize) and execution
-      (qa_scenario) through the work account, retaining Opus5.5/high. All other roles, including
-      interactive QA s0, planning, verification and finalization, stay on main/plain Claude
-      for RC. User work login is complete; a host claude-mixed work/claude-opus-5-5 smoke returned
-      ok. Container/hook/transcript validation remains required. Main-account session limit
-      resets18:40UTC; supervisor will nudge the blocked non-QA runs after reset and shepherd
-      this PR to sign-off, preserving manual merge/spec gates.'
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
   - id: note-ae7cf29
-    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review. Three things
-      for this branch:
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
 
 
-      1. S127''s restart expectation is now the observable contract, not a cosmetic log: after
-      a plain TUI restart with auto-start off, the PR at qa whose return record says awaiting:
-      qa is started exactly once when the live `pm qa run` ends — one qa-<pr> window set, one
-      verifier, one finalizer, one qa_status.json — and no second loop ever starts over the
-      live run. master''s implementation also logs "Sign-off REQA for <pr> — QA starts once
-      the QA run another process drives ends" once per return episode (first poll tick or mount),
-      so an assertion on that line still holds there, but it is not the contract. Please relax
-      S127''s Then accordingly rather than requiring the line.
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
 
 
-      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the owed start
-      in app._pending_auto_qa + app._reqa_waiting — memory only, which is the bug pr-db3bf10
-      fixes. master now persists the obligation in signoff_return.awaiting + a qa_run.json run
-      record, reconciles it from qa_loop_ui.poll_qa_state and App.on_mount regardless of the
-      auto-start switch, and gates every starter (sign-off hop, auto-start pass, pm pr auto-sequence)
-      on signoff.claim_return_launch(..., require_status="qa"). On merge, route the REQA deferral
-      through qa_loop_ui.start_owed_reqa / reconcile_owed_reqa and drop the in-memory pending
-      entry: otherwise the durable path claims while the in-memory path calls start_qa directly,
-      and the two can each start a loop for the same obligation.
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
 
 
-      3. run_driven_elsewhere exists on both sides with the same signature and semantics. master''s
-      version has only qa_run.json (written at the top of run_qa_sync / resume_qa_sync, owner
-      pid + owner_start) and reuses resume_owned_elsewhere; this branch''s richer record set
-      (write_launch_record, own_run_driven_since, run_overlaps_own_run, launched_elsewhere)
-      should win on merge.'
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
     created_at: '2026-10-28T15:57:32Z'
     last_edited: '2026-10-28T15:57:32Z'
   - id: note-9b00f90
     text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
-      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd) but goes
-      further: a failed launch is retried up to 3 times and then reported as LAUNCH_FAILED (retryable)
-      instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
-      expects a single attempt and latest_verdict == "ERROR"; after both merge, update it to
-      expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR as an alias.
-      The no-traceback behavior is preserved (ReviewLaunchError is caught with _log.error, not
-      _log.exception), and _launch_review_window keeps the "Review window launch failed (rc=N):
-      <detail>" message shape.'
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
@@ -39545,11 +40264,42 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
-  updated_at: '2026-10-27T01:30:16.482567+00:00'
+  updated_at: '2026-10-29T04:41:26.423301+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-7a9e33b
+    text: 'Related location from pr-62ad13d review (c02f i6): pm_core/store.py:613
+      `get_pr` also indexes `pr["id"]` directly, so a PR entry without a usable id
+      makes it raise KeyError. `pm pr close` calls `store.get_pr` inside its locked
+      apply, so an id-less entry preceding the target aborts the close before the
+      status write. Add `store.get_pr`/`get_plan` to the fix surface (skip non-dict/id-less
+      entries, as usable_prs does). The close command itself now uses usable_prs for
+      its dependent scan; the store helper is the remaining gap.'
+    created_at: '2026-10-28T08:58:17Z'
+    last_edited: '2026-10-28T08:58:17Z'
+  - id: note-e309863
+    text: 'Two more id-indexing sites of the same class (from pr-62ad13d review e89f
+      i1): `pm pr add`''s duplicate scan (iterates data["prs"] and reads p["title"],
+      then builds fresh_ids = {p["id"] ...}) and the $EDITOR apply path `_apply_pr_edit`''s
+      dependency validation (existing_ids = {p["id"] for p in (data.get("prs") or
+      [])}). Both raise KeyError on a hand-edited entry with no usable id, before
+      any write. Include them in the fix surface alongside store.get_pr/get_plan.'
+    created_at: '2026-10-29T04:09:33Z'
+    last_edited: '2026-10-29T04:09:33Z'
+  - id: note-b14a12e
+    text: 'Two more id-indexing sites of the same class (from pr-62ad13d review e89f
+      i3), in `pm_core/cli/pr.py` `pr_sync()` (`pm pr sync`, the GitHub auto-merge
+      detector): (1) the pre-lock detection loop iterates `prs = data.get("prs") or
+      []` and does `merged_ids.add(pr_entry["id"])`, so an entry without a usable
+      id raises KeyError before any write; (2) the apply loop `for pr in data.get("prs")
+      or []: if pr["id"] in merged_ids` indexes raw entries inside `store.locked_update`.
+      Both should iterate `usable_prs(...)` like the sibling loops. Not fixed in pr-62ad13d
+      because it is outside that PR close/cleanup scope; recorded here with the other
+      sites.'
+    created_at: '2026-10-29T04:37:15Z'
+    last_edited: '2026-10-29T04:41:26Z'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy
@@ -40391,6 +41141,40 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a3b86b7
+  plan: bugs
+  title: 'Bug: retained closed PRs have no TUI toggle, unlike merged PRs (pm pr close
+    keeps them hidden)'
+  branch: pm/pr-a3b86b7-bug-retained-closed-prs-have-no-tui-toggle-unlike-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/tech_tree.py:758 (_hide_closed hardcoded True),
+    pm_core/tui/tree_layout.py:172 (filters closed PRs), pm_core/tui/pr_view.py:318
+    (toggle_merged has a keybinding; there is no closed equivalent). Repro: pm pr
+    close <id> now retains the entry with status closed (pr-62ad13d), but the TUI
+    hides it by default and only the f status-filter cycle can reveal it; merged records
+    get the X toggle and a persisted hide_merged setting. Fix: add a symmetric show/hide-closed
+    toggle (and, if desired, a hide_closed project setting), update the help screen,
+    and cover it in the TUI tests. Related: pr-0939d97.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T11:01:11.032240+00:00'
+  updated_at: '2026-10-29T04:21:14.594555+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-4d07af3
+    text: 'Related gap in the same surface (found in pr-62ad13d review e89f i2): the
+      TUI sort menu has no closed_at field. pm_core/tui/tree_layout.py SORT_FIELDS
+      lists updated/created/started/reviewed/merged_at but not closed_at, so a retained
+      closed record cannot be sorted by its closure time (only merged records can
+      be sorted by merged_at). Adding ("closed_at", "closed") to SORT_FIELDS is enough
+      — _activity_sort_key reads the field generically and the sort-cycle tests are
+      length-agnostic. Group with the show/hide-closed toggle work.'
+    created_at: '2026-10-29T04:21:14Z'
+    last_edited: '2026-10-29T04:21:14Z'
 - id: pr-5d53171
   plan: bugs
   title: 'Bug: stopping a QA run while a scenario PASS is mid-verification still aggregates
@@ -42032,6 +42816,30 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T18:02:48.130836+00:00'
   updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-996519f
+  plan: bugs
+  title: 'Bug: pm pr start prints "is now in_progress" when the PR stays in_review'
+  branch: pm/pr-996519f-bug-pm-pr-start-prints-is-now-in-progress-when-the
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py start_pr (~line 1162) echoes "PR <id> is now in_progress
+    on <machine>" unconditionally, but the locked apply only advances the status when
+    it is pending ("do not regress in_review/merged"). Repro: pm init --backend github
+    --no-import on a repo with an OPEN GitHub PR (imported as in_review), then pm
+    pr start <id> -> output says "is now in_progress" while pm pr list / pm pr show
+    still report in_review. Observed during QA scenario 17 on pr-62ad13d (head dd63a277).
+    Fix: echo the status actually recorded (pr_entry.get("status")) or word the line
+    as "started". Pre-existing on master (line predates this PR); not a close/retention
+    issue.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T12:19:00.653089+00:00'
+  updated_at: '2026-10-29T12:19:00.653089+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

@@ -30,6 +30,8 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
+from pm_core.pr_utils import TERMINAL_PR_STATES
+
 SCHEMA = "pm.autostart.status/1"
 
 POLICY_AUTO = "auto_merge"
@@ -63,7 +65,10 @@ _STATUS_PHASE = {
     "closed": "done",
 }
 
-TERMINAL_STATUSES = ("merged", "closed")
+# Statuses that end a PR's lifecycle.  One definition (pr_utils) shared with
+# the sync/close guards, so "terminal" cannot drift between them; the name is
+# kept here because the scheduler, CLI and popups import it from this module.
+TERMINAL_STATUSES = TERMINAL_PR_STATES
 
 # ``pm_home()`` subdirectory where the TUI writes ``pm autostart`` replies
 # (``<reply_id>.json``) and the CLI polls for them.

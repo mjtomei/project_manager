@@ -18,7 +18,7 @@ import click
 import yaml
 
 from pm_core import store, graph, git_ops, prompt_gen, merge_integrity
-from pm_core.pr_utils import VALID_PR_STATES
+from pm_core.pr_utils import TERMINAL_PR_STATES, VALID_PR_STATES, usable_prs
 from pm_core.shell import shell_quote
 from pm_core import pr_sync as pr_sync_mod
 from pm_core import tmux as tmux_mod
@@ -30,6 +30,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _closed_reopen_hint,
     _ensure_workdir,
     _get_pm_session,
     _gh_state_to_status,
@@ -44,6 +45,7 @@ from pm_core.cli.helpers import (
     _resolve_pr_id,
     _resolve_repo_dir,
     _resolve_repo_id,
+    _terminal_status_at_lock,
     _workdirs_dir,
     echo_record,
     emit_paged,
@@ -175,7 +177,10 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             if parsed["status"] != current_status and parsed["status"] in valid_statuses:
                 pr_entry["status"] = parsed["status"]
                 changes.append(f"status: {current_status} → {parsed['status']}")
-                _record_status_timestamp(pr_entry, parsed["status"])
+                # The editor is the other `pm pr edit` path: reopening here
+                # drops the closure time too (pr-62ad13d).
+                _record_status_timestamp(pr_entry, parsed["status"],
+                                         previous_status=current_status)
 
         # Dependencies (skip unknown IDs silently)
         if parsed["depends_on_str"] is not None:
@@ -299,6 +304,13 @@ def pr_add(title: str, plan_id: str, depends_on: str, desc: str):
     branch = entry["branch"]
     if result.get("duplicate"):
         click.echo(f"PR already exists: {_pr_display_id(entry)}: {title}")
+        if entry.get("status") == "closed":
+            # `pm pr close` retains the entry (pr-62ad13d), so a closed
+            # record now matches this duplicate check.  Say how to reuse it
+            # rather than leaving the add silently unfulfilled.
+            click.echo(f"  It is closed; reopen it with "
+                       f"'pm pr edit {entry['id']} --status pending' to reuse "
+                       f"it, or use a different title.")
     else:
         click.echo(f"Created {_pr_display_id(entry)}: {title} (now active)")
         click.echo(f"  branch: {branch}")
@@ -338,7 +350,9 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         old_status = pr_entry.get("status", "pending")
         pr_entry["status"] = status
         changes.append(f"status: {old_status} → {status}")
-        _record_status_timestamp(pr_entry, status)
+        # ``closed_at`` describes a closure (pr-62ad13d): the helper drops it
+        # on a reopen and keeps it when the status merely restates `closed`.
+        _record_status_timestamp(pr_entry, status, previous_status=old_status)
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -439,8 +453,11 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         if desc is not None:
             pr["description"] = desc
         if status is not None:
+            # Mirrors the pre-lock preview above: reopening drops the closure
+            # time, restating `closed` keeps it (pr-62ad13d).
+            prior_status = pr.get("status") or "pending"
             pr["status"] = status
-            _record_status_timestamp(pr, status)
+            _record_status_timestamp(pr, status, previous_status=prior_status)
         if depends_on is not None:
             if depends_on == "":
                 pr["depends_on"] = []
@@ -514,7 +531,7 @@ def pr_list(workdirs: bool, timestamps: bool, open_only: bool, filter_status: st
         return
 
     if open_only:
-        prs = [p for p in prs if p.get("status") not in ("closed", "merged")]
+        prs = [p for p in prs if p.get("status") not in TERMINAL_PR_STATES]
     if filter_status:
         prs = [p for p in prs if p.get("status") == filter_status]
     if filter_plan:
@@ -938,6 +955,13 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
 
+    if pr_entry.get("status") == "closed":
+        # Closed is a terminal lifecycle record (`pm pr close` keeps it), so a
+        # start would silently resurrect a PR the user retired.  Reopening is
+        # an explicit status edit.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
+        raise SystemExit(1)
+
     # Determine tmux session name (used for fast-path check and later launch)
     pm_session = _get_pm_session()
 
@@ -1100,10 +1124,19 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     # Update state under lock — only advance from pending; don't regress in_review/merged
     machine = platform.node()
     work_path_str = str(work_path)
+    terminal_at_lock: str | None = None
 
     def apply(data):
+        nonlocal terminal_at_lock
         pr = store.get_pr(data, pr_id)
         if not pr:
+            return
+        # A `pm pr close`/merge that landed while this start was cloning and
+        # pushing wins: attaching a workdir, the active pointer and an
+        # `in_progress` timestamp to a terminal record would erase its
+        # closed_at and re-activate a retired PR (pr-62ad13d).
+        terminal_at_lock = _terminal_status_at_lock(pr)
+        if terminal_at_lock:
             return
         if pr.get("status") == "pending":
             pr["status"] = "in_progress"
@@ -1116,6 +1149,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
+    if terminal_at_lock:
+        click.echo(
+            f"PR {pr_id} became {terminal_at_lock} while starting — not "
+            f"recording the start. Any prepared workdir is left in place.",
+            err=True)
+        raise SystemExit(1)
     # Reload pr_entry from updated data (now contains gh_pr_number)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
@@ -1606,8 +1645,14 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     status = pr_entry.get("status")
     display_id = _pr_display_id(pr_entry)
 
-    if status in ("merged", "closed"):
-        click.echo(f"PR {pr_id} is already {status}.", err=True)
+    if status in TERMINAL_PR_STATES:
+        if status == "closed":
+            # A closed record is retained, so name the way out here too
+            # (start/signoff/merge/qa do): reopening is the only route back
+            # into the lifecycle.
+            click.echo(_closed_reopen_hint(pr_id), err=True)
+        else:
+            click.echo(f"PR {pr_id} is already {status}.", err=True)
         raise SystemExit(1)
     if status == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")
@@ -1666,14 +1711,29 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
+    terminal_at_lock: str | None = None
+
     def apply(data):
+        nonlocal terminal_at_lock
         pr = store.get_pr(data, pr_id)
         if not pr:
+            return
+        # Upgrading the draft PR and resolving the workdir happen outside the
+        # lock; a `pm pr close`/merge landing meanwhile must win — moving a
+        # terminal record back to `in_review` would resurrect it and erase
+        # its closed_at (pr-62ad13d).
+        terminal_at_lock = _terminal_status_at_lock(pr)
+        if terminal_at_lock:
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
 
     store.locked_update(root, apply)
+    if terminal_at_lock:
+        click.echo(
+            f"PR {pr_id} became {terminal_at_lock} while opening the review — "
+            f"not marked in_review and no review window was opened.", err=True)
+        raise SystemExit(1)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     if no_window:
@@ -1743,6 +1803,11 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
 
     if status == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
+        raise SystemExit(1)
+    if status == "closed":
+        # A retained closed record (pr-62ad13d) is terminal: name the way out
+        # instead of the generic "sign-off runs after QA" status complaint.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
         raise SystemExit(1)
     # With project.skip_qa there is no QA stage: sign-off follows review.
     entry_statuses = ("qa",)
@@ -2651,6 +2716,12 @@ def pr_qa(pr_id: str | None):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    if pr_entry.get("status") == "closed":
+        # A retained closed record (pr-62ad13d) is terminal for QA as well, so
+        # name the way out like start/review/signoff/merge do rather than
+        # answering with the generic "QA requires ..." status complaint.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
+        raise SystemExit(1)
     if pr_entry.get("status") not in ("in_progress", "in_review", "qa"):
         click.echo(f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires in_progress, in_review, or qa.", err=True)
         raise SystemExit(1)
@@ -2780,6 +2851,16 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
             resolve_window=resolve_window, background=background,
             transcript=transcript, companion=companion)
         return
+
+    # `closed` is a terminal lifecycle record (`pm pr close` keeps it, and the
+    # retained workdir means `_infer_pr_id` can still resolve a closed PR from
+    # its cwd).  Publishing it would rewrite the closure into `merged` and
+    # erase the reason it was retired; reopening is an explicit status edit.
+    # Checked *after* the recovery branch: recovering a merge that is already
+    # published must still work even if the record was closed meanwhile.
+    if pr_entry.get("status") == "closed":
+        click.echo(_closed_reopen_hint(pr_id, "to merge it"), err=True)
+        raise SystemExit(1)
 
     # Sign-off gate (record-only): a fresh SIGNOFF_MERGE for the current HEAD
     # bound to a conflict-free integration with the configured base.  A code
@@ -2912,6 +2993,10 @@ def pr_sync_github():
     - CLOSED → closed
     - OPEN + draft → in_progress
     - OPEN + ready → in_review
+
+    A PR that is already merged or closed locally keeps that status (a
+    merge discovered on GitHub still finalizes): the local record is
+    history, not a cache of the GitHub state.
     """
     root = state_root()
     data = store.load(root)
@@ -3184,6 +3269,8 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
     """Remove work directory for a PR.
 
     Refuses to delete workdirs with uncommitted changes unless --force is given.
+    Without a PR id, auto-selects the sole terminal (merged or closed) PR that
+    still has a workdir — the explicit step `pm pr close` points at.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
     Use --resources to kill live tmux/docker/registry resources for a PR.
@@ -3218,7 +3305,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
         def apply_prune(data):
             nonlocal pruned
-            for p in data.get("prs") or []:
+            # usable_prs: a hand-edited entry without an ``id`` must not turn
+            # `--prune` into a KeyError (same class as the dependents scan).
+            for p in usable_prs(data.get("prs")):
                 wd = p.get("workdir")
                 if wd and not Path(wd).exists():
                     click.echo(f"  {p['id']}: cleared missing workdir {wd}")
@@ -3235,7 +3324,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             return
 
     if cleanup_all:
-        prs = data.get("prs") or []
+        prs = usable_prs(data.get("prs"))
         with_workdir = [p for p in prs if p.get("workdir") and Path(p["workdir"]).exists()]
         if not with_workdir:
             click.echo("No PR workdirs to clean up.")
@@ -3248,7 +3337,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                 cleaned_ids.add(pr_entry["id"])
         if cleaned_ids:
             def apply_cleanup_all(data):
-                for pr in data.get("prs") or []:
+                # usable_prs: an entry without an ``id`` must not raise here
+                # (inside the store lock) on a hand-edited project.yaml.
+                for pr in usable_prs(data.get("prs")):
                     if pr["id"] in cleaned_ids:
                         pr["workdir"] = None
 
@@ -3258,17 +3349,24 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         return
 
     if pr_id is None:
-        prs = data.get("prs") or []
-        with_workdir = [p for p in prs if p.get("status") == "merged" and p.get("workdir")
+        # `closed` is a normal terminal state since `pm pr close` retains the
+        # entry and its workdir (pr-62ad13d), so it is offered here alongside
+        # `merged` — close's help points at this explicit step.
+        prs = usable_prs(data.get("prs"))
+        with_workdir = [p for p in prs
+                        if (p.get("status") or "pending") in TERMINAL_PR_STATES
+                        and p.get("workdir")
                         and Path(p["workdir"]).exists()]
         if len(with_workdir) == 1:
             pr_id = with_workdir[0]["id"]
             click.echo(f"Auto-selected {pr_id}")
         elif len(with_workdir) == 0:
-            click.echo("No merged PRs with workdirs to clean up.", err=True)
+            click.echo("No merged or closed PRs with workdirs to clean up.",
+                       err=True)
             raise SystemExit(1)
         else:
-            click.echo("Multiple merged PRs have workdirs. Specify one:", err=True)
+            click.echo("Multiple merged or closed PRs have workdirs. "
+                       "Specify one:", err=True)
             for p in with_workdir:
                 click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
@@ -3278,7 +3376,12 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         click.echo(f"PR '{pr_id}' not found.", err=True)
         raise SystemExit(1)
 
-    if pr_entry.get("status") not in ("merged", "in_review"):
+    # `closed` is a normal terminal state (pr-62ad13d retains those records and
+    # `pm pr close` points here for the explicit cleanup), so it is not worth a
+    # "not merged" warning; anything else still is.  `in_review` is cleanable
+    # too, so it is named alongside the terminal set rather than by duplicating
+    # its members.
+    if pr_entry.get("status") not in ("in_review", *TERMINAL_PR_STATES):
         click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
         click.echo("Cleaning up anyway.", err=True)
 
@@ -3429,15 +3532,43 @@ def pr_note_delete(pr_id: str, note_id: str):
     trigger_tui_refresh()
 
 
+def _retained_resources(pr_entry: dict) -> list[str]:
+    """The branch/workdir references `pm pr close` keeps verbatim.
+
+    Shared by the close and `--remove` messages so neither claims to have kept
+    something the entry never had.
+    """
+    kept = []
+    if pr_entry.get("branch"):
+        kept.append(f"branch '{pr_entry['branch']}'")
+    if pr_entry.get("workdir"):
+        kept.append(f"workdir '{pr_entry['workdir']}'")
+    return kept
+
+
 @pr.command("close")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
-@click.option("--keep-branch", is_flag=True, help="Don't delete the remote branch")
-def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
-    """Close and remove a PR from the project.
+@click.option("--keep-branch", is_flag=True,
+              help="Deprecated no-op: close never deletes branches")
+@click.option("--remove", is_flag=True, default=False,
+              help="Delete the registry entry instead of recording the "
+                   "closure. Registry-only: the branch and workdir are kept, "
+                   "and the GitHub PR is still closed unless --keep-github "
+                   "(a PR recorded as merged is never touched on GitHub)")
+def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
+             remove: bool):
+    """Close a PR without destroying its history.
 
-    Removes the PR entry from project.yaml. By default also closes the
-    GitHub PR and deletes the remote branch if they exist.
+    Sets the PR's status to "closed" and keeps its registry entry — title,
+    description, notes, dependencies, branch, and workdir reference.  The
+    GitHub PR is closed when one exists (unless --keep-github); no branch,
+    workdir, file, or capture is ever deleted by this command.
+
+    Cleanup stays separate: "pm pr cleanup" removes a workdir, and --remove
+    deletes a mistaken registry entry (local branch and workdir are kept; the
+    GitHub PR is still closed unless --keep-github).  A merged PR cannot be
+    closed without --remove, so merge history is never rewritten.
 
     If PR_ID is omitted, uses the active PR.
     """
@@ -3453,44 +3584,180 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool):
 
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
+    display_id = _pr_display_id(pr_entry)
+    old_status = pr_entry.get("status") or "pending"
 
-    # Close GitHub PR if exists
+    merged_refusal = (
+        f"PR {display_id} is already merged — closing it would erase the "
+        f"merge record. Use 'pm pr close {pr_id} --remove' to delete the "
+        f"registry entry (branch and workdir are kept).")
+
+    if old_status == "merged" and not remove:
+        click.echo(merged_refusal, err=True)
+        raise SystemExit(1)
+
+    # Close the GitHub PR when there is one.  Never delete the branch:
+    # close is non-destructive by contract, so `--delete-branch` is not
+    # passed (the `--keep-branch` flag is a compatibility no-op).  A merged
+    # GitHub PR cannot be closed, so the --remove path skips the call.
     gh_pr_number = pr_entry.get("gh_pr_number")
-    if gh_pr_number and not keep_github:
+    if gh_pr_number and keep_github:
+        # Its GitHub state is not necessarily OPEN (the PR may have been
+        # closed or merged on GitHub), so promise "unchanged", not "open".
+        click.echo(f"Leaving GitHub PR #{gh_pr_number} unchanged "
+                   f"(--keep-github).")
+    elif gh_pr_number and old_status != "merged":
         click.echo(f"Closing GitHub PR #{gh_pr_number}...")
         try:
             from pm_core import gh_ops
-            result = gh_ops.close_pr(gh_pr_number, delete_branch=not keep_branch)
+            result = gh_ops.close_pr(gh_pr_number)
             if result.returncode == 0:
                 click.echo(f"GitHub PR #{gh_pr_number} closed.")
             else:
                 click.echo(f"Warning: Could not close GitHub PR: {result.stderr.strip()}", err=True)
         except SystemExit:
             # gh_ops.run_gh -> _check_gh() raises SystemExit when gh is missing
-            # or unauthenticated. Don't let that abort the local close/cleanup
-            # (workdir + PR-entry removal below) — warn and continue, preserving
-            # the pre-chokepoint behavior where a raw `gh` failure was tolerated.
+            # or unauthenticated.  The local lifecycle record is still written
+            # below: a GitHub failure never triggers destructive fallback.
             click.echo("Warning: Could not close GitHub PR: gh CLI unavailable or unauthenticated.", err=True)
         except Exception as e:
             click.echo(f"Warning: Could not close GitHub PR: {e}", err=True)
+    elif gh_pr_number:
+        # Reached only by `--remove` of a PR recorded as merged (a plain close
+        # of one is refused above): a merged GitHub PR cannot be closed, so no
+        # gh call is made.  Only the LOCAL record is known to be merged — a
+        # hand-set status, or a local-backend merge, can leave the GitHub PR
+        # open — so report the local fact and never call the PR "open".
+        click.echo(f"GitHub PR #{gh_pr_number} left unchanged (the PR is "
+                   f"recorded as merged).")
 
-    # Remove workdir if exists (filesystem op, safe outside lock)
-    workdir = pr_entry.get("workdir")
-    if workdir and Path(workdir).exists():
-        shutil.rmtree(workdir)
-        click.echo(f"Removed workdir: {workdir}")
-
-    # Remove PR from list and update active_pr under lock
-    target_id = pr_id
+    # Record the closure (or drop the entry with --remove) under the lock.
+    # Workdir, branch and every file in the workdir stay untouched — cleanup
+    # is a separate, explicit operation (`pm pr cleanup`, `--resources`).
+    merged_concurrently = False
+    missing_at_lock = False
 
     def apply(data):
-        data["prs"] = [p for p in (data.get("prs") or []) if p["id"] != target_id]
-        if data.get("project", {}).get("active_pr") == target_id:
-            remaining = data.get("prs") or []
-            data["project"]["active_pr"] = remaining[0]["id"] if remaining else None
+        nonlocal merged_concurrently, missing_at_lock
+        pr = store.get_pr(data, pr_id)
+        if not pr:
+            # Removed concurrently — nothing left to close or remove.
+            missing_at_lock = True
+            return
+        if remove:
+            data["prs"] = [p for p in (data.get("prs") or [])
+                           if p.get("id") != pr_id]
+        else:
+            if (pr.get("status") or "pending") == "merged":
+                # A merge landed between our load and the lock: apply the same
+                # rule as the pre-lock guard instead of rewriting a merge
+                # record into `closed`.
+                merged_concurrently = True
+                return
+            # Repeat close is idempotent: updated_at still moves, but the
+            # original closure time is history and is not rewritten.  An entry
+            # closed before closed_at existed keeps none — stamping "now"
+            # would invent a closure time that never happened.  The helper
+            # owns that rule (it sees the previous status).
+            prior_status = pr.get("status") or "pending"
+            pr["status"] = "closed"
+            _record_status_timestamp(pr, "closed", previous_status=prior_status)
+        if data.get("project", {}).get("active_pr") == pr_id:
+            remaining = [
+                p for p in usable_prs(data.get("prs"))
+                if (p.get("status") or "pending") not in TERMINAL_PR_STATES
+            ]
+            data["project"]["active_pr"] = (
+                remaining[0]["id"] if remaining else None)
 
-    store.locked_update(root, apply)
-    click.echo(f"Removed {pr_id}: {pr_entry.get('title', '???')}")
+    updated = store.locked_update(root, apply)
+
+    if merged_concurrently:
+        click.echo(merged_refusal, err=True)
+        raise SystemExit(1)
+
+    if missing_at_lock:
+        # Another process removed the entry between our load and the lock.
+        click.echo(
+            f"PR {pr_id} was removed concurrently; nothing to "
+            f"{'remove' if remove else 'close'}.", err=True)
+        trigger_tui_refresh()
+        return
+
+    if remove:
+        click.echo(f"Removed registry entry {pr_id}: "
+                   f"{pr_entry.get('title', '???')}")
+        kept = _retained_resources(pr_entry)
+        if kept:
+            click.echo(f"  Kept: {', '.join(kept)}")
+        # Everything the entry owned is now unreachable through pm: `pm pr
+        # cleanup` resolves the registry entry, and its --resources mode does
+        # the same, so the retained workdir *and* any live tmux windows /
+        # containers become orphans with no pointer.  Say so instead of
+        # leaving the user to discover it — naming only what the entry had.
+        orphaned = ("that workdir and any tmux windows/containers"
+                    if pr_entry.get("workdir")
+                    else "any tmux windows/containers")
+        click.echo(f"  Note: {orphaned} for this PR are no longer tracked by "
+                   f"pm (the registry entry is gone) — clean them up by hand "
+                   f"when you are done with them.")
+    else:
+        click.echo(f"Closed {display_id}: {pr_entry.get('title', '???')} "
+                   f"(status: closed)")
+        kept = ["registry entry", *_retained_resources(pr_entry)]
+        click.echo(f"  Kept: {', '.join(kept)}")
+        # The status is terminal, so say how to get back and how to do the
+        # (separate, explicit) workdir cleanup this command deliberately
+        # leaves behind.
+        click.echo(f"  Reopen: pm pr edit {pr_id} --status pending")
+        if pr_entry.get("workdir"):
+            click.echo(f"  Cleanup: pm pr cleanup {pr_id} "
+                       f"(--force discards uncommitted changes)")
+
+    # A closed PR blocks its dependents forever (only `merged` satisfies a
+    # dependency): name them so the block is visible, but never rewrite them.
+    # With --remove the dependency reference now names a record that no longer
+    # exists — say so, rather than implying a `closed` status is the blocker.
+    # Iterate usable entries only: this runs *after* the status write, so a
+    # hand-edited `project.yaml` entry without an ``id`` (which the rest of the
+    # codebase skips via ``usable_prs``) must not turn a successful close into
+    # a traceback.
+    dependents = [
+        p for p in usable_prs(updated.get("prs"))
+        if pr_id in (p.get("depends_on") or [])
+        and (p.get("status") or "pending") not in TERMINAL_PR_STATES
+    ]
+    if dependents:
+        names = ", ".join(
+            f"{_pr_display_id(p)} ({p.get('title', '???')})"
+            for p in dependents)
+        if remove:
+            # "are blocked without it", not "stay blocked": removing a
+            # *merged* record (the other --remove input) takes away the
+            # dependency that had satisfied them, so they were ready a moment
+            # ago and are blocked only now.  Only `merged` satisfies a
+            # dependency, so a removed record never satisfies one.
+            click.echo(
+                f"Warning: {len(dependents)} dependent PR(s) depend on the "
+                f"removed {display_id} and are blocked without it: {names}",
+                err=True)
+            # The record is gone, so re-adding would mint a new id and leave
+            # the reference dangling: dropping the dependency is the way out.
+            click.echo(
+                f"  Hint: drop it from the dependents' depends_on "
+                f"('pm pr edit <id> --depends-on \"\"') to unblock them.",
+                err=True)
+        else:
+            click.echo(
+                f"Warning: {len(dependents)} dependent PR(s) remain blocked "
+                f"by {display_id}: {names}", err=True)
+            # Only `merged` satisfies a dependency, so the block is permanent
+            # until the user acts — say which way out exists.
+            click.echo(
+                f"  Hint: reopen the closed PR, or drop it from the "
+                f"dependents' depends_on ('pm pr edit <id> --depends-on "
+                f"\"\"'), to unblock them.", err=True)
+
     trigger_tui_refresh()
 
 
@@ -3668,9 +3935,11 @@ def pr_auto_sequence(pr_id: str):
     ``sign_off`` step (comprehensive review + verdict router); a verified
     sign-off reports ``ready_to_merge`` (sign-off never merges itself).
 
-    Output is a single status line on stdout.  Exit codes:
-      0 — advanced or status reported normally
-      2 — PR not found / unknown state
+    Output is a single status line on stdout.  A terminal PR (merged or
+    closed) reports its status and is not advanced.
+
+    Exit codes: 0 — advanced or status reported normally; 2 — PR not found or
+    an unknown state.
     """
     root = state_root()
     data = store.load(root)
@@ -3681,8 +3950,13 @@ def pr_auto_sequence(pr_id: str):
     tdir = _auto_seq_transcript_dir(root, pr_id)
     tdir.mkdir(parents=True, exist_ok=True)
 
-    if status == "merged":
-        click.echo("merged")
+    if status in TERMINAL_PR_STATES:
+        # `closed` is terminal exactly like `merged` (pr-62ad13d retains the
+        # record): report the status and stop.  Falling through would answer
+        # "unknown status: closed" (exit 2), which a driving session reads as
+        # a broken PR, and driving another phase would resurrect a PR the
+        # user retired.
+        click.echo(status)
         return
 
     if status == "pending":
@@ -4081,7 +4355,7 @@ def pr_qa_run_bg(pr_id: str):
     # window and run a full QA loop against an already-merged PR.  Bail BEFORE
     # run_qa_sync (which creates the window) so no QA window/subprocess is left
     # running against the merged PR.
-    if (pr_entry.get("status") or "") in ("merged", "closed"):
+    if (pr_entry.get("status") or "") in TERMINAL_PR_STATES:
         _log.info("pr_qa_run_bg: %s is %s; skipping QA (no longer qa-eligible)",
                   pr_id, pr_entry.get("status"))
         return

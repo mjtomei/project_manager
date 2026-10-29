@@ -15,7 +15,7 @@ import copy
 from pm_core.paths import configure_logger
 from pm_core import store, guide, pr_sync, merge_integrity
 from pm_core.cli.helpers import _record_status_timestamp
-from pm_core.pr_utils import usable_prs
+from pm_core.pr_utils import TERMINAL_PR_STATES, usable_prs
 
 _log = configure_logger("pm.tui.sync")
 
@@ -308,6 +308,13 @@ async def startup_github_sync(app) -> None:
                 for pr in usable_prs(data.get("prs")):
                     new_status = updates.get(pr["id"])
                     if not new_status:
+                        continue
+                    if pr.get("status") in TERMINAL_PR_STATES \
+                            and new_status != "merged":
+                        # The updates were computed from this worker's stale
+                        # copy; a concurrent merge/close is terminal and must
+                        # not be overwritten (pr-62ad13d).  A merge discovered
+                        # on GitHub still finalizes normally.
                         continue
                     if pr.get("status") != new_status:
                         if new_status == "merged":

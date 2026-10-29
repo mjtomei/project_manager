@@ -22,6 +22,7 @@ from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 _log = configure_logger("pm.cli")
 
@@ -446,7 +447,8 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
+def _record_status_timestamp(pr_entry: dict, status: str | None = None, *,
+                             previous_status: str | None = None) -> None:
     """Record timestamps on *pr_entry*.
 
     Always sets ``updated_at``.  When *status* is provided, also sets
@@ -456,9 +458,21 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
     * ``reviewed_at`` — updated each time the PR enters ``in_review``.
     * ``signed_off_at`` — updated each time the PR enters ``sign_off``.
     * ``merged_at`` — set when the PR is ``merged``.
+    * ``closed_at`` — set when the PR is ``closed`` (a retained historical
+      record, not a deletion).
+
+    ``closed_at`` is maintained as history, not as a cache of the current
+    status: any transition to another status drops it, and only a *fresh*
+    closure records one — pass *previous_status* so a repeat close (or an
+    edit that re-states ``closed``) keeps the original closure time, and so
+    an entry closed before the field existed keeps none instead of inventing
+    one.  It is keyword-only: every caller passes a status it computed, and a
+    positional slip would silently look like a previous status.
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now
+    if status is not None and status != "closed":
+        pr_entry.pop("closed_at", None)
     if status == "in_progress" and not pr_entry.get("started_at"):
         pr_entry["started_at"] = now
     elif status == "in_review":
@@ -467,6 +481,39 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
+    elif status == "closed" and previous_status != "closed":
+        pr_entry["closed_at"] = now
+
+
+def _terminal_status_at_lock(pr: dict | None) -> str | None:
+    """Return *pr*'s status when a launch command must not record its work.
+
+    ``pm pr start`` and ``pm pr review`` guard against a merged/closed PR from
+    their pre-lock snapshot, but they clone/push/create a draft PR before
+    writing the transition under the store lock.  A ``pm pr close`` (or a
+    merge) landing in that window would otherwise be resurrected: the launch
+    writes ``in_progress``/``in_review`` over the terminal record, which also
+    erases ``closed_at`` and (for a start) re-activates the retired PR.
+
+    Re-checking inside the lock makes the concurrent close win.  The caller
+    no-ops on a non-None result and reports it instead of proceeding.
+    """
+    status = (pr or {}).get("status") or "pending"
+    return status if status in TERMINAL_PR_STATES else None
+
+
+def _closed_reopen_hint(pr_id: str, purpose: str | None = None) -> str:
+    """The refusal sentence for a command run against a retained closed PR.
+
+    A closed record is terminal — ``pm pr close`` keeps it as history — so
+    every lifecycle command refuses and names the one way back: an explicit
+    status edit.  Shared so the wording cannot drift between start, review,
+    QA, sign-off and merge: a user reading any refusal gets the same concrete
+    command.  *purpose* adds the command-specific verb ("to merge it").
+    """
+    hint = (f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status pending'")
+    return f"{hint} {purpose}." if purpose else f"{hint}."
 
 
 def _canonical_session(session: str) -> str:

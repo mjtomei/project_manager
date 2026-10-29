@@ -270,6 +270,29 @@ def test_git_backed_merge_advances_base(fake_github_repo):
     assert fake_github_repo.git_repo.is_merged("feature-x") is True
 
 
+def test_git_backed_close_with_delete_branch_removes_the_branch(fake_github_repo):
+    """`gh pr close --delete-branch` really deletes the head branch here, so
+    a caller that must retain branches (pr-62ad13d) is genuinely tested."""
+    pr = fake_github_repo.add_pr(head="feature-x")
+    assert fake_github_repo.git_repo.branch_exists("feature-x")
+
+    result = gh_ops.close_pr(pr.number, delete_branch=True)
+
+    assert result.returncode == 0
+    assert fake_github_repo.prs[pr.number].state == "CLOSED"
+    assert not fake_github_repo.git_repo.branch_exists("feature-x")
+
+
+def test_git_backed_close_without_delete_branch_keeps_the_branch(fake_github_repo):
+    pr = fake_github_repo.add_pr(head="feature-x")
+
+    result = gh_ops.close_pr(pr.number)
+
+    assert result.returncode == 0
+    assert fake_github_repo.prs[pr.number].state == "CLOSED"
+    assert fake_github_repo.git_repo.branch_exists("feature-x")
+
+
 def test_git_backed_merge_with_pull(fake_github_repo, tmp_path):
     """The full merge-with-pull path: gh merge then a consumer ff-only pull."""
     consumer = fake_github_repo.git_repo.clone(tmp_path / "consumer")

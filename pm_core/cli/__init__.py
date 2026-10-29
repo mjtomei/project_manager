@@ -614,8 +614,8 @@ COMMANDS
   pm pr sync                    Check for merged PRs
   pm pr sync-github             Fetch and update PR statuses from GitHub
   pm pr import-github           Import existing GitHub PRs into project yaml
-  pm pr close [pr-id]           Close and remove a PR (also closes GitHub PR)
-  pm pr cleanup [pr-id]         Remove workdir for merged PR
+  pm pr close [pr-id]           Close a PR (keeps entry, branch and workdir)
+  pm pr cleanup [pr-id]         Remove a PR's workdir (explicit cleanup)
   pm pr signoff [pr-id]         Launch the sign-off review window (writes report.html)
   pm pr signoff record <pr-id>  Record reviewer approval of report.html (feeds merge gate)
   pm pr signoff integrate <pr-id>  Check integration with the latest base (isolated candidate)

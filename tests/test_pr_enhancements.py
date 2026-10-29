@@ -744,28 +744,34 @@ class TestPrStartCommittedGate:
 
 
 class TestGitHubCloseResilience:
-    """`pm pr close` must still clean up local state when gh is unavailable."""
+    """`pm pr close` must still record the closure when gh is unavailable."""
 
     @mock.patch("pm_core.gh_ops.close_pr", side_effect=SystemExit(1))
-    def test_close_continues_local_cleanup_on_gh_systemexit(
+    def test_close_retains_local_state_on_gh_systemexit(
         self, _mock_close, tmp_github_merge_project,
     ):
         """gh missing/unauthed (SystemExit from _check_gh via run_gh) must not
-        abort close: warn, then still remove the workdir and the PR entry."""
+        abort close: warn, then still mark the PR closed while keeping the
+        entry, the branch reference, and the whole workdir (pr-62ad13d)."""
         pm_dir = tmp_github_merge_project["pm_dir"]
         workdir = tmp_github_merge_project["workdir"]
         assert workdir.exists()
 
         runner = CliRunner()
-        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir):
+        with mock.patch.object(pr_mod, "state_root", return_value=pm_dir), \
+             mock.patch.object(pr_mod, "trigger_tui_refresh"):
             result = runner.invoke(pr_mod.pr, ["close", "pr-001"])
 
         assert result.exit_code == 0, result.output
         assert "Warning: Could not close GitHub PR" in result.output
-        # Local cleanup still happened despite the gh failure.
-        assert not workdir.exists()
+        # Nothing local was destroyed despite the gh failure.
+        assert workdir.exists()
         data = store.load(pm_dir)
-        assert all(p["id"] != "pr-001" for p in data.get("prs", []))
+        entry = store.get_pr(data, "pr-001")
+        assert entry is not None
+        assert entry["status"] == "closed"
+        assert entry["workdir"] == str(workdir)
+        assert entry["branch"] == "pm/pr-001"
 
 
 class TestFinalizeMergeOutput:
