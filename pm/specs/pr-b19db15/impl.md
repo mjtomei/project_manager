@@ -2567,6 +2567,15 @@ R51. **The driver block's "is the driver here" check accepted an empty
   0-byte case; file **207 passed**. Evidence:
   `$(pm qa captures-path pr-b19db15)/review-ebd1-i10/` (`probe.log`,
   `mutation-check.log`, `suite.log`, `README.md`, `scripts/`).
+  Also checked and dismissed this pass, so a later one does not re-open it:
+  every tmux pane gets `TMUX` set, and a *bare* `tmux attach` in a pane is
+  refused ("sessions should be nested with care, unset $TMUX to force", rc 1,
+  verified on tmux 3.2a in a private `TMUX_TMPDIR`, including through a plain
+  `sh -c`). The recipe's form is not affected — `asciinema rec -c 'tmux attach
+  -t =X'` in a pane attaches and renders the target, verified in isolation and
+  by a full run of the recipe's capture block (rc 0, the cast holds the
+  target's screen and "[detached (from session pm-test)]",
+  `recorder.status` 0) — so no change.
 - Review loop ebd1 i9 (R50) verified the claim handles live in this container
   (real tmux 3.2a, private `TMUX_TMPDIR`, the recipe's own step-2 block with a
   `tmux` wrapper that ends the target at the claim write and leaves pm's
