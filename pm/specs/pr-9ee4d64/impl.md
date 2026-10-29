@@ -220,8 +220,10 @@ available in the run dir:
 
 - Add `iteration_transcript(transcript_dir, pr_id, loop_id, iteration)`.
 - Add `resolve_iteration_transcript(...)`: loop-scoped path if it exists,
-  else the legacy `review-<pr>-i<N>.jsonl` if it exists, else the
-  loop-scoped path (for a new launch).
+  else the legacy `review-<pr>-i<N>.jsonl` when that is a *link* (the
+  pre-upgrade loop's in-flight iteration), else the loop-scoped path (for
+  a new launch).  A frozen regular-file legacy transcript is a completed
+  earlier loop's iteration and is never reused.
 - `run_review_loop_sync`: record
   `state.iteration_sessions[iteration] = session_id_from_transcript(path)`
   after each iteration (launched or adopted) when a session id resolves,
@@ -297,9 +299,10 @@ available in the run dir:
    symlink target captured before the operation plus the re-read guard;
    callers that know their session id pass it.
 5. **Legacy adoption after upgrade.** `resolve_iteration_transcript`
-   falls back to the legacy name when the loop-scoped path is absent, so
-   a pre-upgrade in-flight iteration can still be adopted; new launches
-   always use the loop-scoped name.
+   falls back to the legacy name only while it is a symlink (the
+   pre-upgrade in-flight iteration), so that iteration can still be
+   adopted; a frozen legacy file is a finished earlier loop's iteration
+   and a new launch always uses the loop-scoped name.
 
 No **[UNRESOLVED]** ambiguities.
 
@@ -336,11 +339,13 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (29) in `tests/test_transcript_archive.py` covering:
+- New unit tests (31) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
-  (legacy fallback, loop-scoped preference when both names exist, and a
-  dangling loop-scoped link winning over a stale legacy file),
+  (legacy fallback for a live link, loop-scoped preference when both
+  names exist, a dangling loop-scoped link winning over a stale legacy
+  file, and a frozen legacy file never reused — including end to end
+  after a loop completion freezes an adopted legacy iteration),
   both pre-return sessions surviving two sign-off returns (R4),
   legacy-iteration live/finalize handling, the no-hardlink archive
   fallback, a dangling link and a failed copy left alone by finalize,
@@ -423,7 +428,10 @@ Applied on top of the design above; keep them when editing the code.
 - `finalize_transcript` freezes via a unique temp copy followed by
   `os.replace` (8602 i4) instead of `unlink` + `copy2`: readers see
   either the live symlink or the complete copy, a failed copy leaves the
-  link live, and no truncated canonical can be left behind.
+  link live, and no truncated canonical can be left behind.  That atomic
+  copy is the shared `_copy_atomic` helper (review d468 i2), used by both
+  `finalize_transcript` and `_freeze_archive_copy` instead of two
+  hand-rolled copies.
 - `_transcript_stem` / `transcript_archive_dir` are shared by
   `_archive_name`, `_find_identical_archive`, `archive_transcript`,
   `_freeze_archive_copy` and `finalize_transcript_dir` (8602 i4) instead
@@ -438,6 +446,13 @@ Applied on top of the design above; keep them when editing the code.
   `auto_start._app_session` (review d468 i1) instead of the raw
   `_session_name`: a stub app's attribute may be a non-string, which must
   never be handed to `tmux list-windows` from inside a bulk finalize.
+- `resolve_iteration_transcript` falls back to the legacy iteration name
+  only while that path is a symlink (review d468 i2).  A *frozen* legacy
+  transcript is a completed iteration of an earlier loop — loop
+  completion and the bulk sweeps both freeze it — so reusing it would
+  hand a fresh loop (a REVIEW return) the shared name, reintroducing the
+  cross-loop collision this PR removes and making the legacy name sticky
+  for every later loop at that iteration.
 
 ## Known limitations (accepted)
 

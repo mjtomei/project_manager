@@ -326,11 +326,45 @@ def test_review_loops_use_distinct_iteration_paths(env):
     assert b.endswith("review-pr-abc-bbbb-i1.jsonl")
 
 
-def test_resolve_iteration_transcript_falls_back_to_legacy(env):
+def test_resolve_iteration_transcript_falls_back_to_a_legacy_link(env):
+    """A pre-upgrade loop's in-flight iteration is a live link under the
+    legacy name; the resumed loop must keep polling it."""
     legacy = env.run / "review-pr-abc-i2.jsonl"
-    legacy.write_text("")
+    legacy.symlink_to(_native(env.cwd, _sid(), "IN FLIGHT"))
     assert rl.resolve_iteration_transcript(
         env.run, "pr-abc", "aaaa", 2) == str(legacy)
+
+
+def test_resolve_iteration_transcript_ignores_a_frozen_legacy_file(env):
+    """A *frozen* legacy transcript is a completed earlier loop's iteration,
+    not this loop's in-flight one: reusing its name would give a fresh loop
+    the shared path the loop-scoped name exists to avoid."""
+    (env.run / "review-pr-abc-i2.jsonl").write_text("")
+    scoped = env.run / "review-pr-abc-aaaa-i2.jsonl"
+    assert rl.resolve_iteration_transcript(
+        env.run, "pr-abc", "aaaa", 2) == str(scoped)
+
+
+def test_a_fresh_loop_does_not_reuse_a_finalized_legacy_iteration(env,
+                                                                  monkeypatch):
+    """End to end of the rule above: after an adopted legacy iteration is
+    frozen by its loop's completion, the next loop (a REVIEW return) must
+    launch under its own loop-scoped name, not the finalized legacy file."""
+    from pm_core.tui import review_loop_ui
+
+    first_sid = _sid()
+    legacy = env.run / "review-pr-abc-i1.jsonl"
+    _link(legacy, _native(env.cwd, first_sid, "LOOP 1 PASS"))
+    old = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa",
+                             _transcript_dir=str(env.run))
+    old.iteration_sessions[1] = first_sid
+    monkeypatch.setattr(review_loop_ui, "_is_active_loop",
+                        lambda state: False)
+    review_loop_ui._on_complete_from_thread(None, old)
+    assert legacy.is_file() and not legacy.is_symlink()
+
+    scoped = rl.resolve_iteration_transcript(env.run, "pr-abc", "bbbb", 1)
+    assert scoped == str(env.run / "review-pr-abc-bbbb-i1.jsonl")
 
 
 def test_resolve_iteration_transcript_prefers_the_loop_scoped_path(env):

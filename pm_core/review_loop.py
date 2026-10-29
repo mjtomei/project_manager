@@ -205,13 +205,20 @@ def resolve_iteration_transcript(transcript_dir: str | Path, pr_id: str,
     Falls back to the legacy ``review-<pr>-i<N>.jsonl`` when a loop
     restored from a pre-upgrade breadcrumb has an in-flight iteration
     under the old name.  New launches always use the loop-scoped name.
+
+    Only a *link* counts as that in-flight iteration: a frozen (regular
+    file) legacy transcript is a completed iteration of an earlier loop
+    (loop completion and the bulk sweeps both freeze it).  Falling back
+    to it would hand this loop the shared name — reintroducing the
+    cross-loop collision the loop-scoped name exists to prevent, and
+    making the legacy name sticky for every later loop at that iteration.
     """
     path = Path(iteration_transcript(transcript_dir, pr_id, loop_id,
                                      iteration))
     if path.exists() or path.is_symlink():
         return str(path)
     legacy = path.parent / f"review-{pr_id}-i{iteration}.jsonl"
-    if legacy.exists() or legacy.is_symlink():
+    if legacy.is_symlink():
         return str(legacy)
     return str(path)
 

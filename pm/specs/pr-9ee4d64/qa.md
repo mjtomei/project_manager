@@ -42,7 +42,7 @@ watcher), not the helper functions.
 ### R2 — A returned router transcript is archived, and its verdict is not replayed
 - **Given** the sign-off router has returned a PR (`SIGNOFF_IMPL` /
   `SIGNOFF_REVIEW` / `SIGNOFF_REQA`); its transcript is
-  `signoff-<pr>.jsonl` and its launch stamp is `signoff-<pr>.jsonl.head`.
+  `signoff-<pr>.jsonl` and its launch stamp is `signoff-<pr>.head`.
 - **When** the driver retires that router run for the return and the PR
   later re-enters sign-off.
 - **Then**

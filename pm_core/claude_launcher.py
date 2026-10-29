@@ -1310,6 +1310,26 @@ def archive_transcript(transcript_path: str | Path) -> Path | None:
     return dest
 
 
+def _copy_atomic(src: Path, dest: Path) -> None:
+    """Copy *src* to *dest* so a reader never sees a missing or partial file.
+
+    The copy is written under a unique temp name beside *dest* and moved
+    into place with ``os.replace``.  The name is unique per call: two
+    threads of one process can finalize concurrently (a bulk sweep and a
+    loop's completion), and a shared temp path would let one replace the
+    other's partial copy.  A failed copy leaves *dest* untouched.
+    """
+    tmp = dest.with_name(f".{dest.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dest)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
 def _freeze_archive_copy(p: Path, raw: str, target: Path,
                          sid: str | None) -> Path | None:
     """Write (or refresh) the immutable archive copy for the session at *p*.
@@ -1335,19 +1355,8 @@ def _freeze_archive_copy(p: Path, raw: str, target: Path,
         elif dest.exists():
             return dest
         # Write beside the entry and replace atomically, so a crash can
-        # never leave the archive without a copy of a session.  The name
-        # is unique per call: two threads of one process can finalize
-        # concurrently (a bulk sweep and a loop's completion), and a
-        # shared temp path would let one replace the other's partial copy.
-        tmp = adir / f".{dest.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-        try:
-            shutil.copy2(target, tmp)
-            os.replace(tmp, dest)
-        finally:
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+        # never leave the archive without a copy of a session.
+        _copy_atomic(target, dest)
         return dest
     except OSError as e:
         _log.warning("transcript: archive copy of %s failed: %s", p, e)
@@ -1440,19 +1449,11 @@ def finalize_transcript(transcript_path: Path,
     # Copy beside the path and replace atomically: readers see either the
     # live symlink or the complete frozen copy, never a missing path or a
     # truncated one, and a failed copy leaves the link live.
-    tmp = transcript_path.with_name(
-        f".{transcript_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     try:
-        shutil.copy2(target, tmp)
-        os.replace(tmp, transcript_path)
+        _copy_atomic(target, transcript_path)
     except OSError as e:
         _log.warning("transcript: finalize %s failed: %s", transcript_path, e)
         return False
-    finally:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
     _log.info("transcript: finalized %s (copied from %s)", transcript_path, target)
     return True
 
