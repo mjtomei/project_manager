@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T07:36:44.388474+00:00'
+  updated_at: '2026-10-29T08:32:47.299270+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29800,6 +29800,19 @@ prs:
       windows open.'
     created_at: '2026-10-29T07:36:44Z'
     last_edited: '2026-10-29T07:36:44Z'
+  - id: note-cadd495
+    text: 'QA S34 (2026-10-29) PASS: stop-during-finalize survives a TUI restart as
+      STOPPED (recovery logs "reporting STOPPED instead of PASS", status file + dashboard
+      flip PASS->STOPPED), three autostart passes relaunch nothing (waiting/qa qa
+      STOPPED, picker [open] [done STOPPED]), and z t fresh start replaces the stopped
+      windows and hands PASS off to sign-off. Harness notes: keep /home/pm/.local/bin
+      on PATH (fake-claude shim lives there; without it every fake pane dies and the
+      run ends ERROR "Could not find planner pane"); the prefix+P picker anchors on
+      the PR of the session current window, so select a window of the PR under test
+      before reading its row; agg must be fetched (aarch64 -gnu v1.9.0) to render
+      casts.'
+    created_at: '2026-10-29T08:32:47Z'
+    last_edited: '2026-10-29T08:32:47Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
