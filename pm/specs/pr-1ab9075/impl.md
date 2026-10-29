@@ -204,6 +204,18 @@ be re-collected and re-verified, which re-runs the verifier (bounded by
 `qa-verify-retries`, converging to NEEDS_WORK) rather than turning a
 recoverable wait into a terminal result.
 
+The guard covers pane resolution, not only the dead-pane collection.  A
+worker that exits on its own leaves the scenario window alive: the
+concretizer pane stays in it, and the worker-pane fallback resolves to the
+window's *first* pane — so the reopened loop would poll that sibling pane
+with the dead attempt's transcript and collect the cleared verdict after the
+verdict grace (observed live: a `hold`-limited worker died, the hold scan
+dropped the wait, and 30 s later the reopened loop re-recorded
+`INPUT_REQUIRED` with no worker left to answer, never entering the retry
+path).  While a dropped wait is in recovery and no worker pane is recorded,
+the scenario therefore never adopts a sibling pane as its worker; it records
+the exit launch failure directly and lets the retry path relaunch it.
+
 R10. **No verdict-criteria or verification change.**  Verdict extraction,
 idle-hook gating, verification, and aggregation in `_execute_and_finalize`
 are unchanged apart from per-scenario grace.
@@ -331,3 +343,8 @@ loop owns the run.
   retry runs: the guard is persisted
   (`test_hold_dropped_wait_is_relaunched_not_recollected`,
   `test_dropped_wait_guard_survives_a_restart`).
+- E9b. The drop is still recovered when the window survives the worker: the
+  concretizer pane keeps the window alive, the worker-pane fallback would
+  resolve to it, and the reopened loop would re-read the cleared
+  `INPUT_REQUIRED` instead of relaunching
+  (`test_dropped_wait_is_relaunched_when_window_keeps_a_sibling_pane`).

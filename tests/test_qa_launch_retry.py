@@ -1332,3 +1332,38 @@ def test_dropped_wait_guard_survives_a_restart(tmp_path):
 
     assert restored.scenario_verdicts == {}
     assert restored.launch_retries[1]["kind"] == "exit"
+
+
+def test_dropped_wait_is_relaunched_when_window_keeps_a_sibling_pane(tmp_path):
+    """A worker that exits on its own leaves its scenario window alive: the
+    concretizer pane stays in it.  The reopened loop must not adopt that
+    sibling pane as the worker and re-read the cleared INPUT_REQUIRED out of
+    the dead attempt's transcript (the dead-pane guard only runs when no pane
+    is found at all, and ``find_claude_pane`` returns the window's first
+    pane)."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="wait", focus="f", window_name="w1",
+                    pane_id=None, session_id="sid-1", transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.dropped_wait_verdicts = {1}
+
+    def on_tick(clock):
+        if state.launch_retries:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    # A fresh-looking idle event plus a transcript that still ends in
+    # INPUT_REQUIRED: pre-fix the loop polls the sibling pane and
+    # resurrects the cleared verdict.
+    patches = _base_patches(clock, {"sid-1": _idle("sid-1")},
+                            {str(tp): VERDICT_INPUT_REQUIRED}) + [
+        patch("pm_core.tmux.pane_exists", return_value=True),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value="%9"),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert state.scenario_verdicts == {}
+    assert state.launch_retries[1]["kind"] == "exit"
+    assert state.launch_retries[1]["state"] == "waiting"

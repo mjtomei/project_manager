@@ -4251,6 +4251,21 @@ def _poll_tmux_verdicts(
                     or _CREATE_CAUSE))
                 continue
 
+            # A dropped INPUT_REQUIRED attempt is over by definition: its
+            # worker pane is gone.  The scenario window usually still holds
+            # the concretizer (and a verifier) pane, and the fallback below
+            # resolves to the window's *first* pane — so adopting it would
+            # poll the dead attempt's transcript and resurrect the verdict
+            # that was deliberately cleared (the dead-pane guard further
+            # down only runs when no pane is found at all).  Record the
+            # launch failure instead so the retry path relaunches.
+            if idx in dropped_waits and scenario.pane_id is None:
+                if _worker_has_started(scenario):
+                    _record_failure(scenario, "exit", _EXIT_CAUSE)
+                else:
+                    _record_failure(scenario, "exec", _EXEC_CAUSE)
+                continue
+
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
             if pane_id and not tmux_mod.pane_exists(pane_id):
                 pane_id = None
