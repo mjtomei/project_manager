@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T11:25:20.505110+00:00'
+  updated_at: '2026-10-29T12:25:30.540132+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29957,6 +29957,26 @@ prs:
       (casts + mp4 + frames + log extracts) under /pm-captures/scenarios/37/.'
     created_at: '2026-10-29T11:25:20Z'
     last_edited: '2026-10-29T11:25:20Z'
+  - id: note-2d088bb
+    text: 'QA S39 (sticky-line ack, fixed a377a040): a user-initiated QA start that
+      had to CREATE the qa window (t / `/pr qa <pr>` on a PR with no window yet) was
+      acknowledged only in the command log — `Starting QA for <pr>... (hidden by sticky
+      message)` — while an unrelated PR''s "Review loop done … PASS" held the 10 s
+      sticky line; the qa window was created and focused anyway. The focus path already
+      forced its reply (`Focused QA window for <pr>`, force=True); start_qa''s fresh-start
+      line did not. Fix: `app.log_message(f"Starting QA for {pr_id}...", force=focus)`
+      — user starts force, scheduler starts stay unforced. Tests: test_qa_start_visible_over_sticky_completion
+      (fails pre-fix) + test_background_qa_start_still_defers_to_sticky. Full suite
+      4606 passed, 1 skipped. Stories 1/2 (background auto-QA keeps focus; user /pr
+      qa on a live run focuses + forces "Focused QA window", no second run, same planner
+      pid) passed unchanged. Captures: /pm-captures/scenarios/39/{pre-fix,post-fix}.
+      Harness notes: `tmux send-keys -l` needs `--` (a "review-loop" chunk arrives
+      as `-lo` and tmux eats it as an option); `pm log grep` must run with the test
+      project as cwd; `pm tui restart` re-execs in place so the pid is unchanged —
+      confirm from the log; agg v1.9.0 asset is `agg-aarch64-unknown-linux-gnu` with
+      no .tar.gz suffix.'
+    created_at: '2026-10-29T12:25:30Z'
+    last_edited: '2026-10-29T12:25:30Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
