@@ -43,10 +43,16 @@ def _isolated_sessions_tree(tmp_path_factory, monkeypatch):
     test does not own (pr-1ae1d2d).  Tests that resolve captures paths
     themselves patch ``sessions_dir`` again and win (their monkeypatch is
     applied later).
+
+    The temp dir is created once, like ``_isolated_runtime_state``'s: the
+    patch is a ``lambda`` and ``mktemp`` hands out a *new* directory on every
+    call, so creating it lazily would make two ``sessions_dir()`` calls in
+    one test resolve to different trees — a write-then-read assertion would
+    silently compare against the wrong one.
     """
     from pm_core import paths
-    monkeypatch.setattr(paths, "sessions_dir",
-                        lambda: tmp_path_factory.mktemp("sessions"))
+    sessions = tmp_path_factory.mktemp("sessions")
+    monkeypatch.setattr(paths, "sessions_dir", lambda: sessions)
 
 
 @pytest.fixture

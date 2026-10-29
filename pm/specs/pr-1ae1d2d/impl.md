@@ -332,6 +332,11 @@ is introduced for pre-existing reports.
 - `run_qa_sync` records an empty membership at every post-planning early exit
   (QA spec missing, planner handoff failed) — those two live in
   `tests/test_qa_planner_handoff.py`, next to the planning harness they drive.
+- `run_qa_sync` publishes the start-of-run quarantine + manifest **before**
+  any scenario launch, so an index reused from an earlier run is cleared
+  before its `prompt.md` is written.  Pinned by a call-order assertion in
+  `tests/test_qa_planner_handoff.py` (previously nothing failed if the sync
+  was moved after the launch or dropped).
 
 ## 2. Implicit requirements
 
@@ -368,8 +373,9 @@ is introduced for pre-existing reports.
   `~/.pm/sessions/<tag>/captures/`. `tests/conftest.py`'s autouse
   `_isolated_sessions_tree` fixture points `sessions_dir` at a per-test temp
   dir (the same pattern as the `runtime_state` and `CLAUDE_CONFIG_DIR`
-  fixtures); tests that resolve captures paths themselves patch it again and
-  win.
+  fixtures — the dir is created once per test, so repeated
+  `sessions_dir()` calls in one test see the same tree); tests that resolve
+  captures paths themselves patch it again and win.
 
 ## 3. Ambiguities (resolved)
 

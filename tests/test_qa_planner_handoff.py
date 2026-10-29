@@ -121,6 +121,10 @@ def _write_transcript(path: Path, turns: list[tuple[str, str]]) -> None:
 # run_qa_sync planning phase harness
 # ---------------------------------------------------------------------------
 
+class _StopHarness(Exception):
+    """Raised by a patched phase-2 call to end the harness there."""
+
+
 def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                   transcript_turns: list[tuple[str, str]] | None,
                   idle_events: int = 1, grace: float | None = 0,
@@ -160,9 +164,6 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
             return {"event_type": "idle_prompt", "timestamp": time.time()}
         state.stop_requested = True
         return None
-
-    class _StopHarness(Exception):
-        pass
 
     resolution = MagicMock(model=None, provider=None, effort=None)
     patches = [
@@ -421,6 +422,50 @@ class TestRunQaSyncEvidenceBinding:
         assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
         assert any(call.kwargs.get("scenarios") == []
                    for call in sync.call_args_list)
+
+    def test_start_of_run_sync_precedes_the_scenario_launch(
+            self, tmp_path, monkeypatch):
+        """The start-of-run quarantine + manifest must land *before* any
+        scenario launches: ``prompt.md`` is written at launch, and an index
+        reused from an earlier run has to be cleared of a foreign record
+        first (pr-1ae1d2d R3/R5).  Nothing else pins that ordering, so a
+        later refactor could move the sync after the launch — or drop it —
+        without failing a test."""
+        order: list[str] = []
+        sync_kwargs: list[dict] = []
+
+        def fake_sync(state, *args, **kwargs):
+            order.append("sync")
+            sync_kwargs.append(kwargs)
+
+        def fake_launch(*args, **kwargs):
+            order.append("launch")
+            raise _StopHarness()
+
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", FULL_PLAN)],
+            extra_patches=(
+                patch("pm_core.qa_loop._get_qa_spec", return_value="spec"),
+                patch("pm_core.qa_loop._publish_planner_head",
+                      return_value="a" * 40),
+                patch("pm_core.qa_loop._planner_code_changes",
+                      return_value=[]),
+                patch("pm_core.qa_loop._ensure_qa_main_pane",
+                      return_value="%1"),
+                patch("pm_core.qa_loop._add_status_pane"),
+                patch("pm_core.qa_loop._get_max_scenarios", return_value=0),
+                patch("pm_core.qa_loop._sync_captures_evidence",
+                      side_effect=fake_sync),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux",
+                      side_effect=fake_launch),
+            ))
+        assert state.scenarios
+        assert order == ["sync", "launch"]
+        # The start sync publishes the plan's membership — not an empty one
+        # (that override belongs to the pre-launch early exits).
+        assert sync_kwargs[0].get("scenarios") is None
 
 
 class TestQAPlanProblem:
