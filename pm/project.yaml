@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T06:09:45.461002+00:00'
+  updated_at: '2026-10-29T07:16:02.749799+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42624,6 +42624,47 @@ prs:
       "Auto-start: off  owner=…" + "No auto-start targets (auto-start off)."'
     created_at: '2026-10-29T06:09:45Z'
     last_edited: '2026-10-29T06:09:45Z'
+  - id: note-11a665c
+    text: 'S132 refine (2026-10-29, code reading of 5f204dc2): (1) A second clone
+      claims a held run only when the run owner TUI is dead. pm tui restart re-execs
+      with the same pid, so the 5855077b control difference needs clone A TUI process
+      killed (a crash) after a held-snapshot rewrite; clone B then adopts within one
+      5 s scan. B needs the PR at qa with a workdir (clone B from A after pm push
+      + merge); otherwise its claim aborts "Workdir ... missing - cannot resume QA"
+      and records a QA ERROR note. (2) A worker that answers with INPUT_REQUIRED again
+      is not a reopen: the hold rewrites qa_resume.json and keeps waiting. Only a
+      PASS/NEEDS_WORK follow-up reopens, and the reopened result gets its own finalize.
+      (3) z t over a held run closes the old qa-<pr>-sN windows when the new planner
+      window opens (about 1-3 s), so a late answer needs the stub to hold the worker
+      reply across the z t. (4) mark_completion_processed runs only for held INPUT_REQUIRED
+      runs, so the 67353d44 race needs a held round, and its window is milliseconds:
+      a zero control count is possible.'
+    created_at: '2026-10-29T06:27:24Z'
+    last_edited: '2026-10-29T06:27:24Z'
+  - id: note-6ab37cd
+    text: 'QA S132 (2026-10-29, host, real claude 2.1.312 routed refiner/worker vs
+      acme router + main stubs, fake planner/verifier/finalizer/sign-off; HEAD a0e55418
+      vs controls 67353d44, 5855077b, master 4a74d880; captures /pm-captures/scenarios/132/README.md,
+      every terminal mp4): CODE CHANGE b7321370 + 3de073a6 needs normal re-review.
+      (1) A held run whose TUI stayed up never noted its follow-up result: _ui_writes_done
+      (54c88ad8) kept "note" from the held INPUT_REQUIRED completion, and the #271
+      reopen resets only _ui_complete_notified/completion_processed, so story 1 had
+      a QA INPUT_REQUIRED note and no QA PASS note. The note write is now keyed by
+      verdict. (2) Plain t on a held run whose window is open said only "Focused QA
+      window" (master too); it now also says the run waits for input in its worker
+      pane. (3) A held run re-adopted after TUI downtime collected a follow-up that
+      landed while the TUI was down without the "QA resumed after INPUT_REQUIRED"
+      line; _poll_waiting now publishes it. Post-fix: story 1 has 1 IR + 1 PASS note,
+      2 finalizes, sign_off once then BLOCKED. Story 2 HEAD: result_recorded_by is
+      kept across A restart and rewrite; B never claims through 5 restarts and A SIGKILL;
+      A collects ANSWER-2 only after pm session (resumed 3.1 s). Control 5855077b:
+      the mark is lost and B adopts about 1 s after A crash. Story 3 holds on HEAD
+      and master; the "not relaunching" debug line needs an auto-start pass (pm autostart
+      add; r/refresh runs none). Story 4: HEAD 12, control 11, post-fix 3 rounds,
+      all clean (control 0 race hits). Full suite 5179 passed. Harness: master needs
+      the recorder view named <session>~N.'
+    created_at: '2026-10-29T07:16:02Z'
+    last_edited: '2026-10-29T07:16:02Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
