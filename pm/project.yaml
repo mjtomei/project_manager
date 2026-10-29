@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T00:24:33.943602+00:00'
+  updated_at: '2026-10-29T00:47:45.220471+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39389,6 +39389,46 @@ prs:
       leaves or invents input_required. Report: captures/pr-a80bde5/report.html'
     created_at: '2026-10-29T00:24:33Z'
     last_edited: '2026-10-29T00:24:33Z'
+  - id: note-3ffb53b
+    text: 'Integration done (merge commit 0685f677, master@4a74d880 merged; merge-base
+      == origin/master). All 7 SIGNOFF_IMPL items addressed. (1) The PR follow-up
+      waiter now refreshes the launch lease through _lease_keepalive wired into its
+      own stop_check, so a wait longer than REVIEW_LAUNCH_CLAIM_TTL (180 s) keeps
+      ownership and no other driver relaunches --fresh over the live question pane.
+      (2) The adopt-wait gate (adopt_wait/_adopting_wait/wait_transcript/wait_watch,
+      publish-then-clear ordering) is re-threaded in front of master try/except with
+      the ReviewClosedError/ReviewHoldError/ReviewLaunchError branches, _run_iteration_with_retry,
+      and _reset_launch_retry after adoption; input_required is still set with each
+      recorded verdict before on_iteration. (3) _adopt_in_flight_review and _run_iteration_with_retry
+      take an optional result dict and record the transcript the verdict actually
+      came from, so an adopted INPUT_REQUIRED waits on discovery transcript (another
+      pane possible) instead of assuming review-<pr>-i<N>.jsonl. (4) _adoptable_wait_transcript
+      and the waiter pane check use the workdir-aware _find_review_claude_pane. (5)
+      ReviewLoopState has _adopting_wait + all retry fields; finally does _release_lease
+      AND clears _adopting_wait/input_required; _derive has follow_up/resuming plus
+      master (last LAUNCH_FAILED) suppression; build_status review dict carries follow_up/resuming
+      + retryable/attempts/error/artifact; review_progress_input keeps the _adopting_wait
+      -> iteration -> input_required reader order plus master HOLD/LAUNCH_FAILED normalisation.
+      (6) auto_start.py auto-merged with the input_required=False restore intact (verified
+      at the ReviewLoopState construction in consume_breadcrumb) and the _run_claude_review
+      patch point still intercepts under _run_iteration_with_retry. (7) project.yaml
+      resolved with store.merge_3way: 517 PRs, no id lost or duplicated vs either
+      side, store.load(validate=True) OK, this PR entry + all 45 notes intact. Tests:
+      test_follow_up_wait_refreshes_the_launch_lease rewritten to drive the PR own
+      waiter (it patched _wait_for_follow_up_shared, which the PR deletes); the wait-state
+      live tests neutralise the retry layer and model a real breadcrumb restore (iteration_attempted=True).
+      FULL SUITE 4540 passed, 1 skipped, 0 failed; targeted files (test_review_input_required_state,
+      test_review_launch_retry, test_breadcrumb_review_loop, test_review_loop, test_tui_pidfile,
+      test_qa_input_required, test_autostart_multi_target, test_verdict_transcript,
+      test_autostart_disable_transcripts) 605 passed. impl.md updated: R1 now describes
+      the _run_iteration_with_retry launch path and the result-transcript contract,
+      R2 the workdir-aware pane check and adopted-transcript wait, plus a new lease-invariant
+      bullet and a Master overlap #2 edge case. Not run here: the live TUI/stand-in
+      QA (the re-QA items are unchanged from sign-off: S24 lifecycle, S22 restart/adopt,
+      a wait held longer than 180 s never relaunched over, and LAUNCH_FAILED never
+      leaving or inventing input_required).'
+    created_at: '2026-10-29T00:47:45Z'
+    last_edited: '2026-10-29T00:47:45Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
