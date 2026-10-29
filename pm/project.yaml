@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T08:41:13.779513+00:00'
+  updated_at: '2026-10-29T09:24:11.735334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36807,6 +36807,34 @@ prs:
       updated. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T08:41:13Z'
     last_edited: '2026-10-29T08:41:13Z'
+  - id: note-2069480
+    text: 'Review loop ebd1 i1: one leftover in the kept tmux-recipe scope, the PR
+      own class (a handle that matches the wrong thing) — and no recipe change. The
+      transcript pipe already names `"=$TARGET:0.0"` at all fourteen sites (R37),
+      but that guarantee was the one no test guarded: mutating every one of them to
+      the bare `"$TARGET:0.0"` left the whole file green (177 passed). Verified live
+      in this container (real tmux 3.2a, private TMUX_TMPDIR): with only a grouped
+      `pm-test~1` on the server — the state pm leaves when the target ends, and what
+      step 2 exact-session assert and the pipe attach can straddle — `has-session
+      -t "=pm-test"` exits 1 while `-t pm-test` exits 0, `pipe-pane -t "=pm-test:0.0"`
+      answers "can\''t find session: pm-test" (rc 1), and `pipe-pane -t "pm-test:0.0"`
+      attaches to `pm-test~1` and writes its output into the capture directory (65
+      bytes). A run whose target vanished in that gap would stream a session pm never
+      started into this run transcript and then pass every later check — the harness
+      reproduces it: in the new stub mode `pipegap` the whole block exits 0 with the
+      bare handle and 1 at "could not stream …" with the exact one. Tests: `test_tmux_session_handles_are_exact`
+      now rejects a bare `pipe-pane -t "$TARGET` and requires the `=` form, and the
+      new `test_the_transcript_pipe_targets_the_exact_session` runs the whole block
+      in `pipegap` (the target and its claim go as the claim is written and a grouped
+      `pm-test~1` is left), requiring the failure, no transcript and no claim; both
+      fail against the bare form (mutation-checked, recipe restored in place). File
+      178 pass; related suites 366 together with the file; full suite 4572 passed,
+      1 skipped, 92 deselected, 0 failed (408 s). Evidence: $(pm qa captures-path
+      pr-b19db15)/review-ebd1-i1/ (probe.log, README.md, scripts/). impl.md R41 +
+      Files/verification/evidence and qa.md updated (S23 re-checks the pipe target).
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T09:24:11Z'
+    last_edited: '2026-10-29T09:24:11Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
