@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T15:09:03.000711+00:00'
+  updated_at: '2026-10-29T15:39:49.372711+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37165,6 +37165,36 @@ prs:
       stays dropped. (2026-10-29T15:12:00Z)'
     created_at: '2026-10-29T15:09:02Z'
     last_edited: '2026-10-29T15:09:02Z'
+  - id: note-2ef9456
+    text: 'Review loop ebd1 i10: one leftover in the kept web-UI-recipe scope, the
+      PR''s own class (a completion check that cannot tell a real input from a dead
+      one, and a failure whose remedy cannot work). web-ui-recording.md step 2 tested
+      `[ -f driver.mjs ]` before `node driver.mjs` — the only stage-input check in
+      this PR that is not `-s`, and the one shape R46''s rule had not reached: the
+      0-byte driver a failed save leaves behind. An empty file is a valid ES module,
+      so `node driver.mjs` exits 0 having run nothing (verified, node 22.22.2): the
+      block printed "playwright ok" and exited 0, and the unchanged finalize step
+      then said "there is no webm to transcode — the driver wrote no video; re-run
+      step 2 and check the driver''s recordVideo option" — a remedy that cannot work,
+      because step 2 passes again and `recordVideo` was never the problem (reproduced
+      end to end with the recipe''s own two fenced blocks: step 2 rc 0 with "playwright
+      ok", step 3 rc 1 with that message). Fix: `[ -s driver.mjs ]`, and the message
+      names the empty file ("there is no driver.mjs in $CAPDIR (or it is empty)").
+      No other input check needed changing — the rest are already `-s`, and `-d`/`-e`
+      cover only the capture directory and the `node_modules` link. Tests: test_web_ui_driver_block_refuses_a_missing_driver
+      is parametrized over "no file" and "0-byte file" (the shape R46 used for the
+      cast/gif/webm checks); the 0-byte case fails against the pre-fix `-f` (rc 0,
+      "playwright ok") and both pass with `-s`. File 207 passed (was 206); related
+      suites 395 together with the file; full suite `env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py`
+      -> 4601 passed, 1 skipped, 92 deselected, 0 failed (405.02 s, with the pytest
+      8.4.2 and markdown deps on the scratch path). Evidence: $(pm qa captures-path
+      pr-b19db15)/review-ebd1-i10/ (probe.log sections A-E, mutation-check.log with
+      the pre-fix half, suite.log, README.md, scripts/). impl.md R51 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T15:39:49Z'
+    last_edited: '2026-10-29T15:39:49Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
