@@ -15,6 +15,7 @@ import pwd
 import logging
 import os
 import shlex
+import stat
 import subprocess
 import tempfile
 import time
@@ -843,12 +844,17 @@ def ensure_socket_dir() -> None:
     """
     SHARED_SOCKET_DIR.mkdir(mode=0o1777, parents=True, exist_ok=True)
     # Ensure permissions are correct even if directory already existed.
-    # Another user may own the shared dir (1777); chmod then fails and is
-    # harmless because the mode is already correct.
     try:
         SHARED_SOCKET_DIR.chmod(0o1777)
     except OSError:
-        pass
+        # Another user may own the shared dir, which is fine only when it
+        # already has the mode we need.  Without the sticky bit any user
+        # could unlink another user's socket (the uid check in
+        # `pm session` cannot defend against that: it runs once, before
+        # tmux binds), so refuse rather than proceed on a directory that
+        # is world-writable but not sticky.
+        if not (SHARED_SOCKET_DIR.stat().st_mode & stat.S_ISVTX):
+            raise
 
 
 # Backwards-compatible alias (shared sessions historically owned this dir).

@@ -1071,3 +1071,55 @@ host configuration was touched; both new tests are unit-level and touch no
 tmux server.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i12)
+
+Verification pass over the integrated head; no requirement changes.  Three
+fail-closed/consistency items, all in code that guards the isolation
+boundary:
+
+1. **`ensure_socket_dir()` could accept a socket directory that is not
+   sticky.**  The d1c0-era `try: chmod(0o1777) except OSError: pass` was
+   added so a directory another user already created (the normal 1777
+   case) is usable, but it swallowed *every* failure.  If the directory is
+   world-writable without the sticky bit, any local user can unlink or
+   replace another user's socket — and the uid check in `pm session` start
+   cannot prevent that, because it runs once, before tmux binds the
+   socket.  The failure path now re-checks the mode and raises unless the
+   sticky bit is set, restoring the fail-closed behaviour of the original
+   unconditional `chmod` while still allowing a legitimate 1777 directory
+   owned by someone else.  Tests:
+   `test_tolerates_a_sticky_dir_it_does_not_own` and
+   `test_refuses_a_non_sticky_dir_it_cannot_fix`.
+2. **The TUI connect screen lost the `-t <session>` for a legacy session
+   whose socket was already in the environment.**  d1c0 i1 made
+   `show_connect()` name the session when it lives on the default server,
+   but only on the branch where `PM_TMUX_SOCKET` is unset.  The rollout
+   path (`_resolve_session_socket`'s legacy branch) exports the *default*
+   server's socket, so a TUI restarted into a legacy session takes the
+   other branch and printed `tmux -S /tmp/tmux-<uid>/default attach` with
+   no `-t` — ambiguous whenever more than one legacy pm session is on that
+   server.  The env path now applies the same rule.  Test:
+   `test_legacy_session_with_the_default_socket_in_the_env`.
+3. **`list_pm_sessions()` followed symlinks in the world-writable socket
+   directory.**  It used `Path.is_socket()` (a `stat`, so symlinks are
+   resolved) and `Path.stat()` for the shared/private mode probe, while
+   d1c0 i10 hardened the `pm session` ownership check to `lstat` for
+   exactly this reason.  A link another user plants at `pm-<tag>` could
+   therefore be listed as one of our servers, with its target's mode
+   reported.  Both now use `lstat`, so a link is skipped like any other
+   non-socket entry.  Test:
+   `test_skips_a_symlink_planted_in_the_socket_dir` (verified to fail with
+   `is_socket()`: the planted link was listed).
+
+Validation on the integrated head: full suite **4597 passed / 1 skipped**
+(4593 + the four new tests; scratch `pytest<9` + `markdown` on
+`PYTHONPATH`, `PATH` without the push-proxy `git`,
+`TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared).
+`pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+disposable socket with `TMUX_TMPDIR` on a scratch dir: private server
+created, `PM_TMUX_SOCKET` in the session env, the global env and the
+hooks, default server untouched.  No live session, server or shared host
+configuration was touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).

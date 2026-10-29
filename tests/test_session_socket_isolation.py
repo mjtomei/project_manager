@@ -65,6 +65,42 @@ class TestSessionSocketPath:
         assert fake.is_dir()
         assert (fake.stat().st_mode & 0o7777) == 0o1777
 
+    def test_tolerates_a_sticky_dir_it_does_not_own(self, tmp_path,
+                                                    monkeypatch):
+        """Another user's 1777 dir is usable; chmod failing is expected."""
+        fake = tmp_path / "pm-sessions"
+        fake.mkdir()
+        fake.chmod(0o1777)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", fake)
+
+        def _denied(self, mode):
+            raise PermissionError("not the owner")
+
+        monkeypatch.setattr(Path, "chmod", _denied)
+
+        paths.ensure_socket_dir()  # must not raise
+
+    def test_refuses_a_non_sticky_dir_it_cannot_fix(self, tmp_path,
+                                                    monkeypatch):
+        """A world-writable dir without the sticky bit is not safe to use.
+
+        Any user could unlink another user's socket there, which the
+        per-socket uid check on `pm session` start cannot prevent (it runs
+        once, before tmux binds).  Fail closed instead of proceeding.
+        """
+        fake = tmp_path / "pm-sessions"
+        fake.mkdir()
+        fake.chmod(0o777)
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", fake)
+
+        def _denied(self, mode):
+            raise PermissionError("not the owner")
+
+        monkeypatch.setattr(Path, "chmod", _denied)
+
+        with pytest.raises(PermissionError):
+            paths.ensure_socket_dir()
+
 
 # ---------------------------------------------------------------------------
 # tmux: ambient socket resolution
@@ -621,6 +657,35 @@ class TestListPmSessions:
         sock_dir.mkdir()
         (sock_dir / "pm-dead").write_text("")  # not a socket
         mock_run.return_value = MagicMock(returncode=1, stdout="")
+        with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
+            assert tmux.list_pm_sessions() == []
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_skips_a_symlink_planted_in_the_socket_dir(self, mock_run,
+                                                       tmp_path):
+        """The 1777 socket dir must not let another user point us elsewhere.
+
+        ``is_socket()`` follows symlinks, so a link planted at ``pm-<tag>``
+        would be listed (and its mode read) as if it were one of our
+        servers.  ``lstat`` sees the link itself and skips it.
+        """
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        target = tmp_path / "elsewhere"
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            s.bind(str(target))
+        finally:
+            s.close()
+        (sock_dir / "pm-evil").symlink_to(target)
+
+        def fake_run(cmd, **kwargs):
+            if str(sock_dir / "pm-evil") in cmd:
+                return MagicMock(returncode=0,
+                                 stdout="pm-evil-session|1\n")
+            return MagicMock(returncode=1, stdout="")
+
+        mock_run.side_effect = fake_run
         with patch.object(paths, "SHARED_SOCKET_DIR", sock_dir):
             assert tmux.list_pm_sessions() == []
 
@@ -1585,6 +1650,26 @@ class TestShowConnect:
         monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
                             lambda name: (str(paths.default_socket_path()),
                                           False))
+        app = MagicMock()
+        app._session_name = "pm-x"
+
+        pane_ops.show_connect(app)
+
+        screen = app.push_screen.call_args[0][0]
+        assert screen._command == (
+            f"tmux -S {paths.default_socket_path()} attach -t pm-x")
+
+    def test_legacy_session_with_the_default_socket_in_the_env(self,
+                                                               monkeypatch):
+        """The rollout path exports the default socket for a legacy session.
+
+        That skips the no-env probe, so the session must still be named:
+        one default server can host several legacy pm sessions.
+        """
+        from pm_core.tui import pane_ops
+
+        monkeypatch.setenv("PM_TMUX_SOCKET",
+                           str(paths.default_socket_path()))
         app = MagicMock()
         app._session_name = "pm-x"
 

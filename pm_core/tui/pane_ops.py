@@ -750,8 +750,16 @@ def show_connect(app) -> None:
         hosting, on_private = tmux_mod.find_session_server(session)
         if hosting is not None:
             socket_path = hosting
-            if not on_private:
-                target = f" -t {session}"
+            target = "" if on_private else f" -t {session}"
+    elif socket_path and session:
+        # The rollout path exports the *default* server's socket for a
+        # legacy session, so the branch above never runs for one.  Name the
+        # session there for the same reason: attaching to the default
+        # server without `-t` picks whichever legacy session tmux considers
+        # current.
+        from pm_core.paths import default_socket_path
+        if socket_path == str(default_socket_path()):
+            target = f" -t {session}"
     if socket_path:
         command = f"tmux -S {socket_path} attach{target}"
     elif session:

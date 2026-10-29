@@ -3,6 +3,7 @@
 import os
 import re
 import shlex
+import stat
 import subprocess
 from pathlib import Path
 
@@ -1192,7 +1193,9 @@ def list_pm_sessions() -> list[dict]:
         if sock is None:
             return False
         try:
-            return bool(sock.stat().st_mode & 0o077)
+            # lstat for the same reason as the scan below: never read a
+            # symlink's target as if it were this entry's mode.
+            return bool(sock.lstat().st_mode & 0o077)
         except OSError:
             return False
 
@@ -1244,12 +1247,16 @@ def list_pm_sessions() -> list[dict]:
     except OSError:
         sockets = []
     for sock in sockets:
+        # lstat, not is_socket(): the socket directory is world-writable, so
+        # a symlink another user plants there must not be followed — it
+        # would make their target look like one of our servers.
         try:
-            if not sock.is_socket():
-                _log.debug("list_pm_sessions: skipping non-socket %s", sock)
-                continue
+            mode = sock.lstat().st_mode
         except OSError:
             _log.debug("list_pm_sessions: skipping unreadable %s", sock)
+            continue
+        if not stat.S_ISSOCK(mode):
+            _log.debug("list_pm_sessions: skipping non-socket %s", sock)
             continue
         collect(str(sock))
 
