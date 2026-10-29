@@ -170,7 +170,9 @@ workdirs are touched.
 6. No `gh_pr_number`: no gh call; status `closed`.
 7. Absent workdir path: close succeeds; `workdir` reference preserved.
 8. Repeat close: exit 0; entry still present; status `closed`; notes not
-   duplicated.
+   duplicated; the GitHub close is re-attempted (so a failed one can be
+   retried) while `closed_at` is preserved — review c02f i12,
+   `test_repeat_close_retries_the_github_close`.
 9. `--remove`: entry gone; workdir and branch intact; `active_pr` reassigned.
 10. Dependents: warning names the dependent(s); dependent status unchanged
     (not merged, not started); `ready_prs` still excludes it.
@@ -189,8 +191,10 @@ workdirs are touched.
     the duplicate message names the closed status and the reopen command
     (`pm pr edit <id> --status pending`).
 18. `active_pr` (A2): a default close moves it off the now-closed entry to the
-    first remaining non-terminal PR, and closing a PR never moves a pointer
-    that names a different PR.
+    first remaining non-terminal PR, becomes `None` when no non-terminal PR
+    remains, and closing a PR never moves a pointer that names a different PR
+    (`test_default_close_clears_active_pr_when_nothing_remains`, review c02f
+    i12).
 19. `--remove` on a `merged` PR leaves the GitHub PR alone (a merged GitHub PR
     cannot be closed) and reports the *local* record — "left unchanged (the PR
     is recorded as merged)" — instead of claiming it was left "open", and
@@ -254,6 +258,15 @@ workdirs are touched.
     `pm pr start`, instead of the unhelpful `--status <status>` placeholder.
     `pm pr sync-github --help` documents that a locally merged/closed record
     is not reopened.
+30. Bare `pm pr cleanup` (review c02f i12): with no id the command auto-selects
+    the sole PR *with* a workdir among the terminal statuses.  It used to
+    consider `merged` only, so the explicit step `pm pr close`'s help points at
+    answered "No merged PRs with workdirs to clean up" right after a close.
+    Both terminal statuses are now offered, and the no-match/multiple messages
+    say "merged or closed".  Covered by
+    `test_bare_cleanup_auto_selects_a_closed_workdir` and
+    `test_bare_cleanup_reports_when_nothing_terminal_has_a_workdir` (both fail
+    before the change).
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -375,7 +388,9 @@ No **[UNRESOLVED]** ambiguities.
   duplicates derive from the `pr_utils` constant (review c02f i10/i11).
 - `pm_core/cli/pr.py` — `pr_cleanup`'s "not merged" warning set also accepts
   `closed`, so following close's help to the explicit cleanup is not flagged
-  as unexpected (review c02f i10).
+  as unexpected (review c02f i10), and its id-less auto-select offers the
+  terminal statuses (`merged` or `closed`) rather than `merged` alone (review
+  c02f i12).
 - `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN, at
   snapshot time and again inside the locked apply.
 - `pm_core/tui/sync.py` — the startup GitHub sync's apply applies the same
@@ -391,8 +406,10 @@ No **[UNRESOLVED]** ambiguities.
 ## 6. Out of scope
 
 - Real GitHub operations of any kind; all verification uses the fake backend.
-- Changing `pm pr cleanup`'s behaviour (the only change is dropping a
-  misleading warning for the now-normal `closed` input), `pm pr merge`'s
-  merge flow, or TUI cleanup keys.
+- Reworking `pm pr cleanup`'s behaviour.  The only changes are accepting
+  `closed` as a normal input (no "not merged" warning) and offering it in the
+  id-less auto-select; the dirty-workdir guard, `--force`, `--all`, `--prune`
+  and `--resources` are untouched, as are `pm pr merge`'s merge flow and the
+  TUI cleanup keys.
 - Branch deletion features (e.g. `gh pr close --delete-branch`) — removed from
   the close path entirely; no replacement command is added.

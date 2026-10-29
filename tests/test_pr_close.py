@@ -210,6 +210,20 @@ def test_default_close_moves_active_pr_off_the_closed_entry(tmp_path):
     assert store.get_pr(data, "pr-001")["status"] == "closed"
 
 
+def test_default_close_clears_active_pr_when_nothing_remains(tmp_path):
+    """With no non-terminal PR left, the pointer becomes None — the closed
+    record must never be re-selected as active (A2)."""
+    project = _make_project(tmp_path, with_dependent=False)
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    data = store.load(project["pm_dir"])
+    assert data["project"]["active_pr"] is None
+    assert store.get_pr(data, "pr-001")["status"] == "closed"
+
+
 def test_default_close_leaves_a_foreign_active_pr_alone(tmp_path):
     """Closing one PR must not move an active pointer that names another."""
     project = _make_project(tmp_path)
@@ -296,6 +310,45 @@ def test_cleanup_remains_the_explicit_way_to_drop_a_closed_workdir(tmp_path):
     assert entry["workdir"] is None         # only the reference is cleared
 
 
+def test_bare_cleanup_auto_selects_a_closed_workdir(tmp_path):
+    """`pm pr cleanup` with no id is the step close's help points at, so a
+    closed PR with a workdir must be selectable — the auto-select used to
+    consider `merged` only and answered "No merged PRs with workdirs"."""
+    project = _make_project(tmp_path, with_dependent=False)
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        assert _run_close(project["pm_dir"], "pr-001").exit_code == 0
+    assert project["workdir"].is_dir()
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["cleanup", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert "Auto-selected pr-001" in result.output
+    assert not project["workdir"].exists()
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "closed"
+    assert entry["workdir"] is None
+
+
+def test_bare_cleanup_reports_when_nothing_terminal_has_a_workdir(tmp_path):
+    """The no-match message names both terminal statuses, so a user who just
+    closed a PR without a workdir is not sent chasing a merged-only cleanup."""
+    project = _make_project(tmp_path, workdir=False, with_dependent=False)
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["cleanup"])
+
+    assert result.exit_code != 0
+    assert "No merged or closed PRs with workdirs" in result.output
+
+
 # ---------------------------------------------------------------------------
 # flags
 # ---------------------------------------------------------------------------
@@ -378,6 +431,27 @@ def test_repeat_close_is_idempotent(tmp_path):
     # is a real "the record was touched" check, not a >= tautology.
     assert entry["updated_at"] > first_entry["updated_at"]
     assert _snapshot(project["workdir"]) == wd_before
+
+
+def test_repeat_close_retries_the_github_close(tmp_path):
+    """A6: a repeat close re-attempts the GitHub close (unless
+    --keep-github), so a close whose `gh` call failed can be retried without
+    rewriting the retained record."""
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001")
+        project = _make_project(tmp_path, gh_pr_number=pr.number)
+        assert _run_close(project["pm_dir"], "pr-001").exit_code == 0
+        # The remote is still OPEN (as after a failed `gh pr close`).
+        backend.prs[pr.number].state = "OPEN"
+        first_entry = _load_entry(project["pm_dir"])
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    assert _close_calls(backend) == [["pr", "close", str(pr.number)]] * 2
+    assert backend.prs[pr.number].state == "CLOSED"
+    after = _load_entry(project["pm_dir"])
+    assert after["status"] == "closed"
+    assert after["closed_at"] == first_entry["closed_at"]
 
 
 def test_repeat_close_does_not_invent_a_closure_time(tmp_path):

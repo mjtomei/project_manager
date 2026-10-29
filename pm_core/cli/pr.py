@@ -3210,6 +3210,8 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
     """Remove work directory for a PR.
 
     Refuses to delete workdirs with uncommitted changes unless --force is given.
+    Without a PR id, auto-selects the sole terminal (merged or closed) PR that
+    still has a workdir — the explicit step `pm pr close` points at.
     Use --all to clean up all PR workdirs at once.
     Use --prune to clear stale workdir references from project.yaml.
     Use --resources to kill live tmux/docker/registry resources for a PR.
@@ -3284,17 +3286,24 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
         return
 
     if pr_id is None:
-        prs = data.get("prs") or []
-        with_workdir = [p for p in prs if p.get("status") == "merged" and p.get("workdir")
+        # `closed` is a normal terminal state since `pm pr close` retains the
+        # entry and its workdir (pr-62ad13d), so it is offered here alongside
+        # `merged` — close's help points at this explicit step.
+        prs = usable_prs(data.get("prs"))
+        with_workdir = [p for p in prs
+                        if (p.get("status") or "pending") in TERMINAL_PR_STATES
+                        and p.get("workdir")
                         and Path(p["workdir"]).exists()]
         if len(with_workdir) == 1:
             pr_id = with_workdir[0]["id"]
             click.echo(f"Auto-selected {pr_id}")
         elif len(with_workdir) == 0:
-            click.echo("No merged PRs with workdirs to clean up.", err=True)
+            click.echo("No merged or closed PRs with workdirs to clean up.",
+                       err=True)
             raise SystemExit(1)
         else:
-            click.echo("Multiple merged PRs have workdirs. Specify one:", err=True)
+            click.echo("Multiple merged or closed PRs have workdirs. "
+                       "Specify one:", err=True)
             for p in with_workdir:
                 click.echo(f"  {_pr_display_id(p)}: {p.get('title', '???')}", err=True)
             raise SystemExit(1)
