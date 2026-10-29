@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T10:13:04.537764+00:00'
+  updated_at: '2026-10-29T10:36:27.196237+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42774,6 +42774,23 @@ prs:
       restart keeps the pid, so B never claims.'
     created_at: '2026-10-29T10:13:04Z'
     last_edited: '2026-10-29T10:13:04Z'
+  - id: note-5a5a0bd
+    text: 'QA S135 (2026-10-29, host, real claude 2.1.312 routed refiner/worker vs
+      acme router + main stubs, fake planner/verifier/finalizer/sign-off; HEAD 74cebe25
+      (= bb72f6f8 code) vs control a0e55418; captures /pm-captures/scenarios/135/README.md,
+      every setup tui+cli mp4): PASS, no code change. RQ58 held: t on a held run focuses
+      qa-H and says "waiting for input — answer in its scenario worker pane" (control:
+      only "Focused QA window"); answer -> resumed line ~4.7 s, one IR + one PASS
+      note, 2 finalize lines, one sign-off hand-off (control: no PASS note); crash
+      + answer while down + pm session -> re-adopt 1.1 s, resumed line, PASS note
+      (control: no resumed line); two restarts in A beside clone B -> B never claims,
+      owner_pid always A. RQ57 beside it: plain restart re-adopts held H, cuts off
+      refining J with one sticky press-z-t line, ends its record, kills qa-J-s0..s2
+      (stub client-gone), z t starts exactly one run; re-ask on H stays held with
+      no extra note/finalize. Harness: S132 scripts + ask_prs stub limit; the new
+      J run numbers scenarios 3/4 by design (_next_scenario_offset).'
+    created_at: '2026-10-29T10:36:27Z'
+    last_edited: '2026-10-29T10:36:27Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
