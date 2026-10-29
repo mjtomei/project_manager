@@ -360,9 +360,13 @@ def _resolve_session_socket(session_name: str,
     # socket we do not own even though the legacy path would not connect to
     # it (a squatted socket is a hostile condition, not something to route
     # around silently).
+    # ``lstat`` inspects the directory entry itself, not a symlink target:
+    # with ``stat`` a dangling link planted by another user reads as "owned
+    # by nobody" (OSError, treated as ours) and tmux would then create a
+    # server socket at the attacker-chosen path.
     if not is_shared:
         try:
-            owner = Path(socket_path).stat().st_uid
+            owner = Path(socket_path).lstat().st_uid
         except OSError:
             owner = os.getuid()
         if owner != os.getuid():

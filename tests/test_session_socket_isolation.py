@@ -938,6 +938,28 @@ class TestResolveSessionSocket:
         with pytest.raises(SystemExit):
             session_mod._resolve_session_socket("pm-repo-abc", False)
 
+    def test_refuses_a_symlink_planted_at_the_socket_path(self, monkeypatch,
+                                                          tmp_path):
+        """A dangling symlink must be refused, not followed.
+
+        ``stat()`` follows the link, so a link to a path that does not exist
+        yet raises ``OSError`` and the check would treat the socket as ours;
+        tmux would then create a server socket at the attacker-chosen
+        target.  The ownership check inspects the directory entry itself.
+        """
+        from pm_core.cli import session as session_mod
+
+        sock_dir = tmp_path / "pm-sessions"
+        sock_dir.mkdir()
+        (sock_dir / "pm-repo-abc").symlink_to(tmp_path / "attacker-chosen")
+        real_uid = os.getuid()
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", sock_dir)
+        monkeypatch.setattr(session_mod.os, "getuid", lambda: real_uid + 1)
+
+        with pytest.raises(SystemExit):
+            session_mod._resolve_session_socket("pm-repo-abc", False)
+        assert not (tmp_path / "attacker-chosen").exists()
+
 
 class TestSessionKillServerSelection:
     """``pm session kill`` must target the server that hosts the session."""

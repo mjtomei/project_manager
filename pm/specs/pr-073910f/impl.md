@@ -577,13 +577,23 @@ Known limitation (documented, not fixed — fail-safe by design): R5b's
 guard accepts an ambient session only when
 `~/.pm/pane-registry/<session>.json` exists in the *current* HOME.  A user
 who joined someone else's `--global`/`--group` session has no registry
-file in their own HOME, so `pm session` run from a **workdir clone** of
-that repo starts a separate session instead of re-joining.  From the repo
-directory itself the cwd-derived tag equals the shared tag, so re-joining
-still works.  This is the same trade-off as the i5 note (deleting the
-registry file while a session is live makes `pm session` create a separate
-session); adopting the ambient session without proof of local ownership is
-what caused the 2026-10-28 incident.
+file in their own HOME, so a plain `pm session` started inside that
+session never re-joins it — from a **workdir clone** *or* from the repo
+directory itself — and instead creates a separate private session for that
+user.  (d1c0 i10 correction: the earlier claim that "from the repo
+directory the cwd-derived tag equals the shared tag" was wrong.  The share
+mode is part of the tag hash, and `_session_start` clears `PM_SHARE_MODE`
+when no `--global`/`--group` flag is passed, so the plain tag is the
+*private* one — verified directly: `get_session_tag` for one repo returns
+a different hash with and without `PM_SHARE_MODE`.  Re-joining does work
+when the joiner repeats the flag — `pm session --global` from the repo
+directory recomputes the shared tag and attaches to the shared socket —
+and always works via the documented
+`pm session --global --dir <owner's repo>/pm`.)  This is the same
+trade-off as the i5 note (deleting the registry file while a session is
+live makes `pm session` create a separate session); adopting the ambient
+session without proof of local ownership is what caused the 2026-10-28
+incident.
 
 ## Review iteration (2026-10-29, review-loop d1c0 i2)
 
@@ -975,5 +985,53 @@ test gap in the PR's central requirement, one stale user-facing string, one
 Validation: full suite re-run after these edits; no live session, server
 or shared host configuration was touched (every fixture used a disposable
 socket and an isolated `HOME`).
+
+Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i10)
+
+Verification pass over the integrated head; no requirement changes.  One
+fail-closed hardening in the private-socket ownership check and one
+documentation correction.
+
+1. **The private-socket ownership check followed symlinks.**  The socket
+   directory is world-writable (1777, sticky), so another local user can
+   create `pm-<tag>` there.  `Path(socket_path).stat()` resolves a link, so
+   a *dangling* symlink raised `OSError`, the check fell back to
+   `owner = os.getuid()`, and the squatted path was accepted — tmux would
+   then bind a server socket at the attacker-chosen target path.  The check
+   now uses `lstat()`, i.e. it inspects the directory entry itself: a link
+   planted by another user reports *their* uid and is refused.  A real
+   socket owned by us behaves exactly as before.  Test:
+   `test_refuses_a_symlink_planted_at_the_socket_path` (verified to fail
+   with `stat()` and pass with `lstat()`).
+2. **The documented joiner limitation was wrong about the repo
+   directory.**  The i1 section claimed a collaborator who joined a
+   `--global`/`--group` session can still re-join from the repo directory
+   because "the cwd-derived tag equals the shared tag".  It does not: the
+   share mode is mixed into the tag hash, and `_session_start` clears
+   `PM_SHARE_MODE` when no `--global`/`--group` flag is passed, so the
+   plain tag is the *private* one (verified directly: `get_session_tag`
+   for one repo returns a different hash with and without
+   `PM_SHARE_MODE`).  A plain `pm session` therefore starts a separate
+   private session for the joiner from any directory; re-joining works
+   when the joiner repeats the flag (`pm session --global`, which
+   recomputes the shared tag) or uses the documented `--dir` form.  The
+   behaviour is unchanged and remains the fail-safe trade-off; only the
+   claim was corrected.
+
+Validation on the integrated head: full suite **4591 passed / 1 skipped**
+after these edits (4590 + the new symlink test; scratch `pytest<9` +
+`markdown` on `PYTHONPATH`, `PATH` without the push-proxy `git`,
+`TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared).  The new test was
+checked in both directions (fails with `stat()`, passes with `lstat()`),
+and `pm/specs/pr-073910f/session_start_smoke.py` was re-run after the
+edits (disposable socket, isolated `HOME`, `TMUX_TMPDIR` on a scratch
+dir): private server created, `PM_TMUX_SOCKET` in the session env, the
+global env and the hooks, default server untouched.  `pm session list` was
+also re-verified end to end against disposable private/shared/legacy
+servers (private + `(shared)` + `(default server)` rows, stale non-socket
+entry skipped).  No live session, server or shared host configuration was
+touched.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
