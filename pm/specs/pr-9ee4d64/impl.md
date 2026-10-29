@@ -53,8 +53,8 @@ Required behaviour:
 - Before `build_claude_shell_cmd` replaces an existing transcript path,
   it **archives** the outgoing transcript under
   `<transcript-dir>/archive/<stem>.<session-id>.jsonl` (symlink → native
-  file, or the finalized regular file), using an atomic rename. Archives
-  are never overwritten.
+  file, or the finalized regular file), by creating the entry no-clobber
+  and then removing the outgoing path. Archives are never overwritten.
 - `finalize_transcript` writes an immutable archive copy keyed by the
   session id before it freezes the canonical path.
 - Review-loop iteration transcripts are named per loop:
@@ -138,9 +138,14 @@ available in the run dir:
 
 ## Implicit requirements
 
-1. **Atomicity.** Archive-on-replace must be an atomic `rename` of the
-   outgoing path (symlink or file) so a concurrent reader sees either the
-   old path or the archive, never a half-written state.
+1. **No half-written archives.** An archive entry is created whole
+   (a symlink, a hard link, or an exclusively-created copy that is removed
+   if it fails part way), so a concurrent reader never sees a truncated
+   entry. Archive-on-replace deliberately does *not* use `rename`: it
+   creates the entry no-clobber and then removes the outgoing path, so an
+   existing immutable entry is never overwritten (see
+   `_move_into_archive`). A failure at either step leaves the outgoing
+   session recoverable (the entry, the canonical, or the native JSONL).
 2. **Idempotency.** Archiving an already-archived session must not create
    duplicate or truncated entries. Archive names are keyed by session id;
    an existing archive is never overwritten.
@@ -162,8 +167,10 @@ available in the run dir:
    archived attempt or at the native JSONL; readers follow the chain, so
    appends remain visible until the attempt is frozen.
 7. **Container launches.** `build_claude_shell_cmd` computes the symlink
-   on the host from `write_dir`; archiving happens on the host path, not
-   the container `/workspace` path.
+   target from `cwd` (a container launch passes `/workspace`, so the
+   target is the host `~/.claude/projects/-workspace/<sid>.jsonl` that the
+   container's Claude writes). Archiving operates on the host transcript
+   path the caller passed, never on a container path.
 
 ## Design
 
@@ -177,12 +184,16 @@ available in the run dir:
   - missing → `None`;
   - compute archive name: `<stem>.<sid>.jsonl` for a symlink whose target
     is a UUID-named JSONL, else `<stem>.<mtime_ns>-<size>.jsonl` for a
-    frozen file;
+    frozen file, else `<stem>.<random-12-hex>.jsonl` for a symlink whose
+    target is not UUID-named;
   - `archive_dir.mkdir(parents=True, exist_ok=True)`;
   - if the archive already exists, do not overwrite (if it is a symlink
     to the same target, drop only the redundant canonical link);
-  - otherwise `path.rename(archive_path)` (atomic; renames the symlink
-    itself, not its target).
+  - otherwise `_move_into_archive` creates the entry no-clobber — a
+    symlink to the same absolute target for a symlink, a hard link for a
+    regular file, an exclusively-created copy when the filesystem refuses
+    links — and only then removes `path`. Never `rename`: that would
+    clobber an immutable entry.
 - `build_claude_shell_cmd`: before creating the new symlink, call
   `archive_transcript(transcript_path)` when the path exists / is a
   symlink; log the archive.
@@ -297,11 +308,15 @@ No **[UNRESOLVED]** ambiguities.
 - **Dangling outgoing symlink** (previous launch failed before Claude
   wrote): archived as a dangling link; harmless, and `finalize_transcript`
   no-ops because the target is missing.
-- **Regular (frozen) outgoing path**: archived by rename under an
-  mtime/size key; never confused with a session-id archive.
+- **Regular (frozen) outgoing path**: hard-linked (or copied) into the
+  archive under an mtime/size key, then removed; never confused with a
+  session-id archive.
 - **Two launches racing on one path** (sign-off has a per-PR launch lock;
-  impl `--fresh` is guarded): the rename is atomic; one attempt's link is
-  archived, the other's becomes canonical. No data is lost.
+  impl `--fresh` is guarded): the entry is created no-clobber, so the
+  second archiver finds the entry already there and drops only the
+  redundant canonical link instead of overwriting it. One attempt's link
+  becomes canonical; every session's content stays reachable (archive
+  entry or native JSONL).
 - **Bulk finalize while a loop is running** (auto-start disable): the
   sweep skips live loops/windows, so the collector keeps seeing appends;
   its own completion callback finalizes later.
@@ -321,16 +336,17 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (28) in `tests/test_transcript_archive.py` covering:
+- New unit tests (29) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
   (legacy fallback, loop-scoped preference when both names exist, and a
   dangling loop-scoped link winning over a stale legacy file),
   both pre-return sessions surviving two sign-off returns (R4),
   legacy-iteration live/finalize handling, the no-hardlink archive
-  fallback, a dangling link and a failed copy left alone by finalize, and
+  fallback, a dangling link and a failed copy left alone by finalize,
   the live-owner skips (running review loop, running watcher, live step
-  windows) for both bulk sweeps.  One more
+  windows) for both bulk sweeps, and a stub app's non-string
+  `_session_name` never reaching tmux.  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
   `tests/test_breadcrumb_review_loop.py` gains an
@@ -418,6 +434,10 @@ Applied on top of the design above; keep them when editing the code.
   loop-scoped-over-legacy precedence in `resolve_iteration_transcript`
   (including a dangling loop-scoped link, which is the current attempt
   before Claude writes its native JSONL) is now pinned by tests.
+- `_live_transcript_owners` resolves the tmux session through
+  `auto_start._app_session` (review d468 i1) instead of the raw
+  `_session_name`: a stub app's attribute may be a non-string, which must
+  never be handed to `tmux list-windows` from inside a bulk finalize.
 
 ## Known limitations (accepted)
 

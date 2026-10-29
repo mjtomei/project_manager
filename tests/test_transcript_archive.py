@@ -569,6 +569,30 @@ def test_live_owners_follow_step_windows(env, monkeypatch):
     assert prefixes == set()
 
 
+def test_live_owners_ignore_a_stub_app_session(env, monkeypatch):
+    """A stub app's ``_session_name`` is not a real tmux session.
+
+    ``_app_session`` filters a non-string before it can reach tmux, so the
+    window lookup is skipped and the sweep still runs (with no step-window
+    skips) instead of raising from inside a bulk finalize.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core.tui import auto_start
+
+    app = _fake_app(env, session=object(), prs=[{"id": "pr-abc"}])
+    calls: list = []
+
+    def _list_windows(session):
+        calls.append(session)
+        return []
+
+    monkeypatch.setattr(tmux_mod, "list_windows", _list_windows)
+    exact, prefixes = auto_start._live_transcript_owners(app)
+    assert calls == []
+    assert exact == set()
+    assert prefixes == set()
+
+
 def test_disable_finalizes_idle_transcripts_and_archives(env):
     from pm_core.tui import auto_start
 

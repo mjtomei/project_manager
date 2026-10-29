@@ -612,7 +612,9 @@ def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
                     prefixes.add(f"{info['type']}-i")
         except Exception:
             _log.debug("auto_start: list_watchers failed", exc_info=True)
-    session = getattr(app, "_session_name", None)
+    # ``_app_session``, not the raw attribute: a stub app's ``_session_name``
+    # may be a non-string (see its docstring), which must not reach tmux.
+    session = _app_session(app)
     prs = list((getattr(app, "_data", None) or {}).get("prs") or [])
     if session:
         from pm_core import tmux as tmux_mod
