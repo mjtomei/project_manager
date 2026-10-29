@@ -221,9 +221,6 @@ def next_review_iteration(transcript_dir: str, pr_id: str) -> int:
     REVIEW bounce or a TUI restart must preserve the earlier review
     transcripts and evidence.  Returns 0 when none exist.
     """
-    import re
-    from pathlib import Path
-
     d = Path(transcript_dir)
     if not d.is_dir():
         return 0

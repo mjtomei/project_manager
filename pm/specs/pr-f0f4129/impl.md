@@ -420,6 +420,15 @@ No unresolved ambiguities.
     a conflict still records the return, and a probe failure still records
     its retry metadata (without the guard `_retry_open` raises, so the gate
     fails open and `impl_completion` never completes).
+22. a corrupt non-dict `base_return` (a string, a list, a number) on the
+    "no open return" branch of `impl_completion` reads as "no record": the
+    completion still returns complete instead of raising through the outer
+    guard (which reports "completion check failed" on every poll — the same
+    stuck handoff the null case pins; only the null case was covered before).
+23. a `workdir` recorded on the PR but no longer present on disk is "no PR
+    workdir" in the TUI completion tick: the git helpers would otherwise
+    raise `FileNotFoundError` (they run with the workdir as their cwd)
+    inside the shared poll timer, breaking QA/sign-off polling for every PR.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

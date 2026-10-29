@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T02:26:25.723593+00:00'
+  updated_at: '2026-10-29T03:06:31.453614+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40826,6 +40826,27 @@ prs:
       with many prior iterations gets fewer per loop restart. (2026-10-29T03:20:00Z)'
     created_at: '2026-10-29T02:26:03Z'
     last_edited: '2026-10-29T02:26:25Z'
+  - id: note-00093c0
+    text: 'Review-loop be50 i2 fixes (on e942a64e). (1) impl_completions "no open
+      base return" branch read pr["base_return"].get("resume_loop") directly: a hand-edited
+      non-dict value (a string, a list, a number) raised AttributeError, which the
+      outer guard reported as "completion check failed" on every poll — the permanently
+      stuck handoff R6 forbids. open_return already treats every non-dict as "no return";
+      the resume_loop read now does too (only the null case had a test). (2) The TUI
+      completion tick reached base_check.git_op_in_progress/tracked_dirty with a workdir
+      recorded on the PR but no longer present on disk; both raise FileNotFoundError
+      (subprocess cwd) and the tick runs inside the shared poll timer, so the exception
+      would break QA/sign-off polling for every PR. The guard now requires the directory
+      to exist, matching impl_completions own check; five existing TUI tests that
+      relied on a nonexistent /wd now give the tick a real directory. (3) Dropped
+      redundant local re/Path imports in next_review_iteration (both are module-level).
+      Tests: parametrized non-dict base_return (string/list/int) and a deleted-workdir
+      tick case, each verified to fail without its fix. Spec test plan items 22-23
+      added. Full suite: 4569 passed, 1 skipped, 0 failed (tests/test_markdown_render.py
+      ignored — needs the markdown package; test_hook_events::test_installer_writes_standalone_receiver
+      deselected — needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T03:06:31Z'
+    last_edited: '2026-10-29T03:06:31Z'
   model: provider:deepseek-flash
   effort: high
   session_models:

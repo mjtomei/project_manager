@@ -150,7 +150,7 @@ def test_completion_tick_waits_for_settle(tmp_path):
 def test_completion_tick_blocks_on_dirty_workdir(tmp_path):
     from pm_core.tui import review_loop_ui
 
-    pr = _pr(base_return=_return())
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
     app = _app(tmp_path, [pr])
     old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
     with patch("pm_core.base_check.git_op_in_progress", return_value=None), \
@@ -164,7 +164,7 @@ def test_completion_tick_blocks_on_dirty_workdir(tmp_path):
 def test_completion_tick_runs_the_check_once_and_reports(tmp_path):
     from pm_core.tui import review_loop_ui
 
-    pr = _pr(base_return=_return())
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
     app = _app(tmp_path, [pr])
     # Execute the worker synchronously.
     app.run_worker.side_effect = lambda fn, **kw: fn()
@@ -191,7 +191,7 @@ def test_completion_tick_rechecks_after_a_new_idle_event(tmp_path):
     """
     from pm_core.tui import review_loop_ui
 
-    pr = _pr(base_return=_return())
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
     app = _app(tmp_path, [pr])
     app.run_worker.side_effect = lambda fn, **kw: fn()
     old = time.time() - base_check.IDLE_SETTLE_SECONDS - 2
@@ -215,7 +215,7 @@ def test_completion_tick_background_test_is_not_completion(tmp_path):
     """An idle turn whose rework did not change the pair stays pending."""
     from pm_core.tui import review_loop_ui
 
-    pr = _pr(base_return=_return())
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
     app = _app(tmp_path, [pr])
     app.run_worker.side_effect = lambda fn, **kw: fn()
     old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
@@ -309,6 +309,26 @@ def test_completion_tick_handles_a_missing_workdir(tmp_path):
     assert "workdir" in why
 
 
+def test_completion_tick_handles_a_deleted_workdir(tmp_path):
+    """A workdir path that no longer exists must not reach the git helpers.
+
+    ``subprocess.run(cwd=<missing>)`` raises ``FileNotFoundError``, and this
+    tick runs inside the shared poll timer: an exception there would break
+    QA/sign-off polling too.  A recorded workdir can outlive the directory
+    (the user removed it, a container path was cleaned up).
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr(base_return=_return(), workdir=str(tmp_path / "gone"))
+    app = _app(tmp_path, [pr])
+    old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1
+    # No patch of the git helpers: they would raise on the missing cwd.
+    ok, why, _resume = review_loop_ui._base_completion_tick(
+        app, "pr-001", pr, _tracker(old))
+    assert not ok
+    assert "workdir" in why
+
+
 def test_completion_tick_handles_a_missing_project_root(tmp_path):
     """No project root must not reach ``store.load`` with ``None``."""
     from pm_core.tui import review_loop_ui
@@ -332,7 +352,7 @@ def test_completion_tick_recovers_when_the_worker_cannot_start(tmp_path):
     """
     from pm_core.tui import review_loop_ui
 
-    pr = _pr(base_return=_return())
+    pr = _pr(base_return=_return(), workdir=str(tmp_path))
     app = _app(tmp_path, [pr])
     app.run_worker.side_effect = RuntimeError("no worker")
     old = time.time() - base_check.IDLE_SETTLE_SECONDS - 1

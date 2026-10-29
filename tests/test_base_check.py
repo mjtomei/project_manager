@@ -399,6 +399,22 @@ def test_completion_tolerates_a_null_base_return(w):
     assert res.resume_loop is False
 
 
+@pytest.mark.parametrize("corrupt", ["a string", ["a", "list"], 7])
+def test_completion_tolerates_a_non_dict_base_return(w, corrupt):
+    """A hand-edited ``base_return`` of any non-dict shape reads as no record.
+
+    ``open_return`` already returns None for these; the ``resume_loop`` read
+    in the "no open return" branch must not then raise, or the outer guard
+    reports "completion check failed" on every poll and the handoff can never
+    complete (the same stuck state the null case pins).
+    """
+    set_pr(w, base_return=corrupt)
+    res = base_check.impl_completion(w.pm_dir, PR, pr(w),
+                                     idle_since=time.time())
+    assert res.complete, res.reason
+    assert res.resume_loop is False
+
+
 def test_completion_after_reconciled_base_resolves_the_return(w):
     with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
         gate(w)

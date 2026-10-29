@@ -947,10 +947,16 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
             pr = fresh
         rec = open_return(pr)
         if rec is None:
-            # ``base_return`` may be null in a hand-edited/corrupt
-            # project.yaml; ``or {}`` keeps that from raising inside the
-            # handoff (which would leave the PR permanently "not complete").
-            last = (pr or {}).get("base_return") or {}
+            # ``base_return`` may be null — or, in a hand-edited/corrupt
+            # project.yaml, a string or a list.  Read every non-dict as "no
+            # record": ``open_return`` already does, and the ``resume_loop``
+            # read here must not raise either.  An exception surfaces through
+            # the outer guard as "completion check failed" on every poll,
+            # which is the permanently stuck handoff that guard exists to
+            # prevent.
+            last = (pr or {}).get("base_return")
+            if not isinstance(last, dict):
+                last = {}
             return CompletionResult(True, "no open base return",
                                     bool(last.get("resume_loop")))
         resume_loop = bool(rec.get("resume_loop"))

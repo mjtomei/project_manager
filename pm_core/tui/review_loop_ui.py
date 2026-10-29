@@ -1448,6 +1448,7 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     """
     from pm_core import base_check
     from pm_core.tui import auto_start as _auto_start
+    from pathlib import Path
 
     if not app._root:
         # Every check below (and ``impl_completion``) resolves the project
@@ -1483,10 +1484,11 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     if time.time() - idle_since < base_check.IDLE_SETTLE_SECONDS:
         return False, "letting the implementation settle", False
     workdir = pr.get("workdir")
-    if not workdir:
-        # The git helpers run with this as their cwd; an empty one raises
-        # rather than reporting "no workdir", and this tick runs inside the
-        # shared poll timer.
+    if not workdir or not Path(workdir).is_dir():
+        # The git helpers run with this as their cwd; an empty *or deleted*
+        # one raises (``FileNotFoundError``) rather than reporting "no
+        # workdir", and this tick runs inside the shared poll timer — the
+        # exception would break QA/sign-off polling for every PR too.
         return False, "no PR workdir", False
     op = base_check.git_op_in_progress(workdir)
     if op:
