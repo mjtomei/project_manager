@@ -298,6 +298,21 @@ recording-recipe bugs that any worker following the recipe hits:
   (before the shared `pm-recorder` clear) and in step 2 (before the claim),
   the CLI recipe in the preamble and in the scaffold (before the shared `rec`
   clear); the refused block makes no tmux call at all.
+- the web-UI recipe's capture directory had no writability guard at all
+  (review loop ebd1 i14): step 1 checks only that `mkdir -p` succeeded, and it
+  answers 0 for a directory that exists and cannot be written — so the block
+  exited **0**, started the app, wrote no `server.pid` and left the previous
+  run's mp4/webm/manifest/screenshots in place; the driver block then
+  reported "playwright does not resolve beside driver.mjs" (after `ln`
+  answered "Permission denied"), the finalize block "transcode produced no
+  mp4 — ffmpeg failed on the driver's webm", and the Layer 2 block exited
+  **0** having written neither `http.log` nor `sse.log` — the silent success
+  its own guard exists to prevent (verified live with a mode-500 capture
+  directory and the recipe's own fenced blocks). All four now stop with
+  "capture directory … cannot be written — … check the path and its
+  permissions": step 1 right after its `mkdir` guard (before the stale
+  clear), and the driver, finalize and Layer 2 blocks after their existing
+  missing-directory check. Four new execution cases cover them.
 - two guards the recipes carry had no case (review loop ebd1 i13, test
   coverage only): the CLI scaffold's readiness timeout names
   `recorder-pane.log`, and only the message was pinned — deleting the
@@ -344,6 +359,13 @@ or clearing the shared recorder session (`pm-recorder` for the tmux recipe,
 `rec` for the CLI scaffold); the pre-fix blocks ran on and failed later as
 "recorder exited before it drew" / "asciinema wrote no cast", naming files
 that cannot exist.
+S25/S26 also re-check the web-UI blocks' refusal (review loop ebd1 i14): with
+the capture directory at mode 500, step 1 must stop at "capture directory …
+cannot be written" before starting the app (pre-fix it exits 0, writes no
+`server.pid` and leaves the earlier run's evidence), and the driver, finalize
+and Layer 2 blocks pasted on their own must stop with the same message rather
+than reporting "playwright does not resolve", a failed transcode of the
+driver's webm, or (the Layer 2 block) exiting 0 with neither log written.
 S21/S22 also re-check the CLI scaffold's refusal order: pasted with a
 relative or unsubstituted `<capture-dir>`, it must stop at "must be an
 absolute path" *without* clearing the host-shared `rec` session — a

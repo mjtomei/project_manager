@@ -1790,6 +1790,45 @@ def test_web_ui_finalize_refuses_a_missing_capture_dir(tmp_path):
     assert not called.exists(), "the finalize step ran ffmpeg anyway"
 
 
+def test_web_ui_finalize_refuses_a_capture_dir_it_cannot_write(tmp_path):
+    """An unwritable capture directory is reported as a failed transcode.
+
+    The directory exists, so the block's own checks pass and ffmpeg runs; its
+    output cannot be created, and the block exits 1 with "transcode produced
+    no mp4 — …" — blaming the encoder and the recording for a permissions
+    problem, with no remedy that can work (verified live with a mode-500
+    capture directory and a webm in place: "ffmpeg failed on the driver's
+    webm" with a real encoder, "ffmpeg wrote nothing" with a stub that exits
+    0). The same guard the missing-directory case added, one shape over.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("root can write a mode-500 directory")
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    (capdir / "recording.webm").write_bytes(b"webm")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "ffmpeg-called"
+    _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(capdir),
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    capdir.chmod(0o500)
+    try:
+        r = subprocess.run(["bash"], input=_web_ui_finalize_block(), env=env,
+                           capture_output=True, text=True)
+    finally:
+        capdir.chmod(0o700)
+
+    assert r.returncode != 0, (
+        "the finalize step ran into a capture directory nothing can be "
+        "written into")
+    assert "cannot be written" in r.stderr, r.stderr
+    assert "transcode produced no mp4" not in r.stderr, (
+        "an unwritable capture directory is reported as a failed transcode "
+        "of the driver's webm: " + r.stderr)
+    assert not called.exists(), "the finalize step ran ffmpeg anyway"
+
+
 def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
     """The guard must not break the step it protects."""
     block = _web_ui_finalize_block()
@@ -2312,6 +2351,43 @@ def test_web_ui_driver_block_refuses_a_missing_capture_dir(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
+    """An unwritable capture directory is reported as Playwright not resolving.
+
+    The directory exists, so the block's ``cd`` succeeds and the link is
+    attempted: ``ln`` answers "Permission denied", the resolution check then
+    reports "playwright does not resolve beside driver.mjs" and tells the
+    worker to run that same link again — a remedy that cannot work, the shape
+    R31/R32 fixed for the ``agg`` install and the nested ``node_modules`` —
+    while the driver's own outputs have nowhere to go. Verified live with a
+    mode-500 capture directory: the pre-fix block exits 1 with the Playwright
+    message and ``ln``'s "Permission denied" above it.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("root can write a mode-500 directory")
+    global_dir = _fake_playwright(tmp_path / "global")
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    capdir.chmod(0o500)
+    try:
+        r = _run_driver_block(capdir, global_dir)
+    finally:
+        capdir.chmod(0o700)
+
+    assert r.returncode != 0, (
+        "the driver block ran into a capture directory nothing can be "
+        "written into")
+    assert "cannot be written" in r.stderr, r.stderr
+    assert "playwright does not resolve" not in r.stderr, (
+        "an unwritable capture directory is reported as Playwright not "
+        "resolving, with a link command that fails the same way: " + r.stderr)
+    assert "playwright ok" not in r.stdout, (
+        "the block passed its resolution check although it could not link: "
+        + r.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_block_refuses_an_unset_app_url(tmp_path):
     """An unset APP_URL is not "the default app" — the driver has a fallback.
 
@@ -2710,14 +2786,17 @@ def _web_ui_start_block():
 
 
 def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
-                      mkdir_body=None):
+                      mkdir_body=None, capdir_mode=None):
     """Run the web-UI recipe's app-start block with stub pm/curl/my-app.
 
     ``caps_is_file`` makes the captures path itself a regular file, so the
     block's ``mkdir -p`` cannot create the capture directory. ``pm_body``
     replaces the stub ``pm`` (which otherwise prints the captures root);
     ``mkdir_body`` replaces the stub ``mkdir``, so a case can watch what the
-    block tries to create without creating it.
+    block tries to create without creating it. ``capdir_mode`` pre-creates the
+    block's own capture directory with that mode, so a case can model one that
+    exists and cannot be written (``mkdir -p`` answers 0 for it); the mode is
+    restored before the run returns.
     """
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", _web_ui_start_block())
     bindir = tmp_path / "bin"
@@ -2727,6 +2806,9 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
         caps.write_text("not a directory")
     else:
         caps.mkdir(parents=True, exist_ok=True)
+    capdir = caps / "scenarios" / "1" / "web-ui"
+    if capdir_mode is not None:
+        capdir.mkdir(parents=True)
     launched = tmp_path / "app-launched"
     _stub_tool(bindir, "pm", pm_body or f'echo "{caps}"\n')
     if mkdir_body is not None:
@@ -2736,8 +2818,14 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_MODE=mode, STUB_CURL_COUNT=str(tmp_path / "curl-count"),
                STUB_CURL_LOG=str(tmp_path / "curl-log"))
-    r = subprocess.run(["bash"], input=block, env=env,
-                       capture_output=True, text=True, timeout=60)
+    if capdir_mode is not None:
+        capdir.chmod(capdir_mode)
+    try:
+        r = subprocess.run(["bash"], input=block, env=env,
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        if capdir_mode is not None:
+            capdir.chmod(0o700)
     return r, launched
 
 
@@ -2891,6 +2979,31 @@ class TestWebUiStartExecution:
         assert not launched.exists(), (
             "the app was started although the capture directory does not "
             "exist, so its outputs have nowhere to go")
+
+    def test_an_unwritable_capture_dir_stops_the_start(self, tmp_path):
+        """`mkdir -p` answers 0 for a capture directory that cannot be written.
+
+        Every later write into it fails as something else: the clear leaves
+        the previous run's mp4/webm/manifest/screenshots in place,
+        ``server.pid`` cannot be written (so the teardown later refuses for a
+        missing pid), the driver's link fails with "Permission denied" and is
+        reported as "playwright does not resolve" — a remedy that cannot work
+        — and the Layer 2 block exits 0 having written neither log. Verified
+        live with a mode-500 capture directory: the pre-fix block exits 0,
+        launches the app and writes no pid file. Stop where the directory is
+        established, as both recording recipes do.
+        """
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            pytest.skip("root can write a mode-500 directory")
+        r, launched = _run_web_ui_start("ok", tmp_path, capdir_mode=0o500)
+
+        assert r.returncode != 0, (
+            "a capture directory that cannot be written was reported as a "
+            "successful start")
+        assert "cannot be written" in r.stderr, r.stderr
+        assert not launched.exists(), (
+            "the app was started although nothing can be written into the "
+            "capture directory")
 
     @pytest.mark.parametrize("pm_body", [
         # The real command's failure shape: the error on stderr, exit 1,
@@ -3115,6 +3228,41 @@ def test_web_ui_layer2_block_refuses_a_missing_capture_dir(tmp_path):
         "the protocol block ran with a capture directory that does not exist "
         "and reported success")
     assert "does not exist" in r.stderr, r.stderr
+    assert not called.exists(), (
+        "the protocol block ran curl with nowhere to write its logs")
+
+
+def test_web_ui_layer2_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
+    """The existence guard cannot see this one, and the block exits 0.
+
+    The directory is there, so ``[ -d "$CAPDIR" ]`` passes, but neither
+    redirect can be opened: neither curl runs, and the block's last command
+    (``kill … || true``) succeeds — verified live with a mode-500 capture
+    directory: rc 0, no ``http.log``, no ``sse.log``. That is exactly the "a
+    run with no protocol capture reads as success" failure this block's guard
+    exists for, one shape over.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("root can write a mode-500 directory")
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    called = tmp_path / "curl-called"
+    _stub_tool(bindir, "curl", f'touch "{called}"\n')
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1",
+               PATH=f"{bindir}:{os.environ['PATH']}")
+    capdir.chmod(0o500)
+    try:
+        r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        capdir.chmod(0o700)
+
+    assert r.returncode != 0, (
+        "the protocol block reported success while writing neither log into "
+        "a capture directory nothing can be written into")
+    assert "cannot be written" in r.stderr, r.stderr
     assert not called.exists(), (
         "the protocol block ran curl with nowhere to write its logs")
 

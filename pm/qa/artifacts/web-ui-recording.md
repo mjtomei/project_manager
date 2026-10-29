@@ -113,6 +113,22 @@ mkdir -p "$CAPDIR" || {
     echo "could not create $CAPDIR — check the path and its permissions" >&2
     exit 1
 }
+# An *existing* directory that cannot be written is the same state one shape
+# over, and `mkdir -p` answers 0 for it. Nothing below says so where it
+# happens: the clear cannot remove the previous run's evidence, `server.pid`
+# cannot be written (so the teardown later refuses for a missing pid), the
+# driver's link and outputs fail ("playwright does not resolve", a remedy that
+# cannot work), the transcode blames the driver's webm, and the Layer 2 block
+# writes neither log and still exits 0. Stop here instead, before anything is
+# written (verified live with a mode-500 capture directory: the block exits 0,
+# starts the app, writes no server.pid and leaves the earlier run's mp4, webm,
+# manifest and screenshots in place).
+[ -w "$CAPDIR" ] && [ -x "$CAPDIR" ] || {
+    echo "capture directory $CAPDIR cannot be written — the clear, the pid" \
+        "file, the driver's outputs and the Layer 2 logs all go there; check" \
+        "the path and its permissions" >&2
+    exit 1
+}
 # A previous run's outputs must not survive a failed driver or transcode: the
 # finalize step would otherwise turn an earlier run's webm into a
 # fresh-looking mp4 of that run, and the driver's trace, screenshots and DOM
@@ -253,6 +269,19 @@ fi
 # link landed in the cwd and the resolution check passed on it).
 cd "$CAPDIR" || {                            # where driver.mjs lives
     echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
+    exit 1
+}
+# A directory that exists and cannot be written is the same hole one shape
+# over, and it is misdiagnosed: `ln` fails with "Permission denied", the
+# resolution check then reports "playwright does not resolve beside
+# driver.mjs" and tells the worker to run that same link again — a remedy that
+# cannot work — while the driver's own outputs have nowhere to go (verified
+# live with a mode-500 capture directory: the block exits 1 with the
+# Playwright message and the link's "Permission denied" above it).
+[ -w "$CAPDIR" ] && [ -x "$CAPDIR" ] || {
+    echo "capture directory $CAPDIR cannot be written — the link, the" \
+        "driver's video, trace, screenshots and DOM dump all go there; check" \
+        "the path and its permissions" >&2
     exit 1
 }
 # Clear this attempt's outputs *before* anything below can fail. This block is
@@ -467,6 +496,17 @@ if [ ! -d "$CAPDIR" ]; then
     echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
     exit 1
 fi
+# ... and an existing directory that cannot be written is the same state one
+# shape over: the `rm` fails silently, ffmpeg cannot write the mp4, and the
+# block reports "transcode produced no mp4 — …" — blaming the encoder and the
+# recording for a permissions problem (verified live with a mode-500 capture
+# directory and a webm in place: rc 1 with that message). Stop here instead.
+[ -w "$CAPDIR" ] && [ -x "$CAPDIR" ] || {
+    echo "capture directory $CAPDIR cannot be written — the transcode writes" \
+        "recording.mp4 there and removes the webm; check the path and its" \
+        "permissions" >&2
+    exit 1
+}
 # Drop the old mp4 first: ffmpeg leaves an existing output untouched when it
 # fails, so a failed transcode would otherwise keep the previous run's video
 # as this run's recording.
@@ -546,6 +586,19 @@ if [ ! -d "$CAPDIR" ]; then
     echo "capture directory $CAPDIR does not exist — create it and run step 1" >&2
     exit 1
 fi
+# An existing directory that cannot be written is that exact failure again,
+# and it is the one this block's guard is for: both redirects fail, neither
+# curl runs, and the last command below (`kill … || true`) succeeds, so the
+# block exits 0 having written neither log — a run with no protocol capture
+# that reads as success (verified live with a mode-500 capture directory: rc 0,
+# no http.log, no sse.log). The existence check above cannot see it, because
+# the directory is there. Stop here instead.
+[ -w "$CAPDIR" ] && [ -x "$CAPDIR" ] || {
+    echo "capture directory $CAPDIR cannot be written — http.log and sse.log" \
+        "are redirected there, so this block would otherwise exit 0 having" \
+        "written neither; check the path and its permissions" >&2
+    exit 1
+}
 # http.log — snapshot each route you care about. -sS keeps it quiet but
 # shows errors; -w records the status line per route. Each request is
 # bounded, like the step-1 readiness poll: a route that accepts the
