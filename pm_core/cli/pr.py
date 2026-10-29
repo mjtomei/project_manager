@@ -1806,9 +1806,15 @@ def _launch_review_window(data: dict, pr_entry: dict, fresh: bool = False,
             home_window.park_if_on(pm_session, existing["id"])
             tmux_mod.kill_window(pm_session, existing["id"])
             click.echo(f"Killed existing review window '{window_name}'")
+            # The review loop launches this command as a child and discards
+            # its stdout on success, so mirror the user-facing notice into the
+            # log — otherwise a loop-driven launch silently replaces a held or
+            # historical window with no visible trace.
+            _log.info("Killed existing review window '%s'", window_name)
         else:
             tmux_mod.select_window(pm_session, existing["id"])
             click.echo(f"Switched to existing review window '{window_name}'")
+            _log.info("Switched to existing review window '%s'", window_name)
             return
 
     title = pr_entry.get("title", "")
@@ -4254,6 +4260,28 @@ def _qa_status_for(pr_id: str) -> tuple[str | None, Path | None]:
     return data.get("overall") or None, latest
 
 
+def _qa_run_owned_elsewhere(status_path: Path | None) -> bool:
+    """True when another live process still drives the run behind *status_path*.
+
+    The status file carries an empty ``overall`` for the whole duration of a
+    run, so a missing qa window does not prove the run is dead.  The resume
+    snapshot next to it records the driver (owner pid + start time); the same
+    check a restarting TUI uses decides whether the run is orphaned.
+    """
+    if status_path is None:
+        return False
+    import json
+    from pm_core import qa_loop
+    try:
+        data = json.loads(
+            (status_path.parent / "qa_resume.json").read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    return qa_loop.resume_owned_elsewhere(data)
+
+
 def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
                              fresh: bool, review_loop: bool = True) -> None:
     """Launch review *iteration* in the background for auto-sequence.
@@ -4365,6 +4393,14 @@ def pr_auto_sequence(pr_id: str):
         if not pm_session:
             click.echo("paused: no pm tmux session")
             return
+        # A native review loop (including its bounded failed-launch retries)
+        # owns this PR's review launch; a second --fresh launch here would
+        # kill its window and duplicate the work.  Wait for the loop.
+        from pm_core.review_loop import review_loop_owns_launch
+        _loop_owner = review_loop_owns_launch(pr_id)
+        if _loop_owner:
+            click.echo(f"running: review (owned by {_loop_owner})")
+            return
         verdict, latest_iter = _check_review_verdict(tdir, pr_id)
         if verdict and _older_than(
                 tdir / f"review-{pr_id}-i{latest_iter}.jsonl",
@@ -4429,12 +4465,33 @@ def pr_auto_sequence(pr_id: str):
 
     if status == "qa":
         overall, _path = _qa_status_for(pr_id)
-        if overall and _older_than(_path,
-                                   (open_return(pr_entry) or {}).get("ts")):
-            # The status predates sign-off's return (REQA, or rework that
-            # must be re-verified): it is the run sign-off already judged,
-            # not the re-run.
+        # The status predates sign-off's return (REQA, or rework that must be
+        # re-verified): it is the run sign-off already judged, not the re-run.
+        stale_status = bool(overall) and _older_than(
+            _path, (open_return(pr_entry) or {}).get("ts"))
+        # A PASS seen while the REQA obligation is still unclaimed is not the
+        # owed re-run's either: every full-run starter clears ``awaiting`` as
+        # it starts (``start_qa``, ``qa-run-bg``, ``zz t``), so it came from a
+        # run that was already in flight when sign-off bounced the PR.  That
+        # run verified the code sign-off judged, so advancing would silently
+        # drop the owed re-run — leave the PR at ``qa`` and start it via the
+        # catch-up below (mirrors ``qa_loop_ui._on_qa_complete``'s guard).
+        owed_reqa = awaiting == "qa"
+        pre_return_pass = overall == "PASS" and owed_reqa
+        if stale_status or pre_return_pass:
             overall = None
+        # The REQA episode is still open and a QA run of this PR is in
+        # flight: whatever ``qa_status.json`` says now was written by a run
+        # that started before it (the owed re-run clears ``awaiting`` as it
+        # starts but only writes its own status once planning ends — minutes
+        # later — so the previous run's PASS/NEEDS_WORK stays newest).  Acting
+        # on it would advance or bounce the PR out from under the run that
+        # owns it and drop the owed re-run; wait for that run to end.
+        from pm_core.qa_loop import run_driven_elsewhere
+        if overall is not None and open_return(pr_entry) is not None \
+                and run_driven_elsewhere(pr_id):
+            click.echo("running: qa (driven elsewhere)")
+            return
         if overall == "PASS":
             # QA passed and finalized -> advance to the sign_off step, which
             # runs the comprehensive PR-level review + verdict router.  The
@@ -4476,17 +4533,40 @@ def pr_auto_sequence(pr_id: str):
             )
             return
         if overall is None:
-            # No qa_status.json yet.  Could be a never-started run *or*
-            # a freshly-launched run whose first status write hasn't
-            # landed yet.  Check for the qa tmux window before
+            # No finalized result yet: a never-started run, a freshly
+            # launched run, or a held run reopening after INPUT_REQUIRED.
+            # Check for the qa tmux window before
             # re-launching to avoid stacking duplicate QA subprocesses
-            # during the launch→first-write race window.
-            display_id = _pr_display_id(pr_entry)
-            qa_win = tmux_mod.find_window_by_name(
-                pm_session, f"qa-{display_id}",
-            ) if pm_session else None
+            # during the launch→first-write race window.  While the REQA
+            # obligation is still unclaimed that window belongs to a run that
+            # already finished (QA windows are kept for inspection), so it
+            # does not mean a run is starting: the catch-up's claim is the
+            # one-owner gate there, and any run actually starting has either
+            # cleared ``awaiting`` or written its run record by now.
+            qa_win = None
+            if pm_session and not owed_reqa:
+                display_id = _pr_display_id(pr_entry)
+                qa_win = tmux_mod.find_window_by_name(
+                    pm_session, f"qa-{display_id}")
             if qa_win:
                 click.echo("running: qa")
+                return
+            # Same race, before the window exists: a run another live
+            # process drives (a user's ``pm qa run``, another TUI) is not
+            # ours to duplicate (S117).
+            if run_driven_elsewhere(pr_id):
+                click.echo("running: qa (driven elsewhere)")
+                return
+            if _qa_run_owned_elsewhere(_path):
+                # A reopened held run can still have an owner even without
+                # its window. Keep that driver's workers and evidence intact.
+                click.echo("running: qa")
+                return
+            # A sign-off REQA's re-run is owed: only one driver may take it.
+            from pm_core.signoff import claim_return_launch, return_awaiting
+            if return_awaiting(pr_entry) == "qa" and not claim_return_launch(
+                    root, pr_id, "qa", require_status="qa"):
+                click.echo("running: qa (launch claimed)")
                 return
             _launch_qa_detached(root, pr_id)
             click.echo("running: qa (launched)")
@@ -4537,6 +4617,22 @@ def pr_auto_sequence(pr_id: str):
             click.echo("paused: sign_off_blocked")
             return
         if hop == "qa":
+            # A ``pm qa run`` of this PR may be live (the user's own
+            # re-verification): a detached run now would retire its windows
+            # as stale and run QA twice (S117).  The return record keeps
+            # ``awaiting: qa``, so the next tick — or the TUI's reconciler —
+            # starts the owed run once that one ends.
+            from pm_core.qa_loop import run_driven_elsewhere
+            if run_driven_elsewhere(pr_id):
+                click.echo("sign_off: re-qa deferred: a QA run is in flight")
+                return
+            # One owner across ticks and TUIs: the hop's driver claims the
+            # launch before spawning it (the detached driver clears the
+            # claim with ``awaiting`` as its run starts).
+            from pm_core.signoff import claim_return_launch
+            if not claim_return_launch(root, pr_id, "qa", require_status="qa"):
+                click.echo("running: qa (launch claimed)")
+                return
             _launch_qa_detached(root, pr_id)
             click.echo("sign_off: re-qa")
             return
