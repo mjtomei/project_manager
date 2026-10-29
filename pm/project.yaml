@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T06:00:32.415624+00:00'
+  updated_at: '2026-10-29T07:14:50.045335+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40908,6 +40908,35 @@ prs:
       every 2 s and never ages past IDLE_SETTLE_SECONDS.'
     created_at: '2026-10-29T06:00:32Z'
     last_edited: '2026-10-29T06:00:32Z'
+  - id: note-58087c9
+    text: 'QA scenario 5 (concurrent drivers) found and fixed one bug: the base-rework
+      catch-up did not survive a plain TUI restart. `_poll_impl_idle` registers an
+      implementation pane from `get_transcript_dir(app)/impl-<pr>.jsonl`; a plain
+      `pm tui restart` re-execs with `_auto_start_run_id = None` (the breadcrumb is
+      only written for a merge-restart marker), so the run dir is a fresh `transcripts/manual-<hex>`
+      with no links, `PaneIdleTracker.register` raises for every PR launched by an
+      earlier TUI/auto-start run, and the catch-up is skipped silently. An open `base_return`
+      then has no launcher and no completion check until some external `pm pr auto-sequence`
+      tick happens to run — the stranding R6 forbids. Fixed in 1e58b787: fall back
+      to an `impl-<pr>.jsonl` link another driver already wrote (`transcripts/<run>/`
+      or `transcripts/auto-sequence/<pr>/`, newest link first). `share_impl_transcript`
+      re-points those links on relaunch and a stale link''s idle turn is still rejected
+      by `impl_completion`''s post-relaunch guard, so the fallback cannot manufacture
+      completion. Verified live on an isolated fixture: pre-fix a restarted TUI logged
+      no `impl_idle` line for the returned PR for 2+ minutes and never relaunched
+      it; post-fix it tracks the pane and relaunched the stranded rework exactly once
+      (`impl_idle: relaunched base rework for pr-b04fc41`, one new launch line for
+      that workdir, awaiting cleared, launched_at set, one pr-<id> window). Captures:
+      /pm-captures/scenarios/5/{race,pre-fix,post-fix,duplicate,qa-phase}/. Full suite
+      after the fix: 4573 passed, 1 skipped, 0 failed (test_markdown_render needs
+      the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Two scenario assertions are unreachable as written
+      and are not defects: `pm autostart status` cannot show `base conflict; relaunching
+      implementation` after a plain restart (auto-start is off with no targets), and
+      the TUI catch-up only runs when the impl pane has emitted `idle_prompt`, which
+      a stand-in that never saw the sentinel has not.'
+    created_at: '2026-10-29T07:14:49Z'
+    last_edited: '2026-10-29T07:14:49Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
