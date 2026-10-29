@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T03:26:21.980438+00:00'
+  updated_at: '2026-10-29T03:57:37.461326+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29718,6 +29718,28 @@ prs:
       way.'
     created_at: '2026-10-29T03:26:21Z'
     last_edited: '2026-10-29T03:26:21Z'
+  - id: note-4c5e005
+    text: 'Review-loop 345f i2 (65960976): found and fixed two residual instances
+      of this PR own failure class. (1) `_poll_tmux_verdicts` retired every scenario
+      that never got a window as INPUT_REQUIRED ("worker window never created (launch
+      failed)") and filled open slots by launching queued workers even when the run
+      was already stopping — a stop landing between "plan parsed" and "workers launched"
+      (the launch skips a stopping run, so its scenarios have no window) surfaced
+      a missing-outcome failure + QA note instead of STOPPED, because a launch-failure
+      verdict defeats `stopped_clean`. It now returns immediately when stopping and
+      `_launch_next_queued` refuses to launch during teardown. (2) The verifier re-check
+      replaced `wait_for_follow_up_verdict` (which pre-scanned the transcript) with
+      `poll_for_verdict`, which only scans after a *newer* idle; an answer that landed
+      during the send/settle window (its idle predates the poll baseline) was never
+      seen, hanging the re-check until the 3600 s response timeout. `poll_for_verdict`
+      now takes an optional `baseline_line`: when set it scans once before blocking
+      and returns a verdict newer than the snapshot, and every later scan (`_scan`)
+      filters out the prompting verdict at or below the baseline; the re-check snapshots
+      the prompting verdict before sending. Tests: `TestStoppedRunBeforeLaunch` (3),
+      baseline_line pre-scan/filter (2), re-check baseline_line assertion. Full suite
+      4590 passed, 1 skipped, 0 failed (4591 collected).'
+    created_at: '2026-10-29T03:57:37Z'
+    last_edited: '2026-10-29T03:57:37Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
