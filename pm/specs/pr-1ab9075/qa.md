@@ -155,6 +155,15 @@ the user stops the run,
 blocked behind the concretizer) and a stop does not spawn a worker for the
 queued scenario.
 
+The pr-592e4bd review note called out that the queued refiner
+(`_concretize_scenario`/`poll_for_verdict`) still ran on the poll thread. The
+current code reconciles this: `_launch_next_queued` starts the whole launch
+(workdir, container, concretizer poll, worker split) via `_start_op` in a
+background thread, so a slow or stalled refiner — including a routed refiner
+held by `_RouteStallWatch` during a mid-run route outage — no longer holds
+verdict collection, retries, verification or stop. Exercise this, not the
+route-gate deferral alone.
+
 ### R9 — Verdict criteria and verification unchanged
 **Given** healthy scenarios emitting PASS / NEEDS_WORK / INPUT_REQUIRED,
 **When** the run completes (with or without retries elsewhere),
@@ -162,6 +171,19 @@ queued scenario.
 still go through verification, and the overall verdict follows the existing
 aggregation (any NEEDS_WORK → NEEDS_WORK, any INPUT_REQUIRED/unverdicted →
 INPUT_REQUIRED, all PASS → PASS).
+
+### R10 — Verification re-evaluation and launch retries interact safely
+**Given** a worker that emitted PASS and whose verification was FLAGGED, so
+its verdict was cleared and a follow-up was sent for re-evaluation,
+**When** that worker's pane then dies before it emits the re-evaluated
+verdict,
+**Then** the stale PASS in its old transcript is **not** resurrected (the
+`idx not in verification_failures` guard), the scenario enters a bounded
+launch retry classified as `exit` with a runtime cause, its clone/commits
+survive, and the relaunched worker's new verdict is collected and verified
+normally. Repeated flags/crashes must end at NEEDS_WORK via the existing
+verification-retry budget, not silently at PASS and not as an unexplained
+INPUT_REQUIRED.
 
 ## Setup
 
@@ -187,7 +209,18 @@ Cross-cutting setup (per scenario, in its own container):
 - Container-mode scenarios additionally need `project: nested_podman: true`
   in the test project's `project.yaml` (bootstrap-only), `pm container
   enable`, and a working container image (the default image auto-builds on
-  first use; allow time for it).
+  first use; allow time for it). Swap the image with `pm container set image
+  <image>` to drive a missing-image create failure and to restore it.
+- Host-mode scenarios simply skip `pm container enable`; their workers run
+  `claude` (fake-claude) directly in a tmux pane, so a dead worker is a dead
+  pane.
+- To make one worker fail while its siblings stay healthy, give all workers
+  the same fake-claude behaviour (e.g. a pre-verdict `delay`) and kill only
+  the target worker's pane (or stop only its container) partway through — the
+  fake config cursor is global to the session, so a scripted per-invocation
+  sequence is not per scenario. `hold: 0` makes a worker exit right after
+  writing its verdict (E2); a `delay` longer than the kill time makes it die
+  before it ever starts (E7 `exec`).
 
 ## Edge cases
 
@@ -231,6 +264,24 @@ container restart hint, and the same nonblocking retry behaviour applies.
 ### E8 — Stop while a launch thread is mid-concretize
 The stop must not leave a worker pane spawned after the fact, nor a scenario
 stuck in a "launching" state.
+
+### E9 — Verification flags a PASS and the worker dies during re-evaluation
+A worker emits PASS, verification returns FLAGGED, the follow-up message is
+sent, and the worker's pane dies before it emits a new verdict. The old PASS
+must not be collected again; the scenario must enter an `exit` launch retry
+with the clone preserved, and the new verdict must be collected after the
+relaunch. Watch the follow-up send path: the extra blank Enters after the
+follow-up are sent to the worker pane without re-checking that it still
+exists, so a pane that dies between them is a candidate crash of the poll
+loop — record it as an incidental finding if it reproduces.
+
+### E10 — Restart during a create-kind backoff
+A scenario whose container/workdir/window creation failed (no pane ever
+existed) is waiting out a `create` retry when the TUI is restarted. The
+attempt count and deadline must survive; the past-due retry must fire on the
+first resumed tick; the retry must re-clone and re-install the scenario's
+instruction file (the `instruction_source` field exists for exactly this), and
+must not leave a duplicate window or the previous attempt's container behind.
 
 ## Pass/Fail criteria
 
@@ -285,3 +336,19 @@ A5. **`create` vs `exec` classification** is judged by what the user can see:
 if the worker's transcript/idle hook ever materialised before the pane died it
 is an `exit` (or a started worker), otherwise `exec`; a scenario that never
 got a window/pane is `create`.
+
+A6. **Nested podman is available in this environment.** The 2026-10-28 run
+(scenarios 1–5, workdir
+`/home/matt/.pm/workdirs/qa/pr-1ab9075-5108c0a1b04b9659`) drove real scenario
+containers, container identity and container restarts end-to-end, so A1's
+host-mode fallback is not needed; container-specific coverage is in scope.
+
+A7. **Host mode (no container) is still worth exercising** even though A6
+holds: it is the default backend and takes the no-container branches
+(`_EXEC_CAUSE` / `_EXIT_CAUSE` fallbacks, no diagnosis, no restart hint) that
+container-mode runs never touch.
+
+A8. **Fake-claude makes a worker die on the verification follow-up.** When a
+worker runs under fake-claude and the verifier FLAGs its PASS, the follow-up
+`send_keys` is read as stdin by the fake, which then exits — so E9 can be
+driven deterministically without killing panes by hand.
