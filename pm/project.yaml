@@ -39458,7 +39458,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-29T06:27:56.577054+00:00'
+  updated_at: '2026-10-29T06:54:06.953984+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40111,6 +40111,37 @@ prs:
       No code change.'
     created_at: '2026-10-29T06:27:56Z'
     last_edited: '2026-10-29T06:27:56Z'
+  - id: note-fdf4926
+    text: 'QA S17 (wait-status accuracy: permission prompt / missing-or-unreadable
+      per-run transcript / blocked review launch) PASS, all 3 stories plus the optional
+      dangling-link variant, no code change. Verified on HEAD 251e3d8a with fake-claude
+      in an isolated fixture: HOME=/scratch/qa17-home and PM_TMUX_SOCKET=<private
+      socket> (no shared ~/.pm, no default tmux server touched); PYTHONPATH=/workspace
+      in every shell and `tmux set-environment` inherited it into panes. (1) Permission
+      prompt: with a user record as the transcript tail and a permission_prompt hook,
+      the row and the `a` popup both read "fresh autostart: permission prompt in implementation
+      window" for 10/10 samples over 20 s (never "implementation turn complete; starting
+      fresh review"), no review window, impl pane %2 with the same --session-id; assistant_turn+idle_prompt
+      started exactly one review in ~6 s. (2) TUI restart: after `pm tui restart`
+      the new run dir was empty while the session JSONL survived; the row read "waiting
+      for the current implementation turn after feedback" 10/10 over 20 s despite
+      the stale idle_prompt hook, handoff fired once, awaiting_handoff=false with
+      handoff_at set, no duplicate review after 45 s. (3) Store lock: `EDITOR="bash
+      -c ''sleep 60''" pm edit` held the lock; the row read "implementation turn complete;
+      starting fresh review", awaiting_handoff stayed true with handoff_at None, no
+      review window, and auto_review: impl idle retries were 18 s apart (not per 5
+      s tick); on release the next retry started exactly one review. Optional variant:
+      a per-run link pointing at ~/.claude/projects/-nonexistent/<sid>.jsonl still
+      resolved the wait from the session transcript and handed off exactly once. Fixture
+      traps for future runs: `ls pm/transcripts/autostart-*/impl-<pr>.jsonl` matches
+      BOTH the old and the new run dir once the TUI has restarted (readlink then fails
+      and the fixture appends to nothing) — resolve the current run from `pm autostart
+      status --json` run_id, or pick the first link whose target exists; `tmux capture-pane`
+      on a pane whose foreground is a non-shell process returns blank, use `capture-pane
+      -p -S -400` to read history; asciinema rec refuses to overwrite an existing
+      cast (use --overwrite when re-recording a capture dir). Captures: /pm-captures/scenarios/17/{01-permission-prompt,02-restart-missing-link,03-store-lock-pending,04-dangling-link}.'
+    created_at: '2026-10-29T06:54:06Z'
+    last_edited: '2026-10-29T06:54:06Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
