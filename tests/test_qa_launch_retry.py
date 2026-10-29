@@ -90,14 +90,17 @@ def _base_patches(clock, events: dict, verdicts: dict, verify: bool = False):
               side_effect=lambda sid: events.get(sid)),
         # The poll path is task-scoped since pr-8efa789 and goes through
         # ``find_verdict_turn`` (returning a VerdictHit); the dead-pane
-        # collection path still uses the older string helpers.
+        # collection path still uses the older string helpers.  Both honour
+        # the requested verdict tuple, as the real helpers do — the waiting
+        # scan asks for INPUT_REQUIRED and for PASS/NEEDS_WORK separately.
         patch("pm_core.qa_loop.find_verdict_turn",
-              side_effect=lambda tp, _v: (
+              side_effect=lambda tp, v: (
                   VerdictHit(verdict=verdicts[tp], text="",
                              turn_id=f"turn{tp}", timestamp="1.0")
-                  if verdicts.get(tp) else None)),
+                  if verdicts.get(tp) in v else None)),
         patch("pm_core.qa_loop.extract_verdict_from_transcript",
-              side_effect=lambda tp, _v: verdicts.get(tp)),
+              side_effect=lambda tp, v: (
+                  verdicts[tp] if verdicts.get(tp) in v else None)),
         patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
               return_value=""),
         patch("pm_core.qa_loop._is_verification_enabled", return_value=verify),
@@ -459,6 +462,93 @@ def test_verdict_emitted_before_pane_death_is_collected(tmp_path):
 
     assert state.scenario_verdicts == {1: VERDICT_PASS}
     assert not state.launch_retries
+
+
+def test_dropped_waiting_attempt_is_relaunched_not_recollected(tmp_path):
+    """A waiting scenario whose worker pane died with no follow-up is handed
+    back to the retry path (``_scan_waiting_scenarios`` clears its
+    INPUT_REQUIRED so a fresh worker can be answered).  The dead-pane
+    collection must not read that cleared verdict back out of the dead
+    worker's transcript: that would resurrect it and turn a recoverable wait
+    into a terminal INPUT_REQUIRED with no worker left to answer."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="wait", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1", transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.scenario_verdicts = {1: VERDICT_INPUT_REQUIRED}
+    state.scenario_verdict_reasons = {1: "need a decision"}
+    state.waiting_for_input = {1}
+    state.waiting_input_sources = {1: {
+        "pr_id": "pr-x", "loop_id": state.loop_id, "scenario": 1,
+        "session_id": "sid-1", "turn_id": "turn-ir", "timestamp": "1.0",
+        "transcript_path": str(tp),
+    }}
+
+    def on_tick(clock):
+        if state.launch_retries:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {str(tp): VERDICT_INPUT_REQUIRED}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+    ]
+    _run(state, tmp_path, patches)
+
+    # Handed back to the retry path, not settled from the stale verdict.
+    assert state.scenario_verdicts == {}
+    assert 1 not in state.waiting_for_input
+    assert state.launch_retries[1]["kind"] == "exit"
+    assert state.launch_retries[1]["state"] == "waiting"
+
+
+def test_recovered_wait_collects_a_verdict_from_its_new_worker(tmp_path):
+    """Once the retry has started a new worker, a dead pane may collect the
+    new attempt's verdict again: only the cleared attempt's transcript is
+    excluded."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="wait", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1", transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.scenario_verdicts = {1: VERDICT_INPUT_REQUIRED}
+    state.waiting_for_input = {1}
+    state.waiting_input_sources = {1: {
+        "pr_id": "pr-x", "loop_id": state.loop_id, "scenario": 1,
+        "session_id": "sid-1", "turn_id": "turn-ir", "timestamp": "1.0",
+        "transcript_path": str(tp),
+    }}
+    verdicts = {str(tp): VERDICT_INPUT_REQUIRED}
+    relaunches = []
+
+    def fake_relaunch(scenario, st, *a):
+        relaunches.append(scenario.index)
+        scenario.pane_id = "%2"
+        scenario.session_id = "sid-2"
+        # The relaunched worker answers the user's input and passes.
+        verdicts[str(tp)] = VERDICT_PASS
+        return True
+
+    def on_tick(clock):
+        if state.scenario_verdicts.get(1) == VERDICT_PASS:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, verdicts) + [
+        # Both worker panes die: the first ends the wait, the relaunched one
+        # dies again before its verdict is polled.
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+        patch("pm_core.qa_loop._relaunch_scenario_window",
+              side_effect=fake_relaunch),
+    ]
+    _run(state, tmp_path, patches)
+
+    assert relaunches == [1]
+    assert state.scenario_verdicts == {1: VERDICT_PASS}
 
 
 def test_started_worker_without_window_is_not_recloned(tmp_path):

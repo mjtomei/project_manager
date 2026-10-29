@@ -3549,6 +3549,13 @@ def _poll_tmux_verdicts(
     launch_ops: dict[int, threading.Thread] = {}
     launch_results: dict[int, tuple[str, bool, str]] = {}
     launch_lock = threading.Lock()
+    # Scenarios whose INPUT_REQUIRED was deliberately cleared so the attempt
+    # can be relaunched (``_scan_waiting_scenarios`` handing a lost wait back
+    # to the retry path).  Their old verdict is still in the dead worker's
+    # transcript, so the dead-pane collection below must not read it back —
+    # that would resurrect a cleared verdict and turn a recoverable wait into
+    # a terminal INPUT_REQUIRED.  Cleared once a new worker attempt starts.
+    recovered_waits: set[int] = set()
     for rec in retries.values():
         if rec.get("state") == "launching":
             # The previous controller died mid-launch: re-detect from the
@@ -3557,15 +3564,6 @@ def _poll_tmux_verdicts(
             # retry forever instead of exhausting the bounded budget.
             rec["state"] = "running"
             rec["attempts"] = int(rec.get("attempts", 0)) + 1
-
-    # Scenarios that never got a window (workdir, container or window
-    # creation failed) are retried like any other launch failure.  Queued
-    # scenarios have no window by design; settled ones keep their verdict.
-    for scenario in state.scenarios:
-        if (not scenario.window_name
-                and scenario.index not in _queued_indices
-                and scenario.index not in state.scenario_verdicts):
-            pending.add(scenario.index)
 
     # Verdict grace is per scenario: a relaunch only delays polling of the
     # relaunched worker, never of its healthy siblings.
@@ -3889,41 +3887,7 @@ def _poll_tmux_verdicts(
             _launch_next_queued()
             return
 
-        # Only PASS verdicts need verification — NEEDS_WORK and
-        # INPUT_REQUIRED already indicate problems were found.
-        # Skip re-verification for a PASS that was already verified
-        # before a restart: ``verified_scenarios`` is persisted in
-        # the resume snapshot precisely so a resumed run trusts
-        # prior verification instead of re-spawning a verifier
-        # Claude session for every completed scenario each restart.
-        if (verdict == VERDICT_PASS and verify_enabled
-                and idx not in state.verified_scenarios):
-            state.latest_output = (
-                f"Scenario {idx} ({scenario.title}): {verdict} — verifying..."
-            )
-            _notify()
-
-            verifying.add(idx)
-            # pane_output fallback is only consulted when the
-            # transcript is missing — which it never is in the
-            # hook-driven path — so pass "" here instead of
-            # scraping the pane.  Each scenario's verifier pane
-            # is created once and reused across re-verifications
-            # by _verify_single_scenario.
-            t = threading.Thread(
-                target=_run_verification,
-                args=(scenario, verdict, ""),
-                daemon=True,
-                name=f"qa-verify-{state.pr_id}-{idx}",
-            )
-            t.start()
-        else:
-            state.latest_output = (
-                f"Scenario {idx} ({scenario.title}): {verdict}"
-            )
-            _notify()
-            # Scenario fully done — launch next queued if available
-            _launch_next_queued()
+        _settle(scenario, verdict)
 
     def _poll_waiting() -> None:
         """Collect follow-ups from scenarios whose worker asked for input."""
@@ -3940,6 +3904,7 @@ def _poll_tmux_verdicts(
             state.held = False
         for idx in scan.dropped:
             pending.add(idx)
+            recovered_waits.add(idx)
         for idx, hit in scan.follow_ups.items():
             scenario = next(
                 (s for s in state.scenarios if s.index == idx), None)
@@ -4043,6 +4008,9 @@ def _poll_tmux_verdicts(
             if ok:
                 if rec:
                     rec["state"] = "running"
+                # A new worker attempt started: its transcript is the new
+                # session's, so a verdict it emits may be collected again.
+                recovered_waits.discard(idx)
                 grace_until[idx] = now_mono + _VERDICT_GRACE_PERIOD
                 # Per-session state belongs to the dead worker: a fresh
                 # session must get its own grace, trust watch and first
@@ -4273,11 +4241,14 @@ def _poll_tmux_verdicts(
                 # died must not be relaunched: the transcript is the verdict
                 # source of truth and the dead worker can never supersede it,
                 # so collect it now instead of spending a retry (R9 / E2).
-                # A scenario whose verdict was cleared for a verification
-                # re-evaluation is excluded — its old verdict is still in the
-                # transcript and a dead pane must not resurrect it.
+                # A scenario whose verdict was cleared on purpose is
+                # excluded — its old verdict is still in the transcript and a
+                # dead pane must not resurrect it: cleared for a verification
+                # re-evaluation, or cleared so a lost INPUT_REQUIRED wait can
+                # be relaunched for the user to answer.
                 if (_worker_has_started(scenario)
-                        and idx not in verification_failures):
+                        and idx not in verification_failures
+                        and idx not in recovered_waits):
                     verdict = extract_verdict_from_transcript(
                         scenario.transcript_path, ALL_VERDICTS)
                     if verdict:

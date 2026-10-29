@@ -178,6 +178,19 @@ concretizer pane can keep the old window alive), so a relaunch never leaves
 two same-named windows for name-based pane lookup / dashboard navigation to
 choose between.
 
+R9a. **Never resurrect a deliberately cleared verdict.**  The dead-pane
+collection (a worker that emitted its verdict and then died before the poll
+loop read it) is skipped for a scenario whose verdict was cleared on
+purpose, because that verdict is still in the dead worker's transcript:
+cleared for a verification re-evaluation (`verification_failures`) or
+cleared so a lost `INPUT_REQUIRED` wait is handed back to the retry path
+(`_scan_waiting_scenarios` → `scan.dropped`).  Without the second guard a
+worker that asked for input and then lost its pane would be settled
+`INPUT_REQUIRED` from its own stale turn instead of being relaunched for
+the user to answer, turning a recoverable wait into a terminal result.  The
+exclusion lasts until a new worker attempt starts (the relaunched session's
+transcript may be collected normally).
+
 R10. **No verdict-criteria or verification change.**  Verdict extraction,
 idle-hook gating, verification, and aggregation in `_execute_and_finalize`
 are unchanged apart from per-scenario grace.
@@ -293,3 +306,9 @@ loop owns the run.
 - E8. Relaunch in container mode for a scenario whose `container_name` is
   None (create failure) goes through the full launcher, never
   `_relaunch_scenario_window`.
+- E9. A waiting (`INPUT_REQUIRED`) scenario whose worker pane died with no
+  follow-up is dropped back to the retry path, not settled from the dead
+  worker's transcript: the cleared verdict is excluded from the dead-pane
+  collection until a new attempt starts
+  (`test_dropped_waiting_attempt_is_relaunched_not_recollected`,
+  `test_recovered_wait_collects_a_verdict_from_its_new_worker`).
