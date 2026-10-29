@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T07:14:50.045335+00:00'
+  updated_at: '2026-10-29T07:56:30.224305+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40937,6 +40937,33 @@ prs:
       a stand-in that never saw the sentinel has not.'
     created_at: '2026-10-29T07:14:49Z'
     last_edited: '2026-10-29T07:14:49Z'
+  - id: note-5ff3896
+    text: 'QA scenario 7 (retryable probe failures + sign-off ownership): PASS on
+      b1b4e95f, all three stories, runtime evidence not code reading. (1) Unreachable
+      base at a writer launch: with master renamed away, `pm pr review` printed "Base
+      integration check failed (retryable): fetch master from <project> failed: fatal:
+      couldn''t find remote ref refs/heads/master; continuing review", marked the
+      PR in_review, opened review-<pr>, exit 0; base_check = decision retry / retryable
+      true / status error / base_sha null / attempts 1 / retry_after checked_at+30s;
+      no base_return. (2) Unreachable base during the completion handoff: the conflict
+      tick returned to impl (BASE_CONFLICT, attempt 1, fresh impl session, no review
+      window/transcript); after the base went away, tick 1 re-fetched and printed
+      the retryable error (attempts 1, retry_after +30s), the two immediate ticks
+      printed "recent base check failed; retrying after the backoff" with checked_at/attempts
+      unchanged, the post-retry_after tick re-fetched to attempts 2 with retry_after
+      +60s, and the next immediate tick backed off again; PR stayed in_progress with
+      the open return (resolved_at null) and never advanced. (3) Sign-off owns integration:
+      after a clean sign-off integration check (up_to_date, head 2e3f91b0, master@1e55120e)
+      and master moving to a revision that merge-trees with <<<<<<<, the routing tick
+      still launched the hop — "sign_off: returning to review (iteration 2)", review-<pr>
+      opened, review-i2.jsonl created, review-i1.jsonl + impl-<pr>.jsonl byte-identical
+      (sha256), note intact, no base_return, integration left at the pre-move base_sha;
+      `pm pr merge` refused (no sign-off verdict) and the PR stayed in_review. Fixture:
+      isolated HOME, private tmux socket (PM_TMUX_SOCKET), one-shot `claude` stand-in
+      that emits exactly one idle_prompt, /usr/bin git; captures /pm-captures/scenarios/7/{story1,story2,story3}.
+      No issues found, nothing changed.'
+    created_at: '2026-10-29T07:56:30Z'
+    last_edited: '2026-10-29T07:56:30Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
