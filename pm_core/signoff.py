@@ -770,43 +770,71 @@ def parse_ts(value):
 
 RETURN_LAUNCH_CLAIM_SECONDS = 180
 # Hops whose relaunch is ``--fresh`` (kills the window it finds) and so
-# needs one launcher; a QA return is guarded by the QA loop's running check.
+# needs one launcher.  The claim is written in the same locked update as the
+# transition (:func:`build_return_record`), so only catch-up paths call
+# :func:`claim_return_launch` for them.
+#
+# ``qa`` is deliberately NOT here.  Its claim is taken by every *starter*
+# (qa_loop_ui.start_owed_reqa, the auto-sequence QA hop, auto-start), never
+# by the sign-off hop that performs the transition: that hop may have to
+# defer behind a live ``pm qa run``, and holding the claim would block the
+# owed start for the whole RETURN_LAUNCH_CLAIM_SECONDS after that run ends.
 _CLAIMED_RETURN_HOPS = ("impl", "review")
 
 
-def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
+def claim_return_launch(root: Path, pr_id: str, hop: str,
+                        require_status: str | None = None) -> bool:
     """Take the launch of the routed *hop*'s fresh session (one winner).
 
     Several drivers act on ``awaiting`` (the TUI routing a verdict or
     catching up after a restart, every ``pm pr auto-sequence`` tick).  The
     impl and review relaunches are ``--fresh`` — each kills the window it
     finds — so two concurrent launchers kill each other's session and leave
-    duplicates behind.  The first caller records a claim
-    and launches; later callers see it and leave the launch alone.  The
-    driver that performs the hop holds the claim from the transition on
+    duplicates behind.  A QA return's relaunch starts a whole loop (windows,
+    verifier, finalizer), so it needs the same single-owner gate.  The first
+    caller records a claim and launches; later callers see it and leave the
+    launch alone.
+
+    For the hops in :data:`_CLAIMED_RETURN_HOPS` the driver that performs
+    the hop holds the claim from the transition on
     (:func:`build_return_record`), so only catch-up paths (restart, an
-    ``awaiting`` tick) call this.
+    ``awaiting`` tick) call this.  A ``qa`` claim is taken by every starter
+    instead, because the hop that defers behind a live QA run must not hold
+    one — see that constant.
+
     ``awaiting`` itself stays set until the session opens, and a claim
     whose launcher died expires after RETURN_LAUNCH_CLAIM_SECONDS.
+
+    *require_status* additionally requires the PR to still be in that
+    status, in the same locked update: a return that an out-of-band
+    transition superseded must not be launched off a stale read.
     """
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     won = {"ok": False}
 
+    # Cheap snapshot pre-check before the locked update.  ``locked_update``
+    # rewrites the whole file even when its callback declines, and the TUI's
+    # owed-REQA reconciler retries every ~5 s while another driver's fresh
+    # claim is outstanding (up to RETURN_LAUNCH_CLAIM_SECONDS) — a fsynced
+    # rewrite of a large project.yaml on the event loop per tick.  A snapshot
+    # that already shows the claim unwinnable (awaiting cleared, status moved
+    # on, a fresh claim) is safe to trust: a stale snapshot only falls through
+    # to the atomic path below, which decides for real.
+    try:
+        snapshot = store.get_pr(store.load(root), pr_id)
+    except Exception:
+        snapshot = None       # unreadable: let the locked update decide/report
+    else:
+        if not _launch_claimable(snapshot, hop, require_status, now):
+            return False
+
     def _apply(data):
         pr = store.get_pr(data, pr_id)
-        rec = (pr or {}).get("signoff_return")
-        if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+        if not _launch_claimable(pr, hop, require_status, now):
             return
-        claim = rec.get("launch_claim") or {}
-        try:
-            age = (now - parse_ts(claim.get("at"))).total_seconds()
-        except (TypeError, ValueError):
-            age = None
-        if claim.get("hop") == hop and age is not None \
-                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS:
-            return
-        rec["launch_claim"] = {"hop": hop, "at": now.isoformat()}
+        pr["signoff_return"]["launch_claim"] = {
+            "hop": hop, "at": now.isoformat()}
         won["ok"] = True
 
     try:
@@ -815,6 +843,29 @@ def claim_return_launch(root: Path, pr_id: str, hop: str) -> bool:
         _log.warning("claim sign-off return launch for %s: %s", pr_id, e)
         return False
     return won["ok"]
+
+
+def _launch_claimable(pr: dict | None, hop: str, require_status: str | None,
+                      now) -> bool:
+    """Whether *pr*'s return record can still be claimed for *hop* now.
+
+    False when there is nothing to launch (no open return awaiting *hop*, or
+    the PR left *require_status*) and when another driver's claim is still
+    fresh — the three cases where a claim attempt would be a no-op.
+    """
+    rec = (pr or {}).get("signoff_return")
+    if not isinstance(rec, dict) or rec.get("awaiting") != hop:
+        return False
+    if require_status is not None \
+            and (pr or {}).get("status") != require_status:
+        return False
+    claim = rec.get("launch_claim") or {}
+    try:
+        age = (now - parse_ts(claim.get("at"))).total_seconds()
+    except (TypeError, ValueError):
+        age = None
+    return not (claim.get("hop") == hop and age is not None
+                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS)
 
 
 def clear_return_awaiting(root: Path, pr_id: str, hop: str) -> None:
