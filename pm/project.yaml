@@ -36234,7 +36234,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-29T06:23:20.712466+00:00'
+  updated_at: '2026-10-29T06:52:35.473954+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -36690,6 +36690,39 @@ prs:
       of reaching the handoff.'
     created_at: '2026-10-29T06:23:20Z'
     last_edited: '2026-10-29T06:23:20Z'
+  - id: note-5063fa0
+    text: 'QA S32 (drivers see every early exit / workable remedy) PASS, 7/7 stories,
+      at c1f4e907 (master@4a74d880 integrated). (1) No pm tmux session: `pm pr auto-sequence`
+      -> exactly `paused: no pm tmux session`, rc 0, no qa workdir, no qa window,
+      PR stays qa. (2) NEEDS_WORK run: tick -> `qa: needs_work, returning to review
+      (iteration 1)`, never `running: qa`, PR -> in_review with review-<pr>-i1.jsonl;
+      repeated tick -> `advanced: qa`. (3) Workdir on refs/heads/scratch: first tick
+      `running: qa (launched)`, status overall INPUT_REQUIRED with the wrong-checkout
+      error naming branch+sha+scratch and "Check out <branch> there, then restart
+      QA", qa_run.json ended_at, second tick `paused: input_required (qa)`, PR stays
+      qa. (4) No QA spec: spec-path missing in root and workdir; run stops at the
+      spec gate with "QA spec was not generated during planning." + `pm pr spec <pr>
+      qa`, ended_at, second tick paused: input_required (qa). (5/7) Real file:// upstream,
+      vanilla backend: behind -> `[INPUT_REQUIRED] Planner handoff failed: ... is
+      behind upstream ... Restart QA (it fast-forwards the PR workdir before planning
+      again), or pull the PR branch in the workdir ... scenarios were not launched
+      so none tested a different tree`; diverged (local `planner edit` vs upstream
+      6bd7080132d6) -> same shape with "diverged from upstream" and the merge remedy;
+      both write overall INPUT_REQUIRED to qa_status.json, leave no s-* dirs, and
+      the upstream head is byte-identical before/after (nothing force-pushed). (6)
+      Tick after the refused handoff -> `paused: input_required (qa)`, PR stays qa.
+      Observation (not filed, not a defect): with a live TUI, a finished `pm qa run`
+      is adopted ~2s later by qa_loop_ui resume scan ("Recovered completed QA from
+      disk ... processed=False") which does the NEEDS_WORK->in_review routing itself,
+      so a tick issued after the Given''s status reads prints `advanced: review_relaunched`
+      instead of the routing line; issuing the tick immediately after the run lets
+      auto-sequence do it (clean re-run captured). Isolation: two throwaway projects,
+      each its own PM_TMUX_SOCKET + HOME, /usr/bin/git ahead of the push proxy, PYTHONPATH=/workspace;
+      the real pm session and host config were untouched. Captures: /pm-captures/scenarios/32/
+      (per-story cast+mp4+transcript+manifest, story2 has the TUI-adoption first attempt
+      plus the clean rerun). (2026-10-29T06:58:00Z)'
+    created_at: '2026-10-29T06:52:35Z'
+    last_edited: '2026-10-29T06:52:35Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
