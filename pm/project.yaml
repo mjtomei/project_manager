@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T03:49:25.334689+00:00'
+  updated_at: '2026-10-29T04:12:07.834657+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4715,6 +4715,38 @@ prs:
       keeps its own real-process test. Full suite after the fix: 4566 passed / 1 skipped.'
     created_at: '2026-10-29T03:49:25Z'
     last_edited: '2026-10-29T03:49:25Z'
+  - id: note-78c56c4
+    text: 'Review loop d1c0 i4 (no requirement changes; full suite 4567 passed / 1
+      skipped / 1 environment-only failure). One cross-server correctness fix: pane
+      ids are only unique within one tmux server, and every pm session now has its
+      own. When an explicit --session is not found on any server (stale registry left
+      by a killed session, or a wrong --session typed from inside another pm session),
+      _find_tui_pane() still returned the registry-recorded pane id while PM_TMUX_SOCKET
+      kept naming the *current* session server, so _find_live_tui_pane() checked that
+      id against the wrong server list-panes output. Because ids restart per server
+      (%5 exists on every one), `pm tui send` / `pm tui view -s <stale>` could drive
+      an unrelated pane of another session — the class of cross-session damage this
+      PR exists to prevent. _live_panes_and_tuis() now returns a pane_id -> session_name
+      map instead of a bare id set, and the recorded pane is accepted only when the
+      pane own session (grouped suffix normalised via pane_registry.base_session_name)
+      is the session being resolved; the "fall back to a live pm _tui pane in the
+      same session" path and grouped-session handling are unchanged. New tests: test_pane_id_reused_on_another_server_is_not_returned
+      and test_live_pane_in_a_grouped_session_still_counts (tests/test_cli_helpers.py).
+      Validation on the integrated head: full suite 4567 passed / 1 skipped / 1 failed,
+      the failure being environment-only tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      (hook_install.py untouched by this PR; returns early because PM_HOST_HOME=/home/matt
+      != HOME=/home/pm in this container — that file passes 20/20 with PM_HOST_HOME
+      unset). Suite run with a scratch pytest<9 + markdown on PYTHONPATH, PATH without
+      the push-proxy git, and TMUX/TMUX_PANE/PM_* cleared. No live session, server
+      or shared host configuration was touched: every fixture used a disposable socket/HOME
+      and no destructive command ran against /tmp/tmux-<uid>/default. Residual non-blocking
+      notes unchanged from i3: uid ownership check only on pm session start (other
+      paths fail closed via 0600 sockets); /tmp/pm-sessions literal duplicated in
+      wrapper._mark_tmux_socket and qa_status._tmux_argv by design; R5b relies on
+      the pane registry file; the TUI connect screen keeps a bare `tmux attach -t
+      <name>` only as an unreachable last resort. (2026-10-29)'
+    created_at: '2026-10-29T04:12:07Z'
+    last_edited: '2026-10-29T04:12:07Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
