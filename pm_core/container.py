@@ -661,10 +661,11 @@ def create_container(
         extra_rw_mounts: Additional read-write mounts {host_path: container_path}.
         allowed_push_branch: If set, restrict git push to this branch only.
         session_tag: Session tag for shared push proxies.  When provided
-            together with *pr_id*, multiple containers on the same branch
-            share a single proxy (socket at a deterministic path).
-        pr_id: PR identifier — combined with *session_tag* to key shared
-            push proxies.
+            together with *pr_id*, containers on the same host workdir share
+            a single proxy (socket at a deterministic path); a container on
+            a different workdir — e.g. a QA scenario clone — gets its own.
+        pr_id: PR identifier — combined with *session_tag* and the workdir
+            to key shared push proxies.
 
     Returns:
         Container ID.
@@ -685,7 +686,7 @@ def create_container(
                 start_push_proxy, get_proxy_socket_path, proxy_is_alive,
             )
             sock = get_proxy_socket_path(name, session_tag=session_tag,
-                                         pr_id=pr_id)
+                                         pr_id=pr_id, workdir=str(workdir))
             if not sock or not proxy_is_alive(sock):
                 _log.warning("Push proxy dead/missing for container %s — "
                              "restarting proxy", name)
@@ -855,13 +856,14 @@ def create_container(
     # --- Git push proxy ---
     # If an allowed push branch is set, start a host-side push proxy.
     # The proxy socket is mounted into the container; credentials stay
-    # on the host.  The proxy handles all origin types: real remotes
-    # (HTTP/SSH), local-path origins (from git clone --local), and
-    # repos with no remote (push fails cleanly).
+    # on the host.  The proxy serves one host workdir and only real
+    # remotes (HTTP/SSH): a local-path origin (from git clone --local) is
+    # rejected fail-closed rather than fetched into the target, and a repo
+    # with no remote fails cleanly.
     has_push_proxy = False
     if allowed_push_branch:
         from pm_core.push_proxy import (
-            start_push_proxy, _CONTAINER_SOCKET_DIR, _CONTAINER_SOCKET_PATH,
+            start_push_proxy, _CONTAINER_SOCKET_DIR,
         )
         sock_path = start_push_proxy(
             name, str(workdir), allowed_push_branch,
@@ -1046,7 +1048,8 @@ def create_container(
 
 
 def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
-                   proxy_socket_path: str | None = None) -> str:
+                   proxy_socket_path: str | None = None,
+                   env: dict[str, str] | None = None) -> str:
     """Build a ``<runtime> exec -it`` command string for use in a tmux window.
 
     When the exec'd process exits, the container is removed (unless
@@ -1056,17 +1059,28 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
     If *proxy_socket_path* is provided, the cleanup also removes the
     push proxy socket file and its parent directory.  This triggers the
     proxy daemon thread to self-terminate (it checks for socket existence).
+
+    *env* names environment variables to add to the exec'd process.  Only
+    the *name* goes on the runtime command line (``-e NAME``); the runtime
+    reads the value from its own environment, which the tmux pane carries
+    (the pane command sources a private env file).  Values must never be
+    interpolated into this string: it is logged and kept as
+    ``#{pane_start_command}``.
     """
     runtime = _get_runtime()
     escaped = shlex.quote(shell_cmd)
+    env_args = " ".join(f"-e {shlex.quote(k)}" for k in (env or {}))
+    env_prefix = f"{env_args} " if env_args else ""
     # Under Podman with --userns=keep-id, the default user is already the
     # host user (correct UID).  The "pm" username doesn't exist in
     # /etc/passwd, so -u pm would fail.  Under Docker, -u pm switches
     # from root to the pm user created during setup.
     if "podman" in runtime:
-        exec_part = f"{runtime} exec -it {shlex.quote(name)} bash -c {escaped}"
+        exec_part = (f"{runtime} exec -it {env_prefix}"
+                     f"{shlex.quote(name)} bash -c {escaped}")
     else:
-        exec_part = f"{runtime} exec -it -u {_CONTAINER_USER} {shlex.quote(name)} bash -c {escaped}"
+        exec_part = (f"{runtime} exec -it -u {_CONTAINER_USER} {env_prefix}"
+                     f"{shlex.quote(name)} bash -c {escaped}")
     if cleanup:
         cleanup_parts = []
         if proxy_socket_path:
@@ -1075,7 +1089,18 @@ def build_exec_cmd(name: str, shell_cmd: str, cleanup: bool = True,
             f"{runtime} rm -f {shlex.quote(name)} >/dev/null 2>&1")
         if proxy_socket_path:
             sock_dir = str(Path(proxy_socket_path).parent)
+            # The proxy records its workdir/branch in a metadata sidecar next
+            # to the socket.  Leaving it behind makes `rmdir` fail, so the
+            # directory (and the sidecar) would leak in /tmp.
+            from pm_core.push_proxy import _METADATA_NAME
+            cleanup_parts.append(
+                f"rm -f {shlex.quote(str(Path(sock_dir) / _METADATA_NAME))}")
             cleanup_parts.append(f"rmdir {shlex.quote(sock_dir)} 2>/dev/null")
+            # The start lock lives *next to* the directory (outside the
+            # mount), so rmdir does not take it: without this the lock file
+            # leaks in /tmp for every per-container proxy a pane tears down.
+            cleanup_parts.append(
+                f"rm -f {shlex.quote(os.path.realpath(sock_dir) + '.lock')}")
         # Wrap in a bash trap so cleanup runs even when the pane is killed
         # via tmux kill-pane/kill-window (SIGHUP to the outer shell causes
         # ';'-chained commands to be skipped, but EXIT traps always fire).
@@ -1124,6 +1149,7 @@ def wrap_claude_cmd(
     allowed_push_branch: str | None = None,
     session_tag: str | None = None,
     pr_id: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Create a container and return a wrapped command for tmux.
 
@@ -1140,8 +1166,15 @@ def wrap_claude_cmd(
         allowed_push_branch: If set, restrict git push to this branch inside the container.
         session_tag: Session tag — embedded in the container name and used
             for shared push proxies (with *pr_id*).
-        pr_id: PR identifier — combined with *session_tag* to share push
-            proxies across containers on the same branch.
+        pr_id: PR identifier — combined with *session_tag* and the host
+            workdir to key shared push proxies: containers on the same
+            workdir share one, a container on a different workdir (e.g. a
+            QA scenario clone) gets its own.
+        env: Provider environment variables to pass to the exec'd claude by
+            name (see ``build_exec_cmd``).  Callers must also export the same
+            values into the tmux pane (``env=`` on the pane helper); the pane
+            command sources a private env file, so only the names reach the
+            runtime command line.
 
     Returns:
         (wrapped_cmd, container_name).  container_name is "" if not containerised.
@@ -1155,6 +1188,8 @@ def wrap_claude_cmd(
         "wrap_claude_cmd: label=%s workdir=%s container=%s session_tag=%s pr_id=%s",
         label, workdir, cname, session_tag, pr_id,
     )
+
+    from pm_core.push_proxy import PushProxyError
 
     try:
         create_container(
@@ -1171,6 +1206,15 @@ def wrap_claude_cmd(
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
         raise
+    except PushProxyError as exc:
+        # The proxy is what makes pushes work from inside the container;
+        # report the real reason instead of blaming the container runtime.
+        _log.error("Push proxy unavailable for container %s — aborting",
+                   cname, exc_info=True)
+        raise ContainerError(
+            f"Failed to create container '{cname}': push proxy unavailable "
+            f"— {exc}"
+        ) from exc
     except Exception as exc:
         _log.error("Failed to create container %s — aborting (container mode is enabled)",
                    cname, exc_info=True)
@@ -1193,7 +1237,8 @@ def wrap_claude_cmd(
         _log.debug("wrap_claude_cmd: rewrote prompt-file path to container path")
 
     from pm_core.push_proxy import get_proxy_socket_path
-    proxy_sock = get_proxy_socket_path(cname)
+    proxy_sock = get_proxy_socket_path(
+        cname, session_tag=session_tag, pr_id=pr_id, workdir=workdir)
     # For shared proxies (session_tag + pr_id), don't embed socket cleanup
     # in the exec command — the socket is shared across containers and its
     # lifetime is managed via reference counting in stop_push_proxy().
@@ -1201,6 +1246,7 @@ def wrap_claude_cmd(
     exec_cmd = build_exec_cmd(
         cname, claude_cmd,
         proxy_socket_path=None if shared_proxy else proxy_sock,
+        env=env,
     )
     _log.info("Wrapped claude command in container %s", cname)
     return exec_cmd, cname

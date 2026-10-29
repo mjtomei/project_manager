@@ -645,9 +645,45 @@ def test_qa_already_running_visible_during_autostart_confirmation():
 
     app, shown = _stub_app()
     app._root = "/unused"
-    state = SimpleNamespace(running=True, focus_on_create=False)
+    state = SimpleNamespace(running=True, held=False, focus_on_create=False)
     app._qa_loops = {"pr-001": state}
     _log(app, "Auto-start: targets += pr-001 (1 total)", force=True, hold=3)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " QA already running for pr-001"
+    assert state.focus_on_create is True
+
+
+def test_qa_held_run_reports_waiting_instead_of_running():
+    """A held run is still tracked; pressing t must tell the user to answer
+    in the scenario worker pane rather than claim a run is in progress."""
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=False, held=True, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert "waiting for input" in shown[-1]
+    assert "scenario worker pane" in shown[-1]
+    # No duplicate run was spawned and no window focus was requested.
+    assert state.focus_on_create is False
+
+
+def test_qa_run_reopened_from_a_hold_reports_running():
+    """The hold's reopen publishes ``running=True`` before clearing ``held``,
+    so pressing t in that window must not claim the run is still waiting."""
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    state = SimpleNamespace(running=True, held=True, focus_on_create=False)
+    app._qa_loops = {"pr-001": state}
     with patch.object(qa_loop_ui.store, "load", return_value={}), \
          patch.object(qa_loop_ui.store, "get_pr",
                       return_value={"id": "pr-001", "status": "qa"}):

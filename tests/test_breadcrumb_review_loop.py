@@ -309,6 +309,80 @@ class TestConsumeBreadcrumbReviewLoops:
         assert msgs[-1] == "Auto-start: resumed after merge restart → pr-001, pr-002"
         assert app.log_message.call_args.kwargs.get("sticky", 0) > 0
 
+    def test_restored_loop_is_running_before_the_scheduler_pass(self, tmp_path):
+        """A restored loop must be running when check_and_start runs.
+
+        A re-armed loop keeps ``latest_verdict == LAUNCH_FAILED`` and
+        ``launch_retryable`` while it runs, so a restored-but-not-yet-started
+        loop looks exactly like a completed retryable failure.  If the
+        scheduler pass ran first it would re-arm that loop — clearing the
+        saved ``launch_attempts`` and burning one of the bounded episodes
+        instead of continuing the budget across the restart.
+        """
+        from pm_core.tui import auto_start
+
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 2,
+                    "latest_verdict": "LAUNCH_FAILED",
+                    "loop_id": "ab12",
+                    "retry_iteration": 2,
+                    "launch_attempts": 2,
+                    "next_retry_at": 0,
+                    "launch_retryable": True,
+                    "retry_episodes": 0,
+                    "iteration_attempted": True,
+                    "stale_pane_session_id": "sid-pane-0",
+                    "_transcript_dir": str(tmp_path),
+                    "history": [{"iteration": 1, "verdict": "NEEDS_WORK"}],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        app = _make_app(
+            auto_start=True, root=tmp_path,
+            prs=[{"id": "pr-001", "status": "in_review",
+                  "workdir": str(tmp_path)}],
+        )
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        def fake_start(_app, _pr_id, _pr, **kw):
+            # _start_loop marks the loop running synchronously.
+            kw["resume_state"].running = True
+            return True
+
+        async def fake_check_and_start(_app):
+            auto_start._auto_start_review_loops(_app, _app._data["prs"])
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start",
+                   side_effect=fake_check_and_start), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=fake_start) as mock_start, \
+             patch("pm_core.tmux.in_tmux", return_value=True):
+            mock_store.get_pr.return_value = app._data["prs"][0]
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert mock_start.call_count == 1
+        state = app._review_loops["pr-001"]
+        assert state.running is True
+        # The saved bounded budget survives the restart.
+        assert state.launch_attempts == 2
+        assert state.retry_episodes == 0
+        # The episode-start window snapshot survives too: the resumed loop
+        # must still recognise that pane as the historical window.
+        assert state.stale_pane_session_id == "sid-pane-0"
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert not any("retrying review launch" in m for m in msgs), (
+            "the restored loop must be resumed, not re-armed")
+
     def test_skips_loop_restart_if_pr_not_in_review(self, tmp_path):
         breadcrumb_data = {
             "target": "pr-001",
@@ -341,6 +415,101 @@ class TestConsumeBreadcrumbReviewLoops:
         assert "pr-001" in app._review_loops
         # But _start_loop should NOT have been called (PR not in_review)
         mock_start.assert_not_called()
+
+    def test_a_resume_that_cannot_start_drops_the_phantom_loop(self, tmp_path):
+        """A resume that ``_start_loop`` refuses (missing workdir, no tmux,
+        unusable transcript dir) must not leave the restored entry behind.
+
+        ``_auto_start_review_loops`` skips a PR whose entry is non-running
+        and not a retryable launch failure, so a phantom entry would strand
+        the target exactly like the failed launch this PR recovers — and the
+        TUI must not announce a resume that did not happen.
+        """
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 1,
+                    "loop_id": "ab12",
+                    "_transcript_dir": str(tmp_path),
+                    "history": [],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        app = _make_app(
+            auto_start=True, root=tmp_path,
+            prs=[{"id": "pr-001", "status": "in_review",
+                  "workdir": str(tmp_path)}],
+        )
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tmux.in_tmux", return_value=True), \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   return_value=False):
+            mock_store.get_pr.return_value = app._data["prs"][0]
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert "pr-001" not in app._review_loops
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert not any("Review loop resumed" in m for m in msgs), (
+            "the TUI must not claim a resume that did not happen")
+
+        # With the phantom entry gone, the scheduler pass can start a loop.
+        from pm_core.tui import auto_start
+        started: list[str] = []
+        with patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=lambda _a, pid, _p, **kw: started.append(pid)
+                   or True), \
+             patch("pm_core.tmux.in_tmux", return_value=True):
+            auto_start._auto_start_review_loops(app, app._data["prs"])
+        assert started == ["pr-001"]
+
+    def test_a_raising_resume_is_treated_like_a_refusal(self, tmp_path):
+        """A starter that raises (e.g. a missing project root) must not take
+        the TUI mount down, and must not leave the phantom entry either."""
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 1,
+                    "loop_id": "ab12",
+                    "_transcript_dir": str(tmp_path),
+                    "history": [],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+
+        app = _make_app(
+            auto_start=True, root=tmp_path,
+            prs=[{"id": "pr-001", "status": "in_review",
+                  "workdir": str(tmp_path)}],
+        )
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tmux.in_tmux", return_value=True), \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=RuntimeError("no project root")):
+            mock_store.get_pr.return_value = app._data["prs"][0]
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert "pr-001" not in app._review_loops
+        msgs = [c.args[0] for c in app.log_message.call_args_list]
+        assert not any("Review loop resumed" in m for m in msgs)
 
     def test_no_review_loops_key_is_fine(self, tmp_path):
         """Breadcrumb without review_loops key should work (backward compat)."""
@@ -550,6 +719,55 @@ class TestBreadcrumbRoundTrip:
         # _start_loop was called with the restored state
         mock_start.assert_called_once()
 
+    def test_round_trips_the_retry_notice_key(self, tmp_path):
+        """A restart mid-retry must not re-announce a retry the user already
+        saw: the per-episode notice key travels with the breadcrumb, and
+        ``_start_loop`` must not reset it on resume (only a new retry
+        episode clears it)."""
+        (tmp_path / "merge-restart").touch()
+
+        state = _make_running_state("pr-001", iteration=2)
+        state.latest_verdict = "LAUNCH_FAILED"
+        state.retry_iteration = 2
+        state.launch_attempts = 2
+        state.launch_retryable = True
+        state.last_launch_error = "container setup failed"
+        state._ui_notified_retry = 2
+        save_app = _make_app(review_loops={"pr-001": state}, root=tmp_path)
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(save_app)
+
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert data["review_loops"]["pr-001"]["_ui_notified_retry"] == 2
+
+        restore_app = _make_app(auto_start=False, root=tmp_path)
+        restore_app._update_display = MagicMock()
+        restore_app.log_message = MagicMock()
+        pr_data = {"id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+
+        def fake_start(_app, _pr_id, _pr, **kw):
+            # _start_loop marks the loop running synchronously.
+            kw["resume_state"].running = True
+            return True
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tmux.in_tmux", return_value=True), \
+             patch("pm_core.tui.review_loop_ui._start_loop",
+                   side_effect=fake_start):
+            mock_store.get_pr.return_value = pr_data
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(restore_app))
+
+        rstate = restore_app._review_loops["pr-001"]
+        assert rstate.launch_attempts == 2
+        assert rstate._ui_notified_retry == 2, (
+            "the resumed loop must remember which attempt was announced")
+
 
 # ---------------------------------------------------------------------------
 # pm tui restart command tests
@@ -563,7 +781,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             result = runner.invoke(tui_restart, [])
 
@@ -576,7 +794,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.paths.pm_home", return_value=tmp_path), \
              patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             result = runner.invoke(tui_restart, ["--breadcrumb"])
@@ -591,7 +809,7 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=("%42", "pm-test-12345678")), \
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=("%42", "pm-test-12345678")), \
              patch("pm_core.paths.pm_home", return_value=tmp_path), \
              patch("pm_core.cli.tui.tmux_mod") as mock_tmux:
             mock_tmux.send_keys_literal.side_effect = Exception("tmux error")
@@ -606,8 +824,415 @@ class TestTuiRestartCommand:
         from pm_core.cli.tui import tui_restart
 
         runner = CliRunner()
-        with patch("pm_core.cli.tui._find_tui_pane", return_value=(None, None)):
+        with patch("pm_core.cli.tui._find_live_tui_pane", return_value=(None, None)):
             result = runner.invoke(tui_restart, [])
 
         assert result.exit_code == 1
         assert "No TUI pane found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Orphaned merge-restart marker
+# ---------------------------------------------------------------------------
+
+class TestOrphanedMergeRestartMarker:
+    """A marker that outlives its restart must not poison the next start.
+
+    Two concurrent restarts -- one ``--breadcrumb``, one plain -- race on the
+    shared ``~/.pm/merge-restart`` file.  When the plain one reaches the old
+    TUI first it restarts as ``reason=user`` without consuming the marker, so
+    the marker is left behind and would make the *next* start (even a plain
+    Ctrl+R) behave as a merge restart.
+    """
+
+    def test_resolve_mount_trigger_discards_orphan(self, tmp_path):
+        from pm_core.tui import auto_start
+
+        (tmp_path / "merge-restart").touch()
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            trigger = auto_start.resolve_mount_trigger()
+            assert trigger == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+            # A second mount is a plain start again.
+            assert auto_start.resolve_mount_trigger() == "initial"
+
+    def test_resolve_mount_trigger_clean_start(self, tmp_path):
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            assert auto_start.resolve_mount_trigger() == "initial"
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_discard_missing_marker_is_noop(self, tmp_path):
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            assert auto_start.discard_merge_restart_marker() is False
+            (tmp_path / "merge-restart").touch()
+            assert auto_start.discard_merge_restart_marker() is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_consumed_marker_leaves_nothing_for_mount(self, tmp_path):
+        """The normal path is unchanged: save_breadcrumb consumes it."""
+        from pm_core.tui import auto_start
+
+        (tmp_path / "merge-restart").touch()
+        app = _make_app(auto_start=False, root=tmp_path)
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            auto_start.save_breadcrumb(app)
+            # save_breadcrumb removed the marker, so the mount is "initial".
+            assert auto_start.resolve_mount_trigger() == "initial"
+
+
+# ---------------------------------------------------------------------------
+# Per-session breadcrumb ownership
+# ---------------------------------------------------------------------------
+
+class TestBreadcrumbSessionOwnership:
+    """The breadcrumb file is shared by every pm session in a PM home.
+
+    Two sessions restarting at the same moment must not restore each other's
+    state: session B's mount used to consume session A's breadcrumb, apply
+    A's targets to B's project (dropping them as "missing"), and leave A with
+    nothing to restore.
+    """
+
+    @staticmethod
+    def _write(home, payload):
+        (home / "autostart-resume.json").write_text(json.dumps(payload))
+
+    def _consume(self, home, app):
+        with patch("pm_core.tui.auto_start.pm_home", return_value=home), \
+             patch("pm_core.tui.auto_start.check_and_start",
+                   new_callable=AsyncMock):
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+        return app
+
+    def test_save_records_owning_session(self, tmp_path):
+        from pm_core.tui.auto_start import save_breadcrumb
+
+        app = _make_app(root=tmp_path)
+        app._session_name = "pm-alpha"
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            save_breadcrumb(app)
+
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert data["session"] == "pm-alpha"
+
+    def test_other_session_breadcrumb_is_left_alone(self, tmp_path):
+        self._write(tmp_path, {
+            "session": "pm-alpha", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-bravo"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        # Nothing restored...
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        # ...and the file is still there for its owner.
+        assert (tmp_path / "autostart-resume.json").exists()
+
+    def test_own_breadcrumb_is_consumed(self, tmp_path):
+        self._write(tmp_path, {
+            "session": "pm-alpha", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-alpha"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert app._auto_start is True
+        assert "pr-alpha" in app._auto_start_targets
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+    def test_legacy_breadcrumb_without_session_still_consumed(self, tmp_path):
+        """Breadcrumbs written before the session field must still restore."""
+        self._write(tmp_path, {
+            "auto_start": True, "targets": [{"pr_id": "pr-legacy"}],
+            "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-alpha"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert "pr-legacy" in app._auto_start_targets
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+    def test_breadcrumb_left_for_owner_when_mount_has_no_session(self, tmp_path):
+        """A mount with no session name cannot own a scoped breadcrumb.
+
+        ``pm _tui`` run outside tmux (or a mount whose tmux lookup failed)
+        has ``_session_name is None``.  It used to consume *any* breadcrumb,
+        including one another session's restart had just written, dropping
+        that session's state.
+        """
+        self._write(tmp_path, {
+            "session": "pm-alpha", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = None
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert app._auto_start is False
+        assert app._auto_start_targets == {}
+        assert (tmp_path / "autostart-resume.json").exists()
+
+    def test_grouped_session_owner_matches_its_base(self, tmp_path):
+        """A ``~N`` suffix in the recorded owner still matches its base."""
+        self._write(tmp_path, {
+            "session": "pm-alpha~1", "auto_start": True,
+            "targets": [{"pr_id": "pr-alpha"}], "all_mode": False,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._session_name = "pm-alpha"
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)
+
+        assert "pr-alpha" in app._auto_start_targets
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+    def test_non_object_breadcrumb_is_dropped(self, tmp_path):
+        """Valid JSON that is not an object must not crash the mount."""
+        (tmp_path / "autostart-resume.json").write_text("[]")
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        assert not (tmp_path / "autostart-resume.json").exists()
+
+
+class TestCorruptBreadcrumbShapes:
+    """A corrupt-but-valid breadcrumb must never crash the mount.
+
+    ``consume_breadcrumb`` runs in the deferred startup *before* the TUI
+    command queue is armed, so an exception here disables all external IPC
+    (a healthy TUI that never drains ``queued…`` commands — the failure
+    class this PR removes).  Each section is therefore read structurally,
+    the same rule the top-level non-object check follows.
+    """
+
+    @staticmethod
+    def _write(home, payload):
+        (home / "autostart-resume.json").write_text(json.dumps(payload))
+
+    def _consume(self, home, app):
+        with patch("pm_core.tui.auto_start.pm_home", return_value=home), \
+             patch("pm_core.tui.auto_start.check_and_start",
+                   new_callable=AsyncMock):
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+        return app
+
+    def test_non_string_run_id_does_not_crash_the_mount(self, tmp_path):
+        """``run_id`` names a directory; ``Path / 5`` used to raise TypeError."""
+        self._write(tmp_path, {
+            "auto_start": True,
+            "targets": [{"pr_id": "pr-001"}],
+            "run_id": 123,
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        assert not (tmp_path / "autostart-resume.json").exists()
+        # The corrupt value is dropped, not restored; a fresh run id is made.
+        assert isinstance(app._auto_start_run_id, str)
+
+    def test_wrong_typed_sections_are_ignored(self, tmp_path):
+        self._write(tmp_path, {
+            "auto_start": True,
+            "targets": {"pr-1": {}},       # not a list
+            "review_loops": ["pr-1"],      # not a dict
+            "watchers": 5,                 # not a list
+            "watcher": "nope",             # not a dict
+            "session": ["pm-alpha"],       # not a session name
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        # A wrong-typed ``session`` is corruption, not another session's
+        # request: it must not strand the file forever.
+        assert not (tmp_path / "autostart-resume.json").exists()
+        assert app._review_loops == {}
+
+    def test_corrupt_review_loop_entries_are_skipped(self, tmp_path):
+        self._write(tmp_path, {
+            "review_loops": {
+                "pr-1": ["not", "a", "dict"],
+                "pr-2": {"history": {"iteration": 1}},   # history not a list
+                "pr-3": {"iteration": 2, "history": ["bad"]},
+            },
+        })
+        app = _make_app(auto_start=False, target=None, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        self._consume(tmp_path, app)  # must not raise
+
+        # A non-dict entry is dropped; a dict entry with a corrupt
+        # ``history`` is restored without history rather than raising.
+        assert set(app._review_loops) == {"pr-2", "pr-3"}
+        assert app._review_loops["pr-2"].history == []
+        assert app._review_loops["pr-3"].iteration == 2
+        assert app._review_loops["pr-3"].history == []
+
+
+class TestMergeRestartMarkerSessionScope:
+    """The marker is one shared file; it must belong to one session.
+
+    Observed before the fix: with session A's ``--breadcrumb`` restart racing
+    session B's plain restart, B's TUI saw A's marker, preserved *B's* state
+    and consumed the marker, so A lost the state its user asked to keep.
+    """
+
+    def test_marker_for_another_session_is_ignored(self, tmp_path):
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+
+            assert auto_start.has_merge_restart_marker("pm-alpha") is True
+            assert auto_start.has_merge_restart_marker("pm-bravo") is False
+
+            # B's mount must not drop A's marker...
+            assert auto_start.resolve_mount_trigger("pm-bravo") == "initial"
+            assert (tmp_path / "merge-restart").exists()
+            # ...and A's mount still sees (and consumes) it.
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_grouped_session_name_matches_its_base(self, tmp_path):
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            # The CLI resolves the grouped session (``pm-alpha~1``) while the
+            # TUI keys everything by the base name.
+            assert tui_pidfile.has_merge_restart_marker("pm-alpha~1") is True
+            assert tui_pidfile.clear_merge_restart_marker("pm-alpha~1") is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_clear_leaves_another_sessions_marker(self, tmp_path):
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            # B must not be able to consume A's request...
+            assert tui_pidfile.clear_merge_restart_marker("pm-bravo") is False
+            assert (tmp_path / "merge-restart").exists()
+            # ...and A can.
+            assert tui_pidfile.clear_merge_restart_marker("pm-alpha") is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_clear_does_not_remove_a_marker_rewritten_underneath(
+            self, tmp_path, monkeypatch):
+        """A concurrent write between read and unlink must win.
+
+        Session A decides to clear its marker; before the unlink runs,
+        session B writes *its* marker.  Deleting B's request would drop the
+        state preservation B's restart asked for — the same cross-session
+        hazard scoping exists to prevent — so the clear is conditional on
+        the bytes it validated.
+        """
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-bravo")
+            # What A read was its own marker; the file now holds B's.
+            monkeypatch.setattr(tui_pidfile, "_read_marker_text",
+                                lambda: '{"session":"pm-alpha"}')
+            assert tui_pidfile.clear_merge_restart_marker("pm-alpha") is False
+            assert (tmp_path / "merge-restart").exists()
+            monkeypatch.undo()
+            assert tui_pidfile.read_merge_restart_marker() == (True, "pm-bravo")
+
+    def test_undecodable_marker_never_raises(self, tmp_path):
+        """A corrupt marker must not crash a restart, and must be clearable."""
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        (tmp_path / "merge-restart").write_bytes(b"\xff\xfe\x00garbage")
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            # Unscoped, so every session sees it (legacy behaviour)...
+            assert tui_pidfile.read_merge_restart_marker() == (True, None)
+            assert auto_start.has_merge_restart_marker("pm-alpha") is True
+            # ...and the mount that observes it can drop it rather than
+            # re-reading the same undecodable file forever.
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "initial"
+
+    def test_unscoped_legacy_marker_still_honoured(self, tmp_path):
+        from pm_core import tui_pidfile
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            (tmp_path / "merge-restart").touch()  # what older CLIs wrote
+            assert tui_pidfile.has_merge_restart_marker("pm-bravo") is True
+            assert tui_pidfile.read_merge_restart_marker() == (True, None)
+            # A session-less caller may still consume an unscoped marker.
+            assert tui_pidfile.clear_merge_restart_marker(None) is True
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_scoped_marker_left_alone_by_session_less_caller(self, tmp_path):
+        """A caller with no session name cannot own a scoped marker.
+
+        ``pm _tui`` outside tmux (or a mount whose tmux lookup failed) has
+        no session, so it must not discard another session's restart
+        request — the cross-session hazard session scoping exists to close.
+        """
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        with patch("pm_core.paths.pm_home", return_value=tmp_path):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            assert tui_pidfile.has_merge_restart_marker(None) is False
+            assert tui_pidfile.clear_merge_restart_marker(None) is False
+            assert auto_start.resolve_mount_trigger(None) == "initial"
+            assert (tmp_path / "merge-restart").exists()
+            # The owner still sees and consumes it.
+            assert auto_start.resolve_mount_trigger("pm-alpha") == "merge_restart"
+            assert not (tmp_path / "merge-restart").exists()
+
+    def test_save_breadcrumb_deletes_only_own_marker(self, tmp_path):
+        from pm_core import tui_pidfile
+        from pm_core.tui import auto_start
+
+        app = _make_app(root=tmp_path)
+        app._session_name = "pm-bravo"
+        with patch("pm_core.paths.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            tui_pidfile.write_merge_restart_marker("pm-alpha")
+            auto_start.save_breadcrumb(app)
+            # A's marker survives; B's breadcrumb names B.
+            assert (tmp_path / "merge-restart").exists()
+            data = json.loads((tmp_path / "autostart-resume.json").read_text())
+            assert data["session"] == "pm-bravo"

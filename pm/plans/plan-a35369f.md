@@ -14,10 +14,12 @@ What the incident showed:
 - Deny-list validation of git arguments is fragile: git accepts many spellings of the same option.
 - The host-side git runs inside a repository the container can write to.
 - The proxy's credential can do anything the user can.
+- Every container session could push to GitHub, though only sign-off needs to publish. #241's reviewer had no reason to hold push access.
 - Nothing on GitHub limited the damage. This is now addressed by ruleset 25978556 (see below).
 
 ## Constraints
 
+- Working rule (decided 2026-10-27): every change stays in the PR workdir until sign-off, and only the sign-off session publishes to GitHub. A person who needs to push earlier, for example to collaborate, runs `pm pr cd <pr>` on the host and pushes from the workdir with their own credentials.
 - Nested QA scenarios: scenario containers run their own pm projects and need git access of their own. This is the main reason we may keep a custom proxy rather than adopting off-the-shelf credential forwarding.
 - The fake_github test backend and local-path origins must keep working.
 - Several containers can share a proxy per session and PR (see pr-748e708 / #255 for the keying problems).
@@ -43,8 +45,14 @@ Maintenance procedure for a deliberate history rewrite or a branch cleanup:
 
 ## PRs
 
+### PR: Only the sign-off session can push to GitHub
+- **description**: Enforce the working rule: every change stays in the PR workdir until sign-off, and only the sign-off session publishes to GitHub. Today impl (`pm pr start`), review (`pm pr review`), QA scenarios (qa_loop, create_qa_container), qa-debug (cli/qa.py) and sign-off (signoff.py) all get a push-capable proxy. qa-debug's allowed branch is the main repo's checked-out branch, which is normally master. Impl and review already edit the mounted PR workdir, so they need no push. QA scenarios cannot see the PR workdir: each runs in a `git clone --local` copy whose origin is then switched to GitHub, and their fixes reach the PR by pushing to GitHub (_publish_planner_head keeps GitHub in step). Instead, keep each scenario clone's origin pointed at the PR workdir and deliver scenario commits into it with a local push that uses no GitHub credentials. The PR branch is checked out in the workdir, so land them on a per-scenario ref that host-side pm fast-forwards into the branch, or use another mechanism that never rewrites the checkout under a running session. Read-only fetch and ls-remote stay available to every session. A GitHub push from any other session fails with a message telling the person to run `pm pr cd <pr>` on the host and push from there. Remove QA's GitHub publish step once nothing depends on it. The GitHub draft PR will not show progress until sign-off; that is accepted. Update the session prompts and user docs to state the rule.
+- **tests**: Sandbox tests with a local bare repo standing in for GitHub: impl, review, QA scenario and qa-debug containers cannot change any ref on it; a QA scenario fix reaches the PR workdir branch; sign-off can push the PR branch and nothing else; replaying the incident's command from a review session changes nothing.
+- **files**: pm_core/container.py, pm_core/push_proxy.py, pm_core/cli/pr.py, pm_core/cli/qa.py, pm_core/qa_loop.py, pm_core/signoff.py, pm_core/prompt_gen.py, docs
+- **depends_on**:
+
 ### PR: Decide between hardening the container git proxy and an alternative
-- **description**: Spike producing a decision doc. Compare four options. (a) Keep the proxy, hardened per this plan. (b) A host-owned staging repository: the proxy imports only the commit to publish from the workdir and pushes it from a repository and configuration the container cannot touch. (c) A separate least-privilege identity for agent pushes, such as a GitHub App installation token or a fine-grained token for a machine account, combined with rulesets only the human identity can bypass. (d) Existing tooling for container credential forwarding, or server-side per-ref policy through a local mirror. Score each option on: nested QA scenarios, fake_github tests, local-path origins, sharing a proxy between sessions, performance, and blast radius if an agent misbehaves or a container is compromised. Recommend one option and list the migration PRs.
+- **description**: Spike producing a decision doc. Take as given that only sign-off publishes to GitHub (see "Only the sign-off session can push to GitHub"); every other session needs read-only fetch, and QA scenarios need to deliver commits into the PR workdir. Compare four options. (a) Keep the proxy, hardened per this plan. (b) A host-owned staging repository: the proxy imports only the commit to publish from the workdir and pushes it from a repository and configuration the container cannot touch. (c) A separate least-privilege identity for agent pushes, such as a GitHub App installation token or a fine-grained token for a machine account, combined with rulesets only the human identity can bypass. (d) Existing tooling for container credential forwarding, or server-side per-ref policy through a local mirror. Score each option on: nested QA scenarios, fake_github tests, local-path origins, sharing a proxy between sessions, performance, and blast radius if an agent misbehaves or a container is compromised. Recommend one option and list the migration PRs.
 - **tests**: None (spike). Reviewed as a doc.
 - **files**: pm/docs/container-git-access-options.md
 - **depends_on**:
@@ -56,7 +64,7 @@ Maintenance procedure for a deliberate history rewrite or a branch cleanup:
 - **depends_on**:
 
 ### PR: Push proxy accepts only an allow-listed command grammar
-- **description**: Replace the deny-lists (_check_dangerous_flags and the broad-push flag set) with an allow-list. Push accepts only the origin remote, one refspec whose destination is the allowed branch, and a small fixed set of harmless flags. Fetch, pull and ls-remote accept only the origin remote and a fixed set of flags. Anything else is rejected, including any abbreviation git would expand. Build the host-side command from the parsed request rather than passing the container's arguments through. Remove the deny-list code once the red-team suite passes.
+- **description**: Replace the deny-lists (_check_dangerous_flags and the broad-push flag set) with an allow-list. Only the sign-off session's proxy accepts push at all; it accepts only the origin remote, one refspec whose destination is the allowed branch, and a small fixed set of harmless flags. Fetch, pull and ls-remote accept only the origin remote and a fixed set of flags. Anything else is rejected, including any abbreviation git would expand. Build the host-side command from the parsed request rather than passing the container's arguments through. Remove the deny-list code once the red-team suite passes.
 - **tests**: Red-team suite cases for every rejected form, plus the existing proxy tests.
 - **files**: pm_core/push_proxy.py, pm_core/container.py
 - **depends_on**: Red-team regression suite for the container git wrapper and push proxy
@@ -68,7 +76,7 @@ Maintenance procedure for a deliberate history rewrite or a branch cleanup:
 - **depends_on**: Red-team regression suite for the container git wrapper and push proxy
 
 ### PR: Separate least-privilege GitHub identity for agent pushes
-- **description**: Agent pushes currently use the user's own GitHub credentials, so a proxy failure can do anything the user can, and rulesets cannot exempt the user without also exempting agents. Give agent pushes their own identity, limited to this repository, as chosen by the decision doc. Add the user's account as a bypass actor on ruleset 25978556, so maintenance no longer needs the disable/enable procedure. Document setup and token rotation.
+- **description**: Agent pushes currently use the user's own GitHub credentials, so a proxy failure can do anything the user can, and rulesets cannot exempt the user without also exempting agents. Give agent pushes their own identity, limited to this repository, as chosen by the decision doc. Only the sign-off session's proxy holds this credential. Add the user's account as a bypass actor on ruleset 25978556, so maintenance no longer needs the disable/enable procedure. Document setup and token rotation.
 - **tests**: A sandbox test that the proxy uses the agent credential and never the user's credential helper.
 - **files**: pm_core/push_proxy.py, docs
 - **depends_on**: Decide between hardening the container git proxy and an alternative
