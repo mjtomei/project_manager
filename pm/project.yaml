@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T10:33:43.912995+00:00'
+  updated_at: '2026-10-29T10:55:46.885950+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14830,6 +14830,25 @@ prs:
       171 passed. Captures: /pm-captures/scenarios/11/{auto-sequence-closed,watcher-iteration,readonly-commands,lifecycle-refusals,duplicate-add}/.'
     created_at: '2026-10-29T10:33:43Z'
     last_edited: '2026-10-29T10:33:43Z'
+  - id: note-5a86714
+    text: 'QA S12 (GitHub convergence) on 8892e73d: PASS. All five triples driven
+      through the real CLI against the git-backed stand-in in an isolated sandbox
+      (dedicated HOME + PM_TMUX_SOCKET, TMUX unset; no real session or shared host
+      config touched). (1) close --keep-github then sync: "No status changes.", closed_at
+      byte-identical across the sync, stand-in #1 still OPEN, B not ready. (2) discovered
+      merge: "Updated 1 PR(s). / Merged: <A>", merged_at set and closed_at dropped,
+      B becomes ready. (3) locally merged C (stand-in OPEN) and D (stand-in CLOSED):
+      "No status changes.", every merged_at byte-identical, A stays merged, stand-in
+      untouched. (4) close of merged A exits 1 with the --remove pointer; --remove
+      is registry-only ("GitHub PR #1 left unchanged (the PR is recorded as merged)",
+      branch kept, B warned and blocked), C --remove leaves #2 OPEN, D --remove --keep-github
+      prints the keep-github sentence and no "open"; pr list keeps only B and the
+      backing repo still has feat-a/feat-c/feat-d. (5) sync-github --help carries
+      the durability sentence verbatim. Evidence: /pm-captures/scenarios/12/story-full/{recording.cast,recording.mp4,transcript.log,manifest.md}.
+      Targeted regression: test_pr_sync.py + test_sync_merge_integrity.py 68 passed,
+      plus the 4 named closed/merged sync-durability tests.'
+    created_at: '2026-10-29T10:55:46Z'
+    last_edited: '2026-10-29T10:55:46Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
