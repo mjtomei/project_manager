@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T10:17:11.026280+00:00'
+  updated_at: '2026-10-29T11:17:25.708549+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5092,6 +5092,22 @@ prs:
       the new tests are unit-level and bind no tmux server.'
     created_at: '2026-10-29T10:17:10Z'
     last_edited: '2026-10-29T10:17:10Z'
+  - id: note-caac148
+    text: 'QA S2 (two sessions/two servers) PASS 3/3 stories. No source changes. Two
+      harness gotchas for the next run, neither a product bug: (1) the scenario''s
+      "kill only the TUI process" step leaves the session alive only if the session
+      has another window — if the TUI pane is the session''s LAST pane, killing it
+      closes the session and the private server exits (then `pm tui view` reports
+      "No TUI pane found" and `pm session list` drops the row). Create the qa-driver/keepalive
+      window BEFORE killing, not after. (2) The heal step `plain pm session` attaches
+      when run inside a tty pane, hijacking the recorded pane and killing any shell
+      functions defined there; run it as `pm session < /dev/null > /tmp/heal.out 2>&1`
+      and use the inline `env -u TMUX ...` prefix rather than a `plain()` function
+      in the recorded shell. Also: the recorder must attach to the TUI window explicitly
+      (`select-window -t <group>:0` first) or the cast records the qa-driver window
+      instead. Captures under /pm-captures/scenarios/2/{tui-send-isolation,cli-cross-session,qa-regression-guard}.'
+    created_at: '2026-10-29T11:17:25Z'
+    last_edited: '2026-10-29T11:17:25Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
