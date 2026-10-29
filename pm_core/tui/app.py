@@ -618,10 +618,6 @@ class ProjectManagerApp(App):
         except Exception:
             _log.debug("runtime_state sweep on mount failed", exc_info=True)
         self._update_orientation()
-        # A sign-off REQA whose QA start was deferred behind a live run — or
-        # whose TUI died before starting it — is owed only on disk.  Re-arm
-        # it here: the obligation must not depend on the auto-start switch
-        # (a plain restart turns auto-start off).
         # A QA run the previous image started and lost before its first
         # resume snapshot reads as driven by this very pid: end it, and
         # reopen the REQA it consumed, before the obligation is armed.
@@ -631,6 +627,10 @@ class ProjectManagerApp(App):
         except Exception:
             _log.warning("QA runs lost to the restart: recovery failed",
                          exc_info=True)
+        # A sign-off REQA whose QA start was deferred behind a live run — or
+        # whose TUI died before starting it — is owed only on disk.  Re-arm
+        # it here: the obligation must not depend on the auto-start switch
+        # (a plain restart turns auto-start off).
         try:
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.arm_owed_reqa(self)

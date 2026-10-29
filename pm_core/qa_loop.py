@@ -60,6 +60,10 @@ VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 _QA_KEYWORDS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
+# Status line for a held INPUT_REQUIRED run that a follow-up made live again,
+# whether its own hold loop reopened it or a poll adopted it as held (S132).
+_RESUMED_AFTER_INPUT = ("QA resumed after INPUT_REQUIRED — "
+                        "collecting the follow-up verdict")
 
 _POLL_INTERVAL = 5
 _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
@@ -1426,7 +1430,8 @@ def end_run_record(state: QALoopState) -> None:
     _write_run_record_data(state.qa_workdir, rec)
 
 
-def end_runs_orphaned_by_restart(exclude_workdirs=()) -> list[dict]:
+def end_runs_orphaned_by_restart(
+        exclude_workdirs=()) -> list[tuple[Path, dict]]:
     """Mark ended the runs this process started before it was re-executed.
 
     A run record names its driver by pid and start time, and ``pm tui
@@ -1439,7 +1444,8 @@ def end_runs_orphaned_by_restart(exclude_workdirs=()) -> list[dict]:
     is left to the resume scan, which adopts it.
 
     For a fresh TUI image (its mount) only; *exclude_workdirs* are the QA
-    workdirs of loops it already drives.  Returns the ended records.
+    workdirs of loops it already drives.  Returns (QA workdir, record) for
+    each run it ended.
     """
     me = os.getpid()
     my_start = _proc_start_time(me)
@@ -1462,7 +1468,7 @@ def end_runs_orphaned_by_restart(exclude_workdirs=()) -> list[dict]:
         _log.info("QA run %s of %s died with this process's restart before "
                   "its first snapshot; its run record is ended",
                   rec.get("loop_id"), rec.get("pr_id"))
-        ended.append(rec)
+        ended.append((qa_wd, rec))
     return ended
 
 
@@ -4339,8 +4345,7 @@ def _poll_tmux_verdicts(
                 # watched it (TUI down) is collected here, not by the hold
                 # loop that says so when it reopens a live run: say it too
                 # rather than only "Resuming QA after restart..." (S132).
-                state.latest_output = ("QA resumed after INPUT_REQUIRED — "
-                                       "collecting the follow-up verdict")
+                state.latest_output = _RESUMED_AFTER_INPUT
                 _notify()
             # The run is live again: a follow-up needs verification/finalize
             # and a dropped attempt is handed back to the retry path.  A run
@@ -6140,8 +6145,7 @@ def _execute_and_finalize(
         state.finalize_verdict = None
         state._ui_complete_notified = False
         state.completion_processed = False
-        state.latest_output = ("QA resumed after INPUT_REQUIRED — "
-                               "collecting the follow-up verdict")
+        state.latest_output = _RESUMED_AFTER_INPUT
         # Publish the reopened run as in-progress before collecting.  The
         # status file still carries the INPUT_REQUIRED overall from the held
         # finalize, and a restart in the collection window (which can last

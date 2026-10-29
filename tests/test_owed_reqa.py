@@ -21,6 +21,7 @@ The contract exercised here:
 import json
 import os
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -742,7 +743,7 @@ def test_restart_ends_only_this_images_snapshotless_runs(home):
 
     ended = qa_loop.end_runs_orphaned_by_restart([str(live)])
 
-    assert [r["loop_id"] for r in ended] == ["lost"]
+    assert [(wd, r["loop_id"]) for wd, r in ended] == [(lost, "lost")]
     assert qa_loop.read_run_record(lost)["ended_at"]
     for wd in (snap, live, other, launch):
         assert "ended_at" not in qa_loop.read_run_record(wd)
@@ -780,6 +781,8 @@ def test_a_reqa_rerun_killed_by_a_plain_restart_starts_again_once(tmp_path,
     # Reopened on disk, behind the claim the start took.
     ret = app.pr()["signoff_return"]
     assert ret["awaiting"] == "qa" and ret["launch_claim"]["hop"] == "qa"
+    # It starts again by itself: no "press z t" line for it.
+    assert not [m for m in app.logs if "cut off by the TUI restart" in m]
 
 
 @pytest.mark.parametrize("case", ["verdict", "successor", "before-return",
@@ -810,6 +813,31 @@ def test_a_restart_killed_run_reopens_only_the_reqa_it_consumed(tmp_path,
     assert qa_loop.read_run_record(lost)["ended_at"]
     assert app.pr()["signoff_return"]["awaiting"] is None
     lu.assert_not_called()              # no project.yaml rewrite
+    # A run that reached a verdict or was replaced lost nothing, and a PR
+    # that left qa has nothing to run again; one still at qa is told how.
+    cut = [m for m in app.logs if "cut off by the TUI restart" in m]
+    assert len(cut) == (1 if case == "before-return" else 0)
+
+
+def test_a_restart_killed_plain_run_is_reported_not_left_silent(tmp_path,
+                                                                 home):
+    """A run the user started with ``t`` (no sign-off return) that the
+    restart killed before its first snapshot has nothing to resume and
+    nothing starts it again with auto-start off, so the TUI says why and how
+    to run it again, once.  ``z t``: its main qa window can outlive it, and
+    plain ``t`` only focuses that window."""
+    root = _project(tmp_path, ret=None)
+    lost = _own_run(home, started_at=time.time() - 5)
+    app = App(root)
+    with patch.object(store, "locked_update",
+                      wraps=store.locked_update) as lu:
+        qa_loop_ui.recover_restart_killed_runs(app)
+        qa_loop_ui.recover_restart_killed_runs(app)    # a second mount
+    assert qa_loop.read_run_record(lost)["ended_at"]
+    lu.assert_not_called()
+    assert app.logs == [f"QA for {PR} was cut off by the TUI restart before "
+                        "its first snapshot — press z t to run it again"]
+    assert app.log_kw == [{"sticky": 10}]
 
 
 def test_restart_recovery_retires_the_dead_runs_windows(tmp_path, home):
