@@ -8,9 +8,15 @@ This plan is intentionally underspecified. Many design choices should draw on pr
 
 > **Cross-plan note (2026-08-31):** [[plan-jurisdiction]] Set B builds the seeded-bad-change **exam harness** as standing infrastructure — extending this plan's `signoff` two-evaluation-router A/B into the certification instrument for process grants; the appendix's A/B candidates get their measurement substrate from it plus #160's fixtures. The riscv-pareto campaign (`../riscv-pareto/pm/plans/plan-campaign.md`) is a natural future **target**: an external project exposing a numeric fitness with held-out structure (Pareto-front movement under a pinned eval pipeline).
 
+## Coverage beyond the document bootstrap
+
+The automatic improvement flow should cover all PM use cases, including importing a project from existing material with little human setup. Extend from document quality to discovery of plans/artifacts, generation and execution of recipes, task handoffs and recovery, software and research outcomes, living-document coherence, and Radar. Evaluate whether generated plans/recipes actually help work advance. Project-import cases begin with repositories and goals rather than curated manifests; measure useful first work, discovery omissions, incorrect relationships, repeat-import stability, and user setup/coordination effort. Preserve held-out evaluation and independent evidence; document scores alone do not establish these outcomes.
+
+Use the same agent-controlled, hook-free launch/tmux boundary as [plan-delivery](plan-delivery.md). The document-only experiment remains the first step and does not wait for this wider coverage.
+
 ## Goals
 
-- Use pm to improve any project that exposes a Claude-based fitness metric, including pm itself.
+- Use pm to improve any project with an appropriate independently evaluated outcome, including pm itself.
 - Make the tournament generic across targets — adding a new target is configuration, not new infrastructure.
 - Avoid self-confirmation collapse: a variant never grades itself; anchor variants and held-out corpora bound the loop.
 - Route compute toward variants likely to do good work on stakes-bearing targets.

@@ -32,6 +32,7 @@ Provider resolution order:
 """
 
 import os
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,7 +67,13 @@ class ProviderConfig:
     capabilities: list[str] = field(default_factory=list)
 
     def env_vars(self) -> dict[str, str]:
-        """Return environment variables needed to use this provider."""
+        """Return environment variables needed to use this provider.
+
+        Values are resolved (``${VAR}`` references are expanded).  They are
+        for the launched process's environment only: callers must not
+        interpolate them into a shell command string, because that string is
+        logged and kept as the tmux ``#{pane_start_command}``.
+        """
         if self.type in ("claude", "local"):
             env: dict[str, str] = {}
             if self.api_base:
@@ -149,10 +156,33 @@ def load_providers() -> dict[str, Any]:
 
 
 def save_providers(data: dict[str, Any]) -> None:
-    """Write the providers config to ~/.pm/providers.yaml."""
+    """Write the providers config to ~/.pm/providers.yaml.
+
+    The file may hold a literal API key, so it is always owner-only
+    (0600).  A private temporary file in the same directory is replaced
+    onto the target: ``mkstemp`` creates at 0600 regardless of the umask,
+    and ``os.replace`` swaps the inode, which also tightens an existing
+    permissive file (``write_text`` truncates in place and would leave its
+    mode alone).  Swapping the inode also means a symlinked target is
+    replaced by a regular file rather than written through — safer for a
+    credentials file, and intentional.
+    """
     import yaml
+
     path = _providers_path()
-    path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+    text = yaml.dump(data, default_flow_style=False, sort_keys=False)
+    fd, tmp = tempfile.mkstemp(prefix=".providers.yaml.pm-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     _log.info("Saved provider config to %s", path)
 
 

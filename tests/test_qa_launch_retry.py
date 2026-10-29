@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from pm_core import container as container_mod
 from pm_core import qa_status
+from pm_core.verdict_transcript import VerdictHit
 from pm_core.qa_loop import (
     QALoopState,
     QAScenario,
@@ -87,6 +88,14 @@ def _base_patches(clock, events: dict, verdicts: dict, verify: bool = False):
         patch("pm_core.qa_loop.time.monotonic", clock.now),
         patch("pm_core.hook_events.read_event",
               side_effect=lambda sid: events.get(sid)),
+        # The poll path is task-scoped since pr-8efa789 and goes through
+        # ``find_verdict_turn`` (returning a VerdictHit); the dead-pane
+        # collection path still uses the older string helpers.
+        patch("pm_core.qa_loop.find_verdict_turn",
+              side_effect=lambda tp, _v: (
+                  VerdictHit(verdict=verdicts[tp], text="",
+                             turn_id=f"turn{tp}", timestamp="1.0")
+                  if verdicts.get(tp) else None)),
         patch("pm_core.qa_loop.extract_verdict_from_transcript",
               side_effect=lambda tp, _v: verdicts.get(tp)),
         patch("pm_core.qa_loop.extract_verdict_reason_from_transcript",
