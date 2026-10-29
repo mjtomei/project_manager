@@ -39284,7 +39284,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-29T01:16:50.367553+00:00'
+  updated_at: '2026-10-29T01:54:51.467492+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -41803,6 +41803,27 @@ prs:
       tmux-isolation fix. Do not relaunch old QA fixture workers.'
     created_at: '2026-10-29T01:33:53.678599+00:00'
     last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-bd38b5c
+    text: 'impl 2026-10-29: merged master@4a74d88085edffcc300cb21f31777a798d647782
+      INTO the PR branch as 6cad139c (no code behaviour change beyond the reconciliation).
+      Conflicts were pm/project.yaml, pm_core/signoff.py, pm_core/tui/app.py, tests/test_cli_helpers.py.
+      (1) signoff.py: kept master''s claim_return_launch refactor (_launch_claimable
+      + require_status) and ported this PR''s hand-edited-state guard into it (claim
+      = _mapping(rec.get(''launch_claim''))), so the owed-REQA claim path also reads
+      a scalar launch_claim as absent. (2) tui/app.py: kept both imports (graph +
+      tui_pidfile). (3) test_cli_helpers.py: union of both sides'' tests. (4) project.yaml
+      reconciled by record id with this PR''s own resolver: 524 PR records, 22 plans,
+      no id lost from either side, no duplicates, base active_pr wins, 112 notes and
+      session_models preserved. Validation: full suite 4782 passed, 1 skipped, 1 failure
+      = tests/test_push_proxy.py::TestPushProxyLifecycle::test_get_proxy_socket_path,
+      which is a pre-existing test-isolation defect (hardcoded container name lookup-test
+      -> fixed /tmp/pm-push-proxy-lookup-test/push.sock; two concurrent runs of that
+      test on one host collide, demonstrated: one fails, one passes). This PR does
+      not touch push_proxy.py or its tests; the test passes in isolation. Also verified
+      git merge-tree HEAD origin/master is clean and origin/master is an ancestor
+      of HEAD, so the sign-off integration check should report up to date.'
+    created_at: '2026-10-29T01:54:51Z'
+    last_edited: '2026-10-29T01:54:51Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
