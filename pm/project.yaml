@@ -38197,7 +38197,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-29T08:19:39.290890+00:00'
+  updated_at: '2026-10-29T09:58:09.088267+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -38613,6 +38613,55 @@ prs:
       needed in a still.'
     created_at: '2026-10-29T08:19:39Z'
     last_edited: '2026-10-29T08:19:39Z'
+  - id: note-0f8bb97
+    text: 'Refiner S15 (2026-10-29): story 3 was corrected against HEAD. The draft
+      Then ("the QA loop keeps running") is not what the code does: the verification-flag
+      follow-up sends the message, then two send_keys(pane_id,"") 1 s apart with no
+      pane_exists re-check, so a pane that dies on the follow-up (fake-claude exits
+      on any stdin) makes the second send raise CalledProcessError -> "QA background
+      thread crashed for <pr>", verdict ERROR. That is the pre-existing pr-084e9a3
+      defect, out of scope per spec E9/A10; the refined Then records it as the expected
+      branch and keeps the in-scope assertion (no resurrected/silent PASS). Recipe
+      for S15 (container mode, one planned scenario per PR): story 1 qa_scenario hold
+      50 (PASS read from the live pane after the 30 s grace; worker gone ~10 s before
+      the verifier FLAGGED; exit retry; marker+container id survive relaunch; 4 flags
+      -> NEEDS_WORK at default qa-verify-retries 3); story 2 qa_scenario hold 0 +
+      qa_verification VERIFIED (dead-pane PASS collection, verified, no relaunch,
+      finalize PASS); story 3 qa_scenario no hold (worker alive at the flag, dies
+      on the follow-up). qa_concretize and qa_verification hold 600 so the scenario
+      window survives and the follow-up lands on an input-ignoring pane. S8 (c9f8fd9d)
+      already proved the story-1 loop end-to-end.'
+    created_at: '2026-10-29T09:25:27Z'
+    last_edited: '2026-10-29T09:25:27Z'
+  - id: note-0c0faeb
+    text: 'QA S15 (2026-10-29, HEAD 31392557) PASS 3/3 stories, container mode, isolated
+      HOME/socket (/scratch/qa15, /tmp/qa15-tmux.sock), fixture /scratch/qa15/pm-test-1793266069.
+      (1) Flagged PASS with the worker gone: PASS read from the LIVE pane at +30 s
+      grace (qa_scenario hold 50, worker gone ~10 s before the verifier FLAGGED),
+      re-evaluation follow-up landed on the surviving concretizer pane, exit launch
+      retry `pane died mid-run (killed or crashed); no runtime cause found` at +5/+10/+20
+      s, 4 flags -> `failed verification 4 times - marking NEEDS_WORK`, `QA complete:
+      NEEDS_WORK`. Cleared PASS never resurrected: 0 `worker pane gone; collected
+      from its transcript` and 0 `Verification passed for scenario 1` over the whole
+      run; WORKER_MARKER survived, container id unchanged, exactly one s1 window.
+      (2) Late verdict + dead pane (hold 0): `verdict: PASS (worker pane gone; collected
+      from its transcript)` -> verified -> PASS finalize, zero relaunch lines, one
+      s1 window. qa_resume.json is deleted once the TUI processes completion, so the
+      `scenario_verdicts{"1":"PASS"} / verified_scenarios [1] / launch_retries {}`
+      snapshot was taken on a replica PR with a 1 s poller; capture it mid-run on
+      any future run of this story. (3) Worker dies on the follow-up (no hold): expected
+      pre-existing pr-084e9a3 branch - `Verification FLAGGED ... attempt 1` at 09:49:15,
+      then `CalledProcessError` at qa_loop.py:4133 `tmux_mod.send_keys(pane_id, "")`
+      -> tmux.py:160, `send-keys -t %36 "" Enter` exit 1, `QA background thread crashed
+      for pr-73abb3d`, TUI `QA thread crashed` / `QA finished for pr-73abb3d: ERROR`.
+      No resurrection there either. SCENARIO-WORDING NIT: the story-3 Then asking
+      for the `Sent follow-up message to scenario 1 pane` line is unsatisfiable in
+      that branch - the log line sits AFTER the two trailing blank Enters (qa_loop.py:4127-4133),
+      which is exactly where the crash happens; the follow-up did reach the live worker
+      pane (the fake exited on it), so the assertion should be reworded to drop that
+      line. Captures /pm-captures/scenarios/15/{story1,story2,story3}/.'
+    created_at: '2026-10-29T09:58:08Z'
+    last_edited: '2026-10-29T09:58:08Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
