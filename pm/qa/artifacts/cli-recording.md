@@ -69,7 +69,7 @@ mkdir -p <capture-dir>/<short-name> || {
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/transcript.log \
       <capture-dir>/<short-name>/recording.mp4 \
-      <capture-dir>/<short-name>/recording.gif \
+      <capture-dir>/<short-name>/recording.cast.gif \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
       <capture-dir>/<short-name>/recorder-pane.log
@@ -91,7 +91,9 @@ before it finished pass that check. `recorder-stderr.log` and
 diagnostics, and the pane's last screen when a wait gives up — so an earlier
 run's copies go with the rest; a stale one would be read as this run's
 failure. The render outputs (`recording.mp4` and the intermediate
-`recording.gif`) and the `tee` fallback's `transcript.log` go too: the
+`recording.cast.gif` — the render block's `cast` variable is
+`…/recording.cast` and it renders to `"$cast.gif"`, so the name carries the
+`.cast` too) and the `tee` fallback's `transcript.log` go too: the
 render step clears the video pair before it runs, but a capture that *fails*
 exits before that step ever runs, so the previous run's video would
 otherwise be the only recording in the capture directory — a stale artifact
@@ -197,7 +199,7 @@ mkdir -p <capture-dir>/<short-name> || {
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/transcript.log \
       <capture-dir>/<short-name>/recording.mp4 \
-      <capture-dir>/<short-name>/recording.gif \
+      <capture-dir>/<short-name>/recording.cast.gif \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
       <capture-dir>/<short-name>/recorder-pane.log

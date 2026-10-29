@@ -319,28 +319,51 @@ class TestRecipes:
     def test_capture_section_clears_the_previous_video(self, name):
         """A failed capture must not leave the previous run's mp4 in place.
 
-        The render step clears ``recording.mp4`` and the intermediate
-        ``recording.gif`` before rendering, but a capture that *fails* exits
-        before that step ever runs — so without this the capture directory
-        keeps the earlier run's video, and the manifest and the sign-off
-        report present it as this run's recording. That is the same
-        stale-evidence bug as a leftover cast, one step earlier (the web-UI
-        recipe clears its mp4 in step 1 for exactly this reason).
+        The render step clears ``recording.mp4`` and its intermediate gif
+        before rendering, but a capture that *fails* exits before that step
+        ever runs — so without this the capture directory keeps the earlier
+        run's video, and the manifest and the sign-off report present it as
+        this run's recording. That is the same stale-evidence bug as a
+        leftover cast, one step earlier (the web-UI recipe clears its mp4 in
+        step 1 for exactly this reason).
+
+        The gif's name is *derived from the render block*, not written out
+        here: the block holds the cast in ``cast=<capture-dir>/…/recording.cast``
+        and renders to ``"$cast.gif"``, so the intermediate is
+        ``recording.cast.gif`` — a cleanup (and a test) naming
+        ``recording.gif`` removes and checks a file nothing ever writes, and
+        the earlier run's real intermediate survives. That is what the
+        pre-fix recipes did.
         """
         text = _recipe_text(name)
+        render = _render_block(name)
+        cast_rel = re.search(r"^cast=(\S+)$", render, re.M).group(1)
+        assert '"$cast.gif"' in render, (
+            f"{name}: the render block no longer renders to `$cast.gif`; this "
+            "test derives the intermediate's name from that expression")
+        intermediate = cast_rel + ".gif"
         section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
         first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
         rm = _statement(first_block, "rm -f ")
-        for artifact in ("recording.mp4", "recording.gif"):
-            assert artifact in rm, (
-                f"{name}: the first capture block keeps an earlier run's "
-                f"{artifact}, so a capture that fails before the render step "
-                "leaves the previous run's video as this run's")
+        assert "recording.mp4" in rm, (
+            f"{name}: the first capture block keeps an earlier run's "
+            "recording.mp4, so a capture that fails before the render step "
+            "leaves the previous run's video as this run's")
+        assert intermediate in rm, (
+            f"{name}: the first capture block keeps an earlier run's "
+            f"{intermediate} (the file the render block actually writes), so "
+            "a capture that fails before the render step leaves the previous "
+            "run's video as this run's")
         scaffold_rm = _statement(_scaffold_block(text), "rm -f ")
-        for artifact in ("recording.mp4", "recording.gif"):
-            assert artifact in scaffold_rm, (
-                f"{name}: the scaffold's own cleanup keeps an earlier run's "
-                f"{artifact}")
+        assert "recording.mp4" in scaffold_rm, (
+            f"{name}: the scaffold's own cleanup keeps an earlier run's "
+            "recording.mp4")
+        assert intermediate in scaffold_rm, (
+            f"{name}: the scaffold's own cleanup keeps an earlier run's "
+            f"{intermediate}")
+        assert "recording.gif" not in rm + scaffold_rm, (
+            f"{name}: the cleanup names `recording.gif`, which nothing writes "
+            f"— the intermediate is `{intermediate}`")
 
     def test_cli_capture_section_clears_a_stale_transcript(self):
         """The `tee` fallback's transcript must not survive into a later run.
@@ -2707,24 +2730,34 @@ class TestCaptureFlowExecution:
 
         The render step clears the video pair before rendering, but a capture
         that fails exits before that step ever runs. Verified with the pre-fix
-        blocks: an earlier ``recording.mp4`` and ``recording.gif`` seeded in
+        blocks: an earlier ``recording.mp4`` and intermediate gif seeded in
         the capture directory survived the failed run, so the directory held
         no cast at all but still held a video the manifest and the report
         would present as this run's recording — the stale-cast bug one step
         earlier.
+
+        The gif seeded here is the one the render block *writes*
+        (``$cast.gif`` → ``recording.cast.gif``). The pre-fix cleanup named
+        ``recording.gif``, so seeding that name proved nothing: the run
+        cleared a file nothing writes and left the real intermediate behind
+        (verified live in this container).
         """
         raw = _scaffold_block(_recipe_text(name))
+        cast_rel = re.search(r"^cast=(\S+)$", _render_block(name), re.M).group(1)
+        intermediate = Path(cast_rel).name + ".gif"
         r, cast = _run_block(
             raw, "norec", tmp_path, target=True,
             files={"recording.mp4": "previous run",
-                   "recording.gif": "previous gif"})
+                   intermediate: "previous gif"})
         cap = cast.parent
         assert r.returncode != 0, r.stderr
         assert not (cap / "recording.mp4").exists(), (
             f"{name}: a failed capture left the previous run's recording.mp4 "
             "as this capture's only video")
-        assert not (cap / "recording.gif").exists(), (
-            f"{name}: a failed capture left the previous run's gif behind")
+        assert not (cap / intermediate).exists(), (
+            f"{name}: a failed capture left the previous run's "
+            f"{intermediate} (the intermediate the render block writes) "
+            "behind")
 
     def test_cli_failed_capture_leaves_no_previous_transcript(self, tmp_path):
         """The `tee` fallback's transcript must not outlive a later run.

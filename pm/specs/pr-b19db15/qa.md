@@ -147,9 +147,11 @@ foreground render block,
   `ffmpeg` on `PATH` stops with "ffmpeg is not installed — the render step
   needs it" instead of reporting the gif as failed;
 - a capture that fails (e.g. the recorder never writes a cast) leaves *no*
-  `recording.mp4`/`recording.gif` from the earlier run in the capture
-  directory — the render step's own cleanup never runs on that path — and the
-  earlier run's `transcript.log` is cleared with them;
+  `recording.mp4`/`recording.cast.gif` from the earlier run in the capture
+  directory — the render step's own cleanup never runs on that path, and the
+  intermediate's real name is the one the render block writes (`$cast.gif`,
+  where `cast=…/recording.cast`) — and the earlier run's `transcript.log` is
+  cleared with them;
 - `manifest.md` exists and its `## Files` section lists the produced files;
   on a host without asciinema the documented `| tee …` fallback writes
   `transcript.log` into the capture directory (not the worker's cwd), and the
@@ -194,7 +196,7 @@ session, stop the recorder, and render the cast,
   literal `C-b` leaves the recorder up until the 30 s bound with the keys
   landing in the TUI as input (verified live both ways);
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files; a
-  capture that fails leaves no `recording.mp4`/`recording.gif` from the
+  capture that fails leaves no `recording.mp4`/`recording.cast.gif` from the
   earlier run behind (the render step's cleanup never runs on that path), and
   a host with no `ffmpeg` stops with "ffmpeg is not installed — the render
   step needs it" instead of reporting the gif as failed.
@@ -208,7 +210,7 @@ session, stop the recorder, and render the cast,
 cleans up (kills the recorder/session) instead of hanging or passing on the
 wrong session; and
 **Given** a cast, transcript, recorder status, recorder session, or render
-output (`recording.mp4`/`recording.gif`) left by an earlier run,
+output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort with "recording already exists"
 or "duplicate session", the readiness wait does not pass on the previous

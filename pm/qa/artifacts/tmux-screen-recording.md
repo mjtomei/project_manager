@@ -82,9 +82,9 @@ run's failure evidence — asciinema's own diagnostics, and the pane's last
 screen when a wait gives up or the driving step's send fails — so an earlier
 run's copies go too.
 The render outputs go with them: the render step clears `recording.mp4` and
-the intermediate `recording.gif` before it runs, but a capture that *fails*
-here exits before that step ever runs, so the previous run's video would
-otherwise sit in the capture directory as this run's — the same
+the intermediate `recording.cast.gif` before it runs, but a capture that
+*fails* here exits before that step ever runs, so the previous run's video
+would otherwise sit in the capture directory as this run's — the same
 stale-evidence bug as a leftover cast, one step earlier. (The web-UI recipe
 clears its mp4 in step 1 for the same reason.)
 
@@ -123,13 +123,17 @@ mkdir -p <capture-dir> || {
     exit 1
 }
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
-      <capture-dir>/recording.mp4 <capture-dir>/recording.gif \
+      <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
       <capture-dir>/recorder-pane.log
 # The mp4 and the intermediate gif are here, not only in the render step: a
 # capture that fails below exits before that step runs, so the previous run's
 # video would otherwise be the only recording this capture directory holds —
 # a stale artifact the manifest and the report would present as this run's.
+# The gif's name is `recording.cast.gif`, not `recording.gif`: the render block
+# holds the cast in `cast=<capture-dir>/recording.cast` and renders to
+# `"$cast.gif"`, so a cleanup aimed at `recording.gif` would remove nothing
+# and leave the earlier run's intermediate behind.
 # Failure paths below tear the recorder session down, so each one saves the
 # pane's last screen into the capture dir first — otherwise the messages that
 # point at the pane point at evidence that no longer exists. The save is

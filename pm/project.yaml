@@ -31898,7 +31898,7 @@ prs:
   title: 'Bug: generated background-job waits can match themselves and stall completed
     work'
   branch: pm/pr-b19db15-bug-qa-artifact-rendering-wait-can-match-itself-an
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Observed in #229 QA round 2 scenario 10 on 2026-10-12. Both agg/ffmpeg
     rendering jobs had finished and ffprobe confirmed valid videos (TUI 734.48s, CLI
@@ -31932,7 +31932,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T00:51:36.806568+00:00'
+  updated_at: '2026-10-29T01:46:00.892303+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -33359,6 +33359,82 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T00:51:36Z'
     last_edited: '2026-10-29T00:51:36Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-efe969b
+    text: 'Review loop 9265 i5: one leftover in the kept recipe scope, the PR''s own
+      class (a cleanup that removes a file nothing writes, and tests that checked
+      the same wrong name). Both recording recipes'' step 0 cleared `recording.gif`,
+      but the render block holds the cast in `cast=<capture-dir>/recording.cast` and
+      renders the intermediate to `"$cast.gif"` — `recording.cast.gif`. Verified live
+      with the recipes'' own blocks: with both names seeded, step 0 removed only `recording.gif`
+      and left the real intermediate, so a capture that fails before the render step
+      (the R23 case) still kept the earlier run''s gif; the two tests seeded and asserted
+      the same wrong name, so they passed. Step 0 (both recipes, and the CLI scaffold)
+      now clears `recording.cast.gif`, and the tests derive the name from the render
+      block''s `cast=` plus `"$cast.gif"` so they cannot drift apart again; the recipes''
+      prose and qa.md name the real file. Tests: 4 fail against HEAD''s recipes (restored
+      in place, then the post-fix copies restored); file 153 pass; related suites
+      175 pass. Evidence: $(pm qa captures-path pr-b19db15)/review-9265-i5/ (probe-gif.log
+      with the pre/post cleanup and the agg output-name probes, scripts/). impl.md
+      R28 + Files/verification/evidence and qa.md updated. No pm_core/ change; the
+      dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T01:46:00Z'
+    last_edited: '2026-10-29T01:46:00Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
