@@ -263,7 +263,7 @@ def test_container_create_failure_raises_instead_of_host_launch(tmp_path, home):
             "pm_core.tmux.new_window_get_pane", return_value="%1"))
         stack.enter_context(patch("pm_core.qa_loop._write_status_file"))
 
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(qa_loop.ContainerLaunchError) as excinfo:
             qa_loop._launch_scenarios_in_containers(
                 state, {}, {"id": "pr-c", "branch": "pm/c"}, "pm-s",
                 None, str(tmp_path))
@@ -644,3 +644,63 @@ def test_resume_keeps_host_mode_when_snapshot_says_host(tmp_path, home):
     assert result is state
     finalize.assert_called_once()
     assert state.latest_verdict != "ERROR"
+
+
+def test_qa_error_detail_only_for_error_verdicts(tmp_path, home):
+    """``qa_error_detail`` exposes the fail-closed cause+remedy for a CLI
+    caller, and stays inert for verdicts that carry no infrastructure error."""
+    state = QALoopState(pr_id="pr-c")
+    state._error = "boom"
+    state.latest_verdict = "INPUT_REQUIRED"
+    assert qa_loop.qa_error_detail(state) == ""
+    state.latest_verdict = "ERROR"
+    assert qa_loop.qa_error_detail(state) == "boom"
+
+
+def test_qa_run_prints_the_full_cause_and_remedy(tmp_path, home):
+    """`pm qa run` is the primary execution entry point: it must report the
+    fail-closed launch's cause and retry remedy, not only the one-line
+    progress entry ``on_update`` prints."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    data = {"project": {"name": "t"}, "prs": [], "plans": []}
+    pr = {"id": "pr-c", "title": "T", "branch": "b", "status": "qa"}
+
+    failed = QALoopState(pr_id="pr-c", planning_phase=False)
+    failed.latest_verdict = "ERROR"
+    failed.latest_output = (
+        "Container mode is enabled but the container runtime is "
+        "unavailable: boom")
+    failed._error = (
+        "Container mode is enabled, but the container runtime is "
+        "unavailable, so no agent was launched on the host.\n\n"
+        "Cause: boom\n\n"
+        "To retry:\n"
+        "  - fix the runtime; or\n"
+        "  - if host execution is intended, disable container mode "
+        "explicitly with 'pm container disable'.")
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.cli.helpers._resolve_pr_id",
+                                  return_value=pr))
+        stack.enter_context(patch("pm_core.qa_loop.run_qa_sync",
+                                  return_value=failed))
+        result = CliRunner().invoke(qa_group,
+                                    ["run", "repro", "--pr", "pr-c"])
+
+    assert result.exit_code == 0
+    # The actionable detail the CLI would otherwise drop (run_qa_sync is
+    # stubbed here, so this is the only place it can come from).
+    assert "no agent was launched on the host" in result.output
+    assert "pm container disable" in result.output
+    assert "Result: ERROR" in result.output

@@ -578,6 +578,18 @@ def qa_outcome_detail(state: QALoopState) -> str:
     return "; ".join(parts)
 
 
+def qa_error_detail(state: QALoopState) -> str:
+    """The full cause+remedy of a run that failed with ``ERROR``, else ``""``.
+
+    A fail-closed launch (e.g. container mode enabled but its runtime
+    unusable) records the actionable message in ``state._error`` while
+    ``latest_output`` stays a single TUI log line.  CLI entry points print
+    this so the remedy reaches the user too; other early-abort ERRORs (no pm
+    session, missing workdir) carry no ``_error`` and print nothing extra.
+    """
+    return state._error if state.latest_verdict == "ERROR" else ""
+
+
 def _summarize_changes(changes: list[str]) -> str:
     """First few change labels for a note/summary suffix (with a ``+N``)."""
     shown = ", ".join(changes[:5])

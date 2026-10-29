@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T03:41:09.822409+00:00'
+  updated_at: '2026-10-29T04:35:43.687505+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42190,6 +42190,21 @@ prs:
       a persisted host run resuming on the host.'
     created_at: '2026-10-29T03:41:09Z'
     last_edited: '2026-10-29T03:41:09Z'
+  - id: note-d3d2a9e
+    text: 'Review i4 (f951): `pm qa run` now prints the fail-closed cause+remedy (new
+      `qa_loop.qa_error_detail`); its on_update only printed the one-line latest_output,
+      so the remedy (start the runtime / `pm container disable`) never reached a CLI
+      user. Other early-abort ERRORs carry no `_error` and print nothing extra. Tests
+      added (qa_error_detail gating; CliRunner for `pm qa run`); the create-failure
+      test now asserts ContainerLaunchError specifically. Incidental, filed separately
+      as pr-7abb052: `pm pr auto-sequence` has no branch for the new `overall: "ERROR"`
+      status value, so it reports `running: qa` forever and never surfaces the cause
+      (an explicit ERROR branch + watcher-token docs are needed there, which is why
+      it is not fixed in this PR). Capture note: /pm-captures/impl/post-fix/qa-run/manifest.md
+      records that the i4 remedy block postdates the recording; the fail-closed behaviour
+      and the absence of any host launch are unchanged. (2026-10-29T04:45:00Z)'
+    created_at: '2026-10-29T04:35:43Z'
+    last_edited: '2026-10-29T04:35:43Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
@@ -42198,3 +42213,67 @@ prs:
   session_effort:
     signoff: high
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-574e851-bug-never-fall-back-to-host-executio-4a74d880
+- id: pr-7abb052
+  plan: bugs
+  title: 'Bug: auto-sequence reports ''running: qa'' forever after a QA infrastructure
+    ERROR and never surfaces the cause'
+  branch: pm/pr-7abb052-bug-auto-sequence-reports-running-qa-forever-after
+  status: pending
+  depends_on: []
+  description: '## Location
+
+
+    `pm_core/cli/pr.py`, the `status == "qa"` branch of `pr_auto_sequence` (~line
+    3860-3935), plus the watcher token docs in `pm_core/prompt_gen.py` (~line 2090).
+
+
+    ## Repro
+
+
+    1. Enable container mode for a project whose container runtime is unusable (missing
+    binary, `info` nonzero, or timeout).
+
+    2. Let a QA run start through the auto-sequence chain (`pm pr auto-sequence` ->
+    `pm pr qa-run-bg`), or via the TUI with auto-start.
+
+    3. `run_qa_sync` now fails closed and writes `overall: ERROR` plus the cause+remedy
+    into the run''s `qa_status.json` (pr-574e851). The detached driver exits.
+
+    4. Run `pm pr auto-sequence <pr-id>` again.
+
+
+    ## Expected
+
+
+    The single-line status reports the infrastructure failure (or at least that QA
+    is stopped), so the operator/watcher can act on it.
+
+
+    ## Actual
+
+
+    `overall == "ERROR"` matches none of the PASS / INPUT_REQUIRED / NEEDS_WORK branches
+    and is not `None`, so it falls through to `click.echo("running: qa")` and returns.
+    Every later tick repeats that line: the PR sits in `qa` forever, no QA is running,
+    the detached driver''s stdout/stderr went to DEVNULL, and nothing in the TUI/console
+    shows the cause. The plan watcher logs ''running: qa'' each tick and never escalates.
+
+
+    ## Notes
+
+
+    `overall: ERROR` is a new status value introduced by pr-574e851 (previously only
+    PASS / NEEDS_WORK / INPUT_REQUIRED were written). A fix should add an explicit
+    `ERROR` branch (report the cause from `qa_status.json`''s `error` field and leave
+    the PR in qa for a deliberate retry) and document the new auto-sequence token
+    in the watcher prompt. Related: pr-ccdec71 (auto-sequence misreports a launch
+    that failed).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T04:30:57.107899+00:00'
+  updated_at: '2026-10-29T04:30:57.107899+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

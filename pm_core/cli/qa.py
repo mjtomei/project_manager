@@ -426,6 +426,14 @@ def qa_run(instruction_id: str, pr_id: str | None):
     state = qa_loop.run_qa_sync(state, root, pr_data, on_update, max_scenarios=1)
 
     verdict = state.latest_verdict or "UNKNOWN"
+    detail = qa_loop.qa_error_detail(state)
+    if detail:
+        # A fail-closed launch (e.g. container mode enabled but its runtime
+        # unusable) records the cause and the retry remedy in the run's
+        # error; ``on_update`` above only prints the single-line progress
+        # entry, which is not enough to act on.
+        click.echo("", err=True)
+        click.echo(detail, err=True)
     click.echo(f"\nResult: {verdict}")
 
 

@@ -425,3 +425,25 @@ The implementation matched this spec. Additions made during review:
   fresh-run preflight abort and the resume abort both publish
   `overall=ERROR` with the cause in `qa_status.json`; the bytes-stderr branch
   of `_runtime_status`.
+
+## Review iteration (f951 i4)
+
+- `pm qa run` — the primary execution-only CLI entry point — now prints the
+  full cause+remedy of a fail-closed launch, via the new
+  `qa_loop.qa_error_detail(state)`.  Its `on_update` only prints the
+  one-line `latest_output`, so the actionable remedy (start the runtime, or
+  deliberately `pm container disable`) never reached a CLI user.  Other
+  early-abort ERRORs (no pm session, missing workdir) carry no `_error` and
+  print nothing extra.
+- Tests added: `qa_error_detail` is gated on the ERROR verdict; a
+  `CliRunner` test for `pm qa run` asserting the cause and remedy reach the
+  console.  The create-failure test now asserts the specific
+  `ContainerLaunchError` instead of `Exception`.
+- Incidental (separate PR, not fixed here): `pm pr auto-sequence` has no
+  branch for the `overall: "ERROR"` status value this PR introduces, so it
+  keeps reporting `running: qa` and never surfaces the cause.  Filed
+  pr-7abb052 with the repro and the fix sketch (an explicit ERROR branch +
+  the watcher-token docs).
+- Evidence note: `/pm-captures/impl/post-fix/qa-run/manifest.md` records
+  that the i4 remedy block postdates the recording; the fail-closed
+  behaviour and the absence of a host launch are unchanged.
