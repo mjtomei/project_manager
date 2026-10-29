@@ -89,6 +89,15 @@ recording-recipe bugs that any worker following the recipe hits:
   into `/scenarios/1/web-ui` at the filesystem root, which `mkdir -p` creates
   when the worker is root — the capture then lands outside the per-PR
   captures directory while every later check passes on those files.
+- a missing input is not a failed job (review loop 7c9c i4): the web-UI
+  driver block refuses a missing `driver.mjs` with "there is no driver.mjs in
+  …" instead of letting `node driver.mjs` fail and reporting "the driver
+  failed — this run's video, trace and screenshots are incomplete", which
+  sends the worker to debug a file that was never saved; and its Playwright
+  resolution failure says to remove a `node_modules` that does not hold the
+  package before linking the global install, because the bare `ln -sfn` nests
+  inside an existing (partial `npm i`) directory and still cannot resolve —
+  a remedy that cannot work, repeated.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -113,7 +122,12 @@ re-check the `agg` install: with `agg` missing and `~/.local/bin` **not** on
 exit 0. S25 also re-checks the captures-path guard: step 1 pasted with an
 unsubstituted `PR_ID` (or outside the project) must stop with "could not
 resolve the captures directory" and create nothing, not run the capture in
-`/scenarios/1/web-ui`. The older
+`/scenarios/1/web-ui`. S26 also re-checks the driver block's two new
+messages: pasting step 2 with no `driver.mjs` in the capture directory must
+stop with "there is no driver.mjs in …" (not "the driver failed"), and a
+capture directory holding a `node_modules` that does not resolve Playwright
+must fail with the resolution message that names removing it first; after
+that removal and the link, the same block must run the driver. The older
 S14/S18/S20 covered the same recipe ground before the reduction; S15, S16,
 S17 and S19 exercised the dropped helper, the shared prompt guidance and the
 QA-loop helper install, none of which exist in this PR any more.

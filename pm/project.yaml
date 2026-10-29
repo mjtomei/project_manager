@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T03:58:44.395574+00:00'
+  updated_at: '2026-10-29T04:44:19.808807+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36496,6 +36496,46 @@ prs:
       work stays dropped.'
     created_at: '2026-10-29T03:58:44Z'
     last_edited: '2026-10-29T03:58:44Z'
+  - id: note-3883cbb
+    text: 'Review loop 7c9c i4: two leftovers in the kept recipe scope, both in web-ui-recording.md''s
+      driver block (step 2), both the PR''s own class and both reproduced live in
+      this container with real node 22.22.2. (1) A driver.mjs that was never saved
+      was reported as a driver that ran and failed: with an empty capture directory,
+      `node driver.mjs` exits 1 with "Cannot find module ''<capture-dir>/driver.mjs''"
+      and the block printed "the driver failed — this run''s video, trace and screenshots
+      are incomplete; do not finalize this attempt", sending the worker to debug a
+      file that does not exist (or was saved in the workdir) — the same misdiagnosis
+      R19 fixed for a missing webm and R23 for a missing encoder. The block now checks
+      `[ -f driver.mjs ]` after its attempt cleanup (so an earlier attempt''s outputs
+      still go, per R21) and before the Playwright link/resolution work, and stops
+      with "there is no driver.mjs in $CAPDIR — save the recipe''s driver skeleton
+      as driver.mjs here (step 2''s prose) before running this block"; post-fix the
+      same run exits 1 with that message, creates no link and runs no driver. (2)
+      The Playwright resolution failure offered a link that nests inside an existing
+      node_modules: the link is guarded on `[ ! -e node_modules ]` so a local install
+      is not clobbered, so a partial `npm i playwright` leaves a node_modules that
+      does not hold the package, the resolution check fails, and the message offered
+      `ln -sfn /usr/lib/node_modules node_modules` — which with the directory present
+      creates node_modules/global and `import(''playwright'')` still answers ERR_MODULE_NOT_FOUND,
+      so repeating the remedy cannot work (the shape R31 fixed for the agg install).
+      The message now says to remove the node_modules that does not hold it first
+      ("rm -rf node_modules; ln -sfn /usr/lib/node_modules node_modules"), and after
+      that removal and link the same block resolves Playwright and runs the driver
+      (rc 0, "driver saw object"). Tests: two new cases, both failing against HEAD''s
+      driver block (checked by restoring the pre-fix recipe in place, then restoring
+      the post-fix copy); file 165 pass; related suites (test_qa_artifact_web_ui_recording,
+      test_qa_instructions, test_qa_loop) 340 together with the file; full suite `env
+      -u PM_HOST_HOME pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py` -> 4547 passed, 1 skipped, 92 deselected,
+      12 failed, all tests/test_markdown_render.py with ModuleNotFoundError for the
+      markdown dep this container lacks (the same file passes 13/13 once it is installed
+      on the scratch path); none touch the changed area. Evidence: $(pm qa captures-path
+      pr-b19db15)/review-7c9c-i4/ (probe.log with the pre/post runs of both cases,
+      scripts/probe.sh, README.md). impl.md R32 + Files/verification/evidence and
+      qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work stays
+      dropped.'
+    created_at: '2026-10-29T04:44:19Z'
+    last_edited: '2026-10-29T04:44:19Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

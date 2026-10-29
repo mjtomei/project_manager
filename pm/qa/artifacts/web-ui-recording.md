@@ -240,6 +240,19 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # with that video as the only recording the manifest can present as this
 # run's. The paths are relative because the `cd` above succeeded.
 rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png
+# The driver this block runs is the one the prose above says to save here.
+# Without it `node driver.mjs` answers "Cannot find module …/driver.mjs" and
+# the run-failure message below would report that as a driver that ran and
+# failed — the same misdiagnosis as reporting a missing webm as an encoder
+# failure, and it sends the worker to debug a driver that is simply not there
+# (or was saved in the workdir instead of the capture directory). Name the
+# missing input where it is missing.
+[ -f driver.mjs ] || {
+    echo "there is no driver.mjs in $CAPDIR — save the recipe's driver" \
+        "skeleton as driver.mjs here (step 2's prose) before running this" \
+        "block" >&2
+    exit 1
+}
 # The driver is an ES module, and Node's ES-module resolver ignores
 # NODE_PATH, so with only the image's global Playwright a bare
 # `node driver.mjs` fails at once with "ERR_MODULE_NOT_FOUND: Cannot find
@@ -262,10 +275,17 @@ node -e "import('playwright').then(() => console.log('playwright ok'))" || {
     # The link only helps when the image's global install actually holds the
     # package; offering it unconditionally sends a worker on a host without
     # one to a remedy that cannot work (the same hole the guard above closes).
+    # The same goes for an existing node_modules the guard above refused to
+    # touch: a partial `npm i playwright` leaves the directory without the
+    # package, and a bare `ln -sfn … node_modules` then creates
+    # node_modules/node_modules — a link that still does not resolve, so the
+    # worker repeats it (verified: the nested link answers
+    # ERR_MODULE_NOT_FOUND exactly as before). Say to remove it first.
     echo "playwright does not resolve beside driver.mjs — if" \
-        "/usr/lib/node_modules/playwright exists, link it ('ln -sfn" \
-        "/usr/lib/node_modules node_modules'); otherwise run 'npm i" \
-        "playwright' here" >&2
+        "/usr/lib/node_modules/playwright exists, remove a node_modules here" \
+        "that does not hold it and link the global install ('rm -rf" \
+        "node_modules; ln -sfn /usr/lib/node_modules node_modules');" \
+        "otherwise run 'npm i playwright' here" >&2
     exit 1
 }
 CAPDIR="$CAPDIR" APP_URL="$APP_URL" node driver.mjs || {

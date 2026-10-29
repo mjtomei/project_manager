@@ -2100,6 +2100,74 @@ def test_web_ui_driver_stops_when_playwright_does_not_resolve(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_block_refuses_a_missing_driver(tmp_path):
+    """A driver that was never saved is not a driver that ran and failed.
+
+    Step 2's prose says to save the skeleton as ``driver.mjs`` in the capture
+    directory, and the block then runs ``node driver.mjs``. Without the file
+    Node answers ``Cannot find module …/driver.mjs`` (exit 1, verified) and the
+    run-failure message below calls that "the driver failed — this run's
+    video, trace and screenshots are incomplete", so the worker debugs a
+    driver that is simply absent (or was saved in the workdir instead of the
+    capture directory). That is the same misdiagnosis as reporting a missing
+    webm as an encoder failure. The block names the missing input instead.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()                    # empty: no driver.mjs was saved
+    r = _run_driver_block(capdir, _fake_playwright(tmp_path / "global"))
+    assert r.returncode != 0, "the block ran with no driver.mjs to run"
+    assert "there is no driver.mjs" in r.stderr, (
+        "a missing driver.mjs is not named: " + r.stderr)
+    assert "the driver failed" not in r.stderr, (
+        "a missing driver.mjs is reported as a driver that ran and failed, "
+        "so the worker debugs a file that does not exist: " + r.stderr)
+    assert "driver saw" not in r.stdout, r.stdout
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
+def test_web_ui_driver_remedy_handles_an_existing_node_modules(tmp_path):
+    """The offered link must work when a broken ``node_modules`` is in the way.
+
+    The link is guarded on ``[ ! -e node_modules ]`` (a local install must not
+    be clobbered), so a *partial* ``npm i playwright`` — a ``node_modules``
+    that does not hold the package — is left alone and the resolution check
+    fails. The failure then offered ``ln -sfn … node_modules``, which creates
+    ``node_modules/node_modules`` and still answers ``ERR_MODULE_NOT_FOUND``
+    (verified): a remedy that cannot work, in the same block R17 fixed for the
+    no-global-install case. The message has to say to remove it first.
+    """
+    global_dir = _fake_playwright(tmp_path / "global")
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    _write_driver(capdir)
+    (capdir / "node_modules").mkdir()      # a partial install: no playwright
+    block = _web_ui_driver_block().replace("/usr/lib/node_modules",
+                                           str(global_dir))
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1")
+
+    r = subprocess.run(["bash"], input=block, env=env, capture_output=True,
+                       text=True, timeout=120)
+    assert r.returncode != 0, (
+        "the block ran the driver on a node_modules that cannot resolve it")
+    assert "playwright does not resolve beside driver.mjs" in r.stderr, r.stderr
+    assert "rm -rf node_modules" in r.stderr, (
+        "the failure offers a link that nests inside the existing "
+        "node_modules, so repeating it cannot resolve: " + r.stderr)
+    assert "driver saw" not in r.stdout, r.stdout
+
+    # The remedy the message names has to work. Remove the broken install, take
+    # the link the guard would have created, and re-run the block.
+    subprocess.run(["rm", "-rf", str(capdir / "node_modules")], check=True)
+    os.symlink(str(global_dir), capdir / "node_modules")
+    r = subprocess.run(["bash"], input=block, env=env, capture_output=True,
+                       text=True, timeout=120)
+    assert r.returncode == 0, (
+        "the remedy the message names does not resolve Playwright: "
+        + r.stdout + r.stderr)
+    assert "driver saw object" in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
 def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
     """A failed driver must name itself and leave no earlier attempt's video.
 
