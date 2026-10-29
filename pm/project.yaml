@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T02:49:37.339915+00:00'
+  updated_at: '2026-10-29T03:19:17.748296+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4676,6 +4676,37 @@ prs:
       works).'
     created_at: '2026-10-29T02:49:37Z'
     last_edited: '2026-10-29T02:49:37Z'
+  - id: note-a659bd1
+    text: 'Review loop d1c0 i2 (commit 90bba229, pushed; full suite 4563 passed /
+      1 skipped, plus one environment-only failure: test_installer_writes_standalone_receiver
+      is skipped by _install_receiver when PM_HOST_HOME != HOME in this container,
+      and hook_install.py is untouched by this PR — the suite must be run with PATH=/usr/bin:...
+      because ~/.local/bin/git is the push proxy and rejects the tests'' temporary-repo
+      pushes). Two robustness fixes, no requirement changes. (1) Discovery crashed
+      instead of degrading when tmux cannot be run: find_session_server already returned
+      (None, False) on OSError, but _find_tui_pane called session_exists/pane_exists
+      unguarded and list_pm_sessions called _run unguarded, so _find_tui_pane()/_find_live_tui_pane()
+      without an explicit session raised OSError on a machine without an executable
+      tmux; all three now degrade to "no session"/"no server" (new test_no_tmux_degrades_to_no_session).
+      (2) pm session kill could unlink a live server socket on the legacy path: d1c0
+      i1 gated the not-found unlink on server_alive, but the legacy branch (killed
+      on the default server, on_private False) still unlinked the private socket path
+      whenever any file existed there; a file at that path can belong to a live server
+      hosting only grouped sessions of another name, so the unlink is now `on_private
+      or (exists and not server_alive(...))` (new tests test_legacy_kill_keeps_a_live_private_socket,
+      test_legacy_kill_removes_a_stale_private_socket). Re-ran pm/specs/pr-073910f/session_start_smoke.py
+      end-to-end on a disposable socket (private server, session env, global env,
+      hooks correct; default server untouched). Spec updated with the d1c0 i2 section.
+      Residual notes unchanged/non-blocking: uid ownership check only on pm session
+      start (other paths fail closed — a 0600 socket owned by another user cannot
+      be connected to, so discovery falls back to the default server); /tmp/pm-sessions
+      literal duplicated in wrapper._mark_tmux_socket and qa_status._tmux_argv by
+      design; pane IDs no longer globally unique but always resolved with their session/socket;
+      R5b needs the local pane registry; the TUI connect screen keeps a bare `tmux
+      attach -t <name>` only as a last resort when no server hosts the session and
+      PM_TMUX_SOCKET is unset (unreachable for a live session).'
+    created_at: '2026-10-29T03:19:17Z'
+    last_edited: '2026-10-29T03:19:17Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
