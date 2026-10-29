@@ -42036,3 +42036,95 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-574e851
+  plan: bugs
+  title: 'Bug: never fall back to host execution when container mode is enabled'
+  branch: pm/pr-574e851-bug-never-fall-back-to-host-execution-when-contain
+  status: pending
+  depends_on: []
+  description: 'When container isolation is enabled, a failed runtime check or container launch
+    must stop that attempt rather than run the agent on the host. The enabled setting is an
+    execution boundary, not a best-effort preference.
+
+
+    Confirmed code paths: run_qa_sync currently sets use_containers=False when _runtime_available()
+    fails; execution-only QA paths in qa_loop.py and cli/qa.py combine is_container_mode_enabled()
+    and _runtime_available(), silently selecting the host path. Missing runtime binaries,
+    nonzero runtime info, and timeouts can therefore launch refiners/workers without the requested
+    isolation.
+
+
+    History: initial container support ba0298ff (PR #120, March 5 2026) did not have this
+    QA preflight fallback. Commit 39656010 added it before #120 merged. March 9 commit 16735789
+    made the shared launcher fail on container creation errors, but left QA''s separate preflight
+    downgrade. This is a focused completion of that fail-closed behavior, not whole-session
+    containerization.
+
+
+    Required behavior:
+
+    - If container mode is enabled for a container-eligible launch, runtime unavailable, image/setup/create/exec
+    failure, or loss of its container must never switch to host execution. Report a clear
+    launch/infrastructure error with the original cause and an actionable retry remedy; do
+    not invent a reviewer/scenario verdict or silently flip the setting.
+
+    - Audit initial QA planning-to-refinement/execution handoff, execution-only pm qa run,
+    queued scenarios, retries and persisted resume, and other container-eligible launchers
+    for equivalent downgrade paths. Preserve the requested mode across retries/resume; reject
+    an unusable required container instead of treating its absence as permission to launch
+    on the host.
+
+    - Explicitly disabled container mode continues to support intended host execution. Keep
+    intentionally host-only roles unchanged; this is not a redesign of all PM roles or the
+    container memory governor.
+
+    - Preserve source, captures, transcripts, unsent drafts and live/retained containers.
+    Failed-launch cleanup may release only the failed attempt''s confirmed unused allocation;
+    do not use broad cleanup.
+
+    - Coordinate with #241''s lifecycle/error handling and #278''s tmux targeting, but require
+    neither as a new dependency. No provider/model changes or automatic PR merges.
+
+
+    Acceptance:
+
+    - With container mode enabled, missing binary, failed/timed-out runtime info, and container
+    create/setup/exec failure produce an explicit failure and ZERO host agent launches, both
+    initially and during retry/resume/queued QA. Assert absence of host execution, not just
+    an error message.
+
+    - Healthy runtime still launches the assigned refiner/worker inside its container. Explicit
+    container-disabled control still runs on the host.
+
+    - Error/retry preserves execution mode, original diagnostics and evidence, and does not
+    become a fabricated INPUT_REQUIRED/PASS/NEEDS_WORK verdict.
+
+    - Exercise relevant native entry points with disposable fixtures. Isolate HOME/PM settings,
+    tmux sockets, registry, captures and runtime endpoints; never disable the real host''s
+    container mode, stop its runtime, kill its tmux session, or mutate shared ~/.pm files
+    to test this bug.
+
+
+    Incident distinction: the October 29 #267 host-refiner tmux leak is not proof of this
+    fallback firing. A separate confirmed test leak occurred October 28 19:29:30 UTC: #271''s
+    S0 planner ran pm container disable intending to change a scratch project, but wrote the
+    real global setting. This PR must not claim to fix shared-setting isolation; its tests
+    must avoid repeating that mistake. Evidence: /home/matt/.local/state/pm-pr-shepherd/container-disabled-20261028-evidence.json.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T02:00:23.323053+00:00'
+  updated_at: '2026-10-29T02:00:23.323053+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  effort: high
+  review_spec: false
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
