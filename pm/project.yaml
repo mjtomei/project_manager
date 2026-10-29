@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T11:46:22.045926+00:00'
+  updated_at: '2026-10-29T11:57:49.461340+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14920,6 +14920,36 @@ prs:
       not rejected.'
     created_at: '2026-10-29T11:46:21Z'
     last_edited: '2026-10-29T11:46:21Z'
+  - id: note-1473c30
+    text: 'QA S16 (concurrent close/remove/reopen/start/cleanup/lock): PASS, 7/7 races,
+      executed end to end on this head in a disposable-HOME sandbox against the fake-github
+      stand-in (git_backed remote; pm shim on a PATH with no claude; every actor in
+      its own `cd $TEST_DIR` subshell; no pm session/TUI created, PM_TMUX_SOCKET sandboxed).
+      (1) two simultaneous `pm pr close A`: both exit 0, both print Closed #1 + Kept
+      lines, exactly one closed entry; a third sequential close keeps `closed_at`
+      byte-identical while `updated_at` advances; dirty workdir + remote branch +
+      fake PR CLOSED all intact; project.active_pr -> None. (2) close vs `close --remove`:
+      entry gone, `--remove` prints Removed registry entry + Kept for the resources
+      it had, workdir/branch survive, project.yaml parses with unique ids; the losing
+      close is `PR <id> not found.` (rc 1) or `was removed concurrently; nothing to
+      close.` (rc 0), never `Removed registry entry` — both orderings observed across
+      runs. (3) close vs `edit --status pending` x3 rounds: both exit 0 each round,
+      final closed or pending, never pending-with-closed_at, note/workdir/branch intact.
+      (4) start vs close at 0.1s: close wins (start rc 1 `became closed while starting
+      — not recording the start.`, workdir field null, prepared workdir left on disk);
+      start-wins ordering also exercised (start rc 0 `is now in_progress` + Work directory,
+      close then closes it with the workdir attached). (5) close vs `cleanup --force`:
+      cleanup removes the workdir, close keeps the entry and never claims a deletion;
+      final closed + closed_at + workdir null. (6) close vs `cleanup --all --force`:
+      `Cleaned N/N workdirs.`, E stays in the registry closed with workdir null —
+      --all never deletes entries. (7) held flock: close exits 1 with the exact `Could
+      not acquire lock ... within 2.0s` stderr, registry untouched (status pending,
+      updated_at unchanged), retry succeeds after release. No tracebacks anywhere;
+      no bugs found, no code changed. Evidence: /pm-captures/scenarios/16/race-suite/
+      (recording.cast+mp4 of all seven races, driver.sh, validation-run.log, race2-losing-close/)
+      and /pm-captures/scenarios/16/start-wins/ (recording of the start-wins ordering).'
+    created_at: '2026-10-29T11:57:49Z'
+    last_edited: '2026-10-29T11:57:49Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
