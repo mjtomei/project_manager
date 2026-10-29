@@ -1598,6 +1598,74 @@ class TestVerifySingleScenario:
         # The follow-up asks for the verifier's own outcome only.
         assert "VERIFIED" in str(kwargs["outcome_request"])
 
+    def test_reverification_tolerates_verifier_pane_closing(self, tmp_path):
+        """A re-check send must not crash when the verifier pane closes.
+
+        ``send_keys`` raises ``CalledProcessError`` for a target that no
+        longer exists.  The follow-up races that exit — a session that ends
+        on input closes its pane — so the send has to report failure and let
+        the bounded poller surface "verifier pane disappeared", not take the
+        QA thread down with it.  The worker-retry follow-up in
+        ``_poll_tmux_verdicts`` has the same hazard (a fake worker exits on
+        the re-evaluation message).
+        """
+        import subprocess
+
+        transcript = tmp_path / "verify-s1.jsonl"
+        transcript.write_text("")
+        scenario = QAScenario(
+            index=1, title="Test", focus="test", steps="steps",
+            window_name="qa-s1", pane_id="%1",
+            verifier_pane_id="%7", verifier_session_id="vsid",
+            verifier_transcript=str(transcript),
+            verifier_cwd=str(tmp_path),
+        )
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=subprocess.CalledProcessError(
+                       1, ["tmux", "send-keys"])), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.qa_loop.poll_for_verdict", return_value=None), \
+             patch("pm_core.qa_loop.find_verdict_turn", return_value=None):
+            passed, reason, _ = _verify_single_scenario(
+                scenario, "PASS", "output", {}, {},
+                session="pm-session", qa_workdir=str(tmp_path),
+                pr_workdir=str(tmp_path),
+            )
+        assert passed is False
+        assert reason == "verifier pane disappeared"
+
+
+class TestFollowUpSendToleratesDeadPane:
+    """``_send_keys_if_alive`` — follow-ups must not crash on a closed pane."""
+
+    def test_skips_send_when_pane_is_gone(self):
+        from pm_core.qa_loop import _send_keys_if_alive
+
+        with patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            assert _send_keys_if_alive("%7", "hello") is False
+        mock_send.assert_not_called()
+
+    def test_swallows_pane_closing_mid_send(self):
+        import subprocess
+
+        from pm_core.qa_loop import _send_keys_if_alive
+
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys",
+                   side_effect=subprocess.CalledProcessError(
+                       1, ["tmux", "send-keys"])):
+            assert _send_keys_if_alive("%7", "hello") is False
+
+    def test_sends_when_pane_is_alive(self):
+        from pm_core.qa_loop import _send_keys_if_alive
+
+        with patch("pm_core.tmux.pane_exists", return_value=True), \
+             patch("pm_core.tmux.send_keys") as mock_send:
+            assert _send_keys_if_alive("%7", "hello") is True
+        mock_send.assert_called_once_with("%7", "hello")
+
 
 class TestVerificationSetting:
     """Tests for _is_verification_enabled global setting."""

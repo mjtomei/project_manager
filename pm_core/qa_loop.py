@@ -3485,6 +3485,29 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
     return False
 
 
+def _send_keys_if_alive(pane_id: str, msg: str) -> bool:
+    """Send *msg* (plus Enter) to *pane_id*, tolerating a pane that closes.
+
+    A follow-up message can end the session it is delivered to — a worker
+    that exits on input closes its pane, and a verifier pane can die between
+    the liveness check and the send.  ``send_keys`` raises
+    ``CalledProcessError`` for a target that no longer exists, so a send
+    racing that exit would crash the whole QA thread.  Report failure
+    instead: the dead pane is handed to the relaunch path on the next tick.
+    """
+    from pm_core import tmux as tmux_mod
+
+    if not tmux_mod.pane_exists(pane_id):
+        return False
+    try:
+        tmux_mod.send_keys(pane_id, msg)
+    except (subprocess.CalledProcessError, OSError):
+        _log.debug("send_keys to pane %s failed (closed?)", pane_id,
+                   exc_info=True)
+        return False
+    return True
+
+
 def _poll_tmux_verdicts(
     state: QALoopState,
     data: dict,
@@ -4064,12 +4087,17 @@ def _poll_tmux_verdicts(
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
                             f"on the last line."
                         )
-                        tmux_mod.send_keys(pane_id, followup_msg)
+                        # The follow-up can end the worker (a session that
+                        # exits on input closes its pane) — tolerate that
+                        # instead of crashing the loop; the next tick sees
+                        # the dead pane and relaunches it.
+                        _send_keys_if_alive(pane_id, followup_msg)
                         # Send extra Enters to ensure the message is
                         # submitted — sometimes newlines don't trigger.
                         for _ in range(2):
                             time.sleep(1)
-                            tmux_mod.send_keys(pane_id, "")
+                            if not _send_keys_if_alive(pane_id, ""):
+                                break
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending.  Stamp the
@@ -4823,10 +4851,11 @@ def _verify_single_scenario(
         _prior = find_verdict_turn(
             scenario.verifier_transcript, _VERIFICATION_VERDICTS)
         baseline_line = _prior.line_index if _prior else -1
-        tmux_mod.send_keys(scenario.verifier_pane_id, msg)
+        _send_keys_if_alive(scenario.verifier_pane_id, msg)
         for _ in range(2):
             time.sleep(1)
-            tmux_mod.send_keys(scenario.verifier_pane_id, "")
+            if not _send_keys_if_alive(scenario.verifier_pane_id, ""):
+                break
         _log.info("Verification: sent follow-up to scenario %d verifier pane=%s",
                   scenario.index, scenario.verifier_pane_id)
         try:
