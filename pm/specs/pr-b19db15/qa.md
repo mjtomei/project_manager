@@ -178,6 +178,17 @@ recording-recipe bugs that any worker following the recipe hits:
   the harness: the block exits 0 with the bare handle). The text guard and
   the new `pipegap` execution case now fail on the bare form.
 
+- the manifest example has to name the files the run keeps (review loop
+  ebd1 i4): the web-UI `## Files` example listed the `node_modules` link but
+  neither `server.pid` (a run stopped before the teardown) nor the
+  `recording.webm` a failed transcode keeps, and unlike the recording
+  recipes' examples it has no catch-all — so a worker copying the example
+  into the manifest still left out the two files the produced-files list
+  (R44) says to mention. Both are in the example now. The tmux step-2 claim
+  guard (`could not claim …`) and the cleanup order (this run's pipe stop
+  before the claim release) are also pinned by tests; neither is a recipe
+  change, so no scenario gains a new surface.
+
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
 
@@ -217,7 +228,9 @@ to the grouped session — a bare `pipe-pane -t "$TARGET:0.0"` attaches to it
 and the run then reports success on that session's transcript. S25 also re-checks the captures-path guard: step 1 pasted with an
 unsubstituted `PR_ID` (or outside the project) must stop with "could not
 resolve the captures directory" and create nothing, not run the capture in
-`/scenarios/1/web-ui`. S26 also re-checks the driver block's two new
+`/scenarios/1/web-ui`. S26's recipe-content check includes the manifest
+example: it must list `server.pid` and `recording.webm` beside the files it
+already named (R45). S26 also re-checks the driver block's two new
 messages: pasting step 2 with no `driver.mjs` in the capture directory must
 stop with "there is no driver.mjs in …" (not "the driver failed"), and a
 capture directory holding a `node_modules` that does not resolve Playwright

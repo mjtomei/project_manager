@@ -595,6 +595,8 @@ fencing deep:
 
     - `recording.mp4` — the rendered walk-through, transcoded to H.264
       from Playwright's native webm.
+    - `recording.webm` — Playwright's native video; kept only when the
+      transcode failed, so step 3 can be retried without re-driving the UI.
     - `driver.mjs` — the Playwright driver that produced this capture (the
       adapted skeleton: locators, interactions, side-channel trigger).
     - `trace.zip` — Playwright trace; `npx playwright show-trace trace.zip`.
@@ -604,6 +606,8 @@ fencing deep:
     - `sse.log` — SSE event-stream transcript.
     - `node_modules` — link to the image's Playwright install (if step 2
       created one).
+    - `server.pid` — the app's pid, present only when the run stopped
+      before the teardown (the teardown removes it).
 
 ## Reviewing
 

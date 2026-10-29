@@ -2705,16 +2705,34 @@ def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
     already name their failure evidence (R17), so a worker following this list
     leaves both out of ``## Files`` while the capture directory holds them —
     the same "the manifest and the directory disagree" class, two files over.
+
+    The manifest's own ``## Files`` example has to name them too, not only the
+    produced-files list: that example is what a worker copies into the
+    manifest, and the ``node_modules`` line is pinned in both places for the
+    same reason (``test_web_ui_produced_files_list_names_the_playwright_link``)
+    — the example listed it while these two were still missing.
     """
     text = _recipe_text("web-ui-recording.md")
     produced = text.split("## What this recipe produces", 1)[1].split(
         "## Capture", 1)[0]
+    manifest = text.split("## Manifest format", 1)[1].split(
+        "## Reviewing", 1)[0]
+    # The manifest's `## Commands` block already mentions `recording.webm` in
+    # its ffmpeg line, and the prose above the template mentions a "`## Files`
+    # section", so the example's *file list* — the indented heading — is what
+    # has to name it.
+    files = manifest.split("\n    ## Files", 1)[1]
     for fname in ("server.pid", "recording.webm"):
         assert fname in produced, (
             "the produced-files list never names " + fname + ", which the "
             "flow leaves in the capture directory (a run stopped before the "
             "teardown; a failed transcode), so the manifest's `## Files` "
             "section and the directory disagree")
+        assert fname in files, (
+            "the manifest's `## Files` example does not name " + fname + ", "
+            "although the produced-files list says to mention it when it "
+            "survives — a worker copying the example leaves it out while the "
+            "capture directory holds it")
 
 
 def test_web_ui_layer2_block_refuses_an_unset_capdir(tmp_path):
@@ -2932,6 +2950,16 @@ case "$sub" in
       case " $* " in
         *" -u "*) rm -f "$STATE/claim.$r"; exit 0 ;;
       esac
+      # `claimgone`: the target session ends between step 2's exact-session
+      # assert and the claim write, so the claim cannot be taken although the
+      # assert just passed. The step has to say so where it fails; without its
+      # guard it runs on into the pipe attach, which reports "could not
+      # stream … — check that pane exists" for a session that went away.
+      if [ "$STUB_MODE" = claimgone ]; then
+          rm -f "$STATE/$r" "$STATE/claim.$r"
+          echo "no such session: $s" >&2
+          exit 1
+      fi
       for a in "$@"; do v=$a; done
       printf '%s\n' "$v" > "$STATE/claim.$r"
       # `pipegap`: the target session ends in the gap between step 2's
@@ -3561,6 +3589,75 @@ class TestCaptureFlowExecution:
         assert seen.read_text().strip() == str((tmp_path / "cap").resolve()), (
             "step 2 did not claim the capture directory before attaching the "
             "pipe")
+
+    def test_a_claim_that_cannot_be_written_is_reported(self, tmp_path):
+        """A claim that could not be taken must stop the step where it fails.
+
+        Step 2's claim is the only thing that keeps a second capture from
+        taking this run's transcript pipe over, and the exact-session assert
+        just above it can be stale by the time the write lands. Without the
+        guard the step runs on and attaches the pipe anyway; when the session
+        went away the attach then fails as "could not stream … — check that
+        pane exists", which names the wrong cause: it was the *session* that
+        went away, so there is no pane to check. The stub's `claimgone` ends
+        the session as the claim is written.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")),
+            "claimgone", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "a run that could not take its capture-dir claim was reported as "
+            "a success: " + r.stderr)
+        assert "could not claim" in r.stderr, r.stderr
+        assert "could not stream" not in r.stderr, (
+            "the failed claim is reported as a failed pipe attach, so the "
+            "worker is sent to look at a pane that never existed: "
+            + r.stderr)
+
+    def test_the_claim_is_released_only_after_the_pipe_is_stopped(self):
+        """The cleanup order is a race guard, and it needs its own case.
+
+        Step 5 releases the capture-directory claim *last*: a later run in the
+        same session may record into another directory, and the instant the
+        claim is released it can take it and attach its own pipe — which this
+        run's pipe stop would then close, leaving that run with a transcript
+        that stops growing while its stop step still passes (the takeover the
+        claim exists to stop). Every cleanup that stops the pipe and releases
+        the claim is ordered the same way, so pin the order at every release:
+        only the recorder kill may sit between this run's pipe stop and the
+        release. Reordering them leaves the whole file green (verified by
+        mutation), because no case observes the order — the stub's claim
+        state is the same either way. The one cleanup with no stop is step 2's
+        own failed attach: there is no pipe to stop, and the release is that
+        path's cleanup.
+        """
+        block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+        stmts, cur = [], []
+        for line in block.splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            cur.append(s)
+            if not s.endswith("\\"):
+                stmts.append(" ".join(cur))
+                cur = []
+        releases = [i for i, st in enumerate(stmts)
+                    if st.startswith(
+                        'tmux set-option -u -t "$TARGET" @pm_capture_dir')]
+        assert releases, "the tmux recipe releases no capture-dir claim"
+        stop = 'tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null'
+        for i in releases:
+            j = i - 1
+            while (j >= 0
+                   and stmts[j].startswith('tmux kill-session -t "=pm-recorder"')):
+                j -= 1
+            if j >= 0 and stmts[j].startswith(stop):
+                continue
+            previous = stmts[j] if j >= 0 else "<start of block>"
+            assert j >= 0 and '"cat >>' in " ".join(stmts[max(0, j - 1):i + 1]), (
+                "the claim release after %r is not preceded by this run's pipe "
+                "stop, so a later run in the session can take the claim and "
+                "have its pipe closed by this run's cleanup" % (previous,))
 
     @pytest.mark.parametrize("mode", [
         "pipefail",     # step 2 could not attach the transcript pipe
