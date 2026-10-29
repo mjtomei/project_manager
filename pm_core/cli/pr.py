@@ -1642,7 +1642,11 @@ def _review_post_gate_refusal(root, pr_id: str) -> tuple[int, str] | None:
         _log.warning("review post-gate re-read for %s failed: %s", pr_id, e)
         return None
     if pr is None:
-        return None
+        # Removed from the project inside the fetch (``pm pr close``/remove):
+        # the first-iteration path refuses an absent entry too, so a reviewer
+        # must not be launched against one.  ``run_qa_sync``'s post-gate
+        # re-read classifies this the same way.
+        return 1, "was removed from the project during the base check"
     if base_check.has_open_return(pr):
         return 3, ("was returned to implementation for a base conflict "
                    "during the base check")
@@ -1839,6 +1843,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     def apply(data):
         pr = store.get_pr(data, pr_id)
         if not pr:
+            # Removed inside the gate's fetch (``pm pr close``/remove): name
+            # it, so the refusal below is not an empty reason.
+            entered["why"] = "was removed from the project during the base check"
             return
         # The pre-flight base check above is a network round-trip.  A
         # concurrent merge/close (e.g. a GitHub sync) landing inside that

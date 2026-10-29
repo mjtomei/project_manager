@@ -113,7 +113,12 @@ already drops it because the status is no longer `qa`.
   return there exits **3** — the routing code `review_loop` maps to
   `VERDICT_BASE_CONFLICT`, so no iteration is recorded and the reviewer never
   starts beside the rework — and a PR that left the pre-review phase exits
-  **1** with no window. That re-read runs even when the caller already gated
+  **1** with no window. A PR **removed from the project** inside the fetch
+  (`pm pr close`/remove) exits **1** the same way: the first-iteration
+  path's atomic write already refuses an absent entry, so the re-read must
+  classify "absent" identically (`run_qa_sync`'s post-gate re-read does)
+  instead of launching a reviewer against a PR that no longer exists. That
+  re-read runs even when the caller already gated
   (`--skip-base-check`, the auto-sequence path): the caller's gate was its
   own network round-trip, so a return recorded after it is just as invisible
   here, and the re-read is a cheap local load. `_launch_review_iteration`
@@ -122,8 +127,18 @@ already drops it because the status is no longer `qa`.
   process exit, and only that routing code is converted (other refusals
   still propagate).
 - **R4 — Clean integration continues.** `clean` / `up_to_date` / `in_base`
-  resolve any open base return and let the caller proceed exactly as before.
-  No review/QA reset, no status change, no re-run.
+  resolve the open base return and let the caller proceed exactly as before.
+  No review/QA reset, no status change, no re-run. The resolve is pinned to
+  the episode the check was based on (`resolve_return(expect_ts=...)`): a
+  check is a network round-trip, so another driver's check can record a
+  **new** conflict episode inside it (the base moved between the two
+  fetches). Closing that one would clear a return nobody reconciled and let
+  the caller start a reviewer/planner beside the rework the return just
+  launched — the caller's post-gate re-read only sees an *open* return. After
+  resolving, `gate` (and `impl_completion`'s clean path) re-read and return
+  `wait` / not-complete when a return is still open, instead of reporting a
+  clean decision over it. A hand-built record with no `ts` cannot be told
+  apart, so `expect_ts=None` keeps "resolve whatever is open".
 - **R5 — Retryable probe failures.** `error` (fetch/ls-remote/git failure)
   is recorded in `pr["base_check"]` with `retryable: True` and a
   `retry_after` backoff, logged once, and **never** bounces to
@@ -499,6 +514,18 @@ No unresolved ambiguities.
 29. a PR removed from the project during the gate's fetch aborts
     `run_qa_sync` before the QA workdir/planner (the post-gate re-read must
     treat "absent" like `merged`/`closed`, not as eligible).
+30. a conflict return another driver records inside the **gate's own** clean
+    check (the base moved between the two fetches) survives it: `gate`
+    returns `wait`, leaves the return open and does not stamp a clean
+    `base_check` decision. (The caller-level race tests patch `gate` itself,
+    so they never exercised `gate`'s own `resolve_return`.) The same race in
+    `impl_completion`'s clean path reports not-complete instead of resolving
+    the superseding episode, and `resolve_return(expect_ts=...)` refuses a
+    superseding episode while still closing the one it names.
+31. a PR removed from the project inside the gate's fetch does not get a
+    reviewer on review iteration ≥ 2: `_review_post_gate_refusal` classifies
+    "absent" like `run_qa_sync`'s post-gate re-read (exit 1, no window), and
+    the first-iteration refusal names the removal instead of an empty reason.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

@@ -1045,6 +1045,89 @@ def test_gate_self_heals_a_return_when_the_base_moves_clean(w):
     assert pr(w)["base_return"]["resolved_at"]
 
 
+def test_gate_does_not_resolve_a_return_recorded_during_its_own_check(w):
+    """A conflict another driver records inside the gate's fetch survives it.
+
+    ``gate`` reuses the integration primitive, which fetches the base.  A
+    concurrent check can record a conflict return inside that window (the base
+    moved between the two fetches).  The clean path used to call
+    ``resolve_return`` unconditionally and close it — the caller then saw no
+    open return and launched a reviewer beside the rework.  The caller-level
+    race tests patch ``gate`` itself, so they never exercised this path.
+    """
+    set_pr(w, status="in_progress")
+    clean = {"status": integration.CLEAN, "head": w.head,
+             "base_sha": "b" * 40, "base_branch": "master",
+             "target_repo": str(w.repo), "conflicts": [], "overlap": [],
+             "checked_at": "2026-01-01T00:00:00+00:00"}
+
+    def _clean_but_returned(*_a, **_k):
+        # This check's own fetch saw a clean base ...
+        _return_during_gate(w, base_check.STAGE_REVIEW)
+        return dict(clean)
+
+    with patch("pm_core.base_check.evaluate", side_effect=_clean_but_returned):
+        res = base_check.gate(w.pm_dir, PR, base_check.STAGE_REVIEW,
+                              transcript=w.tdir / "r.jsonl")
+    assert res.decision == base_check.WAIT
+    assert res.already_returned
+    assert base_check.open_return(pr(w)) is not None
+    assert pr(w)["status"] == "in_progress"
+    # No clean decision is stamped over the episode that owns the PR.
+    assert pr(w)["base_check"]["decision"] == base_check.CONFLICT
+
+
+def test_completion_does_not_resolve_a_return_recorded_during_its_check(w):
+    """A superseding return recorded inside the completion check stays open.
+
+    ``impl_completion`` re-fetches the base.  If another driver records a new
+    conflict episode in that window (a moved base), resolving it would report
+    the handoff complete and start a reviewer beside the new rework.
+    """
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)                       # open return; PR now in_progress
+    simulate_launch(w)                # the rework session launched
+    commit(w.wd, "rework.txt", "x\n", "rework")   # HEAD moved past the pair
+    clean = {"status": integration.CLEAN, "head": git(w.wd, "rev-parse", "HEAD"),
+             "base_sha": "b" * 40, "base_branch": "master",
+             "target_repo": str(w.repo), "conflicts": [], "overlap": [],
+             "checked_at": "2026-01-01T00:00:00+00:00"}
+
+    def _clean_but_superseded(*_a, **_k):
+        base_check.return_to_impl(
+            w.pm_dir, PR,
+            {"head": "c" * 40, "base_sha": "d" * 40, "base_branch": "master",
+             "status": integration.CONFLICT, "conflicts": ["other.txt"]},
+            base_check.STAGE_REVIEW, supersede=True)
+        return dict(clean)
+
+    with patch("pm_core.base_check.evaluate",
+               side_effect=_clean_but_superseded):
+        res = completion(w)
+    assert not res.complete
+    assert "recorded during" in res.reason
+    assert base_check.open_return(pr(w)) is not None
+
+
+def test_resolve_return_leaves_a_superseding_episode_open(w):
+    """``expect_ts`` pins the resolve to the episode the check was based on."""
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w)
+    first_ts = pr(w)["base_return"]["ts"]
+    base_check.return_to_impl(
+        w.pm_dir, PR,
+        {"head": "c" * 40, "base_sha": "d" * 40, "base_branch": "master",
+         "status": integration.CONFLICT, "conflicts": ["other.txt"]},
+        base_check.STAGE_REVIEW, supersede=True)
+    assert pr(w)["base_return"]["ts"] != first_ts
+    assert base_check.resolve_return(w.pm_dir, PR, expect_ts=first_ts) is False
+    assert base_check.open_return(pr(w)) is not None
+    # The episode it names is still closable.
+    assert base_check.resolve_return(
+        w.pm_dir, PR, expect_ts=pr(w)["base_return"]["ts"]) is True
+    assert base_check.open_return(pr(w)) is None
+
+
 def test_capped_return_resumes_once_a_human_reconciles_the_base(w):
     """``needs_human`` stops auto-rework, not recovery.
 
@@ -1212,6 +1295,38 @@ def test_pr_review_iteration_does_not_start_beside_a_return_during_the_gate(w):
     window.assert_not_called()
     assert pr(w)["status"] == "in_progress"
     assert base_check.open_return(pr(w)) is not None
+
+
+def test_pr_review_iteration_aborts_when_the_pr_is_removed_during_the_gate(w):
+    """A PR removed inside the fetch must not get a reviewer on iteration N.
+
+    The first-iteration path refuses an absent entry through its atomic
+    ``in_review`` write; the already-``in_review`` branch writes no status, so
+    its post-gate re-read has to classify "absent" the same way (as
+    ``run_qa_sync``'s post-gate re-read already does) instead of letting the
+    reviewer launch against a PR that no longer exists.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    set_pr(w, status="in_review")
+
+    def _removed_during_gate(*_a, **_k):
+        def _drop(d):
+            d["prs"] = [p for p in d.get("prs", []) if p.get("id") != PR]
+        store.locked_update(w.pm_dir, _drop)
+        return base_check.GateResult(base_check.PROCEED,
+                                     base_check.STAGE_REVIEW_ITERATION)
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch("pm_core.base_check.gate", side_effect=_removed_during_gate), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", "--review-iteration", "2", PR])
+    assert result.exit_code == 1, result.output
+    window.assert_not_called()
+    assert "removed from the project" in result.output
+    assert store.get_pr(store.load(w.pm_dir), PR) is None
 
 
 def test_resolve_and_status_repair_skip_the_write_when_nothing_changes(w):

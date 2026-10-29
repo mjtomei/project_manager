@@ -457,8 +457,20 @@ def ensure_impl_status(root: Path, pr_id: str) -> None:
         _log.warning("base_check: status fix for %s failed: %s", pr_id, e)
 
 
-def resolve_return(root: Path, pr_id: str, reason: str = "") -> bool:
-    """Close an open base return (integration is clean again)."""
+def resolve_return(root: Path, pr_id: str, reason: str = "",
+                   *, expect_ts: str | None = None) -> bool:
+    """Close an open base return (integration is clean again).
+
+    *expect_ts* names the episode the caller's check was based on.  A check is
+    a network round-trip, so another driver can record a **new** conflict
+    episode (a base that moved between the two fetches) inside it; closing
+    that one would clear a return nobody reconciled and let the caller start a
+    reviewer/planner beside the rework it just launched.  With *expect_ts* set,
+    only that exact episode (``base_return["ts"]``) is resolved — a superseding
+    record is left open for the caller to see.  ``None`` keeps the old
+    "resolve whatever is open" behaviour (hand-built records with no ``ts``
+    cannot be told apart anyway).
+    """
     closed = {"ok": False}
 
     def _apply(d):
@@ -466,6 +478,8 @@ def resolve_return(root: Path, pr_id: str, reason: str = "") -> bool:
         rec = open_return(pr)
         if rec is None:
             return
+        if expect_ts is not None and rec.get("ts") != expect_ts:
+            return  # a newer episode owns the PR now
         rec["resolved_at"] = _now()
         rec["awaiting"] = None
         rec.pop("launch_claim", None)
@@ -479,7 +493,10 @@ def resolve_return(root: Path, pr_id: str, reason: str = "") -> bool:
         # close — a locked_update would take the lock and rewrite the whole
         # file for nothing.  ``clear_return_awaiting`` above already guards
         # its update this way.
-        if open_return(store.get_pr(store.load(root), pr_id)) is None:
+        pre = open_return(store.get_pr(store.load(root), pr_id))
+        if pre is None:
+            return False
+        if expect_ts is not None and pre.get("ts") != expect_ts:
             return False
         store.locked_update(root, _apply)
     except Exception as e:
@@ -927,7 +944,30 @@ def gate(root: Path, pr_id: str, stage: str, *,
                 reason=integration.summary(record))
 
         # clean / up_to_date / in_base: continue the intended phase.
-        resolve_return(root, pr_id, reason=integration.summary(record))
+        # Resolve only the episode this check was based on: the fetch above is
+        # a network round-trip, and another driver's check can record a *new*
+        # conflict inside it (a base that moved between the two fetches).
+        # Closing that one would clear a return nobody reconciled, and the
+        # caller would then start a reviewer/planner beside the rework the
+        # return just launched (the caller's post-gate re-read only sees an
+        # *open* return).
+        if open_rec is not None:
+            resolve_return(root, pr_id, reason=integration.summary(record),
+                           expect_ts=open_rec.get("ts"))
+        # Re-read: whatever is still open now was recorded inside this check
+        # (or superseded the episode we based on) and owns the PR.  Without
+        # this the gate would report PROCEED — and record a clean decision —
+        # while the return it was about to be blocked by is live.
+        still_open = open_return(store.get_pr(store.load(root), pr_id))
+        if still_open is not None:
+            return GateResult(
+                WAIT, stage, status=still_open.get("status"),
+                head=still_open.get("head"),
+                base_sha=still_open.get("base_sha"),
+                conflicts=list(still_open.get("conflicts") or []),
+                already_returned=True,
+                reason="a base integration return was recorded during the "
+                       "base check")
         _record_decision(root, pr_id, record, stage, PROCEED)
         return GateResult(PROCEED, stage, status=st,
                           head=record.get("head"),
@@ -1078,7 +1118,17 @@ def impl_completion(root: Path, pr_id: str, pr: dict | None = None,
             return CompletionResult(
                 False, "still conflicts with the moved base")
 
-        resolve_return(root, pr_id, reason=integration.summary(record))
+        # Resolve only the episode this check was based on, then confirm it is
+        # really gone: the integration check is a network round-trip, so
+        # another driver can record a *new* conflict inside it (a base that
+        # moved between the two fetches).  Closing that one would let this
+        # handoff start a reviewer beside the rework the return just launched.
+        resolve_return(root, pr_id, reason=integration.summary(record),
+                       expect_ts=rec.get("ts"))
+        if open_return(store.get_pr(store.load(root), pr_id)) is not None:
+            return CompletionResult(
+                False, "a base integration return was recorded during the "
+                       "check")
         # Record the clean verdict like the writer-launch gate does: without
         # it the PR keeps the last *failed* (retryable) ``base_check`` record
         # after a successful completion, so ``_retry_open`` keeps suppressing
