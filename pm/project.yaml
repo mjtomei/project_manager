@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T14:16:01.491282+00:00'
+  updated_at: '2026-10-29T14:35:12.713465+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29994,6 +29994,53 @@ prs:
       vfr`. Captures: /pm-captures/scenarios/40/{story1-launch-failed,story2-autostart-retry,story3-restart-midbackoff,story4-concurrent-ownership,story5-recovery-after-launcher-fixed}.'
     created_at: '2026-10-29T14:16:01Z'
     last_edited: '2026-10-29T14:16:01Z'
+  - id: note-5d7c3f1
+    text: 'QA S41 (container mode: verdictless worker beside a healthy one; stop during
+      recovery; fresh-start cleanup) — found+fixed 90341407.
+
+
+      Defect (story 3): `cleanup_orphaned_qa_containers` (pm_core/container.py) treated
+      a QA container as live if ANY `qa-*` window name ended in the same `-s{N}` suffix.
+      Scenario indices are per PR, so with `qa-pr-6bcd131-s1` and `qa-pr-4521a07-s1`
+      open from the other stories, the stopped run''s `…-qa-pr-7a5e27a-<loop>-s1`
+      container survived the fresh start and no `Cleaned up N orphaned QA container(s)`
+      line was logged (the container stayed Up while its window had been killed).
+      Pre-existing on origin/master, but it is exactly what this scenario''s fresh-start
+      Then requires. Fix: match the exact window name for the run''s own PR (`qa-<display_id>-s{N}`),
+      passing the display id from the QA loop so GitHub PRs (`#116`) map correctly.
+      Tests: TestCleanupOrphanedQaContainers (5 cases; the cross-PR case fails pre-fix).
+      Live post-fix: `Cleaned up 3 orphaned QA container(s) for pr-7a5e27a`, only
+      the new container left.
+
+
+      Stories 1-2 passed unchanged: healthy container run (dashboard ⠏ verifying ->
+      PASS/Overall PASS, `QA complete: PASS [finalize: FINALIZE_DONE]`, worker/refiner
+      panes are `podman exec -it`, verifier host, `QA PASS` note, PR stays qa); verdictless
+      worker beside a healthy one (one row retired by the loop itself in ~90 s as
+      INPUT_REQUIRED with `worker produced no verdict (no_progress): qa-scenario-1:
+      … Pane %17 was left open for inspection.`, other row PASS with no reason line,
+      `QA complete: INPUT_REQUIRED … Alpha: INPUT_REQUIRED; Beta: PASS`, `QA INPUT_REQUIRED`
+      note, no relaunch/retry). Story 3 stop half also passed: STOPPED, no finalize,
+      no note, no queued launch 25 s later.
+
+
+      Harness notes for the next run: (1) the QA loop runs in a thread inside the
+      long-lived TUI process, so a source edit is not live until `pm tui restart`
+      (re-execs in place, same pid); (2) `pm set qa-max-scenarios`/`pm container enable`
+      are per-HOME globals and this container shares HOME=/home/pm with a sibling
+      QA session — use a private HOME + PM_TMUX_SOCKET if two container runs need
+      different values; (3) scripted `qa_scenario` slots are consumed in launch order
+      and the two workers'' windows were created `-s2` before `-s1`, so which title
+      is verdictless can differ from the prompt''s wording; (4) detect a shell-pane
+      command''s completion from a marker written into its output FILE — a marker
+      in the typed command line matches immediately; (5) agg ships in pm-dev:latest
+      (`podman cp <cid>:/usr/local/bin/agg`), ffmpeg 4.4.2 wants `-vsync vfr`.
+
+
+      Captures: /pm-captures/scenarios/41/{story1-healthy,story2-verdictless,pre-fix,post-fix}
+      + README.md.'
+    created_at: '2026-10-29T14:35:12Z'
+    last_edited: '2026-10-29T14:35:12Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
