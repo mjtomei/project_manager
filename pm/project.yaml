@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T03:19:17.748296+00:00'
+  updated_at: '2026-10-29T03:49:25.334689+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4707,6 +4707,14 @@ prs:
       PM_TMUX_SOCKET is unset (unreachable for a live session).'
     created_at: '2026-10-29T03:19:17Z'
     last_edited: '2026-10-29T03:19:17Z'
+  - id: note-0dc4622
+    text: 'Incidental fix (d1c0 i3, commit 7b2a027e): three tests/test_tui_pidfile.py::TestSignalDelivery
+      tests used PID 1234 as a stand-in live TUI and failed with "process is a zombie"
+      whenever the container happened to hold an unreaped child at that PID (reproduced
+      on an unmodified HEAD worktree). They now pin is_zombie to False; zombie handling
+      keeps its own real-process test. Full suite after the fix: 4566 passed / 1 skipped.'
+    created_at: '2026-10-29T03:49:25Z'
+    last_edited: '2026-10-29T03:49:25Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
