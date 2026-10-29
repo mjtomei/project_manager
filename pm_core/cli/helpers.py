@@ -1370,8 +1370,8 @@ def _registry_tui_pane(session: str) -> str | None:
 def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     """Find the TUI pane in a pm session.
 
-    Returns ``(pane_id, session_name)``, or ``(None, None)`` when no session
-    can be identified at all.  With an explicit *session* the name is
+    Returns ``(pane_id, session_name)``, or ``(None, None)`` when no live
+    TUI is found.  With an explicit *session* the name is
     returned even when the session or its TUI pane is gone, and the pane id
     is whatever the registry records — history/frames commands key their
     files off the session, and ``pm autostart`` reports a stale pidfile
@@ -1388,7 +1388,9 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     If session is provided, uses that. Otherwise:
     - If in a pm- tmux session, uses current session
-    - Otherwise, tries to find session matching current directory
+    - Otherwise, tries to find session matching current directory (only
+      when the process is not inside a pm session: there the ambient
+      session wins, see the comment on the cwd branch)
     - Falls back to scanning pm servers for a live TUI pane; when one of the
       two branches above identified a session, only *that* session's server
       is scanned (see the note on ``identified`` below).
@@ -1430,23 +1432,29 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             if pane_id:
                 return pane_id, base
 
-    # Try to find session matching current directory first
-    expected_session = _get_session_name_for_cwd()
-    _select_session_socket(expected_session)
-    try:
-        session_running = tmux_mod.session_exists(expected_session)
-    except OSError:
-        # tmux missing/unexecutable: discovery degrades to "no session"
-        # instead of crashing (same contract as find_session_server).
-        session_running = False
-    if session_running:
-        # Inside a pm session the ambient one stays the fallback target
-        # (that is the server the pre-isolation scan would have used);
-        # otherwise the running cwd session is.
-        identified = identified or expected_session
-        pane_id = _registry_tui_pane(expected_session)
-        if pane_id:
-            return pane_id, expected_session
+    # Try to find session matching current directory — but only when nothing
+    # above identified a session.  Inside a pm session the ambient one is
+    # the answer: the cwd is a weaker signal, and resolving to a *different*
+    # pm session's TUI because its repo happens to be the cwd would hand
+    # ``pm tui send`` another session's pane (keys are delivered unscoped)
+    # and aim ``pm pr merge``'s window cleanup at the wrong session — the
+    # cross-session damage this whole change exists to prevent.  From a
+    # plain shell there is no ambient session, and the cwd lookup is what
+    # makes ``pm tui view`` work outside a pm session.
+    if identified is None:
+        expected_session = _get_session_name_for_cwd()
+        _select_session_socket(expected_session)
+        try:
+            session_running = tmux_mod.session_exists(expected_session)
+        except OSError:
+            # tmux missing/unexecutable: discovery degrades to "no session"
+            # instead of crashing (same contract as find_session_server).
+            session_running = False
+        if session_running:
+            identified = expected_session
+            pane_id = _registry_tui_pane(expected_session)
+            if pane_id:
+                return pane_id, expected_session
 
     # Fall back to scanning pm servers (private sockets + legacy default)
     # for a session with a live registered TUI pane.  Only the identified

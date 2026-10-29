@@ -1000,6 +1000,49 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == ("%2", "pm-a")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/a"
 
+    def test_cwd_session_does_not_override_the_ambient_one(self, monkeypatch):
+        """Inside pm-a, another repo's running session must not be resolved.
+
+        The cwd lookup exists for a plain shell.  Inside a pm session the
+        ambient session wins: pane ids are only unique per tmux server and
+        ``pm tui send`` delivers keys unscoped, so returning pm-b's pane
+        here would drive the wrong TUI (and aim ``pm pr merge``'s window
+        cleanup at pm-b).  Here pm-a's TUI pane is unregistered (heal
+        testing) while the cwd-derived pm-b is running with a live pane.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a")
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-b")
+        # pm-b *is* running, with a live registered TUI pane.
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: True)
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists", lambda p: True)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [{"name": "pm-a", "socket": "/tmp/a",
+                                      "attached": 0, "shared": False}])
+
+        def registry(name):
+            if name == "pm-b":
+                return {"windows": {"@1": {"panes": [
+                    {"id": "%9", "role": "tui"}]}}}
+            return {"windows": {}}
+
+        monkeypatch.setattr(pane_registry, "load_registry", registry)
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        monkeypatch.setattr(helpers.subprocess, "run",
+                            lambda *a, **kw: MagicMock(returncode=1,
+                                                       stdout=""))
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert os.environ["PM_TMUX_SOCKET"] == ""
+
     def test_last_resort_never_crosses_sessions_on_one_server(
             self, monkeypatch):
         """A server is not a session: the default server hosts several.

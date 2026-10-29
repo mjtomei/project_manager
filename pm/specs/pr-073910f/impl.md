@@ -86,11 +86,14 @@ sessions today).
    subcommand) resolves the server for an explicit `--session`, the current
    pane, the cwd-derived session, and finally scans pm servers for a live
    TUI pane. It selects `PM_TMUX_SOCKET` for the found session before
-   returning, so callers' `tmux_mod` calls hit the right server. The final
-   scan covers *all* servers only when neither branch above identified a
-   session (a plain shell); when one did, it is scoped to that session's
-   server, because pane ids are per server and `pm tui send` delivers keys
-   unscoped (review-loop 7af7 i1).
+   returning, so callers' `tmux_mod` calls hit the right server. The cwd
+   lookup only applies when the process is *not* inside a pm session: there
+   the ambient session wins, because a running session derived from the cwd
+   would otherwise be resolved from inside a different pm session (review
+   loop 7af7 i3). The final scan covers *all* servers only when neither
+   branch above identified a session (a plain shell); when one did, it is
+   scoped to that session's server, because pane ids are per server and
+   `pm tui send` delivers keys unscoped (review-loop 7af7 i1).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
@@ -1209,3 +1212,44 @@ skipped).  No live session, server or shared host configuration was
 touched.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop 7af7 i3)
+
+Verification pass over the integrated head; no requirement changes.  One
+cross-session hazard in TUI-pane discovery — the same failure mode i1/i2
+closed for the fallback scan, still open one branch earlier:
+
+1. **`_find_tui_pane()`'s cwd branch could resolve to a *different* pm
+   session.**  The branch "try the session matching the current directory"
+   ran unconditionally, and its result was returned even when the in-tmux
+   branch had already identified the ambient pm session.  From inside
+   `pm-a` with its TUI pane unregistered (heal testing, a respawn that did
+   not update the registry), a cwd inside another project whose session
+   `pm-b` was running resolved to *`pm-b`'s* pane and re-pointed
+   `PM_TMUX_SOCKET` at `pm-b`'s server.  `pm tui send`/`view`/`restart`
+   deliver keys to a bare pane id and `pm pr merge` kills windows by
+   session name, so the consequence is the cross-session damage this
+   change exists to prevent.  The cwd lookup now runs only when nothing
+   identified a session, i.e. from a plain shell — which is what it was
+   for (`pm tui view` from outside a pm session keeps working, and a pm
+   pane whose cwd is the session's own repo is unaffected because the
+   ambient branch already answered).  Test:
+   `test_cwd_session_does_not_override_the_ambient_one` (verified to fail
+   without the guard: it returned `pm-b`'s `%9` and selected
+   `/tmp/pm-sessions/pm-b`).
+2. Corrected the `_find_tui_pane()` docstring, which claimed it returns
+   `(None, None)` only "when no session can be identified at all": the
+   implicit path also returns `(None, None)` when a session was identified
+   but no live TUI pane was found (the explicit-`--session` path is the one
+   that always returns the name).
+
+Validation on the integrated head: full suite re-run after these edits
+(see the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket (`TMUX_TMPDIR` on a scratch dir):
+private server created, `PM_TMUX_SOCKET` in the session env, the global
+env and the hooks, default server untouched.  No live session, server or
+shared host configuration was touched; the new test is unit-level and
+binds no tmux server.
+
+Residual notes unchanged and still non-blocking (see the i3 section of this
+document).
