@@ -462,10 +462,19 @@ async def consume_breadcrumb(app) -> None:
                 recorded_sessions = {}
             for k, sid in recorded_sessions.items():
                 try:
-                    rstate.iteration_sessions[int(k)] = sid
+                    iteration = int(k)
                 except (TypeError, ValueError):
                     _log.debug("consume_breadcrumb: bad iteration_sessions "
                                "key %r for %s", k, pr_id)
+                    continue
+                # Only a real session id is usable: completion passes it as
+                # the ownership check, and a falsy value would silently
+                # disable that check on the shared legacy transcript name.
+                if not isinstance(sid, str) or not sid:
+                    _log.debug("consume_breadcrumb: bad iteration_sessions "
+                               "value %r for %s", sid, pr_id)
+                    continue
+                rstate.iteration_sessions[iteration] = sid
             app._review_loops[pr_id] = rstate
         _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
 

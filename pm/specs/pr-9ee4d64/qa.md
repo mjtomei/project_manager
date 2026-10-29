@@ -186,7 +186,9 @@ Cross-cutting setup for every scenario:
   native JSONL): the next launch replaces it and the workflow advances; no
   crash and no `FileExistsError`.
 - **Frozen canonical at return time** (a regular file, not a link): it is
-  archived by rename — never deleted.
+  moved into the archive (a no-clobber hard link or copy, then the
+  canonical is removed) — never deleted.  Archive-on-replace is not a
+  `rename`: an existing immutable entry is never overwritten.
 - **Same session already archived**: a second archiving attempt adds no
   duplicate entry and never overwrites the existing one.
 - **A superseded callback arriving after the new loop archived the same

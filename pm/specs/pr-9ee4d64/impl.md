@@ -354,7 +354,7 @@ No **[UNRESOLVED]** ambiguities.
 
 ## Verification
 
-- New unit tests (34) in `tests/test_transcript_archive.py` covering:
+- New unit tests (35) in `tests/test_transcript_archive.py` covering:
   archive-on-replace, ownership-checked finalize, loop-scoped naming,
   retire preserving history, live-appends visibility, restart fallback
   (legacy fallback for a live link, loop-scoped preference when both
@@ -370,13 +370,15 @@ No **[UNRESOLVED]** ambiguities.
   freeze copy, a fresh loop never launching over a live legacy link,
   the live-owner skips (running review loop, running watcher, live step
   windows) for both bulk sweeps, and a stub app's non-string
-  `_session_name` never reaching tmux.  One more
+  `_session_name` never reaching tmux, and a legacy iteration link left
+  live when no session id was recorded (review d468 i4).  One more
   (`test_launches_loop_scoped_transcript_and_records_session`) lives in
   `tests/test_review_loop.py` because it drives `run_review_loop_sync`;
   `tests/test_breadcrumb_review_loop.py` gains an
   `iteration_sessions` round-trip test, asserts int-keyed restoration in
-  the existing consume test, and pins that a malformed (non-object)
-  `iteration_sessions` value does not abort the restore.
+  the existing consume test (an unparsable key and a non-string value are
+  dropped), and pins that a malformed (non-object) `iteration_sessions`
+  value does not abort the restore.
   `tests/test_review_launch_retry.py`: the fake that writes a transcript
   now links the path the launcher was given (not a hardcoded legacy
   name), and `test_retry_never_adopts_a_previous_runs_transcript` is
@@ -514,6 +516,25 @@ Applied on top of the design above; keep them when editing the code.
   trade-off (review d468 i3): R9 prefers replacing the canonical over
   stalling the launch, so a frozen regular file that could not be archived
   is the one copy a launch may drop; a symlink only loses its link.
+- `ReviewLoopState.loop_id` is 8 hex chars (`secrets.token_hex(4)`, review
+  d468 i4) instead of 4.  The loop id is the *ownership identity* in every
+  loop-scoped iteration filename, and the loops it must distinguish are
+  deliberately concurrent (a REVIEW return starts a new loop while the
+  superseded one may still be winding down).  With 4 hex chars (65536
+  values) two loops for one PR could share an iteration path — the exact
+  cross-loop freeze this PR removes — so the guarantee is only structural
+  up to a collision.  8 hex chars makes that negligible; the value stays
+  opaque and hex-only (never starts with `i`), which the live-owner prefix
+  matching and the legacy-name patterns rely on.  Old breadcrumbs keep
+  their 4-char ids: the value is opaque everywhere.
+- Loop completion finalizes a *legacy* `review-<pr>-i<N>.jsonl` only when a
+  session id is recorded for that iteration (review d468 i4).  The legacy
+  name is shared with other loops, so without an id the ownership check
+  cannot run and freezing it could clobber the live attempt; the
+  loop-scoped paths need no id because they are structurally this loop's
+  own.  `consume_breadcrumb` also drops a non-string/empty
+  `iteration_sessions` value (a hand-edited breadcrumb must not silently
+  disable the check).
 
 ## Known limitations (accepted)
 

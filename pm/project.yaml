@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T03:24:38.313604+00:00'
+  updated_at: '2026-10-29T04:14:09.580782+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38006,6 +38006,30 @@ prs:
       suites, post-fix repro still reports all three symptoms fixed.'
     created_at: '2026-10-29T03:24:38Z'
     last_edited: '2026-10-29T03:24:38Z'
+  - id: note-a621057
+    text: 'Review-loop d468 i4 (2026-10-29): two ownership-guarantee hardenings; the
+      archive/finalize behaviour is unchanged. (a) ReviewLoopState.loop_id is now
+      8 hex chars (secrets.token_hex(4)) instead of 4. The loop id is the ownership
+      identity in every loop-scoped iteration filename, and the loops it must separate
+      are deliberately concurrent (a REVIEW return starts a new loop while the superseded
+      one winds down), so 4 hex chars (65536 values) left the "a new loop never shares
+      a path" guarantee resting on a ~1/65536 collision — the exact cross-loop freeze
+      this PR removes. Old breadcrumbs keep their 4-char ids (the value is opaque
+      everywhere: leases, --review-loop-id, the commit prefix). (b) Loop completion
+      now finalizes a legacy review-<pr>-i<N>.jsonl only when a session id is recorded
+      for that iteration; with no id the ownership check cannot run and the legacy
+      name is shared with other loops, so it is left live. consume_breadcrumb also
+      drops a non-string/empty iteration_sessions value so a hand-edited breadcrumb
+      cannot silently disable the check. Docs: impl.md hardening bullets + test counts
+      (35 archive tests); qa.md''s "frozen canonical archived by rename" bullet corrected
+      to the real no-clobber-move semantics (impl.md was already corrected in i1).
+      Tests: 35 archive (1 new: a legacy link with no recorded sid stays live — fails
+      without the guard) + the breadcrumb consume test extended with None/list values
+      + review_loop loop-id length assertions. Verified: 638 focused tests; full suite
+      4524 passed / 1 skipped (6m28s, no failures). Post-fix repro still reports all
+      three symptoms fixed; the pre-fix capture still shows all three.'
+    created_at: '2026-10-29T04:14:09Z'
+    last_edited: '2026-10-29T04:14:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high

@@ -377,10 +377,14 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
             # A loop restored from a pre-upgrade breadcrumb ran its
             # in-flight iteration under the legacy shared name; freeze
             # that too, with the session id recorded for the iteration so
-            # a newer loop that took the path is never clobbered.
+            # a newer loop that took the path is never clobbered.  Without
+            # a recorded id the ownership check cannot run at all, and the
+            # legacy name is shared with other loops, so it is left live
+            # (the loop-scoped paths above are structurally this loop's
+            # own and need no id).
             for iteration, sid in sessions.items():
                 legacy = tdir_path / f"review-{state.pr_id}-i{iteration}.jsonl"
-                if legacy.is_symlink():
+                if sid and legacy.is_symlink():
                     finalize_transcript(legacy, session_id=sid)
 
     from pm_core import runtime_state as _rs

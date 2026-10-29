@@ -541,6 +541,27 @@ def test_review_completion_finalizes_an_adopted_legacy_iteration(
     assert other.is_symlink()  # another session's link stays live
 
 
+def test_review_completion_leaves_a_legacy_link_without_a_session_id(env,
+                                                                     monkeypatch):
+    """A recorded iteration with no usable session id must not freeze the
+    shared legacy name: the ownership check cannot run, and the name is
+    shared with other loops (e.g. a hand-edited breadcrumb)."""
+    from pm_core.tui import review_loop_ui
+
+    legacy_sid = _sid()
+    legacy = env.run / "review-pr-abc-i1.jsonl"
+    _link(legacy, _native(env.cwd, legacy_sid, "ANOTHER LOOP"))
+
+    state = rl.ReviewLoopState(pr_id="pr-abc", loop_id="aaaa",
+                               _transcript_dir=str(env.run))
+    state.iteration_sessions[1] = None  # corrupt breadcrumb value
+    monkeypatch.setattr(review_loop_ui, "_is_active_loop",
+                        lambda state: False)
+    review_loop_ui._on_complete_from_thread(None, state)
+
+    assert legacy.is_symlink()
+
+
 # --- sign-off retire keeps history ---------------------------------------
 
 def test_retire_signoff_run_archives_transcript(env, monkeypatch):

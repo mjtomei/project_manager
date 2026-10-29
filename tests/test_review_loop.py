@@ -182,12 +182,12 @@ class TestReviewLoopState:
         assert state.latest_verdict == ""
         assert state.history == []
         # loop_id is auto-generated
-        assert len(state.loop_id) == 4  # 2 bytes = 4 hex chars
+        assert len(state.loop_id) == 8  # 4 bytes = 8 hex chars
 
     def test_unique_loop_ids(self):
         """Each state gets a unique loop_id."""
         ids = {ReviewLoopState(pr_id="pr-001").loop_id for _ in range(10)}
-        # With 4 hex chars (65536 values), 10 should all be unique
+        # With 8 hex chars (2**32 values), 10 should all be unique
         assert len(ids) == 10
 
     def test_input_required_defaults(self):

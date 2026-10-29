@@ -267,6 +267,8 @@ class TestConsumeBreadcrumbReviewLoops:
                         "1": "11111111-1111-4111-8111-111111111111",
                         "3": "33333333-3333-4333-8333-333333333333",
                         "not-an-iteration": "44444444-4444-4444-8444-444444444444",
+                        "4": None,
+                        "5": ["not", "a", "session"],
                     },
                     "history": [
                         {"iteration": 1, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:00:00"},
@@ -303,7 +305,9 @@ class TestConsumeBreadcrumbReviewLoops:
         assert rstate.latest_verdict == "NEEDS_WORK"
         assert rstate.loop_id == "ab12"
         assert len(rstate.history) == 3
-        # Session ids are keyed by int; an unparsable key is dropped, not fatal.
+        # Session ids are keyed by int; an unparsable key and a non-string
+        # value are dropped, not fatal (a falsy value would disable the
+        # ownership check on completion).
         assert rstate.iteration_sessions == {
             1: "11111111-1111-4111-8111-111111111111",
             3: "33333333-3333-4333-8333-333333333333",

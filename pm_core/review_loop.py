@@ -91,8 +91,21 @@ class ReviewIteration:
 
 
 def _generate_loop_id() -> str:
-    """Generate a short random loop identifier (4 hex chars)."""
-    return secrets.token_hex(2)
+    """Generate a random loop identifier (8 hex chars).
+
+    The loop id is part of every iteration transcript's name
+    (``review-<pr>-<loop_id>-i<N>.jsonl``), and that name is the loop's
+    ownership identity (pr-9ee4d64).  Two loops for the same PR are meant
+    to be concurrent — a REVIEW return starts a new loop while the
+    superseded one may still be winding down — so the id must not
+    realistically collide: 8 hex chars (2**32) instead of the 4 the
+    lease/breadcrumb id started with, whose 65536 values would let a
+    superseded and a fresh loop share one iteration path and reintroduce
+    the cross-loop freeze this PR removes.  The value stays opaque and
+    hex-only (never starts with "i"), which the live-owner prefix
+    matching relies on.
+    """
+    return secrets.token_hex(4)
 
 
 class ReviewLaunchError(RuntimeError):
