@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T08:13:25.132942+00:00'
+  updated_at: '2026-10-29T08:38:14.234785+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4970,6 +4970,34 @@ prs:
       Residual notes unchanged and non-blocking (see the i3 section).'
     created_at: '2026-10-29T08:13:25Z'
     last_edited: '2026-10-29T08:13:25Z'
+  - id: note-e9b071f
+    text: 'Review loop 7af7 i1 (commit ff6192cb; full suite 4598 passed / 1 skipped).
+      No requirement changes. One cross-session hazard in TUI-pane discovery — the
+      failure mode this PR exists to remove, reintroduced by the R3.4 fallback. (1)
+      `_find_tui_pane()`''s fallback scanned EVERY pm server for a live `pm _tui`
+      pane, unconditionally. That is right from a plain shell, but when the process
+      is inside a pm session whose registered TUI pane is gone (heal testing, or a
+      respawn that did not update the registry), the loop walked /tmp/pm-sessions
+      in sorted order and returned the first server''s pane. Pane ids are only unique
+      per tmux server and `pm tui send` delivers keys unscoped, so `pm tui send g`
+      from inside pm-a could drive pm-b''s TUI. Before this PR the same fallback ran
+      `list-panes -a` on the *ambient* server, so it could only ever find the current
+      session''s pane; scanning per-socket servers silently widened it. `_find_tui_pane()`
+      now records the session its branches identified (the in-tmux pm session, else
+      a running cwd-derived session) and scopes both the registry scan and the last-resort
+      `pm _tui` scan to that session''s server. With no session identified (a plain
+      shell) every server is still scanned, so `pm tui view` from outside pm keeps
+      working. Test: `test_fallback_never_crosses_to_another_pm_session` (verified
+      to fail without the scope — it returned pm-b''s pane). Spec R3.4 updated to
+      match, and the 7af7 i1 section added to pm/specs/pr-073910f/impl.md. Validation
+      on the integrated head: full suite 4598 passed / 1 skipped (scratch pytest<9
+      + markdown on PYTHONPATH, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared); `pm session list` re-verified end to end (read-only, "No pm sessions
+      found"). No live session, server or shared host configuration was touched; the
+      new test is unit-level and binds no tmux server. Residual notes unchanged and
+      non-blocking (see the i3 section of impl.md).'
+    created_at: '2026-10-29T08:38:14Z'
+    last_edited: '2026-10-29T08:38:14Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
