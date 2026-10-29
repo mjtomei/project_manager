@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T10:11:07.093621+00:00'
+  updated_at: '2026-10-29T01:16:46.435578+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29486,6 +29486,179 @@ prs:
       markdown dep).'
     created_at: '2026-10-27T04:50:44Z'
     last_edited: '2026-10-27T04:50:44Z'
+  - id: note-28c9fb8
+    text: 'QA S27 PASS (dashboard truth, R18 + error-block rendering): verified live
+      that (a) a planner that never emits a complete QA_PLAN ends INPUT_REQUIRED and
+      the status pane keeps the ERROR block, the recovery detail (session uuid + Pane
+      %3284), the guidance line, the "0 Interactive Session interactive" row AND "Overall:
+      INPUT_REQUIRED" — the table/verdict are no longer hidden by the error; (b) with
+      qa-max-scenarios 2 a three-scenario run renders rows 1/2 pending + row 3 queued
+      + "Progress: 0/3 (1 queued)", retires the verdictless worker with its own reason
+      line (uuid bded507b… = that pane Pane %3313), dequeues Gamma (queued→pending→PASS),
+      and ends INPUT_REQUIRED / finalize FINALIZE_DONE with Overall INPUT_REQUIRED,
+      PR still qa, no sign-off. Captures: ~/.pm/sessions/project_manager-5b29c418/captures/pr-6566901/scenarios/27/{story1,story2}.
+      Two scenario-step mismatches (NOT defects): (1) pm log grep "QA finalize: skipped
+      for prA" never matches on the no-plan path — the planner-exhaustion branch returns
+      before _execute_and_finalize, so no finalize log line is emitted (check for
+      the absence of a FINALIZE/finalizer pane instead); (2) pm log grep "exhausted
+      recovery" matches only the planner path; a retired scenario worker logs "Scenario
+      N: qa-scenario-N: session <uuid> … Pane %N was left open for inspection" at
+      WARNING. Env notes for the next run: create the throwaway project session with
+      `env -u TMUX -u TMUX_PANE pm session` (otherwise it adopts the enclosing orchestrator
+      session); `pm which` from the clone depends on ~/.pm/sessions/<repo-tag>/override
+      — a stale one pointed at pr-592e4bd and had to be repointed; ffmpeg is not on
+      PATH (use /tmp/ffmpeg-7.0.2-arm64-static).'
+    created_at: '2026-10-29T01:09:14Z'
+    last_edited: '2026-10-29T01:09:14Z'
+  - id: note-4eddcc1
+    text: 'QA S30 (one run per PR): found+fixed 57773bbf — a QA run whose window was
+      replaced by "pr qa fresh" (z t) re-resolved the QA window by NAME in Phase 2
+      (_ensure_qa_main_pane -> find_window_by_name) and adopted the replacement run
+      window, splitting its planner pane: the live run window ended with 3 panes (replacement
+      planner + the dead run status dashboard showing "No parseable scenarios" + the
+      replacement own dashboard). run_qa_sync now adopts the window only when this
+      run own planner pane is still alive; a vanished window with the name free is
+      still recreated (execution-only restart). Tests: TestDeadRunDoesNotAdoptReplacementWindow
+      (replacement case fails pre-fix). Verified live pre/post (captures /pm-captures/scenarios/30/{pre-fix,post-fix}).
+      Other stories passed: TUI "pr qa" focuses the detached run window (no second
+      run, one planning phase); killed driver ends on pane-gone with its own status
+      in its own loop dir; finished detached run held by auto-sequence (paused: input_required)
+      with picker [done INPUT_REQUIRED]; concurrent E/F kept their own outcomes (INPUT_REQUIRED
+      vs PASS) with per-PR windows and status dirs, both PRs stay qa. Caveats: (1)
+      a planner-failure run logs no "QA complete for <pr>" line (returns before _execute_and_finalize)
+      — the picker/status pane carry the verdict, as story 3 states; (2) a no-plan
+      run creates no qa-<pr>-s0 window; (3) fixture note: a test project with an empty
+      git repo cannot pass the happy-path planner handoff ("PR branch ... not found
+      in workdir") — commit master before a PASS-path QA run.'
+    created_at: '2026-10-29T01:12:45Z'
+    last_edited: '2026-10-29T01:12:45Z'
+  - id: note-3fa2b74
+    text: 'QA S28 (stop during QA finalize) — PASS, no code changes. Verified live
+      on the TUI with fake-claude: a `zz t` stop while the finalize pane is polling
+      ends the run as STOPPED, not the pre-finalize PASS — "QA finalize: stopped before
+      an outcome ... reporting STOPPED", "QA complete for <pr>: STOPPED (finalize=None)",
+      TUI log "QA stopped during finalize" + "QA stopped for <pr> — no verdict recorded",
+      dashboard Overall: STOPPED bold+dim with no ERROR block and the scenario row
+      still PASS, no QA note, PR stays qa, and the finalize pane is left open (3 panes
+      alive). Auto-start then holds it ("waiting/qa qa STOPPED — last QA run was stopped;
+      press t / z t to re-run QA") across three idempotent `pm autostart add` passes
+      with no relaunch (same qa window id and pane ids). A following `z t` fresh start
+      kills the stale windows, replans, and completes PASS [finalize: FINALIZE_DONE]
+      → hand-off to sign_off with a QA PASS note. Captures: /pm-captures/scenarios/28/.
+      Two harness caveats for the next run: (1) /tmp/pm-venv is shared across parallel
+      QA scenarios and its editable pointer gets rewritten by other runs, so always
+      `export PYTHONPATH=<this clone>` — without it `pm set verdict-recovery-max-attempts`
+      reports "Unknown setting" and `pm` silently runs another scenario''s clone;
+      (2) with several clients attached to the shared tmux server, `pm autostart ...`
+      run from a helper pane can resolve `_get_current_pm_session()` to another client''s
+      session (it printed the outer project''s 17 targets once) — use `env -u TMUX
+      -u TMUX_PANE pm autostart ...` to pin it. Also: `pipe-pane -o` does not replace
+      an existing pipe, so a re-armed transcript pipe keeps writing to the old (deleted)
+      inode.'
+    created_at: '2026-10-29T01:12:36Z'
+    last_edited: '2026-10-29T01:12:36Z'
+  - id: note-71fabd2
+    text: 'QA S29 refiner (HEAD ffddba35) — harness facts, verified in code and with
+      a live probe:
+
+      1) `zz d` refuses without a PR workdir ("No workdir for <pr>. Start the PR first.");
+      `pm pr start` in turn needs project.yaml committed on the base branch, so bootstrap-commit
+      the throwaway project after `pm pr add`.
+
+      2) Fake fidelity: while held open the fake re-announces `idle_prompt` every
+      ~2 s but never writes a new assistant turn. The human follow-up wait (`wait_for_follow_up_verdict`)
+      therefore re-reads the same INPUT_REQUIRED turn ~2 s after entering it — the
+      review loop converts the repeat to NEEDS_WORK and starts iteration 2 (fresh
+      review window), the watcher converts it to READY and continues. This is a fake
+      artifact (a real turn ends once), not a recovery nudge/exhaustion. So "the loop
+      holds the pause with the pane open" is NOT observable with the fake; assert
+      no recovery-request text in the pane, no NO_VERDICT, and INPUT_REQUIRED recorded/surfaced.
+
+      3) The pane-gone path is reliably drivable only by killing the pane while the
+      poller waits for the verdict (20 s review grace / 30 s watcher grace); "pane
+      disappeared during INPUT_REQUIRED wait" needs the ~2 s follow-up window and
+      is racy — KILLED either way.
+
+      4) The fake cannot emit a `Reason:` line for a single-line verdict, so a legitimate
+      INPUT_REQUIRED QA scenario row has no reason sub-line; assert the absence of
+      "worker produced no verdict", not a specific reason.
+
+      5) QA spec gate: seed `$TEST_DIR/pm/specs/<pr>/qa.md` before `t`, else the run
+      ends INPUT_REQUIRED "QA spec was not generated". Graces: review 20 s, watcher
+      30 s, QA worker 30 s.'
+    created_at: '2026-10-29T00:53:29Z'
+    last_edited: '2026-10-29T00:53:29Z'
+  - id: note-5907e42
+    text: 'QA S29 PASS (2026-10-28, HEAD ffddba35): a genuine INPUT_REQUIRED is never
+      treated as a missing outcome, in all three roles. Live, fake-driven, host mode,
+      throwaway project (pr-95325c4).
+
+
+      Story 1 (review): zz d -> loop logs "INPUT_REQUIRED — polling for follow-up
+      verdict", TUI "⏸ INPUT_REQUIRED for pr-95325c4: interact with Claude in the
+      review pane"; the review pane keeps only the fake''s verdict — no "Re-emit only
+      your own conclusion"/"Resume the same task in this session" ever typed; `pm
+      log grep -i NO_VERDICT` and `-i recovery` both empty over the whole session.
+      As the refiner note predicted, the fake''s ~2 s idle re-announcement makes the
+      follow-up wait re-read the same turn, so the loop rolls to iteration 2 (NEEDS_WORK)
+      — fake shape, not a nudge.
+
+
+      Story 2 (review pane closed mid-poll): kill-window during the 20 s grace ->
+      TUI "Review loop done for pr-95325c4: ☠ KILLED (7 iterations)", log "pane killed
+      on iteration 7: Review pane disappeared (window: review-pr-95325c4)", no new
+      review window, no NO_VERDICT; a following zz d logged "Review loop started ...
+      loop=a88b" with a fresh window.
+
+
+      Story 3 (QA): seeded pm/specs/pr-95325c4/qa.md, fake qa_scenario INPUT_REQUIRED,
+      pressed t -> dashboard row "3 Basic functionality INPUT_REQUIRED" + "Overall:
+      INPUT_REQUIRED"; "QA complete: INPUT_REQUIRED [finalize: FINALIZE_DONE]"; TUI
+      "QA INPUT_REQUIRED ... paused for human input"; `pm log grep "worker produced
+      no verdict"` empty, no NO_VERDICT/recovery, worker pane clean; PR stayed in
+      qa (no lifecycle transition). Worker window is qa-<pr>-s3 / row 3, not s1: scenario
+      numbering continues per PR from earlier runs on the shared $HOME (expected,
+      see S24 note).
+
+
+      Story 4 (watcher): pm watcher --max-iterations 1 --wait 5 -> CLI "[20:10:59]
+      Iteration 1: INPUT_REQUIRED" then "Watcher finished: 1 iteration(s), last verdict:
+      READY"; log has "iteration 1 verdict=INPUT_REQUIRED" + "INPUT_REQUIRED -- polling
+      for follow-up"; no recovery text in the watcher pane; no NO_VERDICT. The trailing
+      READY is the documented "treat repeated INPUT_REQUIRED as READY (continue loop)"
+      conversion of the fake''s re-announced turn.
+
+
+      Story 5 (watcher pane closed mid-wait): kill-window ~20 s into the 30 s grace
+      -> "Watcher finished: 1 iteration(s), last verdict: KILLED", log "pane killed
+      on iteration 1: Pane disappeared (window: watcher)", no NO_VERDICT/recovery;
+      a second pm watcher run recreated the window and completed normally.
+
+
+      No code changes needed. Captures: /pm-captures/scenarios/29/ (per-story cast+mp4+transcript+pm-log
+      extracts, plus a top-level manifest with the story table). Two env notes: a
+      stale ~/.pm/sessions/project_manager-6b61fb37/override pointed this clone''s
+      session tag at an unrelated PR workdir and had to be repointed before `pm which`
+      resolved to the clone (original kept as override.bak-s29); ffmpeg 9.0.2 dropped
+      -vsync, so renders used -fps_mode vfr.'
+    created_at: '2026-10-29T01:16:46Z'
+    last_edited: '2026-10-29T01:16:46Z'
+  - id: note-f30e8f3
+    text: 'QA S26 refiner: scenario 26 refined (staging notes for the worker). (1)
+      The literal ''loop-completion line holding the log'' plus a same-PR run in flight
+      with NO qa-<pr> window is only reachable in the sub-100 ms gap while a restart
+      kills the old main window before creating the replacement; the refined story
+      stages the visible ''QA already running for <pr>'' answer on a still-launching
+      FIRST run behind the sticky ''QA loop started ... - z t to stop'' line instead
+      (same force=True path in qa_loop_ui.start_qa). (2) For the still-launching scheduler
+      start, the steps delete the PR''s workdir directory (keeping the recorded path
+      in project.yaml) so the QA launch re-clones before creating the window, and
+      fire the user''s ''t'' by tailing the pm log for ''Auto-start: QA for <pr>''.
+      (3) Run ''pm session'' and ''pm pr start'' with TMUX/TMUX_PANE unset or inside
+      the test session''s own pane: this container''s shell is already inside another
+      pm session and _get_current_pm_session() would otherwise target it.'
+    created_at: '2026-10-29T00:46:54Z'
+    last_edited: '2026-10-29T00:46:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

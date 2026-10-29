@@ -461,6 +461,20 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `_write_status_file`; the initial launch in `run_qa_sync` and every
   queued relaunch in `_launch_next_queued` supply them. Regression tests:
   `TestQueuedScenariosStayVisible` in `tests/test_qa_loop.py`.
+* **A replaced QA window belongs to the new run** — Phase 2 re-resolved the
+  QA window by *name* (`_ensure_qa_main_pane` → `find_window_by_name`) to
+  add the status pane. A run whose planner pane had died (its window killed
+  by a `z t` / fresh start for the same PR) therefore found the
+  *replacement* run's window under that name, split its planner pane and
+  left the replacement showing the dead run's dashboard ("No parseable
+  scenarios…") beside its own — three panes once the replacement finished.
+  The window name is only adopted when this run's planner pane is still
+  alive; if it is gone and a window with the name exists, the run keeps its
+  own status file and logs that it is not adopting the replacement. A
+  vanished window with the name free is still recreated (the execution-only
+  restart path). Regression tests:
+  `TestDeadRunDoesNotAdoptReplacementWindow` in
+  `tests/test_qa_planner_handoff.py`.
 
 ### Settings (all optional, defaulted)
 

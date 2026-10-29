@@ -95,7 +95,12 @@ def focus_or_start_qa(app, pr_id: str) -> None:
             suppress = _rs.consume_suppress_switch(pr_id, "qa")
             if not suppress:
                 tmux_mod.select_window(session, window_name)
-                app.log_message(f"Focused QA window for {pr_id}")
+                # A direct answer to the user's key must be visible even
+                # when a confirmation is holding the log line — e.g. the
+                # "QA loop started … — z t to stop" sticky a `zz t` sets
+                # just before a second `t` lands (QA s26).  Same rule as
+                # the dedup / focus-suppressed replies below.
+                app.log_message(f"Focused QA window for {pr_id}", force=True)
             else:
                 app.log_message(
                     f"QA window for {pr_id} ready (focus suppressed)",
