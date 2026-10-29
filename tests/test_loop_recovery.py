@@ -733,6 +733,84 @@ class TestPollForVerdictRecovery:
             )
         assert exc.value.reason == "overall_timeout"
 
+    def test_verdict_landing_at_the_overall_deadline_is_returned(
+            self, tmp_path, monkeypatch):
+        """A verdict present when the poll deadline expires is returned.
+
+        The deadline can expire on the tick the transcript is flushed (its
+        idle hook may be missed, or predate the poller's baseline), so the
+        poller must re-scan before reporting the outcome absent — the same
+        last-chance scan the QA tick loop does in ``_retire_if_exhausted``.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "review"),
+                                   ("assistant", "PASS")])
+        _patch_poll_env(monkeypatch, [None])
+
+        content = loop_shared.poll_for_verdict(
+            "%1", str(link), ("PASS",),
+            grace_period=0, wait_timeout=0.0,
+            # Non-zero: 0 means "no overall deadline" (off), so a 0 here
+            # would leave the poller unbounded.
+            overall_timeout=0.001, max_missing=0,
+            send=lambda _m: None, log_prefix="test",
+        )
+        assert "PASS" in content
+
+    def test_verdict_landing_at_the_response_deadline_is_returned(
+            self, tmp_path, monkeypatch):
+        """A verdict flushed as the post-nudge deadline expires is recorded.
+
+        Retiring the session as ``no_response`` while its outcome sits in the
+        transcript is the "completed result treated as absent" failure this
+        recovery exists to prevent.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "review"),
+                                   ("assistant", "still reading")])
+        calls = {"n": 0}
+
+        def fake_wait(*_a, **_kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _idle(1)          # the turn that produced no verdict
+            if calls["n"] == 2:
+                return None              # settle window: no native retry
+            # The answer to the nudge lands while the poller waits for it.
+            _write_transcript(target, [("user", "review"),
+                                       ("assistant", "PASS")])
+            return None                  # ...but its idle event is never seen
+
+        class _Clock:
+            """Advances one second per read so the nudge deadline expires."""
+
+            def __init__(self):
+                self.now = 100.0
+
+            def monotonic(self):
+                self.now += 1.0
+                return self.now
+
+            def time(self):
+                return 1_700_000_000.0
+
+        from pm_core import hook_events, tmux
+        monkeypatch.setattr(hook_events, "wait_for_event", fake_wait)
+        monkeypatch.setattr(tmux, "pane_exists", lambda _p: True)
+        monkeypatch.setattr(loop_shared, "recovery_settle_seconds",
+                            lambda: 5.0)
+        monkeypatch.setattr(loop_shared, "recovery_max_attempts", lambda: 2)
+        monkeypatch.setattr(loop_shared, "recovery_response_timeout",
+                            lambda: 1.0)
+        monkeypatch.setattr(loop_shared, "time", _Clock())
+
+        content = loop_shared.poll_for_verdict(
+            "%1", str(link), ("PASS",),
+            grace_period=0, wait_timeout=0.01,
+            send=lambda _m: None, log_prefix="test",
+        )
+        assert "PASS" in content
+
     def test_idle_inside_grace_window_is_processed_not_dropped(
             self, tmp_path, monkeypatch):
         """An idle that lands inside the grace window must still be handled.

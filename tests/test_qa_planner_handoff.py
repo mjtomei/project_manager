@@ -518,6 +518,72 @@ class TestDeadRunDoesNotAdoptReplacementWindow:
         assert added.call_args[0][1] == "%77"
 
 
+class TestExecutionOnlyPhase2:
+    """Phase 2 must not depend on state the planning branch binds.
+
+    ``pm qa run <instruction>`` (``pm_core/cli/qa.py``) builds a
+    ``QALoopState(planning_phase=False)`` with the scenario pre-loaded and
+    calls ``run_qa_sync``, so the planning branch is skipped entirely in
+    that shape and Phase 2 may not read a planner pane it never looked for.
+    """
+
+    def _drive(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (tmp_path / "qa").mkdir()
+        pr = {"id": "pr-001", "title": "t", "branch": "pm/pr-001",
+              "status": "qa", "workdir": str(workdir)}
+        data = {"project": {"name": "p"}, "prs": [pr]}
+        state = QALoopState(pr_id="pr-001")
+        state.planning_phase = False
+        state.qa_workdir = str(tmp_path / "qa")
+        state.scenarios = [qa_loop.QAScenario(index=1, title="T", focus="f")]
+        added = MagicMock()
+        launched = MagicMock()
+        finished = MagicMock(return_value=state)
+        resolution = MagicMock(model=None, provider=None, effort=None)
+        with ExitStack() as stack:
+            for p in (
+                patch("pm_core.qa_loop.get_pm_session",
+                      return_value="pm-test"),
+                patch("pm_core.store.load", return_value=data),
+                patch("pm_core.store.get_pr", return_value=pr),
+                patch("pm_core.qa_loop._resolve_qa_model",
+                      return_value=resolution),
+                patch("pm_core.qa_loop._get_qa_spec", return_value="spec"),
+                patch("pm_core.qa_loop._publish_planner_head",
+                      return_value="a" * 40),
+                patch("pm_core.qa_loop._planner_code_changes",
+                      return_value=[]),
+                patch("pm_core.qa_loop._write_status_file"),
+                patch("pm_core.container.is_container_mode_enabled",
+                      return_value=False),
+                patch("pm_core.tmux.find_window_by_name",
+                      return_value=None),
+                patch("pm_core.qa_loop._ensure_qa_main_pane",
+                      return_value="%77"),
+                patch("pm_core.qa_loop._add_status_pane", added),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux", launched),
+                patch("pm_core.qa_loop._execute_and_finalize", finished),
+            ):
+                stack.enter_context(p)
+            qa_loop.run_qa_sync(state, tmp_path / "pm", pr)
+        return state, added, launched, finished
+
+    def test_preloaded_scenarios_reach_phase2(
+            self, tmp_path, monkeypatch):
+        """Regression: the Phase 2 window block read an unbound
+        ``planner_pane`` (only assigned inside the planning branch), so an
+        execution-only run raised ``UnboundLocalError`` before launching any
+        scenario."""
+        state, added, launched, finished = self._drive(tmp_path, monkeypatch)
+        assert finished.called
+        launched.assert_called_once()
+        added.assert_called_once()
+        assert added.call_args[0][1] == "%77"
+
+
 class TestQAPlanProblem:
     def test_complete_plan_ok(self):
         sc = parse_qa_plan(FULL_PLAN)

@@ -785,6 +785,25 @@ def poll_for_verdict(
             return None
         return hit
 
+    def _landed_at_deadline(reason: str) -> str | None:
+        """The verdict that landed as a recovery deadline expired, if any.
+
+        A deadline can expire on the very tick the transcript is flushed: the
+        ``idle_prompt`` for that turn may be missed, or predate the poller's
+        hook baseline (the re-check case).  Reporting such a turn as absent
+        would be the "completed result treated as absent" failure this
+        recovery exists to prevent — the same last-chance re-scan the QA tick
+        loop does in ``_retire_if_exhausted``.  Returns ``None`` when there
+        really is no outcome, so the caller can raise.
+        """
+        hit = _scan()
+        if hit is None:
+            return None
+        _log.info("%s: verdict %s landed as the %s deadline expired "
+                  "(session_id=%s)", log_prefix, hit.verdict, reason,
+                  session_id)
+        return hit.text or hit.verdict
+
     if baseline_line is not None:
         # A caller that prompted the pane itself may already have the answer
         # in the transcript: its idle event fired during the caller's
@@ -802,6 +821,9 @@ def poll_for_verdict(
             return None
 
         if deadline is not None and time.monotonic() >= deadline:
+            landed = _landed_at_deadline("overall")
+            if landed is not None:
+                return landed
             raise recovery.exhausted("overall_timeout")
 
         if not tmux_mod.pane_exists(pane_id):
@@ -832,7 +854,16 @@ def poll_for_verdict(
             if stop_check and stop_check():
                 return None
             if ev is None:
-                recovery.check_response()
+                try:
+                    recovery.check_response()
+                except VerdictRecoveryExhausted:
+                    # A verdict flushed as the response deadline expired must
+                    # be recorded, not reported as absent (the idle hook for
+                    # that turn may never have been seen).
+                    landed = _landed_at_deadline("response")
+                    if landed is not None:
+                        return landed
+                    raise
                 continue
 
             # An idle turn means the session is past any startup dialog.
@@ -859,6 +890,9 @@ def poll_for_verdict(
                             return None
                         if deadline is not None and (
                                 time.monotonic() >= deadline):
+                            landed = _landed_at_deadline("overall")
+                            if landed is not None:
+                                return landed
                             raise recovery.exhausted("overall_timeout")
                         if not tmux_mod.pane_exists(pane_id):
                             _log.warning("%s: pane %s disappeared",

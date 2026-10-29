@@ -274,6 +274,14 @@ still pass the short single-line resume/outcome requests.
    exhaustion raises `VerdictRecoveryExhausted`;
 3. on `ev is None` (wait timeout) call `recovery.check_response()`.
 
+Both deadline raises (the `overall_timeout` check and `check_response`) run
+one last transcript scan first and return a verdict found there.  A deadline
+can expire on the tick the transcript is flushed — its `idle_prompt` may be
+missed, or predate the poller's hook baseline in the re-check case — and
+reporting that turn as absent would be the "completed result treated as
+absent" failure.  It is the same last-chance re-scan the QA tick loop does in
+`_retire_if_exhausted`.
+
 `wait_for_follow_up_verdict` is **not** changed (human wait; see Ambiguities).
 Its one machine-driven caller — the QA verifier's re-check follow-up — was
 switched to `poll_for_verdict` so that wait is bounded too (see the QA loop
@@ -297,9 +305,10 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `NO_VERDICT`, calls `on_iteration`, breaks. A stop that landed while
   `handle` was deciding (`state.stop_requested` set inside the catch) is
   teardown, not a missing verdict: it breaks like the stop check at the top
-  of the loop, recording no `NO_VERDICT` iteration (the poller itself is
-  not passed `stop_check`, so this only covers a stop racing the exhaustion
-  decision).
+  of the loop, recording no `NO_VERDICT` iteration. The poller's
+  `stop_check` is the launch-lease keepalive, which deliberately never stops
+  the poll (`_lease_keepalive` always returns False), so this catch is what
+  covers a stop racing the exhaustion decision.
 
 ### Watcher loop (`pm_core/watcher_base.py`)
 
@@ -492,8 +501,13 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   alive; if it is gone and a window with the name exists, the run keeps its
   own status file and logs that it is not adopting the replacement. A
   vanished window with the name free is still recreated (the execution-only
-  restart path). Regression tests:
-  `TestDeadRunDoesNotAdoptReplacementWindow` in
+  restart path). The planner pane is therefore initialised to `None` before
+  Phase 1: a run that skips planning entirely (`pm qa run <instruction>`
+  builds its state with `planning_phase=False` and the scenario pre-loaded)
+  never binds it, and Phase 2 must see "no planner pane" rather than an
+  unbound local. Regression tests:
+  `TestDeadRunDoesNotAdoptReplacementWindow` and
+  `TestExecutionOnlyPhase2` in
   `tests/test_qa_planner_handoff.py`.
 
 ### Settings (all optional, defaulted)
@@ -657,7 +671,9 @@ into this branch. The conflict resolution keeps both sides' behaviour:
   still does not reset the nudge budget; `retry_prompt` reaches the session
   through `poll_for_verdict` (the "re-send the original prompt" knob);
   a newer non-idle event (`Stop`) is not a new turn; overall timeout;
-  response timeout; recovery disabled keeps legacy behaviour; an idle inside
+  response timeout; a verdict already in the transcript is returned when
+  either deadline expires (rather than reported absent); recovery disabled
+  keeps legacy behaviour; an idle inside
   the grace window is processed rather than dropped (the poller would
   otherwise wait for a turn that never comes); `stop_check`
   during settle does not nudge; the deferral budget is *consecutive* (a

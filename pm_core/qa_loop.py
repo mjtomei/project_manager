@@ -4996,6 +4996,11 @@ def _run_qa_sync(
     # the planner commits while planning (see _planner_code_changes).
     branch = pr_data.get("branch", "")
     pre_plan_head: str | None = None
+    # The QA window's planner pane, resolved by Phase 1 when it runs.  A run
+    # that skips planning (``pm qa run <instruction>`` builds its state with
+    # ``planning_phase=False`` and the scenario pre-loaded) has no planner
+    # pane at all, so Phase 2 must see ``None`` rather than an unbound name.
+    planner_pane: str | None = None
 
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
