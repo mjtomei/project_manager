@@ -1229,3 +1229,37 @@ notes/`session_models` survive.
 The GitHub-merge verification and `--propagation-only` recovery path changed
 shape in this reconciliation, so it needs review and targeted QA on the merged
 tree; the rest of the PR's code is unchanged since `35693308` (QA 33-38 PASS).
+
+## Integration with master: owed REQA and the return-launch claim (pr-db3bf10)
+
+A later base (`master@4a74d880`) carries the owed-REQA work
+(pr-db3bf10/pr-2c67d50: a sign-off REQA is not satisfied by a QA run that was
+already in flight) and the per-session TUI pidfile (pr-c3bf868). Four files
+conflicted; the merge keeps both sides:
+
+- `pm_core/signoff.py` — master refactored `claim_return_launch` into
+  `_launch_claimable(pr, hop, require_status, now)` and added the
+  `require_status` guard. This PR's only change there was a hand-edited-state
+  guard (a non-mapping `launch_claim` must read as absent, not raise
+  `AttributeError` out of the TUI's owed-REQA reconciler), so the merge keeps
+  master's structure and ports the guard *into* `_launch_claimable`
+  (`claim = _mapping(rec.get("launch_claim"))`) rather than restoring the
+  older duplicate check. `_mapping` is this PR's helper; master has no copy.
+- `pm_core/tui/app.py` — both imports are needed: this PR's `graph` (the
+  hand-edited `depends_on` reader in the reload path) and master's
+  `tui_pidfile`.
+- `tests/test_cli_helpers.py` — both sides appended tests (this PR's
+  `_ensure_workdir` / `_resolve_repo_dir` guards; master's `_find_live_tui_pane`
+  and `trigger_tui_restart`); the union is kept.
+- `pm/project.yaml` — reconciled by record id with this PR's own resolver
+  (base/ours/theirs from the merge index): 524 PR records, 22 plans, no id
+  lost from either side, no duplicates, the base's `active_pr` wins (the
+  documented UI-cursor rule), this branch's notes and `session_models` survive.
+
+`pm_core/cli/pr.py` auto-merged: master's `run_driven_elsewhere` /
+`_qa_run_owned_elsewhere` / `review_loop_owns_launch` guards in
+`pr_auto_sequence` and this PR's `effective_verdict` /
+`approval_justification_problem` coercion are both present, and the QA hop's
+claim now goes through master's `claim_return_launch(..., require_status="qa")`
+— i.e. the reconciled `_launch_claimable`, so the hand-edited-state rule
+applies to the owed-REQA claim too.
