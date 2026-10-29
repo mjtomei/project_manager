@@ -1515,15 +1515,12 @@ def _find_live_tui_pane(
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
-        if not session:
-            return None, None
-        # An explicit session whose registry has no ``tui`` entry yet
-        # (a hand-started TUI before the first ``heal_registry`` pass,
-        # or an entry healed away) still has a live pane to find:
-        # ``_find_tui_pane`` only consults the registry when a session is
-        # given, so without this the caller reports "No TUI pane found"
-        # for a TUI that is running and owns the pidfile.
-        sess = session
+        # Only an unresolved *implicit* lookup gets here: with an explicit
+        # session ``_find_tui_pane`` always returns the base name, even
+        # when the registry has no ``tui`` entry (a hand-started TUI before
+        # the first ``heal_registry`` pass) — the live-pane scan below is
+        # what resolves that case.
+        return None, None
     live_panes, live_tuis = _live_panes_and_tuis()
     base = pane_registry.base_session_name(sess)
     if (pane_id and pane_id in live_panes

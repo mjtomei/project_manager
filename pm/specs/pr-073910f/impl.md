@@ -859,11 +859,11 @@ keeps the ambient candidate only on a same-name fast path or a matching
 recorded mode, and both call sites use it:
 
 - `_resolve_start_session_name(shared)` — with `--global`/`--group` the
-  ambient must match; without them the ambient's mode is inherited
-  (`_set_share_mode_env` clears `PM_SHARE_MODE`, so a plain `pm session`
-  inside a shared session still reattaches to it rather than creating a
-  private twin).  `pm session --print-connect` passes the same flag so the
-  printed command names the session that would actually be attached.
+  ambient must match; without them the ambient session is adopted as it
+  is, whatever mode it has, so a plain `pm session` inside a shared
+  session still reattaches to it rather than creating a private twin.
+  `pm session --print-connect` passes the same flag so the printed command
+  names the session that would actually be attached.
 - `_resolve_target_session()` — `kill`/`mobile` filter the ambient fallback
   by the mode they run under (`PM_SHARE_MODE`, inherited from the pane when
   no flags are given).  The workdir-clone fallback (R3.2) still works,
@@ -888,3 +888,50 @@ tmux server.
 
 Validation: see the PR note for this iteration (full suite + disposable
 smoke test, no live session or server touched).
+
+## Review iteration (2026-10-29, review-loop d1c0 i8)
+
+Verification pass over the integrated head; no requirement changes.  Two
+correctness/cleanup items, both of the class the earlier iterations fixed:
+
+1. **`pm session kill` unlinked a live private server's socket.**  d1c0 i1
+   gated the *not-found* unlink on `server_alive()` and i2 applied the same
+   rule to the *legacy* branch, but the branch that kills a session found
+   on its own private socket still unlinked unconditionally
+   (`on_private or …`).  The kill removes this session's base + grouped
+   sessions, but the server can survive it — a session on that socket that
+   is not part of the group (a stray or hand-made one) or a `kill-session`
+   that failed — and unlinking a live server's socket strands every client
+   attached to it.  The unlink now follows the same rule in all branches:
+   remove the file only when no server answers on it.  The normal case is
+   unchanged (the server exits with its last session, the file is left
+   behind and removed).  Tests:
+   `test_private_kill_keeps_a_socket_a_server_still_answers_on` and
+   `test_private_kill_removes_the_emptied_socket`.
+2. **Dead branch in `_find_live_tui_pane()`.**  The master-integration
+   reconciliation left a `sess = session` fallback with a comment saying
+   `_find_tui_pane` "only consults the registry when a session is given"
+   and returns `(None, None)` for a session with no `tui` entry.  That has
+   not been true since the same change made the explicit-session branch
+   return the base name unconditionally, so the fallback was unreachable
+   and the comment misleading.  Removed; the live-pane scan below it is
+   what resolves an explicit session with no recorded pane, and the stale
+   test docstring that repeated the claim is corrected.
+3. Corrected the `_resolve_start_session_name()` docstring (and the i7
+   section above): a plain `pm session` inside a shared session reattaches
+   because the ambient *session* is adopted as-is, not because its share
+   mode is inherited (`_session_start` clears `PM_SHARE_MODE`).
+4. Coverage for R4.4, which was only checked as a source literal: new
+   `TestQaStatusSocketRouting` imports `qa_status` (with
+   `logging.basicConfig` patched out, since importing it installs a file
+   logger) and asserts `_switch_to_window`/`_find_attached_session` build
+   `tmux -S <PM_TMUX_SOCKET>` argv, fall back to a `$TMUX` value only when
+   it names a pm socket, and leave an ordinary tmux session alone.
+
+Residual notes unchanged and still non-blocking (see the i3 section).  One
+more, inert today: `_session_start`'s `is_shared` comes from the flags, so
+an ambient shared session adopted by a plain `pm session` is still treated
+as private for the socket-ownership check.  That is currently unreachable
+for a joining user (R5b requires a local pane registry, which a joiner
+does not have, so they never adopt the shared session) and harmless for
+the owner (they own the socket), so the guard is left as it is.

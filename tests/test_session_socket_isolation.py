@@ -160,6 +160,65 @@ class TestQaStatusSocketLiteral:
         assert f'"{paths.SHARED_SOCKET_DIR}"' in src
 
 
+class TestQaStatusSocketRouting:
+    """The QA status pane must drive the client of *its own* server.
+
+    ``qa_status.py`` runs standalone and builds tmux argv itself, so it
+    resolves the socket from ``PM_TMUX_SOCKET`` (exported into every pm
+    pane) and falls back to a ``$TMUX`` value only when that names a pm
+    socket.  Without this, ``select-window`` addressed the default server
+    and a private session's status pane could not switch its window.
+    """
+
+    @staticmethod
+    def _module():
+        import logging
+
+        # Importing qa_status installs a file logger; keep the suite's
+        # logging configuration untouched.
+        with patch.object(logging, "basicConfig"):
+            from pm_core import qa_status
+        return qa_status
+
+    def test_switching_windows_uses_the_session_socket(self, monkeypatch):
+        qa_status = self._module()
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-x")
+        calls: list[list[str]] = []
+
+        class _Result:
+            returncode = 0
+            stdout = "pm-x 1\n"
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return _Result()
+
+        monkeypatch.setattr(qa_status.subprocess, "run", fake_run)
+        qa_status._switch_to_window("pm-x", "main")
+
+        assert calls, "no tmux command ran"
+        assert all(cmd[:3] == ["tmux", "-S", "/tmp/pm-sessions/pm-x"]
+                   for cmd in calls), calls
+        assert calls[-1][3:] == ["select-window", "-t", "pm-x:main"]
+
+    def test_falls_back_to_the_pm_socket_named_by_tmux(self, monkeypatch):
+        qa_status = self._module()
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setenv("TMUX", "/tmp/pm-sessions/pm-x,4242,0")
+
+        assert qa_status._tmux_argv("list-sessions") == [
+            "tmux", "-S", "/tmp/pm-sessions/pm-x", "list-sessions"]
+
+    def test_leaves_an_ordinary_tmux_session_alone(self, monkeypatch):
+        qa_status = self._module()
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,4242,0")
+
+        assert qa_status._tmux_argv("list-sessions") == [
+            "tmux", "list-sessions"]
+
+
 # ---------------------------------------------------------------------------
 # tmux: explicit default-server targeting
 # ---------------------------------------------------------------------------
@@ -910,6 +969,36 @@ class TestSessionKillServerSelection:
 
         assert result.exit_code == 0, result.output
         assert killed == [("pm-repo-abc~1", sock), ("pm-repo-abc", sock)]
+
+    def test_private_kill_keeps_a_socket_a_server_still_answers_on(
+            self, monkeypatch, tmp_path):
+        """Same rule as the legacy branch: never unlink a live server.
+
+        The kill removes this session's group, but a server can survive it
+        (a stray or hand-made session on the same socket, or a kill that
+        failed).  Removing its socket then would strand those clients.
+        """
+        sock = tmp_path / "pm-repo-abc"
+        sock.write_text("")
+        result, killed = self._invoke(monkeypatch, tmp_path,
+                                      (str(sock), True), alive=True)
+
+        assert result.exit_code == 0, result.output
+        assert killed == [("pm-repo-abc~1", str(sock)),
+                          ("pm-repo-abc", str(sock))]
+        assert sock.exists()
+
+    def test_private_kill_removes_the_emptied_socket(self, monkeypatch,
+                                                     tmp_path):
+        """The normal case: the server exited, so the file is removed."""
+        sock = tmp_path / "pm-repo-abc"
+        sock.write_text("")
+        result, killed = self._invoke(monkeypatch, tmp_path,
+                                      (str(sock), True), alive=False)
+
+        assert result.exit_code == 0, result.output
+        assert killed
+        assert not sock.exists()
 
     def test_legacy_session_kills_on_explicit_default_socket(
             self, monkeypatch, tmp_path):

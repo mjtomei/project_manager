@@ -493,9 +493,9 @@ class TestFindLiveTuiPane:
         """A hand-started TUI has no registry entry until heal_registry
         runs; ``pm tui view -s S`` must still resolve its live pane.
 
-        ``_find_tui_pane`` only consults the registry when a session is
-        passed, so it returns ``(None, None)`` here — the live-pane scan
-        is what makes the explicit-session path work at all."""
+        ``_find_tui_pane`` returns ``(None, "pm-test")`` here — the session
+        name with no recorded pane — so the live-pane scan is what makes
+        the explicit-session path work at all."""
         from pm_core.cli.helpers import _find_live_tui_pane
 
         empty = {"session": "pm-test", "windows": {}, "generation": "1"}

@@ -280,11 +280,13 @@ def _resolve_start_session_name(shared: bool = False) -> str:
     isolated session instead of touching a foreign one.
 
     With an explicit ``--global``/``--group`` (*shared*), the ambient
-    session is only reused when it was created with that same share mode:
-    a plain ``pm session`` inside a shared session inherits the mode, but
-    ``pm session --global`` run from inside a *private* session must
-    create/attach the shared-tag session instead of silently reattaching
-    to the private one.
+    session is only reused when it was created with that same share mode,
+    so ``pm session --global`` run from inside a *private* session
+    creates/attaches the shared-tag session instead of silently
+    reattaching to the private one (and sharing nothing).  Without the
+    flags the ambient session is adopted as it is, whatever mode it has: a
+    plain ``pm session`` inside a shared session reattaches to it rather
+    than starting a private twin.
     """
     if shared:
         ambient = _ambient_session_for_share_mode(
@@ -835,7 +837,7 @@ def session_kill(start_dir):
     # The hosting server: the session's own socket, or the default server
     # for a legacy pre-isolation session (addressed by its explicit path,
     # since tmux follows $TMUX when no -S is given).
-    hosting_socket, on_private = tmux_mod.find_session_server(session_name)
+    hosting_socket, _on_private = tmux_mod.find_session_server(session_name)
     if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
         # Remove the socket file only when no server answers on it.  A live
@@ -867,13 +869,13 @@ def session_kill(start_dir):
                       n_containers, n_proxies)
 
     # tmux leaves the socket file behind after the server exits; remove it
-    # so `pm session list` does not keep reporting a dead server.  When the
-    # session was killed on the *default* server, the private socket (if any
-    # file exists at that path) may still belong to a live server hosting
-    # grouped sessions of another name — unlinking it would strand their
-    # clients, so only remove it when nothing answers on it.
-    if on_private or (Path(socket_path).exists()
-                      and not tmux_mod.server_alive(socket_path)):
+    # so `pm session list` does not keep reporting a dead server.  Only
+    # remove it when no server answers on it: the kill may have left the
+    # server alive (a session that is not part of this group — a stray or
+    # hand-made one — or a kill-session that failed), and unlinking a live
+    # server's socket strands every client attached to it.  This is the
+    # same rule the not-found branch above follows.
+    if Path(socket_path).exists() and not tmux_mod.server_alive(socket_path):
         try:
             Path(socket_path).unlink(missing_ok=True)
         except OSError:
