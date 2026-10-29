@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T12:02:53.072603+00:00'
+  updated_at: '2026-10-29T12:20:26.812548+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42837,6 +42837,38 @@ prs:
       process) until the stale pause.pid is removed.'
     created_at: '2026-10-29T12:02:52Z'
     last_edited: '2026-10-29T12:02:52Z'
+  - id: note-2246ad3
+    text: 'S137 refine: the spec control "1cf5ae0e (pre-7fb5df75)" is wrong. 1cf5ae0e
+      is a descendant of 7fb5df75 (git merge-base --is-ancestor confirms it), so it
+      already has the RQ59 fix and cannot show the 120 s wait. The pre-7fb5df75 control
+      is 4656d4cc (= 7fb5df75^). It has 245eb22f but not 51a709f3/74cebe25, so a restart
+      ends a cut-off QA run without the "press z t" line. Also checked: a plain `pm
+      tui restart` frees a dead review loop''s launch lease, because the mount sweep
+      clears the review-loop runtime entry. A `zz d` right after it does not hit "Review
+      launch owned by another loop".'
+    created_at: '2026-10-29T11:40:28Z'
+    last_edited: '2026-10-29T11:40:28Z'
+  - id: note-d710264
+    text: 'QA S137 (2026-10-29, host, real claude 2.1.312 reviews via the router launcher
+      + acme router/main stubs, fake impl/QA/sign-off; HEAD 74cebe25 vs control 4656d4cc
+      side by side; captures /pm-captures/scenarios/137/README.md, every capture mp4):
+      PASS, no code change. RQ59 7fb5df75 held. HEAD: each re-arm attempt 1 came within
+      1 s, then +5.1/+10.1 s. After a breadcrumb restart inside episode 2 attempt
+      3 came 10.1 s after attempt 2, with no in-flight line, one announcement per
+      attempt, one LAUNCH_FAILED and the next re-arm at +59 s. After chmod +x the
+      next re-arm launched route-launcher --model acme-opus-1 in one review-R window;
+      only the router stub got requests; one PASS. Control: 120 s in-flight wait after
+      every re-arm and after the restart, plus a stale "attempt 2" re-announce. RQ57
+      held for Q: run ended, qa-Q-s0 killed, one cut-off line after "Auto-start: resumed"
+      (none on the control), z t gave one run and one PASS. Story 3 (plain restart)
+      matched on both: nothing resumed, autostart off, 150 s quiet, zz d attempts
+      at once from manual-*, PASS on the route. Spec wording: pm pr review prints
+      "Error: provider ''revroute'': launcher … not an executable file" (RouteSetupError),
+      not "route … unavailable". The planner window qa-<pr> outlives a cut-off run
+      (only qa-<pr>-s* killed) until the fresh run replaces it. A wait-for-merge target
+      stops at "signed off … waiting for manual merge".'
+    created_at: '2026-10-29T12:20:26Z'
+    last_edited: '2026-10-29T12:20:26Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
