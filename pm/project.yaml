@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T03:00:52.215145+00:00'
+  updated_at: '2026-10-29T03:26:24.013098+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34883,6 +34883,25 @@ prs:
       the enclosing-run membership story once the loop runs this branch.'
     created_at: '2026-10-29T03:00:52Z'
     last_edited: '2026-10-29T03:00:52Z'
+  - id: note-5770981
+    text: 'Review-loop 5297 i2 (bd2a38d8): no blocking code defects — captures.py
+      (manifest/audit/quarantine), the qa_loop sync points and shared-mount guard,
+      the prompt/dashboard/merge-gate bindings and the test suite all hold up. Two
+      fixes: (1) the i1 `_isolated_sessions_tree` fixture called `tmp_path_factory.mktemp`
+      inside the patched `sessions_dir` lambda, so each call in a test returned a
+      NEW temp dir (sessions0, sessions1, …) — write-then-read assertions would compare
+      against the wrong tree; it now creates the dir once, like `_isolated_runtime_state`;
+      (2) nothing pinned that `_run_qa_sync` publishes the start-of-run quarantine
+      + manifest BEFORE the first scenario launch — added a call-order test in tests/test_qa_planner_handoff.py
+      (mutation-checked: moving the sync after `_launch_scenarios_in_tmux` fails it)
+      and hoisted `_StopHarness` to module scope. Full suite this container: 4482
+      passed, 1 skipped, 43F+36E = environmental baseline (test_merge_publish/test_signoff_integration/test_sync_merge_integrity
+      — `git push` fails here); reproduced with the conftest change reverted. Residual
+      for QA, unchanged: the impl pre/post captures are a modelled repro, so the live
+      nested-fixture story still needs the enclosing-run check once the loop runs
+      this branch.'
+    created_at: '2026-10-29T03:26:23Z'
+    last_edited: '2026-10-29T03:26:23Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
