@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T09:26:36.135292+00:00'
+  updated_at: '2026-10-29T09:50:42.464237+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41014,6 +41014,38 @@ prs:
       own save (systemic, not this PR''s choice).'
     created_at: '2026-10-29T09:26:36Z'
     last_edited: '2026-10-29T09:26:36Z'
+  - id: note-a22f638
+    text: 'Review-loop 5c3e i2 fixes (on e4cf27be). (1) `base_check.resolve_return`
+      and `ensure_impl_status` now pre-read and skip the `locked_update` when there
+      is nothing to change (no open return / status already `in_progress`): `gate`
+      calls `resolve_return` on every clean review/QA gate and the TUI calls `ensure_impl_status`
+      from the event loop, and a `locked_update` takes the global project.yaml lock
+      and rewrites the whole (2.5 MB here) git-tracked file (~1 s), so the unconditional
+      write stalled the event loop and competed with the TUI''s own 2 s lock budget
+      on every clean gate. (2) `impl_completion`''s clean path now records the `proceed`
+      verdict (`_record_decision`) like the writer-launch gate: without it the PR
+      kept the last retryable `base_check` record after a successful completion, so
+      `_retry_open` kept suppressing the next gate''s fetch until that backoff expired
+      and the stored record still reported a probe failure for an episode that was
+      over. (3) The TUI base-rework catch-up now also runs when the PR has no impl
+      pane at all: the idle-gated catch-up could never fire for a return whose `--fresh`
+      relaunch killed the old window and then failed (or whose window the user closed),
+      leaving `awaiting: impl` with no launcher and no completion check in a manual
+      TUI session (auto-start off). The CLI auto-sequence already relaunches on that
+      `gone` signal; the launch claim still keeps one owner. Tests: the two no-op
+      guards (mocked `locked_update` must not be called, and the mutation still happens
+      when it is needed), the clean-completion `base_check` record, the no-pane catch-up
+      (verified to fail without the fix — the catch-up is never called) and its negative
+      (a missing pane with no return relaunches nothing). Spec R13 + test plan item
+      27 updated. Full suite: 4594 passed, 1 skipped, 0 failed. Reviewed but not changed
+      (documented residual, added to the earlier list): `_run_qa_sync` now runs the
+      base gate (a fetch) before `write_run_record`, widening the window in which
+      another TUI''s scheduler cannot yet see this QA run and could start a second
+      planner for the same PR; closing it properly needs an atomic QA-run claim (the
+      workdir does not exist yet at gate time), so it is left for the QA-ownership
+      work rather than half-fixed here.'
+    created_at: '2026-10-29T09:50:42Z'
+    last_edited: '2026-10-29T09:50:42Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
