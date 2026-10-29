@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T09:09:41.415905+00:00'
+  updated_at: '2026-10-29T09:36:42.582766+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38167,6 +38167,23 @@ prs:
       stories; one R reload cleared it each time — unrelated to this PR.'
     created_at: '2026-10-29T09:09:41Z'
     last_edited: '2026-10-29T09:09:41Z'
+  - id: note-43a743e
+    text: 'QA S15 (2026-10-29) PASS — SIGNOFF_REQA return archives its router and
+      does not replay its verdict. Captures: /pm-captures/scenarios/15/story1-2-reqa-merge/
+      (cast+mp4+transcript+evidence+manifest). Verified end to end: router #1 sid1
+      archived (archive/signoff-<pr>.<sid1>.jsonl, SIGNOFF_REQA), canonical+head gone
+      during re-QA, owed re-QA planning->concretize->scenario->verification->finalize
+      PASS returns the PR to sign_off, router #2 is a fresh sid2 (canonical+head recreated),
+      SIGNOFF_MERGE -> ready_to_merge, exactly one routed SIGNOFF_REQA (no replay),
+      manual merge -> auto-start OFF; final run dir has one archive entry per session,
+      no duplicates, all JSONL valid. FIXTURE PREREQUISITE for any REQA re-run scenario:
+      the fake qa_planning stand-in emits QA_PLAN text but never writes the QA spec
+      file, and the qa_loop spec gate (pre-existing on master) requires one, so the
+      owed re-QA otherwise stops at QA spec missing after planning (INPUT_REQUIRED).
+      A completed-QA fixture must supply pm/specs/<pr>/qa.md before the run; I added
+      it to the fixture. Not a product bug — no source change.'
+    created_at: '2026-10-29T09:36:42Z'
+    last_edited: '2026-10-29T09:36:42Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
