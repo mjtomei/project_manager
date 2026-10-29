@@ -1922,6 +1922,47 @@ def test_held_runs_later_snapshots_keep_the_recorded_by_mark(tmp_path):
         "result_recorded_by"] == "clone-a"
 
 
+def test_snapshot_built_before_the_tui_marks_keeps_both_marks(tmp_path):
+    """The loop thread builds a held run's snapshot, then waits for the
+    lock while the TUI thread records the result (mark_result_recorded,
+    mark_completion_processed).  The write must keep both marks, re-read
+    under the lock: written from the older state, it dropped them, so
+    another clone could claim a run recorded here (S49) and a restart
+    could record it a second time."""
+    import threading
+
+    qa_dir = _seed_run(tmp_path, overall=VERDICT_INPUT_REQUIRED)
+    state = build_resume_state(
+        json.loads(_resume_file_path(qa_dir).read_text()))
+    lock = state._resume_lock
+    built = threading.Event()
+
+    class _SignalingLock:
+        """Says the snapshot is built, then waits for the real lock."""
+        def __enter__(self):
+            built.set()
+            return lock.__enter__()
+
+        def __exit__(self, *exc):
+            return lock.__exit__(*exc)
+
+    state._resume_lock = _SignalingLock()
+    with lock:                                   # hold the writer off
+        writer = threading.Thread(target=_write_resume_file,
+                                  args=(state, False, 0))
+        writer.start()
+        assert built.wait(10)
+        with patch.object(qa_loop, "get_pm_session",
+                          return_value="pm-clone-a"):
+            qa_loop.mark_result_recorded(state)
+        qa_loop.mark_completion_processed(state)
+    writer.join(10)
+    assert not writer.is_alive()
+    data = json.loads(_resume_file_path(qa_dir).read_text())
+    assert data["result_recorded_by"] == "clone-a"
+    assert data["completion_processed"] is True
+
+
 def test_completion_marks_its_snapshot_and_the_launching_clone_records_no_second_note(
         tmp_path):
     """End to end over two project.yaml files sharing ~/.pm: clone A

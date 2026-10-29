@@ -960,7 +960,12 @@ below (item 42 records the suites up to 3738).
     lock: a held INPUT_REQUIRED run keeps rewriting its snapshot after the
     TUI recorded its result (repeated wait, dropped attempt, settled hold,
     reopen), and each rewrite dropped the mark (review loop 0897 i2,
-    `test_held_runs_later_snapshots_keep_the_recorded_by_mark`).
+    `test_held_runs_later_snapshots_keep_the_recorded_by_mark`).  A
+    snapshot built before the TUI's marks and written after them keeps
+    both (`result_recorded_by`, `completion_processed`), re-read under
+    the lock; nothing tested that re-read before review loop 0897 i3
+    (`test_snapshot_built_before_the_tui_marks_keeps_both_marks`, fails
+    with either key dropped from it).
     Cost: if the recording clone never returns, its
     pending follow-up stays undone, as for any foreign snapshot.  Tests
     (each mutation-checked) are in `tests/test_qa_resume.py`:
