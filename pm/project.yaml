@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T09:24:11.735334+00:00'
+  updated_at: '2026-10-29T10:07:41.108898+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36835,6 +36835,54 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T09:24:11Z'
     last_edited: '2026-10-29T09:24:11Z'
+  - id: note-b890e14
+    text: 'Review loop ebd1 i2: one leftover in the kept recipe/test scope, the PR''s
+      own class (a completion check that cannot tell a finished recording from a dead
+      one) — and no recipe change. Both recipes'' step 0 already clear `recorder.status`
+      (R2/R4), the file that tells a recorder torn down before asciinema returned
+      from one that finished; the *guard* was missing. `test_tmux_scaffold_checks_asciinemas_own_exit_status`
+      asserted `"recorder.status" in block[block.index("rm -f "):block.index("new-session
+      -d")]`, and that range also holds step 1''s comment "(verified live — rc 0,
+      cast, `recorder.status` 0, transcript, with …)" — so the substring was satisfied
+      by the comment: deleting `<capture-dir>/recorder.status` from the step-0 `rm`
+      list left the whole file green (178 passed). The false pass is real: stub `tmux`/`pm`,
+      the recipe''s own block, mode `detachnostatus` (recorder draws, detach ends
+      it legitimately, no status written) with an earlier run''s `recorder.status`
+      seeded as `0` — the recipe as shipped exits 1 at "recorder status is missing",
+      the recipe with that one `rm` argument removed exits 0 with the stale file still
+      on disk. The CLI copy of the assertion was sound only because no comment in
+      its range mentions the file. Both tests now derive the status path from the
+      pane command and require the `rm` *statement* (`_statement(block, "rm -f ")`)
+      to remove it, and the new `test_a_stale_recorder_status_is_not_read_as_this_runs`
+      runs the seeded case for both recipes (tmux `detachnostatus`, CLI `nostatus`);
+      all four new/tightened assertions fail against the pre-fix recipes (the two
+      deletions fail exactly those four cases) and pass on the unmodified recipes.
+      An audit of the harness itself found three more guarantees it claimed but did
+      not prove, plus one comment that claimed a guard that did not exist (R43): the
+      stub `tmux`''s `capture-pane` ignored its target, so a pane saved after its
+      teardown still wrote content — real tmux 3.2a answers "can''t find session:
+      pm-recorder" once the recorder is killed (verified live), which is why every
+      failure path saves the pane first, and moving the stop-timeout/`send_failed`
+      saves after their kill now fails three cases; the two driver-guard fixtures
+      had no `driver.mjs`, so the block stopped at R32''s missing-driver check before
+      it could link and the `node_modules`-in-the-cwd assertion could not fail — seeding
+      one makes removing the `CAPDIR` guard''s `exit 1` fail both; and no test pinned
+      a bound''s value or the number its message prints, although `_run_block`''s
+      comment claimed the bounds were "asserted as text above" (a 1 s readiness deadline
+      would have passed everything) — `test_every_deadline_is_a_real_bound_and_its_message_agrees`
+      now requires every arithmetic bound >= 10 s and every "within Ns" message to
+      name a bound the code uses (tmux 60/30/30, the CLI 30, the web-UI 120). Tests:
+      file 183 pass; each mutation fails exactly the cases it names and those cases
+      pass on the unmodified recipes; related suites (test_qa_artifact_web_ui_recording,
+      test_qa_instructions, test_qa_loop, test_markdown_render) 188 pass; full suite
+      `env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py` -> 4577 passed, 1 skipped, 92
+      deselected, 0 failed (415 s, with the `markdown` dep on the scratch path). Evidence:
+      $(pm qa captures-path pr-b19db15)/review-ebd1-i2/ (probe.log sections A-K, README.md,
+      scripts/). impl.md R42/R43 + Files/verification/evidence and qa.md updated.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T10:07:41Z'
+    last_edited: '2026-10-29T10:07:41Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
