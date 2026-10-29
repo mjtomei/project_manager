@@ -226,8 +226,24 @@ When a PR is ready for review, the review loop automates the review-fix cycle:
 4. The loop stops when the PR receives PASS
 
 From the TUI:
-- `zz d` — start a review loop (iterates until PASS)
-- `z d` — stop a running loop, or do a single fresh review
+
+- `zz d` — start a fresh review loop (iterates until PASS), replacing any
+  running loop and its current review window.
+- `z d` — stop any running loop and immediately open a fresh single review.
+
+Neither shortcut is a stop-only toggle. The command bar's
+`review-loop [start] [PR_ID]` also starts fresh; `review-loop stop` is not
+supported.
+
+For a session-wide stop of review-loop scheduling, use a normal TUI restart
+(`Ctrl-r`, or `pm tui restart -s <session>`). This clears review-loop and
+auto-start state while leaving existing agent windows running. In-progress
+QA orchestration is recovered from its saved snapshots. A restart with
+`--breadcrumb`, including a merge-triggered restart, instead preserves
+auto-start and review-loop state.
+
+`pm autostart off` stops scheduling targets but does not stop review loops
+that are already running.
 
 The loop runs in the background without stealing focus from your active window,
 so you can continue working while reviews iterate.
