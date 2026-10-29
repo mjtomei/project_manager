@@ -435,6 +435,38 @@ class TestFindLiveTuiPane:
              self._panes('%9 pm-other "pm _tui"\n'):
             assert _find_live_tui_pane("pm-test") == (None, "pm-test")
 
+    def test_pane_id_reused_on_another_server_is_not_returned(self):
+        """Pane ids are only unique per tmux server (per-session sockets).
+
+        A stale registry entry for a session that no longer exists must not
+        be resolved against whatever server this process is attached to: the
+        recorded ``%6`` here is a live pane of a *different* session, and
+        handing it to ``pm tui send``/``view`` would drive the wrong pane.
+        """
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes("%6 pm-other bash\n"):
+            assert _find_live_tui_pane("pm-gone") == (None, "pm-gone")
+
+    def test_live_pane_in_a_grouped_session_still_counts(self):
+        """A grouped session's name is normalised before comparing."""
+        from pm_core.cli.helpers import _find_live_tui_pane
+
+        data = self._registry(
+            {"id": "%6", "role": "tui", "order": 0, "cmd": "pm _tui"})
+        with patch("pm_core.cli.helpers.pane_registry.load_registry",
+                   return_value=data), \
+             patch("pm_core.tmux.find_session_server",
+                   return_value=(None, False)), \
+             self._panes('%6 pm-test~1 "pm _tui"\n'):
+            assert _find_live_tui_pane("pm-test") == ("%6", "pm-test")
+
     def test_tmux_unavailable_degrades_to_no_live_tui(self):
         from pm_core.cli.helpers import _find_live_tui_pane
 

@@ -1453,13 +1453,20 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _live_panes_and_tuis() -> tuple[set[str], list[tuple[str, str]]]:
-    """Return ``(live_pane_ids, live_tui_panes)`` from tmux in one query.
+def _live_panes_and_tuis() -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Return ``(pane_sessions, live_tui_panes)`` from tmux in one query.
 
-    ``live_pane_ids`` is every pane tmux currently knows about;
-    ``live_tui_panes`` is the ``(pane_id, session_name)`` pairs whose
-    start command is ``pm _tui``.  Returns ``(set(), [])`` when tmux
-    cannot be queried (no server), so callers degrade to "no live TUI".
+    ``pane_sessions`` maps every pane tmux currently knows about to the
+    session that owns it; ``live_tui_panes`` is the ``(pane_id,
+    session_name)`` pairs whose start command is ``pm _tui``.  Returns
+    ``({}, [])`` when tmux cannot be queried (no server), so callers
+    degrade to "no live TUI".
+
+    The owning session is returned alongside the id because pane ids are
+    only unique *within* one tmux server, and every pm session now has its
+    own server: a pane id recorded for one session can name an unrelated
+    pane on another, so a bare id is not proof that a recorded pane is
+    still the TUI.
     """
     try:
         result = subprocess.run(
@@ -1470,19 +1477,20 @@ def _live_panes_and_tuis() -> tuple[set[str], list[tuple[str, str]]]:
         )
     except Exception:
         _log.debug("_live_panes_and_tuis: tmux query failed", exc_info=True)
-        return set(), []
+        return {}, []
     if result.returncode != 0:
-        return set(), []
-    ids: set[str] = set()
+        return {}, []
+    panes: dict[str, str] = {}
     tuis: list[tuple[str, str]] = []
     for line in result.stdout.splitlines():
         parts = line.split(None, 2)
         if not parts:
             continue
-        ids.add(parts[0])
+        if len(parts) >= 2:
+            panes[parts[0]] = parts[1]
         if len(parts) >= 3 and "_tui" in parts[2]:
             tuis.append((parts[0], parts[1]))
-    return ids, tuis
+    return panes, tuis
 
 
 def _find_live_tui_pane(
@@ -1499,9 +1507,15 @@ def _find_live_tui_pane(
     (view) or a raw tmux error (send).
 
     Returns ``(pane_id, session)`` only when the pane is still alive in
-    tmux.  When the recorded pane is gone, falls back to a live
-    ``pm _tui`` pane in the same session (never another session's), and
-    otherwise returns ``(None, session)``.
+    tmux *and belongs to that session*.  When the recorded pane is gone,
+    falls back to a live ``pm _tui`` pane in the same session (never
+    another session's), and otherwise returns ``(None, session)``.
+
+    The session check matters because pane ids are only unique per tmux
+    server: when the session cannot be found on any server (stale
+    registry, wrong ``--session``), the liveness query still runs against
+    whatever server this process is attached to, where the recorded id may
+    name an unrelated pane of a different session.
     """
     pane_id, sess = _find_tui_pane(session)
     if not sess:
@@ -1514,10 +1528,11 @@ def _find_live_tui_pane(
         # given, so without this the caller reports "No TUI pane found"
         # for a TUI that is running and owns the pidfile.
         sess = session
-    live_ids, live_tuis = _live_panes_and_tuis()
-    if pane_id and pane_id in live_ids:
-        return pane_id, sess
+    live_panes, live_tuis = _live_panes_and_tuis()
     base = pane_registry.base_session_name(sess)
+    if (pane_id and pane_id in live_panes
+            and pane_registry.base_session_name(live_panes[pane_id]) == base):
+        return pane_id, sess
     for tui_id, tui_sess in live_tuis:
         if pane_registry.base_session_name(tui_sess) == base:
             return tui_id, sess

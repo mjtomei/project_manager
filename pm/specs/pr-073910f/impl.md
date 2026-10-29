@@ -683,3 +683,42 @@ makes `pm session` create a separate session rather than adopt the live
 one (fail-safe); the TUI connect screen keeps a bare
 `tmux attach -t <name>` as a last resort when no server hosts the session
 *and* `PM_TMUX_SOCKET` is unset (unreachable for a live session).
+
+## Review iteration (2026-10-29, review-loop d1c0 i4)
+
+Verification pass over the integrated head; one cross-server correctness
+fix, no requirement changes.
+
+1. **`_find_live_tui_pane()` could match a pane id against the wrong
+   server.**  Pane ids are only unique *within* one tmux server, and every
+   pm session now has its own.  When an explicit `--session` was not found
+   on any server (`find_session_server()` → `(None, False)`: a stale
+   registry left by a killed session, or a wrong `--session` typed from
+   inside another pm session), `_find_tui_pane()` still returned the
+   registry's recorded pane id while `PM_TMUX_SOCKET` kept naming the
+   *current* session's server.  `_find_live_tui_pane()` then checked that
+   id against `list-panes -a` on the wrong server, and because ids restart
+   per server (`%5` exists on every one) `pm tui send` / `pm tui view -s
+   <stale>` could drive an unrelated pane of another session — the class
+   of cross-session damage this PR exists to prevent.
+   `_live_panes_and_tuis()` now returns a `pane_id → session_name` map
+   instead of a bare id set, and the recorded pane is accepted only when
+   the pane's own session (grouped suffix normalised through
+   `pane_registry.base_session_name`) is the session being resolved.
+   Everything else is unchanged: a live pane in a grouped session still
+   counts, and the "fall back to a live `pm _tui` pane in the same
+   session" path is untouched.
+
+New tests: `test_pane_id_reused_on_another_server_is_not_returned` and
+`test_live_pane_in_a_grouped_session_still_counts`.
+
+Validation: full suite **4567 passed / 1 skipped / 1 failed** (the run
+used a scratch `pytest<9` + `markdown` on `PYTHONPATH`, `PATH` without the
+push-proxy `git`, and `TMUX`/`TMUX_PANE`/`PM_*` cleared).  The single
+failure is environment-only:
+`tests/test_hook_events.py::test_installer_writes_standalone_receiver`
+returns early because `PM_HOST_HOME` (`/home/matt`) differs from `HOME`
+(`/home/pm`); `hook_install.py` is untouched by this PR and that file
+passes 20/20 with `PM_HOST_HOME` unset.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
