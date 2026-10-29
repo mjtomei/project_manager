@@ -50,9 +50,9 @@ recorder pane rendering the attach client rendering the recorder
 pane — endless recursion and a useless cast. Different sessions on
 the same tmux server is enough to break that recursion.
 
-Step 0 of the capture flow clears the recorder session and the files an
-earlier run left behind, then creates the capture directory with
-`mkdir -p <capture-dir>`. All of them matter, and `<capture-dir>` has to be
+Step 0 of the capture flow creates the capture directory with
+`mkdir -p <capture-dir>`, then clears the recorder session and the files an
+earlier run left behind. All of them matter, and `<capture-dir>` has to be
 an absolute path (or start with `~/`): tmux runs the transcript pipe's
 command in the pm session's directory, so a relative path writes the
 transcript somewhere these steps never look (step 0 refuses one rather than
@@ -66,7 +66,10 @@ earlier run's recorder, and the earlier run's step 5 detaches the later one.
 Run captures one after the other, or give each worker its own server with a
 private `TMUX_TMPDIR`. (Both runs then fail loudly — a recorder that vanished
 mid-scenario is a failure in step 5 — rather than reading each other's
-evidence, but the capture is lost either way.) `asciinema rec` reports
+evidence, but the capture is lost either way.) That shared name is also why
+the clear comes *after* the capture directory is created: a block that is
+about to refuse an unusable `<capture-dir>` must not end a concurrent
+capture's recorder on its way out. `asciinema rec` reports
 "asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
 capture that wrote nothing. A leftover cast is worse in the other
@@ -90,8 +93,9 @@ stale-evidence bug as a leftover cast, one step earlier. (The web-UI recipe
 clears its mp4 in step 1 for the same reason.)
 
 ```
-# 0. Clear what an earlier run left behind before anything writes into it:
-#    the recorder session, the capture directory, and the files in it.
+# 0. Create the capture directory, then clear what an earlier run left
+#    behind before anything writes into it: the recorder session and the
+#    files in it.
 # <capture-dir> has to be an absolute path (or start with ~/). tmux runs the
 # transcript pipe's
 # command in the pm session's directory, not in the shell that pasted the
@@ -112,7 +116,6 @@ case "<capture-dir>" in
             "never look" >&2
         exit 1 ;;
 esac
-tmux kill-session -t pm-recorder 2>/dev/null || true
 # A capture directory that cannot be created must stop the run here. Every
 # later step writes into it, and their failures read as something else: the
 # transcript pipe cannot redirect, asciinema cannot write its cast, and the
@@ -123,6 +126,14 @@ mkdir -p <capture-dir> || {
         "permissions" >&2
     exit 1
 }
+# Clear the leftover recorder session now that the path is known usable. It
+# goes *after* the directory is created, not before: `pm-recorder` is shared
+# by every capture on this server, so a block that is about to refuse an
+# unusable <capture-dir> would otherwise end a concurrent capture's recorder
+# on its way out — and that run then fails as "recorder exited while the TUI
+# was still running", a failure it cannot connect to this block. (The
+# absolute-path guard above comes first for the same reason.)
+tmux kill-session -t pm-recorder 2>/dev/null || true
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \

@@ -109,6 +109,15 @@ recording-recipe bugs that any worker following the recipe hits:
   package before linking the global install, because the bare `ln -sfn` nests
   inside an existing (partial `npm i`) directory and still cannot resolve —
   a remedy that cannot work, repeated.
+- a block refused for its input does not act on a shared handle (review loop
+  7c9c i8): both recording recipes create the capture directory *before* they
+  clear the recorder session they share with concurrent runs (`pm-recorder`
+  per server, `rec` per host socket). With an uncreatable `<capture-dir>`
+  under a regular file and another capture's recorder up, the block used to
+  kill that recorder and then refuse, so the concurrent run failed as
+  "recorder exited while the TUI was still running" / "recorder status is
+  missing" — a failure it could not connect to the other worker's paste. A
+  refused block now makes no tmux call at all.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -134,7 +143,10 @@ exit 0. S21/S22 also re-check the CLI scaffold's refusal order: pasted with a
 relative or unsubstituted `<capture-dir>`, it must stop at "must be an
 absolute path" *without* clearing the host-shared `rec` session — a
 concurrent CLI capture's recorder has to survive the refused block (the
-socket name is shared by every run on the host). S23 also re-checks the stop
+socket name is shared by every run on the host). The same holds for a path
+the block cannot create: with `<capture-dir>` under a regular file it must
+stop at "could not create …" and leave a concurrent capture's recorder
+(`rec` for the CLI, `pm-recorder` for the tmux recipe) running. S23 also re-checks the stop
 step's detach race: after the scenario
 ends the pm session itself, a stop step run while the recorder is winding
 down must pass on the complete cast and `recorder.status` 0 (not report "the

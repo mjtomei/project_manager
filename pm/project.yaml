@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T06:15:18.154707+00:00'
+  updated_at: '2026-10-29T06:38:52.969414+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36639,6 +36639,37 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T06:15:18Z'
     last_edited: '2026-10-29T06:15:18Z'
+  - id: note-a438fa7
+    text: 'Review loop 7c9c i8: one leftover in the kept recipe scope, the PR own
+      class — a block refused for its input still acted on a handle shared with concurrent
+      runs. R34 moved the absolute-path guard ahead of the recorder-session clear
+      (the `scaffold` socket name and the `pm-recorder` session name are each shared
+      by every capture), but the *next* refusal in the same block — a capture directory
+      that cannot be created (R15) — still came after the clear. Verified live on
+      a private tmux server with the recipes own capture blocks: with a concurrent
+      capture recorder up (`pm-recorder` / `rec`) and `<capture-dir>` under a regular
+      file, the pre-fix blocks exit 1 with "could not create …" after killing that
+      recorder, so the concurrent run then fails as "recorder exited while the TUI
+      was still running" / "recorder status is missing" — a failure it cannot connect
+      to the other worker paste; post-fix both blocks exit 1 with the same message
+      and the concurrent recorder survives. Both blocks now create the capture directory
+      first and clear the recorder session after it, and the step-0 / step-1 prose
+      says why. Tests: test_capture_dir_that_cannot_be_created_is_reported runs the
+      block with the stub tmux logging its calls (new STUB_TMUX_LOG) and requires
+      no kill-session; both cases fail against HEAD recipes (checked by restoring
+      them in place, then restoring the post-fix copies). Nominal flows re-run end
+      to end after the edit (tmux rc 0, 3029-byte cast, recorder.status 0, 12-byte
+      transcript, claim released; CLI one-shot rc 0, 143-byte cast, status 0). File
+      169 pass; related suites (test_qa_artifact_web_ui_recording, test_qa_instructions,
+      test_qa_loop, test_markdown_render) 188 pass; full suite `env -u PM_HOST_HOME
+      PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py` -> 4563 passed, 1 skipped, 92 deselected,
+      0 failed (with the markdown dep on the scratch path). Evidence: $(pm qa captures-path
+      pr-b19db15)/review-7c9c-i8/ (probe-prefix.log, probe-postfix.log, nominal.log,
+      scripts/). impl.md R36 + Files/verification/evidence and qa.md updated. No pm_core/
+      change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T06:38:52Z'
+    last_edited: '2026-10-29T06:38:52Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

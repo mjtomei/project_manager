@@ -156,6 +156,9 @@ where the CLI runs.
 #    failure path kills the server under the other. Both then fail loudly (a
 #    torn-down pane has no status file) rather than reading each other's
 #    evidence, but both captures are lost — run them one after the other.
+#    That shared name is why the clear comes *after* the absolute-path guard
+#    and the `mkdir` below: a block that is about to refuse its own input must
+#    not end a concurrent capture's recorder on its way out.
 #    <command-to-record> sits inside single quotes that are
 #    themselves inside the outer double-quoted argument, so a command with
 #    quotes of its own has to be escaped to survive both layers: for the
@@ -198,15 +201,23 @@ case "<capture-dir>" in
             "where the checks do not look" >&2
         exit 1 ;;
 esac
-# Clear the leftover `rec` session now that the path is known good (see the
-# note above): `new-session` fails with "duplicate session: rec" while it
-# exists.
-tmux -L scaffold kill-session -t rec 2>/dev/null || true
+# A capture directory that cannot be created must stop the run here: every
+# form below writes into it, and asciinema reports "asciicast saved" and
+# exits 0 even when it wrote nothing, so the failure would read as success.
 mkdir -p <capture-dir>/<short-name> || {
     echo "could not create <capture-dir>/<short-name> — check the path and" \
         "its permissions" >&2
     exit 1
 }
+# Clear the leftover `rec` session now that the path is known good (see the
+# note above): `new-session` fails with "duplicate session: rec" while it
+# exists. It goes *after* the `mkdir` above, not before it: the `scaffold`
+# socket name is shared by every CLI capture on this host, so a block that is
+# about to refuse a capture directory it cannot create would otherwise end a
+# concurrent capture's recorder on its way out — that run then fails as
+# "recorder status is missing", a failure it cannot connect to this block.
+# (The absolute-path guard above comes first for the same reason.)
+tmux -L scaffold kill-session -t rec 2>/dev/null || true
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/transcript.log \
       <capture-dir>/<short-name>/recording.mp4 \

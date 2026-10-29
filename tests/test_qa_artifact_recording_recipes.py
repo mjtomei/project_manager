@@ -2637,6 +2637,10 @@ def test_web_ui_layer2_block_writes_both_logs(tmp_path):
 
 _STUB_TMUX = r"""
 STATE="$STUB_STATE"
+# Optional call log. A block that refuses its own input must not act on a
+# handle shared with concurrent runs (the recorder session), so some cases
+# assert on the calls the block made — or made none.
+[ -n "${STUB_TMUX_LOG:-}" ] && printf '%s\n' "$*" >> "$STUB_TMUX_LOG"
 while [ "$1" = "-L" ]; do shift 2; done
 sub=$1; shift
 val() { f=$1; shift; while [ $# -gt 0 ]; do
@@ -3764,12 +3768,25 @@ class TestCaptureFlowExecution:
         the readiness timeout (CLI) — pointing at files that do not exist.
         Verified: with ``<capture-dir>`` under a regular file, the pre-fix
         blocks report the downstream symptom, not the directory.
+
+        The refusal also has to happen *before* the block touches the recorder
+        session it shares with concurrent runs: both recipes clear
+        ``pm-recorder`` / ``rec`` (one name per server, one socket name per
+        host), and that clear used to run first. Verified live on a private
+        tmux server: with a concurrent capture's recorder up, a block pasted
+        with an uncreatable capture directory killed it and then refused, so
+        that run failed as "recorder exited while the TUI was still running" /
+        "recorder status is missing" — a failure it could not connect to this
+        block. The clear now follows the ``mkdir`` (and the absolute-path
+        guard), so a refused block makes no tmux call at all.
         """
         blocker = tmp_path / "blocker"
         blocker.write_text("not a directory")
+        calls = tmp_path / "tmux-calls"
         r, _cast = _run_block(
             _scaffold_block(_recipe_text(name)), "ok", tmp_path,
-            target=True, capture=blocker / "cap")
+            target=True, capture=blocker / "cap",
+            env_extra={"STUB_TMUX_LOG": str(calls)})
         assert r.returncode != 0, (
             f"{name}: a capture directory that cannot be created was reported "
             "as a successful capture")
@@ -3778,6 +3795,12 @@ class TestCaptureFlowExecution:
             "did not start within" not in r.stderr, (
             f"{name}: the unusable capture directory is reported as a "
             "recorder problem instead of the directory: " + r.stderr)
+        calls_text = calls.read_text() if calls.exists() else ""
+        assert "kill-session" not in calls_text, (
+            f"{name}: the block cleared the shared recorder session before "
+            "refusing a capture directory it cannot create, so a worker "
+            "pasting an unusable path kills a concurrent capture's recorder: "
+            + calls_text)
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_capture_dir_must_be_absolute(self, name, tmp_path):
