@@ -344,6 +344,11 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     if status is not None:
         old_status = pr_entry.get("status", "pending")
         pr_entry["status"] = status
+        if status != "closed":
+            # ``closed_at`` describes a closure (pr-62ad13d); a deliberate
+            # reopen drops it so the field never names a status the PR is not
+            # in, and a later close records a fresh closure time.
+            pr_entry.pop("closed_at", None)
         changes.append(f"status: {old_status} → {status}")
         _record_status_timestamp(pr_entry, status)
     if depends_on is not None:
@@ -447,6 +452,10 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
             pr["description"] = desc
         if status is not None:
             pr["status"] = status
+            if status != "closed":
+                # Mirrors the pre-lock preview above: reopening drops the
+                # closure time (pr-62ad13d).
+                pr.pop("closed_at", None)
             _record_status_timestamp(pr, status)
         if depends_on is not None:
             if depends_on == "":
@@ -3621,6 +3630,13 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
         if pr_entry.get("workdir"):
             kept.append(f"workdir '{pr_entry['workdir']}'")
         click.echo(f"  Kept: {', '.join(kept)}")
+        # The status is terminal, so say how to get back and how to do the
+        # (separate, explicit) workdir cleanup this command deliberately
+        # leaves behind.
+        click.echo(f"  Reopen: pm pr edit {pr_id} --status pending")
+        if pr_entry.get("workdir"):
+            click.echo(f"  Cleanup: pm pr cleanup {pr_id} "
+                       f"(--force discards uncommitted changes)")
 
     # A closed PR blocks its dependents forever (only `merged` satisfies a
     # dependency): name them so the block is visible, but never rewrite them.

@@ -89,6 +89,7 @@ Maintenance procedure for a deliberate history rewrite or a branch cleanup:
 
 ### PR: pm works with GitHub rulesets that block force pushes and branch deletions
 - **description**: With ruleset 25978556 active, `pm pr close` (gh pr close --delete-branch) closes the PR but cannot delete the branch, and currently prints a misleading "Could not close GitHub PR" warning. Default to keeping the remote branch when a ruleset blocks deletion, and say why. Add a pm doctor/status check that warns when the repo has no such ruleset. Document the maintenance procedure from this plan in the user docs.
+- **note**: The first half is obsolete as of pr-62ad13d: `pm pr close` never passes `--delete-branch` any more (branch retention is unconditional), so a deletion-blocking ruleset can no longer make close print a misleading warning. The remaining work is the `pm doctor`/status ruleset check and the user-docs maintenance procedure.
 - **tests**: Unit tests with fake_github simulating a deletion-blocking ruleset.
 - **files**: pm_core/cli/pr.py, pm_core/gh_ops.py, pm_core/fake_github.py, docs
 - **depends_on**:

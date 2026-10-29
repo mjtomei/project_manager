@@ -173,6 +173,26 @@ def test_default_close_retains_entry_and_lifecycle_fields(tmp_path):
     assert after["branch"] == before["branch"]
     assert after["workdir"] == before["workdir"]
 
+    # The output names the follow-up actions close deliberately leaves to the
+    # user: reopen and the separate workdir cleanup.
+    assert "Reopen: pm pr edit pr-001 --status pending" in result.output
+    assert "Cleanup: pm pr cleanup pr-001" in result.output
+
+
+def test_close_a_pending_pr_records_a_closure(tmp_path):
+    """A PR that was never started is still closable: the lifecycle action is
+    about the record, not about a workdir having existed."""
+    project = _make_project(tmp_path, status="pending", workdir=False,
+                            with_dependent=False)
+    result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "closed"
+    assert entry.get("closed_at")
+    assert entry["workdir"] is None
+    assert store.load(project["pm_dir"])["project"]["active_pr"] is None
+
 
 def test_default_close_leaves_unrelated_records_and_settings_alone(tmp_path):
     """Close rewrites one PR's status and (at most) active_pr — every other
@@ -474,6 +494,37 @@ def test_repeat_close_does_not_invent_a_closure_time(tmp_path):
     # updated_at still moves: the record was touched, not rewritten.
     assert after["updated_at"] > before["updated_at"]
     assert _snapshot(project["workdir"]) == wd_before
+
+
+def test_reopening_a_closed_pr_drops_the_closure_time(tmp_path):
+    """`closed_at` names a closure; the deliberate reopen
+    (`pm pr edit --status pending`) clears it, and a later close records a
+    fresh one instead of resurrecting the old time."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    data = store.load(project["pm_dir"])
+    store.get_pr(data, "pr-001")["closed_at"] = "2026-09-01T00:00:00+00:00"
+    store.save(data, project["pm_dir"])
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        reopened = runner.invoke(pr_mod.pr, ["edit", "pr-001",
+                                             "--status", "pending"])
+
+    assert reopened.exit_code == 0, reopened.output
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "pending"
+    assert "closed_at" not in entry
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "closed"
+    assert entry["closed_at"] != "2026-09-01T00:00:00+00:00"
 
 
 def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):

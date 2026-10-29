@@ -267,6 +267,27 @@ workdirs are touched.
     `test_bare_cleanup_auto_selects_a_closed_workdir` and
     `test_bare_cleanup_reports_when_nothing_terminal_has_a_workdir` (both fail
     before the change).
+31. Reopen clears the closure time (review c02f i13): `pm pr edit <id>
+    --status pending` — the deliberate reopen path every guard message names —
+    drops `closed_at` in both the pre-lock preview and the locked `apply`, so
+    the field never describes a status the PR is not in and a later close
+    records a fresh closure time.  Covered by
+    `test_reopening_a_closed_pr_drops_the_closure_time`.
+32. Closing a never-started PR (review c02f i13): a `pending` PR with no
+    workdir closes normally (status `closed`, `closed_at` set, `active_pr`
+    becomes `None`), since the lifecycle action is about the record rather
+    than a workdir having existed.  Covered by
+    `test_close_a_pending_pr_records_a_closure`.
+33. Close's runtime output (review c02f i13) names the two follow-up actions
+    the command deliberately leaves to the user: `Reopen: pm pr edit <id>
+    --status pending` and, when a workdir is retained, `Cleanup: pm pr
+    cleanup <id> (--force discards uncommitted changes)`.  Pinned in
+    `test_default_close_retains_entry_and_lifecycle_fields`.
+34. Stale plan premise corrected (review c02f i13): the
+    `pm/plans/plan-a35369f.md` item about rulesets blocking branch deletion
+    assumed `pm pr close` runs `gh pr close --delete-branch`; a `note` bullet
+    records that branch retention is now unconditional and only the
+    `pm doctor`/status ruleset check and user docs remain.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -322,14 +343,19 @@ be rewritten to assert retention.
 - **A4 — Should close tear down tmux windows/containers?** Resolved: no.
   Those are live resources owned by explicit `pm pr cleanup --resources`
   (and by merge detection). Close must not silently remove anything.
-  **Cross-PR interaction (review c02f i10):** pr-3d1fa55 (#217, in QA) adds
-  `_reclaim_terminal_pr_windows` — a TUI sync sweep that tears down windows,
-  containers and runtime state for *any* `merged`/`closed` PR. Once that
-  lands, a locally closed PR's live windows are reclaimed on the next reload,
-  i.e. the automatic cleanup this decision rules out. Files/branch/workdir
-  are untouched either way. The question (does `closed` authorize
-  live-resource reclamation, or should #217 limit the sweep to `merged`?) is
-  with the user; a note was added to pr-3d1fa55.
+  **Cross-PR interaction (review c02f i10, resolved in i13):** pr-3d1fa55
+  (#217, in QA) adds `_reclaim_terminal_pr_windows` — a TUI sync sweep that
+  tears down windows, containers and runtime state for *any* `merged`/`closed`
+  PR. Once that lands, a locally closed PR's live windows are reclaimed on the
+  next reload, i.e. the automatic cleanup this decision rules out. The user
+  clarification on this PR ("any cleanup must remain a separate, explicitly
+  requested operation; do not add an automatic cleanup fallback or delayed
+  deletion triggered merely by closing") covers live resources as well as
+  files, so `closed` must not authorize reclamation: #217 should limit the
+  sweep to `merged` and leave a closed PR's windows to the explicit
+  `pm pr cleanup --resources`. A cross-PR note stating this was left on
+  pr-3d1fa55 (review c02f i13); if #217's owner believes closed windows should
+  be swept, that needs the user's explicit approval as an exception.
 - **A5 — Close on a `merged` PR?** Resolved: refuse (exit 1) without
   `--remove`, because rewriting `merged` → `closed` erases merge history and
   merge-integrity evidence. With `--remove`, delete the registry record only
@@ -378,8 +404,11 @@ No **[UNRESOLVED]** ambiguities.
 ## 5. Files to change
 
 - `pm_core/cli/pr.py` — `pr_close` rewrite (`--remove`, warnings, messages),
-  `pr_start` and `pr_merge` closed guards, and a closed-duplicate hint in
-  `pr_add` (retained closed entries now match its duplicate check).
+  `pr_start` and `pr_merge` closed guards, a closed-duplicate hint in
+  `pr_add` (retained closed entries now match its duplicate check), and
+  `pr_edit` dropping `closed_at` on a deliberate reopen (review c02f i13).
+- `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
+  premise of its ruleset item obsolete (review c02f i13).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
