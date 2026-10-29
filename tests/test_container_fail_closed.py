@@ -78,6 +78,7 @@ def _run_execution_only(tmp_path, *, container_enabled: bool,
     container_launch = MagicMock(side_effect=container_launch_error)
     scenario0 = MagicMock()
     finalize = MagicMock(return_value=state)
+    resume_write = MagicMock()
     with ExitStack() as stack:
         stack.enter_context(patch("pm_core.qa_loop.get_pm_session",
                                   return_value="pm-s"))
@@ -104,16 +105,19 @@ def _run_execution_only(tmp_path, *, container_enabled: bool,
                                   scenario0))
         stack.enter_context(patch("pm_core.qa_loop._execute_and_finalize",
                                   finalize))
+        stack.enter_context(patch("pm_core.qa_loop._write_resume_file",
+                                  resume_write))
         run_qa_sync(state, tmp_path / "pm", pr, lambda *a: None,
                     max_scenarios=1)
-    return state, host_launch, container_launch, scenario0, finalize
+    return (state, host_launch, container_launch, scenario0, finalize,
+            resume_write)
 
 
 def test_run_qa_sync_fails_closed_when_runtime_unavailable(tmp_path, home):
     """Pre-fix: the preflight flips use_containers=False and launches the
     refiner/worker via _launch_scenarios_in_tmux (host).  Post-fix: it aborts
     with ERROR before any launch."""
-    state, host_launch, container_launch, scenario0, finalize = (
+    state, host_launch, container_launch, scenario0, finalize, resume = (
         _run_execution_only(tmp_path, container_enabled=True,
                             runtime_available=False))
 
@@ -127,10 +131,12 @@ def test_run_qa_sync_fails_closed_when_runtime_unavailable(tmp_path, home):
     assert state.latest_verdict == "ERROR"
     assert "container" in state.latest_output.lower()
     assert "no agent was launched on the host" in state._error
+    # Nothing launched, so there is no resumable snapshot to re-enter.
+    resume.assert_not_called()
 
 
 def test_run_qa_sync_uses_containers_when_runtime_healthy(tmp_path, home):
-    state, host_launch, container_launch, scenario0, finalize = (
+    state, host_launch, container_launch, scenario0, finalize, _resume = (
         _run_execution_only(tmp_path, container_enabled=True,
                             runtime_available=True))
 
@@ -142,7 +148,7 @@ def test_run_qa_sync_uses_containers_when_runtime_healthy(tmp_path, home):
 
 def test_run_qa_sync_host_execution_when_container_disabled(tmp_path, home):
     """Explicitly disabled container mode still supports host execution."""
-    state, host_launch, container_launch, scenario0, finalize = (
+    state, host_launch, container_launch, scenario0, finalize, _resume = (
         _run_execution_only(tmp_path, container_enabled=False,
                             runtime_available=False))
 
@@ -158,7 +164,7 @@ def test_run_qa_sync_reports_error_when_container_launch_raises(
     ERROR: no host launch, no finalize pane, no invented scenario verdict."""
     from pm_core.qa_loop import ContainerLaunchError
 
-    state, host_launch, container_launch, scenario0, finalize = (
+    state, host_launch, container_launch, scenario0, finalize, _resume = (
         _run_execution_only(
             tmp_path, container_enabled=True, runtime_available=True,
             container_launch_error=ContainerLaunchError(
@@ -479,3 +485,106 @@ def test_runtime_status_reports_the_cause():
             run.return_value = MagicMock(returncode=0, stderr="", stdout="")
             ok, problem = container_mod._runtime_status()
         assert ok is True and problem == ""
+
+
+def test_container_preflight_error_only_when_enabled_and_unavailable():
+    """The preflight gate is inert for explicitly disabled container mode."""
+    with patch.object(container_mod, "is_container_mode_enabled",
+                      return_value=False), \
+            patch.object(container_mod, "_runtime_status",
+                         return_value=(False, "runtime down")):
+        assert container_mod.container_preflight_error() is None
+
+    with patch.object(container_mod, "is_container_mode_enabled",
+                      return_value=True), \
+            patch.object(container_mod, "_runtime_status",
+                         return_value=(False, "runtime down")):
+        assert container_mod.container_preflight_error() == "runtime down"
+
+    with patch.object(container_mod, "is_container_mode_enabled",
+                      return_value=True), \
+            patch.object(container_mod, "_runtime_status",
+                         return_value=(True, "")):
+        assert container_mod.container_preflight_error() is None
+
+
+def test_qa_debug_fails_closed_when_create_raises_non_container_error(
+        tmp_path, home):
+    """A runtime that dies between the preflight and the create surfaces as
+    OSError; the command must still report it and exit — never fall through
+    to the host branch."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    data = {"project": {"name": "t"}, "prs": [], "plans": []}
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    build_cmd = MagicMock(return_value="claude ...")
+    remove = MagicMock()
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.loop_shared.get_pm_session",
+                                  return_value="pm-s"))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=True))
+        _patch_runtime(stack, True)
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch.object(
+            container_mod, "create_qa_container",
+            side_effect=OSError("podman: No such file or directory")))
+        stack.enter_context(patch.object(container_mod, "remove_container",
+                                         remove))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.build_claude_shell_cmd", build_cmd))
+        result = CliRunner().invoke(qa_group,
+                                    ["debug", "repro", "--branch", "b"])
+
+    assert result.exit_code == 1
+    assert "could not be created" in result.output.lower()
+    assert "No such file or directory" in result.output
+    assert "host" in result.output.lower()
+    build_cmd.assert_not_called()
+    # Only this attempt's own container is released.
+    assert remove.call_count == 1
+
+
+def test_resume_keeps_host_mode_when_snapshot_says_host(tmp_path, home):
+    """The persisted per-run mode wins: a host run resumes on the host even
+    when container mode is enabled and the runtime is down now."""
+    pr, data, workdir, qa_workdir = _pm_fixture(tmp_path)
+    state = _execution_only_state(qa_workdir)
+    state.session_tag = "s"
+    qa_loop._write_resume_file(state, False, 0, set())
+
+    finalize = MagicMock(return_value=state)
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.qa_loop.get_pm_session",
+                                  return_value="pm-s"))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.store.get_pr", return_value=pr))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=True))
+        _patch_runtime(stack, False)
+        stack.enter_context(patch("pm_core.qa_loop._execute_and_finalize",
+                                  finalize))
+        result = qa_loop.resume_qa_sync(state, tmp_path / "pm", pr,
+                                        lambda *a: None)
+
+    assert result is state
+    finalize.assert_called_once()
+    assert state.latest_verdict != "ERROR"

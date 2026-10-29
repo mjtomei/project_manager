@@ -573,10 +573,14 @@ End with a summary of which steps work and which don't, then one of:
                 allowed_push_branch=base_branch,
                 session_tag=session_tag,
             )
-        except container_mod.ContainerError as exc:
+        except Exception as exc:
             # Container mode is an execution boundary: report the
             # infrastructure failure instead of dropping into the host
-            # branch (or leaking a traceback) below.  Release only this
+            # branch (or leaking a traceback) below.  Broader than
+            # ContainerError on purpose: a runtime that dies between the
+            # preflight above and this create (e.g. the binary disappearing)
+            # surfaces as OSError, and the user should still get the cause
+            # and the remedy rather than a traceback.  Release only this
             # attempt's own container (a setup timeout can leave a
             # half-configured one behind); nothing else is touched.
             try:
