@@ -3135,6 +3135,19 @@ def _launch_scenarios_in_containers(
             state.pr_id, state.loop_id, scenario.index,
             session_tag=_session_tag,
         )
+        # The clone was just made afresh, so a container still running under
+        # this name (an earlier run with the same loop id: every ``pm qa
+        # run`` of a PR is ``cli-<pr>``) mounts the clone it replaced.  Reused,
+        # its /workspace is a deleted directory and the scenario's window
+        # dies at once, retry after retry (S130).
+        try:
+            if container_mod.container_is_running(cname):
+                _log.info("Removing container %s: it mounts the clone of an "
+                          "earlier run", cname)
+                container_mod.remove_container(cname)
+        except Exception:
+            _log.warning("could not remove the earlier run's container %s",
+                         cname, exc_info=True)
         try:
             container_mod.create_qa_container(
                 name=cname,

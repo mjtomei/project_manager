@@ -2056,6 +2056,43 @@ class TestScenarioRetryLogic:
         assert "pm-tag-qa-pr-001-l1-s5 is gone" in reason
         assert "image gone" in reason
 
+    def _container_first_launch(self, tmp_path, running):
+        """_launch_scenarios_in_containers for one scenario of a ``pm qa
+        run`` (loop id ``cli-<pr>``) with a container of that name *running*
+        or not; returns the ordered container calls."""
+        from pm_core import qa_loop
+        calls = MagicMock()
+        calls.create.side_effect = RuntimeError("stop after create")
+        calls.running.return_value = running
+        sc = QAScenario(index=1, title="S130 check", focus="f")
+        state = QALoopState(pr_id="pr-001", loop_id="cli-pr-001")
+        state.qa_workdir = str(tmp_path)
+        state.session_tag = "tag"
+        state.scenarios = [sc]
+        with patch("pm_core.qa_loop._route_mounts", return_value={}), \
+             patch("pm_core.container.load_container_config"), \
+             patch("pm_core.container.container_is_running", calls.running), \
+             patch("pm_core.container.remove_container", calls.remove), \
+             patch("pm_core.container.create_qa_container", calls.create), \
+             patch("pm_core.qa_loop.create_scenario_workdir",
+                   return_value=(tmp_path / "repo", tmp_path / "scratch")):
+            qa_loop._launch_scenarios_in_containers(
+                state, {}, {"id": "pr-001"}, "sess", None, str(tmp_path))
+        return [c[0] for c in calls.mock_calls], sc
+
+    def test_rerun_replaces_the_earlier_runs_container(self, tmp_path):
+        """S130: a second ``pm qa run`` of a PR re-clones the fixed
+        ``cli-<pr>`` scenario workdir.  The first run's container, still
+        running under the same name, mounts the deleted clone; it is removed
+        before the new one is created, not reused (a reused one died at once,
+        window after window)."""
+        names, _ = self._container_first_launch(tmp_path, running=True)
+        assert names == ["running", "remove", "create"]
+
+    def test_first_run_creates_without_removing(self, tmp_path):
+        names, _ = self._container_first_launch(tmp_path, running=False)
+        assert names == ["running", "create"]
+
     def test_failed_recreate_stops_the_retry_ladder(self, tmp_path):
         """The poll loop takes the relaunch's INPUT_REQUIRED as final: one
         relaunch attempt, no further retries, and the retry and outcome
