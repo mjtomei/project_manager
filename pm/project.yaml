@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T10:07:41.108898+00:00'
+  updated_at: '2026-10-29T10:32:24.316334+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36883,6 +36883,41 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T10:07:41Z'
     last_edited: '2026-10-29T10:07:41Z'
+  - id: note-f31aeb1
+    text: 'Review loop ebd1 i3: two leftovers, both the PR own class — a guard no
+      test proved, and files the produced-files list never named. (1) Step 1 of the
+      tmux recipe refuses a `pm session name` that printed nothing before its readiness
+      wait, exactly as steps 2, 4 and 5 do, and each of those refusals is execution-tested;
+      step 1 had no case. Deleting the guard left the whole file green: with `pm session
+      name` printing nothing the wait polls `has-session -t "="` (an exact match on
+      the empty name, which can never succeed) to its deadline and reports "pm session  did
+      not appear within 60s" — a slow failure naming an empty session, for a `pm`
+      that is not on PATH, where the guard prints "pm session name printed nothing
+      — is pm on PATH?" at once. New `test_step_one_refuses_an_empty_target` runs
+      the recipe own block with `pm session name` printing nothing and requires the
+      guard message (and not the deadline one); it fails with the guard removed in
+      place (rc 1 at the deadline with the message above) and passes on the unmodified
+      recipe. (2) The web-UI produced-files list omitted two files the flow leaves
+      in the capture directory: `server.pid`, which step 1 writes and the teardown
+      removes, so it is present exactly when a run stopped before the teardown (a
+      failed driver, which step 2 tells the worker not to finalize, is the ordinary
+      case), and `recording.webm`, which the finalize step keeps deliberately when
+      the transcode fails so the step can be retried without re-driving the UI. The
+      manifest section asks for "every file above" and the recording recipes lists
+      already name their failure evidence (R17), so a worker following this list leaves
+      both out of `## Files` while the directory holds them. Both are now listed with
+      when they survive and the instruction to mention them; `test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps`
+      requires both and fails against the pre-fix list (restored from HEAD, then restored).
+      Tests: file 185 pass; related suites (test_qa_artifact_web_ui_recording, test_qa_instructions,
+      test_qa_loop, test_markdown_render) 373 together with the file; full suite env
+      -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py -> 4579 passed, 1 skipped, 92 deselected,
+      0 failed (397.91 s, with the markdown dep on the scratch path). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-ebd1-i3/ (probe.log sections A-B, README.md,
+      scripts/probe.sh). impl.md R44 + Files/verification/evidence and qa.md updated.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T10:32:24Z'
+    last_edited: '2026-10-29T10:32:24Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
