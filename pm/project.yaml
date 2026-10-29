@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T20:43:59.818017+00:00'
+  updated_at: '2026-10-29T21:29:40.415445+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37432,6 +37432,45 @@ prs:
       updated. No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T20:43:59Z'
     last_edited: '2026-10-29T20:43:59Z'
+  - id: note-bb2dcf6
+    text: 'Review loop ebd1 i18: three guards the kept recipes carry had no case,
+      found by mutating them (test-only; no recipe or pm_core/ change). (1) Every
+      capture-directory writability guard is `[ -w … ] && [ -x … ]`, but every case
+      modelled only the missing write bit (mode 500), which `-w` refuses on its own;
+      a directory that exists with the write bit and no *search* bit (mode 600, `rw-------`)
+      passes `[ -w ]` and is refused only by `-x`, and removing that half from all
+      ten sites left the file green (228 passed). Verified live in this container
+      (uid 1000) with the recipes'' own blocks and a mode-600 capture directory: the
+      tmux step-0 block runs on, clears the shared `pm-recorder` session (the concurrent-capture
+      handle the clear-after-the-guard ordering exists to protect) and only then exits
+      1 on the `rm` "Permission denied"; the render block says "there is no cast to
+      render (the recording wrote nothing)" for a cast that is there; the web-UI start
+      block launches the app and exits 0 having written no `server.pid`; the driver
+      block cd fails ("could not be entered"); the finalize block says "there is no
+      webm to transcode — the driver wrote no video"; and the Layer 2 block exits
+      0 having written neither log. Fix: `UNWRITABLE_MODES` runs the eight writability
+      cases in both shapes (ids `no-write-bit`/`no-search-bit`); with the `-x` halves
+      removed exactly the ten `no-search-bit` cases fail and every mode-500 case still
+      passes. (2) The render blocks'' pre-render `rm -f "${cast%.cast}.mp4" "$cast.gif"`
+      was pinned only through `render_fail`, which removes both on every other failure
+      path; the missing-encoder stop is the one render failure that exits before `agg`
+      runs and never calls `render_fail`, so with the `rm` removed a previous run''s
+      mp4 and gif survive it (verified live: same rc 1 and message, both files still
+      in the capture directory) — `test_render_names_a_missing_encoder` now seeds
+      them and requires both gone. (3) The Layer 2 protocol block''s `kill "$SSE_PID"`
+      (its own "then stop the reader" step; `--max-time` is the backstop) had no case,
+      and the block returns with the reader still writing into `sse.log` without it
+      (verified with a `TERM`-trapping stub) — a new execution case requires the stop.
+      Tests: file 239 passed (was 228); mutations `all_x` -> 10 failed, `render_rm`
+      -> 2 failed, `sse_kill` -> 1 failed; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 4633 passed, 1 skipped, 92 deselected, 0 failed (401.56 s). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-ebd1-i18/ (probe.log, probe-webui.log, mutation-check.log,
+      suite.log, README.md, scripts/). impl.md R59 + Files/verification/evidence and
+      qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work stays
+      dropped.'
+    created_at: '2026-10-29T21:29:40Z'
+    last_edited: '2026-10-29T21:29:40Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
