@@ -1426,6 +1426,78 @@ def end_run_record(state: QALoopState) -> None:
     _write_run_record_data(state.qa_workdir, rec)
 
 
+def end_runs_orphaned_by_restart(exclude_workdirs=()) -> list[dict]:
+    """Mark ended the runs this process started before it was re-executed.
+
+    A run record names its driver by pid and start time, and ``pm tui
+    restart`` execs the TUI in place: both survive while every QA thread of
+    the old image is gone.  A run killed that way before its first resume
+    snapshot (planning and refining, ~20 s after its start) is invisible to
+    the resume scan, and its record keeps reading as driven by a live
+    process to every other driver: ``pm pr auto-sequence`` ticks report it
+    running and nothing ever starts it again (S131).  A run with a snapshot
+    is left to the resume scan, which adopts it.
+
+    For a fresh TUI image (its mount) only; *exclude_workdirs* are the QA
+    workdirs of loops it already drives.  Returns the ended records.
+    """
+    me = os.getpid()
+    my_start = _proc_start_time(me)
+    if my_start is None:
+        return []
+    skip = {str(w) for w in exclude_workdirs}
+    ended = []
+    qa_root = Path.home() / ".pm" / "workdirs" / "qa"
+    for rec_path in qa_root.glob(f"*/{_RUN_RECORD}"):
+        qa_wd = rec_path.parent
+        if str(qa_wd) in skip or _resume_file_path(qa_wd).exists():
+            continue
+        rec = read_run_record(qa_wd)
+        if (not rec or rec.get("launch") or rec.get("ended_at")
+                or rec.get("owner_pid") != me
+                or str(rec.get("owner_start")) != str(my_start)):
+            continue
+        rec["ended_at"] = time.time()
+        _write_run_record_data(qa_wd, rec)
+        _log.info("QA run %s of %s died with this process's restart before "
+                  "its first snapshot; its run record is ended",
+                  rec.get("loop_id"), rec.get("pr_id"))
+        ended.append(rec)
+    return ended
+
+
+def kill_windows_of_run(session: str, qa_workdir: str | Path) -> int:
+    """Kill the ``qa-*`` windows of *session* that work inside *qa_workdir*.
+
+    For a run that died before its main ``qa-<pr>`` window existed: the next
+    run's stale-window cleanup is keyed on that window, so the dead run's
+    scenario windows (scenario 0's, opened first) would sit beside the new
+    run's under the same names.  Returns how many windows were killed.
+    """
+    from pm_core import tmux as tmux_mod
+    from pm_core import home_window
+
+    inside = str(Path(qa_workdir)) + os.sep
+    result = tmux_mod._run(
+        tmux_mod._tmux_cmd("list-panes", "-s", "-t", session, "-F",
+                           "#{window_id}\t#{window_name}\t"
+                           "#{pane_current_path}"), text=True)
+    if result.returncode != 0:
+        return 0
+    doomed = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if (len(parts) == 3 and parts[1].startswith("qa-")
+                and (parts[2] + os.sep).startswith(inside)):
+            doomed[parts[0]] = parts[1]
+    for wid, name in doomed.items():
+        _log.info("Killing QA window %s of the dead run in %s", name,
+                  qa_workdir)
+        home_window.park_if_on(session, wid)
+        tmux_mod.kill_window(session, wid)
+    return len(doomed)
+
+
 def write_launch_record(pr_id: str, loop_id: str, owner_pid: int) -> None:
     """Name *owner_pid* as the driver of run *loop_id* before it starts.
 

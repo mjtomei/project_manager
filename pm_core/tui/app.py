@@ -622,6 +622,15 @@ class ProjectManagerApp(App):
         # whose TUI died before starting it — is owed only on disk.  Re-arm
         # it here: the obligation must not depend on the auto-start switch
         # (a plain restart turns auto-start off).
+        # A QA run the previous image started and lost before its first
+        # resume snapshot reads as driven by this very pid: end it, and
+        # reopen the REQA it consumed, before the obligation is armed.
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.recover_restart_killed_runs(self)
+        except Exception:
+            _log.warning("QA runs lost to the restart: recovery failed",
+                         exc_info=True)
         try:
             from pm_core.tui import qa_loop_ui
             qa_loop_ui.arm_owed_reqa(self)

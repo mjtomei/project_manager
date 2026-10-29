@@ -706,6 +706,154 @@ def test_reconcile_is_wired_into_the_poll_tick(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# A re-run the restart killed before its first snapshot (S131)
+# ---------------------------------------------------------------------------
+
+def _own_run(home, *, loop_id="lost", started_at=None, **kw):
+    """A run record naming this process, as the old TUI image wrote it."""
+    qa_dir = _qa_workdir(home, loop_id=loop_id, owner_pid=os.getpid(),
+                         owner_start=qa_loop._proc_start_time(os.getpid()),
+                         **kw)
+    rec = qa_loop.read_run_record(qa_dir)
+    rec["started_at"] = started_at if started_at is not None else 0.0
+    (qa_dir / qa_loop._RUN_RECORD).write_text(json.dumps(rec))
+    return qa_dir
+
+
+def _as_another_process():
+    """Ask the driver probes from a ``pm pr auto-sequence`` tick's side."""
+    return patch.object(qa_loop.os, "getpid", return_value=1)
+
+
+def test_restart_ends_only_this_images_snapshotless_runs(home):
+    """``pm tui restart`` execs in place: the pid and start time a run
+    record names survive while the run's thread is gone."""
+    lost = _own_run(home, loop_id="lost")
+    snap = _own_run(home, loop_id="snap")
+    (snap / "qa_resume.json").write_text("{}")      # the resume scan's
+    live = _own_run(home, loop_id="live")           # a loop it drives
+    other = _qa_workdir(home, loop_id="reused", owner_pid=os.getpid(),
+                        owner_start="1")            # pid reused
+    done = _own_run(home, loop_id="done", ended_at=5.0)
+    launch = _own_run(home, loop_id="launch")
+    rec = qa_loop.read_run_record(launch)
+    rec["launch"] = True
+    (launch / qa_loop._RUN_RECORD).write_text(json.dumps(rec))
+
+    ended = qa_loop.end_runs_orphaned_by_restart([str(live)])
+
+    assert [r["loop_id"] for r in ended] == ["lost"]
+    assert qa_loop.read_run_record(lost)["ended_at"]
+    for wd in (snap, live, other, launch):
+        assert "ended_at" not in qa_loop.read_run_record(wd)
+    assert qa_loop.read_run_record(done)["ended_at"] == 5.0
+
+
+def test_a_reqa_rerun_killed_by_a_plain_restart_starts_again_once(tmp_path,
+                                                                    home):
+    """The S131 repro: the TUI routed the REQA and started the owed re-run
+    (consuming ``awaiting``), then a plain ``pm tui restart`` killed it
+    during planning.  Its record names the restarted TUI's own live pid, so
+    ticks deferred to it forever and nothing started QA again.  The mount
+    hooks must end that record and start the owed run once."""
+    ts = _now(-10)
+    root = _project(tmp_path, ret=_owed_return(awaiting=None, ts=ts))
+    started = signoff.parse_ts(ts).timestamp() + 1
+    lost = _own_run(home, started_at=started)
+    with _as_another_process():
+        assert qa_loop.run_driven_elsewhere(PR) is True     # the symptom
+    app = App(root)                    # a plain restart: auto-start off
+
+    with patch.object(qa_loop_ui, "start_qa") as sq, \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer"):
+        qa_loop_ui.recover_restart_killed_runs(app)
+        qa_loop_ui.arm_owed_reqa(app)
+        app.fire_timers()
+        for _ in range(6):
+            qa_loop_ui.reconcile_owed_reqa(app)
+        # A second restart's mount finds nothing more to recover.
+        qa_loop_ui.recover_restart_killed_runs(app)
+    sq.assert_called_once_with(app, PR)
+    assert qa_loop.read_run_record(lost)["ended_at"]
+    with _as_another_process():
+        assert qa_loop.run_driven_elsewhere(PR) is False
+    # Reopened on disk, behind the claim the start took.
+    ret = app.pr()["signoff_return"]
+    assert ret["awaiting"] == "qa" and ret["launch_claim"]["hop"] == "qa"
+
+
+@pytest.mark.parametrize("case", ["verdict", "successor", "before-return",
+                                  "not-qa"])
+def test_a_restart_killed_run_reopens_only_the_reqa_it_consumed(tmp_path,
+                                                                 home, case):
+    """Only the owed re-run itself reopens the obligation: not a run that
+    reached a verdict, one a newer run replaced, one started before the
+    return (the judged run), or a PR that has left ``qa``."""
+    ts = _now(-10)
+    t = signoff.parse_ts(ts).timestamp()
+    root = _project(tmp_path, ret=_owed_return(awaiting=None, ts=ts),
+                    status="sign_off" if case == "not-qa" else "qa")
+    lost = _own_run(home, started_at=t - 5 if case == "before-return"
+                    else t + 1)
+    if case == "verdict":
+        (lost / "qa_status.json").write_text(json.dumps({"overall": "PASS"}))
+    if case == "successor":
+        _qa_workdir(home, loop_id="newer")
+        rec = qa_loop.read_run_record(lost.parent / f"{PR}-newer")
+        rec["started_at"] = t + 2
+        (lost.parent / f"{PR}-newer" / qa_loop._RUN_RECORD).write_text(
+            json.dumps(rec))
+    app = App(root)
+    with patch.object(store, "locked_update",
+                      wraps=store.locked_update) as lu:
+        qa_loop_ui.recover_restart_killed_runs(app)
+    assert qa_loop.read_run_record(lost)["ended_at"]
+    assert app.pr()["signoff_return"]["awaiting"] is None
+    lu.assert_not_called()              # no project.yaml rewrite
+
+
+def test_restart_recovery_retires_the_dead_runs_windows(tmp_path, home):
+    """The dead run opened scenario 0's window before its main ``qa-<pr>``
+    window; the next run's cleanup is keyed on the main window, so without
+    this a second ``qa-<pr>-s0`` sat beside the new run's."""
+    ts = _now(-10)
+    root = _project(tmp_path, ret=_owed_return(awaiting=None, ts=ts))
+    lost = _own_run(home, started_at=signoff.parse_ts(ts).timestamp() + 1)
+    app = App(root)
+    with patch.object(qa_loop_ui, "get_pm_session", return_value="pm-test"), \
+         patch.object(qa_loop, "kill_windows_of_run") as kw:
+        qa_loop_ui.recover_restart_killed_runs(app)
+    kw.assert_called_once_with("pm-test", lost)
+
+
+def test_kill_windows_of_run_matches_only_that_runs_qa_windows(tmp_path):
+    from pm_core import tmux as tmux_mod
+    wd = tmp_path / "qa" / f"{PR}-lost"
+    panes = "\n".join([
+        f"@1\tqa-{PR}-s0\t{wd}/s-0/repo",            # the dead run's
+        f"@2\tqa-{PR}-s0\t{wd}-other/s-0/repo",      # a sibling run's
+        f"@3\tnotes\t{wd}/s-0/repo",                 # not a QA window
+        f"@4\tqa-{PR}-s1\t{wd}",
+    ])
+    with patch.object(tmux_mod, "_run", return_value=SimpleNamespace(
+            returncode=0, stdout=panes)), \
+         patch.object(tmux_mod, "kill_window") as kill, \
+         patch("pm_core.home_window.park_if_on"):
+        assert qa_loop.kill_windows_of_run("pm-test", wd) == 2
+    assert [c.args for c in kill.call_args_list] == [("pm-test", "@1"),
+                                                     ("pm-test", "@4")]
+
+
+def test_restart_recovery_is_wired_into_mount_before_the_owed_arm():
+    """The recovery must run before ``arm_owed_reqa`` reads the obligation."""
+    import inspect
+    from pm_core.tui import app as app_mod
+    src = inspect.getsource(app_mod)
+    assert 0 < src.index("recover_restart_killed_runs(self)") \
+        < src.index("qa_loop_ui.arm_owed_reqa(self)")
+
+
+# ---------------------------------------------------------------------------
 # Other drivers of the same obligation
 # ---------------------------------------------------------------------------
 

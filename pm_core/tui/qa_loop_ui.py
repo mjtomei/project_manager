@@ -451,6 +451,100 @@ def reconcile_owed_reqa(app, prs: list[dict] | None = None) -> None:
         start_owed_reqa(app, pr_id)
 
 
+def recover_restart_killed_runs(app) -> None:
+    """Mount hook: end the QA runs the previous TUI image started and lost.
+
+    ``pm tui restart`` execs in place.  A run it killed before its first
+    resume snapshot has nothing to resume, and its record (naming this very
+    pid) read as driven forever: the PR sat at ``qa`` while every tick said
+    ``running: qa`` (S131).  The record is ended
+    (:func:`pm_core.qa_loop.end_runs_orphaned_by_restart`), and when that run
+    was the re-run a sign-off REQA owed — its start consumed ``awaiting`` —
+    the obligation is reopened, so :func:`arm_owed_reqa` (or a tick) starts
+    it once, through the claim, with auto-start on or off.
+    """
+    import json
+    from pathlib import Path
+    from pm_core import qa_loop
+    from pm_core.signoff import open_return, parse_ts
+
+    live = [s.qa_workdir for s in app._qa_loops.values()
+            if getattr(s, "qa_workdir", None)]
+    ended = qa_loop.end_runs_orphaned_by_restart(live)
+    if not ended:
+        return
+    session = get_pm_session()
+    for rec in ended:
+        if session:
+            try:
+                qa_loop.kill_windows_of_run(
+                    session, Path.home() / ".pm" / "workdirs" / "qa"
+                    / f"{rec.get('pr_id')}-{rec.get('loop_id')}")
+            except Exception:
+                _log.warning("could not retire the windows of QA run %s",
+                             rec.get("loop_id"), exc_info=True)
+    if not getattr(app, "_root", None):
+        return
+    # Only a run that never got a verdict and that no newer run replaced.
+    lost = {}
+    for rec in ended:
+        pr_id, started = rec.get("pr_id"), rec.get("started_at")
+        if not pr_id or not isinstance(started, (int, float)):
+            continue
+        try:
+            status = json.loads((Path.home() / ".pm" / "workdirs" / "qa"
+                                 / f"{pr_id}-{rec.get('loop_id')}"
+                                 / "qa_status.json").read_text())
+        except (OSError, ValueError):
+            status = {}
+        if (isinstance(status, dict) and status.get("overall")) \
+                or qa_loop.own_run_started_since(pr_id, started + 1e-6):
+            continue
+        lost[pr_id] = max(started, lost.get(pr_id, started))
+
+    def _reopened(pr, started):
+        rec = open_return(pr)
+        if (not pr or pr.get("status") != "qa" or rec is None
+                or rec.get("hop") != "qa" or rec.get("awaiting")):
+            return None
+        try:
+            if parse_ts(rec.get("ts")).timestamp() > started:
+                return None     # the run predates this return
+        except (TypeError, ValueError):
+            return None
+        return rec
+
+    reopened = []
+
+    def _apply(data):
+        reopened.clear()
+        for pr_id, started in lost.items():
+            rec = _reopened(store.get_pr(data, pr_id), started)
+            if rec is not None:
+                rec["awaiting"] = "qa"
+                rec.pop("launch_claim", None)
+                reopened.append(pr_id)
+
+    if not lost or not any(_reopened(p, lost[p.get("id")])
+                           for p in (app._data or {}).get("prs") or []
+                           if p.get("id") in lost):
+        return
+    try:
+        store.locked_update(app._root, _apply)
+    except store.StoreLockTimeout as e:
+        # The record is ended, so the next driver no longer defers to it.
+        _log.warning("owed REQA: could not reopen %s: %s", sorted(lost), e)
+        return
+    for pr_id in reopened:
+        _log.info("owed REQA: %s reopened — its QA re-run died with the "
+                  "TUI restart before its first snapshot", pr_id)
+        for pr in (app._data or {}).get("prs") or []:
+            if pr.get("id") == pr_id and isinstance(
+                    pr.get("signoff_return"), dict):
+                pr["signoff_return"]["awaiting"] = "qa"
+                pr["signoff_return"].pop("launch_claim", None)
+
+
 def arm_owed_reqa(app) -> None:
     """Mount/routing hook: make sure an owed REQA is not left to memory.
 
