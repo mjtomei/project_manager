@@ -294,7 +294,9 @@ the visible notice/frame captures, not from a single debug-log line.
 E8. **Empty or non-human user records.** An empty, null, whitespace-only or
 tool_result `type:"user"` record arriving while the loop waits does not clear
 `input_required` and does not become the follow-up. A pasted image (a real
-non-text content block) still counts as a human answer. A local slash-command
+non-text content block) still counts as a human answer *and* as a task
+boundary: the answered question is not re-delivered as a new one when Claude
+replies and idles. A local slash-command
 echo (`<command-name>/model</command-name>`, `<local-command-stdout>`) is
 neither an answer nor a task boundary: it must not clear the wait, and a
 follow-up verdict emitted before it must still be recorded (not re-armed).

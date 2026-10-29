@@ -115,7 +115,14 @@ R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
     nudge, local slash-command echoes, and compact summaries.  A record whose
     only content is an empty/whitespace text block carries no prompt and does
     not count, while content with no text at all — a pasted image — still
-    does.  Tool results and assistant output never count, so arbitrary tool
+    does *and* is a task boundary: `_user_record_is_non_task` treats it as a
+    task (`_record_has_non_text_content`) so the verdict scan stops at it
+    rather than crossing back to the question the image answered and
+    re-delivering it.  (Review-loop i1, HEAD after integration: the two
+    predicates disagreed on image-only records, so an image answer was
+    accepted as an answer but transparent to the verdict scan — the waiter
+    re-recorded the answered INPUT_REQUIRED on every idle.)  Tool results and
+    assistant output never count, so arbitrary tool
     output is never treated as an answer, and a harness notice can never
     clear a wait nobody answered.  (Hardened in review
     i1: these record shapes are real — master's `_user_record_is_non_task` and
@@ -335,9 +342,14 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
 - An empty user record is not an answer.  A `type:"user"` record whose only
   content is an empty or whitespace text block (or a `text: null` block) carries
   nothing; counting it would clear a wait nobody answered — the mirror of the
-  bug this PR fixes.  Content with no text at all (a pasted image) still counts.
+  bug this PR fixes.  Content with no text at all (a pasted image) still counts
+  *and* is a task boundary (see R4), so the verdict scan stops at it instead of
+  crossing back to the answered question.
   (Added in review 3bf4 i1: the image branch of `is_human_prompt_record`
-  over-triggered on empty text blocks after the integration rework.)
+  over-triggered on empty text blocks after the integration rework.  Corrected
+  in review-loop i1: `_user_record_is_non_task` treated an image-only record as
+  transparent, so an image answer cleared the wait and was then crossed by the
+  verdict scan, re-delivering the answered question as a new one on every idle.)
 - A restored wait whose transcript yields no session_id cannot be answered (no
   hook stream).  `_adoptable_wait_transcript` returns None, so the resumed loop
   clears `input_required` and launches the next iteration rather than failing

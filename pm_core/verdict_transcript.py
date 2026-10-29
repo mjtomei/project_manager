@@ -197,6 +197,23 @@ def _record_text(rec: object) -> str:
     return "\n".join(chunks)
 
 
+def _record_has_non_text_content(rec: dict) -> bool:
+    """True when a user record carries content other than text.
+
+    The only realistic case is a pasted image (``{"type": "image", …}``).
+    Such a record has no text to classify but is still a human input, so the
+    task-boundary predicate must treat it as a task (see
+    :func:`_user_record_is_non_task`); otherwise the answer predicate and the
+    verdict scan would disagree about it.
+    """
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") not in (None, "text")
+               for b in content)
+
+
 def _is_tool_result_record(rec: dict) -> bool:
     """True for a user record that only carries tool results.
 
@@ -243,8 +260,9 @@ def _user_record_is_non_task(rec: dict) -> bool:
 
     Non-task records are transparent to the backward verdict scan:
     system-injected wakeups/notifications, local slash-command echoes and
-    the loop's own nudges.  Any other user text (the initial prompt, a
-    retry, verifier feedback, a new user task) is a task boundary.
+    the loop's own nudges.  Any other user input — the initial prompt, a
+    retry, verifier feedback, a new user task, or a non-text input such as a
+    pasted image — is a task boundary.
     """
     if _is_tool_result_record(rec):
         return True
@@ -262,7 +280,12 @@ def _user_record_is_non_task(rec: dict) -> bool:
     if rec.get("isCompactSummary") is True:
         return True
     if not unwrapped:
-        return True
+        # A record whose only content is an empty/whitespace text block
+        # carries nothing.  Content with no text at all (a pasted image) is a
+        # genuine human input, though, so it opens a task — otherwise the
+        # verdict scan would cross the human's answer and re-deliver the
+        # question it answered (the false-wait class this predicate guards).
+        return not _record_has_non_text_content(rec)
     if unwrapped in _NON_TASK_SENTINELS:
         return True
     return any(unwrapped.startswith(p) for p in _NON_TASK_TEXT_PREFIXES)
@@ -544,29 +567,20 @@ def is_human_prompt_record(rec: object) -> bool:
     the Esc interrupt marker, qa_loop's verdict nudge).  Counting one of those
     as an answer would clear a wait nobody answered.
 
-    ``_user_record_is_non_task`` is the shared task-boundary predicate behind
-    :func:`find_verdict_turn`, so the two can never disagree about which
-    records are transparent.  It treats a Stop-hook record as a task boundary
-    (its instructions are new work), which is *not* a human answer, so the
-    ``isMeta`` check below stays explicit.
+    This is exactly ``not _user_record_is_non_task(rec)`` — the shared
+    task-boundary predicate behind :func:`find_verdict_turn` — so the answer
+    predicate and the verdict scan can never disagree about which records are
+    transparent.  Every record this returns True for is a task boundary, so
+    the verdict scan always stops at the answer and can never cross it back
+    to the question it answered.  It treats a Stop-hook record as a task
+    boundary (its instructions are new work), which is *not* a human answer,
+    so the ``isMeta`` check below stays explicit; ``isSidechain`` records are
+    sub-agent turns, not the human's prompt.
     """
     if not isinstance(rec, dict) or rec.get("type") != "user":
         return False
     if rec.get("isMeta") or rec.get("isSidechain"):
         return False
-    msg = rec.get("message")
-    content = msg.get("content") if isinstance(msg, dict) else None
-    if isinstance(content, list):
-        blocks = [b for b in content if isinstance(b, dict)]
-        if (blocks and not _record_text(rec).strip()
-                and not any(b.get("type") == "tool_result" for b in blocks)
-                and any(b.get("type") not in (None, "text") for b in blocks)):
-            # Content but no text at all — e.g. a pasted image — is still a
-            # human prompt.  A record whose only content is an empty or
-            # whitespace text block has no text either but carries nothing, so
-            # it falls through and is rejected as a non-task record (never
-            # clear a wait nobody answered).
-            return True
     return not _user_record_is_non_task(rec)
 
 

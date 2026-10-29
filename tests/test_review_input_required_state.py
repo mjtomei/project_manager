@@ -78,6 +78,12 @@ class Pane:
         time.sleep(0.01)
         self._rec({"type": "user", "message": {"role": "user", "content": text}})
 
+    def image(self) -> None:
+        """The human answers by pasting an image (content with no text)."""
+        time.sleep(0.01)
+        self._rec({"type": "user", "message": {"role": "user", "content": [
+            {"type": "image", "source": {}}]}})
+
     def say(self, text: str) -> None:
         self._rec({"type": "assistant", "message": {
             "role": "assistant", "content": [{"type": "text", "text": text}]}})
@@ -247,12 +253,17 @@ class TestHumanPromptRecord:
             assert not is_human_prompt_record(rec), content
 
     def test_pasted_image_is_an_answer(self):
-        """Content with no text at all is still a human prompt."""
+        """Content with no text at all is still a human prompt — and, because
+        the answer predicate is built on the shared task-boundary predicate,
+        a task boundary: the verdict scan must stop at it rather than cross
+        back to the question the image answered."""
+        from pm_core.verdict_transcript import _user_record_is_non_task
         for content in ([{"type": "image", "source": {}}],
                         [{"type": "image", "source": {}},
                          {"type": "text", "text": ""}]):
-            assert is_human_prompt_record(
-                {"type": "user", "message": {"content": content}}), content
+            rec = {"type": "user", "message": {"content": content}}
+            assert is_human_prompt_record(rec), content
+            assert not _user_record_is_non_task(rec), content
 
     def test_agrees_with_the_shared_task_boundary_predicate(self):
         """Built on ``_user_record_is_non_task``, so the answer predicate and
@@ -558,6 +569,53 @@ class TestLiveFlow:
             _until(lambda: state.input_required, what="prose question waits")
             panes[1].user("yes, both")
             _until(lambda: not state.input_required)
+            panes[1].verdict("PASS")
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            state.stop_requested = True
+            p.stop()
+
+    def test_image_only_answer_is_not_redelivered_as_a_question(self, env):
+        """A pasted-image answer (content with no text) is a human prompt, so
+        the verdict scan must stop at it.
+
+        Treating it as transparent made the waiter cross back to the
+        INPUT_REQUIRED question the image answered and re-record that same
+        question on every idle — a false wait (and a notification) for a
+        question nobody is being asked.
+        """
+        tdir, _ = env
+        panes = {}
+
+        def it1():
+            panes[1] = Pane(tdir, 1)
+            return panes[1].verdict("INPUT_REQUIRED", "Option A or B?")
+
+        state = ReviewLoopState(pr_id=PR_ID)
+        recorded = []
+        t, mock, p = _start(state, tdir, {1: it1},
+                            on_iteration=lambda s: recorded.append(
+                                s.latest_verdict))
+        try:
+            _until(lambda: state.input_required, what="INPUT_REQUIRED wait")
+            panes[1].image()
+            _until(lambda: not state.input_required, what="image answer")
+            # Claude acknowledges the image without a verdict, then idles.
+            panes[1].say("Applying option A.")
+            panes[1].idle()
+            _until(lambda: state.input_required or len(recorded) > 1,
+                   what="prose question or re-recorded question")
+            assert recorded == ["INPUT_REQUIRED"], (
+                "the image answer's INPUT_REQUIRED question was re-delivered")
+            assert state.input_required is True
+            for _ in range(3):
+                panes[1].idle()
+                time.sleep(0.05)
+            assert recorded == ["INPUT_REQUIRED"], (
+                "a refreshed idle re-recorded the answered question")
+            panes[1].user("option A for both")
+            _until(lambda: not state.input_required, what="prose answer")
             panes[1].verdict("PASS")
             t.join(5)
             assert state.latest_verdict == "PASS"

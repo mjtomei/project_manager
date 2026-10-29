@@ -514,6 +514,27 @@ def test_new_task_after_a_local_command_echo_supersedes(tmp_path: Path) -> None:
     assert extract_verdict_from_transcript(p, VERDICTS) is None
 
 
+def test_pasted_image_after_a_verdict_supersedes(tmp_path: Path) -> None:
+    """A pasted image (content with no text) is a human input, so it opens a
+    new task: a verdict before it is not resurrected across it.
+
+    The answer predicate and the task-boundary predicate must agree on this
+    — an image-only record is a human prompt, so the verdict scan must stop
+    there.  Treating it as transparent let the review waiter cross the
+    human's image answer back to the INPUT_REQUIRED question it answered and
+    re-deliver it as a fresh question.
+    """
+    p = _write(tmp_path, [
+        _user_line("go"),
+        _assistant_line("Reason: need input\nINPUT_REQUIRED"),
+        json.dumps({"type": "user", "message": {
+            "role": "user",
+            "content": [{"type": "image", "source": {}}]}}),
+        _assistant_line("Applying the screenshot; no verdict yet."),
+    ])
+    assert extract_verdict_from_transcript(p, VERDICTS) is None
+
+
 def test_new_task_after_a_user_interruption_supersedes(tmp_path: Path) -> None:
     """Transparency for the interruption must not leak past a real task."""
     p = _write(tmp_path, [

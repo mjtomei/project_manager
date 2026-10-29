@@ -1354,7 +1354,6 @@ def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
     Returns None when the review pane or its transcript is gone — then
     nobody can answer that question any more.
     """
-    import os
     from pm_core.claude_launcher import session_id_from_transcript
     session = _get_pm_session()
     if not session or not transcript_dir:
