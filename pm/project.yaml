@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T03:57:37.461326+00:00'
+  updated_at: '2026-10-29T04:30:11.873051+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29740,6 +29740,22 @@ prs:
       4590 passed, 1 skipped, 0 failed (4591 collected).'
     created_at: '2026-10-29T03:57:37Z'
     last_edited: '2026-10-29T03:57:37Z'
+  - id: note-9e11f1d
+    text: 'Review-loop 345f i3 (c6167bb1): found and fixed a crash regression plus
+      one remaining instance of this PR''s own failure class. (1) `_run_qa_sync` Phase
+      2 read `planner_pane`, bound only inside the Phase 1 planning branch, so every
+      execution-only run (`pm qa run <instruction>`, which builds QALoopState(planning_phase=False)
+      with the scenario pre-loaded) died with UnboundLocalError before launching its
+      scenario. Fixed by initialising it to None; TestExecutionOnlyPhase2 fails pre-fix
+      with that exact error. (2) poll_for_verdict raised overall_timeout / no_response
+      without the last-chance transcript scan the QA tick loop does in _retire_if_exhausted,
+      so a verdict flushed as the deadline expired was reported absent as NO_VERDICT.
+      Both raise sites now scan first; two new tests. Spec corrected where it no longer
+      matched the code (_lease_keepalive is passed as the review poller stop_check
+      but always returns False). Full suite with the review-container env (pytest
+      8.4.2): 4593 passed, 1 skipped, 0 failed, 0 errors (368 s).'
+    created_at: '2026-10-29T04:30:11Z'
+    last_edited: '2026-10-29T04:30:11Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
