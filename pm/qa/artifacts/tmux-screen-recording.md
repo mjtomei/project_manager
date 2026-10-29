@@ -577,7 +577,10 @@ missing or stale video — so install `agg` first when `command -v agg` prints
 nothing (`~/.local/bin` is on `PATH` in the image; the install creates it if
 it is missing, since `curl -o` cannot; the asset is per architecture, verified
 with agg 1.9.0). The block is guarded on `command -v agg` for that reason, so
-pasting it on an image that already has `agg` does nothing. The render block
+pasting it on an image that already has `agg` does nothing — and it stops when
+the binary it just installed still does not resolve (`~/.local/bin` not on
+`PATH`), instead of exiting 0 and leaving the render to ask whether `agg` is
+installed, which sends the worker back to the same block. The render block
 also checks that `ffmpeg` exists, because a missing encoder otherwise reads
 as a bad gif:
 
@@ -605,6 +608,18 @@ if ! command -v agg >/dev/null; then
         exit 1
     }
     chmod +x ~/.local/bin/agg
+    # The install's job is to make `agg` resolvable, not to leave a file on
+    # disk. `~/.local/bin` is on PATH in the image, but where it is not, this
+    # block would exit 0 with an `agg` nothing can run: the render then fails
+    # with "agg failed on the cast — is 'agg' installed?", the worker pastes
+    # this block again, it downloads again and exits 0 — a remedy that cannot
+    # work, in a loop. Say so, and name the fix.
+    command -v agg >/dev/null || {
+        echo "installed ~/.local/bin/agg but 'agg' still does not resolve —" \
+            "~/.local/bin is not on PATH; add it (export" \
+            "PATH=\"\$HOME/.local/bin:\$PATH\") and re-run the render" >&2
+        exit 1
+    }
 fi
 ```
 

@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T03:27:02.294292+00:00'
+  updated_at: '2026-10-29T03:58:44.395574+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36447,6 +36447,55 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T03:27:02Z'
     last_edited: '2026-10-29T03:27:02Z'
+  - id: note-d6b25f3
+    text: 'Review loop 7c9c i3: two leftovers in the kept recipe scope, both the PR''s
+      own class, both reproduced in this container. (1) The `agg` install block downloaded
+      the release binary into `~/.local/bin/agg` and exited 0; where `~/.local/bin`
+      is not on PATH that leaves an `agg` nothing can run — the render then says "agg
+      failed on the cast — is ''agg'' installed?", the worker pastes the install block
+      again, it downloads again and exits 0: a remedy that cannot work, in a loop.
+      Verified with a PATH that excludes `~/.local/bin` and a stub `curl` that writes
+      the file: the pre-fix block exits 0, `~/.local/bin/agg` exists and is executable,
+      and `command -v agg` still fails; the render block then reports "agg failed
+      on the cast — is ''agg'' installed?" and exits 1. Both recording recipes'' install
+      blocks now check that `agg` resolves after the install and stop with "installed
+      ~/.local/bin/agg but ''agg'' still does not resolve — ~/.local/bin is not on
+      PATH; add it (export PATH="$HOME/.local/bin:$PATH") and re-run the render";
+      with `~/.local/bin` on PATH the block still exits 0, so the image''s layout
+      is unchanged. (2) The web-UI start block turned an unresolvable captures path
+      into `/scenarios/1/web-ui`: `CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"`
+      with an empty answer is the *filesystem root*, because the command prints nothing
+      on stdout when it fails (its error goes to stderr: "PR ''pr-xxxxxxx'' not found."
+      for an unsubstituted id, "No project.yaml found" when the step is pasted outside
+      the project) and exits non-zero, and the block''s own `mkdir -p "$CAPDIR"` creates
+      it when the worker is root (QA container workers are). The capture then lands
+      outside the per-PR captures directory while every later check passes on those
+      files and the manifest points at a directory the report never reads. Verified
+      with real `pm`: the pre-fix block ran `mkdir -p /scenarios/1/web-ui` (non-root
+      here, so it failed and was reported as "could not create … — check the path
+      and its permissions", a misdiagnosis of a path that was never resolved; with
+      the probe''s stubbed `mkdir` modelling the root worker the run exited 0 with
+      the capture aimed there). Step 1 now resolves the captures root with a checked
+      substitution (`cap_root=$(pm qa captures-path "$PR_ID") || cap_root=`) and stops
+      with "could not resolve the captures directory for $PR_ID — run ''pm qa captures-path
+      $PR_ID'' in the project to see why …" before computing `CAPDIR` or creating
+      anything; both failure shapes (failing and silent `pm`) and the nominal run
+      were verified. Tests: four new cases (both recipes'' install block with `~/.local/bin`
+      off PATH; the web-UI start block with a failing `pm` and with a silent one,
+      a logging `mkdir` stub asserting nothing was attempted), all failing against
+      `HEAD`''s recipes (checked by restoring them in place, then restoring the post-fix
+      copies). File 163 pass; related suites (`test_qa_artifact_web_ui_recording`,
+      `test_qa_instructions`, `test_qa_loop`) 175 pass; full suite `env -u PM_HOST_HOME
+      PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py --deselect
+      tests/test_signoff_integration.py` -> 4545 passed, 1 skipped, 92 deselected,
+      12 failed, all tests/test_markdown_render.py with ModuleNotFoundError for the
+      `markdown` dep this container lacks (the same file passes 13/13 once it is installed
+      on the scratch path); none touch the changed area. Evidence: `/pm-captures/review-7c9c-i3/`
+      (`probe.log`, `scripts/`, `README.md`). impl.md R31 + Files/verification/evidence
+      and qa.md updated. No `pm_core/` change; the dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-29T03:58:44Z'
+    last_edited: '2026-10-29T03:58:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

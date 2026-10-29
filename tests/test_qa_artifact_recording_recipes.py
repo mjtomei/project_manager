@@ -87,6 +87,12 @@ hits, regardless of how it waits for a background job:
   recorded so the teardown cannot signal a recycled one, and the web-UI
   finalize step names a missing ``ffmpeg`` instead of reporting it as a
   failed transcode of the driver's webm;
+- a remedy that runs but cannot work says so: the ``agg`` install stops when
+  the binary it just downloaded still does not resolve (``~/.local/bin`` not
+  on ``PATH``), instead of exiting 0 and sending the worker back to the same
+  block from the render's "is 'agg' installed?", and the web-UI start block
+  refuses a captures path it could not resolve rather than turning the empty
+  answer into ``/scenarios/1/web-ui`` at the filesystem root;
 - a scenario-driving step checks its own sends: the tmux recipe's example
   ``pm tui send`` lines are guarded (a mid-sequence failure was invisible,
   because the block's status is its last command's), and the CLI scaffold —
@@ -1243,11 +1249,14 @@ def _install_block(name):
     raise AssertionError(f"{name}: no agg install block found")
 
 
-def _run_install_block(name, tmp_path, curl_body=None, agg_present=False):
+def _run_install_block(name, tmp_path, curl_body=None, agg_present=False,
+                       local_on_path=True):
     """Run the recipe's own ``agg`` install block against stub tools.
 
     ``agg_present`` seeds a working ``agg`` in ``~/.local/bin`` (ahead of the
     stub PATH, as on the image). ``curl_body`` replaces the stub ``curl``.
+    ``local_on_path`` puts ``~/.local/bin`` on PATH (the image's layout); with
+    it off, the block installs a binary nothing can run.
     Returns ``(proc, agg path, curl-called marker)``.
     """
     block = _install_block(name)
@@ -1276,7 +1285,8 @@ printf '#!/bin/sh\\necho downloaded\\n' > "$last"
     # stubs stand in for everything else, so no host `agg` can mask the guard.
     # `bash` itself is resolved before PATH is replaced.
     bash = shutil.which("bash")
-    env = dict(os.environ, HOME=str(home), PATH=f"{local}:{bindir}")
+    path = f"{local}:{bindir}" if local_on_path else str(bindir)
+    env = dict(os.environ, HOME=str(home), PATH=path)
     r = subprocess.run([bash], input=block, env=env,
                        capture_output=True, text=True, timeout=60)
     return r, agg, called
@@ -1344,6 +1354,31 @@ def test_renderer_install_is_bounded_and_drops_a_partial_download(name,
         f"{name}: a failed download left a partial agg earlier on PATH than "
         "the image's working binary")
     assert "could not download agg" in r.stderr, r.stderr
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_renderer_install_names_an_agg_it_cannot_resolve(name, tmp_path):
+    """An install that leaves ``agg`` off PATH must not report success.
+
+    ``~/.local/bin`` is on PATH in the image, but where it is not the block
+    downloads ``agg`` and exits 0 with a binary nothing can run: the render
+    then fails with "agg failed on the cast — is 'agg' installed?", the worker
+    pastes this block again, it downloads again and exits 0 — a remedy that
+    cannot work, in a loop. The block's job is to make ``agg`` *resolvable*,
+    so it has to say when the file it wrote still is not.
+    """
+    r, agg, called = _run_install_block(name, tmp_path, local_on_path=False)
+
+    assert called.exists(), "the fixture did not run the install"
+    assert agg.exists(), "the fixture installed no agg to fail on"
+    assert r.returncode != 0, (
+        f"{name}: the install block exited 0 while `agg` still does not "
+        "resolve on PATH, so the render sends the worker back to the same "
+        "block")
+    assert "does not resolve" in r.stderr, r.stderr
+    assert "~/.local/bin" in r.stderr and "PATH" in r.stderr, (
+        f"{name}: the failure does not name the directory to put on PATH: "
+        + r.stderr)
 
 
 def test_cli_tee_fallback_writes_the_transcript_into_the_capture_dir():
@@ -2141,11 +2176,15 @@ def _web_ui_start_block():
     return re.findall(r"```bash\n(.*?)```", section, re.S)[0]
 
 
-def _run_web_ui_start(mode, tmp_path, caps_is_file=False):
+def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
+                      mkdir_body=None):
     """Run the web-UI recipe's app-start block with stub pm/curl/my-app.
 
     ``caps_is_file`` makes the captures path itself a regular file, so the
-    block's ``mkdir -p`` cannot create the capture directory.
+    block's ``mkdir -p`` cannot create the capture directory. ``pm_body``
+    replaces the stub ``pm`` (which otherwise prints the captures root);
+    ``mkdir_body`` replaces the stub ``mkdir``, so a case can watch what the
+    block tries to create without creating it.
     """
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", _web_ui_start_block())
     bindir = tmp_path / "bin"
@@ -2156,7 +2195,9 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False):
     else:
         caps.mkdir(parents=True, exist_ok=True)
     launched = tmp_path / "app-launched"
-    _stub_tool(bindir, "pm", f'echo "{caps}"\n')
+    _stub_tool(bindir, "pm", pm_body or f'echo "{caps}"\n')
+    if mkdir_body is not None:
+        _stub_tool(bindir, "mkdir", mkdir_body)
     _stub_tool(bindir, "curl", _STUB_CURL)
     _stub_tool(bindir, "my-app", f'touch "{launched}"\n')
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
@@ -2284,6 +2325,51 @@ class TestWebUiStartExecution:
         assert not launched.exists(), (
             "the app was started although the capture directory does not "
             "exist, so its outputs have nowhere to go")
+
+    @pytest.mark.parametrize("pm_body", [
+        # The real command's failure shape: the error on stderr, exit 1,
+        # nothing on stdout (verified: "PR 'pr-xxxxxxx' not found." for an
+        # unsubstituted id; "No project.yaml found" when the step is pasted
+        # outside the project).
+        'echo "PR \'pr-xxxxxxx\' not found." >&2\nexit 1\n',
+        # A command that succeeds and prints nothing is the same empty answer.
+        "exit 0\n",
+    ])
+    def test_web_ui_start_refuses_a_captures_path_it_cannot_resolve(
+            self, pm_body, tmp_path):
+        """An unresolvable captures path must not become ``/scenarios/…``.
+
+        ``CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"`` with
+        an empty answer is ``/scenarios/1/web-ui`` — the *filesystem root* —
+        and the block's ``mkdir -p`` creates it when the worker is root (QA
+        container workers are). The whole capture then lands outside the
+        per-PR captures directory while every later check passes on those
+        files, and the manifest points at a directory the report never reads.
+        Verified with real ``pm``: an unsubstituted ``PR_ID`` prints its error
+        on stderr, exits 1 and leaves stdout empty, so the pre-fix block ran
+        ``mkdir -p /scenarios/1/web-ui`` (as a non-root user that failed and
+        was reported as "could not create … check the path and its
+        permissions" — a misdiagnosis of a path that was never resolved).
+        """
+        mklog = tmp_path / "mkdir-calls"
+        r, launched = _run_web_ui_start(
+            "ok", tmp_path, pm_body=pm_body,
+            # Watch what the block would create, without creating it.
+            mkdir_body=f'printf "%s\\n" "$*" >> "{mklog}"\nexit 1\n')
+
+        assert r.returncode != 0, (
+            "the start block ran on with a captures path it could not "
+            "resolve, so the capture lands at the filesystem root")
+        assert "could not resolve the captures directory" in r.stderr, (
+            r.stderr)
+        assert "pm qa captures-path" in r.stderr, (
+            "the failure does not name the command to run: " + r.stderr)
+        assert not launched.exists(), (
+            "the app was started although the capture directory was never "
+            "resolved")
+        assert not mklog.exists(), (
+            "the block created (or tried to create) a directory from an "
+            "empty captures-path answer: " + mklog.read_text())
 
 
 def test_web_ui_clears_a_previous_video():

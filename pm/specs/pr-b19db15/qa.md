@@ -78,6 +78,17 @@ recording-recipe bugs that any worker following the recipe hits:
   shared by every run on the host, so two CLI captures must run in sequence;
   the step-1 prose says so — both runs fail loudly rather than sharing
   evidence, the same disposition as the tmux recipe's `pm-recorder` note.)
+- a remedy that runs but cannot work says so, and an empty answer never
+  becomes a path (review loop 7c9c i3): both recording recipes' `agg` install
+  block stops when the binary it just downloaded still does not resolve
+  (`~/.local/bin` not on `PATH`), naming the export, instead of exiting 0 and
+  leaving the render to ask "is 'agg' installed?" — which sends the worker
+  back to the block that already ran, in a loop; and the web-UI start block
+  resolves its captures root through a checked `pm qa captures-path` and
+  refuses a failed or empty answer, because the bare substitution turned it
+  into `/scenarios/1/web-ui` at the filesystem root, which `mkdir -p` creates
+  when the worker is root — the capture then lands outside the per-PR
+  captures directory while every later check passes on those files.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -96,7 +107,13 @@ sessions reaching one capture directory through different spellings (`~/cap`
 vs its absolute path) must be refused, and a same-session retry must not be
 refused by its own `~/`-spelled claim; with another pm session on the server
 that holds no claim, step 2 pasted from *inside* the capture directory must
-proceed and take the claim, not refuse the run as a collision. The older
+proceed and take the claim, not refuse the run as a collision. S21/S23 also
+re-check the `agg` install: with `agg` missing and `~/.local/bin` **not** on
+`PATH`, the install block must fail with the export it names rather than
+exit 0. S25 also re-checks the captures-path guard: step 1 pasted with an
+unsubstituted `PR_ID` (or outside the project) must stop with "could not
+resolve the captures directory" and create nothing, not run the capture in
+`/scenarios/1/web-ui`. The older
 S14/S18/S20 covered the same recipe ground before the reduction; S15, S16,
 S17 and S19 exercised the dropped helper, the shared prompt guidance and the
 QA-loop helper install, none of which exist in this PR any more.

@@ -66,7 +66,28 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
 ```bash
 # Placeholders: set these for your capture.
 PR_ID=pr-xxxxxxx             # the PR under QA (keys the captures dir)
-CAPDIR="$(pm qa captures-path "$PR_ID")/scenarios/1/web-ui"   # <capture-dir>/<short-name>
+# Resolve the captures directory through pm, and check the answer before it
+# becomes a path. `pm qa captures-path` prints nothing on stdout when it fails
+# — its error goes to stderr ("PR 'pr-xxxxxxx' not found." for an
+# unsubstituted id, "No project.yaml found" when the step is pasted outside
+# the project) and it exits non-zero — so a bare
+# `CAPDIR="$(...)/scenarios/1/web-ui"` would be `/scenarios/1/web-ui`, at the
+# *filesystem root* (an answer that exits 0 and prints nothing is the same
+# empty path, so the check is on the value, not only on the status).
+# `mkdir -p` creates it when the worker is root (QA
+# container workers are), the whole capture then lands there while every later
+# check passes on those files, and the manifest points at a directory the
+# report never reads — the same "a promised artifact written where nothing
+# looks" bug as the relative `<capture-dir>` the recording recipes refuse.
+cap_root=$(pm qa captures-path "$PR_ID") || cap_root=
+if [ -z "$cap_root" ]; then
+    echo "could not resolve the captures directory for $PR_ID — run 'pm qa" \
+        "captures-path $PR_ID' in the project to see why (a failed lookup" \
+        "prints its error on stderr; the capture directory would otherwise" \
+        "be /scenarios/1/web-ui at the filesystem root)" >&2
+    exit 1
+fi
+CAPDIR="$cap_root/scenarios/1/web-ui"   # <capture-dir>/<short-name>
 PORT=8000                    # the port your app serves on
 APP_URL="http://localhost:$PORT"
 # Every step below writes into the capture directory, and several of them
