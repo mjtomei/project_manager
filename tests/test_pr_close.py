@@ -942,6 +942,7 @@ def test_remove_warns_dependents_reference_the_removed_record(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "depend on the removed" in result.output
+    assert "are blocked without it" in result.output
     assert "remain blocked by" not in result.output
     # The record is gone, so the only way out is dropping the dependency.
     assert "drop it from the dependents' depends_on" in result.output
@@ -950,6 +951,31 @@ def test_remove_warns_dependents_reference_the_removed_record(tmp_path):
     assert dependent["status"] == "pending"
     assert dependent["depends_on"] == ["pr-001"]
     assert [p["id"] for p in graph.ready_prs(data["prs"])] == []
+
+
+def test_remove_of_a_merged_pr_blocks_its_dependents(tmp_path):
+    """`--remove` also accepts a *merged* record, whose dependents were
+    unblocked by that merge.  Deleting it takes the satisfying dependency
+    away, so they are blocked only now — the warning must not tell the user
+    they were already blocked ("stay blocked")."""
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="MERGED")
+        project = _make_project(tmp_path, status="merged",
+                                gh_pr_number=pr.number)
+        # The merge satisfied the dependency: the dependent is ready.
+        assert [p["id"] for p in graph.ready_prs(
+            store.load(project["pm_dir"])["prs"])] == ["pr-002"]
+
+        result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code == 0, result.output
+    assert "depend on the removed" in result.output
+    assert "are blocked without it" in result.output
+    assert "stay blocked" not in result.output
+    # It is blocked now: only `merged` satisfies a dependency and the merged
+    # record is gone.
+    assert [p["id"] for p in graph.ready_prs(
+        store.load(project["pm_dir"])["prs"])] == []
 
 
 def test_malformed_dependent_entry_does_not_break_close(tmp_path):

@@ -103,7 +103,10 @@ Add `--remove` to `pm pr close`:
   `Warning: 2 dependent PR(s) remain blocked by #163: pr-002 (B), pr-003 (C)`.
   With `--remove` the warning instead says the dependents depend on the
   *removed* record (their `depends_on` now names a PR that does not exist), so
-  the message must not imply a `closed` status is what blocks them.
+  the message must not imply a `closed` status is what blocks them.  It says
+  they "are blocked without it" rather than that they "stay blocked": the other
+  `--remove` input is a *merged* record, whose dependents the merge had
+  unblocked — deleting it is what blocks them (review a81e i2, R11 item 49).
 - On the default close, follow the warning with a one-line hint naming the two
   ways out (only `merged` satisfies a dependency, so the block is permanent
   until the user acts): reopen the closed PR, or drop it from the dependents'
@@ -463,6 +466,17 @@ workdirs are touched.
     it, and the id-less auto-select offers both terminal statuses), so the
     line reads "merged or closed PR workdirs".  Documentation only — no
     behavior change, and no test pins the sentence.
+49. `--remove`'s dependent warning does not assert a state the dependents were
+    not in (review a81e i2).  It read "depend on the removed <X> and stay
+    blocked", which is false for the other `--remove` input — a *merged*
+    record: its dependents were unblocked by that merge (`ready_prs` selected
+    them) and deleting the record is what blocks them.  It now reads "and are
+    blocked without it", which holds for both inputs (a closed record never
+    satisfied a dependency either).  Covered by
+    `test_remove_of_a_merged_pr_blocks_its_dependents` (asserts the dependent
+    is ready before, blocked after, and pins the wording) and the new
+    assertion in `test_remove_warns_dependents_reference_the_removed_record`
+    — both fail on the previous head.
 
 The pre-existing `tests/test_pr_enhancements.py:746`
 (`TestGitHubCloseResilience`) asserted the *old* destructive outcome (workdir

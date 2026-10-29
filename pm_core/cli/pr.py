@@ -3732,9 +3732,15 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             f"{_pr_display_id(p)} ({p.get('title', '???')})"
             for p in dependents)
         if remove:
+            # "are blocked without it", not "stay blocked": removing a
+            # *merged* record (the other --remove input) takes away the
+            # dependency that had satisfied them, so they were ready a moment
+            # ago and are blocked only now.  Only `merged` satisfies a
+            # dependency, so a removed record never satisfies one.
             click.echo(
                 f"Warning: {len(dependents)} dependent PR(s) depend on the "
-                f"removed {display_id} and stay blocked: {names}", err=True)
+                f"removed {display_id} and are blocked without it: {names}",
+                err=True)
             # The record is gone, so re-adding would mint a new id and leave
             # the reference dangling: dropping the dependency is the way out.
             click.echo(

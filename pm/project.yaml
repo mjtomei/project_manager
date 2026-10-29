@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T09:21:30.990299+00:00'
+  updated_at: '2026-10-29T09:40:00.382962+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14777,6 +14777,20 @@ prs:
       4564 passed, 1 skipped, 0 failed.'
     created_at: '2026-10-29T09:21:30Z'
     last_edited: '2026-10-29T09:21:30Z'
+  - id: note-ca9e9c9
+    text: 'Review a81e i2: `pm pr close --remove`''s dependent warning no longer says
+      the dependents "stay blocked". That is false for the other --remove input —
+      a *merged* record: its dependents were unblocked by that merge (ready_prs selected
+      them) and deleting the record is what blocks them. It now reads "depend on the
+      removed <X> and are blocked without it", which holds for both inputs (a closed
+      record never satisfied a dependency either). Tests: test_remove_of_a_merged_pr_blocks_its_dependents
+      (ready before, blocked after, wording pinned) plus a new assertion in test_remove_warns_dependents_reference_the_removed_record
+      — both fail on the previous head (probe-verified: ''are blocked without it''
+      missing, old text read ''stay blocked''). Spec synced (R7, R11 item 49). Full
+      suite 4565 passed, 1 skipped, 0 failed (/pm-captures/review-a81e-i2/full-suite.log).
+      No other changes; the close contract itself is untouched.'
+    created_at: '2026-10-29T09:40:00Z'
+    last_edited: '2026-10-29T09:40:00Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
