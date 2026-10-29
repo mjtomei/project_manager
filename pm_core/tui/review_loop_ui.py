@@ -437,21 +437,50 @@ def _ensure_poll_timer(app) -> None:
         app._review_loop_timer = app.set_interval(1.0, lambda: _poll_loop_state(app))
 
 
+_ACTIVE_STATUSES = ("in_progress", "in_review", "qa", "sign_off")
+
+
+def _has_active_pr(app) -> bool:
+    """True when a PR sits in a status whose loop the poll timer serves.
+
+    Deliberately does *not* require ``workdir``.  QA creates the workdir of
+    a run itself (a ``pm qa run`` child, or a TUI-driven run whose clone
+    finishes after ``start_qa``), so ``app._data`` — loaded before that —
+    can be missing it while a run of this project is in flight.  Requiring
+    it let the shared timer stop the moment the local run finished, so the
+    runtime_state mirror deferred to the next tick never ran and the resume
+    scan that adopts a *concurrent* run (another process's ``pm qa run``)
+    never ran either (QA S35: the TUI never reported the CLI run's PASS).
+    """
+    return any(
+        pr.get("status") in _ACTIVE_STATUSES
+        for pr in (app._data.get("prs") or [])
+    )
+
+
+def _qa_poll_needed(app) -> bool:
+    """True when a tracked QA run still needs the shared poll timer.
+
+    Covers a running run, a held run (``running=False`` while it waits for
+    an INPUT_REQUIRED follow-up), and a *finished* run whose verdict has not
+    been cleaned up yet — the runtime_state mirror and the resume-snapshot
+    clear run on the tick *after* the completion is first processed, so
+    dropping the timer at the end of that first tick loses that bookkeeping.
+    """
+    return any(
+        s.running or s.held or bool(s.latest_verdict)
+        for s in app._qa_loops.values()
+    )
+
+
 def ensure_animation_timer(app) -> None:
     """Start the poll timer if there are active PRs that need animation.
 
     Called after PR status changes (start, done, sync) to ensure
     the spinner animation runs for in_progress/in_review PRs.
     """
-    has_active = any(
-        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
-        for pr in (app._data.get("prs") or [])
-    )
-    # A held QA run (waiting for INPUT_REQUIRED follow-up) has
-    # ``running=False`` but still needs the poll timer to collect its
-    # follow-up and process the reopened result.
-    qa_running = any(s.running or s.held for s in app._qa_loops.values())
-    if has_active or any(s.running for s in app._review_loops.values()) or qa_running:
+    if _has_active_pr(app) or any(s.running for s in app._review_loops.values()) \
+            or _qa_poll_needed(app):
         _ensure_poll_timer(app)
 
 
@@ -625,11 +654,8 @@ def _poll_loop_state_inner(app) -> None:
 
     # Stop the timer if no loops are running AND no active PRs need animation
     # AND watcher is not running
-    has_active_prs = any(
-        pr.get("status") in ("in_progress", "in_review", "qa", "sign_off") and pr.get("workdir")
-        for pr in (app._data.get("prs") or [])
-    )
-    qa_running = any(s.running or s.held for s in app._qa_loops.values())
+    has_active_prs = _has_active_pr(app)
+    qa_running = _qa_poll_needed(app)
     watcher_running = app._watcher_manager.is_any_running()
     if not any_running and not has_active_prs and not watcher_running and not qa_running:
         if app._review_loop_timer:

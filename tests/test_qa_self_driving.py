@@ -141,6 +141,86 @@ class TestZZTStart:
                 review_loop_ui._poll_loop_state_inner(app)
             complete.assert_called_once_with(app, app._qa_loops["pr-001"])
 
+    def test_arms_for_an_active_pr_without_a_workdir(self, tmp_path):
+        """A qa PR whose workdir QA created (so ``_data`` lacks it) still
+        arms the shared timer: the resume scan that adopts a concurrent
+        ``pm qa run`` rides on it (QA S35)."""
+        from pm_core.tui import review_loop_ui
+
+        app = _make_app(tmp_path)
+        app._data["prs"][0].pop("workdir")
+        app._review_loop_timer = None
+
+        review_loop_ui.ensure_animation_timer(app)
+
+        app.set_interval.assert_called_once()
+
+    def test_keeps_timer_for_an_active_pr_without_a_workdir(self, tmp_path):
+        """The stop side must agree with the arm side."""
+        from pm_core.tui import review_loop_ui
+
+        app = _make_app(tmp_path)
+        app._data["prs"][0].pop("workdir")
+        app._qa_loops = {}
+        app._impl_poll_counter = 0
+        app._qa_resume_poll_counter = 1
+        app._watcher_manager.is_any_running.return_value = False
+        timer = MagicMock()
+        app._review_loop_timer = timer
+
+        with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"):
+            review_loop_ui._poll_loop_state_inner(app)
+
+        timer.stop.assert_not_called()
+        assert app._review_loop_timer is timer
+
+    def test_keeps_timer_for_a_finished_run_awaiting_its_mirror(self, tmp_path):
+        """The runtime_state mirror and the resume-snapshot clear run on the
+        tick *after* the completion is processed; stopping the timer at the
+        end of the first tick drops them (QA S35: no ``[done STOPPED]``)."""
+        from pm_core.tui import review_loop_ui, qa_loop_ui
+
+        app = _make_app(tmp_path, pr_status="pending")
+        app._data["prs"][0].pop("workdir")
+        state = QALoopState(pr_id="pr-001")
+        state.running = False
+        state.latest_verdict = "STOPPED"
+        app._qa_loops = {"pr-001": state}
+        app._impl_poll_counter = 0
+        app._qa_resume_poll_counter = 1
+        app._watcher_manager.is_any_running.return_value = False
+        timer = MagicMock()
+        app._review_loop_timer = timer
+
+        with patch.object(qa_loop_ui, "_on_qa_complete"), \
+             patch.object(review_loop_ui, "_refresh_tech_tree"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"):
+            review_loop_ui._poll_loop_state_inner(app)
+
+        timer.stop.assert_not_called()
+        assert app._review_loop_timer is timer
+
+    def test_still_stops_the_timer_when_nothing_needs_it(self, tmp_path):
+        """The widened predicate must not pin the timer forever."""
+        from pm_core.tui import review_loop_ui
+
+        app = _make_app(tmp_path, pr_status="pending")
+        app._data["prs"][0].pop("workdir")
+        app._qa_loops = {}
+        app._impl_poll_counter = 0
+        app._qa_resume_poll_counter = 1
+        app._watcher_manager.is_any_running.return_value = False
+        timer = MagicMock()
+        app._review_loop_timer = timer
+
+        with patch.object(review_loop_ui, "_refresh_tech_tree"), \
+             patch("pm_core.tui.watcher_ui.poll_watcher_state"):
+            review_loop_ui._poll_loop_state_inner(app)
+
+        timer.stop.assert_called_once()
+        assert app._review_loop_timer is None
+
     def test_worker_start_failure_clears_running(self, tmp_path):
         from pm_core.qa_loop import start_qa_background
 

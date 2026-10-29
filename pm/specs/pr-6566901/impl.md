@@ -696,6 +696,32 @@ into this branch. The conflict resolution keeps both sides' behaviour:
   of both sides' PR entries and notes (518 PRs, no duplicate ids, no lost
   notes); `active_pr` takes master's value.
 
+## QA S35 — concurrent runs and the shared poll timer (2026-10-29)
+
+A CLI `pm qa run` and a TUI-driven QA loop were driven concurrently on two PRs
+and the TUI-driven one was stopped during planning. The runs kept their own
+state, but the *surfaces* did not update: `~/.pm/runtime/<pr>.json` was never
+written for the stopped run, and the finished CLI run was not adopted (no
+`QA PASS for <pr>` line, no runtime record, no note) until an unrelated reload
+82 s later.
+
+Cause: the shared 1 s poll timer — which processes completions, writes the
+runtime_state mirror and runs the resume scan that adopts another process's
+run — stopped at the end of the tick that processed the local stop. Both its
+arm and stop predicates required an active PR to carry a `workdir` *in the
+TUI's in-memory `_data`*, and QA creates the workdir of a run itself, so
+`_data` loaded before that never has it. The runtime_state mirror runs on the
+tick *after* the completion, so stopping the timer in that same tick dropped it
+entirely.
+
+`_has_active_pr` (status-only) and `_qa_poll_needed` (running, held, or
+verdict-awaiting-cleanup) now back both `ensure_animation_timer` and the stop
+check in `_poll_loop_state_inner`. Live re-run: the stopped run's runtime
+record lands one second after the stop, and the TUI adopts the concurrent CLI
+run's PASS in the same second it completes. Tests:
+`tests/test_qa_self_driving.py::TestZZTStart` — three new (each fails before
+the change) plus a control that the timer still stops when nothing needs it.
+
 ## Tests
 
 * `tests/test_loop_recovery.py` (new): shared recovery unit tests —
