@@ -42869,6 +42869,48 @@ prs:
       stops at "signed off … waiting for manual merge".'
     created_at: '2026-10-29T12:20:26Z'
     last_edited: '2026-10-29T12:20:26Z'
+  - id: note-bbdf7b5
+    text: 'S134 refine (code reading, HEAD 74cebe25): (1) The TUI routes a sign-off
+      verdict only with auto-start on and the PR in scope (signoff_ui._driven). Stage
+      a TUI-started owed re-run with `pm autostart add D`. Start D tick loops only
+      after the TUI logs "Starting QA for D...": a tick that routes the hop launches
+      qa-run-bg itself. The plain restart then turns auto-start off. (2) Restart only
+      after the main qa-<pr> planner window exists. It opens in the PR workdir, so
+      kill_windows_of_run kills only qa-<pr>-s0; t then focuses the main window and
+      ticks print `running: qa`. Without that window, a tick launches the PR itself
+      ~180 s after the dead start (`running: qa (launched)`). (3) With auto-start
+      off, a TUI PASS says "press i to sign off"; the hand-off is a tick `advanced:
+      sign_off`. (4) Crash probe prediction: with a new pid the record is not ended,
+      awaiting is already consumed, and the dead qa-<pr> window keeps ticks at `running:
+      qa`, so D strands on HEAD. Check master. (5) A `pm edit` hold of >=15 s across
+      the restart (lock timeout 2 s) forces the fallback line. Use fresh PRs per sign-off
+      round.'
+    created_at: '2026-10-29T10:16:39Z'
+    last_edited: '2026-10-29T10:16:39Z'
+  - id: note-894d3fa
+    text: 'QA S134 (2026-10-29, host, all fake-claude, HEAD 74cebe25 vs controls f9a6343d/51a709f3,
+      master 4a74d880 for story 5; captures /pm-captures/scenarios/134/README.md,
+      34 mp4): INPUT_REQUIRED, no code change. RQ57 held live: plain restart ends
+      the TUI own snapshot-less run, kills only qa-<pr>-s0, keeps the pid, one sticky
+      "cut off ... press z t" line, none on a 2nd restart, t only focuses, z t starts
+      one run (control f9a: no line); breadcrumb restart restarts the target B once
+      and reports only C, after "resumed" (control 51a: lines for B and C at mount,
+      before the breadcrumb pass); owed REQA re-run cut off -> reopened + restarted
+      once through the claim, no line; busy project.yaml -> WARNING could not reopen,
+      one line, nothing restarts for 250 s, z t once; other processes/clones runs
+      untouched (E clone 2 TUI, F pm qa run, G qa-run-bg), picker [working] throughout.
+      Two Thens fail as worded, both pr-f1d825b (overall PASS written ~30 s before
+      finalize, note-fd1b89d): story 3 ticks print `running: qa (driven elsewhere)`
+      x15 during the owed re-run finalize window (spec: never); story 1 tick `advanced:
+      sign_off` lands ~30 s before the TUI "QA PASS ... press i to sign off" (spec:
+      the next tick). Decide: relax those Thens or bring a pr-f1d825b fix in. Story
+      5 crash probe (kill -9 pm _tui + pm session respawn during the owed re-run planning)
+      strands D3 at qa on HEAD and master alike (dead record never ended, awaiting
+      None, ticks running: qa x161, no line) -> filed pr-58aa21a. Push impossible
+      from this QA container: /run/pm-push-proxy is the s-135 proxy (workdir mismatch),
+      so this note and pr-58aa21a exist only in the s-134 clone project.yaml.'
+    created_at: '2026-10-29T11:30:06Z'
+    last_edited: '2026-10-29T11:30:06Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -43751,7 +43793,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-26T04:56:17.963363+00:00'
-  updated_at: '2026-10-27T07:14:35.705819+00:00'
+  updated_at: '2026-10-29T11:24:49.076319+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -43776,6 +43818,21 @@ prs:
       and stalls once ticks stop (pr-5410ae4 note).'
     created_at: '2026-10-27T07:14:35Z'
     last_edited: '2026-10-27T07:14:35Z'
+  - id: note-fd1b89d
+    text: 'Seen again in pr-592e4bd QA S134 (2026-10-29, host, fake-claude, HEAD 74cebe25
+      and control f9a6343d; /pm-captures/scenarios/134): qa_status.json overall=PASS
+      lands after verification and ~30 s before FINALIZE_DONE in every run. (1) No
+      open sign-off return (S134 story 1, auto-start off, TUI z t run): the 2 s tick
+      printed `advanced: sign_off` at 10:27:38 while the finalizer ran; the TUI logged
+      "QA PASS ... press i to sign off" at 10:28:09 (control f9a6343d: 10:32:15 vs
+      10:32:45). (2) Open REQA return (story 3, TUI-driven owed re-run; also the busy
+      variant z t run): ticks print `running: qa (driven elsewhere)` for the whole
+      finalize window (15 ticks, 10:46:14-10:46:44; 10:57:47-10:58:17), then `advanced:
+      sign_off` once. Same 26-27 per round in S131 analysis.txt. A fix that holds
+      a tick on a status written by a still-live run (finalizing) would make both
+      print plain `running: qa`.'
+    created_at: '2026-10-29T11:24:48Z'
+    last_edited: '2026-10-29T11:24:48Z'
 - id: pr-ad4af06
   plan: bugs
   title: 'Bug: QA runs driven by pm pr auto-sequence (qa-run-bg) record no QA note
@@ -48436,6 +48493,43 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T05:37:07.785932+00:00'
   updated_at: '2026-10-29T05:37:07.785932+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-58aa21a
+  plan: bugs
+  title: 'Bug: a TUI crash while a sign-off REQA re-run is still planning strands
+    the PR at qa: nothing ends the dead run, nothing is owed, ticks print running:
+    qa forever'
+  branch: pm/pr-58aa21a-bug-a-tui-crash-while-a-sign-off-reqa-re-run-is-st
+  status: pending
+  depends_on: []
+  description: 'Repro (QA S134 story 5, pr-592e4bd, host, fake-claude; /pm-captures/scenarios/134/h5
+    and m5): pm autostart add D -> the TUI drives review -> QA PASS -> TUI-launched
+    sign-off router answers SIGNOFF_REQA -> TUI logs "Sign-off routed D back to QA"
+    and "owed REQA: starting the QA run" (awaiting consumed) -> while that re-run
+    is still planning (no qa_resume.json) the pm _tui process dies (kill -9 of the
+    pidfile pid) and the user runs `cd <project> && pm session` ("TUI pane missing
+    - respawning..."). For 5.5 min after the respawn: D stays at qa; the dead run
+    record (~/.pm/workdirs/qa/<D>-<loop>/qa_run.json) keeps owner_pid = the dead TUI
+    and no ended_at; signoff_return.awaiting stays None; qa-<D>-s0 and qa-<D> (the
+    dead run windows) stay open; every `pm pr auto-sequence D` tick prints `running:
+    qa` (161 of 161); the new TUI logs nothing about D and starts nothing. Identical
+    on master 4a74d880 and pr-592e4bd 74cebe25. Why: qa_loop.end_runs_orphaned_by_restart
+    (pr-592e4bd 245eb22f) only ends records whose owner_pid/owner_start are the mounting
+    process itself (a pm tui restart exec), so a new pid never ends them and qa_loop_ui.recover_restart_killed_runs
+    never reopens the REQA; the resume scan adopts only runs with qa_resume.json;
+    and pm_core/cli/pr.py qa branch (overall None, not owed) prints `running: qa`
+    whenever a qa-<pr> window exists. Fix direction: treat a snapshot-less, un-ended
+    run record whose owner (pid + start time) is no longer alive like the restart
+    case (end it, retire its windows, reopen the owed REQA through the claim, else
+    log the press z t line), at TUI mount and/or in the tick.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T11:24:39.224612+00:00'
+  updated_at: '2026-10-29T11:24:39.224612+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
