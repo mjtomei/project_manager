@@ -236,7 +236,7 @@ def _start_loop(app, pr_id: str, pr: dict | None,
             f"{pr_id}: base integration rework pending — review not started",
             force=True)
         _log.info("_start_loop: %s has an open base return; not starting", pr_id)
-        return
+        return False
 
     # Ensure the transcript directory exists on disk.  Fail fast here
     # (before launching a podman container + review pane) if creation
@@ -1639,7 +1639,8 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict, bool]]) -> set[
     started: set[str] = set()
 
     for entry in newly_idle:
-        # Tolerate a 2-tuple (pr_id, pr): only the first element is used.
+        # Only the PR is needed here: the resume flag on the third element is
+        # consumed by the caller's ``_resume_returned_loop`` pass.
         pr_id = entry[0]
         # Scope to the union of the targets' dependency closures
         if not _auto_start.in_scope(app, pr_id, prs):

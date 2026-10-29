@@ -669,6 +669,40 @@ def test_non_dict_base_return_still_records_the_return(w):
     assert pr(w)["base_return"]["attempt"] == 1
 
 
+def test_non_dict_base_check_does_not_disable_the_gate(w):
+    """A corrupt ``base_check`` (a string, a list) must read as "no record".
+
+    ``_retry_open`` runs on the gate's hot path and inside
+    ``impl_completion``; raising there makes the gate fail open (no return is
+    ever recorded) and the completion check report "failed" on every poll, so
+    a hand-edited project.yaml would leave the PR with an open return nobody
+    can resolve.
+    """
+    set_pr(w, base_check="hand-edited garbage")
+    assert base_check._retry_open(pr(w), w.head) is False
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")) as launch:
+        res = gate(w)
+    assert res.decision == base_check.CONFLICT, res.reason
+    assert res.returned
+    launch.assert_called_once()
+    # ``return_to_impl`` replaced the corrupt record with a real one.
+    assert pr(w)["base_return"]["attempt"] == 1
+    assert pr(w)["base_check"]["decision"] == base_check.CONFLICT
+
+
+def test_non_dict_base_check_still_records_a_probe_failure(w):
+    """The error recorder must not raise on a corrupt previous record."""
+    def _apply(d):
+        d["project"]["repo"] = str(w.repo / "does-not-exist")
+        store.get_pr(d, PR)["base_check"] = ["hand-edited"]
+    store.locked_update(w.pm_dir, _apply)
+    res = gate(w)
+    assert res.decision == base_check.RETRY
+    rec = pr(w)["base_check"]
+    assert rec["retryable"] is True
+    assert rec.get("retry_after")
+
+
 def test_malformed_attempt_still_records_the_return(w):
     """A corrupt ``attempt`` must not turn the return into a silent no-op.
 

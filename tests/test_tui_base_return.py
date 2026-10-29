@@ -72,8 +72,12 @@ def test_start_loop_refuses_with_open_base_return(tmp_path):
 
     app = _app(tmp_path, [_pr(base_return=_return())])
     with patch("pm_core.tmux.in_tmux", return_value=True):
-        review_loop_ui._start_loop(app, "pr-001", app._data["prs"][0],
-                                   transcript_dir=str(tmp_path / "tdir"))
+        started = review_loop_ui._start_loop(
+            app, "pr-001", app._data["prs"][0],
+            transcript_dir=str(tmp_path / "tdir"))
+    # The documented contract: a refused start is False, not None — callers
+    # that restore retry state key off the return value.
+    assert started is False
     assert app._review_loops == {}
     assert any("rework pending" in str(c.args[0])
                for c in app.log_message.call_args_list)

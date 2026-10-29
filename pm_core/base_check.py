@@ -680,8 +680,23 @@ def _compact_check(record: dict, stage: str, decision: str,
     return out
 
 
+def _check_record(pr: dict | None) -> dict:
+    """``pr["base_check"]`` as a dict.
+
+    ``project.yaml`` is git-tracked and hand-editable: a ``base_check`` that
+    is a string or a list (or a null) must read as "no record" rather than
+    raise.  An exception here disables the gate (``gate`` catches it and
+    fails open) and leaves ``impl_completion`` reporting "completion check
+    failed" forever — the PR would sit with an open return nobody can
+    resolve.  Same class of corruption ``base_return`` is already guarded
+    against (``open_return``/``last_return``).
+    """
+    rec = (pr or {}).get("base_check")
+    return rec if isinstance(rec, dict) else {}
+
+
 def _retry_after(record: dict, pr: dict) -> str:
-    prev = pr.get("base_check") or {}
+    prev = _check_record(pr)
     prev_attempts = 1
     if (prev.get("retryable") and prev.get("head") == record.get("head")):
         try:
@@ -694,7 +709,7 @@ def _retry_after(record: dict, pr: dict) -> str:
 
 def _retry_open(pr: dict, head: str | None) -> bool:
     """Whether a recorded retryable failure still suppresses a re-fetch."""
-    rec = pr.get("base_check") or {}
+    rec = _check_record(pr)
     if not rec.get("retryable"):
         return False
     if head and rec.get("head") and rec.get("head") != head:
@@ -710,7 +725,7 @@ def _record_error(root: Path, pr_id: str, record: dict, stage: str) -> None:
         if p is None:
             return
         compact = _compact_check(record, stage, RETRY, retryable=True)
-        prev = p.get("base_check") or {}
+        prev = _check_record(p)
         try:
             compact["attempts"] = (int(prev.get("attempts") or 0) + 1
                                    if prev.get("head") == record.get("head")
@@ -818,7 +833,7 @@ def gate(root: Path, pr_id: str, stage: str, *,
                               error=record["error"], record=record,
                               reason=record["error"])
         if open_rec is None and _retry_open(pr, head):
-            rec = pr.get("base_check") or {}
+            rec = _check_record(pr)
             return GateResult(
                 RETRY, stage, status=rec.get("status"), head=head,
                 error=rec.get("error"),

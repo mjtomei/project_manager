@@ -120,7 +120,11 @@ already drops it because the status is no longer `qa`.
   implementation. At a writer launch the phase proceeds (the gate is a
   waste-avoidance pre-check, not the final authority — sign-off still
   checks); during the post-return completion check it means "not proven
-  complete", so the handoff waits and retries.
+  complete", so the handoff waits and retries. A corrupt non-dict
+  `base_check` (hand-edited yaml) reads as "no record" rather than raising:
+  an exception on that path makes the gate fail open (no return is ever
+  recorded) and the completion check report "failed" on every poll, leaving
+  the PR with an open return nobody can resolve.
 - **R6 — Genuine implementation completion.** `impl_completion(root, pr_id,
   pr, *, idle_since)` returns `(complete, reason, resume_loop)` only when all
   hold: the return's `awaiting` is cleared (the fresh session launched); the
@@ -412,13 +416,20 @@ No unresolved ambiguities.
     which writes no status): `pm pr review --review-iteration 2` does not
     launch the reviewer, exits 3, and leaves the PR `in_progress` with the
     return open.
+21. a corrupt non-dict `base_check` (a string, a list) reads as "no record":
+    a conflict still records the return, and a probe failure still records
+    its retry metadata (without the guard `_retry_open` raises, so the gate
+    fails open and `impl_completion` never completes).
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
 continues numbering.
 
-`tests/test_qa_loop.py` additions: `run_qa_sync` conflict → `base_returned`,
-status `in_progress`, no QA window/planner; clean → unchanged flow.
+QA choke point (kept in `tests/test_base_check.py` next to the gate fixtures,
+since each needs a real conflicting base): `run_qa_sync` conflict →
+`base_returned`, status `in_progress`, no QA window/planner; clean →
+unchanged flow; a merge landing during the gate's fetch aborts before the QA
+workdir; a return landing during the fetch reports `base_returned`.
 
 `tests/test_pr_auto_sequence.py` additions: NEEDS_WORK with conflict → no
 review launch, `base_conflict` line; in_progress idle with an open unchanged
