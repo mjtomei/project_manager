@@ -36571,6 +36571,25 @@ prs:
       in that capture directory.'
     created_at: '2026-10-29T02:35:00Z'
     last_edited: '2026-10-29T02:35:00Z'
+  - id: note-71f24c8
+    text: 'impl handoff 2026-10-29: integration is complete at dcf4bfc3 (master@4a74d880
+      merged). `pm pr review pr-62fdd54` marked the PR in_review and opened review-#246,
+      but the review agent failed immediately: "API Error: Connection refused — a
+      firewall or proxy may be blocking it (ECONNREFUSED)". Cause: container mode
+      was enabled at 21:02 local (after the earlier review/QA runs), and this PR
+      provider route needs the host claude-router at 127.0.0.1:8790 — up on the host
+      (HTTP 404) but unreachable from the review container (127.0.0.1:8790 and host.containers.internal:8790
+      both 000 under slirp4netns). This is the known container-transport gap tracked
+      by pr-592e4bd; container.py and review_loop.py are untouched by this PR. Also
+      noticed: the base project.yaml entry for pr-62fdd54 lost its model (now None),
+      session_models and 19 earlier notes; the branch project.yaml still has model=provider:deepseek-flash,
+      session_models.signoff=provider:claude-work-xhigh-249 and 22 notes, so merging
+      restores them. Evidence: captures/pr-62fdd54/impl/integration-4a74d880/handoff/review-connectivity.txt.
+      To review now: run with container mode off (host-wide setting) or land the
+      pr-592e4bd transport fix; the branch is tested (full suite 4519 passed, 1 skipped)
+      and ready.'
+    created_at: '2026-10-29T02:45:00Z'
+    last_edited: '2026-10-29T02:45:00Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
