@@ -294,7 +294,13 @@ session, stop the recorder, and render the cast,
 - the recorder session ends before the cast check (the completion signal is
   observed, not assumed), and a recorder that was killed mid-scenario — even
   when the pm session ended too, leaving no live witness — fails on
-  asciinema's exit status instead of passing on its non-empty cast;
+  asciinema's exit status instead of passing on its non-empty cast; the
+  earlier run's `recorder.status` is cleared before the recorder starts, so a
+  run whose pane was torn down before asciinema returned cannot read the
+  previous run's `0` and report a recording that never finished as a finished
+  one — seed `recorder.status` with `0` and end the recording without letting
+  the pane write one: the run must fail "recorder status is missing", not
+  exit 0 (review loop ebd1 i2, R42);
 - a recorder that is already gone before the detach while the pm session it
   was attaching to still exists (it died mid-scenario) fails the run with
   the "cast is incomplete" message instead of rendering a truncated cast as
@@ -332,7 +338,10 @@ session, stop the recorder, and render the cast,
 **When** the worker runs the recipe's readiness/stop wait,
 **Then** it exits within the stated deadline with an actionable message and
 cleans up (kills the recorder/session) instead of hanging or passing on the
-wrong session; and
+wrong session — and the number the message states is the number the code
+waits (tmux 60 s for the pm session and 30 s for the recorder readiness and
+the stop, the CLI 30 s, the web-UI 120 s; review loop ebd1 i2, R43), so a
+worker told "within 30s" is not looking at a 5 s wait; and
 **Given** a cast, transcript, recorder status, recorder session, or render
 output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are

@@ -28,7 +28,10 @@ hits, regardless of how it waits for a background job:
   header-only cast — so both recipes have the pane's shell record asciinema's
   own exit status and fail on a missing or non-zero one. In the tmux recipe
   the target session is a witness only while it is alive, so the both-gone
-  finish needs the status handle too;
+  finish needs the status handle too — and that handle is only worth anything
+  if the earlier run's status file is cleared first: otherwise a run whose
+  pane was torn down before asciinema returned reads the previous run's ``0``
+  and reports a recording that never finished as a finished one;
 - readiness polls (pm session, web-ui server) carry a deadline and an
   actionable failure instead of hanging forever, the pm-session poll waits on
   the computed session rather than any ``pm-`` session (which would also
@@ -944,10 +947,18 @@ class TestRecipes:
         assert "incomplete" in block, (
             "cli-recording: the status failure does not say the cast is "
             "incomplete")
-        stale = block[block.index("rm -f "):block.index("new-session -d")]
-        assert "recorder.status" in stale, (
-            "cli-recording: an earlier run's recorder status survives, so a "
-            "torn-down recorder can pass the status check")
+        # The cleanup has to remove the *derived* path, and the assertion has
+        # to look at the `rm` statement rather than at everything between it
+        # and `new-session`: that range can also hold prose mentioning the
+        # status file (it does in the tmux recipe), so a substring search over
+        # the range is satisfied by a comment even after the real cleanup has
+        # dropped the file — which is how the tmux recipe's clear stayed
+        # unguarded while this file was green.
+        rm = _statement(block, "rm -f ")
+        assert status_path in rm, (
+            "cli-recording: the pane command writes " + status_path + " but "
+            "the stale cleanup does not remove it, so a recorder torn down "
+            "before it finished reads the earlier run's status and passes")
 
     def test_cli_scaffold_records_the_recorders_exit_status(self, tmp_path):
         """The status echo has to reach the *pane's* shell, and land on disk.
@@ -1008,10 +1019,20 @@ class TestRecipes:
         assert "incomplete" in block, (
             "tmux-screen-recording: the status failure does not say the cast "
             "is incomplete")
-        stale = block[block.index("rm -f "):block.index("new-session -d")]
-        assert "recorder.status" in stale, (
-            "tmux-screen-recording: an earlier run's recorder status survives, "
-            "so a torn-down recorder can pass the status check")
+        # Same as the CLI case: the `rm` statement, not everything up to
+        # `new-session`. The range here contains step 1's comment
+        # "(verified live — rc 0, cast, `recorder.status` 0, transcript, …)",
+        # so the substring was satisfied by that comment and the clear itself
+        # was unguarded: deleting it left the whole file green (178 passed)
+        # and a recorder torn down before it finished passed on the earlier
+        # run's status (verified in the harness — mode `detachnostatus` plus a
+        # seeded `recorder.status` of 0 exits 0 without the clear).
+        rm = _statement(block, "rm -f ")
+        assert status_path in rm, (
+            "tmux-screen-recording: the pane command writes " + status_path +
+            " but the stale cleanup does not remove it, so a recorder torn "
+            "down before it finished reads the earlier run's status and "
+            "passes")
 
     def test_tmux_scaffold_records_the_recorders_exit_status(self, tmp_path):
         """The status echo has to reach the *pane's* shell, and land on disk.
@@ -1922,6 +1943,13 @@ def test_web_ui_driver_guard_stops_an_interactive_paste(tmp_path):
                                            str(_fake_playwright(tmp_path / "global")))
     work = tmp_path / "cwd"
     work.mkdir()
+    # The worker's own directory holds a `driver.mjs` (the recipe's own
+    # misdiagnosis for this case is "saved in the workdir instead of the
+    # capture directory"), so the block's `[ -f driver.mjs ]` check cannot
+    # stop it before the link. Without the file the check would fire first and
+    # the `node_modules` assertion below could not fail even with the guard
+    # removed — it would be proving the missing-driver check, not the guard.
+    _write_driver(work)
     env = {k: v for k, v in os.environ.items()
            if k not in ("CAPDIR", "APP_URL")}
 
@@ -1987,6 +2015,11 @@ def test_web_ui_driver_block_refuses_an_unset_capdir(tmp_path):
                                            str(global_dir))
     work = tmp_path / "cwd"
     work.mkdir()
+    # A `driver.mjs` in the worker's own directory, as above: without it the
+    # block's `[ -f driver.mjs ]` check stops it before the link, and the
+    # `node_modules` assertion below would pass even with the CAPDIR guard
+    # removed.
+    _write_driver(work)
     env = {k: v for k, v in os.environ.items()
            if k not in ("CAPDIR", "APP_URL")}
     r = subprocess.run(["bash"], input=block, env=env, cwd=work,
@@ -2835,7 +2868,21 @@ case "$sub" in
           esac
       fi
       exit 0 ;;
-  capture-pane) cat "$STATE/pane" 2>/dev/null; exit 0 ;;
+  capture-pane)
+      # Resolve the target the way real tmux does, and fail once the session
+      # is gone (verified on 3.2a: `capture-pane -p -t "=pm-recorder:0.0"`
+      # answers "can't find session: pm-recorder" after the recorder is
+      # killed). Ignoring the target would let a recipe save the pane *after*
+      # its teardown and still write content into `recorder-pane.log` — the
+      # save-before-teardown ordering every failure message depends on
+      # (R11/R13) would be unprovable, and a worker would be pointed at an
+      # empty file.
+      s=$(val -t "$@")
+      r=$(resolve "${s%%:*}")
+      if [ -z "$r" ]; then
+          echo "can't find session: $s" >&2; exit 1
+      fi
+      cat "$STATE/pane" 2>/dev/null; exit 0 ;;
   # Session user options: the capture-dir claim step 2 writes and step 5
   # clears. Modelled on the real server (verified: `set-option -t S
   # @pm_capture_dir V`, `show-options -t S -v @pm_capture_dir`, and
@@ -3027,10 +3074,12 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
         p = capture / sub / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
-    # Shorten every numeric deadline so the failing cases finish quickly; the
-    # recipes' own bounds are asserted as text above. Matching the shape
-    # (rather than the literal ``30``/``60``) keeps the cases fast when a
-    # recipe's bound is retuned, instead of silently waiting it out.
+    # Shorten every numeric deadline so the failing cases finish quickly.
+    # Matching the shape (rather than the literal ``30``/``60``) keeps the
+    # cases fast when a recipe's bound is retuned, instead of silently waiting
+    # it out — which is why the *value* of a bound is pinned separately, by
+    # ``test_every_deadline_is_a_real_bound_and_its_message_agrees``: no
+    # execution case can see it here.
     block = re.sub(r"\+\s*\d+\s*\)\)", "+ 2 ))", block)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
                STUB_STATE=str(state), STUB_MODE=mode,
@@ -3296,6 +3345,42 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, (
             "a recording with no completion signal was reported as a success")
         assert "incomplete" in r.stderr, r.stderr
+
+    @pytest.mark.parametrize("name,mode", [
+        ("tmux-screen-recording.md", "detachnostatus"),
+        ("cli-recording.md", "nostatus"),
+    ])
+    def test_a_stale_recorder_status_is_not_read_as_this_runs(self, name, mode,
+                                                              tmp_path):
+        """An earlier run's recorder status must not pass the exit-status check.
+
+        The status file is asciinema's *own* exit status, and the completion
+        check fails on a *missing* one — so a run whose pane was torn down
+        before asciinema returned is only distinguishable from a finished
+        recording if the earlier run's file is gone. That is why step 0 clears
+        it, and why the check is worthless without the clear: seed the
+        previous run's ``0``, run the recipe's own block with a recorder that
+        never writes one, and the run must fail "recorder status is missing".
+
+        Without the clear the seeded file survives and the check reads the
+        previous run's 0, so the run exits 0 — a completed-looking recording
+        of nothing, the same false pass as a stale cast one file over
+        (verified in this harness: mode ``detachnostatus``/``nostatus`` with a
+        seeded ``recorder.status`` of 0 exits 0 against the recipe with that
+        one ``rm`` argument removed, and 1 with it). Both modes end the
+        recording legitimately — the detach in the tmux recipe, the one-shot
+        command in the CLI — so the run reaches the status check rather than
+        failing earlier for an unrelated reason.
+        """
+        raw = _scaffold_block(_recipe_text(name))
+        r, _cast = _run_block(raw, mode, tmp_path, target=True,
+                              files={"recorder.status": "0\n"})
+        assert r.returncode != 0, (
+            f"{name}: the run passed on the earlier run's recorder.status, so "
+            "a recorder torn down before asciinema returned was reported as a "
+            "finished recording: " + r.stderr)
+        assert "recorder status is missing" in r.stderr, (
+            f"{name}: the run failed for another reason: " + r.stderr)
 
     def test_tmux_recording_completes(self, tmp_path):
         r, cast = _run_capture_block(
@@ -4211,3 +4296,35 @@ def test_readiness_waits_are_bounded(name, marker, probe_bound):
         line = text[idx:text.index("\n", idx)]
         assert probe_bound in line, (
             f"{name}: readiness probe is unbounded (no {probe_bound})")
+
+
+@pytest.mark.parametrize("name", RECIPES + ["web-ui-recording.md"])
+def test_every_deadline_is_a_real_bound_and_its_message_agrees(name):
+    """The bound's *value* needs a guard the execution cases cannot give.
+
+    ``_run_block`` rewrites every ``deadline=$(( … + N ))`` to two seconds so
+    the failing cases finish quickly, so no execution case can see the value,
+    and nothing else asserted one either — a recipe whose readiness deadline
+    was retuned to 0 or 1 s would pass every test and then fail a healthy
+    ``pm session``/app start on the first slow run. The message is the other
+    half: a failure that says "within 30s" while the code waits 5 s sends the
+    worker looking for a cause that is not there, the same "a message that
+    disagrees with the code" class as the rest of this file.
+
+    Pin both: every arithmetic bound is a plausible hang detector, and every
+    "within Ns" the recipe prints is one of the numbers it actually waits.
+    """
+    text = _recipe_text(name)
+    bounds = {int(n) for n in re.findall(
+        r"deadline=\$\(\( \$\(date \+%s\) \+ (\d+) \)\)", text)}
+    assert bounds, f"{name}: no bounded deadline found"
+    for n in sorted(bounds):
+        assert n >= 10, (
+            f"{name}: a readiness/stop deadline of {n}s is too short to be a "
+            "hang detector — a slow session or app start would fail a healthy "
+            "run")
+    stated = {int(n) for n in re.findall(r"within (\d+)s", text)}
+    assert stated, f"{name}: no failure message states its bound"
+    assert stated <= bounds, (
+        f"{name}: a failure message states a bound the code does not use "
+        f"(stated {sorted(stated)}s, arithmetic {sorted(bounds)}s)")
