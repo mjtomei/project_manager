@@ -42820,3 +42820,27 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-996519f
+  plan: bugs
+  title: 'Bug: pm pr start prints "is now in_progress" when the PR stays in_review'
+  branch: pm/pr-996519f-bug-pm-pr-start-prints-is-now-in-progress-when-the
+  status: pending
+  depends_on: []
+  description: 'pm_core/cli/pr.py start_pr (~line 1162) echoes "PR <id> is now in_progress
+    on <machine>" unconditionally, but the locked apply only advances the status when
+    it is pending ("do not regress in_review/merged"). Repro: pm init --backend github
+    --no-import on a repo with an OPEN GitHub PR (imported as in_review), then pm
+    pr start <id> -> output says "is now in_progress" while pm pr list / pm pr show
+    still report in_review. Observed during QA scenario 17 on pr-62ad13d (head dd63a277).
+    Fix: echo the status actually recorded (pr_entry.get("status")) or word the line
+    as "started". Pre-existing on master (line predates this PR); not a close/retention
+    issue.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T12:19:00.653089+00:00'
+  updated_at: '2026-10-29T12:19:00.653089+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
