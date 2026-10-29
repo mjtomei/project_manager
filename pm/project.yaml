@@ -38230,6 +38230,23 @@ prs:
       note-580e6a1 and commit 5a91db72 state PASS; this note supersedes them.'
     created_at: '2026-10-29T10:17:55Z'
     last_edited: '2026-10-29T10:17:55Z'
+  - id: note-ba2431f
+    text: 'QA S10 concretization (2026-10-29): (1) qa.md R7 "merge transcripts for
+      both PRs exist" is unreachable on a clean local merge — the local backend goes
+      _publish_approved -> _after_publish -> _finalize_merge with no repo-update window,
+      so no merge-<pr>.jsonl is created (confirmed by QA S1/S6). Assert the merge
+      by PR status, not a merge transcript. (2) A merge window exists only when a
+      post-publish main-repo pull fails (vanilla/github), and the user-facing relaunches
+      (TUI g, pm pr merge, pm pr signoff) pass no --transcript, so "close the merge
+      window, relaunch, both merge sessions readable" is not reachable from the user
+      surface. S10 story 3 was reshaped to the sign-off router (one canonical path):
+      SIGNOFF_BLOCKED, close the window, commit a fix (HEAD moves) -> the driver retires
+      the stale record, archives the router and relaunches; both router sessions readable,
+      PR still merges. (3) End state after auto-start OFF: _disable finalizes every
+      canonical and archive link, so a two-return run has 3 impl and 3 signoff archive
+      entries for the returned PR and no symlinks remain; count as minimums.'
+    created_at: '2026-10-29T05:33:13Z'
+    last_edited: '2026-10-29T05:33:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
