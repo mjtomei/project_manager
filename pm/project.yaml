@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T14:46:03.161332+00:00'
+  updated_at: '2026-10-29T15:28:14.266573+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30064,6 +30064,29 @@ prs:
       has real-launch-branch-observation/).'
     created_at: '2026-10-29T14:46:03Z'
     last_edited: '2026-10-29T14:46:03Z'
+  - id: note-722cc35
+    text: 'QA S42 (flagged verification re-check) — NEEDS_WORK, fixed 36342563. Found+fixed:
+      the FLAGGED re-evaluation follow-up is typed into the worker pane and then two
+      extra Enters are sent; a worker that ends on input closes its pane, so the second
+      send-keys raised CalledProcessError and crashed the whole QA thread (run ended
+      ERROR, dashboard frozen on "verifying", the expected pending(1) retry never
+      happened). Same unguarded pattern in the verifier re-check follow-up. New _send_keys_if_alive()
+      guards both sites; the dead pane now falls through to the existing relaunch
+      path. Post-fix live run: FLAGGED -> "re-evaluating after verification" -> worker
+      relaunched -> re-check follow-up into the held verifier pane -> bounded exhaustion
+      in 24 s -> NEEDS_WORK with the exact expected reason, PR back to in_review,
+      no merge/sign-off; then a fresh config + z t reached PASS with FINALIZE_DONE
+      and "QA PASS — press i to sign off". Captures /pm-captures/scenarios/42/{pre-fix,post-fix}.
+      Incidental (pre-existing, out of scope, filed pr-2a541db): _relaunch_scenario_window
+      leaves a DUPLICATE qa-<pr>-sN window and returns a pane id from the old window,
+      because new_window_get_pane re-resolves by name (find_window_by_name returns
+      the first match) instead of using the window it just created. Harness notes:
+      keep a private HOME + PM_TMUX_SOCKET (sibling QA sessions share /home/pm); the
+      fake worker exits on the first keystroke of the follow-up (select() on stdin),
+      so the pane death is deterministic; scenario numbering leaks across projects
+      sharing a PR id (known pr-154595f), so a re-run numbers s2/s3 not s1.'
+    created_at: '2026-10-29T15:28:14Z'
+    last_edited: '2026-10-29T15:28:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
