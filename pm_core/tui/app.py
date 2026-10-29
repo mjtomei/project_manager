@@ -4,7 +4,12 @@ import shlex
 from pathlib import Path
 
 from pm_core.paths import configure_logger
-from pm_core.tui._shell import _run_shell
+# Re-exported for backward compatibility (the only in-file user,
+# ``on_mount``'s bare ``display-message`` lookup, moved into
+# ``current_session_name`` below): ``pm_core.tui.app`` stays the import
+# surface for the symbols extracted into submodules — see
+# tests/test_tui_imports.py.
+from pm_core.tui._shell import _run_shell  # noqa: F401
 
 _log = configure_logger("pm.tui")
 
@@ -20,7 +25,7 @@ from textual.binding import Binding
 from textual.containers import Container, Vertical
 from textual.timer import Timer
 
-from pm_core import store, guide
+from pm_core import store, guide, tui_pidfile
 
 from pm_core import tmux as tmux_mod
 from pm_core.tui.tech_tree import TechTree, PRSelected
@@ -79,6 +84,43 @@ _Z_PREFIX_KEYS = frozenset({
 # Expire it after a short window (the same 2 s the ``w``/``y`` prefixes use)
 # so a forgotten prefix cannot arm a later destructive key.
 _Z_PREFIX_TIMEOUT = 2.0
+
+
+def current_session_name() -> str | None:
+    """This process's canonical pm tmux session name (``~N`` stripped).
+
+    ``None`` when not running inside tmux.  Shared with the ``pm _tui``
+    launcher so the pidfile can be claimed before the app starts.
+
+    Delegates to :func:`pm_core.tmux.get_session_name`, which targets
+    ``$TMUX_PANE``: a bare ``display-message -p`` resolves against tmux's
+    "current client" (the most recently active one), so with a second
+    attached client this process could claim *another* session's pidfile.
+    Callers look the pidfile up by our real session name, so the file
+    would never be found and IPC would be silently dead — the same
+    pitfall the popup bodies pin ``$S`` for.
+    """
+    if not tmux_mod.in_tmux():
+        return None
+    try:
+        name = tmux_mod.get_session_name()
+    except Exception:
+        return None
+    return name.split("~")[0] or None
+
+
+def _session_for_claim(claim: tui_pidfile.TuiPidfileClaim | None) -> str | None:
+    """Session name this app should use for its pidfile/queue/frames.
+
+    The launcher's claim wins when there is one: it was taken before the
+    app started, and asking tmux a second time here could fail (or return
+    a renamed session), leaving the claim published against a session name
+    the app then does not use — the pidfile would sit at ``caps: []``
+    forever and every caller would report "has not finished starting up".
+    """
+    if claim is not None:
+        return claim.session
+    return current_session_name()
 
 
 class ProjectManagerApp(App):
@@ -368,10 +410,15 @@ class ProjectManagerApp(App):
                 return False
         return True
 
-    def __init__(self):
+    def __init__(self, pidfile_claim: tui_pidfile.TuiPidfileClaim | None = None):
         super().__init__()
         self._data: dict = {}
         self._root: Path | None = None
+        # Pidfile ownership for external IPC.  ``pm _tui`` claims it
+        # before the app starts (so a second TUI can be refused with a
+        # visible message); when constructed directly we claim on mount.
+        self._pidfile_claim = pidfile_claim
+        self._startup_error: str | None = None
         # Coalescing write queue: decouples in-memory state from disk so
         # per-keypress mutations (e.g. active_pr) don't block the event loop.
         # Created on mount once the project root is known.
@@ -408,6 +455,8 @@ class ProjectManagerApp(App):
         # Review loop state: dict of pr_id -> ReviewLoopState (supports multiple)
         self._review_loops: dict = {}
         self._review_loop_timer: Timer | None = None
+        # One-shot scheduler pass after a retryable review-launch failure.
+        self._review_retry_timer: Timer | None = None
         # Pane idle tracker: detects when implementation windows go idle
         from pm_core.pane_idle import PaneIdleTracker
         self._pane_idle_tracker = PaneIdleTracker()
@@ -438,11 +487,6 @@ class ProjectManagerApp(App):
         # ``pr start`` activation must not move the user's cursor.
         self._followed_active_pr: str | None = None
         self._quiet_activations: dict[str, float] = {}
-        # Explicit per-PR opt-out of auto-merge (O key / CLI default).
-        # When a PR is in this set, _maybe_auto_merge stops at "ready to
-        # merge" instead of launching the merge window.  Wait-for-merge
-        # holds are derived separately (auto_start.merge_holds).
-        self._stop_before_merge: set[str] = set()
         # Watcher framework manager (purely in-memory, lost on TUI restart)
         from pm_core.watcher_manager import WatcherManager
         self._watcher_manager = WatcherManager()
@@ -539,32 +583,36 @@ class ProjectManagerApp(App):
 
     def on_mount(self) -> None:
         import os
+        # Get session name for frame capture file naming.  Reuse the
+        # launcher's claim when there is one so the pidfile we publish to
+        # is always the one that was claimed (see _session_for_claim).
+        # Resolved before the merge-restart check: the marker is shared by
+        # every session under one PM home, so only this session's marker
+        # (or an unscoped legacy one) may trigger or be dropped here.
+        self._session_name = _session_for_claim(self._pidfile_claim)
         try:
             from pm_core.tui import auto_start as _auto_start
-            trigger = ("merge_restart"
-                       if _auto_start.has_merge_restart_marker()
-                       else "initial")
+            # A merge-restart marker that survives to mount was never
+            # consumed (save_breadcrumb unlinks it before the old process
+            # re-execs), so it belongs to a restart request that lost a
+            # race; resolve_mount_trigger drops it so a later start does
+            # not silently behave as a merge restart.
+            trigger = _auto_start.resolve_mount_trigger(self._session_name)
         except Exception:
             trigger = "initial"
         _log.info("TUI mount: pid=%d cwd=%s trigger=%s",
                   os.getpid(), Path.cwd(), trigger)
-        # Get session name for frame capture file naming
-        if tmux_mod.in_tmux():
-            try:
-                result = _run_shell(
-                    tmux_mod._tmux_cmd("display-message", "-p", "#{session_name}"),
-                    capture_output=True, text=True, timeout=5
-                )
-                self._session_name = result.stdout.strip().split("~")[0]
-            except Exception:
-                pass
         # Opt-in keystroke-latency instrumentation (PM_PERF_DEBUG=1).
         from pm_core.tui import perf
         perf.setup_event_loop(self._session_name)
-        # External-reload IPC: write a pidfile and install a SIGUSR1 handler
-        # so CLI commands can ask us to reload state without depending on
-        # tmux send-keys (which gets eaten by whichever widget has focus).
+        # External-reload IPC: claim the pidfile and install the signal
+        # handlers so CLI commands can ask us to reload state / run a
+        # command without depending on tmux send-keys (which gets eaten
+        # by whichever widget has focus).
         self._install_reload_signal()
+        if self._startup_error:
+            # Another TUI owns this session; exit() was already requested.
+            return
         # Sweep stale runtime_state entries from the previous TUI
         # process — a freshly-started TUI doesn't own any pane or loop
         # recorded by an old one, so anything still flagged as
@@ -585,6 +633,17 @@ class ProjectManagerApp(App):
         # sync) to after the first frame.
         self._load_state()
         self._update_orientation()
+        # A sign-off REQA whose QA start was deferred behind a live run — or
+        # whose TUI died before starting it — is owed only on disk.  Re-arm
+        # it here: the obligation must not depend on the auto-start switch
+        # (a plain restart turns auto-start off).
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.arm_owed_reqa(self)
+        except Exception:
+            # Not fatal — the poll tick reconciles it again — but a silent
+            # loss here is exactly the bug this hook exists to prevent.
+            _log.warning("owed REQA arm on mount failed", exc_info=True)
         # Start the coalescing write queue now that the project root is known.
         # TUI mutations enqueue here instead of writing to disk inline.
         #
@@ -608,14 +667,30 @@ class ProjectManagerApp(App):
         self.run_worker(self._deferred_startup(), exclusive=False)
 
     async def _deferred_startup(self) -> None:
-        """Run heavier startup tasks in a background worker."""
+        """Run heavier startup tasks in a background worker.
+
+        Neither step below may abort the queue dispatch that follows it:
+        ``_cmd_queue_ready`` is only ever set here, and while it is False
+        every externally queued command is deferred.  So a failing startup
+        chore (or a restore step choking on a corrupt breadcrumb) leaves
+        the TUI on defaults instead of silently disabling all external
+        IPC: with a healthy TUI the picker would then spin on ``queued…``
+        forever — the exact failure this IPC rework removes.
+        """
         import asyncio
         # Run blocking subprocess work off the event loop
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._deferred_startup_sync)
+        try:
+            await loop.run_in_executor(None, self._deferred_startup_sync)
+        except Exception:
+            _log.exception("deferred startup tasks failed; continuing")
         # Resume auto-start if a breadcrumb was left by a merge-triggered restart
         from pm_core.tui import auto_start
-        await auto_start.consume_breadcrumb(self)
+        try:
+            await auto_start.consume_breadcrumb(self)
+        except Exception:
+            _log.exception("consume_breadcrumb failed; continuing without "
+                           "restored state")
         # An explicit fresh autostart (z a / z O / z A) is a user request that must
         # survive a plain TUI restart: re-add its target from the PR marker.
         # ``resume_pending`` logs each resumed PR itself (through
@@ -1154,9 +1229,9 @@ class ProjectManagerApp(App):
         """Run the ``z a``/``z O``/``z A`` fresh-autostart on the selection.
 
         *policy* is None for ``z a`` (preserve an existing target's policy,
-        default a new target to stop-before-merge); ``z O``/``z A`` pass an
-        explicit policy.  Errors are logged, never raised into the key
-        handler.
+        default a new target to wait-for-merge, the manual merge gate);
+        ``z O``/``z A`` pass an explicit policy.  Errors are logged, never
+        raised into the key handler.
         """
         from pm_core.tui import autostart_fresh
         tree = self.query_one("#tech-tree", TechTree)
@@ -1209,8 +1284,8 @@ class ProjectManagerApp(App):
         # implementation turn before one fresh review.  ``z a`` is the
         # policy-preserving variant — an existing target keeps its own
         # policy (``wait_for_merge`` included) and a new target defaults to
-        # stop-before-merge (manual merge) — while ``z O``/``z A`` force
-        # stop-before-merge / auto-merge.
+        # wait-for-merge (the manual merge gate) — while ``z O``/``z A``
+        # force wait-for-merge / auto-merge.
         z = self._consume_z()
         if not z:
             from pm_core.tui import auto_start as _auto_start
@@ -1221,15 +1296,15 @@ class ProjectManagerApp(App):
             "No PR selected (z a = fresh autostart after feedback)")
 
     def action_auto_sequence_pr(self) -> None:
-        # ``O`` arms a stop-before-merge auto-sequence target (continuation
+        # ``O`` arms a wait-for-merge auto-sequence target (continuation
         # from the current phase); ``z O`` is the explicit fresh-autostart
-        # variant with the same stop-before-merge policy.
+        # variant with the same manual-merge policy.
         z = self._consume_z()
         if z:
-            from pm_core.autostart_state import POLICY_STOP
+            from pm_core.autostart_state import POLICY_WAIT
             self._fresh_autostart_from_key(
-                POLICY_STOP, "key:zO",
-                "No PR selected (z O = fresh autostart, stop before merge)")
+                POLICY_WAIT, "key:zO",
+                "No PR selected (z O = fresh autostart, wait for merge)")
             return
         tree = self.query_one("#tech-tree", TechTree)
         pr_id = tree.selected_pr_id
@@ -1371,7 +1446,9 @@ class ProjectManagerApp(App):
 
     def action_restart(self) -> None:
         from pm_core.tui import auto_start
-        if auto_start.has_merge_restart_marker():
+        # Scoped to this session: another session's marker is not a request
+        # for us to preserve our state (see tui_pidfile.has_merge_restart_marker).
+        if auto_start.has_merge_restart_marker(self._session_name):
             auto_start.save_breadcrumb(self)
             _log.info("action_restart: reason=merge_restart_marker")
         else:
@@ -1394,18 +1471,16 @@ class ProjectManagerApp(App):
         """Path to this app's reload pidfile, keyed by tmux session name."""
         if not self._session_name:
             return None
-        from pm_core.paths import pm_home
-        return pm_home() / f"tui-{self._session_name}.pid"
+        return tui_pidfile.pidfile_path(self._session_name)
 
     def _command_queue_file(self) -> Path | None:
         """Path to this app's external command queue, keyed by session name."""
         if not self._session_name:
             return None
-        from pm_core.paths import pm_home
-        return pm_home() / f"tui-{self._session_name}.cmd-queue"
+        return tui_pidfile.command_queue_path(self._session_name)
 
     def _install_reload_signal(self) -> None:
-        """Write pidfile and register signal handlers.
+        """Claim the pidfile, then register signal handlers and advertise.
 
         SIGUSR1 → ``action_reload`` (state-only reload).
         SIGUSR2 → drain the per-session command queue file and dispatch
@@ -1413,22 +1488,40 @@ class ProjectManagerApp(App):
         in-TUI ``/`` command bar).  Lets external processes (popup
         picker, CLI helpers) submit commands without depending on
         focus-sensitive ``tmux send-keys`` timing.
+
+        Ownership is claimed before any handler exists; the capabilities
+        are published only *after* the handlers are installed, so a
+        caller reading the pidfile in between never signals a TUI that
+        cannot handle it.
         """
-        import os
         import signal
         import asyncio
         pidfile = self._reload_pidfile()
         if pidfile is None:
             _log.debug("No session name yet, skipping signal-handler install")
             return
-        try:
-            pidfile.write_text(str(os.getpid()))
-        except OSError as e:
-            _log.debug("Could not write TUI pidfile %s: %s", pidfile, e)
-            return
+        claim = self._pidfile_claim
+        if claim is None or claim.path != pidfile:
+            try:
+                claim = tui_pidfile.claim_tui_pidfile(pidfile,
+                                                      self._session_name)
+            except tui_pidfile.TuiPidfileConflict as e:
+                _log.error("TUI pidfile claim failed: %s", e)
+                self._startup_error = str(e)
+                self.exit(return_code=2, message=str(e))
+                return
+            except OSError as e:
+                # A broken ~/.pm must not take the whole TUI down; run
+                # without external IPC instead.
+                _log.warning("Could not claim TUI pidfile %s: %s; "
+                             "continuing without external IPC", pidfile, e)
+                return
+            self._pidfile_claim = claim
         # Pre-create the command queue file so external writers can
         # always open it for append without a race.  Open for append
         # rather than touch: the startup drain judges staleness by mtime.
+        # Done before publishing caps so a caller that sees sigusr2 can
+        # never race a missing queue.
         queue = self._command_queue_file()
         if queue is not None:
             try:
@@ -1437,16 +1530,24 @@ class ProjectManagerApp(App):
             except OSError as e:
                 _log.debug("Could not create TUI command queue %s: %s",
                            queue, e)
+        caps = set()
         try:
             loop = asyncio.get_event_loop()
             loop.add_signal_handler(signal.SIGUSR1, self.action_reload)
+            caps.add(tui_pidfile.CAP_RELOAD)
             loop.add_signal_handler(signal.SIGUSR2, self._drain_command_queue)
+            caps.add(tui_pidfile.CAP_COMMAND)
             _log.info("Installed SIGUSR1 reload + SIGUSR2 cmd-queue handlers"
                       " (pidfile=%s, queue=%s)", pidfile, queue)
         except (NotImplementedError, RuntimeError) as e:
             # add_signal_handler isn't available on Windows; not relevant
             # for our tmux flow but log so it's visible if it ever fires.
             _log.debug("Could not install signal handlers: %s", e)
+        try:
+            claim.publish(caps)
+        except OSError as e:
+            _log.warning("Could not publish TUI capabilities to %s: %s",
+                         pidfile, e)
 
     def _drain_command_queue(self, startup: bool = False) -> None:
         """Read pending commands from the queue file and dispatch them.
@@ -1481,8 +1582,10 @@ class ProjectManagerApp(App):
             # write+signal so a racing append can't slip a line in
             # between our read and truncate (which would silently drop
             # it — the appender's later SIGUSR2 would then drain an
-            # empty file).
-            with open(queue, "r+") as f:
+            # empty file).  Read as UTF-8 (the appender writes UTF-8
+            # bytes) and never raise on a garbled queue: a bad line must
+            # not escape a signal handler.
+            with open(queue, "r+", encoding="utf-8", errors="replace") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     content = f.read()
@@ -1523,12 +1626,26 @@ class ProjectManagerApp(App):
         # Flush any pending writes before the process goes away.
         if self._write_queue is not None:
             self._write_queue.flush_sync()
-        for path in (self._reload_pidfile(), self._command_queue_file()):
-            if path is not None:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError as e:
-                    _log.debug("Could not remove TUI file %s: %s", path, e)
+        # Remove the pidfile only if we own it and it still describes us.
+        # Never unlink a file we did not claim: on a startup refusal the
+        # pidfile belongs to the sibling TUI that is still running.
+        claim = getattr(self, "_pidfile_claim", None)
+        if claim is not None:
+            try:
+                claim.release()
+            except OSError as e:
+                _log.debug("Could not remove TUI pidfile: %s", e)
+            # The queue is shared with a successor TUI; leave it alone if
+            # the pidfile now names one (we only get here owning a claim
+            # that a successor overrode when our descriptor looked stale).
+            if not claim.owned_by_other():
+                queue = self._command_queue_file()
+                if queue is not None:
+                    try:
+                        queue.unlink(missing_ok=True)
+                    except OSError as e:
+                        _log.debug("Could not remove TUI queue %s: %s",
+                                   queue, e)
 
     def action_reload(self) -> None:
         """Reload state from disk without triggering PR sync.

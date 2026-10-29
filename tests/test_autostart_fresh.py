@@ -18,7 +18,7 @@ from click.testing import CliRunner
 
 from pm_core import autostart_state as st
 from pm_core import store
-from pm_core.autostart_state import FRESH_KEY, POLICY_STOP
+from pm_core.autostart_state import FRESH_KEY, POLICY_WAIT
 from pm_core.qa_loop import QALoopState
 from pm_core.review_loop import ReviewLoopState
 from pm_core.tui import autostart_fresh
@@ -46,7 +46,6 @@ class FakeApp:
         self._auto_start_all = False
         self._auto_start_run_id = None
         self._auto_start_launching = set()
-        self._stop_before_merge = set()
         self._review_loops = {}
         self._qa_loops = {}
         self._self_driving_qa = {}
@@ -160,7 +159,7 @@ class TestReset:
         # reset), but the restart marker must carry the policy just asked
         # for so a TUI restart re-arms the right target.
         pm_dir = project
-        autostart_fresh.reset_pr(pm_dir, "pr-a", "test", policy=st.POLICY_STOP)
+        autostart_fresh.reset_pr(pm_dir, "pr-a", "test", policy=st.POLICY_WAIT)
         out = autostart_fresh.reset_pr(pm_dir, "pr-a", "test",
                                        policy=st.POLICY_AUTO)
         assert out["ok"] and out["action"] == "already_waiting"
@@ -675,7 +674,7 @@ class TestHandoffConsumption:
         if awaiting:
             pr[FRESH_KEY] = {"requested_at": st.now_iso(),
                              "from_status": "in_review", "source": "test",
-                             "attempt": 1, "policy": POLICY_STOP,
+                             "attempt": 1, "policy": POLICY_WAIT,
                              "awaiting_handoff": True}
         store.save(data, project)
         app = FakeApp(store.load(project)["prs"], project)
@@ -958,23 +957,23 @@ class TestFreshStart:
             autostart_fresh.fresh_start(
                 app, ["pr-a"], policy=st.POLICY_AUTO, source="key:zA")
         assert auto_start.target_policy(app, "pr-a") == st.POLICY_AUTO
-        assert "pr-a" not in app._stop_before_merge
+        assert not st.is_wait_target(
+            app._auto_start_targets["pr-a"])
 
-    def test_z_o_defaults_to_stop_before_merge(self, project):
+    def test_z_o_forces_wait_for_merge(self, project):
         app = self._app(project)
         with patch.object(autostart_fresh, "handoff_ready",
                           return_value=False), \
              patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
             autostart_fresh.fresh_start(
-                app, ["pr-a"], policy=st.POLICY_STOP, source="key:zO")
-        assert auto_start.target_policy(app, "pr-a") == POLICY_STOP
-        assert "pr-a" in app._stop_before_merge
+                app, ["pr-a"], policy=st.POLICY_WAIT, source="key:zO")
+        assert auto_start.target_policy(app, "pr-a") == POLICY_WAIT
+        assert st.is_wait_target(app._auto_start_targets["pr-a"])
 
     def test_explicit_policy_overrides_an_existing_target(self, project):
         app = self._app(project)
         app._auto_start_targets["pr-a"] = st.make_target_record("cli")
         app._auto_start = True
-        app._stop_before_merge.discard("pr-a")
         with patch.object(autostart_fresh, "handoff_ready",
                           return_value=False), \
              patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
@@ -982,7 +981,7 @@ class TestFreshStart:
                 app, ["pr-a"], policy=st.POLICY_AUTO)
         assert auto_start.target_policy(app, "pr-a") == st.POLICY_AUTO
 
-    def test_z_a_defaults_a_new_target_to_stop_before_merge(self, project):
+    def test_z_a_defaults_a_new_target_to_wait_for_merge(self, project):
         # `z a` passes no explicit policy: a new target gets the manual-merge
         # default (and the marker records it for a restart re-arm).
         app = self._app(project)
@@ -991,9 +990,9 @@ class TestFreshStart:
              patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
             autostart_fresh.fresh_start(
                 app, ["pr-a"], policy=None, source="key:za")
-        assert auto_start.target_policy(app, "pr-a") == POLICY_STOP
+        assert auto_start.target_policy(app, "pr-a") == POLICY_WAIT
         marker = st.fresh_marker(store.get_pr(store.load(project), "pr-a"))
-        assert marker["policy"] == POLICY_STOP
+        assert marker["policy"] == POLICY_WAIT
 
     def test_z_a_preserves_an_existing_wait_for_merge_target(self, project):
         # `z a` must not silently downgrade a wait-for-merge target (whose
@@ -1105,11 +1104,11 @@ class TestKeyBindings:
         ProjectManagerApp.action_toggle_auto_start(_KeyApp(z=1, pr_id="pr-a"))
         assert calls == [(["pr-a"], st.POLICY_AUTO, "key:zA")]
 
-    def test_z_upper_o_requests_stop_before_merge_fresh(self, monkeypatch):
+    def test_z_upper_o_requests_wait_for_merge_fresh(self, monkeypatch):
         from pm_core.tui.app import ProjectManagerApp
         calls = self._fresh_calls(monkeypatch)
         ProjectManagerApp.action_auto_sequence_pr(_KeyApp(z=1, pr_id="pr-a"))
-        assert calls == [(["pr-a"], st.POLICY_STOP, "key:zO")]
+        assert calls == [(["pr-a"], st.POLICY_WAIT, "key:zO")]
 
     def test_plain_a_opens_the_runs_popup(self, monkeypatch):
         from pm_core.tui.app import ProjectManagerApp
@@ -1356,7 +1355,7 @@ class TestResume:
         restarted = FakeApp(store.load(project)["prs"], project)
         assert autostart_fresh.resume_pending(restarted) == []
 
-    def test_resume_falls_back_to_stop_for_an_unknown_marker_policy(
+    def test_resume_falls_back_to_wait_for_an_unknown_marker_policy(
             self, project):
         # A hand-edited / future marker value must not arm a target with an
         # unknown policy; the resume uses the manual-merge default.
@@ -1367,7 +1366,7 @@ class TestResume:
         store.save(data, project)
         restarted = FakeApp(store.load(project)["prs"], project)
         assert autostart_fresh.resume_pending(restarted) == ["pr-a"]
-        assert auto_start.target_policy(restarted, "pr-a") == st.POLICY_STOP
+        assert auto_start.target_policy(restarted, "pr-a") == st.POLICY_WAIT
 
 
 # ---------------------------------------------------------------------------
@@ -1755,10 +1754,10 @@ class TestCli:
                 in res.output)
 
     def test_merged_rejected_before_sending(self, cli_project):
-        with patch("pm_core.cli.autostart.trigger_tui_command") as trig:
+        with patch("pm_core.cli.autostart.submit_tui_command") as sub:
             res = _cli(["fresh", "pr-m", "-s", "pm-x"])
         assert res.exit_code == 1 and "merged" in res.output
-        trig.assert_not_called()
+        sub.assert_not_called()
 
     def test_round_trip_through_tui_handler(self, cli_project):
         import os
@@ -1771,18 +1770,23 @@ class TestCli:
         app._pane_idle_tracker.is_tracked.return_value = False
         seen = {}
 
-        def fake_trigger(session, cmd):
+        class _Ok:
+            ok = True
+            reason = ""
+            message = ""
+
+        def fake_submit(session, cmd):
             seen["cmd"] = cmd
             with patch("pm_core.tui.auto_start.pm_home",
                        return_value=home):
                 seen["result"] = auto_start.handle_command(
                     app, shlex.split(cmd)[1:])
-            return True
+            return _Ok()
 
         with patch("pm_core.cli.autostart._tui_pidfile_for_session",
                    return_value=pidfile), \
-             patch("pm_core.cli.autostart.trigger_tui_command",
-                   side_effect=fake_trigger), \
+             patch("pm_core.cli.autostart.submit_tui_command",
+                   side_effect=fake_submit), \
              patch.object(autostart_fresh, "handoff_ready",
                           return_value=False), \
              patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):

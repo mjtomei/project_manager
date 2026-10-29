@@ -252,10 +252,10 @@ class HelpScreen(ModalScreen):
                 yield Label("  [bold]e[/] / [bold]Enter[/]  Edit selected PR", classes="help-row")
                 yield Label("  [bold]v[/]  View plan file", classes="help-row")
                 yield Label("  [bold]M[/]  Move to plan", classes="help-row")
-                yield Label("  [bold]O[/]  Auto-start target (stop before merge)", classes="help-row")
+                yield Label("  [bold]O[/]  Auto-start target (wait for merge)", classes="help-row")
                 yield Label("  [bold]A[/]  Toggle auto-merge target", classes="help-row")
                 yield Label("  [bold]z a[/]  Fresh autostart after feedback (keep merge policy)", classes="help-row")
-                yield Label("  [bold]z O[/]  Fresh autostart after feedback (stop before merge)", classes="help-row")
+                yield Label("  [bold]z O[/]  Fresh autostart after feedback (wait for merge)", classes="help-row")
                 yield Label("  [bold]z A[/]  Fresh autostart after feedback (auto-merge)", classes="help-row")
                 yield Label("  [bold]a[/]  Auto-start runs popup", classes="help-row")
                 yield Label("  [bold]V[/]  Review oldest pending spec", classes="help-row")
@@ -676,8 +676,7 @@ class AutoRunsScreen(ModalScreen):
     }
     """
 
-    _POLICY_STYLES = {"stop": "magenta", "wait": "bold magenta",
-                      "auto": "green"}
+    _POLICY_STYLES = {"wait": "bold magenta", "auto": "green"}
 
     _STATE_STYLES = {
         "running": "bold green",
@@ -777,7 +776,7 @@ class AutoRunsScreen(ModalScreen):
                 body.append("No auto-start targets (auto-start off).\n", style="bold")
             else:
                 body.append("No active runs.\n", style="bold")
-            body.append("Add a target with O (stop before merge) or A on a PR,\n"
+            body.append("Add a target with O (wait for merge) or A on a PR,\n"
                         "or `pm autostart add PR_ID`.", style="dim")
             body_widget.update(body)
             return
@@ -795,7 +794,7 @@ class AutoRunsScreen(ModalScreen):
             if r.get("display_id") and r.get("display_id") != r["pr_id"]:
                 line.append(f" {r['pr_id']}", style="dim")
             # Target headers always name their policy (R14); a dep shows
-            # only a hold — a stop mark or the wait target(s) holding it.
+            # only a hold — the wait target(s) holding it.
             for label, kind in policy_labels(row):
                 line.append(f" [{label}]", style=self._POLICY_STYLES[kind])
             state = r.get("state") or "?"

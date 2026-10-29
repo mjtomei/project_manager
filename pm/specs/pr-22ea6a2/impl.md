@@ -30,15 +30,23 @@ returning to implementation after human feedback:
 
 * TUI: **`z a`** is the generic fresh autostart (the shortcut the user asked
   for).  **`z O`** and **`z A`** are explicit-policy variants of the two
-  existing auto-start enable keys (`O` = stop-before-merge / auto-sequence,
+  existing auto-start enable keys (`O` = manual merge / auto-sequence,
   `A` = auto-merge target).  Plain `a` keeps opening the runs popup, and plain
   `O`/`A` keep their continuation semantics.
 
   Policy mapping: `z a` passes no explicit policy, so an existing target keeps
   its own policy — **including `wait_for_merge`, whose hold covers its whole
   dependency chain** (coordinated with sibling #261) — and a *new* target
-  defaults to `stop_before_merge` (manual merge).  `z O` forces
-  stop-before-merge and `z A` forces auto-merge.
+  defaults to `wait_for_merge` (the single manual merge gate).  `z O` forces
+  `wait_for_merge` and `z A` forces auto-merge.
+
+  *(Superseded by the master merge of 2026-10-29: master removed
+  `stop_before_merge` as a distinct policy.  There is now one manual policy,
+  `wait_for_merge`, which holds the target **and its whole unmerged dependency
+  closure**; `auto_merge` is the only other.  `--stop-before-merge` is accepted
+  only as a deprecated alias for `--wait-for-merge`.  A fresh request's
+  new-target default therefore became `wait_for_merge` — the same "manual merge
+  gate" the acceptance criterion asks for, now with the dependency-wide hold.)*
 * CLI: **`pm autostart fresh PR_ID...`** (and the command-bar form
   `autostart fresh PR_ID...`), reached through the existing SIGUSR2 command
   queue exactly like `pm autostart add/remove`.
@@ -55,9 +63,10 @@ implemented alongside `z O`/`z A`.)*
 ### R1 — Explicit reset to implementation (CLI + TUI)
 
 `z a` passes no explicit policy (preserve an existing target's policy,
-default a new target to stop-before-merge); `z O` forces the stop-before-merge
-policy (matching plain `O`); `z A` forces the auto-merge policy (matching
-plain `A`).  All three are always a reset — they never toggle a target off.
+default a new target to `wait_for_merge` — the manual merge gate); `z O` forces
+`wait_for_merge` (matching plain `O`); `z A` forces the auto-merge policy
+(matching plain `A`).  All three are always a reset — they never toggle a
+target off.
 
 `pm autostart fresh ID...` / `z a` / `z O` / `z A` must, for each selected PR:
 
@@ -205,9 +214,9 @@ While a fresh attempt is waiting, the PR row must say so and why:
 After the fresh review PASS, the existing scheduler runs the necessary QA
 (`_maybe_start_qa` / `_auto_start_qa_loops`), then sign-off
 (`signoff_ui.start_signoff` → `step_signoff`), and stops at the target's
-merge policy.  A new target defaults to `stop_before_merge` (manual merge);
-an existing target keeps its policy.  Model assignments, spec-review gates,
-and the manual merge gate are untouched.
+merge policy.  A new target defaults to `wait_for_merge` (the manual merge
+gate); an existing target keeps its policy.  Model assignments, spec-review
+gates, and the manual merge gate are untouched.
 
 ### R8 — Explicit and safe with active later-stage work
 
@@ -257,9 +266,11 @@ update; in-memory retirement and window teardown follow and are best-effort.
 5. **Missing implementation window** — allowed; the reset still happens and
    the scheduler's existing in-progress relaunch creates the session.  There
    is no live session to preserve, so no duplicate risk.
-6. **Policy of a new target** — `stop_before_merge` (manual merge), matching
-   `autostart add` and the acceptance criterion; an existing target keeps its
-   configured policy.
+6. **Policy of a new target** — `wait_for_merge` (the manual merge gate),
+   matching `autostart add`'s default and the acceptance criterion; an
+   existing target keeps its configured policy.  (Before the 2026-10-29
+   master merge this was the now-removed `stop_before_merge`, whose only
+   difference was that it did not hold the dependency closure.)
 
 ## Edge Cases
 
@@ -301,8 +312,8 @@ update; in-memory retirement and window teardown follow and are best-effort.
   (second-turn detection for the ordinary path).
 * `pm_core/verdict_transcript.py` — `latest_turn_state()` tail reader.
 * `pm_core/tui/app.py` — `z a` in `action_show_auto_runs` (policy `None`:
-  preserve the target's policy, default `stop_before_merge`), `z O` in
-  `action_auto_sequence_pr` (policy `stop_before_merge`), `z A` in
+  preserve the target's policy, default `wait_for_merge`), `z O` in
+  `action_auto_sequence_pr` (policy `wait_for_merge`), `z A` in
   `action_toggle_auto_start` (policy `auto_merge`); plain `a` keeps opening
   the runs popup; `_deferred_startup` re-arms pending attempts via
   `autostart_fresh.resume_pending`.
@@ -864,3 +875,55 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   the armed timer) would still pass.  The duck type now delegates to
   ``ProjectManagerApp``'s implementations.
 * No functional change to the fresh flow.
+
+## Master integration (2026-10-29)
+
+Merged `origin/master` (4a74d880) into this branch on user authorization after
+the test-session incident.  The merge base was 450a6362, so the branch was 362
+commits behind.  Seven files conflicted; the resolutions and the one
+behavioural adaptation are below.
+
+* **Master removed `stop_before_merge` as a policy** (pr-1e9c117-era change).
+  There is now exactly one manual policy, `wait_for_merge`, which holds the
+  target *and its whole unmerged dependency closure*; `auto_merge` is the only
+  other.  `--stop-before-merge` / the record value `stop_before_merge` survive
+  only as deprecated aliases that map to `wait_for_merge`
+  (`autostart_state.LEGACY_POLICY_FLAGS` / `LEGACY_POLICIES`), and
+  `POLICY_STOP` no longer exists.  This PR's fresh-autostart code was adapted:
+  * a fresh request's new-target default is now `wait_for_merge` (the same
+    manual merge gate the acceptance criterion asks for, now with the
+    dependency-wide hold);
+  * `z O` / `pm autostart fresh --stop-before-merge` map to `wait_for_merge`;
+    `z A` / `--auto-merge` are unchanged;
+  * the marker's recorded `policy` and `resume_pending`'s fallback use
+    `wait_for_merge`.
+  The README, `pm tui keys`, the in-TUI help screen and the `pm autostart
+  fresh --help` text now use the single-policy vocabulary.
+* **`verdict_transcript.py`** — master rewrote the verdict scanner around
+  `VerdictHit` / `find_verdict_turn` / `_turn_text`.  The merge keeps master's
+  structure and re-applies this PR's additions on top: the
+  `latest_turn_state()` tail reader (with `_resolve_transcript_file`,
+  `_read_transcript_tail`, the non-prompt/interrupt classifiers) and the
+  U+2028/U+2029/U+0085 fix, now applied to master's `find_verdict_turn` and
+  `read_latest_assistant_text` (the assistant-*content* scanners keep
+  `splitlines`, since that text is not line-delimited JSON).
+* **`review_loop_ui.py`** — master added the cross-driver launch lease
+  (`_release_lease`) and its own supersede guard in
+  `_on_complete_from_thread`.  Both guards are kept; the earlier one (which
+  prevents a superseded loop from finalizing the successor's live
+  `review-<pr>-i<n>.jsonl` symlink) now also releases the old loop's lease
+  before returning.
+* **`app.py`** — both sides added module-level definitions at the same spot
+  (`_Z_PREFIX_KEYS` / `_Z_PREFIX_TIMEOUT` here, `current_session_name` /
+  `_session_for_claim` on master): both are kept.  `_deferred_startup` keeps
+  master's guarded `consume_breadcrumb` and this PR's `resume_pending` call.
+* **`auto_start.py`** — docstring/USAGE conflicts merged; master's
+  `add_targets` already performs the legacy-alias mapping and defaults a new
+  target to `wait_for_merge`, which is what `fresh_start` passes.
+* **`tests/test_verdict_transcript.py`** — both sides appended a test block at
+  the same place; both are kept (no helper-name overlap).
+* **`tests/test_autostart_fresh.py`** — policy assertions moved to the
+  single-policy model (`POLICY_WAIT`), the removed `app._stop_before_merge`
+  set is no longer asserted, and the two CLI round-trip tests now patch
+  `submit_tui_command` (master replaced `trigger_tui_command`) with a result
+  object exposing `.ok`.

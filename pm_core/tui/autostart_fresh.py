@@ -35,7 +35,7 @@ from pathlib import Path
 from pm_core.paths import configure_logger
 from pm_core import store
 from pm_core.autostart_state import (
-    FRESH_KEY, POLICY_STOP, SUPERSEDED, TERMINAL_STATUSES, fresh_awaiting,
+    FRESH_KEY, POLICY_WAIT, SUPERSEDED, TERMINAL_STATUSES, fresh_awaiting,
     fresh_marker, now_iso,
 )
 
@@ -192,7 +192,7 @@ def reset_pr(root: Path, pr_id: str, source: str,
             "from_status": status,
             "source": source,
             "attempt": attempt,
-            "policy": policy or POLICY_STOP,
+            "policy": policy or POLICY_WAIT,
             "awaiting_handoff": True,
         }
         out.update(ok=True, action="fresh_reset", from_status=status,
@@ -619,9 +619,9 @@ def resume_pending(app) -> list[str]:
         pr_id = pr["id"]
         if pr_id in get_targets(app):
             continue
-        policy = fresh_marker(pr).get("policy") or POLICY_STOP
+        policy = fresh_marker(pr).get("policy") or POLICY_WAIT
         if policy not in POLICIES:
-            policy = POLICY_STOP
+            policy = POLICY_WAIT
         try:
             add_targets(app, [pr_id], policy=policy, source="resume",
                         confirm=f"Auto-start: resumed fresh attempt for "
@@ -649,7 +649,7 @@ def resume_pending(app) -> list[str]:
 
 def fresh_start(app, ids: list[str], policy: str | None = None,
                 source: str = "command",
-                default_policy: str | None = POLICY_STOP) -> dict:
+                default_policy: str | None = POLICY_WAIT) -> dict:
     """``z a``/``z O``/``z A`` / ``pm autostart fresh ID...``: reset, adopt,
     wait, review.
 

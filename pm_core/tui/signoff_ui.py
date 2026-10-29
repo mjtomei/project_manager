@@ -4,8 +4,9 @@ The TUI is an auto-sequence driver just like ``pm pr auto-sequence``: a QA
 PASS (or, with ``skip_qa``, a review PASS) hands the PR to the ``sign_off``
 step, and the same state machine (:func:`pm_core.signoff.step_signoff`)
 adopts / records / routes the router's verdict.  Only a fresh
-``SIGNOFF_MERGE`` on the current HEAD reaches ``_maybe_auto_merge`` — O then
-stops with the ready line, A merges.  Bounce verdicts restart the matching
+``SIGNOFF_MERGE`` on the current HEAD reaches ``_maybe_auto_merge`` — a
+wait-for-merge hold stops with the waiting-for-manual-merge line, an
+auto-merge target merges.  Bounce verdicts restart the matching
 TUI loop (QA, review loop, implementation); ``SIGNOFF_BLOCKED`` waits for a
 human.
 
@@ -317,7 +318,16 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             "decision (see the sign-off report)", sticky=30)
     elif hop == "qa":
         app.log_message(f"Sign-off routed {pr_id} back to QA (SIGNOFF_REQA)")
-        app._qa_loops.pop(pr_id, None)
+        # Drop a *finished* run's entry so the scheduler no longer reads it as
+        # a loop that owns the PR.  A running one keeps its entry: popping it
+        # would let the owed-REQA start below (and the reconciler) start a
+        # second full run over a loop that is still going.
+        from pm_core.tui import qa_loop_ui
+        loop = app._qa_loops.get(pr_id)
+        if loop is None or not loop.running:
+            # Retire a completed/held run, including its unbounded follow-up
+            # poller and resume snapshot. A live running loop stays protected.
+            qa_loop_ui.discard_qa_state(app._qa_loops.pop(pr_id, None))
         # Drop the finished run's PASS record: it would otherwise read as
         # "QA passed" to the catch-up hand-off before the new run starts.
         try:
@@ -325,8 +335,16 @@ def step(app, pr_id: str, pr: dict | None = None) -> None:
             _rs.set_action_state(pr_id, "qa", None)
         except Exception:
             _log.debug("runtime_state qa clear failed", exc_info=True)
-        from pm_core.tui import qa_loop_ui
-        qa_loop_ui.start_qa(app, pr_id)
+        from pm_core.qa_loop import run_driven_elsewhere
+        if run_driven_elsewhere(pr_id):
+            # A ``pm qa run`` of this PR is live: a new loop's planning
+            # retires its windows as stale and runs QA a second time (S117).
+            # The return record keeps ``awaiting: qa`` on disk, so the owed
+            # start survives this process; arm the poll tick that starts it
+            # once that run ends (also with auto-start off).
+            qa_loop_ui.arm_owed_reqa(app)
+        else:
+            qa_loop_ui.start_owed_reqa(app, pr_id)
     elif hop == "review":
         app.log_message(
             f"Sign-off routed {pr_id} back to review (SIGNOFF_REVIEW)")
