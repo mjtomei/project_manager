@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-28T15:57:32.865016+00:00'
+  updated_at: '2026-10-29T05:39:54.481781+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42579,6 +42579,27 @@ prs:
       window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
+  - id: note-5e0b25d
+    text: 'QA S129 (2026-10-29, container podman 3 slirp4netns, real claude 2.1.312
+      vs main/acme router/decoy stubs, fake planner/verifier/finalizer; HEAD 5f204dc2
+      vs control 4aff1dd4; captures /pm-captures/scenarios/129/README.md, 18 mp4):
+      INPUT_REQUIRED, no code change. Held on HEAD: env only via ~/.pm/run (drwx------,
+      44 files -rw-------, each gone <=25 ms while its pane was still sh, dir empty
+      at end); marker grep 0 files (control: 1, the c pane registry myview.json carries
+      the user key inline = pr-740ae41); routed/unrouted stub split, decoy 0, /run/pm-route
+      only on routed containers, R9 process env, hooks/transcripts; bridge refusal
+      rc 1 one line for start --fresh, review --fresh --background, review from a
+      pm-session shell, TUI s; QA stopped TUI line + one warning; push proxy: 5 concurrent
+      rounds, cross-branch rejected, gap push git-proxy cannot connect rc 1, review
+      respawn same socket, cwd /, decoy pm_core untouched, isolation ok. Open (same
+      on control, spec decision needed): (1) QA stops at the queued scenario-2 launch,
+      so scenario 2 refiner never runs (Then expected it on main; RQ53 stops before
+      any launch); (2) tick stderr carries the SIGNOFF_MERGE coerced note; (3) step
+      2 as written (acme removed) gives not-configured, bridge line only after re-adding
+      acme; plain pm pr review outside tmux is a no-op (filed pr-3713c9e); t focuses
+      a stopped QA window, z t restarts.'
+    created_at: '2026-10-29T05:39:54Z'
+    last_edited: '2026-10-29T05:39:54Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
@@ -48117,6 +48138,35 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T18:02:48.130836+00:00'
   updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-3713c9e
+  plan: bugs
+  title: 'Bug: pm pr review from a shell outside tmux moves the PR to in_review, then
+    exits 0 with "Review window requires tmux" and launches nothing'
+  branch: pm/pr-3713c9e-bug-pm-pr-review-from-a-shell-outside-tmux-moves-t
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/pr.py pr_review -> _launch_review_window (HEAD
+    pr-592e4bd 5f204dc2: "if not tmux_mod.has_tmux() or not (background or tmux_mod.in_tmux())";
+    master 4a74d880 has the same check without the background escape). Repro (QA S129,
+    pr-592e4bd, container mode, private HOME): from a plain terminal outside tmux,
+    cwd = the project root, with the pm session running, run `pm pr review <pr>` or
+    `pm pr review <pr> --fresh` on an in_progress PR. Output: "PR <pr> marked as in_review."
+    then "Review window requires tmux.", rc 0, no review window. The PR status has
+    already moved to in_review although nothing launched, and the rc reports success.
+    `pm pr start <pr>` from the same shell launches its window in the project session,
+    and `pm pr review <pr> --background` from the same shell also works, so plain
+    review is the odd one out. Expected: either open the window in the project session
+    like pm pr start/--background do, or refuse before touching the status, exiting
+    non-zero with a hint (run inside the pm session or pass --background).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T05:37:07.785932+00:00'
+  updated_at: '2026-10-29T05:37:07.785932+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
