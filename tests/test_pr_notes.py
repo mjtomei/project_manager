@@ -744,10 +744,12 @@ class TestPrNotesHandoffGuidance:
 
 
 class TestQAVerdictFinalityGuidance:
-    """A QA scenario worker cannot deliver a replacement verdict once one is
-    recorded (qa_loop pending-set guard), and a scenario refiner's decision is
-    one-shot — so cross-run handoff must go through a pm PR note. Review loops
-    re-run per iteration, so they get no such "verdict is final" guidance.
+    """A QA scenario worker's PASS/NEEDS_WORK verdict cannot be replaced once
+    recorded, while INPUT_REQUIRED keeps the pane polled for a follow-up
+    after the user answers (pr-2c67d50).  A scenario refiner's decision is
+    one-shot — so cross-run handoff must go through a pm PR note. Review
+    loops re-run per iteration, so they get no such "verdict is final"
+    guidance.
     """
 
     def _data(self):
@@ -774,8 +776,13 @@ class TestQAVerdictFinalityGuidance:
         scenario = QAScenario(index=1, title="Test", focus="testing", steps="Run tests")
         with patch("pm_core.prompt_gen.store.find_project_root"):
             prompt = generate_qa_child_prompt(self._data(), "pr-fin", scenario, "/tmp/workdir")
-        assert "Your Verdict Is Final for This Run" in prompt
+        assert "Your Verdict, and When It Is Final" in prompt
+        # PASS/NEEDS_WORK remain terminal...
+        assert "PASS and NEEDS_WORK are final for this run" in prompt
         assert "there is no re-poll" in prompt
+        # ...while INPUT_REQUIRED keeps the pane polled for a follow-up.
+        assert "INPUT_REQUIRED is **not** final" in prompt
+        assert "follow-up verdict" in prompt
         assert "next QA run on this PR" in prompt
         # Points to the handoff channel with the concrete PR id.
         assert "pm pr note add pr-fin '<text>'" in prompt
@@ -784,6 +791,7 @@ class TestQAVerdictFinalityGuidance:
         """Review loops accept successive verdicts, so they must NOT carry the
         QA 'verdict is final' guidance."""
         prompt = generate_review_prompt(self._data(), "pr-fin")
+        assert "Your Verdict, and When It Is Final" not in prompt
         assert "Your Verdict Is Final for This Run" not in prompt
 
     def test_refiner_prompt_one_shot_handoff(self):
@@ -793,6 +801,11 @@ class TestQAVerdictFinalityGuidance:
             scenario, "pm/pr-fin", "master", pr_id="pr-fin")
         assert "This Decision Is Final" in prompt
         assert "REFINER_REJECT defers the scenario" in prompt
+        # The refiner stays one-shot, scoped away from the worker's
+        # INPUT_REQUIRED continuation.  (Assert on the collapsed text so a
+        # re-wrap of the prompt source cannot break the test.)
+        assert ("not describe the scenario worker's INPUT_REQUIRED wait"
+                in " ".join(prompt.split()))
         assert "pm pr note add pr-fin '<text>'" in prompt
         assert "Prefer pm PR notes over GitHub" in prompt
         assert "travels to master when this PR merges" in prompt
