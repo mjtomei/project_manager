@@ -17,7 +17,9 @@ The fix (see `impl.md`) makes every attempt an immutable entry under
 `<run>/archive/<stem>.<session-id>.jsonl`, makes finalization
 ownership-checked, names review iterations per loop, archives instead of
 deleting on retire, and makes bulk sweeps skip transcripts whose session
-may still be writing.
+may still be writing. The branch also merges master's native launch-retry /
+discovery refactor, so retry, rediscovery and follow-up-verdict polling
+must resolve through the same loop-scoped paths (R10).
 
 QA must confirm the user-visible archive behaviour on the real surfaces
 (TUI auto-start, TUI per-PR auto-sequence, CLI `pm pr auto-sequence`, CLI
@@ -157,10 +159,41 @@ watcher), not the helper functions.
   - a warning about the failed archive is logged;
   - the previous session remains recoverable from `~/.claude/projects`.
 
+### R10 — Retry, rediscovery and follow-up polling use the loop's own transcript
+(Added after the master integration: the branch now merges the native
+launch-retry / discovery refactor with loop-scoped naming.)
+- **Given** a review iteration was launched and either the TUI restarts
+  mid-iteration or a launch attempt fails and is retried.
+- **When** the loop rediscovers the in-flight session (or a fresh attempt
+  launches), and later polls for a follow-up verdict after an
+  `INPUT_REQUIRED` turn.
+- **Then**
+  - the rediscovered session is the one on the loop's own loop-scoped
+    path; a session from an earlier run/loop that already finished is not
+    adopted as this iteration's verdict;
+  - a retried launch reuses the same loop-scoped iteration path, and the
+    failed attempt's transcript is preserved in `archive/` rather than
+    lost;
+  - the follow-up verdict a session appends after the restart is collected
+    from the live path — the loop reports the later verdict, not an early
+    one, and never invents one;
+  - a fresh loop never adopts or launches over another loop's still-live
+    legacy `review-<pr>-i<N>.jsonl` link.
+
 ## Setup
 
 Cross-cutting setup for every scenario:
 
+- **Test isolation is mandatory.** Give each scenario its own tmux server
+  and its own `HOME` so `~/.pm`, `~/.claude/projects` and the tmux socket
+  are all scenario-private (e.g. `export HOME=<scratch>/home`,
+  `export TMUX_TMPDIR=<scratch>/tmux` before `pm session`). Before acting,
+  confirm the fixture owns what it is about to touch (`pm which`, the
+  session/window list). Never attach to, restart, stop or kill the user's
+  real `pm-*` session, and never change shared host configuration
+  (global tmux options, `PATH`/`PYTHONPATH` outside the scenario shell) as
+  setup or cleanup. If a run goes wrong, preserve its evidence and report
+  it — do not "clean up" by touching shared state.
 - Use `tui-manual-test.md`: install pm from this branch into a venv, export
   `PYTHONPATH` to the clone, create a throwaway project with `pm init
   --backend local --no-import` and add PRs with `pm pr add`, start the pm
@@ -168,12 +201,18 @@ Cross-cutting setup for every scenario:
 - Configure the fake Claude stand-in with `pm fake-claude config set` before
   starting the run: `impl`/`merge` as no-verdict sessions, `review` as a
   scripted `PASS`, `signoff` as a scripted sequence (e.g. `SIGNOFF_IMPL`
-  then `SIGNOFF_MERGE`; `SIGNOFF_REVIEW` for the review-return scenario),
-  `watcher` as `READY`, and `_all: {}` for the rest. Scripted sequences emit
-  one verdict per iteration.
+  then `SIGNOFF_MERGE`; `SIGNOFF_REVIEW` / `SIGNOFF_REQA` for those
+  scenarios), `watcher` as `READY`, the `qa_*` types when a re-QA runs, and
+  `_all: {}` for the rest. Scripted sequences emit one verdict per
+  iteration; a per-iteration `delay` holds a session open so a concurrent
+  action can land while it is still writing.
 - Use an auto-merge target (`A` / `pm autostart add <pr> --auto-merge`) when
   the scenario should run all the way to merge; use `--wait-for-merge` when
   the run should stop at sign-off.
+- Local-backend gotcha: `pm push` only commits a `pm/sync-*` branch. Before
+  `pm autostart add` / `pm pr start`, fast-forward the project
+  (`git merge --ff-only <branch>`), otherwise the step fails with "not
+  committed on master yet".
 - The transcript run dir is `pm/transcripts/<autostart-*|manual-*|auto-sequence|watcher-*>`
   under the throwaway project; inspect it with ordinary file tools (listing,
   `readlink`, reading JSONL). This is the user-facing archive under test.
@@ -257,6 +296,20 @@ Resolved without user input:
    that no session is overwritten.
 4. **QA transcripts.** Produced through native transcript paths, not the run
    dir; out of scope except that nothing in this change may break a QA run.
+5. **A failed archive of a frozen canonical may drop it (R9).** When
+   `archive/` is unwritable and the outgoing canonical is a *regular file*
+   (already a self-contained copy), the launch replaces it and the run dir
+   loses that one copy; the content stays in `~/.claude/projects` and a
+   warning is logged. This is the documented trade-off (a symlink only
+   loses its link). Pass on "launch proceeded + warning + native copy
+   readable"; do not fail it for the missing run-dir copy.
+6. **Archive key format is opaque.** Session-backed entries are named
+   `<stem>.<session-id>.jsonl`; a link whose target is not session-named
+   uses a deterministic hash key. Assert by session id where one exists,
+   and otherwise only that an entry exists, is complete, and is never
+   duplicated — not a particular key spelling. The review loop id is an
+   opaque hex token (currently 8 chars); never assert its width or reuse
+   it across loops in a Then.
 
 No **[UNRESOLVED]** ambiguities.
 
