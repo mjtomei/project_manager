@@ -760,16 +760,22 @@ def fresh_start(app, ids: list[str], policy: str | None = None,
 
     from pm_core.tui.auto_start import CONFIRM_HOLD_SECONDS, add_targets
     ids_ok = [c["pr_id"] for c in changes]
-    if reset_prs:
-        confirm = ("Auto-start: fresh run for "
-                   + ", ".join(ids_ok)
-                   + " — returned to implementation after feedback")
-    else:
-        # Every PR in the call was already waiting: nothing was reset.
-        pronoun = "their" if len(ids_ok) > 1 else "its"
-        confirm = ("Auto-start: "
-                   + ", ".join(ids_ok)
-                   + f" already waiting for {pronoun} implementation turn")
+    # Name each group by what actually happened to it: a mixed call (one PR
+    # reset, another already waiting) must not claim the waiting PR was
+    # "returned to implementation".
+    reset_ids = [c["pr_id"] for c in changes if c["action"] == "fresh_reset"]
+    waiting_ids = [c["pr_id"] for c in changes
+                   if c["action"] == "already_waiting"]
+    confirm_parts: list[str] = []
+    if reset_ids:
+        confirm_parts.append("fresh run for " + ", ".join(reset_ids)
+                             + " — returned to implementation after feedback")
+    if waiting_ids:
+        pronoun = "their" if len(waiting_ids) > 1 else "its"
+        confirm_parts.append(", ".join(waiting_ids)
+                             + f" already waiting for {pronoun} "
+                               f"implementation turn")
+    confirm = "Auto-start: " + "; ".join(confirm_parts)
     add = add_targets(app, ids_ok, policy=policy,
                       default_policy=default_policy, source=source,
                       confirm=confirm)

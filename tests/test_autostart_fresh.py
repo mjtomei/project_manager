@@ -727,7 +727,11 @@ class TestHandoffConsumption:
 
 class TestFreshStart:
     def _app(self, project):
-        app = FakeApp([_pr(workdir=str(project.parent / "wd"))], project)
+        # Build the in-memory rows from disk so ``_validate`` sees the status
+        # a test wrote: a stale in-memory row would let ``reset_pr``'s own
+        # disk re-read mask a broken validation (and the all-or-nothing
+        # contract of R1.1 would go unpinned).
+        app = FakeApp(store.load(project)["prs"], project)
         app._pane_idle_tracker = MagicMock()
         app._pane_idle_tracker.is_tracked.return_value = False
         return app
@@ -821,6 +825,30 @@ class TestFreshStart:
         assert any("already waiting for their implementation turn" in line
                    for line in app.logs)
 
+    def test_mixed_call_names_each_pr_by_what_happened(self, project):
+        # A call can reset one PR and leave another already waiting.  The
+        # confirmation must not claim the waiting PR was returned to
+        # implementation.
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", status="in_progress",
+                               workdir=str(project.parent / "wd-b"),
+                               **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                              "awaiting_handoff": True}}))
+        store.save(data, project)
+        app = FakeApp(store.load(project)["prs"], project)
+        app._pane_idle_tracker = MagicMock()
+        with patch.object(autostart_fresh, "handoff_ready",
+                          return_value=False), \
+             patch("pm_core.tui.review_loop_ui._auto_review_idle_prs"):
+            out = autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+        assert [c["action"] for c in out["changes"]] == [
+            "fresh_reset", "already_waiting"]
+        line = next(line for line in app.logs
+                    if line.startswith("Auto-start: fresh run"))
+        assert "fresh run for pr-a — returned to implementation" in line
+        assert "pr-b already waiting for its implementation turn" in line
+        assert "fresh run for pr-a, pr-b" not in line
+
     def test_merge_in_progress_is_refused(self, project):
         app = self._app(project)
         app._pending_merge_prs.add("pr-a")
@@ -829,6 +857,16 @@ class TestFreshStart:
         # Nothing changed.
         pr = store.get_pr(store.load(project), "pr-a")
         assert pr["status"] == "in_review"
+        assert not auto_start.get_targets(app)
+
+    def test_merge_input_required_is_refused(self, project):
+        # R8's third in-flight condition: the merge window is blocked on an
+        # INPUT_REQUIRED answer.  The in-memory set alone must refuse.
+        app = self._app(project)
+        app._merge_input_required_prs.add("pr-a")
+        out = autostart_fresh.fresh_start(app, ["pr-a"])
+        assert not out["ok"] and out["error"] == "merge_in_progress"
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_review"
         assert not auto_start.get_targets(app)
 
     def test_merge_window_alone_is_refused(self, project):
@@ -844,12 +882,50 @@ class TestFreshStart:
         assert not auto_start.get_targets(app)
 
     def test_pending_pr_is_refused(self, project):
-        app = self._app(project)
+        # Save first, then build the app from disk: the refusal must come
+        # from ``_validate`` (the all-or-nothing pass), not from
+        # ``reset_pr``'s own stage re-check.
         data = store.load(project)
         store.get_pr(data, "pr-a")["status"] = "pending"
         store.save(data, project)
+        app = self._app(project)
         out = autostart_fresh.fresh_start(app, ["pr-a"])
         assert not out["ok"] and out["error"] == "not_later_stage"
+        # ``invalid`` is only set by the up-front pass; ``reset_pr``'s own
+        # stage re-check reports the failure without it.
+        assert out["invalid"] == ["pr-a"]
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "pending"
+        assert not auto_start.get_targets(app)
+
+    def test_pr_without_a_workdir_is_refused(self, project):
+        # R1.1: no workdir means no implementation session to adopt, so the
+        # whole call must be rejected before anything changes.
+        data = store.load(project)
+        store.get_pr(data, "pr-a")["workdir"] = ""
+        store.save(data, project)
+        app = self._app(project)
+        out = autostart_fresh.fresh_start(app, ["pr-a"])
+        assert not out["ok"] and out["error"] == "no_workdir"
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_review"
+        assert not auto_start.get_targets(app)
+
+    def test_validation_is_all_or_nothing_for_a_wrong_status_pr(self, project):
+        # A non-terminal PR in the wrong stage alongside a valid one must
+        # reject the whole call (R1.1) — the valid PR is not reset and no
+        # target is added.  ``reset_pr`` would have rejected it too, but by
+        # then the other PRs in the call are already on disk (the i4
+        # partial-failure contract), so the up-front pass is what keeps
+        # "nothing changed" true for an invalid set.
+        data = store.load(project)
+        data["prs"].append(_pr("pr-b", status="pending",
+                               workdir=str(project.parent / "wd-b")))
+        store.save(data, project)
+        app = self._app(project)
+        out = autostart_fresh.fresh_start(app, ["pr-a", "pr-b"])
+        assert not out["ok"] and out["error"] == "not_later_stage"
+        assert out["invalid"] == ["pr-b"]
+        assert store.get_pr(store.load(project), "pr-a")["status"] == "in_review"
+        assert not auto_start.get_targets(app)
 
     @pytest.mark.parametrize("stage", ["qa", "sign_off"])
     def test_rewinds_from_every_later_stage(self, project, stage):
@@ -1019,6 +1095,11 @@ class TestFreshStart:
             autostart_fresh.fresh_start(
                 app, ["pr-a"], policy=None, source="key:za")
         assert auto_start.target_policy(app, "pr-a") == st.POLICY_AUTO
+        # The marker must record the preserved policy too: ``resume_pending``
+        # re-arms the target from it after a TUI restart, so a marker left at
+        # the wait-for-merge default would silently downgrade the target.
+        marker = st.fresh_marker(store.get_pr(store.load(project), "pr-a"))
+        assert marker["policy"] == st.POLICY_AUTO
 
     def test_fresh_leaves_unrelated_targets_alone(self, project):
         # A fresh reset must not disturb another target's policy or status.
@@ -1169,6 +1250,7 @@ class _PrefixApp:
         self._command_pending = False
         self.screen_stack = [object()]
         self.cleared = 0
+        self.timers = []
 
     def query_one(self, *_a, **_k):
         from types import SimpleNamespace
@@ -1192,7 +1274,8 @@ class _PrefixApp:
     def log_message(self, *_a, **_k):
         return 0
 
-    def set_timer(self, *_a, **_k):
+    def set_timer(self, delay, callback, *_a, **_k):
+        self.timers.append((delay, callback))
         return MagicMock()
 
 
@@ -1296,11 +1379,16 @@ class TestPrefixCancellation:
         assert app.cleared == 1
 
     def test_pressing_z_arms_and_consuming_stops_the_timer(self):
-        from pm_core.tui.app import ProjectManagerApp
+        from pm_core.tui.app import ProjectManagerApp, _Z_PREFIX_TIMEOUT
         app = _PrefixApp(z=0)
         ProjectManagerApp.on_key(app, _KeyEvent("z", "z"))
         assert app._z_count == 1
         assert app._z_cancel_timer is not None
+        # The timer must be armed with the chord window and the real cancel
+        # callback — a wrong delay or a no-op callback would leave a forgotten
+        # ``z`` armed for a later destructive key, which the direct
+        # ``_cancel_z_mode`` test above cannot detect.
+        assert app.timers == [(_Z_PREFIX_TIMEOUT, app._cancel_z_mode)]
         assert ProjectManagerApp._consume_z(app) == 1
         assert app._z_cancel_timer is None
 
@@ -1401,6 +1489,24 @@ class TestRetirement:
         assert written["review-loop"][1]["previous_verdict"] == "NEEDS_WORK"
         assert written["qa"][1]["verdict"] == "SUPERSEDED"
 
+    def test_signoff_driver_bookkeeping_is_cleared(self):
+        # ``signoff_ui`` skips a terminal outcome it has already acted on for
+        # the same (verdict, sha, policy).  A stale key from the old attempt
+        # would make the new attempt's verdict a no-op (no merge) when the
+        # rework did not move HEAD, so the reset must drop it.
+        app = FakeApp([_pr()])
+        app._signoff_acted = {"pr-a": ("SIGNOFF_MERGE", "abc123", "auto_merge"),
+                              "pr-b": ("SIGNOFF_MERGE", "def456", "auto_merge")}
+        app._signoff_launched_at = {"pr-a": 1234.0}
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert "pr-a" not in app._signoff_acted
+        assert "pr-a" not in app._signoff_launched_at
+        # Another PR's bookkeeping is untouched.
+        assert "pr-b" in app._signoff_acted
+
     def test_a_held_qa_run_is_discarded_not_just_stopped(self):
         # A run that finalized with INPUT_REQUIRED is *held* with ``running``
         # False while it keeps polling its worker panes (the hold has no
@@ -1421,17 +1527,18 @@ class TestRetirement:
         assert qa.stop_requested
         assert qa.superseded
 
-    def test_qa_scenario_tracker_keys_are_dropped(self):
+    def test_qa_scenario_tracker_keys_are_dropped_before_the_sentinel(self):
         # ``poll_qa_state`` unregisters a finished run's scenario keys; a
         # popped loop never reaches that path, so the retirement must drop
-        # them itself — and before the SUPERSEDED sentinel, because
-        # unregistering a ``qa:`` key clears the qa runtime mirror.
+        # them itself — and *before* the SUPERSEDED sentinel, because
+        # unregistering a ``qa:`` key clears the qa runtime mirror, which
+        # would wipe a sentinel written first.  Both sides are recorded into
+        # one event list so the ordering is actually observable.
         from pm_core.qa_loop import QAScenario
 
-        class _Tracker:
-            def __init__(self):
-                self.dropped = []
+        events: list[tuple[str, str]] = []
 
+        class _Tracker:
             def is_idle(self, key):
                 return False
 
@@ -1439,20 +1546,25 @@ class TestRetirement:
                 pass
 
             def unregister(self, key):
-                self.dropped.append(key)
+                events.append(("unregister", key))
 
         app = FakeApp([_pr()])
-        tracker = _Tracker()
-        app._pane_idle_tracker = tracker
+        app._pane_idle_tracker = _Tracker()
         qa = QALoopState(pr_id="pr-a")
         qa.scenarios = [QAScenario(index=1, title="a", focus="f"),
                         QAScenario(index=2, title="b", focus="f")]
         app._qa_loops["pr-a"] = qa
         with patch("pm_core.runtime_state.get_action_state",
                    return_value={}), \
-             patch("pm_core.runtime_state.set_action_state"):
+             patch("pm_core.runtime_state.set_action_state",
+                   side_effect=lambda pid, action, state, **kw:
+                   events.append(("sentinel", action))):
             autostart_fresh.retire_in_memory(app, _pr())
-        assert tracker.dropped == ["qa:pr-a:s1", "qa:pr-a:s2"]
+        assert [e for e in events if e[0] == "unregister"] == [
+            ("unregister", "qa:pr-a:s1"), ("unregister", "qa:pr-a:s2")]
+        qa_sentinel = events.index(("sentinel", "qa"))
+        assert all(i < qa_sentinel for i, e in enumerate(events)
+                   if e[0] == "unregister")
 
     def test_live_loop_is_stopped(self):
         app = FakeApp([_pr()])

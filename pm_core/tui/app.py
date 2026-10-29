@@ -695,9 +695,15 @@ class ProjectManagerApp(App):
         # survive a plain TUI restart: re-add its target from the PR marker.
         # ``resume_pending`` logs each resumed PR itself (through
         # ``add_targets``'s confirmation); an extra aggregate line here would
-        # only duplicate it.
+        # only duplicate it.  Guarded like the restore above: like every other
+        # startup chore, it must not abort the queue dispatch below (that would
+        # leave every externally queued command deferred forever).
         from pm_core.tui import autostart_fresh
-        autostart_fresh.resume_pending(self)
+        try:
+            autostart_fresh.resume_pending(self)
+        except Exception:
+            _log.exception("resume_pending failed; continuing without "
+                           "resuming fresh-autostart attempts")
         # Now dispatch external commands, including any that arrived while
         # the previous process was exec'ing (signal lost) or before the
         # breadcrumb restore above (which would have overwritten them).

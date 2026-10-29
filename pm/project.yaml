@@ -39458,7 +39458,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-29T02:00:52.496827+00:00'
+  updated_at: '2026-10-29T03:47:48.688464+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39979,6 +39979,30 @@ prs:
       section. Handing off to native review next.'
     created_at: '2026-10-29T02:00:52Z'
     last_edited: '2026-10-29T02:00:52Z'
+  - id: note-1dbfd2d
+    text: 'review-loop d9f2 i3: no change to the fresh flow''s design. (1) fresh_start''s
+      log confirmation is assembled per group: a mixed `pm autostart fresh A B` (A
+      reset, B already waiting) no longer claims B was "returned to implementation"
+      (test verified to fail with the old wording). (2) _deferred_startup now guards
+      the resume_pending call like consume_breadcrumb — an unexpected raise would
+      leave _cmd_queue_ready False forever, deferring every externally queued command;
+      pinned by two tests in tests/test_tui_pidfile.py (the guard test verified to
+      fail without the guard). (3) Test gaps closed: TestFreshStart._app now builds
+      its in-memory rows from disk so _validate''s all-or-nothing pass is actually
+      exercised; added a no_workdir refusal, a wrong-status-PR-alongside-a-valid-one
+      all-or-nothing test (both verified to fail without their guards), the merge
+      INPUT_REQUIRED refusal branch, the marker''s preserved policy for an auto-merge
+      target, R4''s sign-off driver bookkeeping clear, an observable QA tracker-key/sentinel
+      ordering, and the z-prefix timer wiring (delay + real callback). (4) Spec resync:
+      R3 states the transcript-first handoff order the code implements and that a
+      stale hook event cannot override an in_progress transcript; R2 matches the real
+      registration order (run-dir symlink first, native-transcript fallback); the
+      stale stop_before_merge in the i4 note is corrected; d9f2 i2/i3 notes added;
+      tests/test_tui_pidfile.py added to the files list. Full suite: 4621 passed,
+      1 skipped, 1 failed — only test_hook_events::test_installer_writes_standalone_receiver,
+      the known env-only hook-installer failure (not touched by this PR).'
+    created_at: '2026-10-29T03:47:48Z'
+    last_edited: '2026-10-29T03:47:48Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

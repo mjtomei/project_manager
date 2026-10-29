@@ -104,15 +104,16 @@ target off.
 Fresh autostart must **never** launch or kill the implementation session:
 
 * Do not call `pr start` with `--fresh`; do not send keys to the pane.
-* Register/adopt the live implementation pane in `PaneIdleTracker` using the
-  pane's own transcript (`pane_transcript_path`, falling back to the run-dir
-  `impl-<pr>.jsonl` symlink) so it is trackable after a TUI restart.  The
-  registration happens in `review_loop_ui._poll_impl_idle`'s existing lazy
-  path: when the run-dir symlink is unavailable (a restarted TUI's run dir is
-  new) a fresh-marked PR recovers the pane's native transcript from its start
-  command instead of only trust-watching it.  The handoff check itself always
-  prefers the pane's native transcript (`autostart_fresh._impl_transcript`),
-  so the tracker registration only feeds hook/idle state.
+* Register/adopt the live implementation pane in `PaneIdleTracker` so it is
+  trackable after a TUI restart.  The registration happens in
+  `review_loop_ui._poll_impl_idle`'s existing lazy path: it registers the
+  run-dir `impl-<pr>.jsonl` symlink first, and when that is unavailable (a
+  restarted TUI's run dir is new, so the symlink was never created) a
+  fresh-marked PR falls back to the pane's own transcript from its start
+  command (`pane_transcript_path`) instead of only trust-watching it.  The
+  handoff check itself always prefers the pane's native transcript
+  (`autostart_fresh._impl_transcript`), so the tracker registration only
+  feeds hook/idle state.
 * The scheduler pass that follows only runs `pr start --background`, whose
   existing-window fast path is a no-op (`pm_core/cli/pr.py:955-965`).  If the
   window genuinely does not exist, that is the existing in-progress relaunch
@@ -125,16 +126,20 @@ Fresh autostart must **never** launch or kill the implementation session:
 A fresh attempt in `in_progress` must wait until the current implementation
 turn is complete before advancing, and then start **one** fresh review:
 
-* Detect the handoff with `autostart_fresh.handoff_ready()`:
-  1. a **new** `idle_prompt`/`Stop` hook event with a timestamp **after**
-     `fresh_autostart.requested_at` (old Stop/idle events cannot count), or
-  2. the latest transcript turn is structurally complete
+* Detect the handoff with `autostart_fresh.handoff_ready()`.  The transcript
+  is consulted **first** and is authoritative:
+  1. the latest transcript turn is structurally complete
      (`latest_turn_state == "complete"`: newest record is an assistant
-     message with no pending tool).  This is the authoritative signal and
-     does **not** additionally require the hook tracker's idle flag, which
-     can be stale or miss the event when `Stop` is written after
-     `idle_prompt`.  It covers "already completed before autostart was
-     enabled" and a restarted TUI.
+     message with no pending tool) → hand off; `in_progress` (a newer prompt,
+     tool result or streamed block) → keep waiting.  This does **not**
+     additionally require the hook tracker's idle flag, which can be stale or
+     miss the event when `Stop` is written after `idle_prompt`.  It covers
+     "already completed before autostart was enabled" and a restarted TUI.
+  2. Only when the transcript path resolves but its contents are
+     missing/unreadable does a **new** `idle_prompt`/`Stop` hook event with a
+     timestamp **after** `fresh_autostart.requested_at` count (old Stop/idle
+     events cannot).  A stale hook event can never override an `in_progress`
+     transcript — that is what stops the review starting over in-flight work.
 * `_poll_impl_idle` routes fresh-marker PRs through this explicit check
   instead of the generic `became_idle()` one-shot, so a stale idle flag
   cannot advance early and a later turn cannot be missed.
@@ -341,6 +346,8 @@ update; in-memory retirement and window teardown follow and are best-effort.
   (`became_idle()` fires again for a resumed turn).
 * `tests/test_review_loop_terminal_state.py` — a superseded loop must not
   finalize the successor's live `review-<pr>-i<n>.jsonl` symlink.
+* `tests/test_tui_pidfile.py` — `_deferred_startup` invokes
+  `resume_pending`, and a failing resume still arms the command queue.
 
 ## Review-iteration notes (i1)
 
@@ -442,8 +449,9 @@ status.  A fully robust fence needs a per-run id in the QA runtime record.
   others are still reset and the failure is reported in `failed` for the
   CLI's `failed:` lines.
 * **`resume_pending` policy fallback is tested** — an unknown/hand-edited
-  marker policy re-arms the target as `stop_before_merge` (manual merge)
-  rather than an unrecognised policy.
+  marker policy re-arms the target as the manual-merge policy
+  (`stop_before_merge` at the time; `wait_for_merge` after the master
+  integration) rather than an unrecognised policy.
 * **No duplicated resume log line** — `resume_pending` already logs each
   resumed PR through `add_targets`'s confirmation, so `_deferred_startup`
   no longer logs a second, near-identical aggregate line.
@@ -969,3 +977,62 @@ behavioural adaptation are below.
   supersede guard re-imported it) is gone, with the guard's race-window
   comment made explicit; one stray extra blank line before `@dataclass` in
   `verdict_transcript.py` is fixed.
+
+## Review-iteration notes (d9f2 i2)
+
+* **One transcript-path resolver** — `verdict_transcript._read_transcript_text`
+  duplicated `_resolve_transcript_file`'s path resolution (including the
+  pr-488b748 slug-mismatch band-aid): both walked "read the path, else glob
+  `~/.claude/projects/*/<session-id>.jsonl`".  The reader now resolves once
+  through `_resolve_transcript_file` and reads the result, so the band-aid and
+  its rationale live in one place.  No behaviour change.
+* **R6's fourth wait reason is pinned** — R6 lists four fresh-autostart wait
+  reasons but only three had tests.  `TestStatus` now pins the permission-prompt
+  reason ("fresh autostart: permission prompt in implementation window"), which
+  must not be conflated with the stale-idle "turn complete; starting fresh
+  review" reason — a blocked turn is not a finished one.
+* **R4 resynced with the code** — R4 still described the pre-i1 QA retirement
+  (set `stop_requested` only).  It now documents what the code does:
+  `qa_loop_ui.discard_qa_state`, the `qa:<pr>:s<n>` tracker-key cleanup a
+  popped loop would otherwise skip, and then the `SUPERSEDED` runtime sentinel.
+
+## Review-iteration notes (d9f2 i3)
+
+* **A mixed fresh call names each PR by what happened to it** — the log
+  confirmation was built from the whole call, so
+  `pm autostart fresh A B` with A reset and B already waiting claimed "fresh
+  run for A, B — returned to implementation after feedback", which is false
+  for B.  It is now assembled per group ("fresh run for A — returned to
+  implementation after feedback; B already waiting for its implementation
+  turn"); the single-group wordings are unchanged.  Pinned by
+  `TestFreshStart::test_mixed_call_names_each_pr_by_what_happened` (verified to
+  fail with the old wording).
+* **R3 documents the transcript-first ordering it already implements** — the
+  normative bullet list still put the hook event first, while `handoff_ready`
+  reads the transcript first and consults the hook only when the transcript
+  resolves but cannot be read (the i2 fix).  R3 now states that order and that
+  a stale hook event can never override an `in_progress` transcript.
+* **R2's pane-registration order matches the code** — R2 said the registration
+  uses the pane's own transcript "falling back to" the run-dir symlink; the
+  code registers the run-dir `impl-<pr>.jsonl` symlink first and falls back to
+  `pane_transcript_path` when it does not exist.  Wording only.
+* **Stale policy name in the i4 note corrected** — the i4 note still said an
+  unknown marker policy re-arms the target as `stop_before_merge`, which the
+  master integration removed; it now names the manual-merge policy
+  (`wait_for_merge`) and records the historical value.
+* **`resume_pending` is guarded like the breadcrumb restore** —
+  `_deferred_startup` called it unguarded while its own docstring states that
+  no startup step may abort the queue dispatch that follows: an unexpected
+  raise would have left `_cmd_queue_ready` False forever, deferring every
+  externally queued command (the exact failure that docstring exists to
+  prevent).  It now logs and continues.  Two tests in
+  `tests/test_tui_pidfile.py` pin the call site and the guard.
+* **Test gaps closed** — `TestFreshStart._app` now builds its in-memory rows
+  from disk, so the all-or-nothing `_validate` pass is actually exercised (the
+  stale `in_review` row previously let `reset_pr`'s disk re-read mask a broken
+  validation).  Added: a `no_workdir` refusal, a wrong-status PR alongside a
+  valid one changing nothing, the `merge INPUT_REQUIRED` refusal branch, the
+  marker's preserved policy for an auto-merge target, the sign-off driver
+  bookkeeping clear (R4), an observable ordering assertion for the QA
+  tracker-key/sentinel sequence, and an assertion that the `z` prefix timer is
+  armed with `_Z_PREFIX_TIMEOUT` and the real cancel callback.
