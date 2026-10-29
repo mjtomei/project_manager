@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T06:33:02.930606+00:00'
+  updated_at: '2026-10-29T07:06:10.282609+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39665,6 +39665,34 @@ prs:
       and stays open - kill the pane id to restore the tree view before recording.'
     created_at: '2026-10-29T06:33:02Z'
     last_edited: '2026-10-29T06:33:02Z'
+  - id: note-e1e2b6f
+    text: 'QA scenario 29 PASS at 45835b9e3 (integrated head), four triples driven
+      live (private HOME=/scratch/s29/home, PM_TMUX_SOCKET=/tmp/pm-qa-s29.sock, interactive
+      stand-in; captures /pm-captures/scenarios/29/). (1) Long lease: 256 s unanswered
+      review wait — 24/24 JSON samples waiting/review INPUT_REQUIRED (iteration 1)
+      ir=true fu=false iteration=1; 9/9 `pm pr auto-sequence` printed "running: review
+      (owned by loop:5181)"; same window @9 / pane %12 / session throughout, only
+      relaunches i1 and (after the answer) i2; answer -> follow-up running in <=2
+      s -> NEEDS_WORK -> iteration 2 -> PASS. (2) Failing launch: read-only run dir
+      -> rc 1 PermissionError classified retryable; text progress "review #1 (launch
+      retry 2)" with review {running,retryable,attempts>=2,error}; exhaustion failed/"review
+      launch failed (retryable)" with {LAUNCH_FAILED,attempts 3,ir=false}; 0/227 episode
+      samples waiting/INPUT_REQUIRED and no "interact with Claude" line; chmod u+w
+      + ~60 s re-arm -> "review iteration 1" (no "(last LAUNCH_FAILED)") -> PASS.
+      (3) Holds: A spec-pending, B QA INPUT_REQUIRED (qa.recorded), C SIGNOFF_MERGE
+      (fresh, held, still sign_off) byte-identical before/after D answer; D waiting
+      -> follow-up running; text/JSON agree; runs popup shows all four targets. (4)
+      Autostart off mid-follow-up: remove last target -> "Auto-start: off"/"No auto-start
+      targets"; loop still records NEEDS_WORK, runs iteration 2 and completes PASS;
+      40/40 samples one review window; notice count 1->1; "keeping transcript symlink
+      for a running review loop"; i1/i2 finalized regular files; PR still in_review.
+      No code changes. Harness: PR ids derive from titles and pm leases are keyed
+      by PR id in $HOME/.pm — two scratch projects with the same PR title in one HOME
+      collide ("Review launch owned by another loop"); use distinct titles. Fake planner
+      QA noise ("QA spec was not generated") follows every review PASS — scope no-wait
+      checks to the review episode. (2026-10-29T07:06:00Z)'
+    created_at: '2026-10-29T07:06:10Z'
+    last_edited: '2026-10-29T07:06:10Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
