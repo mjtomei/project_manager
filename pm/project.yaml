@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T11:28:53.518832+00:00'
+  updated_at: '2026-10-29T11:46:22.045926+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14895,6 +14895,31 @@ prs:
       tests/test_pr_close.py 62 passed.'
     created_at: '2026-10-29T11:28:53Z'
     last_edited: '2026-10-29T11:28:53Z'
+  - id: note-f0bb4ea
+    text: 'S16 refiner (concurrent close/remove/reopen/start/cleanup/lock) — verified
+      end-to-end on this branch with the fake-github recipe: disposable HOME; fake-github
+      installed BEFORE `pm init <fake remote.git> --backend github --no-import`; PRs
+      started with a no-claude PATH; every actor in its own `cd $TEST_DIR` subshell.
+      Observed: (1) two simultaneous `pm pr close A` both exit 0, one closed entry,
+      `closed_at` stays byte-identical on a later repeat close while `updated_at`
+      advances. (2) close vs `close --remove` ends with the entry removed whenever
+      remove applies; the losing close is either `PR ''<id>'' not found.` (rc 1) or
+      `PR <id> was removed concurrently; nothing to close.` (rc 0), never `Removed
+      registry entry`; workdir and remote branch survive. (3) close vs `pm pr edit
+      A --status pending` ends closed or pending, never pending with `closed_at`.
+      (4) a fresh `pm pr start` followed ~0.1 s later by close reliably hits the at-lock
+      guard `became closed while starting — not recording the start.` (rc 1) with
+      the prepared workdir left on disk; the start-wins ordering also ends closed.
+      (5) `pm pr cleanup --all --force` clears workdirs but NEVER removes registry
+      entries — the draft''s "entry gone when --all ran" is wrong; only `--remove`
+      removes. (6) holding `pm/project.yaml.lock` with flock for >2 s yields `Error:
+      Could not acquire lock on ... within 2.0s ...` (rc 1), registry untouched, retry
+      succeeds. One expected artifact of ordering (4): if close''s pre-lock snapshot
+      predates the concurrent start''s draft PR, that GitHub PR can stay OPEN on the
+      stand-in while the local record is closed — not an R16 violation. Scenario refined,
+      not rejected.'
+    created_at: '2026-10-29T11:46:21Z'
+    last_edited: '2026-10-29T11:46:21Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
