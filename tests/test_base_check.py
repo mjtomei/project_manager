@@ -472,6 +472,27 @@ def test_moved_base_during_handoff_keeps_the_resume_loop_marker(w):
     assert ret.get("resume_loop") is True
 
 
+def test_gate_supersede_keeps_the_loop_resume_marker(w):
+    """A one-shot gate superseding a loop episode keeps its resume intent.
+
+    The base moves during the rework and the new pair still conflicts, so a
+    manual ``d`` (``resume_loop=False``) supersedes the episode through the
+    gate.  The flag belongs to the bounce, not to the superseding driver: the
+    interrupted review loop must still restart once the rework lands.
+    """
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        gate(w, base_check.STAGE_REVIEW, resume_loop=True)
+    simulate_launch(w)
+    commit(w.wd, "more.txt", "x\n", "more impl work")
+    commit(w.repo, "shared.txt", "new master side\n", "master moves")
+    with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
+        res = gate(w, base_check.STAGE_REVIEW_ITERATION, iteration=2)
+    assert res.decision == base_check.CONFLICT, res.reason
+    ret = pr(w)["base_return"]
+    assert ret["attempt"] == 2
+    assert ret.get("resume_loop") is True
+
+
 def test_completion_ignores_idle_evidence_from_before_the_relaunch(w):
     """The killed session's idle event is not the rework session's turn.
 

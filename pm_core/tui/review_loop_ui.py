@@ -1152,32 +1152,22 @@ def _shared_impl_transcript(app, pr_id: str) -> str | None:
 
     Best effort: returns ``None`` when no usable link exists.
     """
-    import glob
-
+    from pm_core import base_check
     from pm_core.paths import pm_home
 
     root = app._root or pm_home()
-    base = root / "transcripts"
-    if not base.is_dir():
-        return None
-    name = f"impl-{pr_id}.jsonl"
     best: str | None = None
     best_mtime = -1.0
-    for pattern in (f"*/{name}", f"*/*/{name}"):
+    for p in base_check.impl_transcript_links(root, pr_id):
         try:
-            candidates = glob.glob(str(base / pattern))
-        except OSError:  # pragma: no cover - best effort
+            # lstat: a refreshed link is rewritten, so its own mtime is
+            # the freshness signal (getmtime would follow the shared
+            # target and make every link look identical).
+            mtime = os.lstat(p).st_mtime
+        except OSError:
             continue
-        for p in candidates:
-            try:
-                # lstat: a refreshed link is rewritten, so its own mtime is
-                # the freshness signal (getmtime would follow the shared
-                # target and make every link look identical).
-                mtime = os.lstat(p).st_mtime
-            except OSError:
-                continue
-            if mtime > best_mtime:
-                best, best_mtime = p, mtime
+        if mtime > best_mtime:
+            best, best_mtime = str(p), mtime
     return best
 
 

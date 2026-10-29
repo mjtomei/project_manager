@@ -259,6 +259,26 @@ class TestRunReviewLoopSync:
         assert mock_review.call_count == 3
 
     @patch("pm_core.review_loop._run_claude_review")
+    def test_max_iterations_bounds_this_run_not_the_absolute_number(
+            self, mock_review):
+        """A loop continuing after many transcripts still gets its full budget.
+
+        ``_start_loop`` seeds a fresh loop with ``next_review_iteration`` so
+        earlier evidence is never overwritten.  The safety cap must therefore
+        count the iterations *this* run performs: with an absolute bound, a
+        PR already carrying ``max_iterations`` transcripts would run zero
+        iterations and report no verdict at all.
+        """
+        mock_review.return_value = "**NEEDS_WORK**"
+        state = ReviewLoopState(pr_id="pr-001", iteration=48,
+                                adopt_in_flight=False)
+        result = run_review_loop_sync(state, "/tmp", _PR_DATA,
+                                      transcript_dir="/tmp", max_iterations=3)
+        assert mock_review.call_count == 3
+        assert result.iteration == 51
+        assert result.latest_verdict == VERDICT_NEEDS_WORK
+
+    @patch("pm_core.review_loop._run_claude_review")
     def test_stop_requested_after_iteration(self, mock_review):
         def side_effect(*args, **kwargs):
             # Simulate user requesting stop — _run_claude_review returns

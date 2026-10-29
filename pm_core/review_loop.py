@@ -1425,9 +1425,17 @@ def run_review_loop_sync(
 
     last_done = state.history[-1].iteration if state.history else 0
     adopt = state.adopt_in_flight and state.iteration > last_done
+    # ``max_iterations`` caps the iterations *this run* performs, not the
+    # absolute iteration number.  A fresh loop now continues numbering after
+    # the PR's existing transcripts (``next_review_iteration``, so evidence is
+    # never overwritten), so an absolute bound would silently run zero
+    # iterations for a PR that already carries ``max_iterations``
+    # transcripts — a long-lived PR that keeps bouncing between review and
+    # implementation.  ``start_iteration`` is the counter this pass began at.
+    start_iteration = state.iteration
 
     try:
-        while state.iteration < max_iterations or adopt:
+        while state.iteration - start_iteration < max_iterations or adopt:
             if state.stop_requested:
                 _log.info("review_loop: stop requested after %d iterations", state.iteration)
                 break
@@ -1575,7 +1583,7 @@ def run_review_loop_sync(
             if state.stop_requested:
                 break
 
-        if state.iteration >= max_iterations:
+        if state.iteration - start_iteration >= max_iterations:
             _log.warning("review_loop: hit max iterations (%d)", max_iterations)
 
     finally:

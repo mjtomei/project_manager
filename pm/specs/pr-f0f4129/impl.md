@@ -143,7 +143,9 @@ already drops it because the status is no longer `qa`.
   `idle_prompt` — still visible through a stale `impl-<pr>.jsonl` symlink in
   another driver's transcript dir — is not the rework session's turn, so the
   relaunch re-points those symlinks (`share_impl_transcript`) to keep the
-  new session trackable. A superseding return (a moved base that still
+  new session trackable; the scan for those links is shared with the TUI
+  restart catch-up (`base_check.impl_transcript_links`), so both drivers
+  look in exactly the same places. A superseding return (a moved base that still
   conflicts, including the capped `needs_human` one, which launches nothing
   itself) keeps the superseded episode's `launched_at`, so the guard keeps
   comparing against the session that actually ran instead of the new
@@ -207,9 +209,16 @@ already drops it because the status is no longer `qa`.
   files. `_start_loop` continues iteration numbering from the existing
   `review-<pr>-i<N>.jsonl` files (and carries over an in-memory completed
   state's history) so a resumed loop adds iteration N+1 instead of
-  overwriting `-i1`. A `resume_loop` marker (set when the bounced review was
-  a TUI loop) lets the TUI restart the loop after genuine completion even
-  without auto-start.
+  overwriting `-i1`. Because a loop can now begin at an arbitrary iteration
+  number, `run_review_loop_sync`'s `max_iterations` safety cap counts the
+  iterations *that run* performs (`state.iteration - start_iteration`), not
+  the absolute number: an absolute bound would silently run zero iterations
+  for a long-lived PR that already carries `max_iterations` transcripts and
+  report no verdict at all. A `resume_loop` marker (set when the bounced
+  review was a TUI loop) lets the TUI restart the loop after genuine
+  completion even without auto-start; a superseding return keeps the
+  episode's marker (a one-shot gate must not cancel the loop the original
+  bounce was going to resume), the same way it keeps `launched_at`.
 - **R11 — Prompt context.** `prompt_gen` injects
   `base_check.format_return(pr)` next to `_signoff_return_block` in the impl,
   review and QA-planner prompts: pair, conflicts, pointer to the full
@@ -438,10 +447,17 @@ No unresolved ambiguities.
     is expired and re-run (the handoff is not pinned until a restart), and
     the expired worker's late write does not replace the newer check's
     result.
+25. a superseding return keeps the episode's `resume_loop` marker even when
+    the superseding gate is a one-shot (`resume_loop=False`), so the
+    interrupted review loop still restarts after the rework.
+26. `max_iterations` bounds the iterations this run performs: a loop seeded
+    at iteration 48 with `max_iterations=3` runs three iterations (48→51)
+    instead of zero.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
-continues numbering.
+continues numbering; `max_iterations` is relative to the run's start
+(item 26).
 
 QA choke point (kept in `tests/test_base_check.py` next to the gate fixtures,
 since each needs a real conflicting base): `run_qa_sync` conflict →

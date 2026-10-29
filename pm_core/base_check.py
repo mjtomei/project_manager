@@ -392,6 +392,12 @@ def return_to_impl(root: Path, pr_id: str, record: dict, stage: str,
             # TUI/auto-sequence handoff with no way to resume.  A fresh launch
             # overwrites it (``clear_return_awaiting``).
             rec["launched_at"] = existing["launched_at"]
+        if existing is not None and existing.get("resume_loop"):
+            # The resume intent belongs to the bounce episode, not to whichever
+            # driver superseded it.  A one-shot gate (a manual ``d``) passing
+            # ``resume_loop=False`` must not cancel the review loop the
+            # original return was going to restart once the rework lands.
+            rec["resume_loop"] = True
         if needs_human:
             # Stop automatic rework: no launch is awaited (a human must
             # reconcile the base), so no driver keeps relaunching impl.
@@ -581,6 +587,32 @@ def launch_impl(root: Path, pr_id: str, transcript_dir: str | Path | None) -> tu
     return True, ""
 
 
+def impl_transcript_links(root: Path | str, pr_id: str) -> list[Path]:
+    """Every driver's ``impl-<pr>.jsonl`` link under ``transcripts/``.
+
+    Every pm transcript dir is ``transcripts/<run>/`` (TUI run dir) or
+    ``transcripts/auto-sequence/<pr>/`` (CLI driver).  Scan those two depths
+    explicitly: no unbounded recursion (and no symlink-loop risk), and
+    ``glob`` matches a link whose target is gone where ``rglob`` (which only
+    yields files) would skip it.
+
+    Shared by :func:`share_impl_transcript` (re-point them all) and the TUI's
+    restart catch-up (watch the newest one), so both drivers agree on where a
+    PR's implementation session may be tracked from.
+    """
+    base = Path(root) / "transcripts"
+    if not base.is_dir():
+        return []
+    name = f"impl-{pr_id}.jsonl"
+    links: list[Path] = []
+    for pattern in (f"*/{name}", f"*/*/{name}"):
+        try:
+            links.extend(Path(p) for p in glob.glob(str(base / pattern)))
+        except OSError:  # pragma: no cover - best effort
+            continue
+    return links
+
+
 def share_impl_transcript(root: Path, pr_id: str,
                           transcript: str | Path | None) -> None:
     """Point every driver's ``impl-<pr>.jsonl`` at the session just launched.
@@ -614,22 +646,7 @@ def share_impl_transcript(root: Path, pr_id: str,
         if not transcript.exists():
             return
         target = os.path.abspath(transcript)
-    base = Path(root) / "transcripts"
-    if not base.is_dir():
-        return
-    name = f"impl-{pr_id}.jsonl"
-    # Every pm transcript dir is ``transcripts/<run>/`` (TUI run dir) or
-    # ``transcripts/auto-sequence/<pr>/`` (CLI driver).  Scan those two
-    # depths explicitly: no unbounded recursion (and no symlink-loop risk),
-    # and ``glob`` matches a link whose target is gone where ``rglob``
-    # (which only yields files) would skip it.
-    links: list[Path] = []
-    for pattern in (f"*/{name}", f"*/*/{name}"):
-        try:
-            links.extend(Path(p) for p in glob.glob(str(base / pattern)))
-        except OSError:  # pragma: no cover - best effort
-            continue
-    for p in links:
+    for p in impl_transcript_links(root, pr_id):
         # Compare resolved paths as well: a caller may spell the transcript
         # relatively (``pm pr start --transcript transcripts/run/impl-x.jsonl``),
         # and renaming the transcript itself to ``.finalized`` would move the
