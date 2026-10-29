@@ -1135,6 +1135,25 @@ def test_signoff_refuses_a_closed_pr_and_names_the_reopen(tmp_path):
     assert _load_entry(project["pm_dir"])["status"] == "closed"
 
 
+def test_review_refuses_a_closed_pr_and_names_the_reopen(tmp_path):
+    """The review guard names the way out too (R10): start, signoff and merge
+    all print the concrete reopen command, so a bare "already closed" left
+    review as the one lifecycle command with no route back."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod, "_launch_review_window") as launch:
+        result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
+
+    assert result.exit_code != 0
+    assert "closed" in result.output.lower()
+    assert "pm pr edit pr-001 --status pending" in result.output
+    assert not launch.called
+    assert _load_entry(project["pm_dir"])["status"] == "closed"
+
+
 def _run_merge(pm_dir: Path, tmp_path: Path, *args: str):
     """Invoke `pm pr merge` with the per-PR lock kept out of ~/.pm."""
     lock_dir = tmp_path / "workdirs"

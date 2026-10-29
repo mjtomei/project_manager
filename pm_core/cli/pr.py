@@ -1647,7 +1647,17 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     display_id = _pr_display_id(pr_entry)
 
     if status in TERMINAL_PR_STATES:
-        click.echo(f"PR {pr_id} is already {status}.", err=True)
+        if status == "closed":
+            # A closed record is retained, so name the way out here too
+            # (start/signoff/merge do): reopening is the only route back
+            # into the lifecycle.
+            click.echo(
+                f"PR {pr_id} is already closed — reopen it first with "
+                f"'pm pr edit {pr_id} --status pending'.",
+                err=True,
+            )
+        else:
+            click.echo(f"PR {pr_id} is already {status}.", err=True)
         raise SystemExit(1)
     if status == "in_review":
         click.echo(f"PR {pr_id} is already in_review.")

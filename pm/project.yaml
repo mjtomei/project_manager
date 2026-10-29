@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T06:18:26.841855+00:00'
+  updated_at: '2026-10-29T06:36:51.354339+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14701,6 +14701,23 @@ prs:
       prints closed exit 0, duplicate-add message).'
     created_at: '2026-10-29T06:18:26Z'
     last_edited: '2026-10-29T06:18:26Z'
+  - id: note-849a2db
+    text: 'QA S3 (closed-PR lifecycle, integrated head 161e6350): the scenario passed
+      its retention and dependent-blocking checks verbatim — close keeps entry/branch/workdir,
+      warns `1 dependent PR(s) remain blocked by <A>: <B> (title)` with both ways
+      out, B stays `pending` with `depends_on` intact and is not offered by `pm pr
+      ready`, and the duplicate add of A''s title+description answers `PR already
+      exists: <A>` + `It is closed; reopen it with ''pm pr edit <A> --status pending''...`
+      without creating a second entry. start/signoff/merge refuse with the reopen
+      command and auto-sequence prints `closed` exit 0 launching nothing. One deviation
+      found and fixed: `pm pr review <closed>` was the only lifecycle refusal that
+      did not name the reopen — it printed a bare `PR <id> is already closed.`, though
+      qa.md R10 requires the concrete command on review too. The `closed` branch of
+      the terminal guard now prints the same sentence as start/signoff (`merged` keeps
+      the generic form); new test `test_review_refuses_a_closed_pr_and_names_the_reopen`
+      fails on 161e6350 and passes now; impl.md item 46. Evidence: /pm-captures/scenarios/3/{close-dependents,pre-fix,post-fix,duplicate-add}/.'
+    created_at: '2026-10-29T06:36:51Z'
+    last_edited: '2026-10-29T06:36:51Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249

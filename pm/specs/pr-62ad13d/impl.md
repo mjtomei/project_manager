@@ -420,6 +420,15 @@ workdirs are touched.
     and `review` printing "marked as in_review").  `pm pr signoff`,
     `pm pr qa-run-bg` and the auto-sequence bounce already guard their apply
     on the expected source status, so a concurrent close no-ops there.
+46. `pm pr review <closed>` names the reopen (QA S3): the terminal guard at
+    the top of `pr_review` printed a bare `PR <id> is already closed.`, the
+    one lifecycle refusal that did not name `pm pr edit <id> --status
+    pending` — `start`, `signoff` and `merge` all did (items 29, 38), and
+    `pm/specs/pr-62ad13d/qa.md` R10 requires the concrete command on every
+    one of them.  `closed` now gets the same sentence as the others;
+    `merged` keeps the generic form (there is no reopen path from merged).
+    Covered by `test_review_refuses_a_closed_pr_and_names_the_reopen` (fails
+    on the previous head with the bare message).
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
