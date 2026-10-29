@@ -447,3 +447,25 @@ The implementation matched this spec. Additions made during review:
 - Evidence note: `/pm-captures/impl/post-fix/qa-run/manifest.md` records
   that the i4 remedy block postdates the recording; the fail-closed
   behaviour and the absence of a host launch are unchanged.
+
+## Review iteration (f951 i5)
+
+No code changes: re-verified the four fail-closed paths (fresh-run preflight,
+initial container launch, queued/relaunch inside `_poll_tmux_verdicts`,
+resume re-validation), the relaunch guard, and the CLI reporting against the
+spec. Full pytest on this workdir: 4492 passed, 13 failed — all
+environmental/pre-existing (the `markdown` module is missing;
+`test_hook_events::test_installer_writes_standalone_receiver` is defeated by
+`PM_HOST_HOME`), none in the touched areas.
+
+- Incidental (separate PR, not fixed here): the new terminal
+  `overall: "ERROR"` status is restartable by the TUI auto-start scheduler —
+  `_auto_start_qa_loops` holds only on `QA_HOLD_VERDICTS = ("PASS",
+  "INPUT_REQUIRED")`, so a recorded `ERROR` starts QA again on the next
+  `check_and_start` pass (startup/breadcrumb, target change, a merge in the
+  plan, a QA NEEDS_WORK). Each retry fails the same preflight, writes another
+  QA workdir and appends a duplicate `QA ERROR:` note to the git-tracked
+  `project.yaml`. Filed pr-7b1dd2e with the repro and the fix sketch (mirror
+  the review loop's `VERDICT_LAUNCH_FAILED` + episode cap + cooldown, or hold
+  on `ERROR`). This is the auto-start sibling of the auto-sequence gap filed
+  as pr-7abb052 in i4.
