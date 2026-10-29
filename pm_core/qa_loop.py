@@ -1067,11 +1067,17 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
             # while this write was waiting for the lock.
             if state.superseded:
                 return
-            # These two are set by the TUI thread (mark_completion_processed)
-            # while the held loop writes snapshots.  Re-read them under the
-            # lock so a snapshot built from an older state cannot clobber a
-            # flag the TUI just persisted.
+            # These are set by the TUI thread (mark_completion_processed /
+            # mark_stop_requested) while the held loop writes snapshots.
+            # Re-read them under the lock so a snapshot built from an older
+            # state cannot clobber a flag the TUI just persisted.
             data["completion_processed"] = bool(state.completion_processed)
+            # ``stop_requested`` is set by the TUI thread too
+            # (``mark_stop_requested``) and must win the same way: a snapshot
+            # built before the stop landed must not clobber the flag the TUI
+            # just persisted, or a restart would recover the pre-stop verdict
+            # (the very window ``mark_stop_requested`` exists to close).
+            data["stop_requested"] = bool(state.stop_requested)
             data["latest_verdict"] = state.latest_verdict or ""
             tmp = path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=2))
@@ -1254,6 +1260,40 @@ def clear_resume_file(qa_workdir: str | Path) -> None:
     except OSError:
         _log.debug("Failed to remove QA resume snapshot in %s", qa_workdir,
                    exc_info=True)
+
+
+def mark_stop_requested(state: QALoopState) -> None:
+    """Request a stop *and* persist it into the run's resume snapshot.
+
+    The snapshot is written before the blocking finalize pane (and once per
+    execution tick), so a stop that lands *after* that write would be lost if
+    the TUI restarted before the daemon could rewrite it.  The restart would
+    then recover the pre-stop ``overall`` (a ``PASS`` for a run the user
+    cancelled) and record a QA note / lifecycle hand-off for it.  Flipping the
+    flag the moment the stop is requested closes that window; the daemon's
+    later writes carry it too because ``_write_resume_file`` reads
+    ``state.stop_requested``.
+
+    Only ``stop_requested`` is touched (read-modify-write under the shared
+    snapshot lock) so a concurrently written snapshot keeps its verdicts,
+    panes and attempt identity.
+    """
+    state.stop_requested = True
+    if not state.qa_workdir or state.superseded:
+        return
+    path = _resume_file_path(state.qa_workdir)
+    try:
+        with _RESUME_WRITE_LOCK:
+            data = json.loads(path.read_text())
+            if not isinstance(data, dict) or data.get("stop_requested"):
+                return
+            data["stop_requested"] = True
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2))
+            tmp.rename(path)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        _log.debug("Failed to persist stop_requested in %s",
+                   state.qa_workdir, exc_info=True)
 
 
 def mark_completion_processed(state: QALoopState) -> None:

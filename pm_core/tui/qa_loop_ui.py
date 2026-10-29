@@ -519,7 +519,11 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # If a QA loop is running (or holding for input), stop it
     existing = app._qa_loops.get(pr_id)
     if existing and (existing.running or existing.held):
-        existing.stop_requested = True
+        from pm_core import qa_loop
+        # Persist the stop into the resume snapshot so a TUI restart before
+        # the daemon rewrites it still recovers the STOPPED teardown instead
+        # of the pre-stop PASS (see qa_loop.mark_stop_requested).
+        qa_loop.mark_stop_requested(existing)
         # Also remove self-driving registration
         app._self_driving_qa.pop(pr_id, None)
         app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
@@ -578,7 +582,11 @@ def stop_qa(app, pr_id: str) -> None:
     """Request graceful stop of QA for a PR."""
     state = app._qa_loops.get(pr_id)
     if state and (state.running or state.held):
-        state.stop_requested = True
+        from pm_core import qa_loop
+        # Persist the stop so a restart before the daemon rewrites its
+        # snapshot still recovers the clean STOPPED teardown rather than the
+        # pre-stop PASS (see qa_loop.mark_stop_requested).
+        qa_loop.mark_stop_requested(state)
         app.log_message(f"Stopping QA for {pr_id}...")
     else:
         app.log_message(f"No QA running for {pr_id}")
@@ -843,6 +851,21 @@ def _resume_incomplete_qa(app) -> None:
                       pr_id, state.latest_verdict, state.completion_processed)
             if not state.completion_processed:
                 _on_qa_complete(app, state)
+            # Mirror the verdict into runtime_state, exactly as the live
+            # completion path in ``poll_qa_state`` does.  A recovered run is
+            # not tracked in ``app._qa_loops``, so that path never sees it;
+            # without this record ``recorded_qa_verdict`` returns None and
+            # auto-start relaunches QA for a run the user stopped (STOPPED is
+            # a ``QA_HOLD_VERDICTS`` entry precisely so it does not).  It
+            # also keeps the popup's ``[done VERDICT]`` in step for the other
+            # recovered verdicts.
+            try:
+                from pm_core import runtime_state as _rs
+                _rs.set_action_state(pr_id, "qa", "done",
+                                     verdict=state.latest_verdict)
+            except Exception:
+                _log.debug("runtime_state qa verdict mirror failed for a "
+                           "recovered run", exc_info=True)
             state._ui_complete_notified = True
             if state.qa_workdir:
                 qa_loop.clear_resume_file(state.qa_workdir)

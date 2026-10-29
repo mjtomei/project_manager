@@ -488,6 +488,31 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `::test_resume_stop_during_finalize_reports_stopped`,
   `::test_resume_completed_finalize_then_stop_keeps_pass` and
   `::test_resume_stopped_incomplete_run_respawns_and_stays_stopped`.
+* **Persist the stop when it is requested** — the pre-finalize snapshot is
+  written *before* the finalize pane blocks, so a stop that lands during the
+  poll is not in it; a restart in that window still recovered the pre-stop
+  `PASS`. `qa_loop.mark_stop_requested(state)` now flips `stop_requested` in
+  the existing snapshot (a read-modify-write under `_RESUME_WRITE_LOCK`,
+  preserving every other field) the moment the user stops, from
+  `qa_loop_ui.stop_qa` and `start_or_stop_qa_loop`. The daemon's later writes
+  carry it too (`_write_resume_file` reads `state.stop_requested`).
+  Regression tests:
+  `tests/test_qa_resume.py::test_mark_stop_requested_persists_without_losing_fields`,
+  `::test_mark_stop_requested_without_snapshot_is_a_noop` and
+  `::test_stop_during_finalize_poll_recovers_stopped`.
+* **A recovered verdict is mirrored into runtime_state** — a run recovered by
+  the "completed during downtime" path is not tracked in `app._qa_loops`, so
+  the live completion mirror in `poll_qa_state` never records its verdict.
+  `_resume_incomplete_qa` now writes it (`set_action_state(pr, "qa", "done",
+  verdict=...)`) just as the live path does. Without it `recorded_qa_verdict`
+  returned `None` and `_auto_start_qa_loops` relaunched QA for a recovered
+  `STOPPED` run — undoing the user's stop one restart later — and the popup
+  lost its `[done VERDICT]` for the other recovered verdicts. The mirror is
+  written inside the recovery scan (while `Path.home()` is the test's) and
+  only for a run not already tracked or owned elsewhere (the scan's existing
+  skip guards), so it cannot clobber a newer live run's record. Covered by
+  the `::test_stop_during_finalize_poll_recovers_stopped` runtime_state
+  assertion.
 * **STOPPED is a hold verdict for auto-start** — `STOPPED` is recorded in
   runtime_state like any finished run (state `done`), so
   `auto_start.QA_HOLD_VERDICTS` must include it: otherwise

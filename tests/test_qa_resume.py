@@ -384,6 +384,81 @@ def test_resume_stopped_incomplete_run_respawns_and_stays_stopped(tmp_path):
     assert app._qa_loops["pr-001"].stop_requested is True
 
 
+def test_mark_stop_requested_persists_without_losing_fields(tmp_path):
+    """Requesting a stop flips ``stop_requested`` in the existing snapshot
+    (a read-modify-write) and leaves the rest of it intact — the daemon's
+    verdicts, panes and attempt identity must survive."""
+    qa_dir = _seed_run(tmp_path, overall="")
+    state = qa_loop.build_resume_state(
+        json.loads(_resume_file_path(qa_dir).read_text()))
+    state.scenario_verdicts = {1: VERDICT_PASS}
+    state.scenario_verdict_reasons = {1: "ok"}
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    before = json.loads(_resume_file_path(qa_dir).read_text())
+    assert before["stop_requested"] is False
+
+    qa_loop.mark_stop_requested(state)
+
+    after = json.loads(_resume_file_path(qa_dir).read_text())
+    assert after["stop_requested"] is True
+    assert state.stop_requested is True
+    # Nothing else changed.
+    before["stop_requested"] = True
+    assert after == before
+
+
+def test_mark_stop_requested_without_snapshot_is_a_noop(tmp_path):
+    """A stop requested before any snapshot exists (planning phase) must not
+    create one — there is no in-flight result to preserve."""
+    qa_dir = tmp_path / "qa-empty"
+    qa_dir.mkdir()
+    state = QALoopState(pr_id="pr-001")
+    state.qa_workdir = str(qa_dir)
+
+    qa_loop.mark_stop_requested(state)
+
+    assert state.stop_requested is True
+    assert not _resume_file_path(qa_dir).exists()
+
+
+def test_stop_during_finalize_poll_recovers_stopped(tmp_path):
+    """The i4 gap: the pre-finalize snapshot is written *before* the finalize
+    pane polls, so a stop that lands during the poll is not in it.  Persisting
+    the stop when it is requested (``mark_stop_requested``) closes the window:
+    a restart now recovers the STOPPED teardown, not the pre-stop PASS."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_stopped_in_finalize(tmp_path, finalize_verdict=None)
+    # Simulate the real on-disk state: the snapshot was written before the
+    # stop landed, so it does not yet carry it.
+    rfile = _resume_file_path(qa_dir)
+    data = json.loads(rfile.read_text())
+    data["stop_requested"] = False
+    rfile.write_text(json.dumps(data))
+
+    # The user presses stop while the finalize pane is polling: the TUI
+    # persists the stop into the existing snapshot.
+    state = qa_loop.build_resume_state(data)
+    qa_loop.mark_stop_requested(state)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+        # The recovered verdict is mirrored into runtime_state (as the live
+        # completion path does): STOPPED is a QA_HOLD_VERDICTS entry, so
+        # auto-start must see it or it relaunches the stopped run.
+        from pm_core import runtime_state as _rs
+        recorded = _rs.get_action_state("pr-001", "qa")
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    assert on_complete.call_args[0][1].latest_verdict == "STOPPED"
+    assert json.loads((qa_dir / "qa_status.json").read_text())["overall"] == (
+        "STOPPED")
+    assert recorded.get("state") == "done"
+    assert recorded.get("verdict") == "STOPPED"
+
+
 def test_resume_skips_non_qa_pr(tmp_path):
     app = _make_app(tmp_path, pr_status="merged")
     qa_dir = _seed_run(tmp_path, overall="")
