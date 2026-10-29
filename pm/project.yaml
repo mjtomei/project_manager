@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T01:56:58.221021+00:00'
+  updated_at: '2026-10-29T03:00:52.215145+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34860,6 +34860,29 @@ prs:
       preserved.'
     created_at: '2026-10-29T01:56:58Z'
     last_edited: '2026-10-29T01:56:58Z'
+  - id: note-8e876a8
+    text: 'Review-loop 5297 i1 (9a89182a): no blocking code defects in the provenance
+      implementation — captures.py/audit/quarantine, the qa_loop sync points, the
+      prompt/merge-gate/dashboard bindings and the 71-test suite all hold up on the
+      merged tree. Three fixes applied: (1) test isolation — driving _execute_and_finalize/run_qa_sync
+      from tests published real qa_manifest.json + qa_runs/<id>.json for pr-001 into
+      the runner live ~/.pm/sessions/<tag>/captures/ (verified by running tests/test_qa_input_required.py);
+      cfbb3efe patched three harnesses and missed the seven call sites in test_qa_input_required.py,
+      so an autouse _isolated_sessions_tree conftest fixture now pins paths.sessions_dir
+      at a per-test temp dir; (2) _resume_qa_sync now passes overall=state.latest_verdict
+      so a restart no longer blanks the manifest overall a held run already recorded;
+      (3) test_prompt_bounds::test_qa_scenario_marker_needs_no_path_resolution was
+      vacuous (its _boom AssertionError was swallowed by _qa_run_binding except Exception)
+      — rewritten to assert create=False, plus a new resume-sync test. Full suite
+      after edits: 4469 passed, 1 skipped, 55F+36E = the documented environmental
+      baseline for this container, identical on the unmodified tree; no test writes
+      into the real ~/.pm/sessions any more. Residual for QA, not code: the impl pre/post
+      captures are a *modelled* repro (paths.captures_dir routed at a temp sandbox),
+      not a live nested-container fixture — QA S3 could not verify that premise because
+      the enclosing controller runs pre-PR code, so the next QA round should re-check
+      the enclosing-run membership story once the loop runs this branch.'
+    created_at: '2026-10-29T03:00:52Z'
+    last_edited: '2026-10-29T03:00:52Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
