@@ -61,19 +61,23 @@ def _pm_fixture(tmp_path: Path):
     return pr, data, workdir, qa_workdir
 
 
-def _execution_only_state(qa_workdir: Path) -> QALoopState:
+def _execution_only_state(qa_workdir: Path,
+                          scenarios: list[QAScenario] | None = None
+                          ) -> QALoopState:
     state = QALoopState(pr_id="pr-c", planning_phase=False)
     state.qa_workdir = str(qa_workdir)
-    state.scenarios = [QAScenario(index=1, title="S1", focus="f")]
+    state.scenarios = (scenarios if scenarios is not None
+                       else [QAScenario(index=1, title="S1", focus="f")])
     return state
 
 
 def _run_execution_only(tmp_path, *, container_enabled: bool,
                         runtime_available: bool,
-                        container_launch_error: BaseException | None = None):
+                        container_launch_error: BaseException | None = None,
+                        scenarios: list[QAScenario] | None = None):
     """Drive run_qa_sync's execution-only path with launch spies."""
     pr, data, workdir, qa_workdir = _pm_fixture(tmp_path)
-    state = _execution_only_state(qa_workdir)
+    state = _execution_only_state(qa_workdir, scenarios)
     host_launch = MagicMock()
     container_launch = MagicMock(side_effect=container_launch_error)
     scenario0 = MagicMock()
@@ -704,3 +708,37 @@ def test_qa_run_prints_the_full_cause_and_remedy(tmp_path, home):
     assert "no agent was launched on the host" in result.output
     assert "pm container disable" in result.output
     assert "Result: ERROR" in result.output
+
+
+def test_initial_launch_keeps_queued_scenarios_visible(tmp_path, home):
+    """A concurrency cap must not make queued scenarios vanish from the
+    dashboard while the first batch runs.
+
+    ``run_qa_sync`` narrows ``state.scenarios`` to the launch batch before
+    calling the launch helper.  The helper's status write (and the initial
+    one) must still see every scenario plus the queued set, otherwise the
+    status file drops the queued scenarios until their turn comes — the
+    launch-time write used to clobber the ``queued`` marker written just
+    before it.
+    """
+    import json
+
+    scenarios = [QAScenario(index=1, title="S1", focus="f"),
+                 QAScenario(index=2, title="S2", focus="f")]
+    state, host_launch, container_launch, scenario0, finalize, _resume = (
+        _run_execution_only(
+            tmp_path, container_enabled=True, runtime_available=True,
+            scenarios=scenarios))
+
+    container_launch.assert_called_once()
+    kwargs = container_launch.call_args.kwargs
+    # The launch helper is told about every scenario, not just the batch it
+    # is about to start, so its status write can keep the queue visible.
+    assert kwargs["_status_scenarios"] == scenarios
+    assert kwargs["_queued_indices"] == {2}
+
+    status = json.loads((tmp_path / "qa" / "qa_status.json").read_text())
+    by_index = {s["index"]: s for s in status["scenarios"]}
+    assert by_index[1]["verdict"] == ""
+    assert by_index[2]["verdict"] == "queued"
+    assert status["overall"] == ""

@@ -2414,6 +2414,7 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
@@ -2527,6 +2528,7 @@ def _launch_scenarios_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2627,6 +2629,7 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -2810,6 +2813,7 @@ def _launch_scenarios_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -3583,11 +3587,13 @@ def _poll_tmux_verdicts(
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
         finally:
             state.scenarios = orig
@@ -5162,17 +5168,24 @@ def _run_qa_sync(
     # Only launch the initial batch — queued scenarios are launched later
     # as running scenarios complete (handled by _poll_tmux_verdicts).
     all_scenarios = state.scenarios
+    # ``state.scenarios`` is narrowed to the launch batch below so the
+    # launch helpers only create windows/containers for that batch.  Pass
+    # the full list (and the queued indices) so the status file written
+    # during launch keeps showing the not-yet-started scenarios as
+    # ``queued`` instead of dropping them until their turn comes.
     state.scenarios = launch_scenarios
     try:
         if use_containers:
             _launch_scenarios_in_containers(
                 state, data, pr_data, session, repo_root, workdir_path,
-                pm_root=pm_root,
+                pm_root=pm_root, _status_scenarios=all_scenarios,
+                _queued_indices=queued_indices,
             )
         else:
             _launch_scenarios_in_tmux(
                 state, data, pr_data, session, repo_root, workdir_path,
-                pm_root=pm_root,
+                pm_root=pm_root, _status_scenarios=all_scenarios,
+                _queued_indices=queued_indices,
             )
     except ContainerLaunchError as exc:
         # Container mode is an execution boundary: a container that cannot be
