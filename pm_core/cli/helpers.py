@@ -502,6 +502,20 @@ def _terminal_status_at_lock(pr: dict | None) -> str | None:
     return status if status in TERMINAL_PR_STATES else None
 
 
+def _closed_reopen_hint(pr_id: str, purpose: str | None = None) -> str:
+    """The refusal sentence for a command run against a retained closed PR.
+
+    A closed record is terminal — ``pm pr close`` keeps it as history — so
+    every lifecycle command refuses and names the one way back: an explicit
+    status edit.  Shared so the wording cannot drift between start, review,
+    QA, sign-off and merge: a user reading any refusal gets the same concrete
+    command.  *purpose* adds the command-specific verb ("to merge it").
+    """
+    hint = (f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status pending'")
+    return f"{hint} {purpose}." if purpose else f"{hint}."
+
+
 def _canonical_session(session: str) -> str:
     """Strip the tmux session-group suffix (``~N``) from ``session``.
 

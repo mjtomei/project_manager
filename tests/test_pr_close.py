@@ -1017,6 +1017,8 @@ def test_closed_pr_cannot_be_started(tmp_path):
 
     assert start.exit_code != 0
     assert "closed" in start.output.lower()
+    # R10: start names the concrete reopen command, like review/signoff/merge.
+    assert "pm pr edit pr-001 --status pending" in start.output
 
 
 def _racing_close(pm_dir: Path, pr_id: str = "pr-001",
@@ -1154,6 +1156,22 @@ def test_review_refuses_a_closed_pr_and_names_the_reopen(tmp_path):
     assert _load_entry(project["pm_dir"])["status"] == "closed"
 
 
+def test_qa_refuses_a_closed_pr_and_names_the_reopen(tmp_path):
+    """`pm pr qa` refuses a retained closed record with the concrete reopen
+    command (R10), not the generic "QA requires ..." status complaint."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["qa", "pr-001"])
+
+    assert result.exit_code != 0
+    assert "closed" in result.output.lower()
+    assert "pm pr edit pr-001 --status pending" in result.output
+    assert _load_entry(project["pm_dir"])["status"] == "closed"
+
+
 def _run_merge(pm_dir: Path, tmp_path: Path, *args: str):
     """Invoke `pm pr merge` with the per-PR lock kept out of ~/.pm."""
     lock_dir = tmp_path / "workdirs"
@@ -1174,6 +1192,8 @@ def test_closed_pr_cannot_be_merged(tmp_path):
     assert result.exit_code != 0
     assert "closed" in result.output.lower()
     assert "reopen" in result.output.lower()   # the terminal-status guard
+    # R10: merge names the concrete reopen command too.
+    assert "pm pr edit pr-001 --status pending" in result.output
     assert not publish.called
     assert _load_entry(project["pm_dir"])["status"] == "closed"
     assert project["workdir"].is_dir()

@@ -429,6 +429,25 @@ workdirs are touched.
     `merged` keeps the generic form (there is no reopen path from merged).
     Covered by `test_review_refuses_a_closed_pr_and_names_the_reopen` (fails
     on the previous head with the bare message).
+47. Every lifecycle refusal names the reopen, and the tests pin the command
+    (review e086 i1).  `pm pr qa <closed>` was the last refusal left without
+    it — its status guard answered with the generic `PR <id> has status
+    'closed' — QA requires in_progress, in_review, or qa.`, leaving the user
+    no route back; it now refuses with the same sentence as
+    `start`/`review`/`signoff`/`merge` (`merged` keeps the generic form).
+    The `start` and `merge` tests only asserted that `closed`/`reopen`
+    appeared, so a regression dropping the concrete command from either
+    message would have gone unnoticed; both now assert
+    `pm pr edit <id> --status pending` verbatim, like review/signoff.
+    The sentence has one definition,
+    `helpers._closed_reopen_hint(pr_id, purpose=None)` (merge passes
+    `"to merge it"`), so the five refusals cannot drift apart as review's
+    had; `pr_review`'s wording also loses its "already" so all five read
+    identically.  `pm pr close --remove`'s help parenthetical now says a PR
+    recorded as merged is "never touched on GitHub" instead of the ambiguous
+    "left alone" (which read as if the local branch/workdir were involved).
+    Covered by `test_qa_refuses_a_closed_pr_and_names_the_reopen` plus the
+    strengthened start/merge assertions (all fail on the previous head).
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -555,16 +574,18 @@ No **[UNRESOLVED]** ambiguities.
   `pr_add` (retained closed entries now match its duplicate check), and
   `pr_edit` dropping `closed_at` on a deliberate reopen (review c02f i13),
   plus terminal-status reporting in `pr_auto_sequence` and a closed guard in
-  `pr_signoff` (review 8820 i1), and the in-lock terminal re-check in
-  `pr_start` / `pr_review` so a close landing during their long pre-lock work
-  is not resurrected (review e89f i4).
+  `pr_signoff` (review 8820 i1) and `pr_qa` (review e086 i1), and the in-lock
+  terminal re-check in `pr_start` / `pr_review` so a close landing during
+  their long pre-lock work is not resurrected (review e89f i4).
 - `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
   premise of its ruleset item obsolete (review c02f i13).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`, plus the
   `previous_status` parameter that makes the helper the single owner of the
   field's history (drop on leaving `closed`, keep on restating it; review
-  b320 i1), and `_terminal_status_at_lock` — the in-lock re-check `pm pr
-  start` / `pm pr review` use so a concurrent close wins (review e89f i4).
+  b320 i1), `_terminal_status_at_lock` — the in-lock re-check `pm pr
+  start` / `pm pr review` use so a concurrent close wins (review e89f i4) —
+  and `_closed_reopen_hint`, the one definition of the closed-PR refusal
+  sentence every lifecycle command prints (review e086 i1).
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
 - `pm_core/autostart_state.py`, `pm_core/cli/session.py`, `pm_core/qa_loop.py`,

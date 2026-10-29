@@ -30,6 +30,7 @@ from pm_core.claude_launcher import find_claude, build_claude_shell_cmd, clear_s
 
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
+    _closed_reopen_hint,
     _ensure_workdir,
     _get_pm_session,
     _gh_state_to_status,
@@ -958,9 +959,7 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         # Closed is a terminal lifecycle record (`pm pr close` keeps it), so a
         # start would silently resurrect a PR the user retired.  Reopening is
         # an explicit status edit.
-        click.echo(
-            f"PR {pr_id} is closed — reopen it first with "
-            f"'pm pr edit {pr_id} --status pending'.", err=True)
+        click.echo(_closed_reopen_hint(pr_id), err=True)
         raise SystemExit(1)
 
     # Determine tmux session name (used for fast-path check and later launch)
@@ -1649,13 +1648,9 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
     if status in TERMINAL_PR_STATES:
         if status == "closed":
             # A closed record is retained, so name the way out here too
-            # (start/signoff/merge do): reopening is the only route back
+            # (start/signoff/merge/qa do): reopening is the only route back
             # into the lifecycle.
-            click.echo(
-                f"PR {pr_id} is already closed — reopen it first with "
-                f"'pm pr edit {pr_id} --status pending'.",
-                err=True,
-            )
+            click.echo(_closed_reopen_hint(pr_id), err=True)
         else:
             click.echo(f"PR {pr_id} is already {status}.", err=True)
         raise SystemExit(1)
@@ -1812,9 +1807,7 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     if status == "closed":
         # A retained closed record (pr-62ad13d) is terminal: name the way out
         # instead of the generic "sign-off runs after QA" status complaint.
-        click.echo(
-            f"PR {pr_id} is closed — reopen it first with "
-            f"'pm pr edit {pr_id} --status pending'.", err=True)
+        click.echo(_closed_reopen_hint(pr_id), err=True)
         raise SystemExit(1)
     # With project.skip_qa there is no QA stage: sign-off follows review.
     entry_statuses = ("qa",)
@@ -2723,6 +2716,12 @@ def pr_qa(pr_id: str | None):
     pr_entry = _require_pr(data, pr_id)
     pr_id = pr_entry["id"]
 
+    if pr_entry.get("status") == "closed":
+        # A retained closed record (pr-62ad13d) is terminal for QA as well, so
+        # name the way out like start/review/signoff/merge do rather than
+        # answering with the generic "QA requires ..." status complaint.
+        click.echo(_closed_reopen_hint(pr_id), err=True)
+        raise SystemExit(1)
     if pr_entry.get("status") not in ("in_progress", "in_review", "qa"):
         click.echo(f"PR {pr_id} has status '{pr_entry.get('status')}' — QA requires in_progress, in_review, or qa.", err=True)
         raise SystemExit(1)
@@ -2860,9 +2859,7 @@ def pr_merge(pr_id: str | None, resolve_window: bool | None, background: bool,
     # Checked *after* the recovery branch: recovering a merge that is already
     # published must still work even if the record was closed meanwhile.
     if pr_entry.get("status") == "closed":
-        click.echo(
-            f"PR {pr_id} is closed — reopen it first with "
-            f"'pm pr edit {pr_id} --status pending' to merge it.", err=True)
+        click.echo(_closed_reopen_hint(pr_id, "to merge it"), err=True)
         raise SystemExit(1)
 
     # Sign-off gate (record-only): a fresh SIGNOFF_MERGE for the current HEAD
@@ -3558,7 +3555,7 @@ def _retained_resources(pr_entry: dict) -> list[str]:
               help="Delete the registry entry instead of recording the "
                    "closure. Registry-only: the branch and workdir are kept, "
                    "and the GitHub PR is still closed unless --keep-github "
-                   "(a PR recorded as merged is left alone)")
+                   "(a PR recorded as merged is never touched on GitHub)")
 def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
              remove: bool):
     """Close a PR without destroying its history.

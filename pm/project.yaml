@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T07:39:37.178498+00:00'
+  updated_at: '2026-10-29T08:35:23.848776+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14736,6 +14736,24 @@ prs:
       the start" (3/3 rounds); ~0.5 s shows the start-wins ordering.'
     created_at: '2026-10-29T07:39:37Z'
     last_edited: '2026-10-29T07:39:37Z'
+  - id: note-4888ed5
+    text: 'Review e086 i1: `pm pr qa <closed>` was the last lifecycle refusal with
+      no route back — its status guard answered the generic `PR <id> has status "closed"
+      — QA requires ...`, so it now prints the same reopen sentence as start/review/signoff/merge
+      via the new `helpers._closed_reopen_hint(pr_id, purpose=None)` (merge passes
+      "to merge it") — one definition, so the five refusals cannot drift. `pr_review`''s
+      wording loses its "already" so all five read identically. The start/merge tests
+      only asserted `closed`/`reopen`, so a regression dropping the concrete command
+      would have gone unnoticed; both now pin `pm pr edit <id> --status pending` verbatim,
+      and new `test_qa_refuses_a_closed_pr_and_names_the_reopen` fails on the previous
+      head (probe-confirmed). `pm pr close --remove` help now says a merged record
+      is "never touched on GitHub" (the old "left alone" read as if the local branch/workdir
+      were involved). Spec synced (R11 item 47, §5 helpers.py). QA scenario 3 NEEDS_WORK
+      (review''s missing reopen hint, fixed in b99217f8) re-verified on this head.
+      Full suite 4563 passed, 1 skipped, 0 failed (/pm-captures/review-e086-i1/full-suite.log;
+      markdown on PYTHONPATH, PM_HOST_HOME unset).'
+    created_at: '2026-10-29T08:35:23Z'
+    last_edited: '2026-10-29T08:35:23Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
