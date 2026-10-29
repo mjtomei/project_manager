@@ -84,6 +84,21 @@ def _upstream(s):
     return _git(s["remote"], "rev-parse", BRANCH)
 
 
+class TestOneLine:
+    """``_one_line`` feeds git's output into a one-sentence hold."""
+
+    def test_flattens_git_output_to_one_sentence(self):
+        assert qa_loop._one_line("fatal: no remote\n\n  done.") == \
+            "fatal: no remote done."
+
+    def test_empty_output_uses_a_whole_sentence(self):
+        # The hold appends its own remedy, so the fallback must carry the
+        # stop: "unknown error. Restart QA…", not "unknown error Restart".
+        assert qa_loop._one_line("") == "unknown error."
+        assert qa_loop._one_line(None) == "unknown error."
+        assert qa_loop._one_line(" \n\t") == "unknown error."
+
+
 # ---------------------------------------------------------------------------
 # _sync_pr_branch
 # ---------------------------------------------------------------------------
@@ -253,6 +268,27 @@ class TestSyncPrBranch:
         assert sync.outcome == "hold"
         assert "rebase-merge" in sync.detail
         assert "detached HEAD" not in sync.detail
+
+    def test_unfinished_cherry_pick_holds(self, repos):
+        """A stopped cherry-pick is checked before the checkout: the workdir
+        is on another branch too, but "check out the branch" is not the
+        remedy while the cherry-pick's index is unresolved.
+        """
+        s = repos
+        _git(s["wd"], "checkout", "--quiet", "master")
+        _commit(s["wd"], "app.py", "master side\n", "master edit")
+        _git(s["wd"], "checkout", "--quiet", BRANCH)
+        c = _commit(s["wd"], "app.py", "pr side\n", "pr edit")
+        _git(s["wd"], "checkout", "--quiet", "master")
+        r = subprocess.run(["git", *GIT_ID, "cherry-pick", c], cwd=s["wd"],
+                           capture_output=True, text=True)
+        assert r.returncode != 0
+        assert (s["wd"] / ".git" / "CHERRY_PICK_HEAD").exists()
+        sync = qa_loop._sync_pr_branch(str(s["wd"]), BRANCH)
+        assert sync.outcome == "hold"
+        assert "CHERRY_PICK_HEAD" in sync.detail
+        assert "checked out" not in sync.detail
+        assert _head(s) == c  # the branch ref never moved
 
     def test_wrong_branch_checked_out_holds_when_up_to_date(self, repos):
         """Nothing to fast-forward, but the planner would still read the

@@ -442,12 +442,14 @@ def _fetch_upstream_commit(workdir: str | Path, url: str, branch: str,
                         f"refs/heads/{branch}")
 
 
-def _one_line(msg: str | None, default: str = "unknown error") -> str:
+def _one_line(msg: str | None, default: str = "unknown error.") -> str:
     """Flatten git output into one sentence ending in a single full stop.
 
     git's stderr spans lines and normally ends with a full stop ("… and the
     repository exists."), so embedding it verbatim produced a multi-line hold
-    whose appended remedy read "exists.. Restart QA".
+    whose appended remedy read "exists.. Restart QA".  *default* is used when
+    git printed nothing and is already a whole sentence, so the appended
+    remedy reads "unknown error. Restart QA…".
     """
     text = " ".join((msg or "").split()).rstrip(".")
     return f"{text}." if text else default
@@ -869,9 +871,7 @@ def _branch_sync_stops_qa(state: "QALoopState", sync: BranchSync,
         return True
 
     if sync.outcome == "fast_forwarded":
-        shown = ", ".join(sync.code_changes[:5])
-        if len(sync.code_changes) > 5:
-            shown += f" (+{len(sync.code_changes) - 5} more)"
+        shown = _summarize_changes(sync.code_changes)
         reason = (f"upstream application code {sync.local[:12]}.."
                   f"{sync.upstream[:12]} ({shown}) was never reviewed")
         error = (f"{sync.detail} They change application code ({shown}) "
