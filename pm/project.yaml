@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T10:55:46.885950+00:00'
+  updated_at: '2026-10-29T11:05:28.789181+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14849,6 +14849,26 @@ prs:
       plus the 4 named closed/merged sync-durability tests.'
     created_at: '2026-10-29T10:55:46Z'
     last_edited: '2026-10-29T10:55:46Z'
+  - id: note-b140aae
+    text: 'QA S13 (closure history, head f1f4ac9d): PASS. Six Given/When/Then stories
+      driven through the real CLI on a throwaway project (/tmp/pm-qa-s13-rec, isolated
+      HOME, PYTHONPATH=/workspace; `pm which` -> /workspace/pm_core). Reopen drops
+      closed_at both via `pm pr edit --status pending` and via the $EDITOR form (a
+      wrapper that changes only the status line), and keeps the single note. A close
+      after a reopen stamps a strictly later time (T1 2026-10-29T11:02:30.669492 <
+      T2 11:02:33.474516). `pm pr edit --status closed` on an already-closed record
+      reads closed -> closed and leaves closed_at byte-identical while updated_at
+      moves. A repeat close keeps the original closed_at, moves updated_at, and adds
+      no duplicate note (`pm pr note list` = 1 line). A hand-seeded legacy record
+      (status: closed, no closed_at) keeps closed_at absent across two closes and
+      a restate; only updated_at moves, so no closure time is invented. Supporting:
+      21 closure-time tests in tests/test_pr_close.py + tests/test_cli_helpers.py
+      pass (incl. test_reopening_a_closed_pr_drops_the_closure_time, test_editor_reopen_drops_the_closure_time,
+      test_restating_closed_keeps_the_closure_time, test_repeat_close_does_not_invent_a_closure_time).
+      Evidence: /pm-captures/scenarios/13/closure-history/ (recording.mp4, recording.cast,
+      transcript.log, manifest.md, drive-stories.sh).'
+    created_at: '2026-10-29T11:05:28Z'
+    last_edited: '2026-10-29T11:05:28Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
