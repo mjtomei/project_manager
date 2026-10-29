@@ -361,11 +361,15 @@ workdirs are touched.
 39. Close never tears down live resources (review 8820 i2, A4/R4): the
     command and everything it triggers reach none of
     `pr_cleanup.cleanup_pr_resources`, `tmux.kill_window`,
-    `helpers.kill_pr_windows` or `container.cleanup_pr_containers` — for the
+    `kill_pr_windows` or `container.cleanup_pr_containers` — for the
     default close *and* `--remove` — while the workdir survives.  Pinned by
-    `test_close_does_not_tear_down_live_resources` (the spies are the real
-    teardown entry points, so a future hook that reclaimed a closed PR's
-    window would fail it).
+    `test_close_does_not_tear_down_live_resources`.  The spies target the
+    bindings the close path actually calls through (review e89f i3):
+    `pm_core.cli.pr.kill_pr_windows` *and* `pm_core.cli.helpers.kill_pr_windows`
+    — `pr.py` imports the name directly, so patching only the helpers module
+    would miss a call from the close command — and the test ends with a
+    positive control that fires every spy through its binding, so the empty
+    call list is a real guarantee rather than a mis-targeted patch.
 40. Close preserves historical evidence beyond title/notes/deps (review 8820
     i2): a `signoff` record (verdict, sha, report hash, integration), a
     `merge_integrity` finding, `spec_pending` and the `qa` state survive
@@ -560,9 +564,10 @@ No **[UNRESOLVED]** ambiguities.
 - `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`
   (`TestGitHubCloseResilience` rewrite), `tests/test_sync_merge_integrity.py`
   (TUI startup-sync closed race), `tests/test_fake_github.py` (the
-  `--delete-branch` emulation), and `tests/test_cli_helpers.py`
-  (`TestRecordStatusTimestampClosedAt` — the helper's `closed_at` contract,
-  review e89f i1).
+  `--delete-branch` emulation), `tests/test_store_validation.py`
+  (`closed_at` lifecycle backfill, review e89f i2), and
+  `tests/test_cli_helpers.py` (`TestRecordStatusTimestampClosedAt` — the
+  helper's `closed_at` contract, review e89f i1).
 
 ## 6. Out of scope
 

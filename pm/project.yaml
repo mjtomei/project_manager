@@ -39968,7 +39968,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-27T01:30:16.482567+00:00'
-  updated_at: '2026-10-29T04:09:33.660061+00:00'
+  updated_at: '2026-10-29T04:41:26.423301+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39992,6 +39992,18 @@ prs:
       any write. Include them in the fix surface alongside store.get_pr/get_plan.'
     created_at: '2026-10-29T04:09:33Z'
     last_edited: '2026-10-29T04:09:33Z'
+  - id: note-b14a12e
+    text: 'Two more id-indexing sites of the same class (from pr-62ad13d review e89f
+      i3), in `pm_core/cli/pr.py` `pr_sync()` (`pm pr sync`, the GitHub auto-merge
+      detector): (1) the pre-lock detection loop iterates `prs = data.get("prs") or
+      []` and does `merged_ids.add(pr_entry["id"])`, so an entry without a usable
+      id raises KeyError before any write; (2) the apply loop `for pr in data.get("prs")
+      or []: if pr["id"] in merged_ids` indexes raw entries inside `store.locked_update`.
+      Both should iterate `usable_prs(...)` like the sibling loops. Not fixed in pr-62ad13d
+      because it is outside that PR close/cleanup scope; recorded here with the other
+      sites.'
+    created_at: '2026-10-29T04:37:15Z'
+    last_edited: '2026-10-29T04:41:26Z'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy

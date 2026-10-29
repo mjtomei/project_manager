@@ -19,8 +19,10 @@ from unittest import mock
 
 from click.testing import CliRunner
 
-from pm_core import graph, store
+from pm_core import container as container_mod
+from pm_core import graph, pr_cleanup, store
 from pm_core import pr_sync
+from pm_core import tmux as tmux_mod
 from pm_core.cli import pr as pr_mod
 from pm_core.fake_github import REAL_GIT, FakeGitHubBackend
 
@@ -306,13 +308,23 @@ def test_workdir_is_byte_identical_after_close(tmp_path):
 
 
 def _teardown_spies(calls: list[str]) -> list:
-    """Patches for every live-resource teardown a close must never reach."""
+    """Patches for every live-resource teardown a close must never reach.
+
+    Each target is the binding the close path would actually call through:
+    ``pr.py`` imports ``kill_pr_windows`` by name, so patching only
+    ``pm_core.cli.helpers.kill_pr_windows`` would miss a call made from the
+    close command.  ``cleanup_pr_resources`` is the high-level entry the TUI
+    and ``pm pr cleanup --resources`` use; the rest are its leaves.
+    """
     return [
         mock.patch("pm_core.pr_cleanup.cleanup_pr_resources",
                    side_effect=lambda *a, **k: calls.append(
                        "cleanup_pr_resources")),
         mock.patch("pm_core.tmux.kill_window",
                    side_effect=lambda *a, **k: calls.append("kill_window")),
+        mock.patch("pm_core.cli.pr.kill_pr_windows",
+                   side_effect=lambda *a, **k: calls.append(
+                       "kill_pr_windows")),
         mock.patch("pm_core.cli.helpers.kill_pr_windows",
                    side_effect=lambda *a, **k: calls.append(
                        "kill_pr_windows")),
@@ -335,10 +347,20 @@ def test_close_does_not_tear_down_live_resources(tmp_path):
             stack.enter_context(spy)
         closed = _run_close(project["pm_dir"], "pr-001")
         removed = _run_close(project["pm_dir"], "pr-001", "--remove")
+        # Neither the default close nor --remove reaches a teardown path.
+        assert calls == [], calls
+        # Positive control: the spies are wired to the real entry points (a
+        # direct call through each binding fires them), so the empty list
+        # above is a real guarantee, not a mis-targeted patch.
+        pr_mod.kill_pr_windows("sess", {"id": "pr-001"})
+        pr_cleanup.cleanup_pr_resources("sess", {"id": "pr-001"})
+        tmux_mod.kill_window("sess", "win")
+        container_mod.cleanup_pr_containers("sess", {"id": "pr-001"})
+        assert set(calls) == {"kill_pr_windows", "cleanup_pr_resources",
+                              "kill_window", "cleanup_pr_containers"}, calls
 
     assert closed.exit_code == 0, closed.output
     assert removed.exit_code == 0, removed.output
-    assert calls == []
     assert _load_entry(project["pm_dir"]) is None
     assert project["workdir"].is_dir()
 
