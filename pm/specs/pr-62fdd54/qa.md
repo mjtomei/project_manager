@@ -31,7 +31,11 @@
   INPUT_REQUIRED hold. It never merges divergent histories, resets or
   force-pushes. Every exit before scenarios writes an `overall` verdict.
 - **Integration with master (post-QA merge).** The branch merged
-  `master@89e3c501`. Master had moved the QA planner's command build to
+  `master@89e3c501`, then re-integrated `master@4a74d880` (which reworked
+  the held-run/owed-REQA planning loop; the sync call, the post-sync
+  planner build and its provider-env transport are unchanged, and the
+  auto-sequence lease test gained the live-session fixture the R9 guard
+  needs). Master had moved the QA planner's command build to
   carry provider environment variables out-of-band
   (`build_claude_shell_cmd(..., env_out=…)` collects them and the tmux pane
   receives them via `env=`; they are never interpolated into the logged

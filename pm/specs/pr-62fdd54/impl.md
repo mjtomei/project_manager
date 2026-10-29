@@ -47,7 +47,9 @@ R1. **Refresh before planning.** In `run_qa_sync`'s planning phase, after
     provider env and `tmux_mod.new_window(..., env=planner_env)` hands it
     to the planner pane — the values are never interpolated into the
     logged command string.  (Integration with master@89e3c501, which added
-    that transport at the old build site.)
+    that transport at the old build site; re-integrated with
+    master@4a74d880, which reworked the surrounding planning loop but kept
+    the transport at the same build site.)
 
 R2. **Behind-only fast-forwards automatically.** L ancestor of U →
     `git merge --ff-only U` in the workdir (the branch is checked out).

@@ -2007,7 +2007,11 @@ def test_auto_sequence_does_not_launch_over_a_loop_lease(tmp_path, monkeypatch):
     rs.claim_action_lease(PR, "review-loop", "loop:ab12", 60)
     monkeypatch.setattr("pm_core.cli.pr.state_root", lambda: tmp_path)
     monkeypatch.setattr("pm_core.cli.pr._get_pm_session", lambda: "pm-s")
-    with patch("pm_core.cli.pr._launch_review_iteration") as launch:
+    # The session must be live, not merely named: pr_auto_sequence pauses
+    # when tmux_mod.session_exists() says the resolved name is not real
+    # (the same guard the other status branches have).
+    with patch("pm_core.cli.pr.tmux_mod.session_exists", return_value=True), \
+            patch("pm_core.cli.pr._launch_review_iteration") as launch:
         result = CliRunner().invoke(pr_auto_sequence, [PR])
     assert result.exit_code == 0
     assert "owned by loop:ab12" in result.output
