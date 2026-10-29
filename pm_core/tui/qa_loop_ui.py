@@ -825,9 +825,22 @@ def _resume_incomplete_qa(app) -> None:
             # ended its hold without a follow-up: stop, PR left qa, last
             # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
-            state.latest_verdict = overall
+            # A stop that landed while the (blocking) finalize pane was
+            # polling left the pre-finalize PASS on disk: the daemon converts
+            # it to the terminal STOPPED teardown, but it was interrupted
+            # first.  Record the same verdict the live loop would have, and
+            # keep the status pane agreeing with it.
+            state.latest_verdict = qa_loop.recovered_overall_verdict(
+                state, overall)
+            if state.latest_verdict != overall:
+                _log.info("Recovered QA for %s was stopped during finalize — "
+                          "reporting %s instead of %s", pr_id,
+                          state.latest_verdict, overall)
+                if state.qa_workdir:
+                    qa_loop.set_status_overall(state.qa_workdir,
+                                               state.latest_verdict)
             _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
-                      pr_id, overall, state.completion_processed)
+                      pr_id, state.latest_verdict, state.completion_processed)
             if not state.completion_processed:
                 _on_qa_complete(app, state)
             state._ui_complete_notified = True

@@ -129,6 +129,22 @@ def test_resume_roundtrip(tmp_path):
     assert rebuilt.scenario_0.window_name == "qa-pr1-s0"
 
 
+def test_resume_roundtrip_preserves_a_user_stop(tmp_path):
+    """A stop must survive the snapshot: a resumed loop that forgot it kept
+    collecting verdicts for a run the user cancelled."""
+    state = _make_state(tmp_path)
+    state.stop_requested = True
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+
+    rebuilt = build_resume_state(_load_resume_file(tmp_path))
+    assert rebuilt.stop_requested is True
+
+    # Legacy snapshots (written before the key existed) default to running.
+    loaded = _load_resume_file(tmp_path)
+    loaded.pop("stop_requested")
+    assert build_resume_state(loaded).stop_requested is False
+
+
 def test_write_resume_file_noop_without_workdir():
     state = QALoopState(pr_id="pr-x")
     state.qa_workdir = None
@@ -276,6 +292,96 @@ def test_resume_completed_processes_and_clears(tmp_path):
     assert "pr-001" not in app._qa_loops
     assert "pr-001" in app._resumed_qa_pr_ids
     assert not _resume_file_path(qa_dir).exists()
+
+
+def _seed_stopped_in_finalize(home, *, finalize_verdict=None, pr_id="pr-001"):
+    """A run the user stopped while the finalize pane was polling.
+
+    ``_execute_and_finalize`` writes ``overall=PASS`` before that pane blocks,
+    so the snapshot on disk is the pre-finalize result plus the stop.
+    """
+    qa_dir = home / ".pm" / "workdirs" / "qa" / f"{pr_id}-loop1"
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    state = _make_state(qa_dir)
+    state.pr_id = pr_id
+    state.scenario_verdicts = {1: VERDICT_PASS, 2: VERDICT_PASS}
+    state.finalize_verdict = finalize_verdict
+    state.stop_requested = True
+    state.latest_verdict = VERDICT_PASS
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    status = {
+        "pr_id": pr_id,
+        "scenarios": [
+            {"index": 1, "title": "Login flow", "verdict": VERDICT_PASS,
+             "window_name": "qa-pr1-s1"},
+            {"index": 2, "title": "Logout flow", "verdict": VERDICT_PASS,
+             "window_name": "qa-pr1-s2"},
+        ],
+        "overall": VERDICT_PASS,
+        "error": "",
+    }
+    (qa_dir / "qa_status.json").write_text(json.dumps(status))
+    return qa_dir
+
+
+def test_resume_stop_during_finalize_reports_stopped(tmp_path):
+    """A stop that landed while the finalizer polled must not be recovered as
+    the pre-finalize PASS (a QA PASS note + lifecycle hand-off for a run the
+    user cancelled).  The live loop converts it to STOPPED; a restart must
+    reach the same verdict and keep the status pane in agreement."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_stopped_in_finalize(tmp_path)
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    assert on_complete.call_args[0][1].latest_verdict == "STOPPED"
+    assert json.loads((qa_dir / "qa_status.json").read_text())["overall"] == (
+        "STOPPED")
+    # The scenario rows are preserved, not rebuilt from a partial state.
+    rows = json.loads((qa_dir / "qa_status.json").read_text())["scenarios"]
+    assert [r["verdict"] for r in rows] == [VERDICT_PASS, VERDICT_PASS]
+    assert not _resume_file_path(qa_dir).exists()
+
+
+def test_resume_completed_finalize_then_stop_keeps_pass(tmp_path):
+    """A stop that arrived *after* the finalizer produced its outcome keeps
+    the PASS (the run did finish; only a stop during finalize is teardown)."""
+    app = _make_app(tmp_path)
+    _seed_stopped_in_finalize(tmp_path, finalize_verdict="FINALIZE_DONE")
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    assert on_complete.call_args[0][1].latest_verdict == VERDICT_PASS
+
+
+def test_resume_stopped_incomplete_run_respawns_and_stays_stopped(tmp_path):
+    """An in-flight run the user stopped is re-spawned (its panes are alive)
+    but the restored stop makes it end in the clean teardown."""
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="")
+    rfile = _resume_file_path(qa_dir)
+    data = json.loads(rfile.read_text())
+    data["stop_requested"] = True
+    rfile.write_text(json.dumps(data))
+
+    with patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_called_once()
+    on_complete.assert_not_called()
+    assert app._qa_loops["pr-001"].stop_requested is True
 
 
 def test_resume_skips_non_qa_pr(tmp_path):

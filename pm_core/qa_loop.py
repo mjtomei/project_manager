@@ -889,6 +889,50 @@ def _write_status_file(status_path: Path, pr_id: str,
     tmp_path.rename(status_path)
 
 
+def set_status_overall(qa_workdir: str | Path, overall: str) -> None:
+    """Rewrite only the ``overall`` field of ``qa_status.json``.
+
+    Used by restart recovery when the TUI re-interprets a completed snapshot
+    (a stop the interrupted daemon never got to convert to ``STOPPED``).  The
+    status pane reads this file, so it must agree with the verdict the TUI
+    records; touching only ``overall`` preserves the scenario table and any
+    error block the daemon wrote.
+    """
+    status_path = Path(qa_workdir) / "qa_status.json"
+    try:
+        data = json.loads(status_path.read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    data["overall"] = overall
+    tmp_path = status_path.with_suffix(".recovered.tmp")
+    try:
+        tmp_path.write_text(json.dumps(data, indent=2))
+        tmp_path.rename(status_path)
+    except OSError:
+        _log.warning("Could not rewrite qa_status.json overall to %s", overall,
+                     exc_info=True)
+
+
+def recovered_overall_verdict(state: "QALoopState", overall: str) -> str:
+    """The overall verdict a restart should record for a completed snapshot.
+
+    ``_execute_and_finalize`` writes ``overall`` *before* the blocking
+    finalize pane, so a run the user stopped while that pane was polling left
+    its pre-finalize ``PASS`` on disk; the live loop converts it to the
+    terminal ``STOPPED`` teardown afterwards.  A restart that recovers the
+    snapshot must reach the same verdict instead of recording a QA PASS (and
+    a QA note) for a run the user cancelled.  Only ``PASS`` is converted: a
+    ``NEEDS_WORK`` / ``INPUT_REQUIRED`` finding did determine something about
+    the PR, and a finalize that already produced an outcome keeps its PASS.
+    """
+    if (overall == VERDICT_PASS and state.stop_requested
+            and not state.finalize_verdict and state.scenarios):
+        return VERDICT_STOPPED
+    return overall
+
+
 # ---------------------------------------------------------------------------
 # Resume snapshot (restart survival)
 # ---------------------------------------------------------------------------
@@ -1000,6 +1044,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         },
         "held": bool(state.held),
         "completion_processed": bool(state.completion_processed),
+        # A user stop must survive a restart: without it a resumed run keeps
+        # collecting verdicts for a run the user cancelled (and a stop that
+        # landed while the finalize pane was polling would be reported as the
+        # pre-finalize PASS).  Restored by ``build_resume_state``.
+        "stop_requested": bool(state.stop_requested),
         "latest_verdict": state.latest_verdict or "",
         "input_wait_code_changes": list(state.input_wait_code_changes),
         "planner_head": state.planner_head,
@@ -1352,6 +1401,10 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     }
     state.held = bool(resume_data.get("held"))
     state.completion_processed = bool(resume_data.get("completion_processed"))
+    # The run was already being torn down when the snapshot was taken, so a
+    # resumed loop must finish as the same clean teardown rather than
+    # collecting verdicts for a run the user stopped.
+    state.stop_requested = bool(resume_data.get("stop_requested"))
     state.latest_verdict = resume_data.get("latest_verdict") or ""
     state.input_wait_code_changes = list(
         resume_data.get("input_wait_code_changes") or [])

@@ -469,6 +469,25 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `::test_stop_during_finalize_is_stopped_not_pass`,
   `::test_stop_during_finalize_keeps_a_needs_work_finding` and
   `::test_completed_finalize_then_stop_stays_pass`.
+* **A user stop survives a TUI restart** — the same teardown contract, one
+  process later. `qa_resume.json` did not carry `stop_requested`, so a
+  restart that re-adopted an in-flight run resumed *collecting* verdicts for
+  a run the user had stopped; and because `_execute_and_finalize` writes
+  `overall` *before* the blocking finalize pane, a stop that landed while
+  that pane polled left its pre-finalize `PASS` on disk, so the TUI's
+  "completed during downtime" path recorded a QA PASS (note + lifecycle
+  hand-off) for a cancelled run. `_write_resume_file` now persists
+  `stop_requested` and `build_resume_state` restores it, so a re-spawned
+  loop ends in the same clean teardown. For the completed-snapshot path,
+  `qa_loop.recovered_overall_verdict()` applies the live `stopped_in_finalize`
+  rule (PASS + stop + no finalize outcome → `STOPPED`, everything else keeps
+  its recorded verdict) and `qa_loop.set_status_overall()` rewrites only the
+  `overall` field so the status pane agrees while the scenario table and any
+  error block are preserved. Regression tests:
+  `tests/test_qa_resume.py::test_resume_roundtrip_preserves_a_user_stop`,
+  `::test_resume_stop_during_finalize_reports_stopped`,
+  `::test_resume_completed_finalize_then_stop_keeps_pass` and
+  `::test_resume_stopped_incomplete_run_respawns_and_stays_stopped`.
 * **STOPPED is a hold verdict for auto-start** — `STOPPED` is recorded in
   runtime_state like any finished run (state `done`), so
   `auto_start.QA_HOLD_VERDICTS` must include it: otherwise
