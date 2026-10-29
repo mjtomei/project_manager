@@ -14027,7 +14027,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-28T23:52:06.080745+00:00'
+  updated_at: '2026-10-29T00:13:50.376592+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14163,6 +14163,27 @@ prs:
       as-is (spec §6 scopes pr_cleanup behavior out).'
     created_at: '2026-10-28T23:52:06Z'
     last_edited: '2026-10-28T23:52:06Z'
+  - id: note-fa88a13
+    text: 'Review i12: bare `pm pr cleanup` (no id) auto-selected only `merged` PRs,
+      so the explicit workdir-removal step `pm pr close` points at answered "No merged
+      PRs with workdirs to clean up" immediately after a close. It now offers both
+      terminal statuses (pr_utils.TERMINAL_PR_STATES + usable_prs) and the no-match/multiple
+      messages say "merged or closed"; the dirty-workdir guard/--force/--all/--prune/--resources
+      are untouched. Tests: test_bare_cleanup_auto_selects_a_closed_workdir, test_bare_cleanup_reports_when_nothing_terminal_has_a_workdir
+      (both fail on i11 HEAD). Also filled two coverage gaps with no behavior change:
+      test_repeat_close_retries_the_github_close (A6 — a repeat close re-attempts
+      `gh pr close` so a failed one can be retried, closed_at preserved) and test_default_close_clears_active_pr_when_nothing_remains
+      (A2 — pointer becomes None when no non-terminal PR remains). Spec synced (R11
+      items 8/18/30, §5, §6). Full suite 4126 passed, 1 skipped; the last two tests
+      were added after that run started and pass in test_pr_close.py (44 passed).
+      Two items still open for the user: (1) A4 cross-PR — pr-3d1fa55/#217 `_reclaim_terminal_pr_windows`
+      would reclaim live windows/containers for `closed` PRs on every 5-minute sync;
+      does `closed` authorize live-resource reclamation, or should #217 limit the
+      sweep to `merged`? (2) pm/plans/plan-a35369f.md still describes a future item
+      premised on `pm pr close` doing `gh pr close --delete-branch`; with close never
+      deleting branches that premise is stale (no PR exists for that item yet).'
+    created_at: '2026-10-29T00:13:50Z'
+    last_edited: '2026-10-29T00:13:50Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work
