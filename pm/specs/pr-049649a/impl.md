@@ -427,9 +427,12 @@ All-PR/all-mode removal is unchanged by the merge: `all_mode` is still
 rejected by the parser, `managed_ids` still returns a concrete set, and
 the `all` verb/CLI/help/keybinding/label/popup paths stay removed.
 
-Validation: full suite `4580 passed, 1 skipped`, with one unrelated
-timing-flaky `tests/test_push_proxy.py::TestWorkdirKeyedProxies::
-test_restart_after_socket_death_does_not_disturb_other_workdir` (passes in
-isolation; master's push-proxy code, not touched here).  Focused autostart
-suites (parser, multi-target, single-policy, breadcrumb/loop, log-message,
-signoff handoff, owed REQA, launch retry) all pass.
+Validation on the integrated head (`924caeb2`): full suite **4581 passed,
+1 skipped, 0 failed** (re-run after the test-contract updates; an earlier
+run on the same product code hit one unrelated timing-flaky
+`tests/test_push_proxy.py::TestWorkdirKeyedProxies::
+test_restart_after_socket_death_does_not_disturb_other_workdir`, which
+passes in isolation and is master's push-proxy code, not touched here).
+Focused autostart suites (parser, multi-target, single-policy,
+merge-wait, breadcrumb/loop, log-message, signoff handoff, owed REQA,
+launch retry) all pass.
