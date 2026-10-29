@@ -39,7 +39,12 @@ recording-recipe bugs that any worker following the recipe hits:
   they also check the renderers' own exit statuses (a failed `agg`/`ffmpeg`
   leaves a partial mp4 that `test -s` accepts), say "there is no cast to
   render" when the recording wrote nothing, and the tmux recipe reports a
-  failed transcript pipe and checks `transcript.log`;
+  failed transcript pipe and checks `transcript.log`; both render blocks also
+  refuse a capture directory that is missing or cannot be written before they
+  remove or render anything, so an unwritable directory is not reported as
+  "agg failed on the cast — is 'agg' installed?" (a remedy that runs and
+  changes nothing) and a path that is not there is not reported as a
+  recording that wrote nothing (R57);
 - the web-UI finalize/driver/teardown guards stop the block with
   `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
   interactive shell the next line still runs (the `rm` aimed at
@@ -766,6 +771,14 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   not create …" instead of reporting the recorder as dead ("recorder exited
   before it drew", "asciinema wrote no cast", the readiness timeout) or, in
   the web-UI start block, exiting 0 with the app launched and no pid file.
+- The render step runs against a capture directory that is missing or cannot
+  be written (a mistyped path, or one that became unwritable after the
+  recording) → the block stops with "capture directory … does not exist — …"
+  or "capture directory … cannot be written — …" before it removes or renders
+  anything, instead of reporting the unwritable directory as "agg failed on
+  the cast — is 'agg' installed?" (whose remedy runs and changes nothing) or
+  the missing path as "there is no cast to render (the recording wrote
+  nothing)" (review loop ebd1 i16, R57).
 - The recorder session cannot be created at all (`tmux new-session` fails:
   server gone or refusing, a duplicate session from a concurrent run, a bad
   option) → the run stops with "could not start the recorder session — see

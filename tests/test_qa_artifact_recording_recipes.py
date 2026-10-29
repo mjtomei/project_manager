@@ -105,7 +105,11 @@ hits, regardless of how it waits for a background job:
   worker's cwd), a web-UI start that never answers removes the pid it
   recorded so the teardown cannot signal a recycled one, and the web-UI
   finalize step names a missing ``ffmpeg`` instead of reporting it as a
-  failed transcode of the driver's webm;
+  failed transcode of the driver's webm; both recording recipes' render blocks
+  refuse a missing or unwritable capture directory where they write, instead
+  of reporting an unwritable one as "agg failed on the cast — is 'agg'
+  installed?" (a remedy that runs and changes nothing) or a path that is not
+  there as "the recording wrote nothing";
 - an input that exists but is empty is not an input, and that holds for the
   web-UI driver too: the driver block's "is ``driver.mjs`` here" check is
   ``-s``, not ``-f``, because an empty file is a *valid* ES module —
@@ -1197,7 +1201,8 @@ def test_failed_render_leaves_no_video(name, tmp_path):
 
 
 def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
-                ffmpeg_body=None, with_cast=True, cast_body=None):
+                ffmpeg_body=None, with_cast=True, cast_body=None,
+                capture=None, capdir_mode=None, create_capture_dir=True):
     """Run a recipe's render block against stubbed ``agg``/``ffprobe``/``ffmpeg``.
 
     Returns ``(proc, mp4_path, gif_path)``. The stubs are the real stage
@@ -1205,17 +1210,25 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     codec, ``ffmpeg`` writes the mp4. ``cast_body`` writes the cast's contents
     (``""`` is the 0-byte cast a recording that wrote nothing leaves, which the
     block's ``test -s`` is there for); ``with_cast=False`` leaves no file.
+    ``capture`` is the directory substituted for ``<capture-dir>`` (default
+    ``tmp_path``). ``capdir_mode`` pre-creates the cast's directory with that
+    mode, so a case can model a capture directory that exists and cannot be
+    written (the mode is restored before the run returns);
+    ``create_capture_dir=False`` leaves the directory absent, so a case can
+    model a path that is not there.
     """
+    capture = tmp_path if capture is None else capture
     block = _render_block(name)
     cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
-    block = (block.replace("<capture-dir>", str(tmp_path))
+    block = (block.replace("<capture-dir>", str(capture))
                   .replace("<short-name>", "run"))
-    cast = Path(cast_rel.replace("<capture-dir>", str(tmp_path))
+    cast = Path(cast_rel.replace("<capture-dir>", str(capture))
                        .replace("<short-name>", "run"))
-    cast.parent.mkdir(parents=True, exist_ok=True)
-    if with_cast:
-        cast.write_text(cast_body if cast_body is not None
-                        else '{"version": 2}\n')
+    if create_capture_dir:
+        cast.parent.mkdir(parents=True, exist_ok=True)
+        if with_cast:
+            cast.write_text(cast_body if cast_body is not None
+                            else '{"version": 2}\n')
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     _stub_tool(bindir, "agg", agg_body or (
@@ -1225,9 +1238,77 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     _stub_tool(bindir, "ffmpeg", ffmpeg_body or (
         'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
-    r = subprocess.run(["bash"], input=block, env=env,
-                       capture_output=True, text=True)
+    if capdir_mode is not None:
+        cast.parent.chmod(capdir_mode)
+    try:
+        r = subprocess.run(["bash"], input=block, env=env,
+                           capture_output=True, text=True)
+    finally:
+        if capdir_mode is not None and cast.parent.exists():
+            cast.parent.chmod(0o700)
     return r, cast.with_suffix(".mp4"), cast.with_name(cast.name + ".gif")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_refuses_a_capture_dir_it_cannot_write(name, tmp_path):
+    """An unwritable capture directory is not a broken renderer.
+
+    The render block writes the intermediate gif and the mp4 into the
+    capture directory, and it was the one block that writes there without the
+    writability guard the capture steps carry: with a mode-500 directory
+    holding a cast, the `rm` fails silently, `agg` cannot create its gif, and
+    the block reports "agg failed on the cast — is 'agg' installed?" — a
+    remedy that cannot work, because the renderer is installed and the
+    directory is the problem (verified live in this container with agg 1.9.0
+    and ffmpeg 4.4.2: rc 1 with that message, and the install block that
+    message points at exits 0 without changing anything). The block has to
+    name the directory where it fails, before it removes anything.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        pytest.skip("root can write a mode-500 directory")
+    r, mp4, gif = _run_render(name, tmp_path, capture=tmp_path / "cap",
+                              capdir_mode=0o500)
+
+    assert r.returncode != 0, (
+        f"{name}: a render into an unwritable capture directory exited 0")
+    assert "cannot be written" in r.stderr, r.stderr
+    assert "is 'agg' installed" not in r.stderr, (
+        f"{name}: an unwritable capture directory is reported as a broken "
+        "renderer, so the worker is sent to the agg install block, which "
+        "runs and changes nothing: " + r.stderr)
+    assert str(mp4.parent) in r.stderr, (
+        f"{name}: the refusal does not name the capture directory: "
+        + r.stderr)
+    assert not mp4.exists() and not gif.exists(), (
+        f"{name}: the refused render wrote outputs into a directory it had "
+        "just refused")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_missing_capture_dir(name, tmp_path):
+    """A path that is not there is not a recording that wrote nothing.
+
+    The block's cast check says "there is no cast to render (the recording
+    wrote nothing)" — right for a directory that exists and holds no cast,
+    wrong for a capture directory that does not exist at all (a mistyped or
+    unsubstituted path), where it sends the worker to re-record into a
+    directory nothing created. The web-UI finalize block guards the same
+    state with "capture directory … does not exist".
+    """
+    r, mp4, gif = _run_render(name, tmp_path, capture=tmp_path / "cap",
+                              create_capture_dir=False)
+
+    assert r.returncode != 0, (
+        f"{name}: a render against a missing capture directory exited 0")
+    assert "does not exist" in r.stderr, r.stderr
+    assert "the recording wrote nothing" not in r.stderr, (
+        f"{name}: a missing capture directory is reported as a recording "
+        "that wrote nothing: " + r.stderr)
+    assert str(mp4.parent) in r.stderr, (
+        f"{name}: the refusal does not name the capture directory: "
+        + r.stderr)
+    assert not mp4.parent.exists(), (
+        f"{name}: the refused render created the capture directory")
 
 
 @pytest.mark.parametrize("name", RECIPES)

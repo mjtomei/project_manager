@@ -511,6 +511,31 @@ Don't substitute a different renderer: the mp4 is the required artifact.
 
 ```
 cast=<capture-dir>/<short-name>/recording.cast
+# The cast's directory has to be there and writable before anything is
+# removed or rendered. A missing one turns the cast check below into "the
+# recording wrote nothing" for a path that is not there; an existing
+# directory that cannot be written makes the `rm` fail silently and `agg` fail
+# to write its gif, which the block reports as "agg failed on the cast — is
+# 'agg' installed?" — a remedy that cannot work, because the renderer is
+# installed and the directory is the problem. Verified live in this container
+# with agg 1.9.0 and ffmpeg 4.4.2 and a mode-500 capture directory holding a
+# cast: rc 1 with that message, the earlier run's `recording.mp4` surviving
+# the failed `rm`, and the install block that message points at exiting 0
+# without changing anything. Both checks run before the `rm`, so a
+# refused block leaves the earlier run's outputs alone — the same rule the
+# capture step's own directory guards follow.
+cast_dir=${cast%/*}
+[ -d "$cast_dir" ] || {
+    echo "capture directory $cast_dir does not exist — create it and run the" \
+        "capture step first" >&2
+    exit 1
+}
+[ -w "$cast_dir" ] && [ -x "$cast_dir" ] || {
+    echo "capture directory $cast_dir cannot be written — the render writes" \
+        "the mp4 and the intermediate gif there; check the path and its" \
+        "permissions" >&2
+    exit 1
+}
 # Remove this run's outputs before rendering: a failed render (no `agg`, an
 # unreadable cast, an ffmpeg error) then ends with *no* mp4, instead of
 # leaving the previous run's video in the capture directory — which the
