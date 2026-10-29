@@ -63,7 +63,15 @@ R1. **New iteration owns the work.**  When the review loop launches a new
     optional ``result`` dict and record there the transcript the returned
     verdict actually came from: discovery can adopt *another pane's*
     transcript, so the follow-up wait must not assume the loop's own
-    ``review-<pr>-i<N>.jsonl``.
+    ``review-<pr>-i<N>.jsonl``.  That includes a `"verdict"` discovery:
+    `_discover_iteration` sets `AttemptDiscovery.transcript` to the
+    transcript the landed verdict was read from (another driver's pane
+    included).  Without it the caller fell back to the loop's own symlink —
+    after a failed attempt, a *different* session — and waited on a
+    transcript/hook stream that never sees the answer or the follow-up
+    verdict (review e2e9 i1; regressions
+    `test_discovery_verdict_names_the_transcript_it_came_from`,
+    `test_retry_reports_the_discovered_verdicts_transcript`).
 
 R2. **Restart/adoption of an INPUT_REQUIRED wait.**  A resumed state whose
     `history[-1]` is `(state.iteration, INPUT_REQUIRED)` is a wait that was in

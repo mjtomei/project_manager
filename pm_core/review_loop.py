@@ -572,6 +572,10 @@ class AttemptDiscovery:
     kind: str  # verdict | adopt | other_owner | pending | launch
     output: str | None = None
     pane_id: str | None = None
+    # The transcript the discovery read.  For ``verdict`` it is the one the
+    # verdict came from — possibly another driver's pane, not this loop's
+    # ``review-<pr>-i<N>.jsonl`` — so an INPUT_REQUIRED follow-up is waited
+    # on in the session that actually asked the question.
     transcript: str | None = None
     reason: str = ""
     owner: str = ""
@@ -686,6 +690,7 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
         output = _verdict_output_if_present(our_transcript)
         if output:
             return AttemptDiscovery("verdict", output=output,
+                                    transcript=our_transcript,
                                     session_id=our_sid)
 
     other = _other_loop_owner(state)
@@ -739,6 +744,7 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
             output = _verdict_output_if_present(pane_transcript)
             if output:
                 return AttemptDiscovery("verdict", output=output,
+                                        transcript=pane_transcript,
                                         session_id=pane_sid)
             return AttemptDiscovery("adopt", pane_id=pane_id,
                                     transcript=pane_transcript,
@@ -776,6 +782,7 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
         output = _verdict_output_if_present(pane_transcript)
         if output:
             return AttemptDiscovery("verdict", output=output,
+                                    transcript=pane_transcript,
                                     session_id=pane_sid)
         return AttemptDiscovery("adopt", pane_id=pane_id,
                                 transcript=pane_transcript,

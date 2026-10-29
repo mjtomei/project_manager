@@ -824,6 +824,59 @@ def test_discovery_adopts_another_drivers_live_session(tmp_path, monkeypatch):
     assert disc.transcript == str(tmp_path / f"{theirs}.jsonl")
 
 
+def _another_drivers_question(tmp_path, monkeypatch) -> Path:
+    """Our failed attempt left ``review-pr-001-i1.jsonl``; another driver's
+    live review pane for the same iteration already asked INPUT_REQUIRED."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    ours = str(uuid.uuid4())
+    theirs = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", ours)
+    (tmp_path / f"{ours}.jsonl").write_text("")
+    pane_transcript = tmp_path / f"{theirs}.jsonl"
+    pane_transcript.write_text(json.dumps({
+        "type": "assistant", "sessionId": theirs,
+        "message": {"content": [{"type": "text",
+                                 "text": "Which option?\n\n**INPUT_REQUIRED**"}]},
+    }) + "\n")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: pane_transcript)
+    return pane_transcript
+
+
+def test_discovery_verdict_names_the_transcript_it_came_from(tmp_path,
+                                                             monkeypatch):
+    """A verdict read from another driver's pane carries that pane's
+    transcript: an INPUT_REQUIRED follow-up must be waited on in the session
+    that asked it, not in this loop's own (other-session) symlink
+    (pr-a80bde5 R1)."""
+    pane_transcript = _another_drivers_question(tmp_path, monkeypatch)
+    state = ReviewLoopState(pr_id=PR)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 1)
+    assert disc.kind == "verdict"
+    assert "INPUT_REQUIRED" in (disc.output or "")
+    assert disc.transcript == str(pane_transcript)
+
+
+def test_retry_reports_the_discovered_verdicts_transcript(tmp_path,
+                                                          monkeypatch):
+    """``_run_iteration_with_retry`` hands the follow-up waiter the transcript
+    the rediscovered verdict came from, not ``review-<pr>-i<N>.jsonl``."""
+    pane_transcript = _another_drivers_question(tmp_path, monkeypatch)
+    state = ReviewLoopState(pr_id=PR, iteration=1, retry_iteration=1,
+                            launch_attempts=1)
+    result: dict = {}
+    with patch.object(review_loop, "_run_claude_review") as run:
+        output = review_loop._run_iteration_with_retry(
+            state, str(tmp_path), _pr(tmp_path), str(tmp_path), 1, result)
+    assert run.call_count == 0
+    assert "INPUT_REQUIRED" in output
+    assert result["transcript"] == str(pane_transcript)
+
+
 def test_discovery_treats_the_last_adopted_session_as_historical(
         tmp_path, monkeypatch):
     """An iteration whose verdict was adopted from another driver's session
