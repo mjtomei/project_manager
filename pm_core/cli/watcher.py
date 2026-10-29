@@ -373,6 +373,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     from pm_core.model_config import resolve_model_and_provider
     _resolution = resolve_model_and_provider("watcher", project_data=data)
 
+    env: dict[str, str] = {}
     claude_cmd = build_claude_shell_cmd(
         prompt=watcher_prompt,
         transcript=transcript,
@@ -381,6 +382,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
         provider=_resolution.provider,
         effort=_resolution.effort,
         session_type="watcher",
+        env_out=env,
     )
 
     # Kill existing watcher window and recreate (fresh each iteration).
@@ -408,7 +410,7 @@ def _create_watcher_window(iteration: int, loop_id: str,
     try:
         tmux_mod.new_window_get_pane(
             pm_session, window_name, claude_cmd, repo_dir,
-            switch=False,
+            switch=False, env=env,
         )
         new_win = tmux_mod.find_window_by_name(pm_session, window_name)
         _log.info("_create_watcher_window: new window created: %s", new_win)

@@ -2763,18 +2763,27 @@ different methodology.
 
 {execution_block}
 {_OUT_OF_SCOPE_BUGS_BLOCK}
-## Your Verdict Is Final for This Run
+## Your Verdict, and When It Is Final
 
-Once you output a verdict, the QA loop records it for this scenario and will
-not accept a later or replacement verdict from you — there is no re-poll.
-NEEDS_WORK and INPUT_REQUIRED are terminal. (The one exception is
-loop-initiated: if the loop's verification step flags your PASS, it messages
-this pane asking you to re-evaluate — answer that follow-up if it arrives.)
+PASS and NEEDS_WORK are final for this run: once you emit one, the QA loop
+records it for this scenario and will not accept a later or replacement
+verdict from you — there is no re-poll. (The one exception is loop-initiated:
+if the loop's verification step flags your PASS, it messages this pane asking
+you to re-evaluate — answer that follow-up if it arrives.)
 
-So if you realize something after delivering your verdict, or you're leaving
+INPUT_REQUIRED is **not** final in the same way. When you emit it, the loop
+keeps this scenario's pane under observation while it waits for the user to
+resolve the blocker. After the user answers you here, finish the scenario and
+end your response with **PASS** or **NEEDS_WORK**: the loop collects that
+follow-up verdict and resumes the normal QA flow (a PASS is independently
+verified and finalized as usual; NEEDS_WORK returns the PR to review).
+Emitting INPUT_REQUIRED again is allowed — it keeps the scenario waiting for
+further input rather than ending the run.
+
+If you realize something after a final PASS/NEEDS_WORK, or you're leaving
 work or context for the **next QA run on this PR** to pick up — a fix you
-couldn't finish, a flaky prerequisite, something to check next time — you
-cannot amend your verdict to carry it forward. Hand it off as a PR note
+couldn't finish, a flaky prerequisite, something to check next time — a final
+verdict cannot be amended to carry it forward. Hand it off as a PR note
 instead (see the PR Notes — Handoff Channel section below).
 {pr_notes_handoff_block}
 IMPORTANT: Always end your response with `Reason: <one sentence>` on the second-to-last line and the verdict keyword on the very last line."""

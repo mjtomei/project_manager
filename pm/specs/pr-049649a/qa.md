@@ -76,7 +76,7 @@ auto-start turns off.
 
 ### R4 — A merge-restart round-trips an explicit target set exactly
 
-GIVEN a TUI with targets T1 (wait-for-merge) and T2 (stop-before-merge) and a
+GIVEN a TUI with targets T1 (wait-for-merge) and T2 (auto-merge) and a
 shared dependency
 WHEN the user runs `pm tui restart --breadcrumb` and the TUI comes back
 THEN the log reports `Auto-start: resumed after merge restart → T1, T2`, the
@@ -136,10 +136,16 @@ that could never match — padded/empty) WHEN the TUI restarts THEN auto-start
 stays off with a diagnostic naming the merge-gate set, so nothing can
 auto-merge without the user's holds.
 
+GIVEN saved state with a valid `stop_before_merge` list alongside a valid
+target set WHEN the TUI restarts THEN the marks are folded into
+`wait_for_merge` targets (a mark on an existing target holds it; a mark on a
+non-target becomes a standalone wait target), so the saved hold survives and
+nothing auto-merges.
+
 GIVEN saved state with a valid `stop_before_merge` list alongside rejected
-targets WHEN the TUI restarts THEN auto-start stays off but the hold is kept:
-re-adding that PR as an auto-merge target shows it held rather than merging
-freely.
+targets WHEN the TUI restarts THEN auto-start stays off and the quarantined
+evidence still contains the original stop set (with no scheduler there is no
+merge path to gate); nothing is enabled from the stop marks alone.
 
 GIVEN saved state with a malformed review-loop record or history entry WHEN
 the TUI restarts THEN startup does not fail; well-formed loop state is still
@@ -203,6 +209,10 @@ project), stays off, and A's running auto-start is unaffected.
 - Legacy target unknown to the project; legacy target merged during downtime.
 - Corrupt/truncated JSON; valid JSON that is not an object.
 - `stop_before_merge` as a mapping/string; ids padded with spaces/tabs/empty.
+- Bare-string target entries and a legacy single `target` (both migrate
+  fail-closed to `wait_for_merge`).
+- Legacy record policy fields (`policy`/`merge_policy`) with auto vs
+  unknown/empty/None values.
 - Saved targets unknown to the project; saved targets with no PRs loaded.
 - Two rapid rejections (distinct quarantine filenames, evidence not overwritten).
 - `pm autostart all` from CLI, command bar, and the raw command queue.
@@ -232,7 +242,11 @@ project), stays off, and A's running auto-start is unaffected.
   validated target; completion is normal), and do not paint a "resumed" line
   when nothing remains.
 - **Malformed `stop_before_merge`** — reject auto-start for that restore but
-  still restore review-loop state; never guess holds.
+  still restore review-loop state; never guess holds.  Valid marks on a
+  restored target set fold into `wait_for_merge` targets.
+- **Legacy single/bare target policy** — the old shape cannot distinguish
+  `O` from `A`, so it migrates fail-closed to `wait_for_merge` (no
+  auto-merge authority is granted).
 - **Rejected restore with review loops** — the rejection diagnostic stays on
   screen; the loop-resume line is recorded in the `L` log at non-sticky
   priority instead of painting over it.

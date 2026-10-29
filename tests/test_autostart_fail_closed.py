@@ -42,7 +42,6 @@ class FakeApp:
         self._auto_start_targets = {}
         self._auto_start_run_id = None
         self._auto_start_launching = set()
-        self._stop_before_merge = set()
         self._review_loops = {}
         self._qa_loops = {}
         self._self_driving_qa = {}
@@ -561,9 +560,11 @@ class TestConsumeFailClosed:
         assert any("no project PRs" in m for m in app.logs)
         assert _rejected_files(tmp_path)
 
-    def test_valid_stop_marks_restored_even_when_targets_rejected(self, tmp_path):
-        """A valid merge-gate set is evidence worth keeping even when the
-        target parse fails (the rejected state still cannot merge)."""
+    def test_valid_stop_marks_preserved_in_evidence_when_restore_rejected(
+            self, tmp_path):
+        """The saved merge-gate set is evidence: a rejected restore (all-mode
+        here) preserves the original bytes, so the holds are not silently
+        lost.  With auto-start OFF there is no merge path to gate."""
         app = FakeApp([_pr("pr-a")], tmp_path)
         _write_breadcrumb(tmp_path, {
             "auto_start": True, "all_mode": True,
@@ -572,8 +573,12 @@ class TestConsumeFailClosed:
         })
         _consume(app, tmp_path)
         assert app._auto_start is False
-        assert app._stop_before_merge == {"pr-a"}
+        assert app.launched == []
         assert any("all-mode" in m for m in app.logs)
+        rejected = _rejected_files(tmp_path)
+        assert len(rejected) == 1
+        preserved = json.loads(rejected[0].read_text())
+        assert preserved["stop_before_merge"] == ["pr-a"]
 
     def test_malformed_review_loop_history_does_not_abort_restore(self, tmp_path):
         """A malformed history entry must not raise out of startup; the loop
@@ -696,21 +701,12 @@ class TestSaveNeverPersistsWildcard:
         wildcard record for the next startup to interpret."""
         app = FakeApp([_pr("pr-a")], tmp_path)
         app._auto_start = False
-        app._stop_before_merge = {"pr-a"}
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
             (tmp_path / "merge-restart").touch()
             auto_start.save_breadcrumb(app)
-        data = json.loads((tmp_path / "autostart-resume.json").read_text())
-        assert "auto_start" not in data
-        assert "targets" not in data
-        assert "all_mode" not in data
-        assert data["stop_before_merge"] == ["pr-a"]
-
-        fresh = FakeApp([_pr("pr-a")], tmp_path)
-        _consume(fresh, tmp_path)
-        assert fresh._auto_start is False
-        assert fresh.launched == []
-        assert "pr-a" in fresh._stop_before_merge
+        # Nothing worth preserving: no breadcrumb at all (and certainly no
+        # autostart fields for the next startup to interpret).
+        assert not (tmp_path / "autostart-resume.json").exists()
 
     def test_save_enabled_with_no_targets_writes_no_autostart_fields(self, tmp_path):
         """The impossible-through-the-API enabled/empty state must not write
@@ -733,7 +729,6 @@ class TestSaveNeverPersistsWildcard:
             "pr-a": st.make_target_record("cli"),
         }
         app._auto_start_run_id = "run"
-        app._stop_before_merge = {"pr-a"}
         with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path):
             (tmp_path / "merge-restart").touch()
             auto_start.save_breadcrumb(app)
@@ -744,7 +739,6 @@ class TestSaveNeverPersistsWildcard:
         assert fresh._auto_start_targets["pr-b"][st.WAIT_KEY] is True
         assert st.WAIT_KEY not in fresh._auto_start_targets["pr-a"]
         assert fresh._auto_start_run_id == "run"
-        assert "pr-a" in fresh._stop_before_merge
 
 
 # ---------------------------------------------------------------------------

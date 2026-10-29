@@ -96,6 +96,19 @@ Rules, in order:
        If `wait_for_merge` is present it must be `bool`; `added_at`/`source`
        if present must be `str`. Any other malformed field/entry rejects the
        entire set (all-or-nothing; never silently drop a merge gate).
+       Legacy record fields (`policy`/`merge_policy`/`stop_before_merge`)
+       are folded into `wait_for_merge` when they do not name the automatic
+       policy (fail closed; master's pr-25f4038 behaviour).  A bare-string
+       entry is a legacy shape whose policy is unknown, so it fails closed
+       to `wait_for_merge` (`source="legacy-breadcrumb"`, `migrated=True`).
+   - a `stop_before_merge` top-level key, when present, must be a `list` of
+     valid PR ids (or `null`); any other type (a dict/string/set) or an
+     invalid/padded/empty id rejects the whole restore with the
+     "malformed stop_before_merge merge-gate set" diagnostic.  On a valid
+     restore the marks migrate to `wait_for_merge` targets (a mark on an
+     existing target forces its flag; a mark on a non-target becomes a
+     standalone wait target, terminal ids dropped) so a saved hold is never
+     silently lost.
    - empty list:
      - if `auto_start` is truthy, or `run_id` is present **and non-null** →
        reject with "saved auto-start state has no target PRs; auto-start
@@ -108,9 +121,12 @@ Rules, in order:
 6. `targets` key **absent** → legacy handling:
    - `target` present:
      - a valid id (`valid_pr_id`: non-empty `str`, no whitespace) →
-       `{target: record(source="legacy-breadcrumb")}`,
+       `{target: record(source="legacy-breadcrumb", wait_for_merge=True)}`,
        `migrated=True`. This is the only permitted migration and it names
-       exactly one validated target; no other PR gains authority.
+       exactly one validated target; no other PR gains authority.  The
+       single-target shape cannot distinguish `O` from `A`, so it fails
+       closed to the manual policy (master's pr-25f4038 behaviour); valid
+       `stop_before_merge` marks are folded in as wait targets too.
      - dict, number, empty/whitespace-containing string → reject with a
        diagnostic.
      - `None` → treated as "no target" rather than an invalid one: with
@@ -141,16 +157,19 @@ Rules, in order:
   previous/wildcard scope active), log +
   `app.log_message("Auto-start: <error>; auto-start remains off")`,
   quarantine the file, and **do not** call `check_and_start`.
-  - Still restore non-autostart state that is safe and useful: a valid
-    `stop_before_merge` list and review-loop state (so merge gates and
-    in-flight work are not silently dropped). But with autostart off these
-    cannot cause an automatic merge (every merge path checks `is_enabled`).
-    Malformed review-loop records/history entries are skipped with a
-    warning (never raised out of startup); well-formed loop state and
-    entries are still restored.  A record or entry whose scalar fields have
-    the wrong type (e.g. a string `iteration`, a non-bool
-    `input_required`) counts as malformed: adopting it would only fail
-    later inside a review-loop worker, not at startup.
+  - Still restore safe non-autostart state: review-loop state (so
+    in-flight work is not silently dropped) and the watcher list.  With
+    autostart off these cannot cause an automatic merge (every merge path
+    checks `is_enabled`).  A valid `stop_before_merge` set is preserved in
+    the quarantined evidence; it is not turned into an app-level stop set
+    (master's pr-25f4038 removed that state) and cannot enable autostart on
+    its own.  Malformed review-loop records/history entries are skipped
+    with a warning (never raised out of startup); well-formed loop state
+    and entries are still restored, including the failed-launch retry
+    fields.  A record or entry whose scalar fields have the wrong type
+    (e.g. a string `iteration`, a non-bool `input_required`) counts as
+    malformed: adopting it would only fail later inside a review-loop
+    worker, not at startup.
 - Validate restored targets against the loaded project data:
   - unknown PR ids → reject the whole restore (remain OFF, diagnostic).
   - terminal (merged/closed) targets are kept; the existing
@@ -170,10 +189,12 @@ Rules, in order:
   a restored target that completed during downtime is pruned (which logs
   "auto-start OFF"), so it is omitted from the summary, and no summary is
   painted when none remain (that would claim a scope that is gone).
-- `save_breadcrumb` writes `auto_start`, `targets`, `run_id`, and
-  `stop_before_merge`; it never writes `all_mode`. If autostart is enabled
-  with an empty target map (impossible through the public API), skip the
-  autostart fields rather than writing an empty/ambiguous record.
+- `save_breadcrumb` writes `auto_start`, `targets`, and `run_id` (plus
+  review-loop/watcher/session state); it never writes `all_mode` and never
+  writes a `stop_before_merge` field (the policy no longer exists).  If
+  autostart is enabled with an empty target map (impossible through the
+  public API), skip the autostart fields rather than writing an
+  empty/ambiguous record.
 
 ### R5 — Watcher / background-driver scope is fail-closed
 
@@ -206,10 +227,13 @@ Rules, in order:
 ### R6 — Preserve legitimate behaviour
 
 - Explicit multi-target autostart, additive/idempotent add, per-target
-  `stop_before_merge` / `auto_merge` / `wait_for_merge`, dependency
-  closures, shared dependencies, `O`/`A` keys, `pm autostart
-  add/remove/clear/list/status`, model routing and spec gates are
-  untouched.
+  `auto_merge` / `wait_for_merge`, dependency closures, shared
+  dependencies, `O`/`A` keys, `pm autostart add/remove/clear/list/status`,
+  model routing and spec gates are untouched.
+- Master's pr-25f4038 single-manual-policy behaviour is preserved: the
+  removed `stop_before_merge` value/flag is a deprecated alias for
+  `wait_for_merge` (never a target-only hold), and saved stop marks migrate
+  to wait targets.
 - `wait_for_merge` records survive save/restore unchanged, so held PRs
   remain held.
 - Manual review/QA loops and review-loop breadcrumb restore continue to
@@ -242,10 +266,14 @@ Rules, in order:
    `stop_before_merge` (not a list of strings, or an entry that is not a
    valid PR id — e.g. whitespace-padded, which could never match a PR and
    would silently lose its hold) must reject autostart for that restore
-   (no auto-merge without known holds) and produce a diagnostic; a valid
-   list is still restored even when the target parse failed. Id validity
-   is shared with the target parser
-   (`autostart_state.valid_pr_id`).
+   (no auto-merge without known holds) and produce a diagnostic.  A valid
+   set is folded into `wait_for_merge` targets when autostart resumes; when
+   the restore is rejected (or autostart was off) the original bytes stay
+   in the quarantined evidence, and with no scheduler there is no merge
+   path to gate.  Id validity is shared with the target parser
+   (`autostart_state.valid_pr_id`).  Stale *in-memory* status inputs still
+   fold permissively in `build_status` (`_legacy_ids`), which has no error
+   channel and never restores anything.
 5. **Persistence round-trip.** Save→consume of an explicit multi-target
    collection with mixed policies must reproduce exactly the same targets,
    order, and holds.
@@ -277,7 +305,15 @@ Rules, in order:
 - **Legacy target unknown to the project** — reject migration entirely
   (remain OFF, diagnostic), never enable a scope that cannot be resolved.
 - **Malformed stop_before_merge** — reject autostart for that restore but
-  keep review-loop state; do not guess holds.
+  keep review-loop state; do not guess holds.  The original bytes (with the
+  stop set) are quarantined, so the gate is not lost as evidence.
+- **Valid stop_before_merge with autostart resuming** — migrate the marks to
+  `wait_for_merge` targets (master's pr-25f4038 behaviour) so the hold
+  survives the restart; with autostart off there is no scheduler/merge path,
+  so the marks are left in the evidence rather than enabling a scope.
+- **Legacy single `target: X`** — migrate to exactly `X` as a
+  `wait_for_merge` target: the old shape cannot distinguish `O` from `A`, so
+  it fails closed to the manual policy rather than granting auto-merge.
 - **Watcher started with no targets** — it must be observation-only, not a
   general fixer. Implemented via the explicit empty-scope prompt block.
 
@@ -297,7 +333,14 @@ No **[UNRESOLVED]** ambiguities.
 - `auto_start: "true"` (string) → reject (wrong type).
 - `run_id` without `target`/`targets` → reject (targetless legacy).
 - `target: null` + `auto_start: true` → reject.
-- Valid legacy `target: "pr-1"` → migrate exactly `pr-1`; no all-mode.
+- Valid legacy `target: "pr-1"` → migrate exactly `pr-1` (as a
+  `wait_for_merge` target); no all-mode.
+- Bare-string target entry → legacy shape, migrates to `wait_for_merge`
+  (`source="legacy-breadcrumb"`); an empty/whitespace string rejects the set.
+- `stop_before_merge` as a dict/string/set, or a padded/empty id → reject
+  the whole restore with the malformed merge-gate diagnostic.
+- Valid `stop_before_merge` on a restored target set → marks become wait
+  targets; terminal ids are dropped.
 - Valid current-format multi-target with `wait_for_merge` → exact restore;
   held PRs never merge, unrelated PRs never start.
 - `all` via command bar/IPC → error result, no state change, no worker.
@@ -330,9 +373,9 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
    with `None` → unchanged; with targets → managed set.
 7. `build_status` with `all_mode`/`enabled` hints but no targets → `off`;
    `enabled: false` with targets → `off`.
-8. Malformed `stop_before_merge` → autostart OFF but review-loop restore
-   still happens; a valid set is restored even when the target parse was
-   rejected.
+8. Malformed `stop_before_merge` → autostart OFF, review-loop restore still
+   happens, and the original bytes (with the stop set) are quarantined; a
+   valid set is folded into wait targets on a valid restore.
 9. Non-boolean `all_mode`, non-string `run_id`, a null `run_id` with no
    targets (off, no error), `auto_start` with no target key, and a legacy
    `target` without `auto_start` (migrates).
@@ -351,3 +394,42 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
 Updated existing tests: remove `_auto_start_all` fields and all-mode
 assertions; replace targetless fixtures with explicit targets; update
 `targets_from_breadcrumb` call sites; update help-text expectations.
+
+## Integration — origin/master merged 2026-10-29
+
+Integrated master SHA: `4a74d88085edffcc300cb21f31777a798d647782`
+("Merge pull request #276 …"), merged into
+`pm/pr-049649a-remove-all-pr-autostart-and-fail-clo-registered-20261027`.
+
+Master had moved substantially (352 commits, 101 files).  The two
+autostart-touching master changes reconciled here are:
+
+- **pr-25f4038 — `wait_for_merge` is the only manual policy.**  Master
+  removed `stop_before_merge` as a distinct target policy and
+  `app._stop_before_merge` as app state, migrated saved stop marks to wait
+  targets, normalised legacy record fields fail-closed to wait, and forced
+  legacy single/bare targets to wait.  This PR keeps those semantics and
+  layers its fail-closed saved-state parser on top: a saved
+  `stop_before_merge` must be a list of valid ids (anything else rejects
+  the restore), valid marks become wait targets only when targets are
+  restored, and a rejected restore leaves the original bytes quarantined.
+  `build_status` keeps master's permissive `_legacy_ids` folding for stale
+  *in-memory* inputs (it has no error channel and restores nothing).
+- **pr-2c67d50 / pr-db3bf10 — QA-run adoption and review-loop retry
+  fields.**  `consume_breadcrumb` keeps `_adopt_live_qa` +
+  `check_and_start` ordering (restart loops → adopt QA → scheduler pass)
+  and restores the failed-launch retry fields, now with strict type
+  validation so a corrupt record cannot raise on restore.  Master's
+  session-owner check and non-object/corrupt-shape guards are preserved,
+  upgraded to quarantine rejected evidence instead of deleting it.
+
+All-PR/all-mode removal is unchanged by the merge: `all_mode` is still
+rejected by the parser, `managed_ids` still returns a concrete set, and
+the `all` verb/CLI/help/keybinding/label/popup paths stay removed.
+
+Validation: full suite `4580 passed, 1 skipped`, with one unrelated
+timing-flaky `tests/test_push_proxy.py::TestWorkdirKeyedProxies::
+test_restart_after_socket_death_does_not_disturb_other_workdir` (passes in
+isolation; master's push-proxy code, not touched here).  Focused autostart
+suites (parser, multi-target, single-policy, breadcrumb/loop, log-message,
+signoff handoff, owed REQA, launch retry) all pass.
