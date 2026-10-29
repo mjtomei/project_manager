@@ -67,7 +67,7 @@ def test_second_O_keeps_first_pr_advancing(tmp_path):
                return_value=app._data), \
          patch.object(review_loop_ui, "_start_loop"):
         review_loop_ui._auto_review_idle_prs(
-            app, [("pr-a", prs[0]), ("pr-b", prs[1])])
+            app, [("pr-a", prs[0], False), ("pr-b", prs[1], False)])
 
     # The retarget bug: pre-fix, only pr-b (the latest O) was in scope.
     assert [c[-1] for c in cmds] == ["pr-a", "pr-b"]

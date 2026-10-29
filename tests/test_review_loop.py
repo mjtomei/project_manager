@@ -731,6 +731,9 @@ class TestBaseConflictIteration:
         """A state without the recorded count keeps the previous rendering."""
         from pm_core.tui.review_loop_ui import _done_iteration_count
         state = ReviewLoopState(pr_id="pr-001", iteration=3)
+        # Declared on the state (not a dynamic attribute), so a loop that has
+        # not run reports "unknown" as ``None`` rather than raising.
+        assert state.iterations_performed is None
         assert _done_iteration_count(state) == 3
         state.iterations_performed = 0
         assert _done_iteration_count(state) == 0

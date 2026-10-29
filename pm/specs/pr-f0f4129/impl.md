@@ -547,6 +547,11 @@ No unresolved ambiguities.
     reports 0 iterations (`iterations_performed` is 0 even though the
     counter stays 12), while a loop that runs three iterations reports 3; a
     state without the recorded count keeps the counter rendering.
+34. a gate that *loses* the return race (another driver recorded the return
+    between this gate's fetch and its `return_to_impl` write, so
+    `return_to_impl` returns `None`) reports the episode that actually
+    landed — its HEAD/base/conflicts and integration status — rather than
+    the empty pre-check snapshot the gate started from.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

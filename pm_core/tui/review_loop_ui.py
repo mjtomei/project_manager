@@ -523,9 +523,9 @@ def _done_iteration_count(state) -> int:
     overwritten), so the absolute counter also names earlier loops' work.  A
     base-conflict bounce before the first iteration would otherwise report
     "⇤ BASE_CONFLICT (12 iterations)" for a loop that ran none.
-    ``run_review_loop_sync`` records the performed count on the state;
-    hand-built states (tests, a breadcrumb without it) fall back to the
-    counter as before.
+    ``run_review_loop_sync`` records the performed count on the state
+    (``ReviewLoopState.iterations_performed``); a state that never ran keeps
+    the counter rendering, as before (the field defaults to ``None``).
     """
     performed = getattr(state, "iterations_performed", None)
     if performed is None:
@@ -1172,12 +1172,15 @@ def _shared_impl_transcript(app, pr_id: str) -> str | None:
     Best effort: returns ``None`` when no usable link exists.
     """
     from pm_core import base_check
-    from pm_core.paths import pm_home
 
-    root = app._root or pm_home()
+    # Transcripts live under the *project* root (``<root>/transcripts``), not
+    # pm's home: without a root there is nothing to scan, and substituting
+    # ``pm_home()`` would look in a tree that never holds these links.
+    if not app._root:
+        return None
     best: str | None = None
     best_mtime = -1.0
-    for p in base_check.impl_transcript_links(root, pr_id):
+    for p in base_check.impl_transcript_links(app._root, pr_id):
         try:
             # lstat: a refreshed link is rewritten, so its own mtime is
             # the freshness signal (getmtime would follow the shared
@@ -1759,10 +1762,9 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict, bool]]) -> set[
     tdir = _auto_start.get_transcript_dir(app)
     started: set[str] = set()
 
-    for entry in newly_idle:
+    for pr_id, _pr, _resume in newly_idle:
         # Only the PR is needed here: the resume flag on the third element is
         # consumed by the caller's ``_resume_returned_loop`` pass.
-        pr_id = entry[0]
         # Scope to the union of the targets' dependency closures
         if not _auto_start.in_scope(app, pr_id, prs):
             continue

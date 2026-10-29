@@ -687,6 +687,31 @@ def test_concurrent_gates_produce_one_return_and_one_launch(w):
     assert len(pr(w)["base_return"]) > 0
 
 
+def test_losing_gate_reports_the_episode_that_landed(w):
+    """A gate that loses the return race reports the winner's pair.
+
+    ``return_to_impl`` returns ``None`` when another driver recorded the
+    return between this gate's fetch and its write.  The WAIT result must
+    then carry the episode that actually landed (HEAD/base/conflicts) rather
+    than the empty pre-check snapshot this call started from: the caller and
+    the log would otherwise describe a conflict with no pair at all.
+    """
+    real = base_check.return_to_impl
+
+    def _lose(*a, **kw):
+        real(*a, **kw)      # another driver records the return first
+        return None         # ... and this gate is told it lost
+
+    with patch.object(base_check, "return_to_impl", _lose):
+        res = gate(w)
+    assert res.decision == base_check.WAIT
+    assert res.already_returned is True
+    assert res.status == integration.CONFLICT
+    assert res.head == pr(w)["base_return"]["head"]
+    assert res.base_sha == pr(w)["base_return"]["base_sha"]
+    assert res.conflicts == ["shared.txt"]
+
+
 def test_stale_review_launch_is_refused_while_return_open(w):
     with patch("pm_core.base_check.launch_impl", return_value=(True, "")):
         gate(w)
@@ -1292,6 +1317,7 @@ def test_pr_review_iteration_does_not_start_beside_a_return_during_the_gate(w):
          patch("pm_core.base_check.gate", side_effect=_returned_during_gate), \
          patch.object(pr_mod, "_launch_review_window") as window:
         result = runner.invoke(pr_mod.pr, ["review", "--review-iteration", "2", PR])
+    assert result.exit_code == 3, result.output
     window.assert_not_called()
     assert pr(w)["status"] == "in_progress"
     assert base_check.open_return(pr(w)) is not None

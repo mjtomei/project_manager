@@ -842,11 +842,16 @@ def gate(root: Path, pr_id: str, stage: str, *,
         workdir = pr.get("workdir")
         head = head_sha(workdir)
 
-        def _wait(reason: str) -> GateResult:
+        def _wait(reason: str, episode: dict | None = None) -> GateResult:
+            # ``episode`` overrides the pre-check snapshot: a gate that lost
+            # the return race (another driver recorded it inside this gate's
+            # fetch) must report the episode that actually landed, not the
+            # empty snapshot this call started from.
+            ep = open_rec if episode is None else episode
             return GateResult(
-                WAIT, stage, status=(open_rec or {}).get("status"),
-                head=(open_rec or {}).get("head"), base_sha=(open_rec or {}).get("base_sha"),
-                conflicts=list((open_rec or {}).get("conflicts") or []),
+                WAIT, stage, status=(ep or {}).get("status"),
+                head=(ep or {}).get("head"), base_sha=(ep or {}).get("base_sha"),
+                conflicts=list((ep or {}).get("conflicts") or []),
                 already_returned=True, reason=reason)
 
         if stage == STAGE_QA:
@@ -928,8 +933,10 @@ def gate(root: Path, pr_id: str, stage: str, *,
                     now_pr = store.get_pr(store.load(root), pr_id)
                 except Exception:  # pragma: no cover - best effort
                     now_pr = None
-                if open_return(now_pr) is not None:
-                    return _wait("base integration return already recorded")
+                landed = open_return(now_pr)
+                if landed is not None:
+                    return _wait("base integration return already recorded",
+                                 landed)
                 return _wait("the PR left the review/QA phase before the "
                              "return was recorded")
             launched = False

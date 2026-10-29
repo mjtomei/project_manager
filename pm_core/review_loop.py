@@ -154,6 +154,13 @@ class ReviewLoopState:
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
+    # Iterations *this run* performed, set by ``run_review_loop_sync`` from the
+    # history delta.  ``iteration`` is seeded from the PR's existing iteration
+    # transcripts (``next_review_iteration``, so evidence is never overwritten),
+    # so the counter also names earlier loops' work and cannot be rendered as
+    # "this loop did N reviews".  ``None`` means the loop never ran (a
+    # hand-built state), where the counter is the best available answer.
+    iterations_performed: int | None = None
     # A restored (breadcrumb) loop may have an iteration in flight: adopt its
     # live pane instead of relaunching.  A *fresh* loop that starts after the
     # PR's existing iteration transcripts must not adopt (there is nothing in
