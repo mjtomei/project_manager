@@ -28,7 +28,11 @@ This PR adds one shared, bounded recovery to all of them:
 * a run the *user* stops during recovery is not a missing outcome: it ends in
   a terminal `STOPPED` state (no `INPUT_REQUIRED`, no `NO_VERDICT`, no QA
   note, no `[finalize: NO_VERDICT]`), and auto-start holds a stopped QA run
-  instead of relaunching it.
+  instead of relaunching it. The stop is persisted at stop time, so a run
+  stopped while the blocking finalize pane is polling survives a TUI restart
+  as `STOPPED` — never as the pre-finalize `PASS` that was already on disk —
+  and the recovered verdict is mirrored into shared runtime state so the
+  scheduler does not relaunch it.
 
 Three new settings control it (`verdict-recovery-max-attempts`,
 `verdict-recovery-settle-seconds`, `verdict-recovery-response-timeout`);
@@ -43,7 +47,11 @@ transcript before retiring a worker; routes the verifier's machine-driven
 *re-check* through the same bounded poller; records the QA verdict in shared
 runtime state so auto-start can hold `STOPPED`; mirrors the CLI/auto-sequence
 detached QA driver (`pm pr qa-run-bg`) into that runtime state so the picker
-and auto-start see its progress and verdict; keeps scheduler-driven QA starts
+and auto-start see its progress and verdict; keeps the TUI's shared 1 s poll
+timer armed while any PR sits in an active status or a tracked run is running,
+held, or awaiting verdict cleanup, so a run the TUI does not own (a CLI
+`pm qa run`, the detached driver) is still adopted and mirrored while the TUI
+holds or has just finished a run of its own; keeps scheduler-driven QA starts
 from stealing an attached client's focus while user starts still focus the QA
 window; prefers a *running* watcher in the manager's type lookup so the
 watcher toggle cannot start a second instance over the live one; escapes the
@@ -179,9 +187,16 @@ Given a default install, When the user lists settings, Then the three
 3600 s response timeout); When the user sets a sub-second settle
 (`0.5`) it is accepted, When the user sets a non-numeric or non-finite value
 (`abc`, `inf`) it is rejected with a clear message and the stored value is
-unchanged; When the user sets `verdict-recovery-max-attempts 0` and runs a
-verdictless review loop, Then the loop keeps waiting (no `NO_VERDICT`
-surfaced) until the user stops it, i.e. recovery is off.
+unchanged; When the user sets `verdict-recovery-max-attempts 0`, Then no
+recovery request is typed into any session and no `NO_VERDICT` is surfaced —
+recovery is off. On the QA surface the user can then stop the run with the
+QA-loop toggle and it ends promptly (`STOPPED`). A verdictless *review* loop
+has no stop-only key (`zz d` kills the window and starts a fresh review; a
+plain stop request is graceful and the verdict poller does not observe it),
+so the user ends the unbounded wait by interrupting the session in its review
+pane (Ctrl+C) or restarting the TUI, which the loop reports as `KILLED`, not
+`NO_VERDICT`. A lowered non-zero budget (`1`, `2`) is honoured exactly: that
+many recovery requests, then a bounded `NO_VERDICT`.
 
 **R8 — Non-TUI surfaces report `NO_VERDICT` as a failure.**
 Given a watcher loop whose session never emits its watcher verdict, When the
@@ -204,15 +219,21 @@ and the tree shows one failed and one completed.
 **R10 — A user-stopped QA run is a clean teardown, not a failure, and
 auto-start holds it.**
 Given a QA run stopped while it is inside a recovery episode (planning,
-scenario workers in flight, or the finalizer), When the run stops, Then it
-ends promptly with a terminal `STOPPED`-style teardown: no scenario/worker is
-retired as `INPUT_REQUIRED`, no `[finalize: NO_VERDICT]` is reported, no QA
-note or `INPUT_REQUIRED` lifecycle transition is recorded, and the run can be
-started again. Given auto-start enabled and such a run stopped during
-planning, When later scheduler passes run (and the TUI is restarted), Then
-QA is **not** relaunched, the PR stays in `qa`, and `pm autostart status`
-reports the phase as waiting with a reason saying the last QA run was
-stopped and how to re-run it (not as failed).
+scenario refinement/concretization, the hand-off between a parsed plan and
+the first worker launch, scenario workers in flight, verification, or the
+finalizer), When the run stops, Then it ends promptly with a terminal
+`STOPPED`-style teardown: no scenario/worker is retired as `INPUT_REQUIRED`
+(including the "worker window never created (launch failed)" retirement of
+scenarios that never got a pane), no `[finalize: NO_VERDICT]` is reported, no
+queued worker is launched after the stop, no QA note or `INPUT_REQUIRED`
+lifecycle transition is recorded, and the run can be started again. Given
+auto-start enabled and such a run stopped during planning or while the
+finalizer was polling, When later scheduler passes run (and the TUI is
+restarted), Then QA is **not** relaunched, the PR stays in `qa`, the resumed
+run is reported `STOPPED` (a finalize-phase stop must not resurface as the
+pre-stop `PASS`), and `pm autostart status` reports the phase as waiting with
+a reason saying the last QA run was stopped and how to re-run it (not as
+failed). An explicit fresh start (`z t`) still overrides the hold.
 
 **R11 — A malformed plan is not "no plan": the rejection is named.**
 Given a planner that emits a `QA_PLAN` block the validator refuses (e.g.
@@ -297,6 +318,34 @@ live verdict/verifying state, and the ones still waiting on the cap as
 as slots free the queued rows dequeue in order and show their own verdicts
 and reasons.
 
+**R19 — Running a single QA instruction directly (no planning) works and is
+bounded.**
+Given a project with a committed QA instruction file and a seeded QA spec,
+When the user runs that instruction against a PR directly (`pm qa run
+<instruction> --pr <pr>`), Then the run skips planning (no planner pane, no
+"Planning QA scenarios" step), concretizes and launches its pre-loaded
+scenario in the worker window, and a healthy run completes and prints its
+verdict; a worker that never emits a verdict ends the run in bounded time as
+`INPUT_REQUIRED` with the per-scenario "worker produced no verdict" reason —
+never a crash (no `UnboundLocalError`/traceback) and never a hang. The run's
+status dashboard is the same one the TUI renders, and the PR's lifecycle is
+the same as a TUI-started run.
+
+**R20 — The TUI keeps reporting a QA run it does not own, including while it
+holds one of its own.**
+Given a TUI holding its own QA run on one PR (finalized `INPUT_REQUIRED`,
+waiting for a human follow-up in a worker pane), or having just finished or
+stopped one, When another process's QA run for a different PR finishes
+(`pm qa run`, or the detached auto-sequence driver), Then the finished run is
+adopted within a few seconds — the TUI log announces its verdict,
+`~/.pm/runtime/<pr>.json` records the `qa` action as done with that verdict,
+the QA note is written, and the picker shows the action as done with the
+verdict — while the held run keeps its own dashboard row and verdict, is not
+stopped, torn down or relaunched, and neither PR appears in the other's
+outcome or note. When the user asks to view the held PR, Then the TUI says the
+run is waiting for input (or focuses its existing QA window) instead of
+starting a duplicate run.
+
 ## Edge cases
 
 * **Idle inside the grace window.** A verdict that arrives before the review
@@ -340,8 +389,11 @@ and reasons.
   the session's pane as a single submitted line, the original prompt is not
   replayed, and no partial text is left in the input box afterwards.
 * **A user stop during an episode** is a clean `STOPPED` teardown in every
-  phase (planner, workers, finalizer), never `INPUT_REQUIRED`/`NO_VERDICT`,
-  and auto-start must not relaunch the stopped run.
+  phase (planner, refiner/concretizer, the parsed-plan-to-first-worker
+  hand-off, workers, verification, finalizer), never
+  `INPUT_REQUIRED`/`NO_VERDICT`, and auto-start must not relaunch the stopped
+  run. A stop that lands while the blocking finalize pane polls must survive
+  a TUI restart as `STOPPED`, not the pre-stop `PASS` already on disk.
 * **A malformed plan block** (validator rejection) is distinct from "emitted
   nothing": the nudge and the exhaustion error name the rejection.
 * **Killing a session's pane mid-episode** ends the review/watcher loop on
@@ -367,6 +419,13 @@ and reasons.
   already be in its next turn.
 * A recovery nudge can land in a permission hold that begins during an open
   episode (queued input).
+* A review/watcher stop request is *graceful*: the verdict poller does not
+  observe `stop_requested` (`_lease_keepalive` is passed as the review
+  poller's `stop_check` and always returns `False`), so a stop takes effect
+  at the next iteration boundary, not mid-poll. That is pre-existing
+  behaviour, and it is why `verdict-recovery-max-attempts 0` (the documented
+  unbounded escape hatch) is ended by interrupting the session in its pane or
+  restarting the TUI — reported as `KILLED`, never `NO_VERDICT`.
 * Auto-start's target set is per-TUI-session: the breadcrumb that restores it
   is only written on a merge-restart, so a plain TUI restart starts with
   auto-start off. A scenario that needs the scheduler to run after a restart
@@ -456,16 +515,25 @@ concurrent run is disturbed.
     non-finite value written straight into that file is *listed* but ignored
     by the loop (default used), so "the loop is still bounded" is the
     observable, not a changed listing. `verdict-recovery-max-attempts` bounds
-    nudges, and with the fake the first nudge kills the pane, so an exact
-    "N nudges then exhaustion" count is not observable — assert the
-    *observable* budget effects: a sub-second settle produces a nudge where
-    the default produces none, and `0` restores the unbounded wait.
+    nudges. With the fake's default shape (it exits as soon as input arrives)
+    the first nudge kills the pane, so a count is not observable; but a
+    per-type entry carrying `"hold": <seconds>` makes the fake ignore input
+    and stay alive, and the whole budget then *is* visible — `recovery request
+    1/3`, `2/3`, `3/3`, then exhaustion (QA S10). Scenarios may therefore
+    assert both the *observable* budget effects (a sub-second settle produces
+    a nudge where the default produces none; a lowered budget stops earlier;
+    `0` restores the unbounded wait) and the exact request count when they
+    configure `hold`.
 15. **Auto-start state and restarts.** Auto-start targets/mode ride a
     breadcrumb written only on a merge-restart; a plain TUI restart starts
     with auto-start off. To observe the `STOPPED` hold across a restart,
     re-enable auto-start for the PR after restarting — the hold is read from
-    runtime state on disk, so it must still apply. (See the Residuals note on
-    a `NO_VERDICT` review loop being retried once its in-memory entry is
+    runtime state on disk, so it must still apply. A stop that lands during
+    the finalize poll is persisted at stop time, so the restart must recover
+    the run as `STOPPED` and log the conversion from the pre-finalize `PASS`
+    on disk; the recovered verdict is mirrored into runtime state, which is
+    what makes the scheduler hold it. (See the Residuals note on a
+    `NO_VERDICT` review loop being retried once its in-memory entry is
     gone.)
 16. **`STOPPED` is a deliberate no-result, not a missing one.** The dashboard
     renders `Overall: STOPPED` dim, like `queued`/`interactive`, because a
