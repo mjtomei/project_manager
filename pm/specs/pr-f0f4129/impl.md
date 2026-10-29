@@ -149,7 +149,13 @@ already drops it because the status is no longer `qa`.
   `base_check` (hand-edited yaml) reads as "no record" rather than raising:
   an exception on that path makes the gate fail open (no return is ever
   recorded) and the completion check report "failed" on every poll, leaving
-  the PR with an open return nobody can resolve.
+  the PR with an open return nobody can resolve. The backoff exponent is
+  clamped before `2 ** n`: `attempts` is also read from the git-tracked
+  yaml, so a hand-edited `attempts: 10000000` would otherwise raise
+  `OverflowError` (`30 * 2 ** n` is an int too large to multiply into a
+  float) inside the recorder's locked update and the probe failure would
+  never be persisted — `_retry_open` would keep reading the stale record and
+  the backoff would never advance.
 - **R6 — Genuine implementation completion.** `impl_completion(root, pr_id,
   pr, *, idle_since)` returns `(complete, reason, resume_loop)` only when all
   hold: the return's `awaiting` is cleared (the fresh session launched); the
@@ -246,7 +252,14 @@ already drops it because the status is no longer `qa`.
   files. `_start_loop` continues iteration numbering from the existing
   `review-<pr>-i<N>.jsonl` files (and carries over an in-memory completed
   state's history) so a resumed loop adds iteration N+1 instead of
-  overwriting `-i1`. Because a loop can now begin at an arbitrary iteration
+  overwriting `-i1`. A fresh loop seeds the counter from
+  `next_review_iteration`, so it sets `ReviewLoopState.adopt_in_flight=False`:
+  the default "adopt the in-flight iteration" heuristic (`iteration >
+  last_done`) would otherwise treat the seeded number as an in-flight run and
+  let `_adopt_in_flight_review` adopt an older live pane's verdict for an
+  iteration this loop never launched. A restored (breadcrumb) loop keeps the
+  default so it still adopts its genuinely in-flight iteration. Because a
+  loop can now begin at an arbitrary iteration
   number, `run_review_loop_sync`'s `max_iterations` safety cap counts the
   iterations *that run* performs (`state.iteration - start_iteration`), not
   the absolute number: an absolute bound would silently run zero iterations
@@ -552,6 +565,15 @@ No unresolved ambiguities.
     `return_to_impl` returns `None`) reports the episode that actually
     landed — its HEAD/base/conflicts and integration status — rather than
     the empty pre-check snapshot the gate started from.
+35. a corrupt `base_check["attempts"]` (a hand-edited `10000000`) still
+    records a probe failure: `_retry_after` clamps the exponent instead of
+    raising `OverflowError` (`30 * 2 ** n` too large for a float), which
+    would escape the recorder's locked update and silently lose the retry
+    metadata.
+36. a fresh review loop seeded from the PR's existing iteration transcripts
+    sets `adopt_in_flight=False`, so it does not try to adopt an in-flight
+    iteration it never launched (a resumed breadcrumb loop keeps the
+    default and still adopts its genuinely in-flight one).
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

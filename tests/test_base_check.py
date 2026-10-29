@@ -790,6 +790,30 @@ def test_malformed_attempt_still_records_the_return(w):
     assert pr(w)["base_return"]["attempt"] == 1
 
 
+def test_huge_attempts_value_still_records_a_probe_failure(w):
+    """A corrupt ``attempts`` must not overflow the backoff computation.
+
+    ``_retry_after`` exponentiates the stored counter.  A hand-edited
+    ``attempts: 10000000`` makes ``30 * 2 ** n`` too large for a float
+    (``OverflowError``), which escapes the recorder's locked update — so the
+    probe failure is never persisted, ``_retry_open`` keeps reading the stale
+    record, and the retry metadata the gate and completion check depend on is
+    silently lost.
+    """
+    def _apply(d):
+        d["project"]["repo"] = str(w.repo / "does-not-exist")
+        store.get_pr(d, PR)["base_check"] = {
+            "retryable": True, "head": w.head, "attempts": 10 ** 7,
+        }
+    store.locked_update(w.pm_dir, _apply)
+    res = gate(w)
+    assert res.decision == base_check.RETRY, res.reason
+    rec = pr(w)["base_check"]
+    assert rec["retryable"] is True
+    # Clamped (saturating) rather than the raw 30 * 2 ** (10**7 - 1).
+    assert rec.get("retry_after")
+
+
 # --- prompt block ----------------------------------------------------------
 
 def test_format_return_only_while_open(w):

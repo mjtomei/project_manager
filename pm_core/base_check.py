@@ -755,7 +755,15 @@ def _retry_after(record: dict, pr: dict) -> str:
             prev_attempts = max(1, int(prev.get("attempts") or 1) + 1)
         except (TypeError, ValueError):
             prev_attempts = 2
-    delay = min(RETRY_MAX_SECONDS, RETRY_MIN_SECONDS * (2 ** (prev_attempts - 1)))
+    # ``attempts`` is read from the git-tracked project.yaml, so a hand-edited
+    # value (10**7) makes ``2 ** n`` an int too large to multiply into a float
+    # (OverflowError — the failure is then never recorded, so ``_retry_open``
+    # keeps reading the stale record and the backoff never advances) and a
+    # much larger one allocates for a long time before that.  The delay
+    # saturates at RETRY_MAX_SECONDS by attempt 5, so clamp the exponent
+    # before the shift rather than exponentiating an unbounded counter.
+    exp = max(0, min(prev_attempts - 1, 8))
+    delay = min(RETRY_MAX_SECONDS, RETRY_MIN_SECONDS * (2 ** exp))
     return datetime.fromtimestamp(time.time() + delay, timezone.utc).isoformat()
 
 
