@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-28T23:41:33.810431+00:00'
+  updated_at: '2026-10-29T00:40:46.909366+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4497,6 +4497,29 @@ prs:
       duplicated in wrapper._mark_tmux_socket and qa_status._tmux_argv by design.'
     created_at: '2026-10-28T23:41:33Z'
     last_edited: '2026-10-28T23:41:33Z'
+  - id: note-e481fb3
+    text: 'Review loop b972 i5 (no requirement changes; full suite 4141 passed / 1
+      skipped). (1) detach_current_client() returned True even when tmux rejected
+      detach-client (both the precise -t <tty> branch and the -s <session> fallback);
+      quit_app() uses that value for its logging, so a failed detach was reported
+      as success. Both branches now check the exit status, log a warning on failure
+      and return False. (2) The session-level detach fallback had no unit test; added
+      test_falls_back_to_session_detach (client on a grouped session viewing a different
+      window) and test_failed_detach_is_not_reported_as_success. (3) list_pm_sessions()
+      now debug-logs skipped servers (stale socket, another user''s socket, non-socket/unreadable
+      entries), matching the documented edge case. Residual notes unchanged and non-blocking:
+      the uid ownership check exists only on pm session start (other paths fail closed
+      via 0600 sockets + server-access ACL); the /tmp/pm-sessions literal stays duplicated
+      in wrapper._mark_tmux_socket and qa_status._tmux_argv by design; pane IDs are
+      no longer globally unique across servers but every consumer resolves a pane
+      together with its session/socket; R5b relies on the pane registry file, so deleting
+      ~/.pm/pane-registry/<session>.json while a session is live makes `pm session`
+      create a separate session rather than adopt the live one (fail-safe, no damage
+      to the live session); `pm session --print-connect` still prints a plain `tmux
+      attach -t <name>` for legacy sessions (correct from a plain shell and from inside
+      that same legacy session, wrong only if pasted into a different pm pane).'
+    created_at: '2026-10-29T00:40:46Z'
+    last_edited: '2026-10-29T00:40:46Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

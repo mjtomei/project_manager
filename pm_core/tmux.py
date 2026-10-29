@@ -1059,11 +1059,19 @@ def detach_current_client(socket_path: str | None = None) -> bool:
 
     if candidates:
         tty = max(candidates)[2]
-        _run(_tmux_cmd("detach-client", "-t", tty,
-                       socket_path=socket_path))
-        _log.info("detach_current_client: detached %s (session %s, window %s)",
-                  tty, session, pane_win)
-        return True
+        detached = _run(_tmux_cmd("detach-client", "-t", tty,
+                                  socket_path=socket_path), text=True)
+        if detached.returncode == 0:
+            _log.info(
+                "detach_current_client: detached %s (session %s, window %s)",
+                tty, session, pane_win)
+            return True
+        # Report failure rather than claiming a detach that did not happen;
+        # the caller only uses the result for logging and to decide whether
+        # to keep the TUI running unattached.
+        _log.warning("detach_current_client: detach of %s failed: %s",
+                     tty, detached.stderr)
+        return False
 
     # No client currently views the TUI's window (e.g. a stale window id).
     # Detach the client attached to the group's session instead of using
@@ -1075,10 +1083,13 @@ def detach_current_client(socket_path: str | None = None) -> bool:
             text=True,
         )
         if att.returncode == 0 and att.stdout.strip() not in ("", "0"):
-            _run(_tmux_cmd("detach-client", "-s", name,
-                           socket_path=socket_path))
-            _log.info("detach_current_client: detached client of %s", name)
-            return True
+            detached = _run(_tmux_cmd("detach-client", "-s", name,
+                                      socket_path=socket_path), text=True)
+            if detached.returncode == 0:
+                _log.info("detach_current_client: detached client of %s", name)
+                return True
+            _log.warning("detach_current_client: detach of %s failed: %s",
+                         name, detached.stderr)
 
     _log.info("detach_current_client: no attached client for %s", session)
     return False
@@ -1123,6 +1134,10 @@ def list_pm_sessions() -> list[dict]:
             text=True,
         )
         if result.returncode != 0:
+            # Stale socket (server exited), another user's socket, or no
+            # default server running: not fatal, just nothing to report.
+            _log.debug("list_pm_sessions: skipping %s: %s",
+                       cmd_socket, result.stderr.strip())
             return
         groups: dict[str, int] = {}
         for line in result.stdout.splitlines():
@@ -1148,8 +1163,10 @@ def list_pm_sessions() -> list[dict]:
     for sock in sockets:
         try:
             if not sock.is_socket():
+                _log.debug("list_pm_sessions: skipping non-socket %s", sock)
                 continue
         except OSError:
+            _log.debug("list_pm_sessions: skipping unreadable %s", sock)
             continue
         collect(str(sock))
 

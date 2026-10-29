@@ -435,3 +435,26 @@ requirement changes.
    still said "for shared sessions".
 
 Full suite: 4139 passed / 1 skipped.
+
+## Review iteration (2026-10-28, review-loop b972 i5)
+
+Robustness and truthfulness of the detach result; no requirement changes.
+
+1. **`detach_current_client()` claimed a detach that did not happen.**  Both
+   the precise (`detach-client -t <tty>`) and the session-level fallback
+   (`detach-client -s <session>`) branches discarded the command's exit
+   status and returned `True` unconditionally.  `quit_app()` uses the return
+   value to decide what to log, so a failed detach was reported as success.
+   Both branches now return `False` and log a warning when tmux rejects the
+   command (the common real cause is the client disappearing between
+   `list-clients` and `detach-client`).
+2. **The session-level detach fallback had no unit test.**  Added
+   `test_falls_back_to_session_detach` (client attached to a grouped session
+   viewing a *different* window, so the per-window match finds nothing) and
+   `test_failed_detach_is_not_reported_as_success`.
+3. **`list_pm_sessions()` now debug-logs skipped servers**, matching the
+   documented edge case ("row is skipped with a debug log"): stale sockets
+   (server exited), sockets owned by another user, non-socket entries and
+   unreadable entries in the shared socket directory.
+
+Full suite: 4141 passed / 1 skipped.
