@@ -19,7 +19,12 @@ entry, the remote branch, and the local workdir.
   sign-off/merge-evidence fields — is left untouched.
 - `_record_status_timestamp` is extended with a `closed` branch that sets
   `closed_at` (mirrors `merged_at`). `updated_at` is always set. No other
-  timestamp is touched.
+  timestamp is touched. The helper also *owns the field's history*: an
+  explicit transition to any other status drops `closed_at`, and a transition
+  into `closed` only stamps it when the caller's `previous_status` is not
+  already `closed` (review b320 i1) — so the field can never name a status
+  the PR is not in, and a repeat close/restatement never rewrites the closure
+  time.
 
 ### R2 — Close the GitHub PR; never delete a branch
 
@@ -293,10 +298,20 @@ workdirs are touched.
     before the change).
 31. Reopen clears the closure time (review c02f i13): `pm pr edit <id>
     --status pending` — the deliberate reopen path every guard message names —
-    drops `closed_at` in both the pre-lock preview and the locked `apply`, so
-    the field never describes a status the PR is not in and a later close
-    records a fresh closure time.  Covered by
-    `test_reopening_a_closed_pr_drops_the_closure_time`.
+    drops `closed_at`, so the field never describes a status the PR is not in
+    and a later close records a fresh closure time.  Covered by
+    `test_reopening_a_closed_pr_drops_the_closure_time`.  Enforced in
+    `_record_status_timestamp` (review b320 i1), so *every* explicit status
+    transition maintains the invariant rather than the two `pm pr edit` flag
+    sites alone: the `$EDITOR` path (`_apply_pr_edit`) and the
+    merge-discovered-on-GitHub sync paths (`pr_sync` snapshot + apply,
+    TUI startup sync) drop a stale `closed_at` too, and re-stating `closed`
+    on an already-closed record keeps the original closure time instead of
+    stamping "now" (the A6 rule, now shared).  Covered by
+    `test_editor_reopen_drops_the_closure_time`,
+    `test_restating_closed_keeps_the_closure_time` and
+    `test_merge_discovered_after_close_drops_the_closure_time` (all three
+    fail on the previous head).
 32. Closing a never-started PR (review c02f i13): a `pending` PR with no
     workdir closes normally (status `closed`, `closed_at` set, `active_pr`
     becomes `None`), since the lifecycle action is about the record rather
@@ -421,9 +436,11 @@ be rewritten to assert retention.
   deletion triggered merely by closing") covers live resources as well as
   files, so `closed` must not authorize reclamation: #217 should limit the
   sweep to `merged` and leave a closed PR's windows to the explicit
-  `pm pr cleanup --resources`. A cross-PR note stating this was left on
-  pr-3d1fa55 (review c02f i13); if #217's owner believes closed windows should
-  be swept, that needs the user's explicit approval as an exception.
+  `pm pr cleanup --resources`. Two cross-PR notes state this on pr-3d1fa55
+  (`note-fd141d0`, review c02f i10; `note-c48dda1`, review c02f i13 — the i13
+  iteration summary mis-cited its id as `note-4fd0759`, review b320 i1); if
+  #217's owner believes closed windows should be swept, that needs the user's
+  explicit approval as an exception.
 - **A5 — Close on a `merged` PR?** Resolved: refuse (exit 1) without
   `--remove`, because rewriting `merged` → `closed` erases merge history and
   merge-integrity evidence. With `--remove`, delete the registry record only
@@ -479,7 +496,10 @@ No **[UNRESOLVED]** ambiguities.
   `pr_signoff` (review 8820 i1).
 - `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
   premise of its ruleset item obsolete (review c02f i13).
-- `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
+- `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`, plus the
+  `previous_status` parameter that makes the helper the single owner of the
+  field's history (drop on leaving `closed`, keep on restating it; review
+  b320 i1).
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
 - `pm_core/autostart_state.py`, `pm_core/cli/session.py`, `pm_core/qa_loop.py`,

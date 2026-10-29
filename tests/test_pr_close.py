@@ -653,6 +653,74 @@ def test_reopening_a_closed_pr_drops_the_closure_time(tmp_path):
     assert entry["closed_at"] != "2026-09-01T00:00:00+00:00"
 
 
+def test_editor_reopen_drops_the_closure_time(tmp_path):
+    """`pm pr edit <id>` with no flags edits through $EDITOR, a second code
+    path (`_apply_pr_edit`): reopening there must drop `closed_at` too, so the
+    field never names a status the PR is not in."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    data = store.load(project["pm_dir"])
+    store.get_pr(data, "pr-001")["closed_at"] = "2026-09-01T00:00:00+00:00"
+    store.save(data, project["pm_dir"])
+
+    changes = pr_mod._apply_pr_edit(project["pm_dir"], "pr-001", {
+        "title": None, "status": "pending", "depends_on_str": None,
+        "note_texts": [n["text"] for n in data["prs"][0]["notes"]],
+        "description": data["prs"][0]["description"],
+    })
+
+    assert changes == ["status: closed → pending"], changes
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "pending"
+    assert "closed_at" not in entry
+
+
+def test_restating_closed_keeps_the_closure_time(tmp_path):
+    """`pm pr edit --status closed` on an already-closed record is not a fresh
+    closure: it must not rewrite the closure history (same rule as repeat
+    close, A6)."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    data = store.load(project["pm_dir"])
+    store.get_pr(data, "pr-001")["closed_at"] = "2026-09-01T00:00:00+00:00"
+    store.save(data, project["pm_dir"])
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["edit", "pr-001",
+                                           "--status", "closed"])
+
+    assert result.exit_code == 0, result.output
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "closed"
+    assert entry["closed_at"] == "2026-09-01T00:00:00+00:00"
+
+
+def test_merge_discovered_after_close_drops_the_closure_time(tmp_path):
+    """A closed record that GitHub reports as merged finalizes as `merged`;
+    the stale `closed_at` must not survive to name a status the PR left."""
+    project = _make_project(tmp_path, status="in_progress",
+                            with_dependent=False)
+    with _fake_gh() as backend:
+        pr = backend.add_pr(head="pm/pr-001", state="MERGED")
+        data = store.load(project["pm_dir"])
+        data["prs"][0]["gh_pr_number"] = pr.number
+        store.save(data, project["pm_dir"])
+        stale = store.load(project["pm_dir"])
+
+        def _mark_closed(d):
+            entry = store.get_pr(d, "pr-001")
+            entry["status"] = "closed"
+            entry["closed_at"] = "2026-09-01T00:00:00+00:00"
+        store.locked_update(project["pm_dir"], _mark_closed)
+
+        pr_sync.sync_from_github(project["pm_dir"], data=stale)
+
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "merged"
+    assert "closed_at" not in entry
+
+
 def test_close_does_not_overwrite_a_concurrent_merge(tmp_path):
     """A merge landing between load and the store lock must not become closed."""
     project = _make_project(tmp_path)

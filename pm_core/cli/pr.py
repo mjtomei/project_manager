@@ -175,7 +175,10 @@ def _apply_pr_edit(root: Path, pr_id: str, parsed: dict) -> list[str]:
             if parsed["status"] != current_status and parsed["status"] in valid_statuses:
                 pr_entry["status"] = parsed["status"]
                 changes.append(f"status: {current_status} → {parsed['status']}")
-                _record_status_timestamp(pr_entry, parsed["status"])
+                # The editor is the other `pm pr edit` path: reopening here
+                # drops the closure time too (pr-62ad13d).
+                _record_status_timestamp(pr_entry, parsed["status"],
+                                         previous_status=current_status)
 
         # Dependencies (skip unknown IDs silently)
         if parsed["depends_on_str"] is not None:
@@ -344,13 +347,10 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
     if status is not None:
         old_status = pr_entry.get("status", "pending")
         pr_entry["status"] = status
-        if status != "closed":
-            # ``closed_at`` describes a closure (pr-62ad13d); a deliberate
-            # reopen drops it so the field never names a status the PR is not
-            # in, and a later close records a fresh closure time.
-            pr_entry.pop("closed_at", None)
         changes.append(f"status: {old_status} → {status}")
-        _record_status_timestamp(pr_entry, status)
+        # ``closed_at`` describes a closure (pr-62ad13d): the helper drops it
+        # on a reopen and keeps it when the status merely restates `closed`.
+        _record_status_timestamp(pr_entry, status, previous_status=old_status)
     if depends_on is not None:
         if depends_on == "":
             pr_entry["depends_on"] = []
@@ -451,12 +451,11 @@ def pr_edit(pr_id: str, title: str | None, depends_on: str | None, desc: str | N
         if desc is not None:
             pr["description"] = desc
         if status is not None:
+            # Mirrors the pre-lock preview above: reopening drops the closure
+            # time, restating `closed` keeps it (pr-62ad13d).
+            prior_status = pr.get("status") or "pending"
             pr["status"] = status
-            if status != "closed":
-                # Mirrors the pre-lock preview above: reopening drops the
-                # closure time (pr-62ad13d).
-                pr.pop("closed_at", None)
-            _record_status_timestamp(pr, status)
+            _record_status_timestamp(pr, status, previous_status=prior_status)
         if depends_on is not None:
             if depends_on == "":
                 pr["depends_on"] = []
@@ -3515,7 +3514,8 @@ def _retained_resources(pr_entry: dict) -> list[str]:
 @click.option("--remove", is_flag=True, default=False,
               help="Delete the registry entry instead of recording the "
                    "closure. Registry-only: the branch and workdir are kept, "
-                   "and the GitHub PR is still closed unless --keep-github")
+                   "and the GitHub PR is still closed unless --keep-github "
+                   "(a PR recorded as merged is left alone)")
 def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
              remove: bool):
     """Close a PR without destroying its history.
@@ -3614,19 +3614,14 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
                 # record into `closed`.
                 merged_concurrently = True
                 return
-            was_closed = (pr.get("status") or "pending") == "closed"
-            prior_closed_at = pr.get("closed_at") if was_closed else None
+            # Repeat close is idempotent: updated_at still moves, but the
+            # original closure time is history and is not rewritten.  An entry
+            # closed before closed_at existed keeps none — stamping "now"
+            # would invent a closure time that never happened.  The helper
+            # owns that rule (it sees the previous status).
+            prior_status = pr.get("status") or "pending"
             pr["status"] = "closed"
-            _record_status_timestamp(pr, "closed")
-            if was_closed:
-                # Repeat close is idempotent: updated_at still moves, but the
-                # original closure time is history and is not rewritten.  An
-                # entry closed before closed_at existed keeps none — stamping
-                # "now" would invent a closure time that never happened.
-                if prior_closed_at:
-                    pr["closed_at"] = prior_closed_at
-                else:
-                    pr.pop("closed_at", None)
+            _record_status_timestamp(pr, "closed", previous_status=prior_status)
         if data.get("project", {}).get("active_pr") == pr_id:
             remaining = [
                 p for p in usable_prs(data.get("prs"))

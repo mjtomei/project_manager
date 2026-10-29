@@ -446,7 +446,8 @@ def _make_pr_entry(
     }
 
 
-def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
+def _record_status_timestamp(pr_entry: dict, status: str | None = None,
+                             previous_status: str | None = None) -> None:
     """Record timestamps on *pr_entry*.
 
     Always sets ``updated_at``.  When *status* is provided, also sets
@@ -458,9 +459,18 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
     * ``merged_at`` — set when the PR is ``merged``.
     * ``closed_at`` — set when the PR is ``closed`` (a retained historical
       record, not a deletion).
+
+    ``closed_at`` is maintained as history, not as a cache of the current
+    status: any transition to another status drops it, and only a *fresh*
+    closure records one — pass *previous_status* so a repeat close (or an
+    edit that re-states ``closed``) keeps the original closure time, and so
+    an entry closed before the field existed keeps none instead of inventing
+    one.
     """
     now = datetime.now(timezone.utc).isoformat()
     pr_entry["updated_at"] = now
+    if status is not None and status != "closed":
+        pr_entry.pop("closed_at", None)
     if status == "in_progress" and not pr_entry.get("started_at"):
         pr_entry["started_at"] = now
     elif status == "in_review":
@@ -469,7 +479,7 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None) -> None:
         pr_entry["signed_off_at"] = now
     elif status == "merged":
         pr_entry["merged_at"] = now
-    elif status == "closed":
+    elif status == "closed" and previous_status != "closed":
         pr_entry["closed_at"] = now
 
 
