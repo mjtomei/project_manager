@@ -1299,6 +1299,59 @@ S13, S14, S22, S101.
   write before a queued launch never leaves a running scenario shown as
   `queued` once its verdict, verification or slot change is written.
 
+### Forty-fifth-pass fixes (2026-10-29; QA46 planner)
+- **RQ57** A QA run that a `pm tui restart` cuts off (S131 245eb22f;
+  review 6e6b 51a709f3, 74cebe25). `pm tui restart` execs the TUI in
+  place, so the pid stays the same. Given a QA run that this TUI started
+  and the restart killed before the run's first resume snapshot
+  (planning or refining, about the first 20 s), When the new TUI mounts,
+  Then:
+  - The run's record is ended. No tick or TUI reads the run as "driven
+    elsewhere" any more. The dead run's `qa-*` scenario windows are
+    killed. Its main `qa-<pr>` window may survive, and `t` only focuses
+    it.
+  - If the run was the re-run a sign-off REQA owed, the obligation is
+    reopened (`awaiting: qa`) and started once through the claim
+    (RQ56), with auto-start on or off. No line asks the user to act.
+  - Any other lost run, for a PR still at `qa`, gets one sticky TUI line
+    after the breadcrumb pass: "QA for <pr> was cut off by the TUI
+    restart before its first snapshot — press z t to run it again".
+    This covers a run the user started with `t`, and an owed re-run
+    whose reopen hit a busy project.yaml. `z t` then starts exactly one
+    run.
+  - There is no line for a run that the breadcrumb pass (auto-start on,
+    PR a target) or a queued command has already started again. There is
+    none for a PR that is no longer at `qa`, and none on a later restart.
+  - Runs with a snapshot are left to the resume scan (held runs
+    included). Records owned by another process are never touched: a
+    `pm qa run`, a tick's `qa-run-bg`, another clone's TUI, or a TUI
+    with a new pid after a crash.
+- **RQ58** A held INPUT_REQUIRED run's follow-up (S132 b7321370,
+  3de073a6). Given a run held on INPUT_REQUIRED (#271):
+  - When the user presses `t` with its window open, Then the TUI says
+    "QA for <pr> is waiting for input — answer in its scenario worker
+    pane; the loop is still watching", not just "Focused QA window".
+  - When the user's answer gives a PASS or NEEDS_WORK follow-up, Then
+    that result gets its own QA note, beside the INPUT_REQUIRED note, and
+    its own finalize. This holds whether the TUI stayed up or adopted the
+    held run after a restart or crash. Either way the status line says
+    "QA resumed after INPUT_REQUIRED — collecting the follow-up verdict".
+  - A second INPUT_REQUIRED answer is not a reopen. The run stays held.
+- **RQ59** A re-armed review launch (S133 7fb5df75). Given a review
+  iteration whose launch failed (retryable LAUNCH_FAILED, #259), When
+  auto-start re-arms it or a `pm tui restart --breadcrumb` lands inside
+  its backoff, Then the next attempt starts on schedule. It does not
+  wait the 120 s launch timeout on the dead attempt's transcript link.
+  Once the provider is fixed, the attempt runs on the route.
+- **RQ60** A repeated container-mode `pm qa run` (S130 85f58e5a; also on
+  master 4a74d880). Given container mode and a `pm qa run` of a PR whose
+  earlier `pm qa run` scenario container still runs (same name,
+  `cli-<pr>`), When the user runs it again, Then the earlier container is
+  removed and a fresh one mounts the fresh clone. The scenario window
+  starts, and a routed worker reaches the router. There is no "Scenario
+  N window died — retry n/10" loop. Two concurrent `pm qa run`s of one PR
+  are pr-571a13b, not this PR.
+
 ## 2. Setup
 
 - Install pm from this PR's clone (`./install.sh --local` or venv per
@@ -2731,6 +2784,90 @@ S13, S14, S22, S101.
       variable reference. A review role whose provider fails at launch
       ends LAUNCH_FAILED (retryable, bounded) and runs on the route after
       the fix. S81/S82 restarts are covered too.
+    Results (run ec2feb387de40778). QA46 planner decisions on spec
+    wording are marked "Decided"; none needed the user.
+    - S129 INPUT_REQUIRED, no code change. Every env-channel, routing,
+      refusal and push-proxy Then held on HEAD. Control 4aff1dd4 differed
+      only where #268 and pr-740ae41 apply. Decided (review 6e6b i1):
+      - QA stopping at scenario 2's queued launch is RQ53/RQ55. The Then
+        reads "scenario 2 never launches (no container, refiner or
+        worker) and shows `queued`".
+      - The tick stderr line "note: SIGNOFF_MERGE coerced to
+        SIGNOFF_BLOCKED …" is the expected coercion. "Tick stderr is
+        empty" means no other line.
+      - The refusal When needs the router provider present. A plain
+        `pm pr review` outside tmux is a no-op (pr-3713c9e), so use
+        `--background` or a pm-session shell. `t` on a stopped run
+        focuses its window and `z t` restarts (existing design).
+      S136 reruns the core with these Thens.
+    - S130 NEEDS_WORK, fixed by 85f58e5a (RQ60; pre-existing on master).
+      RQ56's durable REQA held in all 7 rounds. Decided:
+      - A `launch_claim` may outlive `awaiting` (S68 109bca54). It
+        expires in 180 s and is inert. "No launch_claim left behind" is
+        dropped.
+      - The TUI pidfile is JSON: read the pid with `jq -r .pid`.
+      - `pm autostart status` prints "Auto-start: off  owner=…" and
+        "No auto-start targets (auto-start off)."
+    - S131 NEEDS_WORK, fixed by 245eb22f (RQ57). Master 4a74d880 strands
+      the same way. Decided: the picker has no `[running]` badge for QA
+      (a running QA shows `[working]`). The TUI may log "Sign-off REQA …
+      QA starts once …" just after a tick's start.
+    - S132 NEEDS_WORK, fixed by b7321370 and 3de073a6 (RQ58). Decided: a
+      second clone claims a held run only once the owner TUI is dead (a
+      crash, not an in-place restart). The "not relaunching" debug line
+      needs an auto-start pass.
+    - S133 NEEDS_WORK, fixed by 7fb5df75 (RQ59). Decided: the symlinked
+      providers.yaml is replaced silently and its dotfiles target
+      diverges; this is #273 A3 and accepted. The providers.yaml.lock
+      wait is silent. The fake impl never signals done, so `zz d` starts
+      the review. With auto-start targets restored, the TUI logs
+      "Auto-start: resumed after merge restart".
+    - Review 6e6b:
+      - i1 51a709f3 added RQ57's "press z t" line for a lost run that is
+        not a reopened REQA.
+      - i2 74cebe25 moved that line after the breadcrumb pass, so a run
+        that pass restarted gets none.
+      - i3 PASS.
+  - Forty-sixth pass (S134+), delta-only, QA46 planner 2026-10-29, HEAD
+    74cebe25 (origin/master still 4a74d880). Product changes since run
+    ec2feb387de40778: 85f58e5a, b7321370, 3de073a6, 245eb22f, 7fb5df75,
+    51a709f3 and 74cebe25. The first five ran live only post-fix, each in
+    its own scenario and never together. 51a709f3 and 74cebe25 have never
+    run live. Every scenario publishes `recording.mp4`. Controls, run
+    beside HEAD:
+    - f9a6343d (pre-51a709f3, with 245eb22f);
+    - 51a709f3 (pre-74cebe25);
+    - a0e55418 (pre-b7321370);
+    - 1cf5ae0e (pre-7fb5df75);
+    - 5f204dc2 (pre-85f58e5a);
+    - master 4a74d880 for the crash probe.
+    A PASS shows the control failing where a fix applies. Test isolation
+    as in the forty-fifth pass (private HOME/`~/.pm` and tmux socket,
+    scrubbed `TMUX`/routing vars, own sessions only). The S125 PID 1
+    reaping rule applies. Harness: `/pm-captures/scenarios/131/scripts`
+    (restarts, ticks, two clones), `132` (held routed worker), `129` and
+    `130` (container, env watch, stubs) and `133` (review launch
+    failure). Copy them and re-point any `/scratch/s1NN` paths. Not to
+    redo as such: S103–S133.
+    - S134: host, fake-claude. RQ57: a plain restart cuts off a user
+      `t` run (one line, `t` focuses, `z t` runs once). A breadcrumb
+      restart restarts a target and prints no line, beside a cut-off
+      non-target that gets one. An owed REQA re-run is reopened. A busy
+      project.yaml falls back to the line. Another clone's run and a
+      live `pm qa run` survive the restart. Probe: a TUI crash (new pid)
+      during an owed re-run's planning.
+    - S135: host, real claude routed refiner/worker. RQ58 on the final
+      HEAD: `t` on a held run, one note per result across a restart and a
+      crash, a second clone during the hold. A restart also cuts off
+      another PR's routed run (RQ57). Routing as in RQ52/R9.
+    - S136: container mode (podman 3, slirp4netns). The S129 core with
+      the decided Thens, RQ60 (`pm qa run` twice), and a container run
+      cut off by a restart (RQ57: windows killed, no leaked container
+      after `z t`).
+    - S137: host, real claude routed review. RQ59 across
+      `pm tui restart --breadcrumb` inside the backoff and an auto-start
+      re-arm, then recovery onto the route. The same restart cuts off a
+      QA run on another PR.
 
 ## 3. Edge cases
 
