@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T15:28:14.266573+00:00'
+  updated_at: '2026-10-29T15:34:22.414230+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30087,6 +30087,14 @@ prs:
       sharing a PR id (known pr-154595f), so a re-run numbers s2/s3 not s1.'
     created_at: '2026-10-29T15:28:14Z'
     last_edited: '2026-10-29T15:28:14Z'
+  - id: note-c484fbf
+    text: 'QA S42 follow-up: full suite green at 8e255d04 with the review-container
+      env (env -u PM_HOST_HOME PATH=/tmp/pm-venv/bin:/usr/bin:/bin PYTHONPATH=/workspace,
+      pytest 8.4.2): 4615 passed, 1 skipped, 0 failed, 0 errors (372 s). Focused recovery/QA/review/tmux
+      suites 890+ passed. Commits on the branch from this run: 36342563 (fix + 4 tests),
+      f1dfa4d2 (pr-2a541db bug entry), 8e255d04 (this note).'
+    created_at: '2026-10-29T15:34:22Z'
+    last_edited: '2026-10-29T15:34:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
