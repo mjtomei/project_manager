@@ -144,7 +144,13 @@ where the CLI runs.
 #    aborted run first — `new-session` fails with "duplicate session: rec"
 #    while it exists — with `kill-session`, not `kill-server`: killing the
 #    server and reconnecting immediately races its exit ("server exited
-#    unexpectedly"). <command-to-record> sits inside single quotes that are
+#    unexpectedly"). The socket *name* is shared by every run on this host,
+#    so two CLI captures must not run at once: the later run's
+#    `kill-session -t rec` ends the earlier run's recorder, and either run's
+#    failure path kills the server under the other. Both then fail loudly (a
+#    torn-down pane has no status file) rather than reading each other's
+#    evidence, but both captures are lost — run them one after the other.
+#    <command-to-record> sits inside single quotes that are
 #    themselves inside the outer double-quoted argument, so a command with
 #    quotes of its own has to be escaped to survive both layers: for the
 #    `bash -c` form above, paste

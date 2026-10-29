@@ -74,7 +74,10 @@ recording-recipe bugs that any worker following the recipe hits:
   look; and the CLI stop step's two failures (a bound that ran out, a
   mistyped `RECORDER_STOP_TIMEOUT`) leave the recording running, so the
   larger-bound re-run they prescribe can actually be applied instead of
-  meeting a torn-down pane.
+  meeting a torn-down pane. (The CLI scaffold's `-L scaffold` socket name is
+  shared by every run on the host, so two CLI captures must run in sequence;
+  the step-1 prose says so — both runs fail loudly rather than sharing
+  evidence, the same disposition as the tmux recipe's `pm-recorder` note.)
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
