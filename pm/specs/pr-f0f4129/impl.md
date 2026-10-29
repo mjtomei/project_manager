@@ -347,10 +347,14 @@ already drops it because the status is no longer `qa`.
   `resolve_return` (called on every clean review/QA gate) and
   `ensure_impl_status` (called from the TUI event loop and every gate)
   pre-read and skip the `locked_update` when there is no open return to close
-  / no raced `in_review`/`qa` status to repair. `project.yaml` is large and
-  git-tracked, and a `locked_update` takes the global lock and rewrites the
-  whole file (~1 s on a 500-PR project), so an unconditional write here both
-  stalls the event loop and competes with the TUI's own 2 s lock budget.
+  / no raced `in_review`/`qa` status to repair; `claim_impl_launch` does the
+  same for a return that is not awaiting an impl launch or whose claim
+  another driver still holds (the TUI catch-up retries it every
+  `BASE_LAUNCH_RETRY_SECONDS`, and a handshake that keeps failing — a pending
+  spec, a broken workdir — awaits for a long time). `project.yaml` is large
+  and git-tracked, and a `locked_update` takes the global lock and rewrites
+  the whole file (~1 s on a 500-PR project), so an unconditional write here
+  both stalls the event loop and competes with the TUI's own 2 s lock budget.
 - **R14 — Inspection.** `pm pr show` prints a `## Base integration return`
   section (verdict, stage, HEAD/base, attempt, reason, conflict paths,
   apply error) so the handoff is inspectable. `autostart_state._derive`
@@ -440,6 +444,11 @@ No unresolved ambiguities.
   HEAD: `retry` (fail open), no bounce.
 - `spec_pending` set when the return wants to relaunch impl: `pr_start`
   refuses; record `apply_error`, keep `awaiting`, retry later.
+- No live pm tmux session when the return wants to relaunch impl:
+  `launch_impl` refuses before running `pm pr start` (which would fall back
+  to a foreground `claude` — no window, no transcript symlink — and return
+  0, clearing `awaiting` for a launch the handoff can never track); record
+  `apply_error`, release the claim, keep `awaiting` for the next driver.
 - TUI restart between the return and the relaunch: `check_and_start` /
   auto-sequence catch-up claim the expired launch (one winner); the resume
   scan drops a bounced QA snapshot because the status left `qa`.
@@ -574,6 +583,17 @@ No unresolved ambiguities.
     sets `adopt_in_flight=False`, so it does not try to adopt an in-flight
     iteration it never launched (a resumed breadcrumb loop keeps the
     default and still adopts its genuinely in-flight one).
+37. `launch_impl` refuses without a live pm tmux session (no `pm pr start`
+    subprocess is run): `awaiting` stays set, the claim is released and the
+    failure is recorded in `apply_error` — otherwise `pr start`'s foreground
+    fallback returns 0 with no window and no transcript link, and
+    `clear_return_awaiting` would strand the handoff on idle evidence that
+    can never arrive.
+38. `claim_impl_launch` skips the `locked_update` when there is nothing to
+    claim (no open return, or a claim another driver still holds) and still
+    takes an expired one — the TUI catch-up retries it every
+    `BASE_LAUNCH_RETRY_SECONDS`, so a no-op must not rewrite the large
+    git-tracked `project.yaml`.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`

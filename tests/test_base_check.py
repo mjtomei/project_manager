@@ -611,7 +611,9 @@ def test_launch_impl_repairs_the_other_drivers_transcript(w):
         return subprocess.CompletedProcess(args=cmd, returncode=0,
                                            stdout="", stderr="")
 
-    with patch("pm_core.base_check.subprocess.run", side_effect=fake_run):
+    with patch("pm_core.base_check.subprocess.run", side_effect=fake_run), \
+         patch("pm_core.cli.helpers._get_pm_session", return_value="pm-test"), \
+         patch("pm_core.tmux.session_exists", return_value=True):
         ok, detail = base_check.launch_impl(w.pm_dir, PR, w.tdir)
     assert ok, detail
     assert os.readlink(stale) == new_target
@@ -648,7 +650,9 @@ def test_launch_failure_keeps_awaiting_and_releases_the_claim(w):
             return failing
         return real_run(cmd, *a, **k)
 
-    with patch("pm_core.base_check.subprocess.run", side_effect=fake_run):
+    with patch("pm_core.base_check.subprocess.run", side_effect=fake_run), \
+         patch("pm_core.cli.helpers._get_pm_session", return_value="pm-test"), \
+         patch("pm_core.tmux.session_exists", return_value=True):
         res = gate(w)
     assert res.decision == base_check.CONFLICT
     assert not res.launched
@@ -656,6 +660,66 @@ def test_launch_failure_keeps_awaiting_and_releases_the_claim(w):
     assert ret["awaiting"] == "impl"
     assert "launch_claim" not in ret
     assert "spec pending" in ret["apply_error"]
+
+
+def test_launch_without_a_pm_session_keeps_the_handshake_awaiting(w):
+    """No session means no trackable pane: the launch must not "succeed".
+
+    ``pm pr start --background`` falls back to a foreground ``claude`` when
+    there is no pm tmux session: no window, no transcript symlink — and it
+    returns 0.  ``launch_impl`` would then report a launch, clear
+    ``awaiting`` and leave the completion handoff waiting for idle evidence
+    from a pane that does not exist.  The claim is released so the next
+    driver (a TUI/CLI pass with a session) retries it.
+    """
+    set_pr(w, status="in_review", base_return={
+        "verdict": base_check.VERDICT_BASE_CONFLICT, "awaiting": "impl",
+        "resolved_at": None,
+        "launch_claim": {"hop": "impl", "at": "2000-01-01T00:00:00+00:00"}})
+    with patch("pm_core.cli.helpers._get_pm_session", return_value=None), \
+         patch("pm_core.base_check.subprocess.run") as run:
+        ok, detail = base_check.launch_impl(w.pm_dir, PR, w.tdir)
+    assert ok is False
+    assert "session" in detail
+    run.assert_not_called()          # never falls through to a foreground claude
+    rec = base_check.open_return(pr(w))
+    assert rec["awaiting"] == "impl"           # still retryable
+    assert "launch_claim" not in rec           # released for the next driver
+    assert "session" in rec["apply_error"]
+
+
+def test_claim_impl_launch_skips_the_write_when_nothing_to_claim(w):
+    """The retried catch-up must not rewrite project.yaml for a no-op.
+
+    ``_catch_up_base_impl`` calls this every ``BASE_LAUNCH_RETRY_SECONDS``
+    while a return awaits its launch, and a handshake that keeps failing (a
+    pending spec, a broken workdir) awaits for a long time.  A
+    ``locked_update`` takes the global lock and rewrites the whole large,
+    git-tracked file even when ``_apply`` changes nothing.
+    """
+    set_pr(w, status="in_progress")
+    with patch("pm_core.base_check.store.locked_update") as update:
+        assert base_check.claim_impl_launch(w.pm_dir, PR) is False
+    update.assert_not_called()
+
+    # A claim another driver still holds is a no-op too.
+    set_pr(w, status="in_progress", base_return={
+        "verdict": base_check.VERDICT_BASE_CONFLICT, "awaiting": "impl",
+        "resolved_at": None,
+        "launch_claim": {"hop": "impl", "at": base_check._now()}})
+    with patch("pm_core.base_check.store.locked_update") as update:
+        assert base_check.claim_impl_launch(w.pm_dir, PR) is False
+    update.assert_not_called()
+
+    # An expired claim is taken, and the record is really updated on disk.
+    set_pr(w, status="in_progress", base_return={
+        "verdict": base_check.VERDICT_BASE_CONFLICT, "awaiting": "impl",
+        "resolved_at": None,
+        "launch_claim": {"hop": "impl", "at": "2000-01-01T00:00:00+00:00"}})
+    assert base_check.claim_impl_launch(w.pm_dir, PR) is True
+    claim = pr(w)["base_return"]["launch_claim"]
+    assert claim["hop"] == "impl"
+    assert claim["at"] != "2000-01-01T00:00:00+00:00"
 
 
 # --- idempotency / concurrency --------------------------------------------

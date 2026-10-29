@@ -505,6 +505,22 @@ def resolve_return(root: Path, pr_id: str, reason: str = "",
     return closed["ok"]
 
 
+def _claim_held(rec: dict, now: datetime) -> bool:
+    """Whether *rec* carries a live impl launch claim another driver holds."""
+    claim = rec.get("launch_claim") or {}
+    at = _parse_ts(claim.get("at"))
+    age = (now - at).total_seconds() if at else None
+    return (claim.get("hop") == "impl" and age is not None
+            and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS)
+
+
+def _claimable(rec: dict | None, now: datetime) -> bool:
+    """Whether the ``awaiting`` impl launch of *rec* may be claimed now."""
+    if not rec or rec.get("awaiting") != "impl" or rec.get("needs_human"):
+        return False
+    return not _claim_held(rec, now)
+
+
 def claim_impl_launch(root: Path, pr_id: str) -> bool:
     """Take the one impl relaunch for an ``awaiting`` base return.
 
@@ -518,18 +534,22 @@ def claim_impl_launch(root: Path, pr_id: str) -> bool:
     def _apply(d):
         pr = store.get_pr(d, pr_id)
         rec = open_return(pr)
-        if not rec or rec.get("awaiting") != "impl" or rec.get("needs_human"):
-            return
-        claim = rec.get("launch_claim") or {}
-        at = _parse_ts(claim.get("at"))
-        age = (now - at).total_seconds() if at else None
-        if (claim.get("hop") == "impl" and age is not None
-                and 0 <= age < RETURN_LAUNCH_CLAIM_SECONDS):
+        if not _claimable(rec, now):
             return
         rec["launch_claim"] = {"hop": "impl", "at": now.isoformat()}
         won["ok"] = True
 
     try:
+        # Pre-read (same rule as ``resolve_return`` / ``ensure_impl_status``):
+        # the TUI catch-up retries this every ``BASE_LAUNCH_RETRY_SECONDS``
+        # while a return awaits its launch, and a handshake that keeps failing
+        # (a pending spec, a broken workdir) awaits for a long time.  A
+        # ``locked_update`` takes the global lock and rewrites the whole large,
+        # git-tracked project.yaml even when ``_apply`` changes nothing, so the
+        # no-op must stay cheap.
+        pre = open_return(store.get_pr(store.load(root), pr_id))
+        if not _claimable(pre, now):
+            return False
         store.locked_update(root, _apply)
     except Exception as e:
         _log.warning("base_check: claim for %s failed: %s", pr_id, e)
@@ -591,7 +611,27 @@ def launch_impl(root: Path, pr_id: str, transcript_dir: str | Path | None) -> tu
     PR's model override and honors ``spec_pending`` (a pending spec makes
     the launch fail; the return stays awaiting for a later retry).  The
     transcript keeps the TUI/CLI idle tracking pointed at the new session.
+
+    Refused without a live pm tmux session: ``pm pr start`` falls back to a
+    foreground ``claude`` in that case (no window, no transcript symlink) and
+    returns 0, so this call would report a launch nothing can track while
+    ``clear_return_awaiting`` marked the handshake satisfied — the rework
+    handoff waits on idle evidence that can never arrive.  Keep ``awaiting``
+    for the next driver (a TUI/CLI pass with a session) instead.
     """
+    from pm_core import tmux as tmux_mod
+    from pm_core.cli.helpers import _get_pm_session
+
+    try:
+        session = _get_pm_session()
+        has_session = bool(session) and tmux_mod.session_exists(session)
+    except Exception:  # pragma: no cover - best effort
+        has_session = False
+    if not has_session:
+        detail = "no pm tmux session to relaunch implementation into"
+        release_impl_claim(root, pr_id, detail)
+        _log.info("base_check: impl relaunch for %s deferred: %s", pr_id, detail)
+        return False, detail
     tdir = Path(transcript_dir) if transcript_dir else (
         root / "transcripts" / f"manual-{secrets.token_hex(3)}")
     try:
