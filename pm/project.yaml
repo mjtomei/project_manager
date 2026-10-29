@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T10:32:24.316334+00:00'
+  updated_at: '2026-10-29T11:25:58.551837+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36918,6 +36918,48 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T10:32:24Z'
     last_edited: '2026-10-29T10:32:24Z'
+  - id: note-62bfb62
+    text: 'Review loop ebd1 i4: three leftovers in the kept recipe scope, all the
+      PR own class. (1) The web-UI manifest''s `## Files` example listed `node_modules`
+      but neither `server.pid` (written by step 1, removed by the teardown, so present
+      exactly when a run stopped before it — a failed driver, which step 2 says not
+      to finalize) nor the `recording.webm` a failed transcode keeps — the two files
+      R44 had just added to the produced-files list — and unlike the recording recipes''
+      examples it has no `<any extra file>` catch-all, so a worker copying the example
+      left both out and the manifest disagreed with the directory for the ordinary
+      failure shapes. Both are in the example now; `test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps`
+      requires them in the example''s file list, read from the indented `    ## Files`
+      heading: a first `## Files` match lands on the prose above the template and
+      includes the `## Commands` ffmpeg line, which already names `recording.webm`,
+      so that split passed (rc 0, 187 passed) with the example''s line deleted — verified,
+      and the probe shows both ways. (2) Step 2''s "could not claim" guard had no
+      case: the exact-session assert above it can be stale by the time the claim is
+      written, and with the guard replaced by `|| true` the step runs on into the
+      pipe attach, which reports "could not stream … — check that pane exists" for
+      a session that went away (and where only the option write fails, the run proceeds
+      with no claim at all, silently turning the collision guard off). New stub mode
+      `claimgone` ends the session as the claim is written; `test_a_claim_that_cannot_be_written_is_reported`
+      requires the step''s own message and not the pipe-attach one (fails with the
+      guard removed). (3) The cleanup order — this run''s pipe stop before the claim
+      release — is a race guard the recipe and the spec''s Files table describe as
+      R24''s design (the instant the claim is released a later run in the same session
+      can take it and attach its own pipe, which this run''s stop would then close),
+      and no case observed it: moving the release above the stop left all 185 cases
+      green. `test_the_claim_is_released_only_after_the_pipe_is_stopped` pins it at
+      every release (only the recorder kill may sit between the stop and the release;
+      step 2''s own failed attach, which has no pipe to stop, is the one exception).
+      Tests: file 187 pass; each mutation fails exactly the case it names and those
+      cases pass on the unmodified files; related suites (test_qa_artifact_web_ui_recording,
+      test_qa_instructions, test_qa_loop, test_markdown_render) 375 together with
+      the file; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q
+      --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 4581 passed, 1 skipped, 92 deselected, 0 failed (395 s, with the markdown
+      dep on the scratch path). Evidence: $(pm qa captures-path pr-b19db15)/review-ebd1-i4/
+      (probe.log sections A-E, README.md, scripts/probe.py). impl.md R45 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T11:25:58Z'
+    last_edited: '2026-10-29T11:25:58Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
