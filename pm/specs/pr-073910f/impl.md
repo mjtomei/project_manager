@@ -633,3 +633,53 @@ one (fail-safe); the TUI connect screen keeps a bare
 *and* `PM_TMUX_SOCKET` is unset (unreachable for a live session: every
 private session exports the variable and legacy sessions are found by
 `find_session_server`).
+
+## Review iteration (2026-10-29, review-loop d1c0 i3)
+
+Verification pass over the integrated head; one reuse cleanup and one
+robustness fix in `detach_current_client` (R5).  No requirement changes.
+
+1. **`detach_current_client()` re-implemented two existing helpers.**
+   It issued its own `display -t <pane> -p "#{window_id}"` (exactly
+   `tmux.pane_window_id`) and its own per-client "is this client's session
+   viewing the TUI's window" query (exactly `tmux.sessions_on_window`,
+   already used by the review loop, sign-off, watcher and home window).
+   Two implementations of "which sessions are looking at this window" is
+   the divergence risk the i3 note fixed for
+   `_pick_existing_session`/`find_session_server`.  Both helpers now take
+   an optional `socket_path` (positional signature unchanged) and
+   `detach_current_client` uses them: one window query for the pane, one
+   per *session* in the group instead of one per client.  Behaviour is
+   unchanged, including the "no resolvable pane window → any session in
+   the group counts" fallback.
+2. **A non-numeric `client_activity`/`client_created` crashed the quit
+   path.**  `int(activity or 0)` raised `ValueError` out of the TUI's
+   Ctrl-Q handler.  tmux always prints integers, but `list_pm_sessions()`
+   already parses the same kind of field defensively
+   (`attached.isdigit()`), so both now share a small `_int_or_zero()`
+   helper.
+
+New tests: `test_explicit_socket_is_used_for_every_call` (every tmux
+query carries `-S <socket>` when the caller passes `socket_path=`, not
+just the detach) and `test_tolerates_non_numeric_client_timestamps`.
+
+Incidental fix (outside this PR's scope, noted on the PR): three
+`tests/test_tui_pidfile.py::TestSignalDelivery` tests used PID 1234 as a
+stand-in for a live TUI and assumed it was not a zombie.  In a container
+where PID 1 does not reap, an unreaped child can land on that PID (it did
+here, after tmux panes' `sleep` children were killed), so the tests failed
+with "process is a zombie" on an unmodified tree.  They now pin
+`is_zombie` to False; zombie handling keeps its own real-process test.
+
+Residual notes unchanged and still non-blocking: the uid ownership check
+exists only on `pm session` start (other paths fail closed — a 0600 socket
+owned by another user cannot be connected to, so discovery falls back to
+the default server); the `/tmp/pm-sessions` literal stays duplicated in
+`wrapper._mark_tmux_socket` and `qa_status._tmux_argv` by design (no early
+`pm_core` import); pane IDs are no longer globally unique across servers
+but every consumer resolves a pane together with its session/socket; R5b
+relies on the pane registry file, so deleting it while a session is live
+makes `pm session` create a separate session rather than adopt the live
+one (fail-safe); the TUI connect screen keeps a bare
+`tmux attach -t <name>` as a last resort when no server hosts the session
+*and* `PM_TMUX_SOCKET` is unset (unreachable for a live session).

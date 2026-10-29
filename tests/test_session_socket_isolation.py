@@ -395,6 +395,58 @@ class TestDetachCurrentClient:
         monkeypatch.delenv("TMUX_PANE", raising=False)
         assert tmux.detach_current_client() is False
 
+    @patch("pm_core.tmux.subprocess.run")
+    def test_explicit_socket_is_used_for_every_call(self, mock_run,
+                                                    monkeypatch):
+        """``socket_path=`` must reach every tmux query, not just the detach.
+
+        ``quit_app`` relies on ``PM_TMUX_SOCKET``, but the argument is part
+        of the signature; a call that dropped it would query — and detach —
+        on whichever server the process happens to sit on.
+        """
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        sock = "/tmp/pm-sessions/pm-x"
+
+        def fake_run(cmd, **kwargs):
+            if "list-sessions" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            if "list-clients" in cmd:
+                return MagicMock(returncode=0,
+                                 stdout="/dev/pts/1|100|10|pm-x\n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            return MagicMock(returncode=0, stdout="@1\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client(socket_path=sock) is True
+        for call in mock_run.call_args_list:
+            assert call[0][0][:3] == ["tmux", "-S", sock], call[0][0]
+
+    @patch("pm_core.tmux.subprocess.run")
+    def test_tolerates_non_numeric_client_timestamps(self, mock_run,
+                                                     monkeypatch):
+        """Empty/garbage client_activity fields must not crash the quit path."""
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setenv("PM_TMUX_SOCKET", "")
+
+        def fake_run(cmd, **kwargs):
+            if "list-sessions" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            if "list-clients" in cmd:
+                return MagicMock(returncode=0,
+                                 stdout="/dev/pts/1|abc||pm-x\n")
+            if "detach-client" in cmd:
+                return MagicMock(returncode=0, stdout="")
+            if "#{session_name}" in cmd:
+                return MagicMock(returncode=0, stdout="pm-x\n")
+            return MagicMock(returncode=0, stdout="@1\n")
+
+        mock_run.side_effect = fake_run
+        assert tmux.detach_current_client() is True
+
 
 # ---------------------------------------------------------------------------
 # tmux: cross-server discovery

@@ -852,10 +852,12 @@ def pane_exists(pane_id: str) -> bool:
     return result.returncode == 0
 
 
-def pane_window_id(pane_id: str) -> str | None:
+def pane_window_id(pane_id: str,
+                   socket_path: str | None = None) -> str | None:
     """Return the window ID (e.g. ``@1``) that contains *pane_id*, or ``None``."""
     result = _run(
-        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}"),
+        _tmux_cmd("display", "-t", pane_id, "-p", "#{window_id}",
+                  socket_path=socket_path),
         text=True,
     )
     return result.stdout.strip() or None
@@ -896,18 +898,22 @@ def attached_group_active_windows(base: str, socket_path: str | None = None) -> 
     return active
 
 
-def sessions_on_window(base: str, window_id: str) -> list[str]:
+def sessions_on_window(base: str, window_id: str,
+                       socket_path: str | None = None) -> list[str]:
     """Return all sessions in the group (base + grouped) whose active window matches *window_id*.
 
     Used by the review loop to determine which sessions need to be
-    switched to the replacement window after the old one is killed.
+    switched to the replacement window after the old one is killed, and by
+    ``detach_current_client`` to find the sessions whose clients are
+    looking at a given window.
     """
-    candidates = [base] + list_grouped_sessions(base)
+    candidates = [base] + list_grouped_sessions(base, socket_path=socket_path)
     _log.info("sessions_on_window: base=%s window_id=%s candidates=%s", base, window_id, candidates)
     result = []
     for name in candidates:
         r = _run(
-            _tmux_cmd("display", "-t", name, "-p", "#{window_id}"),
+            _tmux_cmd("display", "-t", name, "-p", "#{window_id}",
+                      socket_path=socket_path),
             text=True,
         )
         cur_wid = r.stdout.strip() if r.returncode == 0 else f"<err:{r.returncode}>"
@@ -1020,6 +1026,14 @@ def set_global_environment(key: str, value: str,
     )
 
 
+def _int_or_zero(value: str) -> int:
+    """Parse a tmux numeric format field, tolerating empty/garbage output."""
+    try:
+        return int(value or 0)
+    except ValueError:
+        return 0
+
+
 def detach_current_client(socket_path: str | None = None) -> bool:
     """Detach the client that is viewing the current pane's window.
 
@@ -1040,12 +1054,7 @@ def detach_current_client(socket_path: str | None = None) -> bool:
     if not pane:
         return False
 
-    pane_win_r = _run(
-        _tmux_cmd("display", "-t", pane, "-p", "#{window_id}",
-                  socket_path=socket_path),
-        text=True,
-    )
-    pane_win = pane_win_r.stdout.strip() if pane_win_r.returncode == 0 else ""
+    pane_win = pane_window_id(pane, socket_path=socket_path) or ""
 
     session_r = _run(
         _tmux_cmd("display-message", "-p", "-t", pane, "#{session_name}",
@@ -1058,6 +1067,12 @@ def detach_current_client(socket_path: str | None = None) -> bool:
     base = session.split("~", 1)[0]
     grouped = list_grouped_sessions(base, socket_path=socket_path)
     group = {base} | set(grouped)
+    # Clients viewing the TUI's window: the group's sessions whose active
+    # window is that window (a grouped session has its own current window,
+    # so this is per session, not per client).  With no resolvable pane
+    # window, any session in the group counts.
+    viewing = (set(sessions_on_window(base, pane_win, socket_path=socket_path))
+               if pane_win else group)
 
     result = _run(
         _tmux_cmd("list-clients", "-F",
@@ -1073,17 +1088,10 @@ def detach_current_client(socket_path: str | None = None) -> bool:
             if len(parts) != 4:
                 continue
             tty, activity, created, client_session = parts
-            if client_session not in group:
+            if client_session not in viewing:
                 continue
-            if pane_win:
-                cur = _run(
-                    _tmux_cmd("display", "-t", client_session, "-p",
-                              "#{window_id}", socket_path=socket_path),
-                    text=True,
-                )
-                if cur.returncode != 0 or cur.stdout.strip() != pane_win:
-                    continue
-            candidates.append((int(activity or 0), int(created or 0), tty))
+            candidates.append((_int_or_zero(activity),
+                               _int_or_zero(created), tty))
 
     if candidates:
         tty = max(candidates)[2]
@@ -1179,8 +1187,7 @@ def list_pm_sessions() -> list[dict]:
             if not sep or not name.startswith("pm-"):
                 continue
             base = name.split("~", 1)[0]
-            groups[base] = groups.get(base, 0) + (
-                int(attached) if attached.isdigit() else 0)
+            groups[base] = groups.get(base, 0) + _int_or_zero(attached)
         shared = is_shared(Path(socket_path) if socket_path else None)
         for base, attached in sorted(groups.items()):
             key = (socket_path, base)
