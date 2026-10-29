@@ -639,7 +639,13 @@ tests):
    lines and the return text's `git diff <rev> HEAD` / `git merge <rev>` /
    `git log <rev>..HEAD` hints (the last is built from the return record's
    hand-editable `reviewed_head`) fall back (`<base>`, `<old head>`, the base
-   branch) instead of interpolating a hand-edited fragment. The same rule
+   branch) instead of interpolating a hand-edited fragment. The fallback
+   itself is hand-editable state: `base_branch` is interpolated into the
+   return text's `git merge <rev>` command (and the coercion reason recorded
+   for a conflict routed to implementation), so a value that is not a
+   branch-name string becomes an obvious placeholder — `<base>` in the
+   command, `?` in the reason — rather than the literal `git merge None` or a
+   mapping's repr. The same rule
    covers the revisions either surface *displays* as a revision:
    `resolution.resolved_from`'s `head`/`base_sha`/`merge_base` are rendered
    only when they are object names (the prompt omits the "Resolved from PR

@@ -6666,6 +6666,45 @@ def test_a_malformed_applied_member_still_gets_the_diff_hint():
         assert hint in _text(applied), applied
 
 
+def test_the_reconcile_command_names_a_real_base_or_a_placeholder():
+    """The ``git merge`` hint never interpolates a malformed ``base_branch``.
+
+    The hint falls back to the branch name when the record cannot name a base
+    revision, and ``base_branch`` is hand-editable project.yaml state: a null
+    rendered the literal ``git merge None`` and a mapping its repr — a command
+    the routed step is told to run.  A value that is not a branch-name string
+    is no ref, so it becomes an obvious placeholder (the same rule
+    ``_text`` applies to the block's own header and ``spec_gen`` applies to its
+    ``git diff`` instruction).
+    """
+    def _merge_hint(base_branch):
+        integ = {"status": "conflict", "base_sha": None,
+                 "base_branch": base_branch, "target_repo": "r",
+                 "conflicts": ["pm/project.yaml"]}
+        text = signoff.format_signoff_return({
+            "id": PR,
+            "signoff_return": {"verdict": SIGNOFF_IMPL, "hop": "impl",
+                               "reason": "r", "reviewed_head": "a" * 40,
+                               "integration": integ}})
+        return [line for line in text.splitlines() if "git merge" in line][0]
+
+    for bad in (None, {"x": 1}, ["master"], "", 0, True):
+        line = _merge_hint(bad)
+        assert "`git merge <base>`" in line, (bad, line)
+        assert "None" not in line and "{'x'" not in line, (bad, line)
+    # A real branch name is still named.
+    assert "`git merge master`" in _merge_hint("master")
+    # The coercion reason the return text carries uses the same placeholder.
+    verdict, reason = signoff.effective_verdict(
+        SIGNOFF_MERGE,
+        {"status": integration.CONFLICT, "head": "a" * 40,
+         "base_sha": "b" * 40, "base_branch": {"x": 1},
+         "conflicts": ["pm/project.yaml"]},
+        "a" * 40)
+    assert verdict == SIGNOFF_IMPL
+    assert "merging ?@" in reason and "{" not in reason
+
+
 def test_a_malformed_applied_merge_does_not_contradict_the_not_applied_label():
     """A non-string ``applied_merge_sha`` is no applied merge, everywhere.
 

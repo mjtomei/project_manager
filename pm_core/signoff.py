@@ -692,7 +692,7 @@ def effective_verdict(verdict: str | None, integration: dict | None,
             shown += f", … {len(conflicts) - 5} more"
         return SIGNOFF_IMPL, (
             f"{verdict} coerced to {SIGNOFF_IMPL}: merging "
-            f"{rec.get('base_branch')}@{(base or '?')[:8]} "
+            f"{_text(rec.get('base_branch'))}@{(base or '?')[:8]} "
             f"conflicts ({shown}); "
             "reconciling it is implementation work")
     if of_head and rec.get("status") == integ.RESOLVED:
@@ -1587,8 +1587,9 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
                             f"The PR's changes on top of that base: `git diff "
                             f"{applied_base[:12]} HEAD` (your usual diff "
                             "against "
-                            f"`{integ.get('base_branch') or 'the base'}` may "
-                            "be stale and include the merged base commits).")
+                            f"`{_text(integ.get('base_branch'), 'the base')}` "
+                            "may be stale and include the merged base "
+                            "commits).")
         behavior = integ.get("base_behavior_changes")
         behavior = behavior if isinstance(behavior, list) else []
         if not behavior and integ.get("base_behavior_error"):
@@ -1638,8 +1639,8 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
             lines.append(
                 f"The PR's changes on top of that base: `git diff "
                 f"{applied_base_rev[:12]} HEAD` (your usual diff against "
-                f"`{integ.get('base_branch') or 'the base'}` may be stale and "
-                "include the merged base commits).")
+                f"`{_text(integ.get('base_branch'), 'the base')}` may be stale "
+                "and include the merged base commits).")
     elif rec.get("apply_error"):
         if rec["apply_error"] in (integration.HEAD_MOVED,
                                   integration.HEAD_MOVED_APPLYING):
@@ -1656,13 +1657,18 @@ def format_signoff_return(pr: dict, *, for_signoff: bool = False) -> str:
     if not for_signoff and integ.get("status") == integration.CONFLICT:
         # Object name only: it becomes a `git merge <rev>` command.
         base_rev = (integration._sha_like(integ.get("base_sha")) or "")[:12]
+        # The fallback is a branch name, and ``base_branch`` is hand-editable
+        # state too: a value that is not a branch-name string is no ref to
+        # merge (``None`` rendered the literal ``git merge None``, and a
+        # mapping rendered its repr), so it becomes an obvious placeholder.
+        merge_ref = base_rev or _text(integ.get("base_branch"), "<base>")
         lines.append(
             f"\nReconcile it in this branch: `git fetch` the base and "
-            f"`git merge {base_rev or integ.get('base_branch')}` (or a newer "
-            f"base), resolve the conflicts preserving both sides' intent, run "
-            "the tests, commit and push the PR branch. Never push or merge "
-            "into the base branch yourself — the merge step publishes only a "
-            "freshly signed-off candidate.")
+            f"`git merge {merge_ref}` (or a newer base), resolve the "
+            "conflicts preserving both sides' intent, run the tests, commit "
+            "and push the PR branch. Never push or merge into the base branch "
+            "yourself — the merge step publishes only a freshly signed-off "
+            "candidate.")
     if for_signoff:
         lines.append(
             f"\nProvenance: `git log "

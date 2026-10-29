@@ -564,6 +564,19 @@ alongside PRs with pm's ISO strings.
 WHEN the user runs `pm pr list --timestamps`.
 THEN both rows render, newest first, without a comparison error.
 
+GIVEN a sign-off return whose integration snapshot has a null (or non-string)
+`base_branch` and no usable `base_sha`.
+WHEN the routed step's prompt is built.
+THEN the "Reconcile it in this branch" instruction says `git merge <base>`, not
+`git merge None` (or a mapping's repr), and a real branch name is still named
+as before.
+
+GIVEN a conflicted integration whose `base_branch` was hand-edited to a
+non-string.
+WHEN sign-off routes a MERGE/REVIEW/REQA verdict to implementation.
+THEN the recorded coercion reason says `merging ?@<sha>`, never the malformed
+value, and the return text carries it verbatim.
+
 GIVEN the stored `integration.base_sha` hand-edited to a non-string (an int, a
 mapping, a list, a boolean) on a PR whose apply loses a race and `prepare`
 re-checks the revision the branch now has.
