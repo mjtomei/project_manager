@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T01:50:07.580281+00:00'
+  updated_at: '2026-10-29T01:54:09.465852+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39509,6 +39509,27 @@ prs:
       QA — prior QA evidence is not a pass for this head; handing off to native review.'
     created_at: '2026-10-29T01:50:07Z'
     last_edited: '2026-10-29T01:50:07Z'
+  - id: note-29a4ec4
+    text: 'review e2e9 i1 (fix + handoff, bc039d4c). Reviewed integrated HEAD 5703427a
+      (merge-base == origin/master@4a74d880). Found one real gap in the SIGNOFF_IMPL
+      item 3 rework: _discover_iteration returned "verdict" discoveries WITHOUT a
+      transcript, so the new result["transcript"] in _run_iteration_with_retry/_adopt_in_flight_review
+      fell back to the loop own review-<pr>-i<N>.jsonl. When the landed INPUT_REQUIRED
+      was read from another driver pane (or our symlink belongs to a failed attempt
+      different session), the follow-up waiter watched the wrong transcript + hook
+      stream: the answer never cleared the wait and the follow-up verdict was never
+      seen (stuck waiting). Fix: all three verdict returns set transcript=. Regressions
+      test_discovery_verdict_names_the_transcript_it_came_from + test_retry_reports_the_discovered_verdicts_transcript
+      (both fail pre-fix). impl.md R1 updated. 609 targeted tests pass. Residual for
+      next iteration (not fixed): _adoptable_wait_transcript only re-adopts a restarted
+      wait from the loop own review-<pr>-i<N>.jsonl; the wait transcript is not persisted
+      in the breadcrumb, so a restart during a wait on ANOTHER driver transcript finds
+      no own transcript, reports "no live pane" and launches the next iteration over
+      the live question pane. Consider falling back to pane_transcript_path(live claude
+      pane) when it holds the INPUT_REQUIRED turn, or persisting the wait transcript
+      in the breadcrumb.'
+    created_at: '2026-10-29T01:54:09Z'
+    last_edited: '2026-10-29T01:54:09Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
@@ -43421,8 +43442,17 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-28T11:05:47.288848+00:00'
-  updated_at: '2026-10-28T11:05:47.288848+00:00'
+  updated_at: '2026-10-29T02:55:14.659116+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-b946b24
+    text: 'Fixed in pr-a80bde5 (review baa8 i3, commit 94dbf681): the local slash-command
+      echo prefixes (<command-name>, <local-command-message>, <local-command-stdout>,
+      <local-command-stderr>) joined the shared task-boundary predicate verdict_transcript._user_record_is_non_task,
+      so an echo after a verdict no longer stops the task-scoped scan. Covered by
+      test_local_command_echo_is_transparent and test_follow_up_verdict_survives_a_local_slash_command.
+      Close this as covered by pr-a80bde5 rather than re-fixing.'
+    created_at: '2026-10-29T02:55:14Z'
+    last_edited: '2026-10-29T02:55:14Z'

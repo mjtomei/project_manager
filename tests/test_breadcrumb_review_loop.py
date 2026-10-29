@@ -707,6 +707,50 @@ class TestStartLoopResumeState:
         mock_bg.assert_called_once()
         assert mock_bg.call_args.kwargs["state"] is state
 
+    def test_resume_of_a_restored_wait_publishes_resuming_before_running(self):
+        """The window between ``_start_loop`` marking the loop running and the
+        thread's first statement must not read as an answered follow-up.
+
+        A restored INPUT_REQUIRED history plus ``running`` and no live wait is
+        exactly "INPUT_REQUIRED answered; follow-up running" — claiming the
+        user answered a question the resumed loop has not even re-adopted yet
+        (R6).  The resuming flag must already be up when ``running`` goes up.
+        """
+        from pm_core.tui.review_loop_ui import _start_loop
+        from pm_core.tui import review_loop_ui
+        from pm_core import tmux as tmux_mod
+        from pm_core import autostart_state
+
+        app = MagicMock()
+        app._review_loops = {}
+        app._review_loop_timer = None
+        pr = {"id": "pr-001", "workdir": "/tmp/wd", "status": "in_review"}
+        state = ReviewLoopState(pr_id="pr-001", iteration=2,
+                                latest_verdict="INPUT_REQUIRED", loop_id="ab12")
+        state.history = [
+            ReviewIteration(iteration=1, verdict="NEEDS_WORK", output=""),
+            ReviewIteration(iteration=2, verdict="INPUT_REQUIRED", output=""),
+        ]
+        seen = {}
+
+        def capture_background(**kwargs):
+            # ``_start_loop`` marks the loop running synchronously before the
+            # thread exists; this is what a status reader sees in that window.
+            seen.update(autostart_state.review_progress_input(kwargs["state"]))
+
+        with patch.object(tmux_mod, "in_tmux", return_value=True), \
+             patch.object(review_loop_ui, "store") as mock_store, \
+             patch.object(review_loop_ui, "start_review_loop_background",
+                          side_effect=capture_background), \
+             patch.object(review_loop_ui, "_ensure_poll_timer"):
+            mock_store.find_project_root.return_value = Path("/tmp/pm")
+            _start_loop(app, "pr-001", pr, transcript_dir="/tmp",
+                        resume_state=state)
+
+        assert seen["resuming"] is True
+        assert seen["input_required"] is False
+        assert seen["follow_up"] is False
+
     def test_fresh_start_creates_new_state(self):
         from pm_core.tui.review_loop_ui import _start_loop
         from pm_core import tmux as tmux_mod

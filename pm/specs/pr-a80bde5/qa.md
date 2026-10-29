@@ -274,6 +274,11 @@ E3. **Adopted in-flight iteration.** At a restart the counter was bumped but the
 iteration had not recorded a verdict; that in-flight iteration then ends
 INPUT_REQUIRED and its follow-up must be read from the transcript it was
 launched under (a manual loop may resume with a different transcript dir).
+A restart *during* that wait must re-adopt it from the live pane's own session
+(recovered from its start command), even when the resumed loop has no
+`review-<pr>-i<N>.jsonl` of its own or that symlink names a different (dead)
+session: the loop must wait on the pane that can still be answered, never
+relaunch the next iteration over the live question.
 
 E4. **Stop during the wait.** Stopping the loop while it waits ends it cleanly;
 the marker becomes `⏹N` then the finished-verdict marker, never a red `⏸N`.

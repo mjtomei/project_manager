@@ -1360,6 +1360,17 @@ def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
 
     Returns None when the review pane or its transcript is gone — then
     nobody can answer that question any more.
+
+    The question is not always in this loop's own
+    ``review-<pr>-i<N>.jsonl``: discovery can adopt *another driver's*
+    session for an iteration this loop did not launch, and the wait runs on
+    that transcript (R1).  A restarted loop used to look only at its own
+    symlink, find nothing, and relaunch the next iteration over the live
+    question pane — the false wait this loop exists to prevent (review e2e9
+    i1).  The live pane names its session in its start command, so recover
+    the transcript from there and use it whenever it names a different
+    session than our own symlink: the human answers in the pane, so the
+    pane's session is the one that receives the answer.
     """
     from pm_core.claude_launcher import session_id_from_transcript
     session = _get_pm_session()
@@ -1367,15 +1378,36 @@ def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
         return None
     # Workdir-aware: the shared first-pane helper can return the review
     # window's diff shell, which is not the pane that asked the question.
-    if not _find_review_claude_pane(
-            session, _compute_review_window_name(pr_data),
-            pr_data.get("workdir")):
+    pane_id = _find_review_claude_pane(
+        session, _compute_review_window_name(pr_data), pr_data.get("workdir"))
+    if not pane_id:
         return None
+    # The live pane's own session: where the human's answer will land.
+    pane_transcript: str | None = None
+    pane_sid: str | None = None
+    try:
+        from pm_core.claude_launcher import pane_transcript_path
+        path = pane_transcript_path(pane_id, pr_data.get("workdir"))
+        if path is not None:
+            pane_sid = session_id_from_transcript(path)
+            if pane_sid:
+                pane_transcript = str(path)
+    except Exception:  # pragma: no cover - tmux/pane lookup is best effort
+        pane_transcript = None
+        pane_sid = None
     transcript = _iteration_transcript(state, transcript_dir)
-    if not os.path.lexists(transcript):
-        return None
-    # No session_id means no hook stream to wait on: same as a dead pane.
-    return transcript if session_id_from_transcript(transcript) else None
+    own_sid = (session_id_from_transcript(transcript)
+               if os.path.lexists(transcript) else None)
+    # The human answers in the *pane*, so the pane's session is the one the
+    # follow-up lands in.  Our own symlink is only equivalent when it names
+    # the same session; otherwise it was left by a failed attempt (or an
+    # earlier driver) and waiting on it would never see the answer.  Waiting
+    # on the dead one hung the loop; finding no own transcript at all used to
+    # relaunch the next iteration over the live question pane (review e2e9
+    # i1).
+    if pane_transcript and pane_sid and pane_sid != own_sid:
+        return pane_transcript
+    return transcript if own_sid else None
 
 
 def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,

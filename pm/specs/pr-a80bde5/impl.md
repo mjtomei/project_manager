@@ -90,6 +90,20 @@ R2. **Restart/adoption of an INPUT_REQUIRED wait.**  A resumed state whose
     different dir than the resumed loop's own — a manual loop gets a fresh
     ``manual-<token>`` dir on restart.
 
+    The wait transcript is likewise not always the loop's own
+    ``review-<pr>-i<N>.jsonl``: discovery can adopt another driver's session
+    for an iteration this loop did not launch (R1), and that session's
+    transcript is where the human's answer lands.  `_adoptable_wait_transcript`
+    therefore recovers the live pane's own session from its start command
+    (`pane_transcript_path`) and uses it whenever its session id differs from
+    the loop's own symlink.  The human answers in the *pane*, so a symlink
+    naming another session belongs to a failed attempt (or an earlier
+    driver), and waiting on it never sees the answer.  Before this, a restart
+    found no own transcript (or a dead one), reported "no live pane" and
+    relaunched the next iteration over the live question pane, or hung on the
+    dead session (review e2e9 i1; regression
+    `test_restart_during_wait_on_another_drivers_transcript`).
+
 R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
     appended to the iteration's transcript after the INPUT_REQUIRED turn means
     the native flow has resumed.  `state.input_required` becomes False and
@@ -326,7 +340,14 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   `review_progress_input` reads the fields in that same order
   (`_adopting_wait`, then `iteration`, then `input_required`), so a reader
   that sees the flag cleared is guaranteed to see the state the transcript
-  reported.  Assuming the wait first and reading the transcript after
+  reported.  The flag is also raised by `_start_loop` when it resumes a
+  state whose history ends INPUT_REQUIRED, *before* it marks the loop
+  running: otherwise the window between that synchronous `running=True` and
+  the thread's first statement (which sets the same flag) read as
+  "INPUT_REQUIRED answered; follow-up running" for a question nobody had
+  answered.  (review 5228 i1; regression
+  `test_resume_of_a_restored_wait_publishes_resuming_before_running`.)
+  Assuming the wait first and reading the transcript after
   (review e386 i3) published a phantom `waiting / review INPUT_REQUIRED
   (iteration N)` at the adopt decision for a question the human had already
   answered — the same false-wait class — for the length of the transcript
@@ -359,10 +380,12 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   transparent, so an image answer cleared the wait and was then crossed by the
   verdict scan, re-delivering the answered question as a new one on every idle.)
 - A restored wait whose transcript yields no session_id cannot be answered (no
-  hook stream).  `_adoptable_wait_transcript` returns None, so the resumed loop
-  clears `input_required` and launches the next iteration rather than failing
-  the wait and ending KILLED.  (Guard added in 581d i2; regression added in
-  3bf4 i1: `test_restart_wait_with_no_recoverable_session_clears`.)
+  hook stream).  `_adoptable_wait_transcript` returns None when neither the
+  loop's own symlink nor the live pane's session (`pane_transcript_path`)
+  yields one, so the resumed loop clears `input_required` and launches the
+  next iteration rather than failing the wait and ending KILLED.  (Guard
+  added in 581d i2; regression added in 3bf4 i1:
+  `test_restart_wait_with_no_recoverable_session_clears`.)
 - A running review loop's transcript symlink must never be finalized.
   `pm autostart remove` of the last target (or any auto-start disable) runs
   `auto_start._finalize_all_transcripts`, which replaces the run dir's

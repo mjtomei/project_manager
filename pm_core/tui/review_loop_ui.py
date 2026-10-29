@@ -241,6 +241,19 @@ def _start_loop(app, pr_id: str, pr: dict | None,
         state.stop_requested = False
         state._ui_notified_done = False
         state._ui_notified_input = False
+        # A restored INPUT_REQUIRED wait is not a live question yet: the loop
+        # thread re-adopts the pane that asked it (``run_review_loop_sync``).
+        # Mark that check here, before ``running`` goes up below, so a status
+        # reader in the window between this call and the thread's first
+        # statement never reads the recorded INPUT_REQUIRED history as
+        # "INPUT_REQUIRED answered; follow-up running" — claiming an answer
+        # nobody gave (R6).  The thread recomputes the same flag.
+        last = state.history[-1] if state.history else None
+        state._adopting_wait = bool(
+            last is not None and last.iteration == state.iteration
+            and last.verdict == VERDICT_INPUT_REQUIRED)
+        if state._adopting_wait:
+            state.input_required = False
         # ``_ui_notified_retry`` is deliberately *not* reset here: it is
         # persisted in the breadcrumb so a merge restart mid-episode does
         # not re-announce a retry the user already saw.  It is cleared at

@@ -906,6 +906,63 @@ class TestRestartAdoption:
             release3.set()
             p.stop()
 
+    @pytest.mark.parametrize("own", ["missing", "dead"])
+    def test_restart_during_wait_on_another_drivers_transcript(self, env, own,
+                                                               monkeypatch):
+        """A wait that ran on another driver's transcript survives a restart.
+
+        Discovery can adopt another driver's session for an iteration this
+        loop did not launch, so the INPUT_REQUIRED question lives in that
+        session's transcript, not in ``review-<pr>-i<N>.jsonl`` (which may be
+        absent, or left by a failed attempt whose session is dead).  Looking
+        only at the own symlink found nothing and relaunched the next
+        iteration over the live question pane (review e2e9 i1).
+        """
+        tdir, _ = env
+        other_dir = tdir / "other"
+        other_dir.mkdir()
+        pane2 = Pane(other_dir, 2)
+        pane2.verdict("INPUT_REQUIRED", "Which option?")
+        if own == "dead":
+            dead_sid = str(uuid.uuid4())
+            (tdir / f"{dead_sid}.jsonl").write_text("")
+            (tdir / f"review-{PR_ID}-i2.jsonl").symlink_to(
+                tdir / f"{dead_sid}.jsonl")
+        monkeypatch.setattr(rl, "_find_review_claude_pane",
+                            lambda *a, **k: "%9")
+        monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                            lambda *a, **k: pane2.native)
+        panes = {}
+        release3 = threading.Event()
+
+        def it3():
+            panes[3] = Pane(tdir, 3)
+            release3.wait(10)
+            return panes[3].verdict("PASS")
+
+        state = _restored(tdir, 2, ["NEEDS_WORK", "INPUT_REQUIRED"])
+        t, mock, p = _start(state, tdir, {3: it3})
+        try:
+            _until(lambda: state.running, what="resume started")
+            time.sleep(0.2)
+            # The live question is adopted, not relaunched over.
+            assert state.input_required and mock.call_count == 0
+            assert _status(state)[:2] == (
+                "waiting", "review INPUT_REQUIRED (iteration 2)")
+
+            pane2.user("option B")
+            _until(lambda: not state.input_required, what="answer on adopted pane")
+            pane2.verdict("NEEDS_WORK")
+            _until(lambda: state.iteration == 3 and 3 in panes, what="iteration 3")
+            assert state.history[1].verdict == "NEEDS_WORK"
+            release3.set()
+            t.join(5)
+            assert state.latest_verdict == "PASS"
+        finally:
+            release3.set()
+            state.stop_requested = True
+            p.stop()
+
     def test_adopting_wait_is_not_reported_as_an_answered_follow_up(self):
         """A restored wait whose adopt check has not run is neither live nor
         answered: status must not claim "INPUT_REQUIRED answered"."""
