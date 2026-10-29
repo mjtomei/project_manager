@@ -488,3 +488,49 @@ server, session env, global env and hooks all correct; the default server
 untouched).
 
 Full suite: 4143 passed / 1 skipped.
+
+## Master integration (2026-10-29)
+
+`origin/master` @ `4a74d88085edffcc300cb21f31777a798d647782` (merge base
+`89e3c501`) was merged into this branch, 215 commits.  No textual conflicts.
+One **semantic** conflict that a clean auto-merge could not catch:
+
+1. **`_find_tui_pane()` gained a second owner while this PR was open.**
+   Master added `_find_live_tui_pane()` / `_live_panes_and_tuis()` and a test
+   asserting that `_find_tui_pane("pm-test")` still returns the recorded pane
+   even when it is dead, because `pm autostart` reports a stale pidfile from
+   it.  This PR had made `_find_tui_pane()` liveness-aware (i2) and required
+   the session to exist.  Reconciled by responsibility:
+   - explicit-session branch: returns the **recorded** pane with no
+     `session_exists`/`pane_exists` gate (new `_recorded_tui_pane()`), so
+     master's autostart contract and the i2 "return the session name even
+     when it is gone" rule both hold;
+   - in-tmux, cwd and cross-server branches: keep the liveness check
+     (`_registry_tui_pane()`), because there the answer decides *which
+     server* is being addressed;
+   - `pm qa regression` was the one pane-*driving* caller still using
+     `_find_tui_pane()`; it now uses `_find_live_tui_pane()`, which is
+     master's sanctioned live-pane filter.  The i2 requirement (the runner
+     drives the pane, so it must be alive) is unchanged — only the mechanism
+     moved to the shared helper.
+2. **Discovery must degrade when tmux cannot run.**
+   `tmux.find_session_server()` now returns `(None, False)` on `OSError`
+   (tmux missing/unexecutable) instead of propagating out of
+   `_select_session_socket()` and `_find_tui_pane()`.  Master's
+   `test_tmux_unavailable_degrades_to_no_live_tui` documents the contract.
+3. The preserved smoke script's default-server probe now passes
+   `-S str(paths.default_socket_path())` instead of relying on a bare
+   `tmux` (the R4.3 lesson: the binary follows `$TMUX` when no `-S` is
+   given).
+
+Also committed on top of the merge: the interrupted working tree from the
+2026-10-29 test-session-leak restart (shared `_resolve_target_session()` for
+`pm session kill`/`mobile`, flag validation before `--print-connect` prints
+a command, and their tests).  It was verified byte-identical to the
+shepherd's preserved `pr-278/dirty.patch` before being committed.
+
+Validation on the integrated head:
+- full suite: **4557 passed / 1 skipped**;
+- `pm/specs/pr-073910f/session_start_smoke.py` re-run end-to-end on a
+  disposable socket (private server, session env, global env and hooks
+  correct; default server untouched).

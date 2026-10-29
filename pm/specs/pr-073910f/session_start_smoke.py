@@ -84,8 +84,11 @@ r = run("show-hooks", "-g")
 assert "after-kill-pane" in r.stdout and "run-shell" in r.stdout, r.stdout
 print("HOOKS: after-kill-pane present")
 
-# The unique test session must not exist on the default server.
-r = subprocess.run(["tmux", "has-session", "-t", name],
+# The unique test session must not exist on the default server.  Address
+# that server by its explicit socket (R4.3): a bare ``tmux`` would follow
+# $TMUX, and "the default server" must never depend on ambient state.
+r = subprocess.run(["tmux", "-S", str(paths.default_socket_path()),
+                    "has-session", "-t", name],
                    capture_output=True, text=True)
 assert r.returncode != 0, "test session leaked onto the default server!"
 print("DEFAULT SERVER: no such session (correct)")

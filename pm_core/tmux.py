@@ -179,7 +179,9 @@ def find_session_server(session_name: str) -> tuple[str | None, bool]:
     inside a pm pane names that session's private server.
 
     Returns ``(None, False)`` when the session is running on neither
-    server.  ``session_name`` may carry a grouped-session ``~N`` suffix.
+    server, or when tmux cannot be run at all (callers degrade to "no
+    session" instead of crashing).  ``session_name`` may carry a
+    grouped-session ``~N`` suffix.
     """
     from pm_core.paths import default_socket_path, session_socket_path
 
@@ -187,12 +189,16 @@ def find_session_server(session_name: str) -> tuple[str | None, bool]:
     # tmux.py is the lower-level module and should not depend on the
     # registry.
     base = session_name.split("~", 1)[0]
-    if base.startswith("pm-"):
-        sock = str(session_socket_path(base.removeprefix("pm-")))
-        if session_exists(base, socket_path=sock):
-            return sock, True
-    if session_exists(base, use_env=False):
-        return str(default_socket_path()), False
+    try:
+        if base.startswith("pm-"):
+            sock = str(session_socket_path(base.removeprefix("pm-")))
+            if session_exists(base, socket_path=sock):
+                return sock, True
+        if session_exists(base, use_env=False):
+            return str(default_socket_path()), False
+    except OSError:
+        # tmux is not installed or not executable; no server can host it.
+        return None, False
     return None, False
 
 
