@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -243,6 +244,45 @@ def test_dangling_symlink_falls_back_to_session_id_glob(
     symlink.symlink_to(expected_dir / f"{sid}.jsonl")
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+
+    assert extract_verdict_from_transcript(symlink, VERDICTS) == "PASS"
+
+
+def test_unreadable_transcript_falls_back_to_session_id_glob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The pre-existing reader tried the path and, on any read error, fell
+    # back to the session-id glob.  A path that *exists* but cannot be read
+    # (another user's file, a restrictive mode) must keep that behaviour:
+    # returning it would read as an empty transcript and a verdict present
+    # in a readable copy elsewhere would never be seen.
+    sid = "abcdef01-2345-6789-abcd-ef0123456789"
+    fake_home = tmp_path / "home"
+    projects = fake_home / ".claude" / "projects"
+    actual_dir = projects / "-where-claude-actually-wrote"
+    actual_dir.mkdir(parents=True)
+    readable = actual_dir / f"{sid}.jsonl"
+    readable.write_text("\n".join([
+        _user_line("q"),
+        _assistant_line("Verdict on its own line:\nPASS\n"),
+    ]) + "\n")
+
+    # The symlink target exists (so ``is_file()`` is True) but is reported
+    # unreadable, and its content is a *different* verdict — so the
+    # assertion can tell the two paths apart.
+    unreadable = tmp_path / f"{sid}.jsonl"
+    unreadable.write_text("\n".join([
+        _user_line("q"),
+        _assistant_line("NEEDS_WORK\n"),
+    ]) + "\n")
+    symlink = tmp_path / "iter-1.jsonl"
+    symlink.symlink_to(unreadable)
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+    real_access = os.access
+    monkeypatch.setattr(
+        "pm_core.verdict_transcript.os.access",
+        lambda p, mode: False if Path(p) == symlink else real_access(p, mode))
 
     assert extract_verdict_from_transcript(symlink, VERDICTS) == "PASS"
 

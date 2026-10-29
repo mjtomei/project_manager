@@ -39458,7 +39458,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-29T03:47:48.688464+00:00'
+  updated_at: '2026-10-29T04:26:28.036630+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40003,6 +40003,37 @@ prs:
       the known env-only hook-installer failure (not touched by this PR).'
     created_at: '2026-10-29T03:47:48Z'
     last_edited: '2026-10-29T03:47:48Z'
+  - id: note-58dfed3
+    text: 'review-loop d9f2 i4: no change to the fresh flow''s design. (1) handoff_ready
+      now also requires pr["status"] == "in_progress": the marker is consumed when
+      the review starts, but a consume whose locked write failed leaves it armed,
+      and a later bounce to in_progress (e.g. a sign-off return whose relaunch has
+      not run yet) could hand off a second review over the old turn; the guard test
+      was verified to fail without the fix and the test module''s _marker_pr gained
+      the status a real fresh-waiting PR has. (2) retire_in_memory now releases a
+      running old review loop''s cross-driver launch lease (exactly as the z d / zz
+      d supersede paths do): the successor review this attempt''s handoff starts claims
+      the lease *before* discovery, so a lease still held by the stopping old loop
+      made it sit in _wait_for_claim (up to REVIEW_LAUNCH_CLAIM_WAIT, 15 s) and, if
+      the old thread were slower, stand down as "superseded" (non-retryable), leaving
+      the fresh attempt in in_review with no review. (3) _resolve_transcript_file
+      now also requires os.access(p, R_OK): the i2 refactor onto the resolver dropped
+      the old "read it, else session-id glob" fallback for a transcript path that
+      exists but cannot be read (EACCES), so the verdict reader saw an empty transcript;
+      new test verified to fail without the fix. (4) pm autostart add/fresh now share
+      cli/autostart._chosen_policy() (the 7-line flag block was copied verbatim and
+      fresh''s conflict branch had no test) + two CLI tests, which also cover qa.md
+      R6 item 26. (5) autostart_fresh''s duplicate _review_window_name helper dropped
+      (the log line names the PR id). (6) Test gaps closed: the two error branches
+      of the TUI key path (_fresh_autostart_from_key) had no coverage — a raising
+      fresh_start must be logged, never traceback into Textual, and a refusal must
+      reach the log line with its message. Non-blocking observation: z a runs fresh_start
+      synchronously on the UI thread, and when the implementation turn is already
+      complete that includes the inline `pr review --no-window` subprocess (the same
+      work the 5 s poll already does); relevant if the open TUI-latency work (#6412997)
+      ever makes key handlers async. Spec updated with the i4 notes.'
+    created_at: '2026-10-29T04:26:27Z'
+    last_edited: '2026-10-29T04:26:27Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

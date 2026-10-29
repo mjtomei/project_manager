@@ -1036,3 +1036,52 @@ behavioural adaptation are below.
   bookkeeping clear (R4), an observable ordering assertion for the QA
   tracker-key/sentinel sequence, and an assertion that the `z` prefix timer is
   armed with `_Z_PREFIX_TIMEOUT` and the real cancel callback.
+
+## Review-iteration notes (d9f2 i4)
+
+* **The old loop's launch lease is released with the rest of its state** —
+  `retire_in_memory` pops the loop and kills its review window exactly like
+  the ``z d`` / ``zz d`` supersede paths, but those two also call
+  ``_release_lease`` immediately and the fresh reset did not.  The successor
+  review that this attempt's handoff starts claims the cross-driver launch
+  lease *before* it discovers/launches, so it would sit in
+  ``_wait_for_claim`` until the old loop's thread reached its completion
+  callback (bounded by ``REVIEW_LAUNCH_CLAIM_WAIT``, 15 s — the same order as
+  the old loop's own shutdown) and, if that callback were slower still, stand
+  down as ``superseded`` (non-retryable), leaving the fresh attempt in
+  ``in_review`` with no review.  `retire_in_memory` now releases it for a
+  running loop (a finished loop released its own).  Pinned by
+  ``TestRetirement::test_the_old_loops_launch_lease_is_released`` and
+  ``test_a_finished_loop_has_no_lease_to_release``.
+* **`_resolve_transcript_file` keeps the old "read it, else search"
+  behaviour** — the d9f2 i2 refactor of the reader onto the resolver changed
+  one case: a transcript path that *exists* but cannot be read (EACCES — a
+  restrictive mode, another user's file) used to fall through to the
+  session-id glob and find a readable copy; ``is_file()`` alone returned it,
+  so the reader saw an empty transcript and a review-verdict poll could never
+  find its verdict.  The resolver now requires ``os.access(p, R_OK)`` as
+  well.  Pinned by
+  ``tests/test_verdict_transcript.py::test_unreadable_transcript_falls_back_to_the_session_id_glob``
+  (verified to fail without the fix).
+* **One fewer copy of the review-window name** — `autostart_fresh` carried its
+  own `_review_window_name` used only for a log line, duplicating the name
+  `park_and_kill_review_window` (and `review_loop._compute_review_window_name`)
+  already build.  The log line names the PR id instead; no behaviour change.
+* **`add` and `fresh` share one policy-flag resolver** — the 7-line
+  "at most one distinct policy; `--stop-before-merge` is an alias" block was
+  copied verbatim into `pm autostart fresh`, so a later flag change could
+  drift between the two commands.  Both now call
+  `cli/autostart._chosen_policy()`; `fresh`'s branch had no test at all, so
+  `TestCli::test_fresh_rejects_conflicting_flags_before_sending` and
+  `test_fresh_accepts_the_deprecated_alias` pin it (nothing is sent to the
+  owner on a contradiction; the alias is one choice, not a conflict).
+* **The handoff only advances a PR that is back in implementation** — the
+  fresh marker is consumed by ``_auto_review_idle_prs`` when the review
+  starts, but a consume whose locked write failed leaves it armed
+  indefinitely, and ``handoff_ready`` gated on nothing else: a later bounce
+  to ``in_progress`` (e.g. a sign-off return whose relaunch has not run yet)
+  could then hand off a second review over the old turn.  The check now
+  returns False unless ``pr["status"] == "in_progress"``.  Pinned by
+  ``TestHandoff::test_an_armed_marker_outside_implementation_does_not_hand_off``
+  (verified to fail without the guard); ``_marker_pr`` in the test module
+  gained the status a real fresh-waiting PR always has.

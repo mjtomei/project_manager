@@ -87,10 +87,13 @@ def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
         return None
     p = Path(transcript_path)
     try:
-        # A readable file (including a symlink to one).  Directories are not
-        # transcripts — fall through to the session-id glob so the previous
-        # "read it, else search" behaviour is preserved.
-        if p.is_file():
+        # A *readable* file (including a symlink to one).  Anything else —
+        # a directory, a dangling symlink, or a file this process may not
+        # read — falls through to the session-id glob, which is what the
+        # previous "read it, else search" behaviour did (an EACCES on the
+        # symlink target reached the glob too, so the verdict was still
+        # found when a readable copy existed elsewhere).
+        if p.is_file() and os.access(p, os.R_OK):
             return p
     except OSError:
         pass

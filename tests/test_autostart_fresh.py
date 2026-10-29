@@ -272,8 +272,10 @@ class _Tracker:
         return self.gone
 
 
-def _marker_pr(requested_at):
-    return {"id": "pr-a", "workdir": "/w",
+def _marker_pr(requested_at, status="in_progress"):
+    # A fresh attempt is by definition back in implementation: the handoff
+    # refuses to advance for any other status (see ``handoff_ready``).
+    return {"id": "pr-a", "workdir": "/w", "status": status,
             FRESH_KEY: {"requested_at": requested_at,
                         "awaiting_handoff": True}}
 
@@ -371,6 +373,22 @@ class TestHandoff:
         pr["signoff_return"] = {"verdict": "SIGNOFF_IMPL", "hop": "impl",
                                 "awaiting": "impl"}
         assert not autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+
+    def test_an_armed_marker_outside_implementation_does_not_hand_off(
+            self, tmp_path):
+        # The marker is only meaningful while the PR is back in implementation.
+        # ``_auto_review_idle_prs`` consumes it when the review starts, but a
+        # consume whose locked write failed leaves it armed; a later bounce to
+        # in_progress (e.g. a sign-off return whose relaunch has not run yet)
+        # must not hand off a second review over the old turn.
+        path = _transcript(tmp_path, [_complete()])
+        pr = _marker_pr(st.now_iso(), status="in_review")
+        assert not autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+        pr["status"] = "qa"
+        assert not autostart_fresh.handoff_ready(None, pr, _Tracker(path))
+        # In implementation (the only legitimate state) it still advances.
+        pr["status"] = "in_progress"
+        assert autostart_fresh.handoff_ready(None, pr, _Tracker(path))
 
     def test_consume_handoff_clears_marker(self, project):
         pm_dir = project
@@ -1238,6 +1256,35 @@ class TestKeyBindings:
         assert calls == []
         assert any("No PR selected" in line for line in app.logs)
 
+    def test_a_raising_fresh_start_is_logged_not_raised(self, monkeypatch):
+        # The key path must never traceback into Textual: a destructive
+        # action that fails has to say so on the log line and leave the app
+        # usable.
+        from pm_core.tui.app import ProjectManagerApp
+
+        def boom(*_a, **_k):
+            raise RuntimeError("store exploded")
+
+        monkeypatch.setattr(autostart_fresh, "fresh_start", boom)
+        app = _KeyApp(z=1, pr_id="pr-a")
+        ProjectManagerApp.action_show_auto_runs(app)  # must not raise
+        assert any("Auto-start fresh failed: store exploded" in line
+                   for line in app.logs)
+
+    def test_a_refused_fresh_start_names_the_reason(self, monkeypatch):
+        # A rejection (wrong stage, merge in flight, ...) must reach the log
+        # line with its stage-specific message, not fail silently.
+        from pm_core.tui.app import ProjectManagerApp
+        monkeypatch.setattr(
+            autostart_fresh, "fresh_start",
+            lambda *_a, **_k: {"ok": False, "error": "not_later_stage",
+                               "message": "pr-a is pending; fresh autostart "
+                                          "applies to in_review / qa / "
+                                          "sign_off PRs"})
+        app = _KeyApp(z=1, pr_id="pr-a")
+        ProjectManagerApp.action_show_auto_runs(app)
+        assert any("pr-a is pending" in line for line in app.logs)
+
 
 class _PrefixApp:
     """Minimal app for the App-level ``on_key`` prefix handler."""
@@ -1572,9 +1619,45 @@ class TestRetirement:
         app._review_loops["pr-a"] = loop
         with patch("pm_core.runtime_state.get_action_state",
                    return_value={}), \
-             patch("pm_core.runtime_state.set_action_state"):
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch("pm_core.review_loop._release_lease"):
             autostart_fresh.retire_in_memory(app, _pr())
         assert loop.stop_requested
+
+    def test_the_old_loops_launch_lease_is_released(self):
+        # The successor review this attempt starts claims the cross-driver
+        # launch lease *before* it discovers/launches, so the old loop must
+        # give its lease up now — exactly what the z d / zz d supersede paths
+        # do.  Otherwise the successor sits in ``_wait_for_claim`` until the
+        # old thread reaches its completion callback (or, if that is slower
+        # than REVIEW_LAUNCH_CLAIM_WAIT, stands down as "superseded" and
+        # leaves the fresh attempt in in_review with no review).
+        app = FakeApp([_pr()])
+        loop = ReviewLoopState(pr_id="pr-a", running=True)
+        app._review_loops["pr-a"] = loop
+        released = []
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch("pm_core.review_loop._release_lease",
+                   side_effect=lambda st: released.append(st)):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert released == [loop]
+
+    def test_a_finished_loop_has_no_lease_to_release(self):
+        # A loop that already finished released its lease at completion; the
+        # retirement must not do a second (harmless but pointless) release.
+        app = FakeApp([_pr()])
+        app._review_loops["pr-a"] = ReviewLoopState(pr_id="pr-a",
+                                                    running=False)
+        released = []
+        with patch("pm_core.runtime_state.get_action_state",
+                   return_value={}), \
+             patch("pm_core.runtime_state.set_action_state"), \
+             patch("pm_core.review_loop._release_lease",
+                   side_effect=lambda st: released.append(st)):
+            autostart_fresh.retire_in_memory(app, _pr())
+        assert released == []
 
     def test_review_loop_sentinel_fences_late_callbacks(self):
         # ``_is_active_loop`` compares the recorded loop_id: the retirement
@@ -1588,7 +1671,8 @@ class TestRetirement:
                    return_value={}), \
              patch("pm_core.runtime_state.set_action_state",
                    side_effect=lambda pid, action, state, **kw:
-                   written.__setitem__(action, (state, kw))):
+                   written.__setitem__(action, (state, kw))), \
+             patch("pm_core.review_loop._release_lease"):
             autostart_fresh.retire_in_memory(app, _pr())
         new_id = written["review-loop"][1]["loop_id"]
         assert new_id and new_id != loop.loop_id
@@ -1849,6 +1933,34 @@ class TestCli:
         assert sent == [("pm-x", ["fresh", "pr-a", "--auto-merge"])]
         assert "fresh: pr-a (in_review → in_progress)" in res.output
         assert "Auto-start fresh: pr-a: waiting" in res.output
+
+    def test_fresh_rejects_conflicting_flags_before_sending(self, cli_project):
+        # ``fresh`` shares ``add``'s flag resolution; two distinct policies
+        # must reject the command locally (nothing sent to the owner).
+        with patch("pm_core.cli.autostart.submit_tui_command") as sub:
+            res = _cli(["fresh", "pr-a", "--stop-before-merge",
+                        "--auto-merge", "--json", "-s", "pm-x"])
+        assert res.exit_code == 1, res.output
+        out = json.loads(res.output)
+        assert out["error"] == "conflicting_flags"
+        assert "--wait-for-merge" in out["message"]
+        sub.assert_not_called()
+
+    def test_fresh_accepts_the_deprecated_alias(self, cli_project):
+        # ``--stop-before-merge`` and ``--wait-for-merge`` are one choice,
+        # not a conflict, and both map to the manual policy.
+        sent = []
+
+        def fake_request(session, args, timeout):
+            sent.append(args)
+            return {"ok": True, "changes": [], "status": {}}
+
+        with patch("pm_core.cli.autostart._request",
+                   side_effect=fake_request):
+            res = _cli(["fresh", "pr-a", "--stop-before-merge",
+                        "--wait-for-merge", "-s", "pm-x"])
+        assert res.exit_code == 0, res.output
+        assert sent == [["fresh", "pr-a", "--wait-for-merge"]]
 
     def test_failed_reply_prints_the_error_once(self, cli_project):
         # The owner's failure message is reported by `_finish`'s Error line;

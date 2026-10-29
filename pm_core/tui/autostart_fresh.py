@@ -213,11 +213,6 @@ def reset_pr(root: Path, pr_id: str, source: str,
 # Retiring the old attempt's live/in-memory state
 # ---------------------------------------------------------------------------
 
-def _review_window_name(pr: dict) -> str:
-    from pm_core.cli.helpers import _pr_display_id
-    return f"review-{_pr_display_id(pr)}"
-
-
 def retire_in_memory(app, pr: dict) -> None:
     """Drop the old attempt's loop/QA/sign-off state (evidence is kept).
 
@@ -234,6 +229,16 @@ def retire_in_memory(app, pr: dict) -> None:
     loop = app._review_loops.pop(pr_id, None)
     if loop is not None and getattr(loop, "running", False):
         loop.stop_requested = True
+        # Give up the old loop's cross-driver launch lease now, exactly as the
+        # ``z d`` / ``zz d`` supersede paths do.  The successor review this
+        # attempt starts claims the lease *before* it discovers/launches, and
+        # the old loop's lease otherwise lives until its thread reaches the
+        # completion callback — up to ``REVIEW_LAUNCH_CLAIM_WAIT`` (15 s),
+        # which is how long the successor would then sit in
+        # ``_wait_for_claim`` (and, if the old thread is slower still, the
+        # successor stands down as "superseded" and the fresh attempt is left
+        # in ``in_review`` with no review).
+        _release_loop_lease(loop)
     if loop is not None:
         _kill_review_window(app, pr)
 
@@ -325,6 +330,16 @@ def _retire_runtime_action(pr_id: str, action: str, state_obj, now: str,
                    action, pr_id, exc_info=True)
 
 
+def _release_loop_lease(loop) -> None:
+    """Release a popped loop's cross-driver launch lease (best-effort)."""
+    try:
+        from pm_core.review_loop import _release_lease
+        _release_lease(loop)
+    except Exception:
+        _log.debug("autostart_fresh: lease release failed for %s",
+                   getattr(loop, "pr_id", "?"), exc_info=True)
+
+
 def _kill_review_window(app, pr: dict) -> None:
     """Kill the PR's review window so a live loop's poll exits promptly."""
     session = getattr(app, "_session_name", None)
@@ -332,8 +347,7 @@ def _kill_review_window(app, pr: dict) -> None:
         return
     from pm_core.tui.review_loop_ui import park_and_kill_review_window
     if park_and_kill_review_window(session, pr):
-        _log.info("autostart_fresh: killed review window %s",
-                  _review_window_name(pr))
+        _log.info("autostart_fresh: killed review window for %s", pr["id"])
 
 
 def retire_downstream(app, pr: dict) -> None:
@@ -475,8 +489,19 @@ def handoff_ready(app, pr: dict, tracker) -> bool:
     no session id to look the event up by, so nothing can advance: the
     scheduler's in-progress relaunch (or the poll's pane re-adoption) has to
     restore a resolvable transcript first.
+
+    The PR must still be ``in_progress``: the marker only means anything while
+    the PR is back in implementation (see the guard below).
     """
     if not fresh_awaiting(pr):
+        return False
+    if pr.get("status") != "in_progress":
+        # The marker only means anything while the PR is back in
+        # implementation.  ``_auto_review_idle_prs`` consumes it when the
+        # review starts, but a consume whose locked write failed leaves it
+        # armed: without this guard a later bounce to ``in_progress`` (e.g. a
+        # sign-off return whose relaunch has not happened yet) could hand off
+        # a second review over the old turn.
         return False
     if pr.get("spec_pending"):
         # The existing spec gate owns the next step; do not advance.

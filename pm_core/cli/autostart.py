@@ -276,6 +276,23 @@ def autostart():
     """
 
 
+def _chosen_policy(wait: bool, auto: bool, stop: bool) -> str | None:
+    """The single merge policy the CLI flags select (None = no flag given).
+
+    ``--stop-before-merge`` is the deprecated alias for ``--wait-for-merge``,
+    so the two are one choice; two *distinct* policies are a contradiction
+    that rejects the whole command before anything is sent to the owner.
+    Shared by ``add`` and ``fresh`` so their flag handling cannot drift.
+    """
+    chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
+                              (POLICY_AUTO, auto)) if on]
+    if len(chosen) > 1:
+        flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
+        raise _Fail(EXIT_INVALID, "conflicting_flags",
+                    f"conflicting merge policies: {flags}")
+    return chosen[0] if chosen else None
+
+
 @autostart.command("add")
 @click.argument("pr_ids", nargs=-1)
 @click.option("--wait-for-merge", "wait", is_flag=True,
@@ -308,16 +325,11 @@ def autostart_add(pr_ids, wait, auto, stop, session, timeout, as_json):
     unblocked — no further autostart command needed.
     """
     try:
-        chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
-                                  (POLICY_AUTO, auto)) if on]
-        if len(chosen) > 1:
-            flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
-            raise _Fail(EXIT_INVALID, "conflicting_flags",
-                        f"conflicting merge policies: {flags}")
+        chosen = _chosen_policy(wait, auto, stop)
         ids = _validate(pr_ids, for_add=True)
         args = ["add", *ids]
         if chosen:
-            args.append(POLICY_FLAGS[chosen[0]])
+            args.append(POLICY_FLAGS[chosen])
         payload = _request(session, args, timeout)
     except _Fail as f:
         _emit_fail(f, as_json)
@@ -360,16 +372,11 @@ def autostart_fresh(pr_ids, wait, auto, stop, session, timeout, as_json):
     is a no-op.
     """
     try:
-        chosen = [p for p, on in ((POLICY_WAIT, wait or stop),
-                                  (POLICY_AUTO, auto)) if on]
-        if len(chosen) > 1:
-            flags = ", ".join(POLICY_FLAGS[p] for p in chosen)
-            raise _Fail(EXIT_INVALID, "conflicting_flags",
-                        f"conflicting merge policies: {flags}")
+        chosen = _chosen_policy(wait, auto, stop)
         ids = _validate(pr_ids, for_add=True)
         args = ["fresh", *ids]
         if chosen:
-            args.append(POLICY_FLAGS[chosen[0]])
+            args.append(POLICY_FLAGS[chosen])
         payload = _request(session, args, timeout)
     except _Fail as f:
         _emit_fail(f, as_json)
