@@ -684,8 +684,8 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         raise SystemExit(1)
     if print_connect:
         # Every session lives on its own server; print that socket's attach
-        # command.  Legacy sessions still on the default server get a plain
-        # `tmux attach -t`.
+        # command.  Legacy sessions still on the default server get the
+        # default server's explicit socket plus `-t <session>`.
         from pm_core.paths import session_socket_path
         if start_dir:
             from pm_core.paths import get_session_tag
@@ -703,8 +703,11 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         sp = str(session_socket_path(session_name.removeprefix("pm-")))
         hosting_socket, on_private = tmux_mod.find_session_server(session_name)
         if hosting_socket is not None and not on_private:
-            # Legacy session on the default server: no -S needed.
-            click.echo(f"tmux attach -t {session_name}")
+            # Legacy session on the default server.  Name the socket *and*
+            # the session: a bare `tmux attach` follows $TMUX (the wrong
+            # server when pasted into another pm pane), and one default
+            # server can host several legacy pm sessions.
+            click.echo(f"tmux -S {hosting_socket} attach -t {session_name}")
         else:
             click.echo(f"tmux -S {sp} attach")
         return
@@ -782,11 +785,14 @@ def session_kill(start_dir):
     hosting_socket, on_private = tmux_mod.find_session_server(session_name)
     if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
-        # A stale socket file from a crashed server is safe to remove.
-        try:
-            Path(socket_path).unlink(missing_ok=True)
-        except OSError:
-            pass
+        # Remove the socket file only when no server answers on it.  A live
+        # server can still host grouped sessions after its base session was
+        # killed elsewhere; unlinking its socket would strand those clients.
+        if not tmux_mod.server_alive(socket_path):
+            try:
+                Path(socket_path).unlink(missing_ok=True)
+            except OSError:
+                pass
         raise SystemExit(1)
 
     # Kill grouped sessions first, then the base, on the hosting server.

@@ -232,6 +232,16 @@ class TestFindSessionServer:
         monkeypatch.setattr(tmux, "session_exists", lambda *a, **kw: False)
         assert tmux.find_session_server("pm-gone") == (None, False)
 
+    def test_tmux_unavailable_degrades_to_none(self, monkeypatch, tmp_path):
+        """A missing/broken tmux must not crash discovery."""
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+
+        def boom(*a, **kw):
+            raise OSError("no tmux")
+
+        monkeypatch.setattr(tmux, "session_exists", boom)
+        assert tmux.find_session_server("pm-repo-abc") == (None, False)
+
     def test_non_pm_name_only_checks_default(self, monkeypatch, tmp_path):
         """A plain tmux session must never be mapped to a pm socket."""
         seen: list[str | None] = []
@@ -682,13 +692,15 @@ class TestSessionKillServerSelection:
     """``pm session kill`` must target the server that hosts the session."""
 
     def _invoke(self, monkeypatch, tmp_path, hosting, *, ambient=None,
-                hosting_for=None):
+                hosting_for=None, alive=False):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
         from pm_core import container, push_proxy
 
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
         monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda sock: alive)
         monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
                             lambda: "pm-repo-abc")
         monkeypatch.setattr(session_mod, "_known_ambient_session",
@@ -744,6 +756,22 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 1
         assert killed == []
         assert not stale.exists()
+
+    def test_missing_session_keeps_a_live_socket(self, monkeypatch, tmp_path):
+        """A live server may host only grouped sessions; keep its socket.
+
+        ``find_session_server`` reports "not found" when the base session is
+        gone, but the server can still be running (``pm-x~1`` survived).
+        Unlinking its socket would strand every client attached to it.
+        """
+        sock = tmp_path / "pm-repo-abc"
+        sock.write_text("")
+        result, killed = self._invoke(monkeypatch, tmp_path, (None, False),
+                                      alive=True)
+
+        assert result.exit_code == 1
+        assert killed == []
+        assert sock.exists()
 
     def test_kills_the_ambient_session_when_the_cwd_one_is_absent(
             self, monkeypatch, tmp_path):
@@ -938,12 +966,19 @@ class TestPrintConnect:
         assert result.exit_code == 0, result.output
         assert result.output.strip() == f"tmux -S {sock} attach"
 
-    def test_legacy_session_prints_plain_attach(self, monkeypatch, tmp_path):
+    def test_legacy_session_prints_default_socket_attach(self, monkeypatch,
+                                                         tmp_path):
+        """A legacy session is named *and* its server addressed explicitly.
+
+        A bare `tmux attach -t` follows $TMUX, so pasting it into another
+        pm pane would reach that pane's private server.
+        """
         default = str(paths.default_socket_path())
         result = self._invoke(monkeypatch, tmp_path, (default, False))
 
         assert result.exit_code == 0, result.output
-        assert result.output.strip() == "tmux attach -t pm-repo-abc"
+        assert result.output.strip() == (
+            f"tmux -S {default} attach -t pm-repo-abc")
 
     def test_dir_without_share_flags_is_rejected(self, monkeypatch, tmp_path):
         """`--dir` only means "join a shared session", as for `pm session`."""
@@ -1012,20 +1047,36 @@ class TestShowConnect:
         screen = app.push_screen.call_args[0][0]
         assert screen._command == "tmux -S /tmp/pm-sessions/pm-x attach"
 
-    def test_legacy_session_shows_plain_attach(self, monkeypatch, tmp_path):
+    def test_legacy_session_shows_default_socket_attach(self, monkeypatch):
         from pm_core.tui import pane_ops
 
         monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
-        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
-        monkeypatch.setattr(pane_ops.tmux_mod, "session_exists",
-                            lambda *a, **kw: False)
+        monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
+                            lambda name: (str(paths.default_socket_path()),
+                                          False))
         app = MagicMock()
         app._session_name = "pm-x"
 
         pane_ops.show_connect(app)
 
         screen = app.push_screen.call_args[0][0]
-        assert screen._command == "tmux attach -t pm-x"
+        assert screen._command == (
+            f"tmux -S {paths.default_socket_path()} attach -t pm-x")
+
+    def test_private_session_without_env_shows_its_socket(self, monkeypatch):
+        """No PM_TMUX_SOCKET (e.g. a hand-started TUI): probe the server."""
+        from pm_core.tui import pane_ops
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(pane_ops.tmux_mod, "find_session_server",
+                            lambda name: ("/tmp/pm-sessions/pm-x", True))
+        app = MagicMock()
+        app._session_name = "pm-x"
+
+        pane_ops.show_connect(app)
+
+        screen = app.push_screen.call_args[0][0]
+        assert screen._command == "tmux -S /tmp/pm-sessions/pm-x attach"
 
     def test_no_session_reports_instead_of_a_command(self, monkeypatch):
         from pm_core.tui import pane_ops
@@ -1201,6 +1252,20 @@ class TestServerIsolationIntegration:
                          "-t", f"{base}~1").returncode == 0
         finally:
             _close(proc, sock)
+
+    def test_server_alive_distinguishes_stale_from_live(self, short_sock_dir):
+        """Only a socket no server answers on may be removed."""
+        sock = short_sock_dir / "alive.sock"
+        assert tmux.server_alive(str(sock)) is False  # no server, no file
+        _make_server(sock, "pm-iso-live")
+        try:
+            assert tmux.server_alive(str(sock)) is True
+        finally:
+            _tmux(sock, "kill-server")
+        # tmux leaves the socket file behind; the server is gone.
+        assert Path(sock).exists()
+        assert tmux.server_alive(str(sock)) is False
+        Path(sock).unlink(missing_ok=True)
 
     def test_hooks_are_per_server(self, short_sock_dir):
         sock_a = short_sock_dir / "a.sock"

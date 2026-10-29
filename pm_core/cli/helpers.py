@@ -1504,8 +1504,8 @@ def _find_live_tui_pane(
     live_ids, live_tuis = _live_panes_and_tuis()
     if pane_id and pane_id in live_ids:
         return pane_id, sess
-    base = sess.rsplit("~", 1)[0]
+    base = pane_registry.base_session_name(sess)
     for tui_id, tui_sess in live_tuis:
-        if tui_sess.rsplit("~", 1)[0] == base:
+        if pane_registry.base_session_name(tui_sess) == base:
             return tui_id, sess
     return None, sess

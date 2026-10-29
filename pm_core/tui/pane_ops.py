@@ -739,15 +739,21 @@ def show_connect(app) -> None:
     """Show the tmux connect command for this session's server."""
     socket_path = os.environ.get("PM_TMUX_SOCKET")
     session = getattr(app, "_session_name", None)
+    target = ""
     if not socket_path and session:
-        # Legacy (pre-isolation) session: no socket env, and its private
-        # socket does not exist yet.  Only offer -S for a live private one.
-        from pm_core.paths import session_socket_path
-        candidate = str(session_socket_path(session.removeprefix("pm-")))
-        if tmux_mod.session_exists(session, socket_path=candidate):
-            socket_path = candidate
+        # No socket in the environment: a legacy (pre-isolation) session on
+        # the default server, or a TUI started outside tmux.  Ask tmux which
+        # server actually hosts it, and name the session explicitly for the
+        # default server: a bare `tmux attach` follows $TMUX (the wrong
+        # server when pasted into another pm pane), and one default server
+        # can host several legacy pm sessions.
+        hosting, on_private = tmux_mod.find_session_server(session)
+        if hosting is not None:
+            socket_path = hosting
+            if not on_private:
+                target = f" -t {session}"
     if socket_path:
-        command = f"tmux -S {socket_path} attach"
+        command = f"tmux -S {socket_path} attach{target}"
     elif session:
         command = f"tmux attach -t {session}"
     else:

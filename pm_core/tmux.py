@@ -166,6 +166,28 @@ def session_exists(name: str, socket_path: str | None = None,
     return result.returncode == 0
 
 
+def server_alive(socket_path: str) -> bool:
+    """Return True when a tmux server answers on *socket_path*.
+
+    Tells a stale socket file (server gone, safe to unlink) from a live
+    one whose session set simply no longer contains the name being looked
+    for: a live server can still host grouped sessions after its base
+    session was killed elsewhere, and removing its socket would strand it.
+
+    An unprobeable socket (tmux cannot be run) counts as alive, so nothing
+    is ever deleted on a guess.
+    """
+    try:
+        result = _run(
+            _tmux_cmd("list-sessions", "-F", "#{session_name}",
+                      socket_path=socket_path),
+            text=True,
+        )
+    except OSError:
+        return True
+    return result.returncode == 0
+
+
 def find_session_server(session_name: str) -> tuple[str | None, bool]:
     """Return ``(socket_path, is_private)`` for the server hosting a session.
 

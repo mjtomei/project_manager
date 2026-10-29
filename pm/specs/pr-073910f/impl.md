@@ -534,3 +534,53 @@ Validation on the integrated head:
 - `pm/specs/pr-073910f/session_start_smoke.py` re-run end-to-end on a
   disposable socket (private server, session env, global env and hooks
   correct; default server untouched).
+
+## Review iteration (2026-10-29, review-loop d1c0 i1)
+
+Verification pass over the integrated head; one user-visible fix, one
+consistency tidy, one new test, plus a documented limitation.  No
+requirement changes.
+
+1. **The printed connect command for a *legacy* session still depended on
+   ambient `$TMUX`.**  Both `pm session --print-connect` and the TUI
+   "connect" screen emitted `tmux attach -t <session>` when the session
+   lives on the default server.  That is correct from a plain shell and
+   from inside the same legacy session, but pasted into another pm pane a
+   bare `tmux` follows `$TMUX` and attaches to *that* pane's private
+   server — the exact R4.3 failure mode this PR removes everywhere else.
+   Both now print `tmux -S <default_socket_path()> attach -t <session>`,
+   which is correct from any context (and names the session, because one
+   default server can host several legacy pm sessions).  The TUI screen
+   now resolves the hosting server through `tmux.find_session_server()`
+   instead of probing the private socket itself, so the two surfaces share
+   one implementation.  Tests: `TestPrintConnect` and `TestShowConnect`
+   updated, plus a new "private session without `PM_TMUX_SOCKET`" case.
+2. **`_find_live_tui_pane()` derived the base session name with
+   `rsplit("~", 1)`** while every other call site uses
+   `pane_registry.base_session_name()` (`split("~")[0]`).  Switched to the
+   shared helper for one definition of "grouped session base".
+3. **`find_session_server()`'s `OSError` contract had no direct test.**
+   The master-integration note relies on it degrading to `(None, False)`
+   when tmux cannot run; added `test_tmux_unavailable_degrades_to_none`.
+4. **`pm session kill` unlinked the socket of a *live* server.**  When the
+   session name is not found (`find_session_server()` → `None`) the branch
+   assumed the socket file was stale and removed it.  A live server whose
+   base session was killed elsewhere can still host grouped sessions
+   (`pm-x~1`), and unlinking its socket strands every client attached to
+   it (new clients create a fresh server at the same path).  New
+   `tmux.server_alive(socket_path)` (`list-sessions` on that socket, True
+   when tmux cannot be run so nothing is deleted on a guess) gates the
+   unlink.  Tests: `test_missing_session_keeps_a_live_socket` (mock) and
+   `test_server_alive_distinguishes_stale_from_live` (disposable socket).
+
+Known limitation (documented, not fixed — fail-safe by design): R5b's
+guard accepts an ambient session only when
+`~/.pm/pane-registry/<session>.json` exists in the *current* HOME.  A user
+who joined someone else's `--global`/`--group` session has no registry
+file in their own HOME, so `pm session` run from a **workdir clone** of
+that repo starts a separate session instead of re-joining.  From the repo
+directory itself the cwd-derived tag equals the shared tag, so re-joining
+still works.  This is the same trade-off as the i5 note (deleting the
+registry file while a session is live makes `pm session` create a separate
+session); adopting the ambient session without proof of local ownership is
+what caused the 2026-10-28 incident.

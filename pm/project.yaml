@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T02:00:56.067217+00:00'
+  updated_at: '2026-10-29T02:49:37.339915+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4651,6 +4651,31 @@ prs:
       or unrelated work.'
     created_at: '2026-10-29T02:00:56Z'
     last_edited: '2026-10-29T02:00:56Z'
+  - id: note-d52253e
+    text: 'Review loop d1c0 i1 (no requirement changes; full suite 4561 passed / 1
+      skipped, +4 tests). (1) pm session --print-connect and the TUI connect screen
+      printed a bare "tmux attach -t <session>" for a legacy default-server session:
+      that follows $TMUX when pasted into another pm pane (the R4.3 failure mode)
+      and cannot pick one of several legacy sessions on the default server. Both now
+      print "tmux -S <default_socket_path()> attach -t <session>", and show_connect
+      resolves the hosting server through tmux.find_session_server instead of probing
+      the private socket itself. (2) pm session kill unlinked the private socket file
+      whenever the session name was not found, even when a live server was still answering
+      on it (base session killed elsewhere, grouped sessions alive); unlinking would
+      strand its clients. New tmux.server_alive() gates the unlink and returns True
+      when tmux cannot be run, so nothing is deleted on a guess. (3) _find_live_tui_pane
+      now uses pane_registry.base_session_name() instead of rsplit("~", 1), one definition
+      of a grouped-session base. (4) New tests: find_session_server OSError degrade,
+      missing-session-keeps-a-live-socket, server_alive stale-vs-live on a disposable
+      socket, print-connect/connect-screen legacy command, private-session-without-env
+      connect. Spec updated with a documented limitation: R5b accepts an ambient session
+      only when this HOME has its pane registry, so a collaborator who joined a --global/--group
+      session has no registry file in their own HOME and pm session run from a WORKDIR
+      CLONE of that repo starts a separate session instead of re-joining (from the
+      repo directory itself the cwd tag equals the shared tag, so re-joining still
+      works).'
+    created_at: '2026-10-29T02:49:37Z'
+    last_edited: '2026-10-29T02:49:37Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
