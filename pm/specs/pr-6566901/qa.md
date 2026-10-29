@@ -50,10 +50,15 @@ watcher toggle cannot start a second instance over the live one; escapes the
 `NO_VERDICT` reason in the review/watcher log lines (a bracketed
 `watcher[<type>]` prefix was being eaten as Rich markup); recreates a QA
 window that was killed between runs with a live main pane plus a pruned pane
-registry; and keeps scenarios still waiting on the concurrency cap visible as
+registry; keeps scenarios still waiting on the concurrency cap visible as
 *queued* on the status dashboard instead of overwriting the status file with
 the current launch batch (a queued row used to render as *pending* and vanish
-until the next rewrite).
+until the next rewrite); enforces that every recovery request is a single
+line (a multi-line or padded caller request is collapsed, an empty one falls
+back to the built-in wording so it cannot press Enter on a queued user
+draft); and colours the dashboard's `Overall: STOPPED` dim like the other
+non-result states (`queued` / `interactive`) so a user stop cannot read as a
+missing verdict.
 
 ## Setup (cross-cutting)
 
@@ -221,7 +226,9 @@ outcome, When recovery nudges it, Then the request asks only for the agent's
 own standalone outcome in that role's vocabulary (worker: PASS / NEEDS_WORK /
 INPUT_REQUIRED; verifier: VERIFIED or the FLAGGED block; planner: its
 `QA_PLAN` block), tells it not to redo work or re-run tests, does not replay
-the original prompt, and does not contain a verdict. Given
+the original prompt, does not contain a verdict, and is delivered as exactly
+one line (no embedded newline and no surrounding padding) so the session
+never receives a partial instruction or presses Enter on a queued draft. Given
 `qa-verdict-reminder-timeout` set to a few seconds while the shared settle is
 much larger, Then scenario workers are nudged on that override rather than
 waiting out the shared settle. Given a verifier that emits `VERIFIED` on the
@@ -324,6 +331,11 @@ and reasons.
   verifier outcome blocks finalize even when every scenario passed.
 * **A verdict that lands on the deadline tick** is recorded, not retired:
   the loop re-scans the transcript before reporting a missing outcome.
+* **A recovery request is one line.** Every in-tree request already is; the
+  invariant matters for caller-supplied text, which cannot be reached from a
+  user surface. Live, assert the weaker observable: the request appears in
+  the session's pane as a single submitted line, the original prompt is not
+  replayed, and no partial text is left in the input box afterwards.
 * **A user stop during an episode** is a clean `STOPPED` teardown in every
   phase (planner, workers, finalizer), never `INPUT_REQUIRED`/`NO_VERDICT`,
   and auto-start must not relaunch the stopped run.
@@ -452,3 +464,14 @@ concurrent run is disturbed.
     runtime state on disk, so it must still apply. (See the Residuals note on
     a `NO_VERDICT` review loop being retried once its in-memory entry is
     gone.)
+16. **`STOPPED` is a deliberate no-result, not a missing one.** The dashboard
+    renders `Overall: STOPPED` dim, like `queued`/`interactive`, because a
+    user stop determined the run's outcome. It is still a terminal verdict:
+    scenarios should assert it is *shown* (and that no PASS/INPUT_REQUIRED
+    line or QA note is recorded), not that it is absent.
+17. **Recovery settings are read when a wait starts.** A change to
+    `verdict-recovery-*` affects the next wait/run, not an episode already in
+    flight. Scenarios should assert the safe, user-visible pair: a mid-run
+    change does not restart, tear down or disturb the running loops (they
+    still end bounded on their own), and the next run honours the new value.
+    Do not assert which budget an in-flight loop used.
