@@ -37360,7 +37360,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T20:35:32.509320+00:00'
-  updated_at: '2026-10-29T00:43:44.481309+00:00'
+  updated_at: '2026-10-29T01:16:50.367553+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -39783,6 +39783,46 @@ prs:
       signoff integrate` (a race, not hand-edited state).'
     created_at: '2026-10-29T00:43:44Z'
     last_edited: '2026-10-29T00:43:44Z'
+  - id: note-73d95ec
+    text: 'review-loop 4f1e i7: closed the last "a reader must not print a value the
+      record does not hold" gaps on the integration record. A non-string `base_branch`/`target_repo`/`head`/`candidate_tree`/`error`
+      in the *stored* record (prepare returns it when a concurrent apply won) used
+      to print the literal None (`None@89e3c501`) or a mapping repr: `integration.summary()`
+      (the line the sign-off prompt Result entry, the router coercion reason, `pm
+      pr show` and `integrate` all print), `integrate`s target/head/base/candidate
+      lines and its `Merged <branch>@<sha>` line, `pm pr show`s `## Integration` field
+      loop and the return `Integration:` line (they passed a truthy non-string through
+      via `or "?"`), `pm pr signoff record`s base note, and `_apply_locked`s merge
+      commit message (permanent history). They now share a new `integration._text`
+      (same rule as `signoff._text`). Three new tests, each failing on the pre-fix
+      HEAD.
+
+
+      Independent checks this iteration, all clean: a from-scratch preservation checker
+      (written from the spec, not the resolver) over 3000 randomized base/ours/theirs
+      triples with independent record + note additions on both sides and both sides
+      moving `project.active_pr` and bumping `updated_at` — 3000 resolved, 0 lost
+      changes, deterministic; 23 targeted negative cases all behave per R1 (same field/status
+      changed differently, delete-vs-edit both directions, same id added both sides,
+      duplicate ids, both-changed atomic lists, scalar conflicts, field deletion-vs-edit,
+      `active_pr` deletion-vs-edit, null-vs-string timestamp, bool-vs-int scalar kinds,
+      nested note id collision, invalid merged status, plan cycle — refused; one-sided
+      changes and identical changes resolved; both-differ `active_pr` takes the base).
+      Full suite: 4377 passed, 1 skipped. The 4 failures seen in the first (undeselected)
+      run are load flakes in files this PR does not touch (test_meta_override_cleanup,
+      test_push_proxy) — all pass in isolation, and the two push_proxy ones passed
+      in the second full run.
+
+
+      Base state unchanged from i6: remote master is 4a74d880 and the read-only check
+      conflicts in pm_core/signoff.py, pm_core/tui/app.py and tests/test_cli_helpers.py
+      besides pm/project.yaml — genuine code conflicts, so sign-off will route SIGNOFF_IMPL
+      and impl must merge that base. A review iteration does not merge it. Still noted,
+      not fixed: the pre-existing unguarded `data.get("project", {}).get(...)` readers
+      in prompt_gen/cli/pr.py (filed as pr-852dde2), and the run_check is_dir()-then-git
+      race on a workdir deleted mid-check.'
+    created_at: '2026-10-29T01:16:50Z'
+    last_edited: '2026-10-29T01:16:50Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
