@@ -735,3 +735,54 @@ def test_focus_answer_visible_over_sticky():
     assert shown[-1] == " Focused QA window for pr-001"
     select.assert_called_once_with("pm-x", "qa-pr-001")
     assert app._log_sticky_until == until  # forcing doesn't extend it
+
+
+# QA s39 (pr-6566901): a user's `/pr qa X` sent inside the 10 s sticky
+# window of *another* PR's loop-completion line.  The start had no window
+# yet, so it took the fresh-start path, whose "Starting QA for X..." was
+# recorded as "(hidden by sticky message)" — the log line kept showing the
+# other PR's "Review loop done ... PASS".  The focus path already forced its
+# answer (see test_focus_answer_visible_over_sticky); the start must too.
+
+def test_qa_start_visible_over_sticky_completion():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    _log(app, "Review loop done for pr-other: ✓ PASS (1 iteration)",
+         sticky=10)
+    until = app._log_sticky_until
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "in_review"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_poll_timer"), \
+         patch.object(qa_loop_ui, "_consume_owed_reqa_in_memory"), \
+         patch("pm_core.signoff.clear_return_awaiting"), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " Starting QA for pr-001..."
+    assert app._log_sticky_until == until  # forcing doesn't extend it
+
+
+def test_background_qa_start_still_defers_to_sticky():
+    """The scheduler's own start is not a reply to the user's key: it must
+    not paint over a confirmation that is still holding the log line."""
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    _log(app, "Review loop done for pr-other: ✓ PASS (1 iteration)",
+         sticky=10)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "in_review"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_poll_timer"), \
+         patch.object(qa_loop_ui, "_consume_owed_reqa_in_memory"), \
+         patch("pm_core.signoff.clear_return_awaiting"), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_qa(app, "pr-001")
+    assert shown[-1] == (" Review loop done for pr-other: ✓ PASS (1 iteration)")

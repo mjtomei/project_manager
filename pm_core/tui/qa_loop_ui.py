@@ -180,7 +180,12 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
 
     app._qa_loops[pr_id] = state
     _ensure_poll_timer(app)
-    app.log_message(f"Starting QA for {pr_id}...")
+    # A user-initiated start (*focus*, i.e. `t` / `/pr qa`) is a direct
+    # answer to the user's key, so it must paint over whatever is holding
+    # the log line — e.g. the 10 s sticky another PR's "Review loop done …
+    # PASS" set moments earlier (QA s39).  Scheduler-driven starts stay
+    # unforced so a confirmation in progress is not overwritten.
+    app.log_message(f"Starting QA for {pr_id}...", force=focus)
 
     start_qa_background(state, app._root, pr, on_update)
 
