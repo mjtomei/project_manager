@@ -211,11 +211,21 @@ available in the run dir:
 - Add `resolve_iteration_transcript(...)`: loop-scoped path if it exists,
   else the legacy `review-<pr>-i<N>.jsonl` if it exists, else the
   loop-scoped path (for a new launch).
-- `run_review_loop_sync`: use `iteration_transcript` for the launch path;
-  record `state.iteration_sessions[iteration] = session_id_from_transcript(path)`
-  after each iteration (launched or adopted) when a session id resolves.
-- `_adopt_in_flight_review` / `_wait_for_follow_up_verdict`: use
-  `resolve_iteration_transcript`.
+- `run_review_loop_sync`: record
+  `state.iteration_sessions[iteration] = session_id_from_transcript(path)`
+  after each iteration (launched or adopted) when a session id resolves,
+  using `resolve_iteration_transcript` to find the path that iteration
+  actually used.
+- `_run_iteration_with_retry` (the launch-retry path merged from master):
+  resolves its iteration transcript with `resolve_iteration_transcript`,
+  so every retry attempt of one iteration writes the same loop-scoped path
+  and a legacy in-flight iteration is still adopted under the old name.
+- `_discover_iteration` / `_adopt_in_flight_review` /
+  `_wait_for_follow_up_verdict`: use `resolve_iteration_transcript`.
+- `_is_historical_session`: scans both the legacy
+  `review-<pr>-i<N>.jsonl` names and this loop's
+  `review-<pr>-<loop_id>-i<N>.jsonl` names, so a pane running an earlier
+  iteration of this loop is still recognised as historical.
 - Add `iteration_sessions: dict[int, str]` to `ReviewLoopState`.
 
 ### `pm_core/tui/review_loop_ui.py`
@@ -336,6 +346,19 @@ No **[UNRESOLVED]** ambiguities.
   `tests/test_signoff.py`, `tests/test_signoff_integration.py`,
   `tests/test_workspace_trust.py`, `tests/test_tui_signoff_handoff.py`,
   `tests/test_claude_launcher.py`.
+- Master integration (2026-10-28, merge of `origin/master` 4a74d880 into
+  this branch): master's launch-retry/discovery refactor
+  (`_run_iteration_with_retry`, `_discover_iteration`,
+  `ReviewClosedError`, the retry-episode breadcrumb fields) is combined
+  with this PR's loop-scoped naming.  All iteration-transcript path
+  builders (`_run_iteration_with_retry`, `_discover_iteration`,
+  `_wait_for_follow_up_verdict`, the adoption branch of
+  `run_review_loop_sync`) resolve through `resolve_iteration_transcript`,
+  and `_is_historical_session` also scans loop-scoped names.  The
+  breadcrumb carries both the retry fields and `iteration_sessions`.
+  Verified: 4515 passed / 1 skipped in the full suite; the only two
+  failures (`test_push_proxy`) pass in isolation and on master and are
+  load-related (push-proxy daemon startup), not caused by this PR.
 - Manual repro (pre/post) recorded under
   `$CAP/impl/{pre-fix,post-fix}/` with `pm/qa/artifacts/cli-recording.md`.
 
