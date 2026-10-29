@@ -26476,6 +26476,22 @@ prs:
       -vsync, so renders used -fps_mode vfr.'
     created_at: '2026-10-29T01:16:46Z'
     last_edited: '2026-10-29T01:16:46Z'
+  - id: note-f30e8f3
+    text: 'QA S26 refiner: scenario 26 refined (staging notes for the worker). (1)
+      The literal ''loop-completion line holding the log'' plus a same-PR run in flight
+      with NO qa-<pr> window is only reachable in the sub-100 ms gap while a restart
+      kills the old main window before creating the replacement; the refined story
+      stages the visible ''QA already running for <pr>'' answer on a still-launching
+      FIRST run behind the sticky ''QA loop started ... - z t to stop'' line instead
+      (same force=True path in qa_loop_ui.start_qa). (2) For the still-launching scheduler
+      start, the steps delete the PR''s workdir directory (keeping the recorded path
+      in project.yaml) so the QA launch re-clones before creating the window, and
+      fire the user''s ''t'' by tailing the pm log for ''Auto-start: QA for <pr>''.
+      (3) Run ''pm session'' and ''pm pr start'' with TMUX/TMUX_PANE unset or inside
+      the test session''s own pane: this container''s shell is already inside another
+      pm session and _get_current_pm_session() would otherwise target it.'
+    created_at: '2026-10-29T00:46:54Z'
+    last_edited: '2026-10-29T00:46:54Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
