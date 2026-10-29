@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T04:30:11.873051+00:00'
+  updated_at: '2026-10-29T05:51:56.015881+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29756,6 +29756,20 @@ prs:
       8.4.2): 4593 passed, 1 skipped, 0 failed, 0 errors (368 s).'
     created_at: '2026-10-29T04:30:11Z'
     last_edited: '2026-10-29T04:30:11Z'
+  - id: note-fbc398f
+    text: 'Review-loop 345f i5 (2d82474a): closed two residual "stop survives a TUI
+      restart" windows in the QA STOPPED teardown. (1) mark_stop_requested(state)
+      persists stop_requested into the existing qa_resume.json at stop time (read-modify-write
+      under _RESUME_WRITE_LOCK) from qa_loop_ui.stop_qa and start_or_stop_qa_loop,
+      and _write_resume_file re-reads stop_requested under the lock — so a stop that
+      lands during the finalize poll (after the pre-finalize snapshot) no longer recovers
+      as the pre-stop PASS on restart. (2) _resume_incomplete_qa now mirrors the recovered
+      verdict into runtime_state (set_action_state qa=done) as the live completion
+      path does; without it a recovered STOPPED run left recorded_qa_verdict None
+      and _auto_start_qa_loops relaunched QA. Tests in tests/test_qa_resume.py (3
+      new). Full suite: 4600 passed, 1 skipped, 0 failed (362 s).'
+    created_at: '2026-10-29T05:51:55Z'
+    last_edited: '2026-10-29T05:51:55Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
