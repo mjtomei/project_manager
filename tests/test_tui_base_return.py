@@ -573,6 +573,50 @@ def test_catch_up_base_impl_reloads_state_after_a_launch(tmp_path):
     app._load_state.assert_called_once()
 
 
+def test_poll_impl_idle_reloads_state_after_a_base_completion(tmp_path):
+    """A verified completion must drop the stale open return from the snapshot.
+
+    ``impl_completion`` resolves the return on disk, but the poll iterates the
+    in-memory ``app._data``.  Neither the resume pass nor auto-start reloads
+    when the bounce came from a one-shot gate (``resume_loop`` unset) and
+    auto-start is off, so without a reload ``open_return(pr)`` stays truthy:
+    every later tick re-enters the base-return branch and re-runs the
+    completion check (a full ``store.load``) forever, and a manual ``zz d`` is
+    refused with a reason that is no longer true.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr("in_progress", base_return=_return())
+    app = _app(tmp_path, [pr])
+    app._session_name = "pm-test"
+    app._pending_merge_prs = set()
+    tracker = app._pane_idle_tracker
+    tracker.is_tracked.return_value = True
+    tracker.is_gone.return_value = False
+    tracker.is_idle.return_value = True
+
+    # On disk the rework already finished (the return is resolved); the
+    # snapshot the poll iterates still shows it open.
+    resolved = store.load(app._root)
+    store.get_pr(resolved, "pr-001")["base_return"]["resolved_at"] = \
+        "2026-01-02T00:00:00+00:00"
+    store.save(resolved, app._root)
+    assert base_check.open_return(app._data["prs"][0]) is not None
+
+    with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+               return_value="%1"), \
+         patch("pm_core.tui.auto_start.get_transcript_dir",
+               return_value=str(tmp_path)), \
+         patch("pm_core.tui.review_loop_ui._base_completion_tick",
+               return_value=(True, "up to date with master@base", False)):
+        review_loop_ui._poll_impl_idle(app)
+
+    # The idle turn was consumed and the snapshot now agrees with disk, so a
+    # later tick no longer enters the base-return branch for this PR.
+    tracker.became_idle.assert_called_once_with("pr-001")
+    assert base_check.open_return(app._data["prs"][0]) is None
+
+
 # --- raced status repair in the schedulers --------------------------------
 
 def test_auto_start_review_loops_repairs_a_raced_in_review_status(tmp_path):

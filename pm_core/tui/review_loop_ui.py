@@ -1294,6 +1294,20 @@ def _poll_impl_idle(app) -> None:
                                pr_id, why)
                     continue
                 tracker.became_idle(pr_id)  # consume the verified idle
+                # The completion check resolved the return on disk, but this
+                # snapshot still carries it open: ``open_return(pr)`` would
+                # stay truthy, so every later tick re-enters this branch and
+                # re-runs the check (a ``store.load`` of the whole project)
+                # forever, and a manual ``zz d`` is refused with a reason
+                # that is no longer true.  Neither the resume pass nor
+                # auto-start reloads when the bounce came from a one-shot
+                # gate, so refresh here.  Best effort: a parse error leaves
+                # the snapshot as it was.
+                try:
+                    app._data = store.load(app._root)
+                except Exception:
+                    _log.debug("impl_idle: reload after base completion "
+                               "failed for %s", pr_id, exc_info=True)
                 newly_idle.append((pr_id, pr, resume))
                 continue
             if tracker.became_idle(pr_id):

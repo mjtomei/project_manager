@@ -310,7 +310,13 @@ already drops it because the status is no longer `qa`.
   no CLI-subprocess reload (`trigger_tui_refresh` / `_run_command_async`)
   follows this launch, so without it the next idle tick re-enters the
   awaiting branch with the stale marker and never reaches the completion
-  check.
+  check. A *verified completion* reloads `app._data` for the same reason:
+  `impl_completion` resolved the return on disk, and neither the resume pass
+  nor auto-start reloads when the bounce came from a one-shot gate
+  (`resume_loop` unset) with auto-start off — the stale open record would
+  keep every later tick in the base-return branch (a full `store.load` per
+  check, forever) and refuse a manual `zz d` with a reason that is no longer
+  true.
   `_base_completion_tick` never reaches the git helpers with an empty cwd
   (they raise, inside the shared
   poll timer), and returns a plain "no project root" verdict instead of
@@ -526,6 +532,11 @@ No unresolved ambiguities.
     reviewer on review iteration ≥ 2: `_review_post_gate_refusal` classifies
     "absent" like `run_qa_sync`'s post-gate re-read (exit 1, no window), and
     the first-iteration refusal names the removal instead of an empty reason.
+32. a verified base completion in `_poll_impl_idle` reloads `app._data`: the
+    idle turn is consumed and the snapshot no longer carries the (now
+    resolved) open return, so a later tick does not re-enter the base-return
+    branch (a full `store.load` per check, forever) and a manual `zz d` is
+    not refused on stale data.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
