@@ -37294,7 +37294,7 @@ prs:
   title: Resolve integration conflicts at sign-off and reuse unaffected review and
     QA evidence
   branch: pm/pr-5cee3d5-resolve-integration-conflicts-at-sign-off-and-reus
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'A metadata-only integration conflict currently sends a passed PR through
     implementation, full review and QA again. PR #250 is the concrete example: both
@@ -39823,6 +39823,62 @@ prs:
       race on a workdir deleted mid-check.'
     created_at: '2026-10-29T01:16:50Z'
     last_edited: '2026-10-29T01:16:50Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
