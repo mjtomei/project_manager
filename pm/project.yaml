@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T01:53:04.908533+00:00'
+  updated_at: '2026-10-29T02:30:04.274708+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14570,6 +14570,29 @@ prs:
       workers relaunched.'
     created_at: '2026-10-29T01:53:04Z'
     last_edited: '2026-10-29T01:53:04Z'
+  - id: note-59c0d19
+    text: 'Review 8820 i1: three terminal-status gaps left by the closed-is-terminal
+      work, each with a failing-then-passing test. (1) `pm pr auto-sequence <closed>`
+      fell through every phase branch to "unknown status: closed" (exit 2) — the driver
+      a watcher session ticks read a legitimately closed PR as broken; it now reports
+      `closed` and returns (exit 0) exactly like `merged` (pr_utils.TERMINAL_PR_STATES).
+      (2) `pm pr signoff <closed>` answered with the generic "sign-off runs after
+      QA" complaint; it now names the deliberate reopen (`pm pr edit <id> --status
+      pending`) like the start/merge guards. (3) `review_loop._pr_is_terminal` was
+      the last literal ("merged","closed") check; it now uses the shared constant
+      (same two statuses, no behavior change), so the spec R11 item 27 claim covers
+      every path. Auto-sequence --help docstring tidied (terminal line, no literal
+      double-backticks). Tests: test_auto_sequence_reports_a_closed_pr_without_advancing_it,
+      test_signoff_refuses_a_closed_pr_and_names_the_reopen — both fail on the previous
+      head. Spec synced (R8, R11 items 27/37/38, §5). Full suite 4540 passed, 1 skipped,
+      1 failed = test_hook_events::test_installer_writes_standalone_receiver, env-only
+      (PM_HOST_HOME set; 20/20 pass with it unset) (/pm-captures/review-8820-i1/full-suite-final.log).
+      Smoke-tested the real CLI on a scratch project: close keeps entry/notes/branch/workdir
+      (dirty + untracked files intact), moves active_pr, warns the dependent; --remove
+      is registry-only; auto-sequence/signoff/start/merge all name the reopen. Rest
+      of the PR re-reviewed as-is — no other changes. (2026-10-29)'
+    created_at: '2026-10-29T02:30:04Z'
+    last_edited: '2026-10-29T02:30:04Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
