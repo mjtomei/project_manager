@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T11:25:58.551837+00:00'
+  updated_at: '2026-10-29T11:55:44.055765+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36960,6 +36960,49 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T11:25:58Z'
     last_edited: '2026-10-29T11:25:58Z'
+  - id: note-7fd0e0c
+    text: 'Review loop ebd1 i5: one leftover in the kept recipe/test scope, the PR''s
+      own class (a completion check that cannot tell a finished artifact from a missing
+      one) — and no recipe change. Every stage-input check in the render/finalize
+      blocks is `test -s`, so the state it rejects is "the file exists but is empty",
+      which is the state each message names ("the recording wrote nothing", "or a
+      0-byte gif"); yet every case modelled only "the file is absent". A mutation
+      sweep of ~55 weakenings of the kept guarantees found twelve survivors — eight
+      benign by design (dropping `--overwrite`; the final `kill-session` after a stop
+      wait that only ends once the session is gone; a bare `capture-pane` behind the
+      exact `has-session`; the CLI readiness wait''s `-s`; `-e` for `-f` on driver.mjs;
+      the CLI `kill-server` cleanups) and four real, all this gap plus one unexecuted
+      block: (1) the gif check (`[ -s "$cast.gif" ]`), whose case only modelled an
+      agg that wrote no file — weakened to `-e`, a 0-byte gif reaches real ffmpeg
+      4.4.2, which answers "Invalid data found when processing input" and the block
+      reports "ffmpeg failed on the gif" (R40''s misdiagnosis), verified live with
+      both recipes'' own blocks; (2) the cast check (`[ -s "$cast" ]`) — the 0-byte
+      cast reaches real agg 1.9.0 ("Error: empty file") and the run says "agg failed
+      on the cast — is ''agg'' installed?" (R12''s misdiagnosis); (3) the web-UI webm
+      check (`[ -s "$CAPDIR/recording.webm" ]`) — real ffmpeg answers "EBML header
+      parsing failed … Invalid data found" and the finalize step reports a failed
+      transcode of the driver''s webm (R19''s misdiagnosis); (4) the final mp4 check
+      in both recording recipes had no case at all — deleting it leaves the file green
+      and a stub ffmpeg that exits 0 after creating its output leaves a 0-byte `recording.mp4`
+      with the block exiting 0. The sweep also showed the CLI recipe''s preamble block
+      (the one fenced block no case executed) was unproven: weakening its `mkdir`
+      guard to `|| true` left the file green. Fixes: the no-cast, no-gif and no-webm
+      cases are parametrized over "no file" and "0-byte file" with the ffmpeg stub
+      modelling real ffmpeg''s contract for a missing *and* an empty input; new `test_render_names_an_encoder_that_writes_no_mp4`
+      covers the final check in both recipes (the recording recipes'' counterpart
+      of the web-UI `test_web_ui_transcode_that_writes_nothing_leaves_no_mp4`); and
+      `test_cli_preamble_refuses_an_uncreatable_capture_dir` runs the preamble block.
+      Each weakening now fails exactly the new case and the unmodified recipes pass
+      (195, was 187). Tests: related suites 383 together with the file; full suite
+      `env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py` -> 4589 passed, 1 skipped, 92
+      deselected, 0 failed (414 s). Evidence: $(pm qa captures-path pr-b19db15)/review-ebd1-i5/
+      (probe.log with the four live shapes, README.md, scripts/ with the extractor,
+      the probes and the mutation harness, mini-results.txt, preamble-mutation.txt,
+      sweep2.log). impl.md R46 + Files/verification/evidence and qa.md updated. No
+      pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T11:55:27Z'
+    last_edited: '2026-10-29T11:55:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
