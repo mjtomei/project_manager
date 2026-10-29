@@ -4262,6 +4262,14 @@ def _poll_tmux_verdicts(
         if scan.changed:
             verdicts_changed = True
         if scan.follow_ups or scan.dropped:
+            if state.held:
+                # A run adopted as held whose follow-up landed while nothing
+                # watched it (TUI down) is collected here, not by the hold
+                # loop that says so when it reopens a live run: say it too
+                # rather than only "Resuming QA after restart..." (S132).
+                state.latest_output = ("QA resumed after INPUT_REQUIRED — "
+                                       "collecting the follow-up verdict")
+                _notify()
             # The run is live again: a follow-up needs verification/finalize
             # and a dropped attempt is handed back to the retry path.  A run
             # adopted as held must therefore finalize this *new* result
