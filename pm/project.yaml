@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T12:20:26.812548+00:00'
+  updated_at: '2026-10-29T13:44:32.364227+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42911,6 +42911,48 @@ prs:
       so this note and pr-58aa21a exist only in the s-134 clone project.yaml.'
     created_at: '2026-10-29T11:30:06Z'
     last_edited: '2026-10-29T11:30:06Z'
+  - id: note-b279519
+    text: 'S138 refine (2026-10-29, code reading on 701e5a84; pm_core = 44ea3dd7).
+      (1) Each PASS scenario gets its own fake verifier pane, so a two-scenario run
+      has two verifiers, not one. (2) Hold a cut-off run''s refiners with exact keys
+      ''<pr> 1 refiner'' and ''<pr> 2 refiner'', not ''<pr> * refiner''. The hold
+      can then stay through z t, because the new run numbers its scenarios 3/4. On
+      74cebe25 the held refiners close only at z t''s stale-window cleanup. Stub HOLD_CAP
+      is 300 s per request, so story 2''s four holds (U worker at main; F, S workers
+      and R2 refiners at the router) must all be placed less than ~250 s before the
+      restart, with no hold-cap line logged. (3) Story 2: put U at qa with ''pm pr
+      edit U --status qa''; one plain-terminal tick then prints ''running: qa (launched)''
+      and starts qa-run-bg. The adopt line is ''Resuming QA for <S> after restart...''.
+      R2''s z t will most likely keep R2''s dead -s1/-s2 containers, because qa-S-s1,
+      qa-F-s1 and qa-U-s2 windows exist (pr-81a249e). (4) Story 3: cleanup_orphaned_qa_containers
+      filters on pm-<session_tag>-qa-<pr>-, so it never matches the other clone''s
+      containers. _next_scenario_offset is not session-scoped, so clone B may number
+      3/4, and z t runs continue the numbering across both clones. Debug logs are
+      per tag (~/.pm/debug/<tag>.log). (5) A tick on the cut-off PR after the restart
+      prints ''running: qa'' (the main qa-<pr> window survives), never ''(driven elsewhere)''
+      or ''(launched)''.'
+    created_at: '2026-10-29T13:07:11Z'
+    last_edited: '2026-10-29T13:07:11Z'
+  - id: note-79e4b4f
+    text: 'QA S138 (2026-10-29, container podman 3 slirp4netns, real claude 2.1.312
+      s0/refiners/workers vs acme router + main stubs, fake planner/verifier/finalizer;
+      HEAD b49a8cac (pm_core = 44ea3dd7) vs control 74cebe25; captures /pm-captures/scenarios/138/README.md,
+      19 mp4): PASS, no code change. RQ57 container cut-off held on a fresh setup:
+      plain pm tui restart ends the run record and kills qa-R-s0 plus container qa-R-s1/-s2
+      (held refiners client-gone at once); dead containers stay until z t, whose planning
+      cleanup removes them before the planner registers; new run is scenarios 3/4
+      on acme only, overall PASS. Control 74cebe25 kills only s0; s1/s2 + held refiners
+      live until z t cleanup. Beside S (snapshot, resumed, PASS), F (live container
+      pm qa run, picker [working], Result: PASS), U (route=none qa-run-bg, main only,
+      PASS): only R2 ended/killed, S/F/U windows, panes and container IDs unchanged;
+      R2 z t kept its dead containers (pr-81a249e, accepted). Two clones, one HOME,
+      simultaneous restart: each TUI ends/kills only its own run; z t cleanup is tag-scoped;
+      numbering continues 3/4 then 5/6. Marker grep 0 files; env files 0600, deleted
+      at launch; no NAME=value in start commands. Harness: PR var S clobbers $S (use
+      PS); t moves the view to qa-<pr>, so press C-b 0 before restart to film the
+      sticky line (h1b/c1b rerun).'
+    created_at: '2026-10-29T13:44:32Z'
+    last_edited: '2026-10-29T13:44:32Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
