@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T05:08:14.368873+00:00'
+  updated_at: '2026-10-29T05:14:35.187695+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34993,6 +34993,30 @@ prs:
       its own round; this run did not exercise the incident path.'
     created_at: '2026-10-29T05:08:14Z'
     last_edited: '2026-10-29T05:08:14Z'
+  - id: note-a1af61d
+    text: 'QA S6 (2026-10-29) PASS: quarantine/preservation semantics verified end-to-end
+      on the merged tree. (1) seeded scenarios/{1 foreign,2 unowned,3 prior-run run0,03
+      non-canonical} — `pm qa evidence` read-only, exit 0, named all three anomalies
+      separately, never mentioned 03, all bytes unchanged. (2) TUI `/ pr qa pr-a551fef`
+      on that tree: watcher logged _foreign first at t+0 and scenarios/1/prompt.md
+      16.33 s later; quarantine went to scenarios/_foreign/f1e852c799ad37f0-1 with
+      the seeded files byte-identical; scenarios/2,3,03 unchanged. (3) post-run evidence:
+      QA run f1e852c799ad37f0, Overall PASS, membership Scenario 1 — Example scenario:
+      PASS, anomalies scenarios/2 unowned + scenarios/3 prior QA run run0, foreign
+      record not listed. (4) damaged root manifest (scenarios=3, qa_runs intact):
+      membership recovered from qa_runs/ with the exact "damaged (its scenario list
+      is not a list) — membership recovered from qa_runs/" anomaly, no "no qa_manifest.json"
+      line, exit 0; with qa_runs moved aside it prints "a qa_manifest.json exists
+      but is unusable — membership not run-bound" plus the "scenario membership is
+      not run-bound" anomaly. (5) two CLI `pm qa run smoke --pr pr-461af20` passes:
+      run1 quarantined to _foreign/cli-pr-461af20-1, run2 to distinct _foreign/cli-pr-461af20-1-1,
+      run1 dir sha256sum -c OK, both dirs present, scenarios/1 = run2 record (pr_id=pr-461af20,
+      run_id=cli-pr-461af20), evidence shows Scenario 1 — Smoke: PASS. No bugs found,
+      nothing committed. Captures under /pm-captures/scenarios/6/s1..s5 (cast+mp4+manifest).
+      Ran on a private tmux socket (PM_TMUX_SOCKET=/tmp/qa-s6.sock); default server
+      and real sessions untouched.'
+    created_at: '2026-10-29T05:14:35Z'
+    last_edited: '2026-10-29T05:14:35Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
