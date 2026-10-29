@@ -39555,6 +39555,29 @@ prs:
       that its slash-command-echo bug is fixed here (baa8 i3).'
     created_at: '2026-10-29T03:00:16Z'
     last_edited: '2026-10-29T03:00:16Z'
+  - id: note-f474ed3
+    text: 'S25 concretizer 2026-10-29: scenario refined and live-verified end-to-end
+      at this HEAD (whole repro file 49 passed; TestLiveFlow + TestRestartAdoption
+      26 passed). Verified recipe corrections: (1) write the fake-claude config for
+      the pm session tag BEFORE any pane launches, or pm pr start launches a real
+      Claude session; (2) bootstrap the workdir with pm push, git merge of the printed
+      pm/sync-* branch, pm pr start (impl fake, no API), kill its impl window, pm
+      pr review <pr> --no-window, then pm autostart add <pr>; (3) fake-claude ignores
+      typed keys, so simulate the human answer by appending a user record (transcript
+      sessionId + ISO timestamp) to <TEST_DIR>/pm/transcripts/autostart-*/review-<pr>-iN.jsonl
+      and the follow-up verdict by appending an assistant record ending in **NEEDS_WORK**/**PASS**;
+      the loop reads it on the fake''s next idle-hook refresh (~2-4s); (4) with autostart
+      on, review PASS is handed to QA in the same poll tick, so do NOT assert the
+      reason "review passed; QA transition pending" or that the PR stays in_review;
+      park QA with empty-verdict qa_* fake entries and assert phase qa / reason "planning
+      scenarios" with the tech-tree marker still showing the finished review (glyph
+      iteration-2 PASS); (5) prove the INPUT_REQUIRED notice re-arm from the log_message
+      triggers in ~/.pm/debug/<session>-frames.json (pm tui frames --json), not pm
+      log grep (identical repeats are deduped); the old notice line can stay painted
+      mid-loop by design; (6) the reproduction tests live in the /workspace pm checkout,
+      not the throwaway project workdir.'
+    created_at: '2026-10-29T04:43:45Z'
+    last_edited: '2026-10-29T04:43:45Z'
   - id: note-02d9c81
     text: 'QA scenario 26 (restart during an INPUT_REQUIRED wait) PASS at 6faf7496,
       all 5 stories driven live with a real TUI + interactive stand-in on a throwaway
