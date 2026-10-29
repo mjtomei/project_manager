@@ -4579,9 +4579,16 @@ def _run_qa_sync(
     data = store.load(pm_root)
     after_gate = next((p for p in data.get("prs", []) if p.get("id") == pr_id),
                       None)
-    if (after_gate or {}).get("status") in ("merged", "closed"):
+    # A PR removed during the fetch is gone, not eligible: the pre-gate check
+    # aborts when the PR is not in the data, and this re-check must classify
+    # the same way instead of letting ``None`` fall through to "not
+    # merged/closed" and opening a QA workdir/window for a PR that no longer
+    # exists.
+    if after_gate is None \
+            or after_gate.get("status") in ("merged", "closed"):
         _log.info("QA aborted: %s is %s after the base check; not running QA",
-                  pr_id, after_gate.get("status"))
+                  pr_id,
+                  (after_gate or {}).get("status") or "no longer in the project")
         state.running = False
         return state
 

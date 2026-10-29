@@ -1754,19 +1754,22 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                 review_loop_id=review_loop_id)
             if code:
                 raise SystemExit(code)
-            # This branch writes no status, so the atomic guard below (which
-            # only runs on the first-iteration path) does not cover it:
-            # re-read after the gate's fetch before launching a reviewer.
-            refusal = _review_post_gate_refusal(root, pr_id)
-            if refusal:
-                code, why = refusal
-                if code == 3:
-                    from pm_core import base_check
-                    base_check.ensure_impl_status(root, pr_id)
-                    _retire_review_window_for_return(pr_entry)
-                click.echo(f"PR {_pr_display_id(pr_entry)} {why}; review "
-                           f"not started.", err=True)
-                raise SystemExit(code)
+        # This branch writes no status, so the atomic guard below (which only
+        # runs on the first-iteration path) does not cover it: re-read after
+        # the gate's fetch before launching a reviewer.  It runs even when the
+        # caller already gated (``--skip-base-check``): that gate was its own
+        # network round-trip, so a return another driver recorded after it is
+        # just as invisible here, and the re-read is a cheap local load.
+        refusal = _review_post_gate_refusal(root, pr_id)
+        if refusal:
+            code, why = refusal
+            if code == 3:
+                from pm_core import base_check
+                base_check.ensure_impl_status(root, pr_id)
+                _retire_review_window_for_return(pr_entry)
+            click.echo(f"PR {_pr_display_id(pr_entry)} {why}; review "
+                       f"not started.", err=True)
+            raise SystemExit(code)
         _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                               review_loop=review_loop,
                               review_iteration=review_iteration,
@@ -3906,10 +3909,20 @@ def _launch_review_iteration(pr_id: str, tdir: Path, iteration: int, *,
         click.echo(f"note: base check failed (retryable): {res.reason}",
                    err=True)
     transcript = tdir / f"review-{pr_id}-i{iteration}.jsonl"
-    click.get_current_context().invoke(
-        pr_review, pr_id=pr_id, fresh=fresh, background=True,
-        review_loop=review_loop, review_iteration=iteration,
-        review_loop_id="", transcript=str(transcript), skip_base_check=True)
+    try:
+        click.get_current_context().invoke(
+            pr_review, pr_id=pr_id, fresh=fresh, background=True,
+            review_loop=review_loop, review_iteration=iteration,
+            review_loop_id="", transcript=str(transcript), skip_base_check=True)
+    except SystemExit as e:
+        # ``pr_review``'s post-gate guard refuses with exit 3 when another
+        # driver recorded a base return inside this launch's window (no
+        # reviewer ran).  This helper's contract is a status line, not a
+        # process exit: the tick must report the routing and stay alive.
+        if e.code == 3:
+            return ("base_conflict: returned to implementation during the "
+                    "review launch")
+        raise
     return None
 
 

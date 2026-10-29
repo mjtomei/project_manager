@@ -1248,3 +1248,67 @@ def test_resolve_and_status_repair_skip_the_write_when_nothing_changes(w):
     with patch("pm_core.base_check.store.locked_update") as update:
         assert base_check.resolve_return(w.pm_dir, PR) is False
     update.assert_not_called()
+
+
+def test_qa_run_sync_aborts_when_the_pr_is_removed_during_the_gate(w):
+    """A PR removed inside the gate's fetch must not start QA.
+
+    The pre-gate code aborts when the PR is not in the project data; the
+    post-gate re-read used to treat ``None`` as "not merged/closed" and let a
+    QA workdir/planner run against a PR that no longer exists.
+    """
+    from pm_core.qa_loop import QALoopState, run_qa_sync
+    set_pr(w, status="qa")
+    state = QALoopState(pr_id=PR)
+
+    def _removed_during_gate(*_a, **_k):
+        def _drop(d):
+            d["prs"] = [p for p in d.get("prs", []) if p.get("id") != PR]
+        store.locked_update(w.pm_dir, _drop)
+        return base_check.GateResult(base_check.PROCEED, base_check.STAGE_QA)
+
+    with patch("pm_core.qa_loop.get_pm_session", return_value="pm-test"), \
+         patch("pm_core.base_check.gate", side_effect=_removed_during_gate), \
+         patch("pm_core.qa_loop.create_qa_workdir") as mk:
+        run_qa_sync(state, w.pm_dir, pr(w))
+    mk.assert_not_called()
+    assert state.running is False
+    assert state.base_returned is False
+    assert state.qa_workdir is None
+
+
+def test_pr_review_skip_base_check_still_rechecks_for_a_return(w):
+    """The auto-sequence path must not launch beside a return either.
+
+    ``_launch_review_iteration`` runs the gate itself and passes
+    ``--skip-base-check``; the in_review branch used to skip *both* the gate
+    and the post-gate re-read, so a return another driver recorded after that
+    gate's fetch was invisible and the reviewer launched beside the rework.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    set_pr(w, status="in_review")
+    clean = store.load(w.pm_dir)
+    returned = store.load(w.pm_dir)
+    store.get_pr(returned, PR)["base_return"] = {
+        "verdict": base_check.VERDICT_BASE_CONFLICT, "head": "h",
+        "base_sha": "b", "awaiting": "impl", "resolved_at": None}
+    # The first load (``pr_review``'s own snapshot) is clean; every later one
+    # (the post-gate re-read, and ``ensure_impl_status``'s pre-read) sees the
+    # return another driver recorded meanwhile.
+    seen = {"n": 0}
+
+    def _load(_root, **_kw):
+        seen["n"] += 1
+        return clean if seen["n"] == 1 else returned
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(pr_mod.store, "load", side_effect=_load), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", "--skip-base-check",
+                                          "--review-iteration", "2", PR])
+    window.assert_not_called()
+    assert result.exit_code == 3
+    assert pr(w)["status"] == "in_progress"

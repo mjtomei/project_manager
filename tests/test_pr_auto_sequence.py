@@ -1205,3 +1205,42 @@ class TestBaseGate:
         run.assert_not_called()
         update.assert_called_once()                # the raced-status repair
         assert pr["status"] == "in_progress"       # never qa
+
+
+def test_launch_review_iteration_reports_an_exit_3_as_a_status_line(tmp_path):
+    """A refusal inside the invoked command must not kill the tick.
+
+    ``_launch_review_iteration``'s contract is a status line; ``pr_review``'s
+    post-gate guard refuses with exit 3 (no reviewer ran) when a base return
+    landed inside the launch window, and that must surface as ``base_conflict``
+    rather than a process exit.
+    """
+    from pm_core import base_check
+    from pm_core.cli.pr import _launch_review_iteration
+
+    proceed = base_check.GateResult(base_check.PROCEED,
+                                    base_check.STAGE_REVIEW_ITERATION)
+    ctx = MagicMock()
+    ctx.invoke.side_effect = SystemExit(3)
+    with patch("pm_core.base_check.gate", return_value=proceed), \
+         patch("pm_core.cli.pr.click.get_current_context", return_value=ctx):
+        line = _launch_review_iteration("pr-001", tmp_path, 2, fresh=True,
+                                        root=tmp_path)
+    ctx.invoke.assert_called_once()
+    assert line and line.startswith("base_conflict")
+
+
+def test_launch_review_iteration_reraises_other_refusals(tmp_path):
+    """Only the base-return routing code is converted; real errors still raise."""
+    from pm_core import base_check
+    from pm_core.cli.pr import _launch_review_iteration
+
+    proceed = base_check.GateResult(base_check.PROCEED,
+                                    base_check.STAGE_REVIEW_ITERATION)
+    ctx = MagicMock()
+    ctx.invoke.side_effect = SystemExit(1)
+    with patch("pm_core.base_check.gate", return_value=proceed), \
+         patch("pm_core.cli.pr.click.get_current_context", return_value=ctx):
+        with pytest.raises(SystemExit):
+            _launch_review_iteration("pr-001", tmp_path, 2, fresh=True,
+                                     root=tmp_path)

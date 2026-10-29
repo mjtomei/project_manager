@@ -102,7 +102,10 @@ already drops it because the status is no longer `qa`.
   3, the routing code `review_loop` maps to `VERDICT_BASE_CONFLICT`, since no
   reviewer ran; otherwise it would start a reviewer beside the rework that
   return just launched) is demoted back to `in_review`; and `run_qa_sync`
-  re-checks `merged`/`closed` and an open base return after the gate.
+  re-checks `merged`/`closed`, a PR removed from the project (absent from the
+  freshly loaded data — the pre-gate check aborts on that, so the post-gate
+  one must classify it the same way rather than as eligible) and an open base
+  return after the gate.
   Neither may demote a finished PR or start a writer against it.
   The already-`in_review` branch of `pr_review` (the normal path for review
   iterations ≥ 2, which writes no status and therefore has no atomic guard)
@@ -110,7 +113,14 @@ already drops it because the status is no longer `qa`.
   return there exits **3** — the routing code `review_loop` maps to
   `VERDICT_BASE_CONFLICT`, so no iteration is recorded and the reviewer never
   starts beside the rework — and a PR that left the pre-review phase exits
-  **1** with no window.
+  **1** with no window. That re-read runs even when the caller already gated
+  (`--skip-base-check`, the auto-sequence path): the caller's gate was its
+  own network round-trip, so a return recorded after it is just as invisible
+  here, and the re-read is a cheap local load. `_launch_review_iteration`
+  converts an exit **3** raised by the command it invokes into its own
+  `base_conflict: ...` status line — its contract is a status line, not a
+  process exit, and only that routing code is converted (other refusals
+  still propagate).
 - **R4 — Clean integration continues.** `clean` / `up_to_date` / `in_base`
   resolve any open base return and let the caller proceed exactly as before.
   No review/QA reset, no status change, no re-run.
@@ -186,6 +196,18 @@ already drops it because the status is no longer `qa`.
   implementation owner across the TUI scheduler, CLI ticks, review-loop
   subprocesses and restarts. Status guards (`in_progress`/`in_review`/`qa`
   only) make stale callbacks no-ops.
+  Known limitation (documented, not fixed here): the *supersede* path in
+  `return_to_impl` mints a fresh `launch_claim` without consulting the
+  existing one, and `clear_return_awaiting` / `release_impl_claim` act on
+  whichever open return has `awaiting == "impl"` rather than on the episode
+  their launcher created. If two drivers run `impl_completion` on the same
+  idle returned PR while the base moves between their two fetches, both see
+  a moved pair, both supersede and both launch (`--fresh`, so the second
+  kills the first); a late `clear_return_awaiting` can then stamp
+  `launched_at` from the other driver's launch. Closing that needs an
+  episode token threaded through `pm pr start` (so the handshake is
+  generation-aware), which is a design change rather than a gate fix; the
+  single-driver paths (the normal case) are one-owner as specified.
 - **R8 — Bounded loop.** A return records `attempt`; repeated conflicts for
   the same base across *moved* heads are capped at `MAX_RETURNS_PER_BASE`.
   Past the cap the return is marked `needs_human` and no further impl is
@@ -469,6 +491,14 @@ No unresolved ambiguities.
     there is nothing to change (no open return / status already
     `in_progress`), and still mutate when there is — the no-op must not
     rewrite the large git-tracked `project.yaml` on every clean gate.
+28. `pm pr review --skip-base-check` (the auto-sequence path) still re-reads
+    the PR before launching: a return another driver recorded after the
+    caller's own gate exits 3 with no window, and `_launch_review_iteration`
+    turns that exit 3 into a `base_conflict:` status line (other refusal
+    codes still propagate).
+29. a PR removed from the project during the gate's fetch aborts
+    `run_qa_sync` before the QA workdir/planner (the post-gate re-read must
+    treat "absent" like `merged`/`closed`, not as eligible).
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
