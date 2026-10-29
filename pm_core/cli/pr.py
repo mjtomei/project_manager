@@ -3694,16 +3694,13 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
         # cleanup` resolves the registry entry, and its --resources mode does
         # the same, so the retained workdir *and* any live tmux windows /
         # containers become orphans with no pointer.  Say so instead of
-        # leaving the user to discover it.
-        if pr_entry.get("workdir"):
-            click.echo("  Note: that workdir and any tmux windows/containers "
-                       "for this PR are no longer tracked by pm (the registry "
-                       "entry is gone) — clean them up by hand when you are "
-                       "done with them.")
-        else:
-            click.echo("  Note: any tmux windows/containers for this PR are "
-                       "no longer tracked by pm (the registry entry is gone) "
-                       "— clean them up by hand when you are done with them.")
+        # leaving the user to discover it — naming only what the entry had.
+        orphaned = ("that workdir and any tmux windows/containers"
+                    if pr_entry.get("workdir")
+                    else "any tmux windows/containers")
+        click.echo(f"  Note: {orphaned} for this PR are no longer tracked by "
+                   f"pm (the registry entry is gone) — clean them up by hand "
+                   f"when you are done with them.")
     else:
         click.echo(f"Closed {display_id}: {pr_entry.get('title', '???')} "
                    f"(status: closed)")

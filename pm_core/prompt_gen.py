@@ -1316,7 +1316,7 @@ def _auto_cleanup_addendum() -> str:
 Auto-cleanup is enabled. After finishing your main work:
 - Check for old or dead tmux panes that are no longer needed
 - Suggest the user press `b` in the TUI to rebalance panes after closing panes
-- Remind them they can run `pm pr cleanup <pr-id>` to remove merged PR workdirs
+- Remind them they can run `pm pr cleanup <pr-id>` to remove merged or closed PR workdirs
 """
 
 

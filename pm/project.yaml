@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T08:35:23.848776+00:00'
+  updated_at: '2026-10-29T09:21:30.990299+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14754,6 +14754,29 @@ prs:
       markdown on PYTHONPATH, PM_HOST_HOME unset).'
     created_at: '2026-10-29T08:35:23Z'
     last_edited: '2026-10-29T08:35:23Z'
+  - id: note-cf200fb
+    text: 'Review a81e i1: no change to the close contract itself. (1) The watcher
+      prompt''s `closed` lifecycle line (spec R11 item 41) was the only spec item
+      with no test — a rewrite of the lifecycle list could drop it and a watcher session
+      would read a retired PR as "merge it to unblock". Pinned by tests/test_watcher_loop.py::TestGenerateWatcherPrompt::test_describes_closed_as_terminal_history
+      (verified to fail when the line is stripped). (2) The `--remove` orphan note
+      was two copies of one sentence (workdir / no-workdir variants) that had to be
+      kept in sync; it is now one constructed sentence naming only what the entry
+      had — the emitted text is byte-identical, so nothing QA observed changes. (3)
+      The auto-cleanup addendum told sessions to point users at `pm pr cleanup` "to
+      remove merged PR workdirs"; a closed PR''s workdir is exactly the case `pm pr
+      close` points at now, so it reads "merged or closed PR workdirs" (R11 item 48).
+      (4) Spec §5 listed pm_core/cli/pr.py twice; the pr_cleanup bullet is folded
+      into the pr.py bullet, and the test list gains tests/test_watcher_loop.py. Re-verified
+      the contract end-to-end on a scratch project: close keeps entry/notes/branch/workdir,
+      --remove is registry-only (and warns that a removed merged PR''s dependents
+      stay blocked), qa/start/merge refusals name the reopen, cleanup stays explicit
+      and refuses a dirty workdir without --force. Both earlier open items remain
+      resolved: the A4 cross-PR note is on pr-3d1fa55 (note-fd141d0, note-c48dda1)
+      and the stale plan premise is marked in pm/plans/plan-a35369f.md. Full suite
+      4564 passed, 1 skipped, 0 failed.'
+    created_at: '2026-10-29T09:21:30Z'
+    last_edited: '2026-10-29T09:21:30Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249

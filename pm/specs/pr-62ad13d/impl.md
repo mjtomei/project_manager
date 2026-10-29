@@ -380,6 +380,11 @@ workdirs are touched.
     describes `closed` — retained as history, terminal like `merged`, never
     satisfying a dependency, with the reopen / drop-dependency ways out — so
     a watcher session cannot read a retired PR as "merge it to unblock".
+    Pinned by
+    `tests/test_watcher_loop.py::TestGenerateWatcherPrompt::test_describes_closed_as_terminal_history`
+    (review a81e i1): the text was a documentation change with no test, so a
+    rewrite of the lifecycle list could drop the `closed` line unnoticed —
+    exactly the regression that would let a watcher merge a retired PR.
 42. `--remove` output names every resource it orphans (review e89f i2):
     `pm pr cleanup` and its `--resources` mode both resolve the registry
     entry, so after `--remove` the retained workdir *and* any live tmux
@@ -387,7 +392,9 @@ workdirs are touched.
     adapts to an entry with no workdir (naming only the live resources)
     instead of claiming a workdir it never had.  Covered by
     `test_remove_says_live_resources_are_no_longer_reachable` and
-    `test_remove_without_a_workdir_claims_only_the_branch`.
+    `test_remove_without_a_workdir_claims_only_the_branch`.  The two
+    variants are one constructed sentence (`orphaned`), not two copies that
+    must be kept in sync (review a81e i1).
 43. `closed_at` is a lifecycle timestamp in the store backfill (review e89f
     i2): `_validate_pr_statuses` backfills `created_at`/`updated_at` from
     `started_at`/`reviewed_at`/`merged_at`, and now from `closed_at` too —
@@ -448,10 +455,19 @@ workdirs are touched.
     "left alone" (which read as if the local branch/workdir were involved).
     Covered by `test_qa_refuses_a_closed_pr_and_names_the_reopen` plus the
     strengthened start/merge assertions (all fail on the previous head).
+48. Every agent-facing mention of workdir cleanup matches the new lifecycle
+    (review a81e i1): the auto-cleanup addendum in
+    `prompt_gen._auto_cleanup_addendum` told sessions to point users at
+    `pm pr cleanup` "to remove merged PR workdirs"; a closed PR's workdir is
+    exactly the one that step exists for now (`pm pr close` points users at
+    it, and the id-less auto-select offers both terminal statuses), so the
+    line reads "merged or closed PR workdirs".  Documentation only — no
+    behavior change, and no test pins the sentence.
 
-Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
-asserts the *old* destructive outcome (workdir removed, entry removed) and must
-be rewritten to assert retention.
+The pre-existing `tests/test_pr_enhancements.py:746`
+(`TestGitHubCloseResilience`) asserted the *old* destructive outcome (workdir
+removed, entry removed); it was rewritten to assert retention
+(`test_close_retains_local_state_on_gh_systemexit`).
 
 ## 2. Implicit requirements
 
@@ -576,7 +592,12 @@ No **[UNRESOLVED]** ambiguities.
   plus terminal-status reporting in `pr_auto_sequence` and a closed guard in
   `pr_signoff` (review 8820 i1) and `pr_qa` (review e086 i1), and the in-lock
   terminal re-check in `pr_start` / `pr_review` so a close landing during
-  their long pre-lock work is not resurrected (review e89f i4).
+  their long pre-lock work is not resurrected (review e89f i4); and
+  `pr_cleanup`'s "not merged" warning set also accepts `closed`, so following
+  close's help to the explicit cleanup is not flagged as unexpected (review
+  c02f i10), with its id-less auto-select offering the terminal statuses
+  (`merged` or `closed`) rather than `merged` alone (review c02f i12) — the
+  warning set derives from `TERMINAL_PR_STATES` (review e89f i2).
 - `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
   premise of its ruleset item obsolete (review c02f i13).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`, plus the
@@ -592,12 +613,6 @@ No **[UNRESOLVED]** ambiguities.
   `pm_core/home_window/pr_list.py`, `pm_core/review_loop.py` — the
   pre-existing terminal-status duplicates derive from the `pr_utils` constant
   (review c02f i10/i11, review 8820 i1).
-- `pm_core/cli/pr.py` — `pr_cleanup`'s "not merged" warning set also accepts
-  `closed`, so following close's help to the explicit cleanup is not flagged
-  as unexpected (review c02f i10), and its id-less auto-select offers the
-  terminal statuses (`merged` or `closed`) rather than `merged` alone (review
-  c02f i12); the warning set now derives from `TERMINAL_PR_STATES` (review
-  e89f i2).
 - `pm_core/store.py` — `_validate_pr_statuses` backfills `created_at`/
   `updated_at` from `closed_at` too (review e89f i2), so a retained `closed`
   record is treated as a lifecycle timestamp like `merged_at`.
@@ -614,16 +629,19 @@ No **[UNRESOLVED]** ambiguities.
 - `pm_core/prompt_gen.py` — the watcher prompt's lifecycle list gains a
   `closed` line (retained history, terminal, never satisfies a dependency) so
   a watcher session does not read a retired PR as one to merge (review 8820
-  i2, R11 item 41).
+  i2, R11 item 41), and the auto-cleanup addendum's `pm pr cleanup` line
+  names merged *or closed* workdirs (review a81e i1, R11 item 48).
 - `pm/qa/regression/command-dedup.md`, `pm/qa/regression/multi-window-registry.md`
   — cleanup steps use `--remove`.
 - `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`
   (`TestGitHubCloseResilience` rewrite), `tests/test_sync_merge_integrity.py`
   (TUI startup-sync closed race), `tests/test_fake_github.py` (the
   `--delete-branch` emulation), `tests/test_store_validation.py`
-  (`closed_at` lifecycle backfill, review e89f i2), and
+  (`closed_at` lifecycle backfill, review e89f i2),
   `tests/test_cli_helpers.py` (`TestRecordStatusTimestampClosedAt` — the
-  helper's `closed_at` contract, review e89f i1).
+  helper's `closed_at` contract, review e89f i1), and
+  `tests/test_watcher_loop.py` (the watcher prompt's `closed` lifecycle line,
+  review a81e i1).
 
 ## 6. Out of scope
 
