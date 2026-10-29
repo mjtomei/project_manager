@@ -29813,6 +29813,23 @@ prs:
       casts.'
     created_at: '2026-10-29T08:32:47Z'
     last_edited: '2026-10-29T08:32:47Z'
+  - id: note-4be11ed
+  text: 'S35 refine findings (verified live): (1) A planner-phase stop has NO status
+  dashboard — the qa status pane is only added after planning succeeds, so do
+  not expect ''Overall: STOPPED'' for a planner-episode stop; assert the TUI log
+  ''QA stopped for <pr> — no verdict recorded'' + runtime/<pr>.json qa done STOPPED
+  + ''last QA run was stopped'' in pm autostart status. (2) The fake planner''s
+  no-verdict episode is only ~20-25s (11 deferrals x ~2s refresh), so send the
+  QA-loop stop as soon as the qa-<A> window appears; if it exhausts first the
+  run ends INPUT_REQUIRED and records a QA note. (3) A finished ''pm qa run''
+  is adopted by the live TUI''s resume scan within ~5s (runtime_state done/PASS
+  + a QA note) without a restart. (4) When auto-start later targets a qa PR with
+  a recorded PASS, signoff_ui.advance_all hands it to sign_off (a signoff-<pr>
+  window, not a QA rerun) — configure signoff: SIGNOFF_BLOCKED to park it deterministically.
+  (5) Command-bar text must be sent in small chunks (~0.3s apart); fast tmux send-keys
+  drops characters (''loop'' -> ''oop'').'
+  created_at: '2026-10-29T08:28:59Z'
+  last_edited: '2026-10-29T08:28:59Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
