@@ -36234,7 +36234,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-29T04:29:13.164408+00:00'
+  updated_at: '2026-10-29T05:41:06.367589+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -36647,6 +36647,36 @@ prs:
       ?". (2026-10-29T04:30:00Z)'
     created_at: '2026-10-29T04:29:13Z'
     last_edited: '2026-10-29T04:29:13Z'
+  - id: note-640cfc2
+    text: 'QA S30 (upstream holds + dirty divergence) PASS, 4/4 stories. (1) Unreachable
+      remote: `t` -> "QA [pr]: Planning QA scenarios..." then one hold line (qa_loop
+      WARNING + TUI mirror) "Could not refresh the upstream PR branch: could not query
+      file:///... for <branch>: fatal: ... does not appear to be a git repository
+      fatal: Could not read from remote repository. ... Restart QA once the remote
+      is reachable." — one physical line, no embedded newline, no "..", PR -> qa,
+      note INPUT_REQUIRED, no qa-* window, workdir HEAD/ref/porcelain unchanged, qa_status
+      overall INPUT_REQUIRED + scenarios [] + error. (2) ls-remote ok but fetch fails
+      (upstream ref overwritten with deadbeef...): hold "Could not fetch <branch>
+      at deadbeefdead from file:///...: fatal: git upload-pack: not our ref ... fatal:
+      remote error: upload-pack: not our ref ... Restart QA once the remote is reachable."
+      flattened to one line, same state guarantees, ls-remote still deadbeef. (3)
+      Divergence routed once (NEEDS_WORK + qa_branch_sync local/upstream/routed_at)
+      then dirty tree (` M app.py`) + `zt`: hold ends "The workdir also has uncommitted
+      changes (app.py); commit or stash them first, then restart QA.", status stays
+      qa (no re-route), qa_branch_sync byte-identical, workdir/upstream untouched.
+      (4) tree cleaned, heads unchanged, `zt` again: "QA held: PR branch still diverged
+      after review", note "still diverged after it was returned to review for the
+      same heads", no NEEDS_WORK, record unchanged. tests/test_qa_branch_sync.py 34
+      passed. Captures: /pm-captures/scenarios/30/ (story1, story2, story3-4, regression/).
+      Harness notes: one private tmux socket per story (a fresh server inherits the
+      fixture PATH; /usr/bin before any push proxy), fixture git always /usr/bin/git,
+      pm from /tmp/pm-venv with PYTHONPATH=/workspace; the TUI log pane is a single
+      status-bar line so these long holds are clipped at the pane width in the videos
+      — the full flattened text is what `pm log grep` prints and is in each capture''s
+      log-greps.txt. No default tmux server existed at any point, so the real pm session
+      was never touched.'
+    created_at: '2026-10-29T05:41:06Z'
+    last_edited: '2026-10-29T05:41:06Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
