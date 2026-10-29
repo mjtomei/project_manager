@@ -462,7 +462,7 @@ def recover_restart_killed_runs(app) -> None:
     was the re-run a sign-off REQA owed — its start consumed ``awaiting`` —
     the obligation is reopened, so :func:`arm_owed_reqa` (or a tick) starts
     it once, through the claim, with auto-start on or off.  Any other lost
-    run is reported, since its windows close with nothing in their place.
+    run is left for :func:`report_restart_lost_runs`.
     """
     import json
     from pm_core import qa_loop
@@ -538,13 +538,26 @@ def recover_restart_killed_runs(app) -> None:
         if isinstance(rec, dict):
             rec["awaiting"] = "qa"
             rec.pop("launch_claim", None)
-    # Any other lost run (the user's ``t``, an owed re-run whose reopen hit a
-    # busy project.yaml) is gone with nothing started in its place: say why
-    # rather than leave the PR silently at qa.  ``z t``, not ``t``: a run
-    # past planning's start leaves its main qa window, which ``t`` would
-    # only focus.  (An auto-start target is started again by its next pass.)
-    for pr_id in sorted(set(lost) - set(reopened)):
-        if (prs.get(pr_id) or {}).get("status") == "qa":
+    app._restart_lost_qa = sorted(set(lost) - set(reopened))
+
+
+def report_restart_lost_runs(app) -> None:
+    """Startup hook, after the breadcrumb: say how to re-run a lost QA run.
+
+    A run :func:`recover_restart_killed_runs` ended without reopening an
+    owed REQA (the user's ``t``, or a reopen that hit a busy project.yaml)
+    is gone with nothing in its place: say why rather than leave the PR
+    silently at ``qa``.  Not at mount: auto-start comes back only with the
+    breadcrumb, whose pass starts a lost target's QA again, and that run
+    needs no line.  ``z t``, not ``t``: a run past planning's start leaves
+    its main qa window, which ``t`` would only focus.
+    """
+    lost = getattr(app, "_restart_lost_qa", None) or []
+    app._restart_lost_qa = []
+    prs = {p.get("id"): p for p in (app._data or {}).get("prs") or []}
+    for pr_id in lost:
+        if (pr_id not in app._qa_loops
+                and (prs.get(pr_id) or {}).get("status") == "qa"):
             app.log_message(
                 f"QA for {pr_id} was cut off by the TUI restart before its "
                 "first snapshot — press z t to run it again", sticky=10)

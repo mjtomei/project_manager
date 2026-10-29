@@ -770,10 +770,12 @@ def test_a_reqa_rerun_killed_by_a_plain_restart_starts_again_once(tmp_path,
         qa_loop_ui.recover_restart_killed_runs(app)
         qa_loop_ui.arm_owed_reqa(app)
         app.fire_timers()
+        qa_loop_ui.report_restart_lost_runs(app)
         for _ in range(6):
             qa_loop_ui.reconcile_owed_reqa(app)
         # A second restart's mount finds nothing more to recover.
         qa_loop_ui.recover_restart_killed_runs(app)
+        qa_loop_ui.report_restart_lost_runs(app)
     sq.assert_called_once_with(app, PR)
     assert qa_loop.read_run_record(lost)["ended_at"]
     with _as_another_process():
@@ -810,6 +812,7 @@ def test_a_restart_killed_run_reopens_only_the_reqa_it_consumed(tmp_path,
     with patch.object(store, "locked_update",
                       wraps=store.locked_update) as lu:
         qa_loop_ui.recover_restart_killed_runs(app)
+    qa_loop_ui.report_restart_lost_runs(app)
     assert qa_loop.read_run_record(lost)["ended_at"]
     assert app.pr()["signoff_return"]["awaiting"] is None
     lu.assert_not_called()              # no project.yaml rewrite
@@ -831,13 +834,38 @@ def test_a_restart_killed_plain_run_is_reported_not_left_silent(tmp_path,
     app = App(root)
     with patch.object(store, "locked_update",
                       wraps=store.locked_update) as lu:
-        qa_loop_ui.recover_restart_killed_runs(app)
-        qa_loop_ui.recover_restart_killed_runs(app)    # a second mount
+        for _ in range(2):                             # a second mount
+            qa_loop_ui.recover_restart_killed_runs(app)
+            qa_loop_ui.report_restart_lost_runs(app)
     assert qa_loop.read_run_record(lost)["ended_at"]
     lu.assert_not_called()
     assert app.logs == [f"QA for {PR} was cut off by the TUI restart before "
                         "its first snapshot — press z t to run it again"]
     assert app.log_kw == [{"sticky": 10}]
+
+
+@pytest.mark.parametrize("case", ["autostart", "left-qa"])
+def test_a_lost_run_running_again_or_out_of_qa_is_not_reported(
+        tmp_path, home, case):
+    """Auto-start is off at mount and comes back with the breadcrumb, whose
+    pass starts a lost target's QA again: no "press z t" line for a run
+    already running again (z t would kill it), nor for a PR that left qa
+    before the report."""
+    root = _project(tmp_path, ret=None)
+    _own_run(home, started_at=time.time() - 5)
+    app = App(root)
+    qa_loop_ui.recover_restart_killed_runs(app)
+    if case == "autostart":
+        from pm_core.tui import auto_start
+        app._auto_start, app._auto_start_targets = True, {PR: {}}
+        with patch.object(qa_loop_ui, "start_qa", side_effect=lambda a, p:
+                          a._qa_loops.__setitem__(p, object())) as sq:
+            auto_start._auto_start_qa_loops(app)
+        sq.assert_called_once_with(app, PR)
+    else:
+        store.get_pr(app._data, PR)["status"] = "sign_off"
+    qa_loop_ui.report_restart_lost_runs(app)
+    assert not [m for m in app.logs if "cut off by the TUI restart" in m]
 
 
 def test_restart_recovery_retires_the_dead_runs_windows(tmp_path, home):
@@ -879,6 +907,15 @@ def test_restart_recovery_is_wired_into_mount_before_the_owed_arm():
     src = inspect.getsource(app_mod)
     assert 0 < src.index("recover_restart_killed_runs(self)") \
         < src.index("qa_loop_ui.arm_owed_reqa(self)")
+
+
+def test_restart_lost_report_is_wired_after_the_breadcrumb():
+    """The report waits for the breadcrumb's auto-start pass."""
+    import inspect
+    from pm_core.tui import app as app_mod
+    src = inspect.getsource(app_mod)
+    assert 0 < src.index("auto_start.consume_breadcrumb(self)") \
+        < src.index("qa_loop_ui.report_restart_lost_runs(self)")
 
 
 # ---------------------------------------------------------------------------

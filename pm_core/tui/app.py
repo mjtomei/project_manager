@@ -488,6 +488,9 @@ class ProjectManagerApp(App):
         self._prefix_hint_seq: int | None = None
         # QA loop state (purely in-memory)
         self._qa_loops: dict = {}
+        # PRs whose QA run the restart cut off, reported after the breadcrumb
+        # (qa_loop_ui.recover_restart_killed_runs / report_restart_lost_runs)
+        self._restart_lost_qa: list[str] = []
         # Self-driving QA state (zz t — tracks pass counts per PR)
         self._self_driving_qa: dict = {}
         # Command-input race condition fix: buffer keystrokes between / and focus
@@ -694,6 +697,14 @@ class ProjectManagerApp(App):
         # breadcrumb restore above (which would have overwritten them).
         self._cmd_queue_ready = True
         self._drain_command_queue(startup=True)
+        # A QA run the restart cut off is reported only now: the breadcrumb
+        # pass (or a queued command) may have started it again already.
+        try:
+            from pm_core.tui import qa_loop_ui
+            qa_loop_ui.report_restart_lost_runs(self)
+        except Exception:
+            _log.warning("QA runs lost to the restart: report failed",
+                         exc_info=True)
         # These must run on the main thread (touch Textual state)
         self.run_worker(sync_mod.startup_github_sync(self))
         self._capture_frame("mount")
