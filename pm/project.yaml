@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T03:18:59.036009+00:00'
+  updated_at: '2026-10-29T03:26:21.980438+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29708,6 +29708,16 @@ prs:
       focused recovery/QA/review/watcher/autostart suites 494 passed.'
     created_at: '2026-10-29T03:18:58Z'
     last_edited: '2026-10-29T03:18:58Z'
+  - id: note-dbd1694
+    text: 'Review-loop 345f i1 follow-up: the full suite IS green in this container
+      when run with the documented review-container env (env -u PM_HOST_HOME PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace, scratchpad pytest 8.4.2): 4585 passed, 1 skipped, 0 failed,
+      0 errors (393 s) at 94cc53b0. The earlier 43F/36E came from running without
+      those flags (PM_HOST_HOME makes the hook-receiver test skip its copy; the container
+      git push proxy rejects every push except this PR branch). No regressions either
+      way.'
+    created_at: '2026-10-29T03:26:21Z'
+    last_edited: '2026-10-29T03:26:21Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
