@@ -209,19 +209,47 @@ def find_session_server(session_name: str) -> tuple[str | None, bool]:
     server, or when tmux cannot be run at all (callers degrade to "no
     session" instead of crashing).  ``session_name`` may carry a
     grouped-session ``~N`` suffix.
+
+    Resolution uses tmux's default *prefix* matching, so a base name also
+    finds a surviving grouped session ``pm-x~1``.  That is what TUI
+    discovery wants (the panes are shared, so `pm tui view -s pm-x` should
+    still reach the TUI after the base was killed elsewhere), but it is
+    wrong for `pm session kill` — see ``find_exact_session_server``.
     """
+    return _find_session_server(session_name, exact=False)
+
+
+def find_exact_session_server(session_name: str) -> tuple[str | None, bool]:
+    """Like ``find_session_server`` but matches the session name exactly.
+
+    A bare ``tmux -t <name>`` is resolved by tmux as a *prefix*, so
+    ``has-session -t pm-x`` also succeeds for a surviving grouped session
+    ``pm-x~1``.  Prefix matching made ``pm session kill`` treat a session
+    whose base had been killed elsewhere as running: it killed the grouped
+    session (detaching its client) and unlinked a live server's socket.
+    R8 requires "No session found" there, with the server left alone.
+
+    Used only by the destructive path; discovery keeps prefix matching.
+    """
+    return _find_session_server(session_name, exact=True)
+
+
+def _find_session_server(session_name: str, *, exact: bool) -> tuple[str | None, bool]:
     from pm_core.paths import default_socket_path, session_socket_path
 
     # Same rule as pane_registry.base_session_name; kept inline because
     # tmux.py is the lower-level module and should not depend on the
     # registry.
     base = session_name.split("~", 1)[0]
+    # ``=name`` is tmux's exact-match target syntax; a bare name is a
+    # prefix match.
+    target = f"={session_name}" if exact else base
     try:
         if base.startswith("pm-"):
             sock = str(session_socket_path(base.removeprefix("pm-")))
-            if session_exists(base, socket_path=sock):
+            if session_exists(target, socket_path=sock):
                 return sock, True
-        if session_exists(base, use_env=False):
+        if session_exists(target, use_env=False):
             return str(default_socket_path()), False
     except OSError:
         # tmux is not installed or not executable; no server can host it.
@@ -248,13 +276,24 @@ def create_session(name: str, cwd: str, cmd: str, socket_path: str | None = None
 
     *env* is exported into the new session's panes through a private file
     (see ``_wrap_cmd_env``).
+
+    Two ``pm session`` starts for the same project race between the
+    caller's existence check and this call; the loser's ``new-session``
+    fails with "duplicate session".  Converge on the winner's session
+    instead of raising — a genuine failure leaves no session behind, so
+    it is still re-raised.
     """
-    _run_with_env(
-        _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
-                  cmd, socket_path=socket_path),
-        env,
-        check=True,
-    )
+    try:
+        _run_with_env(
+            _tmux_cmd("new-session", "-d", "-s", name, "-n", "main", "-c", cwd,
+                      cmd, socket_path=socket_path),
+            env,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        if not session_exists(f"={name}", socket_path=socket_path):
+            raise
+        _log.info("create_session: %s created concurrently; converging", name)
 
 
 def split_pane(session: str, direction: str, cmd: str,
@@ -760,12 +799,22 @@ def current_or_base_session(base: str) -> str:
 
 
 def create_grouped_session(base: str, name: str, socket_path: str | None = None) -> None:
-    """Create a grouped session sharing windows with the base session."""
-    _run(
-        _tmux_cmd("new-session", "-d", "-t", base, "-s", name,
-                   socket_path=socket_path),
-        check=True,
-    )
+    """Create a grouped session sharing windows with the base session.
+
+    Concurrent starts can pick the same ``~N`` suffix and both call this;
+    the loser gets "duplicate session".  Converge on the existing grouped
+    session instead of raising (same race as ``create_session``).
+    """
+    try:
+        _run(
+            _tmux_cmd("new-session", "-d", "-t", base, "-s", name,
+                       socket_path=socket_path),
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        if not session_exists(f"={name}", socket_path=socket_path):
+            raise
+        _log.info("create_grouped_session: %s created concurrently; converging", name)
 
 
 def list_grouped_sessions(base: str, socket_path: str | None = None) -> list[str]:

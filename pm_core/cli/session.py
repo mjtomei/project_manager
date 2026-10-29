@@ -854,7 +854,12 @@ def session_kill(start_dir):
     # The hosting server: the session's own socket, or the default server
     # for a legacy pre-isolation session (addressed by its explicit path,
     # since tmux follows $TMUX when no -S is given).
-    hosting_socket, _on_private = tmux_mod.find_session_server(session_name)
+    # Exact name match: a bare tmux target is a *prefix* match, so
+    # `has-session -t pm-x` also succeeds for a surviving grouped session
+    # `pm-x~1`.  Treating that as "running" would kill the grouped session
+    # (detaching its client) and unlink a live server's socket; R8 requires
+    # "No session found" and leaves the server alone.
+    hosting_socket, _on_private = tmux_mod.find_exact_session_server(session_name)
     if hosting_socket is None:
         click.echo(f"No session '{session_name}' found.", err=True)
         # Remove the socket file only when no server answers on it.  A live

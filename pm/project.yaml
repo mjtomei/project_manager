@@ -42908,3 +42908,38 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-ea98f71
+  plan: bugs
+  title: 'Bug: a second concurrent `pm session` start can respawn the TUI of a session
+    that is still being created'
+  branch: pm/pr-ea98f71-bug-a-second-concurrent-pm-session-start-can-respa
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/session.py `_session_start`, the "TUI pane missing
+    — respawning..." branch (roles_alive computed from the pane registry).
+
+
+    Repro (tmux 3.2a): from a plain shell in an initialised project, run two `pm session
+    </dev/null` at the same moment. The loser takes the "session already exists" branch
+    before the winner has registered its TUI pane (or after the winner reset the registry),
+    so `roles_alive` lacks "tui" and `_respawn_tui()` restarts a TUI that is already
+    running. Seen in 2 of 3 paired-start rounds in QA S6 (logs start with "TUI pane
+    missing — respawning...").
+
+
+    Impact: transient TUI restart / lost in-memory TUI state during a paired start;
+    it is a false positive of the heal path, not a genuinely dead pane.
+
+
+    Suggested fix: before respawning, treat a live pane whose `#{pane_start_command}`
+    is `pm _tui` as the TUI (and register it) instead of trusting only the registry
+    snapshot taken during a concurrent start.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T13:39:35.560131+00:00'
+  updated_at: '2026-10-29T13:39:35.560131+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []

@@ -337,6 +337,55 @@ class TestFindSessionServer:
         monkeypatch.setattr(tmux, "session_exists", boom)
         assert tmux.find_session_server("pm-repo-abc") == (None, False)
 
+    @staticmethod
+    def _prefix_matching_exists(alive: set[str]):
+        """Emulate tmux target resolution: a bare name is a prefix match,
+        ``=name`` is exact."""
+        def exists(name, socket_path=None, use_env=True):
+            exact = name.startswith("=")
+            n = name[1:] if exact else name
+            if exact:
+                return n in alive
+            return any(a.startswith(n) for a in alive)
+        return exists
+
+    def test_discovery_still_prefix_matches_a_surviving_group(
+            self, monkeypatch, tmp_path):
+        """Discovery keeps tmux's prefix rule: the group shares the panes.
+
+        `pm tui view -s pm-x` should still reach the TUI after the base was
+        killed elsewhere, so `find_session_server` must accept ``pm-x~1``
+        for ``pm-x``.
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(tmux, "session_exists",
+                            self._prefix_matching_exists({"pm-repo-abc~1"}))
+        sock, private = tmux.find_session_server("pm-repo-abc")
+        assert (sock, private) == (str(tmp_path / "pm-repo-abc"), True)
+
+    def test_exact_match_rejects_a_surviving_group(self, monkeypatch,
+                                                   tmp_path):
+        """A surviving ``pm-x~1`` must not make ``pm-x`` look alive to kill.
+
+        ``tmux has-session -t pm-x`` also matches ``pm-x~1``.  With prefix
+        matching, `pm session kill` found the "session", killed the grouped
+        session (detaching its client) and unlinked a live server's socket
+        when the base had already been killed elsewhere — R8 requires "no
+        session found" and leaves the server alone.
+        """
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(tmux, "session_exists",
+                            self._prefix_matching_exists({"pm-repo-abc~1"}))
+        assert tmux.find_exact_session_server("pm-repo-abc") == (None, False)
+
+    def test_exact_match_accepts_the_session_itself(self, monkeypatch,
+                                                    tmp_path):
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(tmux, "session_exists",
+                            self._prefix_matching_exists({"pm-repo-abc"}))
+        sock, private = tmux.find_exact_session_server("pm-repo-abc")
+        assert (sock, private) == (str(tmp_path / "pm-repo-abc"), True)
+
     def test_non_pm_name_only_checks_default(self, monkeypatch, tmp_path):
         """A plain tmux session must never be mapped to a pm socket."""
         seen: list[str | None] = []
@@ -1240,15 +1289,19 @@ class TestSessionKillServerSelection:
         # Never query a real tmux server from a unit test.
         monkeypatch.setattr(session_mod, "_ambient_share_mode",
                             lambda name: ambient_share_mode)
+        # Candidate selection uses find_session_server; the kill itself uses
+        # the exact-match variant (a bare target would also match a grouped
+        # session).  Stub both against the same fixture.
         if hosting_for is None:
-            monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                                lambda name: hosting)
+            resolver = lambda name: hosting  # noqa: E731
         else:
             # Per-name hosting, so the cwd session can be absent while the
             # ambient one is live.
-            monkeypatch.setattr(
-                session_mod.tmux_mod, "find_session_server",
-                lambda name: hosting_for.get(name, (None, False)))
+            resolver = lambda name: hosting_for.get(name, (None, False))  # noqa: E731
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            resolver)
+        monkeypatch.setattr(session_mod.tmux_mod, "find_exact_session_server",
+                            resolver)
         killed: list[tuple[str, str | None]] = []
         monkeypatch.setattr(
             session_mod.tmux_mod, "list_grouped_sessions",
