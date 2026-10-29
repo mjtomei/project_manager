@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T10:53:24.972278+00:00'
+  updated_at: '2026-10-29T11:51:42.084935+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41104,6 +41104,38 @@ prs:
       deselected, needs PM_HOST_HOME unset).'
     created_at: '2026-10-29T10:53:24Z'
     last_edited: '2026-10-29T10:53:24Z'
+  - id: note-186cf38
+    text: 'Review-loop 2aa0 i1 (on fae20ece). (1) `_poll_impl_idle` did not refresh
+      `app._data` after a *verified* base completion: `impl_completion` resolved the
+      return on disk, but the poll iterates the in-memory snapshot, and nothing else
+      reloads it when the bounce came from a one-shot gate (`resume_loop` unset) with
+      auto-start off — the resume pass only runs for a loop-origin bounce and `_auto_review_idle_prs`
+      only runs with auto-start enabled. `open_return(pr)` therefore stayed truthy,
+      so every later tick re-entered the base-return branch and re-ran the completion
+      check (a full `store.load` of the multi-MB project.yaml in a worker) every BASE_CHECK_POLL_SECONDS
+      forever for an episode that was already over, and a manual `zz d` was refused
+      with "base integration rework pending" for up to the 300 s background-sync reload
+      window on a reason that was no longer true. The tick now reloads `app._data`
+      (best effort) once the verdict is consumed, matching `_catch_up_base_impl` after
+      an in-process relaunch. Test: `_poll_impl_idle` with a resolved-on-disk return
+      and a stale snapshot asserts the idle turn is consumed and the snapshot no longer
+      carries the open return; verified failing without the fix. Spec R13 + test plan
+      item 32. Full suite: 4589 passed, 1 skipped, 0 failed (test_hook_events::test_installer_writes_standalone_receiver
+      deselected, needs PM_HOST_HOME unset; tests/test_markdown_render.py run separately,
+      13 passed). Evidence: /pm-captures/review-2aa0-i1/full-suite.log. Reviewed but
+      not changed (unchanged residuals, already documented): the writer-launch gate
+      self-heal can resolve an open return while a mid-turn impl has a clean tree
+      (impl_completion is the normal resolver); the CLI auto-sequence runs one ls-remote
+      per tick through impl_completion; worst-case gate latency (300 s repo lock +
+      300 s `pm pr start`) can exceed the 360 s review child budget; `_run_command_async`s
+      360 s budget is now global to every async TUI command (deliberate, matches review_loop._LAUNCH_TIMEOUT);
+      `pr start`s foreground (non-tmux) fallback clears `awaiting`/stamps `launched_at`
+      without re-pointing transcript links, so the TUI handoff waits for idle evidence
+      that never arrives until a `d` gate self-heal or a new hook event — recoverable,
+      not stranded; `pm/project.yaml` carries ~700 lines of unrelated YAML re-wrapping
+      from pms own save (systemic, not this PRs choice).'
+    created_at: '2026-10-29T11:51:42Z'
+    last_edited: '2026-10-29T11:51:42Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
