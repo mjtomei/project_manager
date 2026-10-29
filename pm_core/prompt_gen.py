@@ -1521,6 +1521,10 @@ mechanics will help you distinguish normal operation from genuine problems.
 - `qa` -- QA testing is running. QA scenarios execute in parallel; if they find
   issues and commit fixes, the PR returns to `in_review` for another review cycle.
 - `merged` -- PR merged to `{base_branch}`. Auto-start then checks for newly-unblocked dependents.
+- `closed` -- Retired without merging (`pm pr close` keeps the record as history).
+  Terminal like `merged`, but it never satisfies a dependency: its dependents stay
+  blocked until the PR is reopened (`pm pr edit <id> --status pending`) or dropped
+  from their `depends_on`. Do not merge it to unblock them.
 
 **How transitions work:**
 - **pending -> in_progress**: Auto-start detects all deps are merged and launches

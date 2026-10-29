@@ -338,6 +338,24 @@ workdirs are touched.
     instead of the generic "sign-off runs after QA" complaint about a status
     the PR is not going to leave on its own.  Covered by
     `test_signoff_refuses_a_closed_pr_and_names_the_reopen`.
+39. Close never tears down live resources (review 8820 i2, A4/R4): the
+    command and everything it triggers reach none of
+    `pr_cleanup.cleanup_pr_resources`, `tmux.kill_window`,
+    `helpers.kill_pr_windows` or `container.cleanup_pr_containers` — for the
+    default close *and* `--remove` — while the workdir survives.  Pinned by
+    `test_close_does_not_tear_down_live_resources` (the spies are the real
+    teardown entry points, so a future hook that reclaimed a closed PR's
+    window would fail it).
+40. Close preserves historical evidence beyond title/notes/deps (review 8820
+    i2): a `signoff` record (verdict, sha, report hash, integration), a
+    `merge_integrity` finding, `spec_pending` and the `qa` state survive
+    verbatim.  Covered by
+    `test_close_preserves_merge_and_signoff_evidence`.
+41. Agent-facing lifecycle docs match the new state (review 8820 i2): the
+    watcher prompt's lifecycle list (`prompt_gen.generate_watcher_prompt`)
+    describes `closed` — retained as history, terminal like `merged`, never
+    satisfying a dependency, with the reopen / drop-dependency ways out — so
+    a watcher session cannot read a retired PR as "merge it to unblock".
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -483,6 +501,10 @@ No **[UNRESOLVED]** ambiguities.
   `FakeGitHubRepo.delete_branch`) so branch retention is genuinely tested
   (review c02f i14).
 - `pm_core/cli/__init__.py` — help line.
+- `pm_core/prompt_gen.py` — the watcher prompt's lifecycle list gains a
+  `closed` line (retained history, terminal, never satisfies a dependency) so
+  a watcher session does not read a retired PR as one to merge (review 8820
+  i2, R11 item 41).
 - `pm/qa/regression/command-dedup.md`, `pm/qa/regression/multi-window-registry.md`
   — cleanup steps use `--remove`.
 - `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`

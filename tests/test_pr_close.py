@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 from unittest import mock
 
@@ -303,6 +303,79 @@ def test_workdir_is_byte_identical_after_close(tmp_path):
     status = subprocess.run([REAL_GIT, "status", "--porcelain"], cwd=wd,
                             capture_output=True, text=True, check=True).stdout
     assert "M tracked.txt" in status
+
+
+def _teardown_spies(calls: list[str]) -> list:
+    """Patches for every live-resource teardown a close must never reach."""
+    return [
+        mock.patch("pm_core.pr_cleanup.cleanup_pr_resources",
+                   side_effect=lambda *a, **k: calls.append(
+                       "cleanup_pr_resources")),
+        mock.patch("pm_core.tmux.kill_window",
+                   side_effect=lambda *a, **k: calls.append("kill_window")),
+        mock.patch("pm_core.cli.helpers.kill_pr_windows",
+                   side_effect=lambda *a, **k: calls.append(
+                       "kill_pr_windows")),
+        mock.patch("pm_core.container.cleanup_pr_containers",
+                   side_effect=lambda *a, **k: calls.append(
+                       "cleanup_pr_containers")),
+    ]
+
+
+def test_close_does_not_tear_down_live_resources(tmp_path):
+    """A4/R4: close is a registry action.  It never kills tmux windows,
+    containers or push-proxy sockets, and never clears runtime state — that
+    is the separate, explicitly requested `pm pr cleanup --resources`.  The
+    retained workdir means a closed PR's live window can still be used."""
+    calls: list[str] = []
+    project = _make_project(tmp_path)
+    with _fake_gh() as backend, ExitStack() as stack:
+        backend.add_pr(head="pm/pr-001")
+        for spy in _teardown_spies(calls):
+            stack.enter_context(spy)
+        closed = _run_close(project["pm_dir"], "pr-001")
+        removed = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert closed.exit_code == 0, closed.output
+    assert removed.exit_code == 0, removed.output
+    assert calls == []
+    assert _load_entry(project["pm_dir"]) is None
+    assert project["workdir"].is_dir()
+
+
+def test_close_preserves_merge_and_signoff_evidence(tmp_path):
+    """The record keeps every piece of historical evidence — the sign-off
+    approval it was retired with, merge-integrity findings, spec/QA state —
+    not just the title, notes and dependencies."""
+    signoff = {
+        "verdict": "SIGNOFF_MERGE", "sha": "a" * 40, "ts": NOW,
+        "origin": "manual", "report_hash": "b" * 64,
+        "integration": {"base_branch": "master", "base_sha": "c" * 40,
+                        "target_repo": "o/r", "status": "clean"},
+    }
+    integrity = {"problem": "published candidate differs from the approved "
+                            "one", "merge_sha": "d" * 40}
+    qa_state = {"done": 3, "total": 3, "verdict": "PASS"}
+    project = _make_project(tmp_path, with_dependent=False)
+    data = store.load(project["pm_dir"])
+    entry = store.get_pr(data, "pr-001")
+    entry["signoff"] = dict(signoff)
+    entry["merge_integrity"] = dict(integrity)
+    entry["spec_pending"] = True
+    entry["qa"] = dict(qa_state)
+    store.save(data, project["pm_dir"])
+
+    with _fake_gh() as backend:
+        backend.add_pr(head="pm/pr-001")
+        result = _run_close(project["pm_dir"], "pr-001")
+
+    assert result.exit_code == 0, result.output
+    after = _load_entry(project["pm_dir"])
+    assert after["status"] == "closed"
+    assert after["signoff"] == signoff
+    assert after["merge_integrity"] == integrity
+    assert after["spec_pending"] is True
+    assert after["qa"] == qa_state
 
 
 def test_cleanup_remains_the_explicit_way_to_drop_a_closed_workdir(tmp_path):
