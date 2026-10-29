@@ -106,6 +106,61 @@ class TestSocketPathFromTmuxEnv:
 
 
 # ---------------------------------------------------------------------------
+# wrapper: the entry-point resolver (R4.1)
+#
+# The wrapper runs before pm_core is imported, so it repeats the socket
+# directory instead of importing paths.  Pin it to the real value.
+# ---------------------------------------------------------------------------
+
+class TestWrapperMarksTmuxSocket:
+    def test_socket_dir_literal_matches_paths(self):
+        from pm_core import wrapper
+
+        assert wrapper._PM_SOCKET_DIR == str(paths.SHARED_SOCKET_DIR)
+
+    def test_exports_pm_socket_from_tmux(self):
+        from pm_core import wrapper
+
+        env = {"TMUX": "/tmp/pm-sessions/pm-repo-abc,1234,0"}
+        wrapper._mark_tmux_socket(env)
+        assert env["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-repo-abc"
+
+    def test_leaves_ordinary_tmux_sessions_alone(self):
+        from pm_core import wrapper
+
+        env = {"TMUX": "/tmp/tmux-1000/default,1234,0"}
+        wrapper._mark_tmux_socket(env)
+        assert "PM_TMUX_SOCKET" not in env
+
+    def test_keeps_an_explicit_socket(self):
+        from pm_core import wrapper
+
+        env = {"PM_TMUX_SOCKET": "/tmp/pm-sessions/pm-explicit",
+               "TMUX": "/tmp/pm-sessions/pm-other,1234,0"}
+        wrapper._mark_tmux_socket(env)
+        assert env["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-explicit"
+
+    def test_no_tmux_no_socket(self):
+        from pm_core import wrapper
+
+        env: dict[str, str] = {}
+        wrapper._mark_tmux_socket(env)
+        assert "PM_TMUX_SOCKET" not in env
+
+
+class TestQaStatusSocketLiteral:
+    """qa_status.py runs standalone (no pm_core import), so it hardcodes
+    the socket directory; keep the copy honest without importing the
+    module (it configures logging at import time)."""
+
+    def test_hardcoded_socket_dir_matches_paths(self):
+        import pm_core
+
+        src = (Path(pm_core.__file__).parent / "qa_status.py").read_text()
+        assert f'"{paths.SHARED_SOCKET_DIR}"' in src
+
+
+# ---------------------------------------------------------------------------
 # tmux: explicit default-server targeting
 # ---------------------------------------------------------------------------
 
@@ -722,6 +777,47 @@ class TestSessionKillServerSelection:
         assert killed == []
 
 
+class TestResolveTargetSession:
+    """``pm session kill``/``mobile`` share one candidate list."""
+
+    def test_falls_back_to_a_known_ambient_session(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-cwd")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: "pm-ambient")
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: cands[-1])
+        assert session_mod._resolve_target_session() == "pm-ambient"
+
+    def test_never_uses_an_unknown_ambient_session(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-cwd")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: None)
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[0])
+        assert session_mod._resolve_target_session() == "pm-cwd"
+        assert seen == [["pm-cwd"]]
+
+    def test_does_not_duplicate_the_cwd_candidate(self, monkeypatch):
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-same")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: "pm-same")
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[0])
+        session_mod._resolve_target_session()
+        assert seen == [["pm-same"]]
+
+
 class TestPickExistingSession:
     def test_prefers_the_first_running_candidate(self, monkeypatch, tmp_path):
         from pm_core.cli import session as session_mod
@@ -848,6 +944,17 @@ class TestPrintConnect:
 
         assert result.exit_code == 0, result.output
         assert result.output.strip() == "tmux attach -t pm-repo-abc"
+
+    def test_dir_without_share_flags_is_rejected(self, monkeypatch, tmp_path):
+        """`--dir` only means "join a shared session", as for `pm session`."""
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        result = CliRunner().invoke(
+            session_mod.session, ["--print-connect", "--dir", str(tmp_path)])
+
+        assert result.exit_code == 1
+        assert "--dir requires --global or --group" in result.output
 
 
 # ---------------------------------------------------------------------------

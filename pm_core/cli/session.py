@@ -265,6 +265,23 @@ def _pick_existing_session(candidates: list[str]) -> str:
     return candidates[0]
 
 
+def _resolve_target_session() -> str:
+    """Return the session ``pm session kill``/``mobile`` should act on.
+
+    Prefers the cwd-derived session and falls back to the session this
+    process is running inside (workdir clones hash to their own tag, so
+    the cwd name is usually absent while the ambient one is live).  A
+    foreign HOME's inherited session is never a candidate (R5b), and a
+    different project's ambient session is never preferred over the cwd's
+    live one.
+    """
+    candidates = [_get_session_name_for_cwd()]
+    ambient = _known_ambient_session()
+    if ambient and ambient not in candidates:
+        candidates.append(ambient)
+    return _pick_existing_session(candidates)
+
+
 def _resolve_session_socket(session_name: str,
                             is_shared: bool) -> tuple[str | None, bool]:
     """Select the tmux server for *session_name* and export it.
@@ -657,6 +674,14 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         _set_share_mode_env(share_global, share_group)
     if ctx.invoked_subcommand is not None:
         return
+    # Validate the flag combination before anything prints a command: the
+    # printed command must name a session `pm session` would actually use.
+    if start_dir and not (share_global or share_group):
+        click.echo("--dir requires --global or --group", err=True)
+        raise SystemExit(1)
+    if share_global and share_group:
+        click.echo("--global and --group are mutually exclusive", err=True)
+        raise SystemExit(1)
     if print_connect:
         # Every session lives on its own server; print that socket's attach
         # command.  Legacy sessions still on the default server get a plain
@@ -683,12 +708,6 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
         else:
             click.echo(f"tmux -S {sp} attach")
         return
-    if start_dir and not (share_global or share_group):
-        click.echo("--dir requires --global or --group", err=True)
-        raise SystemExit(1)
-    if share_global and share_group:
-        click.echo("--global and --group are mutually exclusive", err=True)
-        raise SystemExit(1)
     _session_start(share_global=share_global, share_group=share_group,
                    start_dir=start_dir, disconnect_others=disconnect_others)
 
@@ -711,10 +730,10 @@ def session_list():
     """List pm sessions across their tmux servers.
 
     Each pm session runs on its own dedicated tmux server (socket) under
-    ``/tmp/pm-sessions/``.  Sessions started by older pm versions still
-    live on the default server and are listed with ``(default server)``.
-    Grouped sessions (``~N``) are collapsed into their base session; the
-    client count covers the whole group.
+    /tmp/pm-sessions/.  Sessions started by older pm versions still live on
+    the default server and are listed as "(default server)".  Grouped
+    sessions (~N) are collapsed into their base session; the client count
+    covers the whole group.
     """
     if not tmux_mod.has_tmux():
         click.echo("tmux is not installed.", err=True)
@@ -751,15 +770,7 @@ def session_kill(start_dir):
         tag = get_session_tag(start_path=Path(start_dir))
         session_name = f"pm-{tag}" if tag else _get_session_name_for_cwd()
     else:
-        # Prefer the cwd's session; fall back to the session we're inside
-        # (workdir clones hash to a different name than the one hosting
-        # them).  Never pick a different project's ambient session over a
-        # live cwd session.
-        candidates = [_get_session_name_for_cwd()]
-        ambient = _known_ambient_session()
-        if ambient and ambient not in candidates:
-            candidates.append(ambient)
-        session_name = _pick_existing_session(candidates)
+        session_name = _resolve_target_session()
 
     from pm_core.paths import session_socket_path
     session_tag = session_name.removeprefix("pm-")
@@ -815,11 +826,7 @@ def session_mobile(force: bool | None):
     Mobile mode auto-zooms the active pane on every pane switch,
     making the tool usable on narrow terminals (< 120 cols).
     """
-    candidates = [_get_session_name_for_cwd()]
-    ambient = _known_ambient_session()
-    if ambient and ambient not in candidates:
-        candidates.append(ambient)
-    session_name = _pick_existing_session(candidates)
+    session_name = _resolve_target_session()
     # Target the server that actually hosts the session (private socket, or
     # the legacy default server).
     from pm_core.cli.helpers import _select_session_socket
