@@ -3255,7 +3255,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
         def apply_prune(data):
             nonlocal pruned
-            for p in data.get("prs") or []:
+            # usable_prs: a hand-edited entry without an ``id`` must not turn
+            # `--prune` into a KeyError (same class as the dependents scan).
+            for p in usable_prs(data.get("prs")):
                 wd = p.get("workdir")
                 if wd and not Path(wd).exists():
                     click.echo(f"  {p['id']}: cleared missing workdir {wd}")
@@ -3272,7 +3274,7 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
             return
 
     if cleanup_all:
-        prs = data.get("prs") or []
+        prs = usable_prs(data.get("prs"))
         with_workdir = [p for p in prs if p.get("workdir") and Path(p["workdir"]).exists()]
         if not with_workdir:
             click.echo("No PR workdirs to clean up.")
@@ -3285,7 +3287,9 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
                 cleaned_ids.add(pr_entry["id"])
         if cleaned_ids:
             def apply_cleanup_all(data):
-                for pr in data.get("prs") or []:
+                # usable_prs: an entry without an ``id`` must not raise here
+                # (inside the store lock) on a hand-edited project.yaml.
+                for pr in usable_prs(data.get("prs")):
                     if pr["id"] in cleaned_ids:
                         pr["workdir"] = None
 
@@ -3476,6 +3480,20 @@ def pr_note_delete(pr_id: str, note_id: str):
     trigger_tui_refresh()
 
 
+def _retained_resources(pr_entry: dict) -> list[str]:
+    """The branch/workdir references `pm pr close` keeps verbatim.
+
+    Shared by the close and `--remove` messages so neither claims to have kept
+    something the entry never had.
+    """
+    kept = []
+    if pr_entry.get("branch"):
+        kept.append(f"branch '{pr_entry['branch']}'")
+    if pr_entry.get("workdir"):
+        kept.append(f"workdir '{pr_entry['workdir']}'")
+    return kept
+
+
 @pr.command("close")
 @click.argument("pr_id", default=None, required=False)
 @click.option("--keep-github", is_flag=True, help="Don't close the GitHub PR")
@@ -3620,15 +3638,21 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
 
     if remove:
         click.echo(f"Removed registry entry {pr_id}: "
-                   f"{pr_entry.get('title', '???')} (branch and workdir kept)")
+                   f"{pr_entry.get('title', '???')}")
+        kept = _retained_resources(pr_entry)
+        if kept:
+            click.echo(f"  Kept: {', '.join(kept)}")
+        if pr_entry.get("workdir"):
+            # `pm pr cleanup` resolves the registry entry, so the retained
+            # workdir is no longer reachable through pm — say so instead of
+            # leaving the user with an orphaned directory and no pointer.
+            click.echo("  Note: that workdir is no longer tracked by pm "
+                       "(the registry entry is gone) — delete it by hand "
+                       "when you are done with it.")
     else:
         click.echo(f"Closed {display_id}: {pr_entry.get('title', '???')} "
                    f"(status: closed)")
-        kept = ["registry entry"]
-        if pr_entry.get("branch"):
-            kept.append(f"branch '{pr_entry['branch']}'")
-        if pr_entry.get("workdir"):
-            kept.append(f"workdir '{pr_entry['workdir']}'")
+        kept = ["registry entry", *_retained_resources(pr_entry)]
         click.echo(f"  Kept: {', '.join(kept)}")
         # The status is terminal, so say how to get back and how to do the
         # (separate, explicit) workdir cleanup this command deliberately
@@ -3659,10 +3683,22 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
             click.echo(
                 f"Warning: {len(dependents)} dependent PR(s) depend on the "
                 f"removed {display_id} and stay blocked: {names}", err=True)
+            # The record is gone, so re-adding would mint a new id and leave
+            # the reference dangling: dropping the dependency is the way out.
+            click.echo(
+                f"  Hint: drop it from the dependents' depends_on "
+                f"('pm pr edit <id> --depends-on \"\"') to unblock them.",
+                err=True)
         else:
             click.echo(
                 f"Warning: {len(dependents)} dependent PR(s) remain blocked "
                 f"by {display_id}: {names}", err=True)
+            # Only `merged` satisfies a dependency, so the block is permanent
+            # until the user acts — say which way out exists.
+            click.echo(
+                f"  Hint: reopen the closed PR, or drop it from the "
+                f"dependents' depends_on ('pm pr edit <id> --depends-on "
+                f"\"\"'), to unblock them.", err=True)
 
     trigger_tui_refresh()
 

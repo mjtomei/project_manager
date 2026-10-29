@@ -77,6 +77,11 @@ Add `--remove` to `pm pr close`:
 - `project.active_pr` is reassigned exactly as today when it pointed at the
   removed PR: first remaining non-terminal PR, else `None`.
 - Help text documents it as registry-only.
+- Output names the resources that survived (`Kept: branch '...', workdir
+  '...'`, only the ones the entry actually had) and, when a workdir is
+  retained, says it is no longer tracked by pm — `pm pr cleanup` resolves the
+  registry entry, so it cannot reach that directory any more (review c02f
+  i14).
 
 ### R6 — `--keep-github` kept; `--keep-branch` deprecated no-op
 
@@ -94,6 +99,12 @@ Add `--remove` to `pm pr close`:
   With `--remove` the warning instead says the dependents depend on the
   *removed* record (their `depends_on` now names a PR that does not exist), so
   the message must not imply a `closed` status is what blocks them.
+- On the default close, follow the warning with a one-line hint naming the two
+  ways out (only `merged` satisfies a dependency, so the block is permanent
+  until the user acts): reopen the closed PR, or drop it from the dependents'
+  `depends_on` with `pm pr edit <id> --depends-on ""`.  With `--remove` the
+  hint names only the dependency drop — re-adding mints a new id, so the old
+  reference would stay dangling (review c02f i14).
 - Do not change dependent statuses, do not add the closed id to any "merged"
   set, do not remove it from `depends_on`.
 - `graph.ready_prs` (`pm_core/graph.py:40`) only treats *merged* dependencies
@@ -162,7 +173,10 @@ workdirs are touched.
    gh fields, prior timestamps).
 2. GitHub: `backend.calls` contains `["pr","close","42"]` and no
    `--delete-branch`; fake PR state `CLOSED`; with a git-backed fake the
-   branch still exists in `backend.git_repo`.
+   branch still exists in `backend.git_repo`.  The fake now *emulates*
+   `--delete-branch` (it deletes the head branch in the backing repo, review
+   c02f i14), so "the branch still exists" is a real assertion rather than a
+   vacuous one — a caller that passed the flag would fail it.
 3. Workdir: tracked modification, untracked file, ignored file, and a
    `captures/` fixture are byte-identical after close (snapshot hashes).
 4. `--keep-github`: no `pr close` call recorded; local status `closed`.
@@ -175,7 +189,9 @@ workdirs are touched.
    `test_repeat_close_retries_the_github_close`.
 9. `--remove`: entry gone; workdir and branch intact; `active_pr` reassigned.
 10. Dependents: warning names the dependent(s); dependent status unchanged
-    (not merged, not started); `ready_prs` still excludes it.
+    (not merged, not started); `ready_prs` still excludes it.  The default
+    close also prints the two-ways-out hint (reopen / drop the dependency) —
+    review c02f i14, `test_dependents_are_warned_but_not_unblocked`.
 11. GitHub failure (`simulate_*` / exception / `SystemExit`): exit 0, warning
     printed, status `closed`, entry + workdir intact.
 12. `pm pr start <closed>`: refused with exit 1.
@@ -288,6 +304,21 @@ workdirs are touched.
     assumed `pm pr close` runs `gh pr close --delete-branch`; a `note` bullet
     records that branch retention is now unconditional and only the
     `pm doctor`/status ruleset check and user docs remain.
+35. `--remove` output accuracy (review c02f i14): the line names only the
+    resources the entry actually had (`Kept: branch '...'`, plus `workdir
+    '...'` when there is one) instead of always claiming "branch and workdir
+    kept", and — because `pm pr cleanup` resolves the registry entry — says
+    the retained workdir is no longer tracked by pm and must be deleted by
+    hand.  Covered by `test_remove_deletes_only_the_registry_entry` and
+    `test_remove_without_a_workdir_claims_only_the_branch`.
+36. Incidental hardening (review c02f i14), same class as item 23:
+    `pm pr cleanup --all` and `pm pr cleanup --prune` walked
+    `data["prs"]` raw and indexed `p["id"]`, so a hand-edited entry without an
+    `id` raised `KeyError` — for `--all` that happened *inside* the store lock,
+    after the workdir had already been deleted.  Both now iterate
+    `usable_prs`, like every other id-indexing loop (such an entry is skipped,
+    not rewritten).  Covered by `test_cleanup_all_tolerates_a_malformed_entry`
+    and `test_prune_tolerates_a_malformed_entry`.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -425,20 +456,26 @@ No **[UNRESOLVED]** ambiguities.
 - `pm_core/tui/sync.py` — the startup GitHub sync's apply applies the same
   closed-is-terminal guard.
 - `pm_core/gh_ops.py` — docstring note only (no signature change).
+- `pm_core/fake_github.py` — `_pr_close` emulates `--delete-branch` (deletes
+  the head branch in the backing repo via the new
+  `FakeGitHubRepo.delete_branch`) so branch retention is genuinely tested
+  (review c02f i14).
 - `pm_core/cli/__init__.py` — help line.
 - `pm/qa/regression/command-dedup.md`, `pm/qa/regression/multi-window-registry.md`
   — cleanup steps use `--remove`.
 - `tests/test_pr_close.py` (new), `tests/test_pr_enhancements.py`
-  (`TestGitHubCloseResilience` rewrite), and `tests/test_sync_merge_integrity.py`
-  (TUI startup-sync closed race).
+  (`TestGitHubCloseResilience` rewrite), `tests/test_sync_merge_integrity.py`
+  (TUI startup-sync closed race), and `tests/test_fake_github.py` (the
+  `--delete-branch` emulation).
 
 ## 6. Out of scope
 
 - Real GitHub operations of any kind; all verification uses the fake backend.
 - Reworking `pm pr cleanup`'s behaviour.  The only changes are accepting
-  `closed` as a normal input (no "not merged" warning) and offering it in the
-  id-less auto-select; the dirty-workdir guard, `--force`, `--all`, `--prune`
-  and `--resources` are untouched, as are `pm pr merge`'s merge flow and the
-  TUI cleanup keys.
+  `closed` as a normal input (no "not merged" warning), offering it in the
+  id-less auto-select, and skipping id-less entries in `--all`/`--prune` so a
+  hand-edited record cannot raise `KeyError` (R11 item 36); the dirty-workdir
+  guard, `--force`, `--all`, `--prune` and `--resources` are otherwise
+  untouched, as are `pm pr merge`'s merge flow and the TUI cleanup keys.
 - Branch deletion features (e.g. `gh pr close --delete-branch`) — removed from
   the close path entirely; no replacement command is added.

@@ -369,6 +369,59 @@ def test_bare_cleanup_reports_when_nothing_terminal_has_a_workdir(tmp_path):
     assert "No merged or closed PRs with workdirs" in result.output
 
 
+def _add_malformed_entry(project: dict, **fields) -> None:
+    """Append a hand-edited registry entry with no usable ``id``."""
+    data = store.load(project["pm_dir"])
+    data["prs"].append({"title": "hand edited", "status": "pending", **fields})
+    store.save(data, project["pm_dir"])
+
+
+def test_cleanup_all_tolerates_a_malformed_entry(tmp_path):
+    """`--all` walks every entry; an id-less hand-edited record must not raise
+    inside the store lock (usable_prs, like the rest of the id-indexing code)."""
+    project = _make_project(tmp_path)
+    _add_malformed_entry(project)
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["cleanup", "--all", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None, result.exception
+    assert not project["workdir"].exists()
+    entry = _load_entry(project["pm_dir"])
+    assert entry["workdir"] is None          # reference cleared
+    assert entry["status"] == "in_review"    # cleanup is not a status change
+    # The malformed neighbour is left exactly as it was.
+    titles = [p.get("title") for p in store.load(project["pm_dir"])["prs"]
+              if not p.get("id")]
+    assert titles == ["hand edited"]
+
+
+def test_prune_tolerates_a_malformed_entry(tmp_path):
+    """`--prune` reports stale workdir references by id; an id-less entry is
+    skipped instead of raising KeyError."""
+    project = _make_project(tmp_path)
+    missing = tmp_path / "gone-workdir"
+    _add_malformed_entry(project, workdir=str(missing))
+
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["cleanup", "--prune"])
+
+    assert result.exit_code == 0, result.output
+    assert result.exception is None, result.exception
+    assert "No stale workdir references found." in result.output
+    # The entry is untouched: pm cannot identify it, so it is not rewritten.
+    malformed = [p for p in store.load(project["pm_dir"])["prs"]
+                 if not p.get("id")]
+    assert malformed[0]["workdir"] == str(missing)
+
+
 # ---------------------------------------------------------------------------
 # flags
 # ---------------------------------------------------------------------------
@@ -639,9 +692,25 @@ def test_remove_deletes_only_the_registry_entry(tmp_path):
     # local thing removed); no branch deletion is requested.
     assert _close_calls(backend) == [["pr", "close", str(pr.number)]]
     assert not any("--delete-branch" in c for c in backend.calls)
+    # The output names what survived, and warns that the retained workdir is
+    # no longer reachable through pm (`pm pr cleanup` resolves the entry).
+    assert f"Kept: branch 'pm/pr-001', workdir '{project['workdir']}'" \
+        in result.output
+    assert "no longer tracked by pm" in result.output
     # active_pr moves off the removed entry.
     data = store.load(project["pm_dir"])
     assert data["project"]["active_pr"] == "pr-002"
+
+
+def test_remove_without_a_workdir_claims_only_the_branch(tmp_path):
+    """--remove must not claim it kept a workdir the PR never had."""
+    project = _make_project(tmp_path, workdir=False, with_dependent=False)
+    result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code == 0, result.output
+    assert "Kept: branch 'pm/pr-001'" in result.output
+    assert "workdir" not in result.output
+    assert "no longer tracked by pm" not in result.output
 
 
 def test_remove_with_keep_github_touches_nothing_remote(tmp_path):
@@ -671,6 +740,10 @@ def test_dependents_are_warned_but_not_unblocked(tmp_path):
     assert result.exit_code == 0, result.output
     assert "pr-002" in result.output
     assert "blocked" in result.output.lower()
+    # Only `merged` satisfies a dependency, so the block is permanent until
+    # the user acts: the warning says which way out exists.
+    assert "reopen the closed PR" in result.output
+    assert "depends-on" in result.output
 
     data = store.load(project["pm_dir"])
     dependent = store.get_pr(data, "pr-002")
@@ -693,6 +766,8 @@ def test_remove_warns_dependents_reference_the_removed_record(tmp_path):
     assert result.exit_code == 0, result.output
     assert "depend on the removed" in result.output
     assert "remain blocked by" not in result.output
+    # The record is gone, so the only way out is dropping the dependency.
+    assert "drop it from the dependents' depends_on" in result.output
     data = store.load(project["pm_dir"])
     dependent = store.get_pr(data, "pr-002")
     assert dependent["status"] == "pending"
