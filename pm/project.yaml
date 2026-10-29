@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T07:56:30.224305+00:00'
+  updated_at: '2026-10-29T08:31:46.560294+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40964,6 +40964,26 @@ prs:
       No issues found, nothing changed.'
     created_at: '2026-10-29T07:56:30Z'
     last_edited: '2026-10-29T07:56:30Z'
+  - id: note-03fdd6f
+    text: 'Review-loop 30a9 i1 fixes (on 43e5166e). (1) `_base_completion_tick` now
+      expires an in-flight completion check after `BASE_CHECK_IN_FLIGHT_SECONDS` (900
+      s — above the 300 s integration repo lock plus the 300 s `pm pr start` the gate
+      allows) instead of trusting the marker forever: the worker fetches the base
+      and `git fetch` has no timeout of its own, so a hung network call pinned the
+      handoff at "checking base integration" until a restart, the same stuck handoff
+      the spawn-failure path already clears. The spawn timestamp doubles as an attempt
+      token, so an expired worker late write cannot replace the newer check verdict;
+      overlapping checks are otherwise idempotent (an unchanged pair never bounces
+      twice, resolving an already-resolved return is a no-op). (2) `test_poll_impl_idle_registers_from_a_shared_transcript_after_restart`
+      no longer leaks an unawaited `_catch_up_base_impl` worker coroutine (it patched
+      only the registration path), which was the suites RuntimeWarning. Tests: stale-marker
+      expiry (fails without the expiry — `impl_completion` never runs) and superseded-worker
+      drop (fails without the token), both verified failing pre-fix. Spec R13 + test
+      plan item 24 updated. Full suite: 4575 passed, 1 skipped, 0 failed (test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T08:31:46Z'
+    last_edited: '2026-10-29T08:31:46Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
