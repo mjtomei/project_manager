@@ -71,7 +71,8 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   does.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above. A previous run's
-  copy is cleared in step 1 like the rest, so the manifest in the
+  copy is cleared in step 1 like the rest, and again by step 2's
+  attempt cleanup when a driver is retried, so the manifest in the
   directory is always this run's.
 
 ## Capture — Layer 1: rendered browser recording
@@ -161,6 +162,12 @@ rm -f "$CAPDIR/recording.mp4" \
 # startup output", which names neither the cause nor the process holding the
 # port (verified: with a listener that accepts and never answers, the app's
 # own "Address already in use" was reported that way, after the full 120 s).
+# The probe carries the same per-attempt bounds as the readiness poll below,
+# and they are what makes the timeout branch reachable at all: curl has no
+# default deadline for a server that accepted the connection, so an unbounded
+# probe blocks the step instead of answering 28 (verified: with the bounds the
+# same listener is refused in 5 s, without them curl is still blocked at 20 s)
+# — the unbounded wait this recipe bounds everywhere else.
 if curl -s -o /dev/null --connect-timeout 2 --max-time 5 "$APP_URL/"; then
     # The cleanup above already removed server.pid, and the server answering
     # is not necessarily this capture's (another scenario may hold the port),
@@ -260,8 +267,14 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # any file check. The mp4 goes too: an earlier attempt that was already
 # finalized leaves the primary artifact, and a retry that fails would then end
 # with that video as the only recording the manifest can present as this
-# run's. The paths are relative because the `cd` above succeeded.
-rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png
+# run's. The paths are relative because the `cd` above succeeded. The
+# manifest goes too: it is the document that says what this capture is
+# (workdir, the app URL, `## Files`), and an attempt that already reached the
+# finalize step leaves one whose `## Files` names the `recording.mp4` this
+# `rm` just deleted — so a retry that fails would end with a manifest
+# describing files that are gone (step 1 clears it for a fresh run; this
+# covers step 2 alone, the same reason the rest of this cleanup exists).
+rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png ./manifest.md
 # The driver this block runs is the one the prose above says to save here.
 # Without it `node driver.mjs` answers "Cannot find module …/driver.mjs" and
 # the run-failure message below would report that as a driver that ran and

@@ -106,7 +106,15 @@ hits, regardless of how it waits for a background job:
   because the block's status is its last command's), and the CLI scaffold —
   which has no witness at all, since asciinema exits 0 whenever its recorded
   command ends — says that a failed ``send-keys`` means the recorded shell
-  died before the behaviour under test and the capture must be re-run.
+  died before the behaviour under test and the capture must be re-run;
+- a request that has no deadline cannot report a diagnosis: the web-UI port
+  pre-check bounds each attempt because curl has no default deadline for a
+  server that accepted the connection and never answers, so without its
+  ``--max-time`` the "exit 28" branch is unreachable and the step blocks
+  instead (the unbounded wait this PR removes everywhere else); and a retry's
+  cleanup takes the manifest with the outputs it presents, so a driver retried
+  after an earlier attempt was finalized cannot fail and leave a manifest
+  naming the video the cleanup deleted.
 
 The capture flow's readiness and stop logic is also *executed* against stub
 ``tmux``/``pm`` (``TestCaptureFlowExecution``), because its failure modes are
@@ -2484,6 +2492,18 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
     step leaves the primary artifact, and a retry that fails would otherwise
     end with that video as the only recording the manifest can present as
     this run's (the finalize step clears it only when it runs).
+
+    The manifest goes with them, for the reason step 1 clears it (R47): it is
+    the document that says what this capture is, and an attempt that already
+    reached the finalize step leaves one whose ``## Files`` names the
+    ``recording.mp4`` this cleanup just deleted. A retry that then fails ends
+    with a manifest describing files that are gone — the manifest and the
+    directory disagreeing, in the one file a reviewer reads to interpret the
+    rest. Verified with the recipe's own block and a driver that throws: the
+    pre-fix block exits 1 leaving only ``driver.mjs``, ``node_modules`` and
+    the earlier attempt's manifest, whose ``## Files`` names the deleted mp4;
+    with the manifest in the cleanup the directory holds only the input and
+    the link.
     """
     capdir = tmp_path / "cap"
     capdir.mkdir()
@@ -2491,7 +2511,8 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
              "recording.webm": "an earlier attempt\n",
              "trace.zip": "an earlier trace\n",
              "dom.html": "<html>an earlier dump</html>\n",
-             "01-loaded.png": "an earlier screenshot\n"}
+             "01-loaded.png": "an earlier screenshot\n",
+             "manifest.md": "## Files\n- `recording.mp4` — the walk-through\n"}
     for name, content in stale.items():
         (capdir / name).write_text(content)
     # The driver resolves Playwright, then fails the way a bad locator does.
@@ -2508,12 +2529,18 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
     for name in stale:
         assert not (capdir / name).exists(), (
             f"the driver block left an earlier attempt's {name} in place, so "
-            "a retry that fails can be finalized as this run's recording")
+            "a retry that fails presents the earlier attempt's evidence as "
+            "this run's")
 
 
 _STUB_CURL = r"""
 n=$(cat "$STUB_CURL_COUNT" 2>/dev/null || echo 0)
 n=$((n + 1)); echo "$n" > "$STUB_CURL_COUNT"
+# The argv of each call, so a case can see the bounds the block passes. The
+# stub answers with exit codes only: it cannot show that a call *would* hang
+# without its deadline, and the pre-check's `--max-time` is what makes curl
+# answer 28 for a listener that never replies.
+[ -n "${STUB_CURL_LOG:-}" ] && printf '%s\n' "$*" >> "$STUB_CURL_LOG"
 case "$STUB_MODE" in
   inuse) exit 0 ;;
   never) exit 7 ;;
@@ -2570,7 +2597,8 @@ def _run_web_ui_start(mode, tmp_path, caps_is_file=False, pm_body=None,
     _stub_tool(bindir, "curl", _STUB_CURL)
     _stub_tool(bindir, "my-app", f'touch "{launched}"\n')
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
-               STUB_MODE=mode, STUB_CURL_COUNT=str(tmp_path / "curl-count"))
+               STUB_MODE=mode, STUB_CURL_COUNT=str(tmp_path / "curl-count"),
+               STUB_CURL_LOG=str(tmp_path / "curl-log"))
     r = subprocess.run(["bash"], input=block, env=env,
                        capture_output=True, text=True, timeout=60)
     return r, launched
@@ -2640,6 +2668,38 @@ class TestWebUiStartExecution:
         assert r.returncode != 0, (
             "a server that never answers was reported as started")
         assert "did not answer" in r.stderr, r.stderr
+
+    def test_the_port_pre_check_is_bounded(self, tmp_path):
+        """The pre-check's own bounds are what make its exit-28 branch exist.
+
+        The readiness poll bounds each attempt because a deadline is only
+        consulted between attempts (``test_readiness_waits_are_bounded``), and
+        the port pre-check above it is a *single* request: curl has no default
+        deadline for a server that accepted the connection and never answers,
+        so an unbounded probe blocks the step instead of answering 28, and the
+        "could not check … exit 28" diagnosis R27 added is unreachable — the
+        unbounded wait this recipe removes everywhere else, in the block that
+        runs before every capture. Verified live against a socket that accepts
+        and never replies: the shipped probe exits 1 in 5.0 s with that
+        message, and the same block with the flags removed is still blocked in
+        curl at 20 s.
+
+        No case could see it: the stub curl answers 28 by mode, whatever its
+        arguments, so dropping the flags left the whole file green (200
+        passed). The stub now records each call's argv, and the first call is
+        the pre-check.
+        """
+        r, _launched = _run_web_ui_start("hung", tmp_path)
+        assert r.returncode != 0, r.stderr
+        calls = (tmp_path / "curl-log").read_text().splitlines()
+        assert calls, "the start block made no curl call at all"
+        precheck = calls[0]
+        assert "--max-time" in precheck, (
+            "the port pre-check has no deadline, so a listener that accepts "
+            "and never answers blocks the step instead of answering 28: "
+            + precheck)
+        assert "--connect-timeout" in precheck, (
+            "the port pre-check has no connect deadline: " + precheck)
 
     def test_an_app_that_answers_404_at_root_is_ready(self, tmp_path):
         """Readiness means "the server answers", not "the root returns 2xx".

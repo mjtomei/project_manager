@@ -207,6 +207,22 @@ recording-recipe bugs that any worker following the recipe hits:
   before the claim release) are also pinned by tests; neither is a recipe
   change, so no scenario gains a new surface.
 
+- a request that is never bounded cannot report a diagnosis, and a retry's
+  cleanup has to take the manifest with it (review loop ebd1 i7): the web-UI
+  port pre-check's `--connect-timeout 2 --max-time 5` is what makes its own
+  "exit 28" branch reachable — curl has no default deadline for a server that
+  accepted the connection and never answers, so an unbounded probe blocks the
+  step instead of answering 28 (verified: 5.0 s with the bounds, still blocked
+  at 20 s without them), and the block runs before every capture. The stub
+  `curl` answered by mode, not by arguments, so deleting the flags left the
+  whole file green; it now logs each call's argv and
+  `test_the_port_pre_check_is_bounded` pins the first call's bounds. Step 2's
+  attempt cleanup also clears `manifest.md` now: it is the document that
+  presents this attempt's video, and a retried driver that fails left the
+  earlier attempt's manifest naming the `recording.mp4` the cleanup had just
+  deleted — R47's disagreement in the one block R47 did not cover. Neither is
+  a change to a nominal flow.
+
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
 
@@ -246,9 +262,14 @@ to the grouped session — a bare `pipe-pane -t "$TARGET:0.0"` attaches to it
 and the run then reports success on that session's transcript. S25 also re-checks the captures-path guard: step 1 pasted with an
 unsubstituted `PR_ID` (or outside the project) must stop with "could not
 resolve the captures directory" and create nothing, not run the capture in
-`/scenarios/1/web-ui`. S26's recipe-content check includes the manifest
-example: it must list `server.pid` and `recording.webm` beside the files it
-already named (R45). S26 also re-checks the driver block's two new
+`/scenarios/1/web-ui`. S25 also re-checks the port pre-check's bound: with a
+listener that accepts and never answers, the step must refuse in about five
+seconds with "could not check … exit 28" (an unbounded probe blocks instead),
+and S26 re-checks the driver retry's cleanup: with an earlier attempt's
+`manifest.md` seeded beside its mp4, a retried driver that fails must leave no
+manifest naming the deleted video. S26's recipe-content check includes the
+manifest example: it must list `server.pid` and `recording.webm` beside the
+files it already named (R45). S26 also re-checks the driver block's two new
 messages: pasting step 2 with no `driver.mjs` in the capture directory must
 stop with "there is no driver.mjs in …" (not "the driver failed"), and a
 capture directory holding a `node_modules` that does not resolve Playwright
