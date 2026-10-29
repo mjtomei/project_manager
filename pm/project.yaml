@@ -36314,7 +36314,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T00:03:31.954494+00:00'
+  updated_at: '2026-10-29T00:24:33.943602+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -37448,11 +37448,48 @@ prs:
       its verdict (observed: iteration 2 ran /usr/bin/claude and sat on a real session).'
     created_at: '2026-10-29T00:03:31Z'
     last_edited: '2026-10-29T00:03:31Z'
+  - id: note-a329c13
+    text: 'SIGNOFF_IMPL (sign-off 2026-10-28, HEAD 835e5454, base master@4a74d880).
+      The fix itself is sound and proven at this HEAD: QA 21-24 PASS on e9ec829e,
+      whose code is identical to HEAD; 182 targeted tests pass. Integration needs
+      code work. Candidate merge conflicts: review_loop.py (7 hunks), autostart_state.py
+      (3), project.yaml. Master #259/pr-e040aeb (failed-launch retry) rewrote run_review_loop_sync,
+      adoption and the follow-up waiter. Do: (1) MUST carry master _lease_keepalive
+      into the PR follow-up waiter. Master _wait_for_follow_up_verdict wraps stop_check
+      with _lease_keepalive(state); the PR custom waiter uses only state.stop_requested.
+      Without it, a wait longer than REVIEW_LAUNCH_CLAIM_TTL (180 s) drops the launch
+      lease and another driver can relaunch --fresh over the live question pane, which
+      is the bug this PR fixes. Rewrite master test_follow_up_wait_refreshes_the_launch_lease:
+      it patches _wait_for_follow_up_shared, which the PR deletes. (2) Re-thread the
+      adopt-wait gate (adopt_wait/_adopting_wait/wait_transcript/wait_watch, publish-then-clear
+      ordering) into master try/except with the ReviewClosedError/ReviewHoldError/ReviewLaunchError
+      branches, _run_iteration_with_retry and _reset_launch_retry after adoption.
+      Keep input_required set together with each recorded verdict. (3) Master _adopt_in_flight_review/_run_iteration_with_retry
+      can return output from discovery.transcript (another pane transcript). When
+      that output is INPUT_REQUIRED, wait on that transcript, not the hard-coded _iteration_transcript(state,
+      dir). (4) Use master workdir-aware _find_review_claude_pane in _adoptable_wait_transcript
+      and the waiter pane check. (5) Union the fields: ReviewLoopState (_adopting_wait
+      + retry fields); finally (_release_lease + clear _adopting_wait/input_required);
+      _derive (resuming/follow_up reasons + master "(last LAUNCH_FAILED)" suppression);
+      build_status review dict (follow_up/resuming + retryable/attempts/error/artifact);
+      review_progress_input (keep the reader order _adopting_wait -> iteration ->
+      input_required plus master HOLD/LAUNCH_FAILED normalisation). (6) auto_start.py
+      auto-merged with the input_required=False restore intact. Re-check consume_breadcrumb
+      after pr-c3bf868, and confirm the PR tests _run_claude_review patch point still
+      intercepts under _run_iteration_with_retry. (7) Resolve project.yaml with store.merge_3way.
+      Run the PR test files plus test_review_launch_retry.py, test_breadcrumb_review_loop.py,
+      test_review_loop.py, test_tui_pidfile.py, test_qa_input_required.py and test_autostart_multi_target.py.
+      Update impl.md for the R1/R2 launch path and the lease invariant. Re-QA after
+      integration: the S24 lifecycle, S22 restart/adopt, a new check that a wait held
+      longer than 180 s is never relaunched over, and a check that LAUNCH_FAILED never
+      leaves or invents input_required. Report: captures/pr-a80bde5/report.html'
+    created_at: '2026-10-29T00:24:33Z'
+    last_edited: '2026-10-29T00:24:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
   session_models:
-    signoff: provider:claude-work
+    signoff: provider:claude-work-xhigh-249
   session_effort:
     signoff: high
 - id: pr-592e4bd
