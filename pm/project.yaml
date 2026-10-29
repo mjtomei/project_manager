@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T10:01:33.302889+00:00'
+  updated_at: '2026-10-29T10:17:55.917093+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38206,6 +38206,30 @@ prs:
       Also re-ran tests/test_transcript_archive.py: 35 passed.'
     created_at: '2026-10-29T10:01:33Z'
     last_edited: '2026-10-29T10:01:33Z'
+  - id: note-9fa37bd
+    text: 'QA scenario 16 RE-EVALUATION (corrects note-580e6a1, which reported PASS):
+      story 3 final Then is UNMET -> INPUT_REQUIRED. After the watcher sweep over
+      the shared auto-start run dir, impl-pr-ee74dfd.jsonl is still a symlink (find
+      -type l | wc -l = 1), so "every .jsonl still present in the run dir and its
+      archive/ is a readable, non-empty regular file" fails; the archive/ half passed
+      (3 regular sid-keyed copies, no symlinks) and every other check in that triple
+      passed. Cause isolated with a two-sweep probe (/pm-captures/scenarios/16/probe-step-window-sweep/,
+      cast+mp4): _live_transcript_owners marks a step canonical live whenever that
+      step tmux window EXISTS, not while the step is writing. Sweep A with the impl
+      step already finished (review loop polling) and the impl window still open left
+      impl-pr-<pr>.jsonl a symlink; closing the window and re-running the same bulk
+      sweep froze that same file immediately (transcript: finalized .../impl-pr-<pr>.jsonl,
+      archive copy written, canonical now a 430-byte regular file). Because auto-start
+      leaves the impl window open after impl finishes, this is systematic for any
+      auto-start run, not a timing artifact. It is consistent with the limitation
+      impl.md records (live step window skipped for the whole sweep, review-loop i2
+      note), so I did not change the sweep semantics in QA - changing the liveness
+      rule (e.g. keying on the PR step/status instead of window existence) is a design
+      decision for review, since it is the exact trade-off this PR was accepted with.
+      Stories 1 and 2 remain PASS with their captures unchanged. Note: my earlier
+      note-580e6a1 and commit 5a91db72 state PASS; this note supersedes them.'
+    created_at: '2026-10-29T10:17:55Z'
+    last_edited: '2026-10-29T10:17:55Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
