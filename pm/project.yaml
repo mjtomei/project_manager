@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T05:51:56.015881+00:00'
+  updated_at: '2026-10-29T07:36:44.388474+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29770,6 +29770,36 @@ prs:
       new). Full suite: 4600 passed, 1 skipped, 0 failed (362 s).'
     created_at: '2026-10-29T05:51:55Z'
     last_edited: '2026-10-29T05:51:55Z'
+  - id: note-ad107d5
+    text: 'QA S33 (execution-only QA path) PASS, no code changes. Story 1: `pm qa
+      run direct-qa-smoke --pr pr-038f7db` skipped planning entirely (no "Planning
+      QA scenarios" anywhere), provisioned the workdir, concretized REFINED_STEPS
+      + worker PASS + verifier VERIFIED, printed "QA complete: PASS [finalize: FINALIZE_DONE]"
+      / "Result: PASS"; the qa window main pane is the "QA execution" placeholder
+      (no planner), the dashboard showed "1 Direct QA smoke PASS" / "Overall: PASS";
+      the TUI adopted the finished CLI run 4 s later ("Recovered completed QA from
+      disk" -> "QA PASS for pr-038f7db — press i to sign off") and wrote the QA PASS
+      note; status stayed qa, no sign-off. Story 2: a verdictless worker (qa_scenario
+      verdicts []) was retired on its own in ~132 s with "Scenario 1 ...: INPUT_REQUIRED
+      (worker produced no verdict: no_progress)", dashboard row + dim "↳ worker produced
+      no verdict (no_progress): qa-scenario-1: session ..." + "Overall: INPUT_REQUIRED",
+      worker pane left open, no traceback, PR still qa, TUI adoption 3 s after completion
+      with the QA INPUT_REQUIRED note naming the scenario. Captures: /pm-captures/scenarios/33/{story1-execution-only,story2-verdictless}.
+      Three PRE-EXISTING (also on master) bugs found in the surrounding TUI adoption
+      code and filed separately, none blocking this PR: pr-d7d8929 (a running TUI
+      deletes another project QA resume snapshot from the global ~/.pm/workdirs/qa,
+      so that project CLI run is never adopted), pr-1c48ae3 (a repeat pm qa run on
+      the same PR with the previous windows open duplicates panes/windows: 5 panes,
+      two qa-<pr>-s1 windows, two dashboards), pr-7d94f02 (_resumed_qa_pr_ids is one-shot
+      per PR per TUI lifetime, so a second completed CLI run is never adopted or noted).
+      Harness notes: (1) parallel TUIs for two projects in one HOME interfere via
+      the global qa workdir scan — isolate one project per session when testing adoption;
+      (2) agg is not installed in this container (downloaded v1.9.0 aarch64 to /scratch/qa33/tools)
+      and this ffmpeg is 4.4.2, so the recipe needs -vsync vfr, not -fps_mode; (3)
+      a fresh `pm session` gives a clean QA window set after earlier runs leave their
+      windows open.'
+    created_at: '2026-10-29T07:36:44Z'
+    last_edited: '2026-10-29T07:36:44Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -43219,6 +43249,139 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T18:02:48.130836+00:00'
   updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d7d8929
+  plan: bugs
+  title: 'Bug: a running TUI deletes another project''s QA resume snapshot, so that
+    project''s completed CLI QA run is never adopted'
+  branch: pm/pr-d7d8929-bug-a-running-tui-deletes-another-project-s-qa-res
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py::_resume_incomplete_qa — the scan
+    root is the GLOBAL ~/.pm/workdirs/qa, but the "PR is not in QA / unknown" branch
+    (if not pr or pr.get("status") != "qa": ... qa_loop.clear_resume_file(resume_file.parent))
+    cannot tell "this PR left QA" from "this PR belongs to another project".
+
+
+    Repro (verified 2026-10-29, QA S33 on pr-6566901):
+
+    1. Two pm projects A and B in one HOME; project A has a pm TUI running.
+
+    2. In B, run `pm qa run <instruction> --pr <prB>` from a shell pane of B session.
+
+    3. B run finishes (qa_status.json has overall, qa_resume.json still on disk, unprocessed).
+
+    4. A TUI scans, store.get_pr(A.project, prB) -> None, so it DELETES B qa_resume.json.
+
+    Result: B TUI never logs "Recovered completed QA from disk"/"QA INPUT_REQUIRED
+    for <pr> — paused for human input" and never writes the QA PR note; the same deletion
+    also destroys restart-recovery for a genuinely orphaned B run.
+
+
+    Probe: writing {"pr_id": "pr-deadbeef", ...} to ~/.pm/workdirs/qa/pr-deadbeef-cli-probe/qa_resume.json
+    while any TUI runs makes the file disappear within ~6 s.
+
+
+    Evidence: /pm-captures/scenarios/33/story2-verdictless/attempt1-crossproject-interference/
+    (no adoption line in the pm log while story 1 TUI ran; identical flow adopts 2-3
+    s after completion once that TUI is stopped — attempt2-repeat-run/).
+
+
+    Suggested fix: only clear when the PR is known to THIS project (pr is None ->
+    skip, do not delete); treat unknown-PR snapshots as not-ours.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:35:57.589701+00:00'
+  updated_at: '2026-10-29T07:35:57.589701+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1c48ae3
+  plan: bugs
+  title: 'Bug: a repeat pm qa run on the same PR adds panes/windows to the previous
+    run''s QA windows instead of replacing them'
+  branch: pm/pr-1c48ae3-bug-a-repeat-pm-qa-run-on-the-same-pr-adds-panes-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py execution path — _cleanup_stale_scenario_windows
+    has 3 call sites but none runs for a repeat execution-only run that finds the
+    previous run windows still open (the worker is deliberately left open for inspection
+    after an INPUT_REQUIRED/no-verdict retirement).
+
+
+    Repro (verified 2026-10-29, QA S33 on pr-6566901, host mode, fake-claude):
+
+    1. `pm qa run direct-qa-verdictless --pr pr-9a20a46` -> ends INPUT_REQUIRED, worker
+    pane left open (qa-pr-9a20a46 has 3 panes, qa-pr-9a20a46-s1 has 2).
+
+    2. Without closing those windows, run the same command again.
+
+    Result: qa-pr-9a20a46 grows to 5 panes (two qa_status dashboards, two finalize
+    panes), a SECOND window named qa-pr-9a20a46-s1 is created (windows 3 and 4), and
+    a second concretizer pane (%24) runs REFINED_STEPS. The run itself still ends
+    correctly (INPUT_REQUIRED), but the windows and dashboards are duplicated and
+    one dashboard renders truncated.
+
+
+    Evidence: /pm-captures/scenarios/33/story2-verdictless/attempt2-repeat-run/pane-map.txt
+    (+ pm-log.log). A third run after manually killing windows 2/3/4 produced the
+    clean 3+2 layout (attempt3-clean-windows/).
+
+
+    Note: identical call sites exist on master, so this is pre-existing, not introduced
+    by the verdict-recovery work.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:36:09.547316+00:00'
+  updated_at: '2026-10-29T07:36:09.547316+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7d94f02
+  plan: bugs
+  title: 'Bug: a second completed CLI QA run for the same PR is never adopted by a
+    long-lived TUI (_resumed_qa_pr_ids is one-shot per PR per TUI lifetime)'
+  branch: pm/pr-7d94f02-bug-a-second-completed-cli-qa-run-for-the-same-pr-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py::_resume_incomplete_qa — `if pr_id
+    in app._qa_loops or pr_id in app._resumed_qa_pr_ids: continue` adds every scanned
+    PR to _resumed_qa_pr_ids and never removes it when a NEW run for that PR starts,
+    so only the first completed run of a PR in a TUI lifetime is recovered/noted.
+
+
+    Repro (verified 2026-10-29, QA S33 on pr-6566901): fresh session, `pm qa run direct-qa-verdictless
+    --pr pr-9a20a46` -> adoption works 3 s after completion ("Recovered completed
+    QA from disk: pr-9a20a46 -> INPUT_REQUIRED", TUI "QA INPUT_REQUIRED for pr-9a20a46
+    — paused for human input", PR note written). Run the same command a second time
+    in the same session: the run completes with Result: INPUT_REQUIRED and leaves
+    an unprocessed qa_resume.json, but the TUI logs nothing, writes no note, and never
+    clears the snapshot (verified: resume file still on disk with completion_processed=false
+    after the second run).
+
+
+    Evidence: /pm-captures/scenarios/33/story2-verdictless/attempt3-clean-windows/
+    (run completed, no adoption line in pm-log.log) vs the recorded run (adoption
+    line at 07:32:57).
+
+
+    Suggested fix: drop the pr_id from _resumed_qa_pr_ids when a new run record for
+    it appears (qa_run.json started_at newer than the processed snapshot), or key
+    the guard on loop_id/started_at instead of pr_id alone.
+
+    Note: the same guard exists on master; pre-existing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:36:11.280445+00:00'
+  updated_at: '2026-10-29T07:36:11.280445+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
