@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T05:39:54.481781+00:00'
+  updated_at: '2026-10-29T06:09:45.461002+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42600,6 +42600,30 @@ prs:
       a stopped QA window, z t restarts.'
     created_at: '2026-10-29T05:39:54Z'
     last_edited: '2026-10-29T05:39:54Z'
+  - id: note-142dcef
+    text: 'QA S130 (2026-10-29, container mode podman 3 slirp4netns, real claude 2.1.312
+      routed refiner/worker vs main + acme router stubs, fake planner/verifier/finalizer;
+      HEAD 5f204dc2 then 85f58e5a, control 4aff1dd4; captures /pm-captures/scenarios/130/README.md,
+      every terminal mp4): CODE CHANGE 85f58e5a needs normal re-review. Incidental
+      bug (pre-existing on master 4a74d880): a second container-mode `pm qa run` of
+      a PR reused the first run''s still-running scenario container (fixed loop id
+      cli-<pr>), whose /workspace bind mount was the deleted clone (re-cloned by create_scenario_workdir),
+      so the scenario window died 10x with backoff to 640 s and never reached the
+      router; fix removes a running same-name container before creating one for the
+      fresh clone (tests fail on 5f204dc2; full suite 5175 passed). RQ56 durable REQA
+      held in all 7 rounds: story 1 tick launch 0.3 s after Result; plain tui restart
+      with auto-start off, no ticks -> TUI owed-REQA start 4-5 s after Result; with
+      ticks -> TUI start, ticks only running: qa; TUI SIGKILL -> nothing for 60 s,
+      pm session respawn starts it in <1 s, or a user tick starts it and the new TUI
+      starts nothing; project.yaml flock 1 s/30 s at ended_at -> one tick launch 0.8
+      s/0.54 s after release (launch claimed/claimed elsewhere during hold). Control
+      4aff1dd4: bare re-qa, nothing for 414 s, one user tick launched. Spec wording
+      for the planner: (1) "no launch_claim left behind" conflicts with S68 109bca54
+      (qa claim outlives awaiting, expires in 180 s; inert); (2) TUI pidfile is JSON,
+      so kill -KILL "$(cat …pid)" fails, use jq -r .pid; (3) pm autostart status prints
+      "Auto-start: off  owner=…" + "No auto-start targets (auto-start off)."'
+    created_at: '2026-10-29T06:09:45Z'
+    last_edited: '2026-10-29T06:09:45Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
