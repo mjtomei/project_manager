@@ -51,6 +51,14 @@ how to reach the incident's write path on this branch.
   **THEN** the command still succeeds and reports that there is no captures
   dir / no evidence to audit, and it does **not** create a captures directory
   as a side effect.
+- **GIVEN** a `qa_manifest.json` that exists but cannot be used (damaged, or
+  its `scenarios` value is not a list — a bare int, `null`, a mapping from a
+  partial rewrite or hand edit),
+  **WHEN** the operator runs `pm qa evidence <pr>`,
+  **THEN** the output says a manifest exists but is unusable (never "no
+  qa_manifest.json"), reports the damage as an anomaly, and recovers
+  membership from `qa_runs/<run_id>.json` when that copy is intact. Such a
+  manifest must never be read as a run that owns zero scenarios.
 
 ### R3 — A run that launches nothing owns no evidence
 - **GIVEN** a PR with no QA spec (so the run stops before any scenario
@@ -191,7 +199,12 @@ how to reach the incident's write path on this branch.
   still name their own run so they audit as `prior-run`, never as current
   membership.
 - **Manifest file damaged/unparseable**: reported as damaged (not "absent");
-  readers fall back to `qa_runs/` and never raise.
+  readers fall back to `qa_runs/` and never raise. A manifest whose
+  `scenarios` key is present but not a list (a bare int, `null`, a mapping)
+  is **damaged**, not a run owning zero scenarios: `pm qa evidence` and the
+  sign-off block say "a qa_manifest.json exists but is unusable" rather than
+  claiming none exists, and the audit reports the damage in both the
+  run-bound and the `qa_runs/`-recovery branches.
 - **`qa_status.json` damaged or non-mapping**: the sign-off prompt still
   carries the run binding instead of crashing.
 - **Non-canonical numeric directory names** (`scenarios/03`): not classified
