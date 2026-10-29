@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T06:24:06.728206+00:00'
+  updated_at: '2026-10-29T07:38:34.674170+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42244,6 +42244,17 @@ prs:
       -s1. (2026-10-29T06:25:00Z)'
     created_at: '2026-10-29T06:24:06Z'
     last_edited: '2026-10-29T06:24:06Z'
+  - id: note-6000dd6
+    text: 'QA S5 incidental fix (868d48e8): with qa-max-scenarios set, the initial
+      container/tmux launch wrote qa_status.json from the narrowed launch batch, so
+      a queued scenario vanished from the status file (and its "queued" marker was
+      clobbered) until its turn came. The launch helpers now receive the full scenario
+      list plus the queued indices and pass them to the launch-time status write;
+      a regression test covers the wiring. Found while driving S5 story 3 (cap 1).
+      Unrelated: `pm container cleanup` removes nothing on podman 3.x and still reports
+      success — already filed as pr-436d18a, not fixed here.'
+    created_at: '2026-10-29T07:38:34Z'
+    last_edited: '2026-10-29T07:38:34Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
