@@ -308,6 +308,10 @@ def _resolve_session_socket(session_name: str,
     # Private servers live in a world-writable directory; refuse to connect
     # to a socket another user planted at our path.  Shared sessions are
     # owned by the sharing user by design, so this check is private-only.
+    # It deliberately runs before the legacy check below: fail closed on a
+    # socket we do not own even though the legacy path would not connect to
+    # it (a squatted socket is a hostile condition, not something to route
+    # around silently).
     if not is_shared:
         try:
             owner = Path(socket_path).stat().st_uid

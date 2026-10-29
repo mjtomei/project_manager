@@ -257,6 +257,33 @@ class TestFindSessionServer:
         assert seen == [None]  # no private-socket probe was made
 
 
+class TestServerAlive:
+    def test_live_and_stale_sockets(self, monkeypatch):
+        monkeypatch.setattr(
+            tmux, "_run",
+            lambda *a, **kw: MagicMock(returncode=0, stdout=""))
+        assert tmux.server_alive("/tmp/pm-sessions/pm-x") is True
+
+        monkeypatch.setattr(
+            tmux, "_run",
+            lambda *a, **kw: MagicMock(returncode=1, stderr="no server"))
+        assert tmux.server_alive("/tmp/pm-sessions/pm-x") is False
+
+    def test_unprobeable_socket_counts_as_alive(self, monkeypatch):
+        """Never delete a socket on a guess: if tmux cannot run, keep it.
+
+        ``pm session kill`` unlinks a socket file when ``server_alive`` says
+        nothing answers on it; an OSError (tmux missing or not executable)
+        must not be read as "the server is gone".
+        """
+
+        def boom(*a, **kw):
+            raise OSError("no tmux")
+
+        monkeypatch.setattr(tmux, "_run", boom)
+        assert tmux.server_alive("/tmp/pm-sessions/pm-x") is True
+
+
 # ---------------------------------------------------------------------------
 # tmux: precise client detach
 # ---------------------------------------------------------------------------

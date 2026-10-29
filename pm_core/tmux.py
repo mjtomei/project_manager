@@ -50,6 +50,10 @@ def socket_path_from_tmux_env(environ: dict | None = None) -> str | None:
     path = raw.rsplit(",", 2)[0]
     if not path:
         return None
+    # Imported here rather than at module scope so the value is read when
+    # the function runs: callers (and tests) may re-point
+    # ``paths.SHARED_SOCKET_DIR``, and a top-level ``from … import`` would
+    # freeze the original Path object.
     from pm_core.paths import SHARED_SOCKET_DIR
     if Path(path).parent != SHARED_SOCKET_DIR:
         return None
@@ -1102,9 +1106,9 @@ def detach_current_client(socket_path: str | None = None) -> bool:
                 "detach_current_client: detached %s (session %s, window %s)",
                 tty, session, pane_win)
             return True
-        # Report failure rather than claiming a detach that did not happen;
-        # the caller only uses the result for logging and to decide whether
-        # to keep the TUI running unattached.
+        # Report failure rather than claiming a detach that did not happen
+        # (the client may have exited between list-clients and
+        # detach-client).  ``quit_app`` uses the result only for logging.
         _log.warning("detach_current_client: detach of %s failed: %s",
                      tty, detached.stderr)
         return False

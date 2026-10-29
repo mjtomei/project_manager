@@ -722,3 +722,46 @@ returns early because `PM_HOST_HOME` (`/home/matt`) differs from `HOME`
 passes 20/20 with `PM_HOST_HOME` unset.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i5)
+
+Verification pass over the integrated head; no requirement changes.  The
+whole change set was re-read against R1–R7, the suite re-run, and the
+preserved smoke script re-executed.
+
+1. **`server_alive()`'s "cannot probe" contract had no test.**  The
+   docstring promises that an unprobeable socket (tmux missing or not
+   executable) counts as *alive* so `pm session kill` never unlinks on a
+   guess — the one branch where being wrong destroys state.  Added
+   `TestServerAlive`: `test_live_and_stale_sockets` (returncode 0 vs 1)
+   and `test_unprobeable_socket_counts_as_alive` (`_run` raising
+   `OSError`).  The disposable-socket integration test still covers the
+   real-server case.
+2. **The call-time `SHARED_SOCKET_DIR` import in
+   `tmux.socket_path_from_tmux_env()` looked like an oversight.**  It is
+   load-bearing: a module-level `from … import` would freeze the original
+   `Path`, so re-pointing `paths.SHARED_SOCKET_DIR` (tests, and the smoke
+   script's disposable socket directory) would no longer be seen.  Now
+   commented.
+3. **`detach_current_client()`'s failure comment described a caller that
+   does not exist** ("…and to decide whether to keep the TUI running
+   unattached"); `quit_app` uses the return value only for logging.  The
+   comment now names the real cause (the client disappearing between
+   `list-clients` and `detach-client`).
+4. **The private-socket ownership refusal intentionally precedes legacy
+   detection.**  A squatted socket at the private path therefore refuses
+   `pm session` even when the user's own session lives on the default
+   server and would never connect to that socket.  Kept (fail closed on a
+   hostile condition rather than routing around it) and now says so in a
+   comment, so it does not read as an ordering accident.
+
+Validation on the integrated head: full suite **4570 passed / 1 skipped**
+(`PM_HOST_HOME` unset, so the environment-only `test_installer_writes_standalone_receiver`
+early return noted in i4 does not apply; scratch `pytest<9`, `PATH`
+without the push-proxy `git`, `TMUX`/`TMUX_PANE`/`PM_*` cleared).
+`pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+disposable socket: private server created, `PM_TMUX_SOCKET` in the
+session env, the global env and the hooks, default server untouched.
+No live session, server or shared host configuration was touched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).
