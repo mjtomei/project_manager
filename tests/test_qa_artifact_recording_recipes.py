@@ -96,8 +96,14 @@ hits, regardless of how it waits for a background job:
   misdiagnosed downstream: an unusable capture directory and a failed
   ``new-session`` stop the run with their own message (otherwise the failure
   reads as "recorder exited before it drew" / "asciinema wrote no cast", both
-  pointing at files that were never written), the tmux recipe's step 2 — the
-  paste-alone re-attach — refuses a relative ``<capture-dir>`` because its
+  pointing at files that were never written). The capture-directory guard
+  tests both permission bits — a directory with the write bit and no *search*
+  bit (mode 600) is the same unusable state and ``[ -w ]`` alone cannot see
+  it, so every writability case runs in both shapes — and a render that stops
+  after its own cleanup has removed the previous run's video and gif, even on
+  the one path that exits without ``render_fail`` (a missing encoder). The
+  tmux recipe's step 2 — the paste-alone re-attach — refuses a relative
+  ``<capture-dir>`` because its
   claim is canonicalized while the pipe's command runs in the pm session's
   directory (the transcript lands nowhere the end-of-run check looks), the
   web-UI driver block refuses
@@ -163,6 +169,17 @@ RECIPES = ["tmux-screen-recording.md", "cli-recording.md"]
 
 pytestmark = pytest.mark.skipif(
     shutil.which("bash") is None, reason="bash is required")
+
+# A capture directory that exists and cannot be written into comes in two
+# permission shapes, and every recipe guard tests both permission bits for
+# that reason: mode 500 (`r-x------`) has no write bit, while mode 600
+# (`rw-------`) *has* the write bit and no search bit — creating, reading or
+# `cd`-ing into it still fails, and `[ -w ]` alone cannot see it. The guards
+# are `[ -w … ] && [ -x … ]`; running each writability case in both shapes is
+# what keeps the `-x` half from being the untested one (removing it left the
+# whole file green: mode 500 is refused by `-w` either way).
+UNWRITABLE_MODES = pytest.mark.parametrize(
+    "capdir_mode", [0o500, 0o600], ids=["no-write-bit", "no-search-bit"])
 
 
 def _recipe_text(name):
@@ -1253,7 +1270,9 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
 
 
 @pytest.mark.parametrize("name", RECIPES)
-def test_render_refuses_a_capture_dir_it_cannot_write(name, tmp_path):
+@UNWRITABLE_MODES
+def test_render_refuses_a_capture_dir_it_cannot_write(name, tmp_path,
+                                                      capdir_mode):
     """An unwritable capture directory is not a broken renderer.
 
     The render block writes the intermediate gif and the mp4 into the
@@ -1266,11 +1285,17 @@ def test_render_refuses_a_capture_dir_it_cannot_write(name, tmp_path):
     and ffmpeg 4.4.2: rc 1 with that message, and the install block that
     message points at exits 0 without changing anything). The block has to
     name the directory where it fails, before it removes anything.
+
+    The second shape is a directory with the write bit and no *search* bit
+    (mode 600): `[ -w ]` answers 0 for it, so the guard's `[ -x ]` half is
+    what refuses it — without that half the block runs on and reports "there
+    is no cast to render (the recording wrote nothing)" for a cast that is
+    right there (verified live).
     """
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
-        pytest.skip("root can write a mode-500 directory")
+        pytest.skip("root bypasses the directory permission bits")
     r, mp4, gif = _run_render(name, tmp_path, capture=tmp_path / "cap",
-                              capdir_mode=0o500)
+                              capdir_mode=capdir_mode)
 
     assert r.returncode != 0, (
         f"{name}: a render into an unwritable capture directory exited 0")
@@ -1354,7 +1379,13 @@ def _run_render_without_ffmpeg(name, tmp_path):
 
     A host may well have a real ``ffmpeg`` on ``PATH``, so the bindir carries
     the block's other tools (stubbed ``agg``/``ffprobe``, symlinked coreutils)
-    and nothing else — the encoder has to be genuinely absent.
+    and nothing else — the encoder has to be genuinely absent. The capture
+    directory is seeded with a *previous* run's ``recording.mp4`` and
+    ``recording.cast.gif``, because the missing-encoder stop is the one render
+    failure that does not go through ``render_fail``: only the block's own
+    pre-render ``rm`` keeps that path from leaving the earlier run's video
+    behind (verified live: with the ``rm`` removed the block exits 1 with the
+    same message and both files survive).
     """
     bash = shutil.which("bash")
     block = _render_block(name)
@@ -1365,6 +1396,8 @@ def _run_render_without_ffmpeg(name, tmp_path):
                        .replace("<short-name>", "run"))
     cast.parent.mkdir(parents=True, exist_ok=True)
     cast.write_text('{"version": 2}\n')
+    cast.with_suffix(".mp4").write_bytes(b"previous run's video")
+    cast.with_name(cast.name + ".gif").write_bytes(b"previous run's gif")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     _stub_tool(bindir, "agg", (
@@ -1384,7 +1417,7 @@ def _run_render_without_ffmpeg(name, tmp_path):
 
 @pytest.mark.parametrize("name", RECIPES)
 def test_render_names_a_missing_encoder(name, tmp_path):
-    """A missing ``ffmpeg`` is not a bad gif.
+    """A missing ``ffmpeg`` is not a bad gif, and it still leaves no video.
 
     The block checks the encoder's exit status (R12), so a host without
     ``ffmpeg`` reaches the shell's "ffmpeg: command not found" (status 127)
@@ -1394,6 +1427,14 @@ def test_render_names_a_missing_encoder(name, tmp_path):
     anywhere on PATH. This is the misdiagnosis the web-UI finalize step got
     the same guard for (R22), in the recipes where a missing renderer is most
     likely (the QA image used on 2026-10-27 had no ``agg`` either).
+
+    This stop is also the one render failure that does not go through
+    ``render_fail`` (it exits before ``agg`` runs), so the block's own
+    pre-render ``rm`` is the only thing that removes a *previous* run's
+    ``recording.mp4`` and gif here: without it the block exits 1 with the
+    same message and leaves both in the capture directory, where the manifest
+    and the report present them as this run's evidence (verified live). The
+    seeded files below are what pins that ordering.
     """
     r, mp4, gif = _run_render_without_ffmpeg(name, tmp_path)
 
@@ -1404,9 +1445,12 @@ def test_render_names_a_missing_encoder(name, tmp_path):
         f"{name}: a missing encoder is still reported as a bad gif: "
         + r.stderr)
     assert not gif.exists(), (
-        f"{name}: the render ran agg before noticing the encoder was missing")
+        f"{name}: the render left a gif behind — either it ran agg before "
+        "noticing the encoder was missing, or it kept the previous run's gif")
     assert not mp4.exists(), (
-        f"{name}: a render that could not run left an mp4 behind")
+        f"{name}: a render that could not run left the previous run's "
+        "recording.mp4 behind, so the capture looks successful with a stale "
+        "video")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -1878,7 +1922,9 @@ def test_web_ui_finalize_refuses_a_missing_capture_dir(tmp_path):
     assert not called.exists(), "the finalize step ran ffmpeg anyway"
 
 
-def test_web_ui_finalize_refuses_a_capture_dir_it_cannot_write(tmp_path):
+@UNWRITABLE_MODES
+def test_web_ui_finalize_refuses_a_capture_dir_it_cannot_write(tmp_path,
+                                                                capdir_mode):
     """An unwritable capture directory is reported as a failed transcode.
 
     The directory exists, so the block's own checks pass and ffmpeg runs; its
@@ -1888,9 +1934,13 @@ def test_web_ui_finalize_refuses_a_capture_dir_it_cannot_write(tmp_path):
     capture directory and a webm in place: "ffmpeg failed on the driver's
     webm" with a real encoder, "ffmpeg wrote nothing" with a stub that exits
     0). The same guard the missing-directory case added, one shape over.
+
+    Mode 600 (write bit, no search bit) is the other shape: `[ -w ]` passes
+    and only the guard's `[ -x ]` half refuses it, because the block cannot
+    reach the webm or create the mp4 inside it either.
     """
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
-        pytest.skip("root can write a mode-500 directory")
+        pytest.skip("root bypasses the directory permission bits")
     capdir = tmp_path / "cap"
     capdir.mkdir()
     (capdir / "recording.webm").write_bytes(b"webm")
@@ -1900,7 +1950,7 @@ def test_web_ui_finalize_refuses_a_capture_dir_it_cannot_write(tmp_path):
     _stub_tool(bindir, "ffmpeg", f'touch "{called}"\n')
     env = dict(os.environ, CAPDIR=str(capdir),
                PATH=f"{bindir}:{os.environ['PATH']}")
-    capdir.chmod(0o500)
+    capdir.chmod(capdir_mode)
     try:
         r = subprocess.run(["bash"], input=_web_ui_finalize_block(), env=env,
                            capture_output=True, text=True)
@@ -2439,7 +2489,9 @@ def test_web_ui_driver_block_refuses_a_missing_capture_dir(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required")
-def test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
+@UNWRITABLE_MODES
+def test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_write(tmp_path,
+                                                                   capdir_mode):
     """An unwritable capture directory is reported as Playwright not resolving.
 
     The directory exists, so the block's ``cd`` succeeds and the link is
@@ -2450,14 +2502,19 @@ def test_web_ui_driver_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
     while the driver's own outputs have nowhere to go. Verified live with a
     mode-500 capture directory: the pre-fix block exits 1 with the Playwright
     message and ``ln``'s "Permission denied" above it.
+
+    Mode 600 (write bit, no search bit) is the shape only the guard's
+    ``-x`` half can see: the ``cd`` into it fails too, so without that half
+    the block reports the directory as "could not be entered — it may have
+    been removed" instead of naming the permission problem.
     """
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
-        pytest.skip("root can write a mode-500 directory")
+        pytest.skip("root bypasses the directory permission bits")
     global_dir = _fake_playwright(tmp_path / "global")
     capdir = tmp_path / "cap"
     capdir.mkdir()
     _write_driver(capdir)
-    capdir.chmod(0o500)
+    capdir.chmod(capdir_mode)
     try:
         r = _run_driver_block(capdir, global_dir)
     finally:
@@ -3109,7 +3166,9 @@ class TestWebUiStartExecution:
             "the app was started although the capture directory does not "
             "exist, so its outputs have nowhere to go")
 
-    def test_an_unwritable_capture_dir_stops_the_start(self, tmp_path):
+    @UNWRITABLE_MODES
+    def test_an_unwritable_capture_dir_stops_the_start(self, tmp_path,
+                                                       capdir_mode):
         """`mkdir -p` answers 0 for a capture directory that cannot be written.
 
         Every later write into it fails as something else: the clear leaves
@@ -3121,10 +3180,15 @@ class TestWebUiStartExecution:
         live with a mode-500 capture directory: the pre-fix block exits 0,
         launches the app and writes no pid file. Stop where the directory is
         established, as both recording recipes do.
+
+        Mode 600 (write bit, no search bit) is the shape only the guard's
+        ``-x`` half can see: the block otherwise starts the app, writes no
+        pid file, and exits 0 exactly as it does for mode 500.
         """
         if not hasattr(os, "geteuid") or os.geteuid() == 0:
-            pytest.skip("root can write a mode-500 directory")
-        r, launched = _run_web_ui_start("ok", tmp_path, capdir_mode=0o500)
+            pytest.skip("root bypasses the directory permission bits")
+        r, launched = _run_web_ui_start("ok", tmp_path,
+                                        capdir_mode=capdir_mode)
 
         assert r.returncode != 0, (
             "a capture directory that cannot be written was reported as a "
@@ -3361,7 +3425,9 @@ def test_web_ui_layer2_block_refuses_a_missing_capture_dir(tmp_path):
         "the protocol block ran curl with nowhere to write its logs")
 
 
-def test_web_ui_layer2_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
+@UNWRITABLE_MODES
+def test_web_ui_layer2_block_refuses_a_capture_dir_it_cannot_write(
+        tmp_path, capdir_mode):
     """The existence guard cannot see this one, and the block exits 0.
 
     The directory is there, so ``[ -d "$CAPDIR" ]`` passes, but neither
@@ -3369,10 +3435,11 @@ def test_web_ui_layer2_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
     (``kill … || true``) succeeds — verified live with a mode-500 capture
     directory: rc 0, no ``http.log``, no ``sse.log``. That is exactly the "a
     run with no protocol capture reads as success" failure this block's guard
-    exists for, one shape over.
+    exists for, one shape over. Mode 600 is the shape only the guard's
+    ``-x`` half can see, for the same reason.
     """
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
-        pytest.skip("root can write a mode-500 directory")
+        pytest.skip("root bypasses the directory permission bits")
     capdir = tmp_path / "cap"
     capdir.mkdir()
     bindir = tmp_path / "bin"
@@ -3381,7 +3448,7 @@ def test_web_ui_layer2_block_refuses_a_capture_dir_it_cannot_write(tmp_path):
     _stub_tool(bindir, "curl", f'touch "{called}"\n')
     env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1",
                PATH=f"{bindir}:{os.environ['PATH']}")
-    capdir.chmod(0o500)
+    capdir.chmod(capdir_mode)
     try:
         r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
                            capture_output=True, text=True, timeout=60)
@@ -3421,6 +3488,50 @@ def test_web_ui_layer2_route_snapshots_are_bounded():
     assert "--max-time" in sse, (
         "the SSE reader is unbounded, so a failed kill leaves it running: "
         + sse)
+
+
+def test_web_ui_layer2_stops_the_sse_reader_it_started(tmp_path):
+    """The protocol block's last act is to stop the reader it started.
+
+    ``curl -N`` is an open stream: the block backgrounds it, triggers the
+    change, and stops it — "then stop the reader", as its own comment says.
+    ``--max-time`` bounds a *failed* stop, so dropping the ``kill`` leaves the
+    suite green (verified: 228 passed with the line removed) while the block
+    returns with the reader still writing into ``sse.log``: the capture the
+    block hands back is not the capture it produced, and a reader started
+    again by the next attempt appends to a log this run never closed. The
+    stub below traps ``TERM`` and records that it arrived, so the case sees
+    the stop itself rather than the text of the line.
+    """
+    capdir = tmp_path / "cap"
+    capdir.mkdir()
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    stopped = tmp_path / "sse-reader-stopped"
+    _stub_tool(bindir, "curl", f"""\
+case " $* " in
+  *" -N "*)
+      trap 'echo stopped > "{stopped}"; exit 0' TERM
+      i=0
+      while [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done
+      exit 0 ;;
+esac
+echo "HTTP 200"
+""")
+    env = dict(os.environ, CAPDIR=str(capdir), APP_URL="http://localhost:1",
+               PATH=f"{bindir}:{os.environ['PATH']}")
+
+    r = subprocess.run(["bash"], input=_web_ui_layer2_block(), env=env,
+                       capture_output=True, text=True, timeout=60)
+
+    assert r.returncode == 0, r.stderr
+    deadline = time.time() + 5
+    while not stopped.exists() and time.time() < deadline:
+        time.sleep(0.05)
+    assert stopped.exists(), (
+        "the protocol block returned with the SSE reader it started still "
+        "running, so sse.log keeps growing after the block says the capture "
+        "is done")
 
 
 def test_web_ui_layer2_block_writes_both_logs(tmp_path):
@@ -4205,9 +4316,13 @@ class TestCaptureFlowExecution:
         assert not (tmp_path / "state" / "claim.pm-test~1").exists(), (
             "step 2 wrote its claim on the prefix-matched grouped session")
 
-    @pytest.mark.parametrize("shape", ["missing", "read-only"])
+    @pytest.mark.parametrize("shape,capdir_mode", [
+        ("missing", None),
+        ("read-only", 0o500),
+        ("read-only", 0o600),
+    ], ids=["missing", "no-write-bit", "no-search-bit"])
     def test_step_two_refuses_a_capture_dir_it_cannot_write(
-            self, shape, tmp_path):
+            self, shape, capdir_mode, tmp_path):
         """A claim on a directory nothing can be written into is not a capture.
 
         Step 2 is pasted on its own when a run re-attaches its transcript, and
@@ -4222,14 +4337,20 @@ class TestCaptureFlowExecution:
         message with the cast, the stderr log and the status file all absent).
         Refuse it here, before the claim: a claim on an unusable directory is
         a collision the next attempt has to clear by hand.
+
+        The directory that exists and cannot be written comes in two
+        permission shapes: mode 500 has no write bit, and mode 600 has the
+        write bit and no search bit — only the guard's ``-x`` half sees the
+        second, and without it the claim is taken and the pipe attached
+        exactly as for a usable directory.
         """
         capture = tmp_path / "missing" / "cap"
         if shape == "read-only":
             if not hasattr(os, "geteuid") or os.geteuid() == 0:
-                pytest.skip("root can write a mode-500 directory")
+                pytest.skip("root bypasses the directory permission bits")
             capture = tmp_path / "cap"
             capture.mkdir()
-            capture.chmod(0o500)
+            capture.chmod(capdir_mode)
         try:
             r, _cast = _run_block(_step_two_block(), "ok", tmp_path,
                                   target=True, capture=capture)
@@ -4279,8 +4400,9 @@ class TestCaptureFlowExecution:
             "the refused step attached the transcript pipe")
 
     @pytest.mark.parametrize("name", RECIPES)
+    @UNWRITABLE_MODES
     def test_a_capture_dir_that_cannot_be_written_stops_the_run(
-            self, name, tmp_path):
+            self, name, capdir_mode, tmp_path):
         """`mkdir -p` answers 0 for an existing directory that is not writable.
 
         Every later write into it fails as something else: the tmux recipe's
@@ -4294,9 +4416,16 @@ class TestCaptureFlowExecution:
         directory where it creates it — and before it clears the recorder
         session shared with concurrent runs, so a refused block makes no tmux
         call at all.
+
+        Mode 600 (write bit, no search bit) is the shape only the guard's
+        ``-x`` half sees. Without that half the block runs on, clears the
+        shared recorder session first, and then exits 1 on `rm`'s own
+        "Permission denied" — a block that refused its own path *after*
+        ending a concurrent capture's recorder, which is exactly what the
+        clear-after-the-guard ordering exists to prevent.
         """
         if not hasattr(os, "geteuid") or os.geteuid() == 0:
-            pytest.skip("root can write a mode-500 directory")
+            pytest.skip("root bypasses the directory permission bits")
         capture = tmp_path / "cap"
         capture.mkdir()
         # The CLI scaffold writes under <capture-dir>/<short-name>/.
@@ -4304,7 +4433,7 @@ class TestCaptureFlowExecution:
         if name == "cli-recording.md":
             target = capture / "run"
             target.mkdir()
-        target.chmod(0o500)
+        target.chmod(capdir_mode)
         calls = tmp_path / "tmux-calls.log"
         try:
             r, _cast = _run_block(
@@ -4321,7 +4450,9 @@ class TestCaptureFlowExecution:
             "shared with concurrent runs) for a capture directory it then "
             "refused")
 
-    def test_cli_preamble_refuses_a_capture_dir_it_cannot_write(self, tmp_path):
+    @UNWRITABLE_MODES
+    def test_cli_preamble_refuses_a_capture_dir_it_cannot_write(
+            self, tmp_path, capdir_mode):
         """The preamble's own copy of the guard covers the simple forms too.
 
         It clears the previous run's files before any recording form, and a
@@ -4329,13 +4460,14 @@ class TestCaptureFlowExecution:
         simple `asciinema rec` form (no ``--overwrite``) then aborts on it
         ("asciinema: <path> already exists, aborting" on 2.1.0), a cause the
         worker cannot connect to the path. The preamble refuses the directory
-        instead.
+        instead. Mode 600 (write bit, no search bit) is the shape only the
+        guard's ``-x`` half can see.
         """
         if not hasattr(os, "geteuid") or os.geteuid() == 0:
-            pytest.skip("root can write a mode-500 directory")
+            pytest.skip("root bypasses the directory permission bits")
         capture = tmp_path / "cap"
         (capture / "run").mkdir(parents=True)
-        (capture / "run").chmod(0o500)
+        (capture / "run").chmod(capdir_mode)
         try:
             r, _cast = _run_block(
                 _cli_preamble_block(), "ok", tmp_path, capture=capture)

@@ -44,7 +44,11 @@ recording-recipe bugs that any worker following the recipe hits:
   remove or render anything, so an unwritable directory is not reported as
   "agg failed on the cast — is 'agg' installed?" (a remedy that runs and
   changes nothing) and a path that is not there is not reported as a
-  recording that wrote nothing (R57);
+  recording that wrote nothing (R57); "cannot be written" covers both
+  permission shapes — a directory with no write bit and one with the write
+  bit and no *search* bit, which `[ -w ]` alone cannot see — and a render
+  that stops before `agg` (a missing encoder) still leaves none of the
+  previous run's video or gif behind (R59);
 - the web-UI finalize/driver/teardown guards stop the block with
   `if … exit 1`, because `: "${VAR:?}"` only stops a *scripted* run — in an
   interactive shell the next line still runs (the `rm` aimed at
@@ -55,6 +59,9 @@ recording-recipe bugs that any worker following the recipe hits:
   neither is available instead of silently leaving the app holding the port.
   The Layer 2 protocol block carries the same guard: with `CAPDIR`/`APP_URL`
   unset it used to redirect to `/http.log` and `/sse.log` and still exit 0.
+  Its `curl -N` reader is stopped by the block before it returns (`kill
+  "$SSE_PID"`; `--max-time` is the backstop), so `sse.log` is final when the
+  block says the protocol capture is done (R59).
 - a start step that cannot do its job says so where it fails: an unusable
   capture directory and a `new-session` that never creates the recorder stop
   the run with their own message instead of being misdiagnosed as a dead
