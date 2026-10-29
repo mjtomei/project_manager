@@ -150,7 +150,8 @@ operations do not take PM's launch lock.
   allowing host fallback. A surviving renamed allocation or unknown ID check
   defers cleanup to a fresh-name retry without touching its proxy.
 - **QA**: at the end of `_execute_and_finalize` (completed *or* stopped),
-  scenario containers of **this loop** are released in bounded parallel,
+  and before a held run waits for a human (A11), scenario containers of
+  **this loop** are released in bounded parallel,
   except scenarios whose verdict is `INPUT_REQUIRED` (awaiting a human), that
   are explicitly retained, or whose window is currently being viewed by an
   attached client. Failed client/window inspection defers owner release;
@@ -764,6 +765,43 @@ container cleared it and kept its files.  Running state is not health.
   wait behind the occupied floor slot, including a container retained for a
   human; A8 (retained containers count toward the limit) stays in force.
   Separate PM processes remain uncoordinated (qa.md resolution 24).
+
+- A11 *Held QA runs after merging master@4a74d880* — master (pr-2c67d50)
+  no longer treats a worker's `INPUT_REQUIRED` as terminal: the scenario
+  enters `waiting_for_input`, its pane keeps being polled for a follow-up
+  verdict, and a run whose only remaining work is waiting finalizes as
+  `INPUT_REQUIRED` and is then *held* (`_hold_for_follow_up`) until a
+  follow-up reopens it, the run is stopped, or the PR leaves `qa`. The hold
+  has no time limit. Integration rules:
+  - A waiting scenario is not *settled*: the in-poll release skips it
+    (otherwise its provisional `INPUT_REQUIRED` is "kept" and marked
+    released, and the follow-up PASS/NEEDS_WORK it later produces would keep
+    its container until the run ends). Its container still counts as held
+    for `container-max-running` (A8), readable inventory or outage, although
+    master's own `concurrency_cap` does not count a waiting worker.
+  - Before entering the hold, the run's settled containers are released with
+    the same owner release as the run end (waiting/`INPUT_REQUIRED`, viewed
+    and retained ones are kept). A deferred release is retried by the hold
+    every status-check interval and again when the run ends; the run-end
+    release in `_execute_and_finalize`'s `finally` still runs once the hold
+    exits.
+  - The held run's resume snapshot carries `floor_container`, and the TUI
+    resume scan restores the floor claim of a re-adopted held run before
+    spawning any resumed run (same ordering as an in-progress run). This
+    narrows the 2d18 i3/i4 open question (note-06639c8): an `INPUT_REQUIRED`
+    floor container of a *held* run keeps the slot across a TUI restart. A
+    run that ends without holding while its floor container is kept for a
+    human (trust-blocked or terminal `INPUT_REQUIRED`, a NEEDS_WORK run that
+    left QA, a hold ended by stop or a status change) still clears its
+    snapshot and loses the claim on restart — that case remains open for the
+    user and is not decided here.
+  - Snapshot writes from the finalize/hold loop carry `desired_cap`, and a
+    superseded run still drops its own snapshot (`discard_qa_state` sets
+    `superseded` before `stop_requested`).
+  - `resolve_mount_trigger` (master, session-scoped marker) also pops this
+    PR's `PM_TUI_RESTART_TRIGGER` handover, so a breadcrumb restart still
+    mounts as `trigger=merge_restart` after `save_breadcrumb` consumed the
+    marker.
 
 ## 4. Edge cases
 

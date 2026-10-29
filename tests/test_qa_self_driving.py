@@ -532,7 +532,10 @@ class TestFreshStartZT:
             fresh_start_qa(app, "pr-001")
 
         assert not snapshot.exists()
-        assert done.superseded is False
+        # discard_qa_state treats every dropped run alike: nothing it might
+        # still do (a deferred release retry) can rewrite the snapshot.
+        assert done.superseded is True
+        assert done.stop_requested is True
 
     def test_fresh_start_removes_old_loop(self, tmp_path):
         """Step 10: z t removes old loop from _qa_loops before starting new."""

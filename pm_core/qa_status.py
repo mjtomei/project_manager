@@ -48,6 +48,10 @@ _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
 _CLEAR_SCREEN = "\033[H\033[2J"
 
+# Appended to a scenario's verdict while its worker waits for input.
+_WAITING_SUFFIX = " (waiting)"
+_WAITING_SUFFIX_WIDTH = len(_WAITING_SUFFIX)
+
 _VERDICT_COLORS = {
     "PASS": _GREEN,
     "NEEDS_WORK": _YELLOW,
@@ -135,8 +139,13 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
             lines.append(f"{_DIM}{_truncate('  q: quit', cols)}{_RESET}")
             return _finish(lines, rows, cols, err_start, err_chunks)
 
-    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23
-    title_width = max(cols - 28, 10)
+    # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23.
+    # A scenario waiting for input appends " (waiting)" to its verdict, so
+    # reserve that width when any row uses it — otherwise the line exceeds
+    # the terminal width and wraps, pushing the footer off screen.
+    waiting_any = any(sc.get("waiting_for_input") for sc in scenarios)
+    reserve = _WAITING_SUFFIX_WIDTH if waiting_any else 0
+    title_width = max(cols - 28 - reserve, 10)
     lines.append(f"  {'#':>3}  {'Scenario':<{title_width}}  {'Verdict'}")
     lines.append(f"  {'---':>3}  {'-' * title_width}  {'-' * 14}")
 
@@ -168,6 +177,10 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
         elif verdict:
             color = _VERDICT_COLORS.get(verdict, _DIM)
             verdict_display = f"{color}{verdict}{_RESET}"
+            if sc.get("waiting_for_input"):
+                # The worker asked for input; the loop is still watching its
+                # pane for a follow-up verdict after the user answers.
+                verdict_display += f"{_DIM}{_WAITING_SUFFIX}{_RESET}"
         else:
             verdict_display = f"{_DIM}pending{_RESET}"
 

@@ -15,6 +15,7 @@ from pm_core.paths import pane_registry_dir, debug_dir
 from pm_core.cli import cli
 from pm_core.cli.helpers import (
     _find_tui_pane,
+    _find_live_tui_pane,
     state_root,
 )
 
@@ -32,6 +33,12 @@ def tui_cmd():
     sys.stderr = stderr_file
 
     log = configure_logger("pm.tui.crash")
+
+    # Protect the startup window from IPC signals: until the real asyncio
+    # handlers are installed, the default action for SIGUSR1/SIGUSR2 is
+    # terminate.  These no-ops are replaced on mount.
+    from pm_core.tui_pidfile import install_signal_guards
+    install_signal_guards()
 
     # Catch SystemExit raised in threads (e.g. run_in_executor callbacks)
     import threading
@@ -59,9 +66,32 @@ def tui_cmd():
             stderr_file.flush()
             log.error("hook install conflict: %s", e)
             raise
-        from pm_core.tui.app import ProjectManagerApp
-        app = ProjectManagerApp()
+        from pm_core.tui.app import ProjectManagerApp, current_session_name
+        from pm_core.tui_pidfile import (
+            TuiPidfileConflict, claim_tui_pidfile, pidfile_path,
+        )
+
+        # Claim the session's pidfile before the app starts so a second
+        # TUI for the same session is refused with a visible message
+        # (stderr is redirected to tui-stderr.log, so print to stdout).
+        claim = None
+        session = current_session_name()
+        if session:
+            try:
+                claim = claim_tui_pidfile(pidfile_path(session), session)
+            except TuiPidfileConflict as e:
+                log.error("TUI startup refused: %s", e)
+                print(str(e), flush=True)
+                raise SystemExit(2)
+            except OSError as e:
+                log.error("Could not claim TUI pidfile (continuing without "
+                          "external IPC): %s", e)
+        app = ProjectManagerApp(pidfile_claim=claim)
         app.run()
+        startup_error = getattr(app, "_startup_error", None)
+        if startup_error:
+            print(startup_error, flush=True)
+            raise SystemExit(2)
     except SystemExit as e:
         tb = traceback.format_exc()
         log.error("TUI exited with SystemExit(%s):\n%s", e.code, tb)
@@ -154,7 +184,7 @@ def tui_view(no_history: bool, session: str | None):
     Captures the current TUI pane content and displays it.
     Also adds the frame to history for later review (unless --no-history).
     """
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
@@ -221,7 +251,7 @@ def tui_send(keys: str, session: str | None):
       pm tui send C-c        # Press Ctrl+C
     """
     import subprocess
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
@@ -290,23 +320,25 @@ def tui_restart(breadcrumb: bool, session: str | None):
         pm tui restart                  # Clean restart (no state preserved)
         pm tui restart --breadcrumb     # Restart preserving loop state
     """
-    pane_id, sess = _find_tui_pane(session)
+    pane_id, sess = _find_live_tui_pane(session)
     if not pane_id:
         click.echo("No TUI pane found. Is there a pm tmux session running?", err=True)
         raise SystemExit(1)
 
     marker = None
     if breadcrumb:
-        from pm_core.paths import pm_home
-        marker = pm_home() / "merge-restart"
-        marker.touch()
+        from pm_core import tui_pidfile
+        # Scoped to the session whose TUI is being restarted: the marker is
+        # a single shared file, and a concurrent restart in another session
+        # must not consume it (nor preserve its own state because of it).
+        marker = tui_pidfile.write_merge_restart_marker(sess)
         click.echo("Wrote merge-restart marker for state persistence")
 
     try:
         tmux_mod.send_keys_literal(pane_id, "C-r")
     except Exception:
-        if marker and marker.exists():
-            marker.unlink(missing_ok=True)
+        if marker is not None:
+            tui_pidfile.clear_merge_restart_marker(sess)
         raise
     click.echo(f"Sent restart to TUI pane {pane_id} (session: {sess})")
 

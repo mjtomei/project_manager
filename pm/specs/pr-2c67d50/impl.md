@@ -1,0 +1,742 @@
+# Spec — pr-2c67d50: resume QA scenario polling after INPUT_REQUIRED
+
+## 0. Problem
+
+A QA scenario worker that emits `INPUT_REQUIRED` is treated as terminal today:
+
+- `_poll_tmux_verdicts` (`pm_core/qa_loop.py`) records the verdict in
+  `state.scenario_verdicts`, removes the scenario from its local `pending`
+  set, and never reads that pane's transcript again.
+- When all runnable work is done, `_execute_and_finalize` aggregates the
+  verdicts (`INPUT_REQUIRED` wins over `PASS`) and runs the finalize pane.
+- `qa_loop_ui.poll_qa_state` calls `_on_qa_complete` (records a QA note,
+  logs "paused for human input"), then drops the completed state from
+  `app._qa_loops` and clears `qa_resume.json`.
+
+The user then answers the blocker in the *original worker pane*. The worker
+finishes and emits a new verdict, but nothing consumes it: the collector no
+longer polls the scenario, the TUI no longer tracks the run, and autostart
+keeps reporting the original `INPUT_REQUIRED` (#267 QA `fb7eecdb7ab986be`,
+note-8ee427c).
+
+`review_loop.py` already solves the single-pane version of this: on
+`INPUT_REQUIRED` it calls `loop_shared.wait_for_follow_up_verdict`, which
+waits for a *new* idle event and accepts only a verdict turn whose transcript
+line is newer than the one that prompted the wait (pr-8efa789).
+
+## 1. Requirements (grounded in code)
+
+### R1 — Live run: a worker `INPUT_REQUIRED` keeps the scenario polled
+
+In `_poll_tmux_verdicts`, when a verdict accepted from a scenario's own
+transcript (`hit = find_verdict_turn(scenario.transcript_path, ALL_VERDICTS)`)
+is `INPUT_REQUIRED`:
+
+- Record the verdict and its `scenario_verdict_sources` identity as today
+  (evidence/display/aggregation).
+- Add the scenario index to `QALoopState.waiting_for_input`.
+- Store a follow-up source under `QALoopState.waiting_input_sources[idx]`:
+  `{pr_id, loop_id, scenario, session_id, transcript_path, turn_id,
+  timestamp, line_index, head, reason}`.
+- Discard the index from `state.verified_scenarios` (a PASS from this
+  attempt was verified for an older turn and must not be inherited).
+- Remove the scenario from the local `pending` set, call
+  `_launch_next_queued()` so queued work proceeds (a waiting worker is
+  user-bound and does not count against `concurrency_cap`), and keep the
+  run alive.
+
+Loop-exit behaviour: `_poll_tmux_verdicts` exits when `pending`, `verifying`
+and `_launch_queue` are empty. `waiting_for_input` alone must **not** keep
+the collection loop spinning: when no runnable work remains, the run
+finalizes (overall `INPUT_REQUIRED`) and the held phase (R2) takes over.
+While other work is runnable the run stays `running` (autostart shows
+progress, not a wait).
+
+### R2 — Held run: finalize as INPUT_REQUIRED, then keep watching
+
+`_execute_and_finalize` gains an outer loop:
+
+1. `_poll_tmux_verdicts(...)`.
+2. Aggregate as today, plus `input_wait_code_changes` (R6) forcing
+   `NEEDS_WORK`.
+3. Write status + persist verdict evidence.
+4. If the run was **not restored as already held** (`was_held`, the flag the
+   snapshot was adopted with, is false), clear `state.completion_processed`
+   and `state._ui_complete_notified` *first*, then run the normal finalize
+   pane. The clearing must precede the pre-finalize snapshot: that snapshot
+   is what a restart during the pane adopts, and a restored held run that
+   just collected a follow-up still carries the previous held result's
+   `completion_processed=True` — adopting it would skip the new result's QA
+   note and lifecycle transition (see §19). A live run that newly enters the
+   hold does run the pane (the hold snapshot is written first, so a restart
+   during the pane recovers the wait instead of treating the run as
+   finished); a restored held run already finalized this result before the
+   restart and skips it.
+5. `state.held = bool(waiting_for_input) and latest_verdict ==
+   INPUT_REQUIRED and not stop_requested`.
+6. `state.running = False`; persist the resume snapshot; `notify()`.
+7. If not held (or stopped), break.
+8. Otherwise `_hold_for_follow_up(...)` blocks, polling the waiting
+   scenarios. On a follow-up (or a waiting attempt that needs the live
+   loop to act) it returns `True`: reset `held=False`, `running=True`,
+   `latest_verdict=""`, `finalize_verdict=None`, `_ui_complete_notified=
+   False`, `completion_processed=False`, `notify()`, and loop back to 1.
+
+A held run whose overall is `NEEDS_WORK`/`PASS` does **not** hold: the run
+has left QA (review/sign-off takes over) and the remaining waiting
+scenarios stay recorded as `INPUT_REQUIRED` evidence for the next run.
+
+The held phase also stops if the PR leaves `qa` status (checked
+periodically) so a stale watcher cannot resurrect QA after an out-of-band
+status change.
+
+### R3 — Persistence and restart adoption
+
+`qa_resume.json` gains: `waiting_for_input`, `waiting_input_sources`,
+`held`, `completion_processed`, `latest_verdict`, `input_wait_code_changes`.
+`_write_resume_file` / `build_resume_state` round-trip them.
+
+`build_resume_state` reconciles waiting entries against the restored
+scenario identity (same `pr_id`/`loop_id`/`scenario`/`session_id`/
+`transcript_path`). A waiting entry whose attempt was superseded (worker
+relaunched, different session) is dropped together with its provisional
+verdict/verification so the new attempt is polled from scratch. A waiting
+entry with no recoverable session is dropped as terminal `INPUT_REQUIRED`
+(the verdict stays).
+
+`qa_loop_ui._resume_incomplete_qa`:
+
+- Snapshot with `overall` and **not held** → existing behaviour (process
+  completion, clear snapshot).
+- Snapshot that is held (or still incomplete) → `build_resume_state`,
+  keep the snapshot, track the state in `app._qa_loops`, and re-spawn
+  `resume_qa_background`. A held run that was never processed
+  (`completion_processed=False`) is recorded **on adoption** (the same
+  `_on_qa_complete` + `mark_completion_processed` the live path runs when
+  it publishes the held result): the re-spawned watcher publishes
+  `running=True` immediately, so `poll_qa_state` can never observe the
+  held completion and the note would otherwise be lost whenever no
+  follow-up ever arrives (see §15). One already processed is not
+  re-noted. Either way `state._ui_complete_notified` is set, so the
+  re-spawned watcher's own completion does not duplicate it.
+
+`qa_loop_ui.poll_qa_state`:
+
+- When a completed state is `held`: run `_on_qa_complete` once, keep the
+  state in `app._qa_loops`, keep the resume snapshot, and persist
+  `completion_processed=True` (new `qa_loop.mark_completion_processed`).
+- When the held watcher reopens (`running=True`,
+  `_ui_complete_notified=False`), no completion is processed.
+- When it finalizes again, `_on_qa_complete` runs for the new verdict.
+- Non-held completion keeps today's delete + clear behaviour.
+
+`start_qa`, `fresh_start_qa`, `start_or_stop_qa_loop` and `stop_qa` treat a
+`held` state as active: starting/focusing does not spawn a duplicate run;
+stopping sets `stop_requested`; a fresh start clears the superseded
+snapshot.
+
+### R4 — Follow-up acceptance rules (no stale output)
+
+For each waiting scenario, `_scan_waiting_scenarios`:
+
+- Validates the attempt identity; on mismatch drops the waiting entry and
+  its provisional verdict (superseded attempt).
+- Reads the worker's own `scenario.transcript_path` only (never another
+  pane). A cheap `stat()` (mtime/size) cache on the state avoids re-parsing
+  an unchanged transcript.
+- Looks for a **newer** `INPUT_REQUIRED` turn than the recorded baseline
+  (`line_index` / `timestamp`): if found, refresh the baseline, source
+  identity and reason — a repeated `INPUT_REQUIRED` keeps waiting and does
+  not finalize.
+- Looks for a newer `PASS`/`NEEDS_WORK` turn with the same baseline rule
+  (excludes `INPUT_REQUIRED`). On a hit: clear the waiting entry, its
+  provisional verdict/source/reason and verification, add the scenario back
+  to `pending`, and let the normal acceptance path record it (so PASS
+  verification / NEEDS_WORK routing are unchanged).
+- If no follow-up exists and the pane/session is gone, drop the waiting
+  entry and its provisional verdict and put the scenario back in `pending`
+  so the existing retry/relaunch path owns the new attempt. A follow-up
+  already present in the transcript is accepted even if the pane has since
+  died.
+
+Baseline comparison: `hit.line_index > src["line_index"]` or, when the
+transcript was truncated/rotated, `hit.timestamp > src["timestamp"]`.
+
+### R5 — Status/visibility
+
+- `_write_status_file` gains a `waiting_for_input` argument; each waiting
+  scenario entry gets `"waiting_for_input": true` and the top-level object
+  gets `"waiting_for_input": [indices]`. `qa_status.py` renders a dim
+  `(waiting)` suffix while keeping the canonical verdict/colour/counts.
+- `state.latest_output` says the scenario is waiting for input (answered in
+  its worker pane) while other work continues.
+- `autostart_state._derive`: while the run is live `running=True` → running;
+  once held `running=False` and verdict `INPUT_REQUIRED` →
+  `QA INPUT_REQUIRED — answer in the scenario worker pane (still watching
+  for a follow-up)`. `qa_progress_input` therefore carries `held` so the
+  reason can name the pane the user must answer in (the status dashboard
+  cannot accept the answer); a non-held `INPUT_REQUIRED` (a finished run
+  with no watcher) keeps the existing `answer in QA window` text. This
+  satisfies "a single waiting scenario must not make the whole run WAITING
+  while other runnable work proceeds".
+
+### R6 — Later PASS / NEEDS_WORK / new source changes
+
+- A follow-up `PASS` goes through the normal independent verifier
+  (`verified_scenarios` was discarded when the scenario entered waiting) and
+  the normal finalize pane.
+- A follow-up `NEEDS_WORK` aggregates to `NEEDS_WORK`; `_on_qa_complete`
+  transitions to `in_review` and the review loop runs.
+- At follow-up acceptance, compare the PR head against the head all
+  scenarios started from (`state.planner_head`, falling back to the head
+  recorded when the scenario entered waiting). If the head moved, record
+  `state.input_wait_code_changes` and force the scenario verdict/overall to
+  `NEEDS_WORK` with a reason — a new source head is never promoted on the
+  strength of the old run's approval.
+- The manual merge gate is untouched: a later PASS still needs sign-off, and
+  the existing freshness checks invalidate old approvals when HEAD moves.
+
+### R7 — Prompt reconciliation
+
+- `prompt_gen.generate_qa_child_prompt`'s "Your Verdict Is Final for This
+  Run" block: PASS/NEEDS_WORK remain terminal (except loop-initiated
+  re-verification); `INPUT_REQUIRED` is explicitly **not** terminal — the
+  loop keeps the pane under observation and accepts a later PASS/NEEDS_WORK
+  after the user answers, and a repeated INPUT_REQUIRED keeps waiting.
+  Cross-run handoff via PR notes still applies to final verdicts.
+- `qa_loop._build_concretization_prompt`'s "This Decision Is Final" block
+  stays (the concretizer is genuinely one-shot) but gains one sentence
+  scoping that rule to the concretizer, distinct from the scenario worker's
+  INPUT_REQUIRED continuation.
+
+### R8 — Preserve evidence and user holds
+
+- INPUT_REQUIRED reasons are written to `scenario_verdict_reasons` and
+  persisted to `verdict.md`/`scenario.json` at finalize; they are only
+  replaced when a genuine follow-up verdict supersedes them.
+- Worker panes/containers/captures are never killed by the hold.
+- Autostart merge holds and the manual merge gate are not modified.
+
+## 2. Implicit requirements
+
+- `state.scenario_verdicts` remains the canonical verdict map (status,
+  notes, captures, aggregation). Waiting is an *overlay*: a verdict present
+  in the map is provisional while the index is in `waiting_for_input`.
+- The live `pending` set must exclude indices already in
+  `waiting_for_input` (polled separately) and indices already carrying a
+  verdict (so a restart/held restore never re-consumes a completed
+  scenario's stale turn).
+- `state.verified_scenarios` must be cleared for a scenario entering
+  waiting and for a promoted follow-up.
+- Resume identity validation reuses the `scenario_verdict_sources`
+  contract: `(pr_id, loop_id, scenario, session_id)`.
+- The held thread is the single owner of the run; `resume_owned_elsewhere`
+  (owner pid + start time) already prevents a second TUI/CLI process from
+  adopting it while the holder is alive.
+- No new `claude -p` usage; the hold is passive polling.
+
+## 3. Ambiguities and resolutions
+
+- **Does a live waiting scenario consume a concurrency slot?** No. The
+  worker is idle waiting for a human; queued runnable work should proceed
+  (scope: "must not make the whole run WAITING while other runnable work
+  proceeds"). `_launch_next_queued` is triggered when a scenario enters
+  waiting.
+- **Should a run with `NEEDS_WORK` from a follow-up keep holding other
+  waiting scenarios?** No. The run has returned to review; the remaining
+  INPUT_REQUIRED evidence is retained for the next run. Holding would let a
+  later PASS promote a head that review has not approved.
+- **What if the whole run finalized as INPUT_REQUIRED before this change
+  (no snapshot)?** Not recoverable retroactively (no persisted identity);
+  the feature persists the hold from the moment a run finalizes with
+  waiting scenarios. The #267 flow is covered for runs under this code.
+- **Does the refiner's INPUT_REQUIRED exist?** No — the refiner emits
+  refine/reject. Its block remains final; only a clarifying sentence is
+  added.
+- **Repeated INPUT_REQUIRED after the user answers**: keep waiting and
+  refresh the baseline/reason; it is not treated as a terminal verdict.
+
+## 4. Edge cases
+
+- Follow-up arrives before the live loop finalizes → collected in the live
+  loop (no held round-trip).
+- Follow-up arrives between finalize and the held loop → the held loop's
+  first scan promotes it and reopens.
+- TUI/controller restart while held → `_resume_incomplete_qa` re-spawns the
+  held watcher; no duplicate note for an already-processed completion; a
+  follow-up that landed during downtime is collected.
+- TUI restart while a follow-up has landed but the completion was not
+  processed (`completion_processed=False`) → processed on the next poll.
+- Worker pane killed while waiting → existing retry/relaunch path owns the
+  new attempt (bounded by `_SCENARIO_MAX_RETRIES`); retries exhausted →
+  terminal INPUT_REQUIRED.
+- Superseded session/transcript on resume → waiting dropped, verdict
+  dropped, scenario polled fresh.
+- Stop (`z t` / `zz t` stop) while held → hold exits, no relaunch.
+- PR leaves `qa` while held → hold exits.
+- Verification of a follow-up PASS is mandatory even if the scenario had a
+  verified PASS earlier in the run.
+- Follow-up PASS with a moved PR head → `NEEDS_WORK`, review required.
+
+## 5. Test plan (unit)
+
+- `waiting` entry on worker INPUT_REQUIRED; run stays live while another
+  scenario is pending.
+- Follow-up PASS/NW accepted; repeated INPUT_REQUIRED ignored; stale PASS
+  before the baseline rejected; stale PASS from a superseded task rejected.
+- Superseded session drops waiting + verdict.
+- Snapshot round-trip of waiting/held/source fields; `_drop_foreign_verdicts`
+  reconciliation.
+- `_resume_incomplete_qa`: held snapshot re-spawns (no clear, no duplicate
+  completion); held+unprocessed processes once; non-held completed clears.
+- `poll_qa_state`: held completion keeps state + snapshot; non-held deletes.
+- `_execute_and_finalize`: held after INPUT_REQUIRED-only run; reopen on
+  follow-up; new source changes force NEEDS_WORK; no finalize re-run on a
+  restored held run.
+- Prompt assertions updated: INPUT_REQUIRED continuation described;
+  PASS/NEEDS_WORK finality retained.
+
+## 6. Implementation notes (review iteration 1)
+
+Corrections found while reviewing the implementation against R2-R4; all are
+covered by tests in `tests/test_qa_input_required.py` /
+`tests/test_qa_resume.py`.
+
+- **A follow-up found by the hold must survive to the live loop.** The hold
+  reports `scan.follow_ups` and reopens the run, whose first act is to rescan
+  the same transcript. The stat cache therefore only records a transcript
+  that held *no* follow-up; `_clear_waiting` drops the entry when the live
+  loop records it.
+- **Reopening must not relaunch already-launched queued scenarios.** A held
+  run re-enters `_poll_tmux_verdicts` with the original queue list, and a
+  restart adopts a snapshot whose `queued_indices` may name scenarios
+  launched before the restart. The launch queue keeps only scenarios with no
+  window and no verdict.
+- **The hold snapshot is written before the finalize pane.** The finalize
+  pane can run for minutes; a restart during it must recover the wait rather
+  than process the run as finished. `was_held` (the restored flag) decides
+  whether to skip the finalize pane.
+- **A superseded run never rewrites its snapshot.** `fresh_start_qa` /
+  the `zz t` restart path clear `qa_resume.json`; the winding-down held
+  thread must not recreate it or a later scan resurrects the run. The TUI
+  sets `state.superseded`, and `_write_resume_file` /
+  `mark_completion_processed` skip it. Snapshot writes are serialized by
+  `_RESUME_WRITE_LOCK` so the TUI's read-modify-write cannot be clobbered.
+- **The hold does not rewrite the snapshot every tick.** It writes only when
+  the waiting set changes (repeated INPUT_REQUIRED / dropped attempt), and
+  `_execute_and_finalize` writes once when the hold ends.
+
+## 7. Implementation notes (review iteration 2)
+
+- **Reopening publishes `running` before clearing `held`.** `poll_qa_state`
+  drops a state whose completion it has already processed once it sees
+  `running=False` and `held=False`. Setting `held=False` first left a window
+  in which the TUI could observe exactly that and delete the state and the
+  resume snapshot for a run that had just reopened — orphaning it. `running`
+  is now set first; the TUI skips any state that is running.
+- **Only an INPUT_REQUIRED result may be held.** A crashed driver sets
+  `latest_verdict="ERROR"`; if `held` stayed set the TUI kept the state in
+  `_qa_loops` forever with no thread behind it, so every later `t` reported
+  "waiting for input". The TUI held branch now requires
+  `latest_verdict == INPUT_REQUIRED`, and both background-thread crash
+  handlers clear `held`.
+- **Waiting relaunches are capped across hold/reopen cycles.** The live
+  loop's `_SCENARIO_MAX_RETRIES` budget is local to one
+  `_poll_tmux_verdicts` call, and each hold/reopen starts a new one, so a
+  worker that asked for input and then kept dying (user closes the pane,
+  container OOM) was relaunched forever — a fresh full scenario run every
+  cycle. `QALoopState.wait_relaunch_count` (in-memory) caps the total and
+  then records the INPUT_REQUIRED verdict as terminal, matching R4's
+  "retries exhausted → terminal INPUT_REQUIRED".
+- **The attempt-identity check is shared.** `_attempt_is_current()` is the
+  single implementation of the resume identity contract (R3/§2); the
+  waiting variant pins the transcript path on top of
+  `(pr_id, loop_id, scenario, session_id)`.
+- **The `(waiting)` marker fits the status line.** `qa_status._render`
+  reserves the suffix width when any row is waiting; otherwise an 80-column
+  pane wrapped the row and pushed the footer off screen.
+
+## 8. Implementation notes (review iteration 3)
+
+- **Reopening publishes an in-progress status.** The held finalize leaves
+  `overall: INPUT_REQUIRED` in `qa_status.json`, and
+  `qa_loop_ui._resume_incomplete_qa` reads that `overall` as "the run
+  completed while the TUI was down". A restart during the reopened
+  collection window (seconds for a dropped attempt, minutes while a
+  follow-up PASS is verified) therefore finalized the stale result, cleared
+  the snapshot and dropped the run before the follow-up was collected.
+  `_execute_and_finalize` now rewrites the status file with `overall=""`
+  (and the snapshot with `held=False`, `latest_verdict=""`) at the reopen,
+  status first: a restart between the two writes re-adopts the safe held
+  snapshot instead of finalizing.
+- **A dead pane no longer discards a PASS behind a repeated
+  INPUT_REQUIRED.** `_scan_waiting_scenarios`'s pane-death branch skipped
+  the PASS/NEEDS_WORK check whenever a newer INPUT_REQUIRED existed, so
+  "ask → answer → ask → answer → PASS, then the pane exits" lost the PASS
+  and relaunched the scenario. It now refreshes the baseline past the
+  repeated INPUT_REQUIRED and then applies the normal newer-verdict check,
+  matching the live-pane branch.
+
+## 9. Implementation notes (review iteration 4)
+
+- **A run reopened mid-poll keeps its state.** `poll_qa_state` reads
+  `state.running`, then calls `_on_qa_complete` (which does note I/O), then
+  re-reads `state.held`. The held thread can reopen the run (running=True,
+  held=False) in that window; the TUI would then fall through to the
+  finished-run path, clear the reopened run's resume snapshot and mark the
+  completion notified — so the follow-up verdict it was reopened to collect
+  would never be processed. `poll_qa_state` now re-checks `state.running`
+  after `_on_qa_complete` and skips the state when the run has reopened.
+- **The per-scenario head is only a fallback baseline.** `_enter_waiting`
+  resolved the current PR head on every worker INPUT_REQUIRED even though
+  `_poll_waiting` prefers `state.planner_head` (set for every run that
+  launches scenarios). That lookup queries the upstream with a 15s timeout,
+  so it is now skipped when a planner head exists, keeping the verdict
+  collection loop off the network in the normal path.
+- **Head resolution is best-effort as documented.** `_current_pr_head`
+  wrapped only the upstream query; the local `_rev_parse` fallback could
+  raise (a workdir deleted mid-run) and crash the collection thread. Both
+  paths now return `None` on failure.
+- **Known trade-off (unchanged): follow-ups are accepted from the
+  transcript without an idle_prompt gate.** The hold and the live loop read
+  the scenario's own transcript on a stat-change poll, so a standalone
+  verdict line written mid-turn could be accepted before the turn ends.
+  The baseline rule (newer than the INPUT_REQUIRED turn) keeps stale output
+  out, and the worker prompt requires the verdict on the final line; a
+  hook gate was rejected because a missed `idle_prompt` would strand the
+  scenario in an unbounded wait, which is the failure this PR exists to
+  remove.
+- **Known trade-off (unchanged): a follow-up that lands between the hold's
+  scan and the reopened live loop's scan.** If the worker appends a
+  repeated INPUT_REQUIRED in that one-interval window, the live loop
+  refreshes the baseline instead of accepting the earlier follow-up and the
+  run re-finalizes as INPUT_REQUIRED. The re-finalize re-runs the finalize
+  pane for the same result (idempotent: it re-verifies pushes and
+  fast-forwards) and records a second, textually identical QA note — QA
+  notes are appended per completed run (`test_three_qa_runs_three_notes`),
+  so identical text is *not* de-duplicated; the extra note is noise, not a
+  lost result.
+
+## 10. Implementation notes (review iteration 5)
+
+- **The two `_scan_waiting_scenarios` branches share one acceptance path.**
+  The live-pane and pane-death branches had drifted apart once already
+  (iteration 3 fixed a lost PASS behind a repeated INPUT_REQUIRED), so the
+  repeated-INPUT_REQUIRED refresh, the PASS/NEEDS_WORK check and the
+  "never cache an unconsumed follow-up" rule now run once for both. The
+  only branch-specific parts remain: the stat cache applies to a live pane
+  only (a dead pane must be re-checked every tick), a live pane defers the
+  PASS/NEEDS_WORK check to the next tick after a repeated INPUT_REQUIRED,
+  and a dead pane with no follow-up goes through the relaunch cap.
+- **Persistence test covers the whole waiting contract.** The resume
+  round-trip test now also asserts the per-scenario `head` fallback
+  baseline and `input_wait_code_changes`, which force NEEDS_WORK after a
+  resumed run.
+- **Spec correction.** Iteration 4's note claimed the TUI de-duplicates an
+  identical QA note; it does not (see the trade-off above).
+
+## 11. Implementation notes (review iteration 6)
+
+- **A hold can reopen the run between the TUI's two checks.** `poll_qa_state`
+  reads `state.running` (False, pre-reopen), then the held thread publishes
+  `running=True` and only afterwards clears `held`; the TUI's `held` read can
+  therefore see the already-cleared False and fall through to the finished
+  path, clearing the reopened run's resume snapshot.  `running` is re-checked
+  after the held branch, so every ordering of the reopen transition keeps the
+  run and its snapshot.
+- **A completed snapshot whose result was already noted is not re-noted.**
+  `_resume_incomplete_qa`'s completed-run branch now honours
+  `completion_processed` from the snapshot.  A held run that ends its hold
+  without a follow-up (stop, PR left qa, last attempt dropped terminal)
+  leaves a snapshot with `held=False` and the already-noted result; adopting
+  it must clear the snapshot, not record a second QA note / lifecycle
+  transition.
+- **Test coverage.** `test_restored_held_run_finalizes_a_collected_follow_up`
+  pins the `_clear_waiting` → `held=False` coupling that makes a restored
+  held run re-finalize a collected follow-up (a follow-up PASS must not skip
+  the finalize pane's push/fast-forward verification);
+  `test_resume_completed_snapshot_already_processed_is_not_renoted` covers
+  the `completion_processed` guard.
+
+## 12. Implementation notes (review iteration 7)
+
+- **Clearing one waiting attempt must not end the hold for the others.**
+  `_clear_waiting` unconditionally set `held=False`.  A held run can clear
+  one scenario's attempt terminally (no session/transcript left to poll, or
+  its relaunch budget exhausted) while another scenario still waits; the
+  hold loop then kept polling, but the state was published as
+  (`running=False`, `held=False`, `INPUT_REQUIRED`).  The TUI's completion
+  poll reads exactly that as a finished run: it removes the state from
+  `_qa_loops` and deletes the resume snapshot, so the still-waiting
+  scenario's follow-up could never be collected (and a restart in the same
+  window would finalize the stale result instead of re-adopting the hold).
+  `_clear_waiting` now leaves `held` alone; `_hold_for_follow_up` recomputes
+  it from `waiting_for_input` after every scan (so the persisted snapshot
+  matches the real wait), and the live loop's `_poll_waiting` clears it when
+  it collects a follow-up or hands a dropped attempt back to the retry path
+  — that is the case a restored held run must re-finalize.
+- **Test coverage.** `test_terminal_clear_keeps_the_hold_for_other_waiting_scenarios`
+  pins the persisted `held=True` after one of two waiting scenarios is
+  cleared (it fails on the pre-iteration code), and
+  `test_follow_up_reopens_the_waiting_scenario` now starts from `held=True`
+  so it pins the live loop clearing the hold for the reopened result.
+- **Iteration 6 note correction.** The `held=False` on follow-up collection
+  now lives in `_poll_waiting`, not in `_clear_waiting` (see above); the
+  behaviour that note describes is unchanged.
+
+## 13. Implementation notes (review iteration 8)
+
+- **Reopening must publish a live run, not a finished one.** `_hold_for_follow_up`
+  recomputed `held` from `waiting_for_input` *before* the reopen check.  When a
+  scan dropped the last waiting attempt (dead pane handed back to the retry
+  path, superseded attempt), `waiting_for_input` became empty, so the state was
+  published as (`running=False`, `held=False`, `INPUT_REQUIRED`) for the few
+  milliseconds of the snapshot/status writes before `_execute_and_finalize`
+  reopened it.  That is exactly the tuple `poll_qa_state` reads as a finished
+  run: it drops the state from `_qa_loops` and deletes the resume snapshot, so
+  the reopened run's follow-up verdict would never be processed.  The reopen
+  branch now sets `running=True` (and keeps `held=True`) before returning, and
+  leaves both file writes to the reopen block in `_execute_and_finalize` (which
+  already writes them as in-progress).  `test_reopening_never_publishes_a_finished_looking_run`
+  pins it.
+- **A held run keeps the shared poll timer armed.** `ensure_animation_timer`
+  and `_poll_loop_state_inner` computed `qa_running` from `state.running`
+  only, so a held run (running=False) could let the timer stop when no active
+  PR kept it alive — and then the follow-up would never be collected.
+  Both now count `state.held`.  `test_held_run_keeps_the_poll_timer_armed`
+  covers it.
+- **Test coverage for the restore contract.** `test_restored_completed_scenario_is_not_re_polled`
+  pins the `_needs_polling` rule that a restored run never re-reads a completed
+  scenario's stale turn (only an unverified PASS is polled again).
+
+## 14. Implementation notes (review iteration 9)
+
+- **A run that leaves QA does not advertise a wait it can no longer serve.**
+  The finalize status write passed `waiting_for_input=state.waiting_for_input`
+  unconditionally, so a run whose overall was NEEDS_WORK/PASS still rendered
+  the remaining INPUT_REQUIRED scenario as `(waiting)` in `qa_status` — telling
+  the user to answer a worker pane whose follow-up nothing polls (the hold is
+  not entered for those verdicts, by design).  The hold decision now happens
+  before that write and the status file flags waiting scenarios only while the
+  run is genuinely held.  The INPUT_REQUIRED evidence itself is still kept in
+  `scenario_verdicts`/`waiting_for_input` for the next run.  Covered by
+  `test_status_file_marks_the_wait_while_the_run_is_held` and
+  `test_status_file_drops_the_waiting_marker_once_the_run_leaves_qa`.
+- **A completion whose verdict was cleared records nothing.**  `_on_qa_complete`
+  read `state.latest_verdict` again after `poll_qa_state`'s entry check; the
+  hold thread can reopen the run (clearing the verdict) in that window, and the
+  old code then logged `QA finished for <pr>: ` and recorded a `QA : ...` note.
+  The callback now returns on an empty verdict.
+  `test_on_qa_complete_ignores_a_completion_with_no_verdict` pins it.
+- **Docstring corrections.**  `_attempt_is_current`'s rationale claimed the
+  pinned transcript path detects a relaunched worker; a relaunch keeps the same
+  per-scenario path, so the session id is what detects it and the path pin is
+  defence in depth.  `test_restored_held_run_finalizes_a_collected_follow_up`
+  still said `_clear_waiting` clears `held` (iteration 7 moved that to
+  `_poll_waiting`).
+
+## 15. Implementation notes (review iteration 10)
+
+- **A held result that finalized while the TUI was down is noted on
+  adoption.** R3 promised that a held snapshot with
+  `completion_processed=False` is "processed by the normal
+  `poll_qa_state` completion path".  It was not: `_resume_incomplete_qa`
+  publishes `running=True` and re-spawns the watcher immediately, and
+  `poll_qa_state` only processes a completion while `running` is false, so
+  the held `INPUT_REQUIRED` result was never noted — and the note was lost
+  outright whenever no follow-up ever arrived (stop, PR leaves qa, the user
+  abandons the wait).  The adoption now records it itself (exactly as the
+  live path does when it publishes the held result) and persists
+  `completion_processed` so a second restart does not note it again.  A
+  follow-up that reopens the run still produces its own note, matching the
+  live path.  Covered by
+  `test_resume_held_run_notes_the_unprocessed_result_once`; the existing
+  `test_resume_held_run_keeps_watching` assertion (which encoded the old,
+  wrong behaviour) was corrected.
+- **A held self-driving run is not "paused".** `_on_qa_complete` logged
+  "QA self-driving: INPUT_REQUIRED — loop paused" for a held run, but the
+  hold keeps watching and resumes the self-driving loop on the follow-up.
+  The log line now distinguishes a held run from a genuinely paused one.
+- **No upstream head query once a head move is recorded.** `_poll_waiting`
+  resolved the PR head for every follow-up even after
+  `input_wait_code_changes` was set (the flag already forces NEEDS_WORK).
+  The lookup is now skipped in that case, keeping the verdict-collection
+  loop off the network on later follow-ups.
+- **The auto-sequence tick no longer launches a second QA driver over a live
+  one.** `pm pr auto-sequence` treats a status file with an empty `overall`
+  plus no qa window as a dead run and launches a fresh driver.  That is
+  exactly the tuple a *reopened* held run publishes (the reopen writes
+  `overall=""` so a restart re-adopts the collection instead of finalizing
+  it), so closing the main QA window during the reopen window — or during
+  any in-progress run — could stack a second driver.  The second driver's
+  `_cleanup_stale_scenario_windows` kills the `qa-<id>-s*` worker panes the
+  live driver is polling, i.e. the very worker the user is answering.  The
+  tick now consults the run's resume snapshot with the same
+  `resume_owned_elsewhere` owner check a restarting TUI uses and reports
+  `running: qa` instead of relaunching; an orphaned run (dead owner) is
+  still recovered.  Covered by
+  `test_in_progress_run_with_live_owner_is_not_relaunched` and
+  `test_in_progress_run_with_dead_owner_is_relaunched`.
+
+## 16. Implementation notes (review iteration 11)
+
+- **Test gap: a follow-up PASS is verified independently.** §5 requires the
+  follow-up PASS to go through the normal verifier, but no test exercised it:
+  the existing follow-up tests run with verification disabled, which skips
+  that branch entirely.
+  `test_follow_up_pass_is_independently_verified` patches
+  `_verify_single_scenario`, runs the live collector over a transcript whose
+  INPUT_REQUIRED is followed by a user answer and a PASS, and asserts the
+  verifier was invoked and its result collected (`verified_scenarios`), i.e.
+  the scenario's earlier PASS verification was not inherited.
+- **Test gap: an unrecoverable waiting entry keeps its verdict.** R3 splits
+  the two resume drops — a *superseded* attempt drops the wait *and* its
+  provisional verdict, while a waiting entry with no recoverable attempt
+  drops only the wait and keeps INPUT_REQUIRED as terminal evidence.  Only
+  the first was covered;
+  `test_waiting_entry_without_a_source_is_dropped_but_keeps_the_verdict`
+  pins the second.
+- No production-code changes were needed in this iteration.
+
+## 17. Implementation notes (review iteration 12)
+
+- **A run superseded before it had a qa workdir could still be resurrected.**
+  `fresh_start_qa` / `start_or_stop_qa_loop` only set `state.superseded` (and
+  cleared the snapshot) when `existing.qa_workdir` was already set, but
+  `run_qa_sync` creates the workdir *after* startup.  A run superseded in that
+  window (`z t` pressed while it was still starting) kept writing resume
+  snapshots once its workdir existed; when the replacing run later ended in
+  `qa` (e.g. INPUT_REQUIRED), `_resume_incomplete_qa` adopted the discarded
+  run's snapshot and recorded a spurious QA note for it.  Both paths now mark
+  the discarded state superseded unconditionally and clear the snapshot only
+  when there is one.  Covered by
+  `test_fresh_start_supersedes_a_run_that_has_no_workdir_yet` and
+  `test_qa_loop_restart_supersedes_a_stale_state`.
+
+## 18. Implementation notes (review iteration 13)
+
+- **A hold that ends without a follow-up left the "(waiting)" marker
+  behind.**  The held finalize writes `qa_status.json` with the waiting
+  scenarios flagged (R5/§14), but the hold's exit path (stop, PR left `qa`)
+  only rewrote the *resume snapshot*.  The dashboard therefore kept
+  rendering `INPUT_REQUIRED (waiting)` — and `state.latest_output` kept
+  saying "waiting for input in scenario(s) N" — for a run nothing was
+  polling any more, i.e. exactly the stale advertisement §14 removed for
+  the "run left QA" case.  The exit path now rewrites the status file with
+  an empty waiting set (same `overall`, the INPUT_REQUIRED evidence is
+  untouched) and sets the settled `QA complete: ...` output.  Covered by
+  `test_status_file_drops_the_waiting_marker_when_the_hold_ends`; the
+  reopen-ordering test now expects the extra settled write.
+- **Docstring/UX corrections.**  `qa_loop_ui._on_qa_complete`'s docstring
+  still said INPUT_REQUIRED "pause[s] self-driving loop for human input";
+  a held run keeps watching and resumes the loop, so the docstring now
+  says so (the log line was already fixed in iteration 10).  `start_qa`'s
+  held-run message pointed at the "QA window" — the status dashboard —
+  where the user cannot answer; it now points at the scenario worker pane,
+  matching `_on_qa_complete`.
+- **Test robustness.**  `test_pr_notes.py` asserted on a literal
+  `"does\nnot describe ..."` line wrap of the concretizer prompt; it now
+  collapses whitespace so a re-wrap cannot break it.
+- **One discard path for a dropped run.**  §17 made the fresh-start and
+  `zz t` restart paths stop/supersede a discarded run so it could not
+  rewrite its snapshot.  A third path — sign-off's REQA return hop
+  (`signoff_ui.step`) — still only popped the run from `_qa_loops`.
+  Before this PR that was harmless (a run was finished by then); now a
+  *held* run has no timeout, so popping it left its thread polling the
+  worker panes for ever and its snapshot let a restart scan re-adopt it
+  over the run that replaced it.  The pattern now lives in one helper,
+  `qa_loop_ui.discard_qa_state` (stop + supersede + clear the snapshot),
+  used by all three paths.  Covered by
+  `test_discard_qa_state_stops_and_supersedes`; the existing fresh-start
+  and restart tests still pin the other two call sites.
+
+## 19. Implementation notes (review loop ab13, iteration 1)
+
+- **A restored held run's new result could be persisted as already
+  processed.** A run adopted from a held snapshot carries
+  `completion_processed=True` (the held result was noted before the
+  restart). When it collected a follow-up, `_execute_and_finalize` wrote
+  the pre-finalize snapshot (the one a restart during the possibly
+  minutes-long finalize pane adopts) *before* clearing the flag, so the
+  snapshot said `held=<new result>`, `latest_verdict=<new result>` and
+  `completion_processed=True`. On adoption, `_resume_incomplete_qa` skips
+  `_on_qa_complete` when the flag is set, so a follow-up PASS/NEEDS_WORK
+  lost its QA note *and* its lifecycle transition (no sign-off hand-off,
+  no return to review) and the snapshot was cleared as finished. The
+  flags are now cleared right after `was_held` is decided, before the
+  pre-finalize snapshot; a `was_held` run (restored, still waiting) keeps
+  them. Covered by
+  `test_restored_held_follow_up_clears_processed_before_the_pane`, which
+  fails on the previous ordering.
+- **The autostart status pointed a held run at the dashboard.** R5's
+  "needs no new input" held that a held run derives to `QA INPUT_REQUIRED
+  — answer in QA window`, but the status dashboard cannot accept the
+  answer: the wait is resolved in the scenario worker pane (the same
+  correction §18 made for `start_qa`). `qa_progress_input` now reports
+  `held` and `_derive` names the worker pane for a held run, keeping the
+  dashboard text for a finished `INPUT_REQUIRED` with no watcher.
+  Covered by `test_qa_held_run_points_at_the_worker_pane`,
+  `test_qa_input_required_without_a_watcher_keeps_the_dashboard_hint` and
+  `test_qa_progress_input_reports_a_held_run`.
+- **Spec correction.** R2 step 4 now states the ordering iteration 1
+  implemented: the completion flags are cleared *before* the pre-finalize
+  snapshot, not merely "when the pane runs" (see the first bullet above).
+
+## 20. Implementation notes (review loop ab13, iteration 2)
+
+- **A held run that fails to resume is no longer left "waiting for
+  input".** `resume_qa_sync`'s three abort paths (no pm session, PR workdir
+  gone, no QA workdir) set `running=False` and `latest_verdict="ERROR"` but
+  left `held` set and never published `latest_output`.  For a run adopted
+  from a held snapshot that is the wrong state: nothing is watching the
+  worker panes any more, so the flag kept the TUI poll timer armed and made
+  a later `t` report a wait (and `start_qa` log "waiting for input") for a
+  run that is dead, while the failure reached only the daemon log — the
+  TUI's completion poll suppresses `_on_qa_complete` for an adopted held run
+  (its earlier result was already noted).  All three aborts now go through
+  one `_abort` helper that clears `held`, sets a `latest_output` message and
+  notifies, matching the background-thread crash handlers (see §7).
+  Covered by `test_resume_abort_stops_advertising_the_held_wait`.
+- **Observation, still not changed: `runtime_state` shows a held run as
+  `running`.** §19 recorded this as "no waiting action state exists"; a
+  `waiting` action state does exist (`runtime_state.VALID_STATES`), but it is
+  hook-derived for pane-backed actions and writing it directly for a held QA
+  run would need a reopen/reset path the TUI does not own (the driver thread
+  publishes the transitions).  The TUI log, `qa_status.json` and the
+  autostart status all expose the wait, and the picker still derives
+  `[idle]`/`[wait]` from the live scenario panes for TUI-driven runs; only a
+  detached `pm pr qa` driver's own `[working]` mirror stays stale.  Left as
+  documented rather than widening this PR into runtime_state semantics.
+
+## 21. Implementation notes (review loop 6c8e, iteration 1)
+
+- **Spec correction: R3's adoption bullet.** R3 still said a held snapshot
+  with `completion_processed=False` is "processed by the normal
+  `poll_qa_state` completion path". §15 established that it cannot be (the
+  re-spawned watcher publishes `running=True` immediately) and that adoption
+  records the result itself; R3 now says so.
+- **The run entry keeps `held`.** `autostart_state`'s `runs[]` entry mirrors
+  `qa_progress_input` field by field, including `recorded`, but dropped the
+  new `held` flag — so `pm autostart status --json` lost the distinction the
+  derived `reason` carries in prose.  `_derive` itself always saw it (it
+  reads the raw `qa_loops` input), so this was output-only.
+  Covered by an assertion in `test_qa_held_run_points_at_the_worker_pane`.
+- **`start_qa` prefers "already running" over "waiting for input".** The
+  hold's reopen publishes `running=True` *before* clearing `held` (see §8),
+  so a run that is actively collecting can briefly have both flags set;
+  pressing `t` then reported the run as waiting for input.  `running` now
+  wins.  Covered by `test_qa_run_reopened_from_a_hold_reports_running`.
+- **Filed a follow-up bug, not fixed here: the TUI auto-start scheduler can
+  launch a duplicate QA driver over a live detached one.**
+  `_auto_start_qa_loops` skips a PR whose tracked state is `running` or has a
+  `latest_verdict`, but a detached `pm pr qa` driver is not in
+  `_qa_loops` at all, so auto-start starts a second run whose
+  `_cleanup_stale_scenario_windows` kills the `qa-<id>-s*` panes the live
+  driver is polling — including the worker pane in which a held scenario's
+  user is answering the blocker.  `pm pr auto-sequence` gained exactly this
+  guard in §15; the TUI scheduler still lacks it, and the unbounded
+  INPUT_REQUIRED hold widens the window from minutes to arbitrarily long.  Out of this PR's scope (the
+  user narrowed it to the standalone continuation change) and it needs a
+  coherent "a detached run is in progress" status report to avoid replacing
+  one misleading row with another, so it is filed as its own bug PR rather
+  than widened into this one.  Pre-existing for any detached run.
