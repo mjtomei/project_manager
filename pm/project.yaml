@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T14:22:01.534708+00:00'
+  updated_at: '2026-10-29T14:48:38.006602+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41223,6 +41223,35 @@ prs:
       needs PM_HOST_HOME unset).'
     created_at: '2026-10-29T14:22:01Z'
     last_edited: '2026-10-29T14:22:01Z'
+  - id: note-4e23105
+    text: 'Review-loop 3b50 i4 fixes (on 27533b66). (1) `base_check.launch_impl` now
+      refuses when there is no live pm tmux session instead of running `pm pr start`:
+      without one, `pr_start` falls back to a foreground `claude` (no window, no transcript
+      symlink) and returns 0, so `launch_impl` reported a launch, `clear_return_awaiting`
+      marked the handshake satisfied, and the completion check waited for idle evidence
+      from a pane that does not exist — the stranded handoff R6 forbids. Reachable
+      from a manual `pm pr review` outside a pm session (the gate runs before `_launch_review_window`''s
+      own session check) and from a machine without `claude` on PATH (`pr_start` prints
+      the prompt and exits 0). The guard mirrors `pr_start`''s own window-creation
+      condition (`_get_pm_session()` + `session_exists`), so it can never refuse a
+      launch that would have created a window; the claim is released, `apply_error`
+      recorded and `awaiting` kept, so the next TUI/CLI pass relaunches. (2) `claim_impl_launch`
+      pre-reads and skips the `locked_update` when the return is not awaiting an impl
+      launch or another driver''s claim is still live: `_catch_up_base_impl` retries
+      it every `BASE_LAUNCH_RETRY_SECONDS` and a handshake that keeps failing (a pending
+      spec, a broken workdir) awaits for a long time, so each no-op took the global
+      project.yaml lock and rewrote the whole large, git-tracked file — the same rule
+      `resolve_return`/`ensure_impl_status` already follow. The eligibility check
+      is now one `_claimable` helper used by both the pre-read and the locked update,
+      so they cannot drift. Tests: `test_launch_without_a_pm_session_keeps_the_handshake_awaiting`
+      and `test_claim_impl_launch_skips_the_write_when_nothing_to_claim`, both verified
+      failing without their fix; the two tests that run the real `launch_impl` now
+      give it a session. Spec R13 + edge cases + test plan items 37-38. Full suite:
+      4597 passed, 1 skipped, 0 failed (test_markdown_render needs the `markdown`
+      package; test_hook_events::test_installer_writes_standalone_receiver needs PM_HOST_HOME
+      unset).'
+    created_at: '2026-10-29T14:48:37Z'
+    last_edited: '2026-10-29T14:48:37Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
