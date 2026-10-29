@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T11:51:42.084935+00:00'
+  updated_at: '2026-10-29T13:35:18.481394+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41136,6 +41136,38 @@ prs:
       from pms own save (systemic, not this PRs choice).'
     created_at: '2026-10-29T11:51:42Z'
     last_edited: '2026-10-29T11:51:42Z'
+  - id: note-dc9e585
+    text: 'Review-loop 3b50 i1 fix (on fdf6c8bd). (1) The review loop completion line
+      reported the absolute iteration counter, which a fresh loop now seeds from the
+      PR existing iteration transcripts (`next_review_iteration`), so a base bounce
+      before the first iteration read "⇤ BASE_CONFLICT (12 iterations)" for a loop
+      that ran none — a misleading line in this PR own headline scenario on a long-lived
+      PR. `run_review_loop_sync` now records `iterations_performed` (the history delta
+      for this run) and `_done_iteration_count` renders that, falling back to the
+      counter for a state that never ran (a hand-built test state). Tests: a fresh
+      loop seeded at iteration 12 that bounces reports 0 performed while the counter
+      stays 12 (numbering preserved); a loop that runs three iterations reports 3;
+      the fallback keeps the old rendering; and a `_poll_loop_state_inner` test asserts
+      the rendered line is "(0 iterations)". Verified failing without the fix (the
+      old rendering prints "(12 iterations)"). Spec R13 + test plan item 33 updated.
+      Full suite: 4606 passed, 1 skipped, 0 failed (markdown installed to the session
+      scratchpad; PM_HOST_HOME unset; PATH=/usr/bin:/bin so the push-proxy git wrapper
+      stays out of the real-git tests). Reviewed but not changed (unchanged residuals,
+      already documented in R7/R13 and the 2aa0 i1 note): the supersede path in `return_to_impl`
+      can still double-launch if two drivers run `impl_completion` while the base
+      moves between their fetches (needs an episode/generation token); the writer-launch
+      gate self-heal can resolve an open return while a mid-turn impl has a clean
+      tree; the CLI auto-sequence runs one ls-remote per tick through `impl_completion`;
+      worst-case gate latency can exceed the 360 s review child budget; the TUI review-loop
+      resume path runs `pm pr review --no-window` synchronously on the event loop
+      (same as the existing auto-review path); the QA gate deliberately applies only
+      to a `qa`-status PR, so pressing `t` on an `in_progress` PR still starts QA
+      without the base check (pre-existing, and `test_qa_gate_skips_when_status_left_qa`
+      pins the decision); `pm/project.yaml` carries unrelated YAML re-wrapping from
+      pm own save (verified: only pr-f0f4129 added and one cross-PR note on pr-9ee4d64;
+      no PR entry or field changed).'
+    created_at: '2026-10-29T13:35:18Z'
+    last_edited: '2026-10-29T13:35:18Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
