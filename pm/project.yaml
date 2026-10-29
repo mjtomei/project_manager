@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T05:15:00.036174+00:00'
+  updated_at: '2026-10-29T06:00:32.415624+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40875,6 +40875,39 @@ prs:
       without the fix). Captures: /pm-captures/scenarios/2/{pre,post}-fix/.'
     created_at: '2026-10-29T05:14:59Z'
     last_edited: '2026-10-29T05:14:59Z'
+  - id: note-d8e8900
+    text: 'QA scenario 4 (impl->review handoff after a base-conflict return) must
+      NOT drive the impl pane with fake-claude: its impl session re-emits idle_prompt
+      every 2 s, so idle_since never ages past IDLE_SETTLE_SECONDS (5 s) and every
+      tick reports "implementation just went idle; letting it settle" — the handoff
+      never advances. Use a one-shot claude stand-in instead: a `claude` script early
+      on the pane PATH that writes the Claude-format JSONL transcript (~/.claude/projects/<mangled-cwd>/<sid>.jsonl),
+      writes exactly ONE ~/.pm/hooks/<sid>.json idle_prompt event, then sleeps forever.
+      Validated end to end on 2026-10-29: `pm pr auto-sequence` gives "base_conflict:
+      CONFLICTS with master@<sha>: <path>", then "running: implementation (HEAD and
+      base unchanged since the return)" / "(uncommitted edits remain)", and after
+      fetch+merge+commit+push "advanced: in_review" with a review-<pr> window, Resolved
+      timestamp and an unchanged base branch. Panes ignore the tmux server PATH, so
+      prepend via an isolated HOME ~/.bashrc, keeping /usr/bin ahead of ~/.local/bin
+      (the push-proxy git wrapper breaks the gate local fetch).'
+    created_at: '2026-10-29T05:47:24Z'
+    last_edited: '2026-10-29T05:47:24Z'
+  - id: note-fe92b7b
+    text: 'QA scenario 4 (impl->review handoff after a base return): PASS on the integrated
+      head, all three stories on a throwaway local-backend PR (pr-95325c4). Idle-but-unfinished
+      rework polls print "running: implementation (HEAD and base unchanged since the
+      return)" with no review window and no Resolved line; a tracked uncommitted edit
+      prints "(uncommitted edits remain)" and still does not advance; untracked fixtures
+      and a git stash survive untouched; after a real fetch+merge+commit+push the
+      same poll prints "advanced: in_review", opens review-pr-95325c4, keeps the BASE_CONFLICT
+      record with Resolved: <ts> / "up to date with master@e5b47e09", keeps the note,
+      leaves both impl- and review-i1 transcripts in the auto-sequence dir, and leaves
+      master at its original sha. Capture: /pm-captures/scenarios/4/handoff/ (recording.mp4
+      + manifest). Fixture used a one-shot claude stand-in (one transcript, one idle_prompt
+      event, then idle) rather than fake-claude, whose impl session re-emits idle_prompt
+      every 2 s and never ages past IDLE_SETTLE_SECONDS.'
+    created_at: '2026-10-29T06:00:32Z'
+    last_edited: '2026-10-29T06:00:32Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
