@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T10:05:28.779568+00:00'
+  updated_at: '2026-10-29T10:53:24.972278+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41078,6 +41078,32 @@ prs:
       remain one-owner as specified.'
     created_at: '2026-10-29T10:05:28Z'
     last_edited: '2026-10-29T10:05:28Z'
+  - id: note-b941602
+    text: 'Review-loop 5c3e i3 fixes (on c6c010fe). (1) A clean review/QA gate could
+      clear a conflict return another driver recorded inside its own fetch: the base
+      moved between the two fetches, one check saw clean and the other conflict, and
+      the clean one resolve_return closed the new episode. The caller post-gate re-read
+      only sees an *open* return, so it then launched a reviewer beside the rework
+      the return had just started. resolve_return now takes expect_ts and closes only
+      the episode the check was based on; gate re-reads after resolving and returns
+      wait when a return is still open (so it no longer stamps a clean base_check
+      over it), and impl_completion clean path reports not-complete instead of resolving
+      the superseding episode. The existing caller-level race tests patch gate itself,
+      so they never exercised this path (reproduced with the real gate: PROCEED +
+      the return resolved). (2) pr_review already-in_review branch (review iterations
+      >= 2) launched a reviewer for a PR removed from the project during the gate
+      fetch (its post-gate re-read returned None for an absent entry). Now exits 1
+      with no window, matching run_qa_sync post-gate re-read and the first-iteration
+      atomic guard; the first-iteration refusal also names the removal instead of
+      an empty reason. Tests: a return recorded inside the gate own clean check survives
+      it; the same race in the completion check reports not-complete; resolve_return(expect_ts)
+      leaves a superseding episode open while still closing the one it names; a removed
+      PR gets no reviewer on iteration 2. Each verified failing without its fix. Spec
+      R3/R4 + test plan items 30-31 updated. Full suite: 4588 passed, 1 skipped, 0
+      failed (tests/test_markdown_render.py ignored, needs the markdown package; test_hook_events::test_installer_writes_standalone_receiver
+      deselected, needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T10:53:24Z'
+    last_edited: '2026-10-29T10:53:24Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
