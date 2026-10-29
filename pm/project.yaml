@@ -36234,7 +36234,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/246
   gh_pr_number: 246
   created_at: '2026-10-13T06:08:05.900366+00:00'
-  updated_at: '2026-10-29T05:41:06.367589+00:00'
+  updated_at: '2026-10-29T06:23:20.712466+00:00'
   started_at: '2026-10-22T17:20:55.835790+00:00'
   reviewed_at: '2026-10-22T17:35:36.285012+00:00'
   merged_at: null
@@ -36677,6 +36677,19 @@ prs:
       was never touched.'
     created_at: '2026-10-29T05:41:06Z'
     last_edited: '2026-10-29T05:41:06Z'
+  - id: note-962deac
+    text: 'Scenario 32 refinement (2026-10-29): the behind/diverged remedy cases need
+      the PR workdir origin to resolve to a real URL. With `pm init --backend local`
+      the origin chain ends at a local path, resolve_real_origin() returns None, and
+      the planner-handoff guard never classifies heads — `pm qa run` proceeds instead
+      of refusing. Working fixture: create a bare upstream, `git clone file://<bare>
+      work`, run `pm init --no-import` in work (auto-detects the vanilla backend),
+      then push the PR branch and advance the upstream from a second clone. Also:
+      the fake planner never writes pm/specs/<pr>/qa.md, so create that QA spec (pm
+      root or workdir) before any full QA run, or the run stops at the spec gate instead
+      of reaching the handoff.'
+    created_at: '2026-10-29T06:23:20Z'
+    last_edited: '2026-10-29T06:23:20Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-62fdd54-bug-qa-start-does-not-refresh-the-pr-c740d896
   model: provider:deepseek-flash
   effort: high
