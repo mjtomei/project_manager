@@ -447,7 +447,10 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     import secrets
     from pm_core import qa_instructions, store
     from pm_core import tmux as tmux_mod
-    from pm_core.container import is_container_mode_enabled, _runtime_available
+    from pm_core.container import (
+        is_container_mode_enabled, container_preflight_error,
+        container_unavailable_message,
+    )
     from pm_core.claude_launcher import build_claude_shell_cmd
     from pm_core.loop_shared import get_pm_session
 
@@ -466,6 +469,17 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     if not session:
         click.echo("No pm session found. Run inside a pm tmux session.", err=True)
         raise SystemExit(1)
+
+    # Container mode is an execution boundary.  Resolve it before creating
+    # any workdir/clone so an unusable runtime aborts here instead of
+    # silently running the debug instruction on the host.
+    use_containers = is_container_mode_enabled()
+    if use_containers:
+        _runtime_problem = container_preflight_error()
+        if _runtime_problem:
+            click.echo(container_unavailable_message(_runtime_problem),
+                       err=True)
+            raise SystemExit(1)
 
     # Create a workdir keyed to session + instruction (not PR)
     debug_id = secrets.token_hex(4)
@@ -502,8 +516,6 @@ def qa_debug(instruction_id: str, branch: str | None, foreground: bool):
     dest_dir.mkdir(parents=True, exist_ok=True)
     import shutil
     shutil.copy2(item["path"], dest_dir / filename)
-
-    use_containers = is_container_mode_enabled() and _runtime_available()
 
     if use_containers:
         from pm_core import container as container_mod
