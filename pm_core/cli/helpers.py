@@ -1349,8 +1349,15 @@ def _registry_tui_pane(session: str) -> str | None:
     for _, pane in pane_registry._iter_all_panes(data):
         if pane.get("role") == "tui":
             pane_id = pane.get("id")
-            if pane_id and tmux_mod.pane_exists(pane_id):
-                return pane_id
+            if not pane_id:
+                continue
+            try:
+                if tmux_mod.pane_exists(pane_id):
+                    return pane_id
+            except OSError:
+                # tmux missing/unexecutable: no pane is live (same contract
+                # as find_session_server's degrade).
+                return None
     return None
 
 
@@ -1394,7 +1401,13 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # Try to find session matching current directory first
     expected_session = _get_session_name_for_cwd()
     _select_session_socket(expected_session)
-    if tmux_mod.session_exists(expected_session):
+    try:
+        session_running = tmux_mod.session_exists(expected_session)
+    except OSError:
+        # tmux missing/unexecutable: discovery degrades to "no session"
+        # instead of crashing (same contract as find_session_server).
+        session_running = False
+    if session_running:
         pane_id = _registry_tui_pane(expected_session)
         if pane_id:
             return pane_id, expected_session

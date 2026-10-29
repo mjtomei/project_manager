@@ -1154,12 +1154,19 @@ def list_pm_sessions() -> list[dict]:
         # Address the default server explicitly: tmux would otherwise
         # follow $TMUX and list the private server this process runs on.
         cmd_socket = socket_path or str(default_socket_path())
-        result = _run(
-            _tmux_cmd("list-sessions", "-F",
-                      "#{session_name}|#{session_attached}",
-                      socket_path=cmd_socket),
-            text=True,
-        )
+        try:
+            result = _run(
+                _tmux_cmd("list-sessions", "-F",
+                          "#{session_name}|#{session_attached}",
+                          socket_path=cmd_socket),
+                text=True,
+            )
+        except OSError:
+            # tmux missing/unexecutable: nothing to report, and discovery
+            # must degrade rather than crash (see find_session_server).
+            _log.debug("list_pm_sessions: tmux cannot run, skipping %s",
+                       cmd_socket)
+            return
         if result.returncode != 0:
             # Stale socket (server exited), another user's socket, or no
             # default server running: not fatal, just nothing to report.

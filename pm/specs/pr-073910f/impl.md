@@ -584,3 +584,52 @@ still works.  This is the same trade-off as the i5 note (deleting the
 registry file while a session is live makes `pm session` create a separate
 session); adopting the ambient session without proof of local ownership is
 what caused the 2026-10-28 incident.
+
+## Review iteration (2026-10-29, review-loop d1c0 i2)
+
+Verification pass over the integrated head; two robustness fixes of the
+same class the previous iterations addressed.  No requirement changes.
+
+1. **Discovery crashed instead of degrading when tmux cannot be run.**
+   `find_session_server()` already returns `(None, False)` on `OSError`
+   (master's `test_tmux_unavailable_degrades_to_no_live_tui` documents
+   the contract), but the rest of the same scan still propagated the
+   error: `_find_tui_pane()` called `session_exists()`/`pane_exists()`
+   unguarded and `list_pm_sessions()` called `_run()` unguarded, so
+   `_find_tui_pane()` and `_find_live_tui_pane()` (no explicit session)
+   raised `OSError` on a machine without an executable tmux.  All three
+   now degrade — "no session" / "no server" — instead of crashing, which
+   is what every caller (`pm autostart`, `pm tui view`, `trigger_tui_reload`,
+   `pm pr merge`'s window cleanup) already assumes.
+   Test: `test_no_tmux_degrades_to_no_session`.
+2. **`pm session kill` could unlink a live server's socket on the legacy
+   path.**  d1c0 i1 gated the "session not found" unlink on
+   `server_alive()`, but the legacy branch (session killed on the
+   *default* server, `on_private` False) still unlinked the private
+   socket path whenever *any* file existed there.  A file at that path
+   can belong to a live server hosting only grouped sessions of another
+   name; unlinking it strands their clients.  The unlink is now
+   `on_private or (exists and not server_alive(...))`: the private kill
+   still removes the file it just emptied, the legacy kill only removes
+   a socket nothing answers on.
+   Tests: `test_legacy_kill_keeps_a_live_private_socket`,
+   `test_legacy_kill_removes_a_stale_private_socket`.
+
+Re-verified end to end with `pm/specs/pr-073910f/session_start_smoke.py`
+on a disposable socket (private server, session env, global env and hooks
+correct; default server untouched).
+
+Residual notes unchanged and still non-blocking: the uid ownership check
+exists only on `pm session` start (other paths fail closed — a 0600 socket
+owned by another user cannot be connected to, so discovery falls back to
+the default server); the `/tmp/pm-sessions` literal stays duplicated in
+`wrapper._mark_tmux_socket` and `qa_status._tmux_argv` by design (no early
+`pm_core` import); pane IDs are no longer globally unique across servers
+but every consumer resolves a pane together with its session/socket; R5b
+relies on the pane registry file, so deleting it while a session is live
+makes `pm session` create a separate session rather than adopt the live
+one (fail-safe); the TUI connect screen keeps a bare
+`tmux attach -t <name>` as a last resort when no server hosts the session
+*and* `PM_TMUX_SOCKET` is unset (unreachable for a live session: every
+private session exports the variable and legacy sessions are found by
+`find_session_server`).

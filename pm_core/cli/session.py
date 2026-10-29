@@ -814,8 +814,13 @@ def session_kill(start_dir):
                       n_containers, n_proxies)
 
     # tmux leaves the socket file behind after the server exits; remove it
-    # so `pm session list` does not keep reporting a dead server.
-    if on_private or Path(socket_path).exists():
+    # so `pm session list` does not keep reporting a dead server.  When the
+    # session was killed on the *default* server, the private socket (if any
+    # file exists at that path) may still belong to a live server hosting
+    # grouped sessions of another name — unlinking it would strand their
+    # clients, so only remove it when nothing answers on it.
+    if on_private or (Path(socket_path).exists()
+                      and not tmux_mod.server_alive(socket_path)):
         try:
             Path(socket_path).unlink(missing_ok=True)
         except OSError:

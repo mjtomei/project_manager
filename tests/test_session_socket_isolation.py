@@ -574,6 +574,31 @@ class TestFindTuiPaneAcrossServers:
         assert (pane_id, session) == ("%42", "pm-target")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
 
+    def test_no_tmux_degrades_to_no_session(self, monkeypatch):
+        """Discovery must not crash when tmux cannot be run.
+
+        ``find_session_server`` already degrades to ``(None, False)``; the
+        rest of the scan (session probe, server list, pane probe) has to
+        follow, otherwise ``pm tui view`` / ``pm autostart`` trace back on a
+        machine where tmux is missing or unexecutable.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(
+            pane_registry, "load_registry",
+            lambda name: {"windows": {"@1": {"panes": [
+                {"id": "%6", "role": "tui"}]}}})
+        monkeypatch.setattr(helpers.subprocess, "run",
+                            MagicMock(side_effect=OSError("no tmux")))
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert helpers._find_live_tui_pane() == (None, None)
+
     def test_failed_scan_restores_ambient_socket(self, monkeypatch):
         """A lookup that finds nothing must not leave the env re-pointed."""
         from pm_core.cli import helpers
@@ -772,6 +797,36 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 1
         assert killed == []
         assert sock.exists()
+
+    def test_legacy_kill_keeps_a_live_private_socket(self, monkeypatch,
+                                                     tmp_path):
+        """Killing a default-server session must not unlink another server.
+
+        A file at the private socket path can belong to a live server that
+        hosts only grouped sessions of a different name; unlinking it would
+        strand every client attached there.
+        """
+        private = tmp_path / "pm-repo-abc"
+        private.write_text("")
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (str(paths.default_socket_path()), False),
+            alive=True)
+
+        assert result.exit_code == 0, result.output
+        assert killed  # the legacy session was still killed
+        assert private.exists()
+
+    def test_legacy_kill_removes_a_stale_private_socket(self, monkeypatch,
+                                                        tmp_path):
+        stale = tmp_path / "pm-repo-abc"
+        stale.write_text("")
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (str(paths.default_socket_path()), False),
+            alive=False)
+
+        assert result.exit_code == 0, result.output
+        assert killed
+        assert not stale.exists()
 
     def test_kills_the_ambient_session_when_the_cwd_one_is_absent(
             self, monkeypatch, tmp_path):
