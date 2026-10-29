@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T08:38:14.234785+00:00'
+  updated_at: '2026-10-29T09:17:03.163193+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4998,6 +4998,41 @@ prs:
       non-blocking (see the i3 section of impl.md).'
     created_at: '2026-10-29T08:38:14Z'
     last_edited: '2026-10-29T08:38:14Z'
+  - id: note-e19da06
+    text: 'Review loop 7af7 i2 (commit 6abedd1b; full suite 4601 passed / 1 skipped).
+      No requirement changes. Three items, all of the class the earlier iterations
+      fixed. (1) The i1 fallback scope was per *server*, but a server is not a session:
+      the last-resort `pm _tui` scan in `_find_tui_pane()` returned the first `pm
+      _tui` pane on the identified session own server. That is exact for a private
+      server (one session per server), but the legacy default server hosts every pre-isolation
+      pm session, so from inside legacy pm-a with its registry entry gone (heal testing)
+      the scan could return pm-b live TUI and `pm tui send` would drive it — the cross-session
+      damage i1 removed, one level down. The pane base session is now compared with
+      the row session (`info["name"]`), which is exact in both cases (with no session
+      identified every row is one base session). Test: `test_last_resort_never_crosses_sessions_on_one_server`
+      (verified to fail without the comparison: it returned pm-b pane). (2) `ensure_socket_dir()`
+      fail-closed refusal (d1c0 i12: world-writable dir without the sticky bit, where
+      another user could unlink our socket and the uid check cannot help because it
+      runs once before tmux binds) surfaced as a raw traceback out of `pm session`;
+      `_resolve_session_socket()` now reports the directory and the fix (owned by
+      you, or 1777). Test: `test_unusable_socket_dir_reports_the_fix`. (3) `_get_current_pm_session()`
+      called `get_session_name()` unguarded, so with `$TMUX` set and no tmux binary
+      (forwarded pane env, container) it raised OSError out of `pm session mobile`
+      and `pm session --print-connect`, both of which now reach it through the ambient-session
+      lookup; it degrades to "not inside a pm session" like every other probe in the
+      module, and uses `pane_registry.base_session_name()` for the ~N strip like the
+      call sites i6 unified. Test: `test_tmux_missing_inside_a_pane_degrades_to_no_session`.
+      Validation on the integrated head: full suite 4601 passed / 1 skipped (scratch
+      pytest<9 + markdown on PYTHONPATH, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared); pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a
+      disposable socket with TMUX_TMPDIR on a scratch dir (private server, session
+      env, global env, hooks correct; default server untouched); pm session list re-verified
+      end to end against disposable private/shared servers (private row, (shared)
+      marker, grouped ~1 collapsed). No live session, server or shared host configuration
+      was touched. Residual notes unchanged and non-blocking (see the i3 section of
+      pm/specs/pr-073910f/impl.md).'
+    created_at: '2026-10-29T09:17:03Z'
+    last_edited: '2026-10-29T09:17:03Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
