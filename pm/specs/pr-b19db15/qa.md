@@ -280,6 +280,37 @@ recording-recipe bugs that any worker following the recipe hits:
   `test_a_refused_start_clears_the_previous_pid`); the recipe text is
   unchanged, so no scenario gains a new surface.
 
+- a capture directory that exists and cannot be written is not a capture
+  directory (review loop ebd1 i13): both recipes guard the path by creating
+  it, and `mkdir -p` answers 0 for a directory that already exists — so the
+  guard passed, the transcript pipe and the recorder's cast/status redirects
+  failed inside the pane, and the run reported "recorder exited before it
+  drew — see the cast and …/recorder-stderr.log" (tmux) or "asciinema wrote
+  no cast — see …/recorder-stderr.log" (CLI), naming files that cannot exist
+  (verified live in this container with a mode-500 capture directory: both
+  blocks exit 1 with that message and the directory stays empty). The tmux
+  recipe's step 2, pasted on its own to re-attach a transcript, is the same
+  hole for a path that is not there at all: it exited 0 with the
+  capture-directory claim on the session, a pipe that wrote nothing and the
+  claim left behind for the next attempt to clear by hand. Both recipes now
+  refuse the directory where the path is known — "capture directory … cannot
+  be written — check the path and its permissions" — the tmux recipe in step 0
+  (before the shared `pm-recorder` clear) and in step 2 (before the claim),
+  the CLI recipe in the preamble and in the scaffold (before the shared `rec`
+  clear); the refused block makes no tmux call at all.
+- two guards the recipes carry had no case (review loop ebd1 i13, test
+  coverage only): the CLI scaffold's readiness timeout names
+  `recorder-pane.log`, and only the message was pinned — deleting the
+  `capture-pane` line left the whole file green (211 passed) while the message
+  went on pointing at a file nothing writes, so the case now requires the file
+  to exist and hold what the recorder drew (as the tmux readiness-timeout case
+  already did); and both recipes' absolute-path guards accept a `~/…` capture
+  directory, which the prose documents and step 2's canonical comparison
+  exists for — every case used an absolute path, so narrowing the pattern to
+  `/*` left the file green and refused a documented-valid path; the tmux
+  step-0 block and the CLI preamble now run with `~/cap` and must create it
+  under `$HOME`.
+
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
 
@@ -305,7 +336,15 @@ claim on the grouped session (a plain `-t "$TARGET"` writes it there and the
 run then fails as "could not stream … — check that pane exists"). S21/S23 also
 re-check the `agg` install: with `agg` missing and `~/.local/bin` **not** on
 `PATH`, the install block must fail with the export it names rather than
-exit 0. S21/S22 also re-check the CLI scaffold's refusal order: pasted with a
+exit 0. S21/S23 also re-check the unwritable-capture-dir refusal (review loop ebd1
+i13): with the capture directory at mode 500 — and, for step 2 pasted on
+its own, with `<capture-dir>` missing — the block must stop at "capture
+directory … cannot be written" without taking the claim, attaching the pipe
+or clearing the shared recorder session (`pm-recorder` for the tmux recipe,
+`rec` for the CLI scaffold); the pre-fix blocks ran on and failed later as
+"recorder exited before it drew" / "asciinema wrote no cast", naming files
+that cannot exist.
+S21/S22 also re-check the CLI scaffold's refusal order: pasted with a
 relative or unsubstituted `<capture-dir>`, it must stop at "must be an
 absolute path" *without* clearing the host-shared `rec` session — a
 concurrent CLI capture's recorder has to survive the refused block (the

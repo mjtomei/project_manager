@@ -79,7 +79,13 @@ about to refuse an unusable `<capture-dir>` must not end a concurrent
 capture's recorder on its way out. `asciinema rec` reports
 "asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
-capture that wrote nothing. A leftover cast is worse in the other
+capture that wrote nothing. A directory that exists and cannot be written is
+the other half: `mkdir -p` answers 0 for it, so the creation guard passes,
+and every write into it fails as something else — the pipe writes nothing and
+the recorder's own redirects fail before asciinema runs, which step 3 reports
+as "recorder exited before it drew" for a cast and a stderr log that cannot
+exist. Step 0 refuses that directory where the path is known, and so does
+step 2, which is pasted on its own. A leftover cast is worse in the other
 direction: without `--overwrite`, `asciinema rec` aborts with "recording
 already exists" and the recorder dies before it draws, so the run fails at
 the readiness wait — loudly, but for a reason unrelated to the scenario,
@@ -137,6 +143,23 @@ esac
 mkdir -p <capture-dir> || {
     echo "could not create <capture-dir> — check the path and its" \
         "permissions" >&2
+    exit 1
+}
+# An *existing* directory that cannot be written is the same state one shape
+# over, and `mkdir -p` answers 0 for it. The transcript pipe's redirect and
+# the recorder's cast and status redirects all fail, so the recorder dies
+# before it draws and the run ends with "recorder exited before it drew — see
+# the cast and <capture-dir>/recorder-stderr.log", naming two files that
+# cannot exist (verified live on tmux 3.2a with a mode-500 capture directory:
+# step 2 exited 0 with the claim taken and the pipe attached, step 3 printed
+# exactly that message, and the cast, the stderr log and the status file were
+# all absent). Stop here instead — and *before* the clear below, because a
+# block that is about to refuse its own path must not end a concurrent
+# capture's recorder on its way out.
+[ -w <capture-dir> ] && [ -x <capture-dir> ] || {
+    echo "capture directory <capture-dir> cannot be written — the transcript" \
+        "pipe and the recorder's cast and status files all go there; check" \
+        "the path and its permissions" >&2
     exit 1
 }
 # Clear the leftover recorder session now that the path is known usable. It
@@ -292,6 +315,25 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
         "whose name starts with it; run step 1 first" >&2
     exit 1
 }
+# The capture directory has to be there and writable before anything is
+# claimed on it. Step 0 creates it, but this step is pasted on its own when a
+# run re-attaches its transcript, and `mkdir -p` answers 0 for a directory
+# that already exists and cannot be written — so neither path is covered by
+# step 0's creation guard. Without this check the claim below is taken on a
+# directory nothing can be written into, the pipe is attached and writes
+# nothing, and the run dies two steps later as "recorder exited before it
+# drew — see the cast and <capture-dir>/recorder-stderr.log", naming two
+# files that cannot exist (verified live on tmux 3.2a: step 2 exited 0 with
+# the claim on the session and no transcript written, and step 3 printed that
+# message with the cast, the stderr log and the status file all absent).
+# Refuse it here, before the claim: a claim on a directory nothing can be
+# written into is a collision the next attempt has to clear by hand.
+[ -w <capture-dir> ] && [ -x <capture-dir> ] || {
+    echo "capture directory <capture-dir> cannot be written — run step 0" \
+        "(it creates and clears it), then this step; check the path and its" \
+        "permissions" >&2
+    exit 1
+}
 # The claim names a *directory*, so compare it canonically rather than as the
 # text a worker typed. Step 0 accepts `~/cap` as well as an absolute path, and
 # a quoted `~` never expands, so one directory spelled two ways passed the
@@ -300,8 +342,9 @@ tmux has-session -t "=$TARGET" 2>/dev/null || {
 # `/home/<user>/capA` on another ran on and took the same directory) — while a
 # retry in the same session was refused as a collision that does not exist.
 # `pwd -P` also collapses a trailing slash and a symlinked path. A directory
-# that cannot be entered keeps the text as typed, and nothing is recording
-# into it then.
+# that disappears between the guard above and this `cd` keeps the text as
+# typed (the guard has already refused one that cannot be entered or written,
+# which is when nothing can be recording into it).
 claim_dir=$(cd <capture-dir> 2>/dev/null && pwd -P)
 [ -n "$claim_dir" ] || claim_dir="<capture-dir>"
 # A stored claim may itself hold the `~/` spelling (a quoted `~` never expands

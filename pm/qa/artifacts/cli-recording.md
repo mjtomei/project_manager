@@ -68,6 +68,19 @@ mkdir -p <capture-dir>/<short-name> || {
         "its permissions" >&2
     exit 1
 }
+# An *existing* directory that cannot be written is the same state one shape
+# over, and `mkdir -p` answers 0 for it: the clear below cannot remove the
+# previous run's files, and every form then writes into a directory that
+# cannot hold the capture (the simple forms abort with asciinema's "recording
+# already exists" for a cast that could not be cleared, and the no-TTY
+# scaffold's pane redirect fails before asciinema runs — step 4 then reports
+# "asciinema wrote no cast" for a file that cannot exist, verified live with a
+# mode-500 capture directory). Stop here instead.
+[ -w <capture-dir>/<short-name> ] && [ -x <capture-dir>/<short-name> ] || {
+    echo "capture directory <capture-dir>/<short-name> cannot be written —" \
+        "check the path and its permissions" >&2
+    exit 1
+}
 rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/transcript.log \
       <capture-dir>/<short-name>/recording.mp4 \
@@ -80,7 +93,12 @@ rm -f <capture-dir>/<short-name>/recording.cast \
 
 `asciinema rec` reports "asciicast saved" and exits 0 even when the
 directory does not exist, so a missing `mkdir` looks like a successful
-capture that wrote nothing — and a leftover cast is worse: without
+capture that wrote nothing. A directory that exists and cannot be written is
+the same state one shape over: `mkdir -p` answers 0 for it, so the creation
+guard passes, the clear cannot remove the previous run's files, and the
+pane's redirect fails before asciinema runs — which step 4 reports as
+"asciinema wrote no cast" for a file that cannot exist. Both blocks refuse it
+where the path is known. A leftover cast is worse: without
 `--overwrite` the recorder aborts on it, and the render step rewrites the
 `.mp4` from whatever cast is on disk, so a run that recorded nothing would
 still produce a fresh-looking video of the *previous* run. The no-TTY
@@ -214,6 +232,20 @@ esac
 mkdir -p <capture-dir>/<short-name> || {
     echo "could not create <capture-dir>/<short-name> — check the path and" \
         "its permissions" >&2
+    exit 1
+}
+# An *existing* directory that cannot be written is the same state one shape
+# over, and `mkdir -p` answers 0 for it: the pane command's `2> …` redirect
+# fails before asciinema runs, the recorder dies, and step 4 reports
+# "asciinema wrote no cast — see …/recorder-stderr.log" for a file that
+# cannot exist (verified live: with a mode-500 capture directory the block
+# exited 1 with that message and the directory stayed empty). Stop here
+# instead — and before the shared `rec` session is cleared below, so a block
+# refused for its path cannot end a concurrent capture's recorder.
+[ -w <capture-dir>/<short-name> ] && [ -x <capture-dir>/<short-name> ] || {
+    echo "capture directory <capture-dir>/<short-name> cannot be written —" \
+        "the pane's cast and status redirects both write into it; check the" \
+        "path and its permissions" >&2
     exit 1
 }
 # Clear the leftover `rec` session now that the path is known good (see the

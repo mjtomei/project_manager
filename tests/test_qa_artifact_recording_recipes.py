@@ -3543,6 +3543,17 @@ def _step_two_block():
     return raw[raw.index("# 2."):raw.index("# 3.")]
 
 
+def _step_zero_block():
+    """The tmux recipe's create-and-clear step (``# 0.`` … ``# 1.``).
+
+    The block that owns the capture directory: it creates it, refuses one it
+    cannot write, and clears the shared recorder session and the previous
+    run's files.
+    """
+    raw = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
+    return raw[:raw.index("# 1. Start")]
+
+
 def _cli_preamble_block():
     """The CLI recipe's capture-section preamble (create and clear the dir).
 
@@ -3565,14 +3576,28 @@ class TestCaptureFlowExecution:
         assert cast.stat().st_size > 0, "the completed cast is missing"
 
     def test_cli_recorder_that_never_writes_a_cast_fails(self, tmp_path):
-        """A recorder that starts but records nothing is a failure, not a hang."""
-        r, cast = _run_capture_block("cli-recording.md", "norec", tmp_path)
+        """A recorder that starts but records nothing is a failure, not a hang.
+
+        The message names the pane the failing wait saved, so the file has to
+        be there with what the recorder drew — the rule the tmux recipe's
+        readiness-timeout case pins. Nothing asserted the save itself: the
+        message text was pinned, so deleting the ``capture-pane`` line left
+        the whole file green (211 passed) and the message then pointed at a
+        file nothing writes.
+        """
+        r, cast = _run_block(
+            _scaffold_block(_recipe_text("cli-recording.md")), "norec",
+            tmp_path, state_files={"pane": "recorder output\n"})
         assert r.returncode != 0, "an empty recording was reported as success"
         assert "did not start within" in r.stderr, r.stderr
         assert "recorder-pane.log" in r.stderr, (
             "the readiness failure does not say where the pane was saved: "
             + r.stderr)
         assert not cast.exists()
+        log = cast.parent / "recorder-pane.log"
+        assert log.exists(), "the failing wait left no pane evidence"
+        assert "recorder output" in log.read_text(), (
+            "the saved pane does not hold what the recorder drew")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_a_failed_capture_leaves_no_previous_video(self, name, tmp_path):
@@ -3902,6 +3927,143 @@ class TestCaptureFlowExecution:
         assert "no session named exactly" in r.stderr, r.stderr
         assert not (tmp_path / "state" / "claim.pm-test~1").exists(), (
             "step 2 wrote its claim on the prefix-matched grouped session")
+
+    @pytest.mark.parametrize("shape", ["missing", "read-only"])
+    def test_step_two_refuses_a_capture_dir_it_cannot_write(
+            self, shape, tmp_path):
+        """A claim on a directory nothing can be written into is not a capture.
+
+        Step 2 is pasted on its own when a run re-attaches its transcript, and
+        step 0's creation guard does not cover it: a path that is not there
+        (a typo in a fresh paste) or a directory that exists and cannot be
+        written (``mkdir -p`` answers 0 for it) passed the block, which then
+        took the claim and attached a pipe that wrote nothing. The run dies
+        two steps later as "recorder exited before it drew — see the cast and
+        <capture-dir>/recorder-stderr.log", naming two files that cannot exist
+        (verified live on tmux 3.2a: step 2 exited 0 with the claim on the
+        session and no transcript written, and step 3 printed exactly that
+        message with the cast, the stderr log and the status file all absent).
+        Refuse it here, before the claim: a claim on an unusable directory is
+        a collision the next attempt has to clear by hand.
+        """
+        capture = tmp_path / "missing" / "cap"
+        if shape == "read-only":
+            if not hasattr(os, "geteuid") or os.geteuid() == 0:
+                pytest.skip("root can write a mode-500 directory")
+            capture = tmp_path / "cap"
+            capture.mkdir()
+            capture.chmod(0o500)
+        try:
+            r, _cast = _run_block(_step_two_block(), "ok", tmp_path,
+                                  target=True, capture=capture)
+        finally:
+            if capture.exists():
+                capture.chmod(0o700)
+        assert r.returncode != 0, (
+            f"{shape}: step 2 claimed a capture directory nothing can be "
+            "written into")
+        assert "cannot be written" in r.stderr, r.stderr
+        assert str(capture) in r.stderr, (
+            "the refusal does not name the capture directory: " + r.stderr)
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            f"{shape}: the refused step took the capture-directory claim")
+        assert not (tmp_path / "state" / "pipeclaim").exists(), (
+            f"{shape}: the refused step attached the transcript pipe")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_capture_dir_that_cannot_be_written_stops_the_run(
+            self, name, tmp_path):
+        """`mkdir -p` answers 0 for an existing directory that is not writable.
+
+        Every later write into it fails as something else: the tmux recipe's
+        pipe writes nothing and the recorder's redirects fail before
+        asciinema runs, so the run ends as "recorder exited before it drew —
+        see the cast and …/recorder-stderr.log"; the CLI scaffold's pane
+        redirect fails the same way and step 4 says "asciinema wrote no cast —
+        see …/recorder-stderr.log". Both messages name files that cannot exist
+        (verified live with a mode-500 capture directory in each recipe: rc 1
+        with that message, and the directory empty). The block must refuse the
+        directory where it creates it — and before it clears the recorder
+        session shared with concurrent runs, so a refused block makes no tmux
+        call at all.
+        """
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            pytest.skip("root can write a mode-500 directory")
+        capture = tmp_path / "cap"
+        capture.mkdir()
+        # The CLI scaffold writes under <capture-dir>/<short-name>/.
+        target = capture
+        if name == "cli-recording.md":
+            target = capture / "run"
+            target.mkdir()
+        target.chmod(0o500)
+        calls = tmp_path / "tmux-calls.log"
+        try:
+            r, _cast = _run_block(
+                _scaffold_block(_recipe_text(name)), "ok", tmp_path,
+                capture=capture, env_extra={"STUB_TMUX_LOG": str(calls)})
+        finally:
+            target.chmod(0o700)
+        assert r.returncode != 0, (
+            f"{name}: an unwritable capture directory was reported as a "
+            "successful start")
+        assert "cannot be written" in r.stderr, r.stderr
+        assert not calls.exists(), (
+            f"{name}: the block acted on a tmux handle (the recorder session "
+            "shared with concurrent runs) for a capture directory it then "
+            "refused")
+
+    def test_cli_preamble_refuses_a_capture_dir_it_cannot_write(self, tmp_path):
+        """The preamble's own copy of the guard covers the simple forms too.
+
+        It clears the previous run's files before any recording form, and a
+        clear that cannot write leaves the earlier cast in place — which the
+        simple `asciinema rec` form (no ``--overwrite``) then reports as
+        "recording already exists", a cause the worker cannot connect to the
+        path. The preamble refuses the directory instead.
+        """
+        if not hasattr(os, "geteuid") or os.geteuid() == 0:
+            pytest.skip("root can write a mode-500 directory")
+        capture = tmp_path / "cap"
+        (capture / "run").mkdir(parents=True)
+        (capture / "run").chmod(0o500)
+        try:
+            r, _cast = _run_block(
+                _cli_preamble_block(), "ok", tmp_path, capture=capture)
+        finally:
+            (capture / "run").chmod(0o700)
+        assert r.returncode != 0, (
+            "the preamble cleared a capture directory nothing can be written "
+            "into")
+        assert "cannot be written" in r.stderr, r.stderr
+        assert str(capture / "run") in r.stderr, (
+            "the refusal does not name the capture directory: " + r.stderr)
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_tilde_capture_dir_is_accepted(self, name, tmp_path):
+        """`~/…` is a documented spelling, and only the refusal half had a case.
+
+        Both recipes' guards accept a ``<capture-dir>`` that starts with
+        ``~/`` — the prose says so, and step 2's claim comparison exists to
+        make ``~/cap`` and its absolute spelling one claim. Every case that
+        ran a guard used an absolute path, so narrowing the pattern to ``/*``
+        left the whole file green (211 passed) and the block then refused a
+        documented-valid path with "must be an absolute path". Run the block
+        that owns the guard — the tmux recipe's step 0, the CLI preamble —
+        with ``~/cap`` and require it to create the directory under ``$HOME``.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        block = (_step_zero_block() if name == "tmux-screen-recording.md"
+                 else _cli_preamble_block())
+        r, _cast = _run_block(block, "ok", tmp_path, capture=Path("~/cap"),
+                              env_extra={"HOME": str(home)})
+        assert r.returncode == 0, (
+            f"{name}: a ~/ capture dir was refused: " + r.stderr)
+        assert "must be an absolute path" not in r.stderr, r.stderr
+        assert (home / "cap").is_dir(), (
+            f"{name}: the block did not create the capture directory under "
+            "$HOME")
 
     def test_step_zero_does_not_kill_a_pm_session_that_shares_the_prefix(
             self, tmp_path):
