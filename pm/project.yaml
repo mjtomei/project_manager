@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T02:38:33.249862+00:00'
+  updated_at: '2026-10-29T03:41:09.822409+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42180,6 +42180,16 @@ prs:
       (relaunch/reuse the container) or push the branch; then run QA.'
     created_at: '2026-10-29T02:38:33Z'
     last_edited: '2026-10-29T02:38:33Z'
+  - id: note-e6283f3
+    text: 'Review i2 (f951): the earlier "PUSH BLOCKED" note is stale — the branch
+      is pushed (77e095d6, now 146faddc) and up to date on origin. i2 changes: pm
+      qa debug now catches any create failure (not just ContainerError) so a runtime
+      that dies between preflight and create still gets cause+remedy instead of a
+      traceback; tests added for the non-ContainerError create path, no-resume-snapshot
+      on the preflight abort, container_preflight_error() inert when disabled, and
+      a persisted host run resuming on the host.'
+    created_at: '2026-10-29T03:41:09Z'
+    last_edited: '2026-10-29T03:41:09Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
