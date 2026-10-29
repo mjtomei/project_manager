@@ -12105,7 +12105,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-04-24T20:54:20.188876+00:00'
-  updated_at: '2026-10-27T17:58:00.042338+00:00'
+  updated_at: '2026-10-28T07:53:51.066740+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -12141,6 +12141,18 @@ prs:
       WIP; preserve its work and finish integrations/tests.'
     created_at: '2026-10-22T15:34:41Z'
     last_edited: '2026-10-22T15:34:41Z'
+  - id: note-ce3ae10
+    text: 'pr-1ab9075 (2c18b50c) added pure helpers in pm_core/container.py you can
+      reuse instead of duplicating: classify_runtime_error(text, name) (keyring "session
+      key"/EDQUOT and PID "Cannot fork"/pids limit -> cause + remediation), runtime_error_summary,
+      launch_error_summary(exc), diagnose_exec_failure(name) (bounded inspect + exec
+      true probe). The keyring remediation text points at pr-1139060 for reaping;
+      update it to the real cleanup command once it exists. pr-1ab9075 does NOT restart/recreate
+      unhealthy containers; QA retries just pick up once the container recovers within
+      the ~5 min retry window. The setup-timeout message in create_container still
+      says "pm session cleanup" (yours to fix).'
+    created_at: '2026-10-22T18:42:17Z'
+    last_edited: '2026-10-22T18:42:17Z'
   - id: note-daeb892
     text: 'From pr-e040aeb (failed review-launch recovery): the native review loop
       now raises ReviewLaunchError when the `pm pr review --fresh --review-loop` child
@@ -12163,6 +12175,29 @@ prs:
       there is one prefix-matching helper.'
     created_at: '2026-10-27T17:57:59Z'
     last_edited: '2026-10-27T17:57:59Z'
+  - id: note-94d602b
+    text: 'pr-1ab9075 (#247) fixes the inline-backoff defect your QA S75 filed as
+      pr-d022825 ("QA dead-worker retry backoff sleeps inline in the verdict poll
+      loop"): retries now use per-scenario wall-clock deadlines, launches/relaunches/diagnosis
+      run in background threads, and queued dequeues no longer run the refiner synchronously.
+      When #247 merges, close pr-d022825 as a duplicate rather than re-fixing it.
+      #247 diagnoses PID/keyring exhaustion and names `pm container`/runtime restart
+      as the remediation but does not restart or reap containers — that stays with
+      you.'
+    created_at: '2026-10-28T07:14:23Z'
+    last_edited: '2026-10-28T07:14:23Z'
+  - id: note-b063313
+    text: 'Retry caveat for the reaper (from pr-1ab9075 review): once a QA scenario''s
+      failure kind is exec/exit, retries only relaunch inside the existing container
+      — the clone and container are kept so worker commits/evidence survive. So if
+      your cleanup force-removes a scenario container mid-run, the QA loop cannot
+      rebuild it: each relaunch fails with "container <name> not found" and the scenario
+      burns its ~5 min budget to INPUT_REQUIRED. If reaping containers of a live QA
+      run is in scope, either leave them until the run ends or notify the loop; adding
+      an escalate-to-create path later would need a create that reuses the existing
+      host clone at ~/.pm/workdirs/qa/<pr>-<loop>/s-N/repo instead of re-cloning it.'
+    created_at: '2026-10-28T07:53:51Z'
+    last_edited: '2026-10-28T07:53:51Z'
 - id: pr-d43d362
   plan: bugs
   title: Container pm user hardcoded at UID 1000 breaks for hosts with non-1000 UID
@@ -28662,22 +28697,11 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T05:25:59.189527+00:00'
+  updated_at: '2026-10-28T07:53:41.793661+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes:
-  - id: note-c3eb1e0
-    text: 'From pr-e040aeb (failed review-launch recovery): the loop now distinguishes
-      (a) a failed launch with no transcript/session id (ReviewLaunchError, retryable,
-      artifact) from (b) a real verdict and (c) a pane that disappears while polling
-      (PaneKilledError, not retried). Before every retry, _discover_iteration adopts
-      a recovered transcript, a landed verdict, or another driver''s live pane. If
-      you add idle-agent/missing-output handling, route it through that discovery
-      / a classified outcome rather than relaunching blindly, so the two paths do
-      not duplicate or kill each other.'
-    created_at: '2026-10-27T05:25:59Z'
-    last_edited: '2026-10-27T05:25:59Z'
   - id: note-d8d9490
     text: 'Coordination from pr-8efa789 (impl 4f902f18, pushed): verdict extraction
       is now task-scoped, not latest-turn-only. It walks back across non-task wakeup
@@ -28696,6 +28720,30 @@ prs:
       markdown dep).'
     created_at: '2026-10-27T04:50:44Z'
     last_edited: '2026-10-27T04:50:44Z'
+  - id: note-c3eb1e0
+    text: 'From pr-e040aeb (failed review-launch recovery): the loop now distinguishes
+      (a) a failed launch with no transcript/session id (ReviewLaunchError, retryable,
+      artifact) from (b) a real verdict and (c) a pane that disappears while polling
+      (PaneKilledError, not retried). Before every retry, _discover_iteration adopts
+      a recovered transcript, a landed verdict, or another driver''s live pane. If
+      you add idle-agent/missing-output handling, route it through that discovery
+      / a classified outcome rather than relaunching blindly, so the two paths do
+      not duplicate or kill each other.'
+    created_at: '2026-10-27T05:25:59Z'
+    last_edited: '2026-10-27T05:25:59Z'
+  - id: note-ed60e3d
+    text: 'pr-1ab9075 (#247) reworked the retry half of _poll_tmux_verdicts: per-scenario
+      launch_retries (attempts/kind/cause/state/retry_at/sessions) persisted in qa_resume.json;
+      launch/relaunch/diagnose steps run in background threads (launch_ops/launch_results)
+      and the poll thread applies their outcomes; per-scenario grace_until; _record_failure
+      never sleeps and settles (never overwrites) a scenario that already has a verdict.
+      Your no-verdict recovery trackers live in the same loop, so expect textual conflicts
+      in the pending-set loop, the idle-reminder block and the status write. Please
+      reuse this pattern instead of adding a second per-scenario pending/retry mechanism:
+      hang the recovery nudge off the same record and retire a worker through _settle
+      + pending.discard the way launch failures do.'
+    created_at: '2026-10-28T07:53:41Z'
+    last_edited: '2026-10-28T07:53:41Z'
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
@@ -31563,7 +31611,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-25T21:41:47.459945+00:00'
-  updated_at: '2026-05-25T22:43:57.109042+00:00'
+  updated_at: '2026-10-22T18:42:15.813625+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -31581,6 +31629,19 @@ prs:
       archaeology.'
     created_at: '2026-05-25T22:43:57Z'
     last_edited: '2026-05-25T22:43:57Z'
+  - id: note-766ffa3
+    text: 'pr-1ab9075 (2c18b50c) delivered PART of this: container create failures
+      now record "container create failed: <cause>" (container.launch_error_summary
+      classifies stderr; keyring/EDQUOT and PID/Cannot-fork carry remediation); dead-before-start
+      workers are probed via container.diagnose_exec_failure; launch failures retry
+      on a bounded nonblocking backoff (qa_status shows "launch retry n/max" + cause)
+      and on exhaustion get INPUT_REQUIRED with reason "...(runtime failure, not an
+      agent verdict); gave up after N relaunch attempt(s): <cause>". A dead pane no
+      longer hangs "running" forever. NOT done here: persisting every scenario transcript
+      to the host captures dir, and any separate non-INPUT_REQUIRED error verdict
+      state. Not closed by pr-1ab9075.'
+    created_at: '2026-10-22T18:42:15Z'
+    last_edited: '2026-10-22T18:42:15Z'
 - id: pr-fa9f172
   plan: improvements
   title: 'Self-documenting + consistent pm commands: complete --help, actionable errors,
@@ -35933,7 +35994,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T18:57:33.967457+00:00'
-  updated_at: '2026-10-13T22:18:20.648960+00:00'
+  updated_at: '2026-10-28T07:56:04.302720+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35946,6 +36007,19 @@ prs:
       This time no QA PASS PR note was persisted. Captures pr-b53bfe2/scenarios/10/W3-interrupted-QA/pm-log-stale-run.txt.'
     created_at: '2026-10-13T22:18:20Z'
     last_edited: '2026-10-13T22:18:20Z'
+  - id: note-cf7a82a
+    text: 'Adjacent work landed in pr-1ab9075 (#247), which rewrote the retry/cancellation
+      half of _poll_tmux_verdicts. Relevant to your repro: _launch_next_queued returns
+      immediately when state.stop_requested; _relaunch_scenario_window returns False
+      before creating a window; both launchers (_launch_scenarios_in_tmux/_launch_scenarios_in_containers)
+      now check stop_requested after the concretizer finishes and before splitting
+      the worker pane; and background launch/relaunch/diagnose threads check stop
+      at entry, so a stopped run no longer spawns workers from the retry path. NOT
+      changed there: the post-loop finalize path and verdict aggregation (only pre-existing
+      unverdicted→INPUT_REQUIRED). Re-check your repro against #247 before implementing
+      the relaunch/queued-launch half; the finalizer half is still yours.'
+    created_at: '2026-10-28T07:56:04Z'
+    last_edited: '2026-10-28T07:56:04Z'
 - id: pr-c9e69fb
   plan: bugs
   title: 'Bug: shell `pm pr start` impl panes are never trust-watched (no --session-id
@@ -36174,11 +36248,21 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-14T15:49:43.888654+00:00'
-  updated_at: '2026-10-22T17:19:43.945696+00:00'
+  updated_at: '2026-10-22T18:42:18.546926+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-cbd6b5a
+    text: 'pr-1ab9075 (2c18b50c): _poll_tmux_verdicts now launches dequeued scenarios
+      and retries in background threads and persists QALoopState.launch_retries (attempts/kind/cause/state/retry_at/sessions)
+      in qa_resume.json. On resume, records left in state "launching" are re-detected
+      from panes (a no-pane scenario is relaunched via the full launcher, so an orphaned
+      concretizer window from the dead controller may remain). Launchers accept scenarios=[...]
+      and write_status=False. Initial-batch persistence/adoption before the first
+      snapshot is still yours.'
+    created_at: '2026-10-22T18:42:18Z'
+    last_edited: '2026-10-22T18:42:18Z'
 - id: pr-62fdd54
   plan: bugs
   title: 'Bug: synchronize the PR branch before QA planning and recover stale handoffs'
@@ -38069,7 +38153,7 @@ prs:
   plan: improvements
   title: 'Bug: one failed QA worker blocks verdict collection during retry backoff'
   branch: pm/pr-1ab9075-bug-one-failed-qa-worker-blocks-verdict-collection
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'Observed while manually recovering #236 on 2026-10-22: QA scenario
     28 exhausted its container PID limit (2041 processes, including 1929 treesample.sh,
@@ -38109,15 +38193,271 @@ prs:
     adoption. Keep all healthy workers/results moving while any one launch is retried.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/247
+  gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-22T17:19:44.677099+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-10-29T04:39:12.217584+00:00'
+  started_at: '2026-10-22T17:21:04.879323+00:00'
+  reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-222cad3
+    text: 'Impl done 2c18b50c (spec pm/specs/pr-1ab9075/impl.md). Tests: tests/test_qa_launch_retry.py
+      (fake clock; pre-fix the healthy PASS was verified ~5195 s after start). Run
+      with a scratch venv + PATH=/usr/bin:$PATH; test_hook_events::test_installer_writes_standalone_receiver
+      fails on master too. Evidence files /tmp/pm-recovery-20261022.jsonl and /home/matt/.pm/...
+      are not visible in this container; regressions are synthetic. Live QA should
+      cover: real podman exec failure (e.g. stop a scenario container) while siblings
+      finish, z t during backoff, TUI restart mid-backoff.'
+    created_at: '2026-10-22T18:42:20Z'
+    last_edited: '2026-10-22T18:42:20Z'
+  - id: note-8a985a7
+    text: 'From pr-592e4bd review (2026-10-22): route-gate waits in queued launches
+      are now nonblocking there (defer/requeue + per-tick queue retry). Remaining,
+      not route-specific: _launch_next_queued still runs the queued scenario refiner
+      synchronously (_concretize_scenario/poll_for_verdict) inside _poll_tmux_verdicts,
+      so a long or stalled queued refiner (incl. a routed refiner held by _RouteStallWatch
+      during a mid-run route outage) blocks verdict collection, retries, verification
+      and stop for its duration. Cover this with the nonblocking retry/launch work.'
+    created_at: '2026-10-22T19:28:01Z'
+    last_edited: '2026-10-22T19:28:01Z'
+  - id: note-resume-247-20261028
+    created_at: '2026-10-28T05:33:39.918891+00:00'
+    last_edited: '2026-10-28T05:33:39.918891+00:00'
+    text: 'User authorized resumption from the retained reviewed branch in the #249
+      controller session. Preserve existing source/specs/review history and all local
+      files. Fresh native review, then fresh QA/signoff; historical outcomes are not
+      new approval. DeepSeek 1017/high for implementation/review/QA/helpers, work
+      Opus 5.5/high for signoff; manual wait_for_merge and spec review OFF. No force
+      push or master rewrite.'
+  - id: note-8e753c1
+    text: 'QA scenario 4 (restart mid-backoff): stories 1-3 PASS; story 4 (E2/A4)
+      found that a worker which wrote its verdict and then died before collection
+      was relaunched (verdict discarded). Fixed in 600fd168: the dead-pane branch
+      of _poll_tmux_verdicts now collects the verdict from the transcript and settles
+      the scenario instead of spending a retry (guarded against resurrecting a verdict
+      cleared for a verification re-evaluation; unit test added). Verified live: worker-pane
+      death -> PASS (verified), no relaunch. Residual, pre-existing and out of R10
+      scope: if the whole scenario window is destroyed, PASS verification cannot find
+      a pane to split, so a preserved verdict ends INPUT_REQUIRED (window gone during
+      verification) instead of PASS — same as for a verdict collected while the pane
+      was still alive. Captures: /pm-captures/scenarios/4/. (2026-10-28T13:35:00Z)'
+    created_at: '2026-10-28T13:28:58Z'
+    last_edited: '2026-10-28T13:28:58Z'
+  - id: note-4cafc51
+    text: 'QA S8 (flagged PASS, worker dies during re-evaluation) needs fake-claude
+      hold timers: the fake exits on ANY stdin input, so a verification follow-up
+      typed into a live worker pane kills it and the loop''s two extra send_keys(pane_id,
+      "") Enters (FLAGGED follow-up block) then hit the dead pane and raise CalledProcessError
+      -> "QA background thread crashed". Use qa_scenario hold=50 (alive through the
+      30 s verdict grace, gone before the ~30 s-later re-evaluation follow-up) and
+      qa_concretize/qa_verification hold=600 (the follow-up lands on the surviving
+      concretizer/verifier pane, which ignores input); the dead-pane branch then sees
+      idx in verification_failures and records an `exit` launch retry instead of re-collecting
+      the stale PASS. The same unguarded send is a latent crash if a real worker dies
+      in that ~2 s follow-up window.'
+    created_at: '2026-10-28T14:59:57Z'
+    last_edited: '2026-10-28T14:59:57Z'
+  - id: note-d898e98
+    text: 'QA scenario 6 (host mode, no container) PASS 3/3 stories at c9f8fd9d: (1)
+      repeated worker-window kills -> row `launch retry n/6` (1/6..6/6) with the plain
+      pane-death cause `pane died at startup; no runtime cause found — next attempt
+      at HH:MM:SS` (no container name, no restart advice), `Progress: 2/3 scenarios
+      complete (1 relaunching)`, siblings PASS+verified while the row still retried;
+      (2) one kill -> single `launch retry 1/6` (next attempt +5 s, no s3 window),
+      relaunch creates exactly one same-named window, new worker PASSes, `QA complete:
+      PASS [finalize: FINALIZE_DONE]`; (3) `hold: 0` workers -> all three verdicts
+      `PASS (worker pane gone; collected from its transcript)`, verified, no launch-retry/relaunch,
+      overall PASS. Captures /pm-captures/scenarios/6/. Incidental pre-existing bug
+      filed as pr-084e9a3: stopping QA (`zz t`) while PASS verifications are in flight
+      flags them ("verifier pane disappeared"), the flag follow-up then send-keys
+      a pane that vanished 1 s later and the QA thread crashes (verdict ERROR) instead
+      of stopping cleanly — not exercised by this PR''s scope. (2026-10-28T15:12:00Z)'
+    created_at: '2026-10-28T15:11:50Z'
+    last_edited: '2026-10-28T15:11:50Z'
+  - id: note-4df67c9
+    text: 'QA scenario 9 (restart during a create-kind backoff), real podman, no code
+      change — INPUT_REQUIRED for one Then that conflicts with spec-correct behaviour.
+      Everything substantive held: attempts=5/retry_at=15:04:27 preserved across an
+      in-place `pm tui restart` (dashboard 6/6 unchanged, siblings PASS, verified
+      [1,3], no verification re-run); TUI killed before T, failure rule removed, overdue
+      retry fired on the first resumed tick (mount 15:04:46 -> relaunch 15:04:52);
+      re-clone dropped ATTEMPT-MARKER; exactly one ...-s2 container (7e2431fd808d)
+      and one qa-<PR>-s2 window; instruction re-installed with INSTRUCTION-MARKER-424242;
+      fresh transcript-s2 ending PASS; QA complete: PASS (finalize=FINALIZE_DONE).
+      The failing Then: worker prompt.md has no "Test setup instructions are available
+      at: /scratch/qa-instructions/restart-check.md" block. Both launch paths clear
+      scenario.instruction_path ("Steps will be inlined by concretizer - worker does
+      not need the file ref"), so prompt_gen.generate_qa_child_prompt''s instruction_block
+      is unreachable for QA children, and tests/test_qa_launch_retry.py::test_create_retry_reinstalls_scenario_instruction
+      asserts exactly that. The instruction content goes to the concretizer via _build_concretization_prompt(instruction_content=...)
+      instead, which is where the retry re-installs it (live: copy logged at relaunch).
+      Decide whether to delete that dead block or keep the ref on the worker. Wording
+      notes: dashboard N/6 is the relaunch index while qa_resume attempts = N-1 (scenario
+      text had it inverted); backoff is 5/10/20/40/80/160 s so the 6th relaunch is
+      ~4.5 min after the first failure; the resume line is "Resuming QA for <PR> after
+      restart..." not "[tui.qa_loop_ui] Resuming incomplete QA from disk". Captures
+      /pm-captures/scenarios/9/.'
+    created_at: '2026-10-28T15:16:42Z'
+    last_edited: '2026-10-28T15:16:42Z'
+  - id: note-98cf70c
+    text: 'QA scenario 8 (verification re-evaluation vs a dying worker) PASS on c9f8fd9d,
+      container mode. Fake config: qa_scenario {PASS, hold 50}, qa_verification {FLAGGED,
+      hold 600}, default qa-verify-retries 3. Each PASS is collected from the live
+      worker pane after the 30 s grace; the verifier flags ~30 s later, by which time
+      the worker has exited, and the poll loop records "worker exited before any verdict
+      … relaunch n/6" instead of re-collecting the stale PASS (0 "worker pane gone;
+      collected from its transcript" lines over a full 4-flag run ending NEEDS_WORK
+      for both scenarios; schedule 5/10/20 s; clone marker, container id and window
+      uniqueness survive relaunches). Captures: /pm-captures/scenarios/8/run1/. Rerun
+      caveat: if the re-evaluation follow-up reaches a LIVE fake-claude worker, fake-claude
+      exits on the stdin input and the loop''s two safety Enters 1 s later hit the
+      vanished pane and crash the QA thread (CalledProcessError → verdict ERROR).
+      Keep hold 50 so the worker is gone before the verifier grace elapses, or use
+      a stand-in that ignores stdin.'
+    created_at: '2026-10-28T15:33:12Z'
+    last_edited: '2026-10-28T15:33:12Z'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-7e650cd
+    text: 'MASTER INTEGRATION DONE 2026-10-29 (test-session-leak restart). Merged
+      origin/master 4a74d88085edffcc300cb21f31777a798d647782 into the branch as merge
+      commit f52145b9; pushed (no force). Tests (pm venv, PATH=/usr/bin:$PATH): full
+      suite 4512 passed, 1 skipped, 0 failed; tests/test_qa_launch_retry.py 32, tests/test_qa_loop.py
+      109, tests/test_qa_input_required.py 56. Conflict resolution kept master task-scoped
+      verdicts (find_verdict_turn/_accept_hit, pr-8efa789) and waiting_for_input/_poll_waiting,
+      plus this PR launch_retries/_start_op/_record_failure/per-scenario grace; master
+      immediate INPUT_REQUIRED for no-window scenarios was dropped because create
+      retries replace it (R5/E5). project.yaml: master registry + this PR entry; verified
+      no master note lost across 515 shared PR entries. Two integration fixes: (1)
+      _needs_polling now keeps a scenario whose waiting retry record is due in pending
+      so a stale record is reconciled even when a verdict landed (E4), and a windowless
+      scenario stays pending while its retry is outstanding; (2) _launch_fresh no
+      longer aborts the whole relaunch when the computed window name cannot be derived
+      from pr_data. Earlier review/QA verdicts (incl. NEEDS_WORK on TUI-restart-mid-backoff
+      and INPUT_REQUIRED on the scenario-9 instruction-file Then) are PRESERVED but
+      NOT re-approved - the merge materially changed the poll loop, so fresh native
+      review + QA must re-evaluate. QA caveats still apply: use a dedicated test tmux
+      socket/isolated state, never the real pm-project_manager-5b29c418 session; fake-claude
+      hold timers per the earlier note. Handoff to native review/QA.'
+    created_at: '2026-10-29T02:21:44Z'
+    last_edited: '2026-10-29T02:21:44Z'
+  - id: note-5e625c5
+    text: 'Review-loop cd51 i1 (2026-10-29): fixed a regression in the dead-pane verdict
+      collection added by 600fd168. _scan_waiting_scenarios hands a lost INPUT_REQUIRED
+      wait back to the retry path (worker asked for input, then its pane/window was
+      destroyed) by clearing the verdict; the dead-pane collection then re-read that
+      stale INPUT_REQUIRED out of the dead worker''s transcript, so the wait was cleared
+      and never relaunched and the run finalized INPUT_REQUIRED with no worker left
+      to answer. The collection is now skipped while a dropped wait is in recovery
+      (local `recovered_waits` guard, cleared once a new worker attempt starts). Also
+      de-duplicated _accept_hit''s verdict-settling tail into _settle and removed
+      a redundant pending.add loop (already covered by _needs_polling). Spec updated:
+      impl.md R9a + E9. Tests: tests/test_qa_launch_retry.py 34 passed (2 new: test_dropped_waiting_attempt_is_relaunched_not_recollected,
+      test_recovered_wait_collects_a_verdict_from_its_new_worker; _base_patches now
+      honours the requested verdict tuple like the real helpers). Full suite (scratch
+      venv, PATH=/usr/bin:$PATH): 4513 passed, 1 skipped, 1 failed — only test_hook_events::test_installer_writes_standalone_receiver,
+      which fails on master too. QA note: the new E9 case (input wait dropped by a
+      destroyed window) is worth a story; the pre-existing "window gone during PASS
+      verification" residual is unchanged. (2026-10-29T03:20:00Z)'
+    created_at: '2026-10-29T03:16:55Z'
+    last_edited: '2026-10-29T03:16:55Z'
+  - id: note-a7fc305
+    text: 'Review-loop cd51 i2 (2026-10-29): fixed a second path for the E9/R9a "do
+      not resurrect a cleared INPUT_REQUIRED" regression. i1 guarded it with a loop-local
+      set, but a held run scans for dropped waits in _hold_for_follow_up and hands
+      the dropped scenario to a *fresh* _poll_tmux_verdicts invocation (and the controller
+      can restart in between), so the guard was empty in exactly the cases it exists
+      for: the reopened loop re-read the dead worker INPUT_REQUIRED out of its transcript
+      and settled the scenario terminally with no worker left to answer. The guard
+      now lives on the state (QALoopState.dropped_wait_verdicts), is persisted in
+      qa_resume.json, is set where _scan_waiting_scenarios records a drop, and is
+      cleared when a background launch reports that a new worker started (or the wait
+      is settled terminally). Tests: test_hold_dropped_wait_is_relaunched_not_recollected
+      (drops in the hold scan, then runs the reopened loop; fails before the fix)
+      and test_dropped_wait_guard_survives_a_restart. Spec updated: impl.md R9a +
+      E9a. Full suite (scratch venv, PATH=/usr/bin:$PATH): 4515 passed, 1 skipped,
+      1 failed - only test_hook_events::test_installer_writes_standalone_receiver,
+      verified failing on origin/master in a detached worktree too. Not changed, deliberately:
+      (a) verification_failures is still in-memory only, so a restart during a flagged
+      re-evaluation re-collects the stale PASS and re-runs the verifier (bounded by
+      qa-verify-retries, converges to NEEDS_WORK rather than a false PASS) - documented
+      in R9a; (b) the QA-open question about prompt_gen.generate_qa_child_prompt instruction
+      block (unreachable because both launch paths clear instruction_path) is untouched:
+      keeping the ref on the worker vs deleting the block is a product decision, not
+      a review fix; (c) a restart mid-concretizer now tears the attempt down and re-runs
+      the concretizer (create retry) instead of adopting it - pr-3201ea8 must run
+      any adoption before the poll loop classifies a windowless, worker-less scenario
+      as a create failure. QA note: the E9a case (a held INPUT_REQUIRED whose worker
+      pane dies) is worth a story - it exercises the hold loop plus the reopened loop,
+      not just a live-loop tick.'
+    created_at: '2026-10-29T03:51:57Z'
+    last_edited: '2026-10-29T03:51:57Z'
+  - id: note-3c7e6ff
+    text: 'Review-loop cd51 i3 (2026-10-29): fresh native review of the merged branch
+      (f52145b9 + i1/i2) found nothing to change — PASS, no code edits, no new commits
+      beyond this note. What was verified: (a) no blocking call remains in _poll_tmux_verdicts
+      except the 5 s poll tick and the pre-existing 2 s verification follow-up Enter
+      sleep; every non-progress branch of the per-scenario state machine either schedules
+      a retry or discards from pending, so a failing worker cannot livelock or delay
+      aggregation; (b) _worker_has_started is correct against the real launcher: build_claude_shell_cmd
+      eagerly re-links the transcript symlink to a fresh UUID, so a relaunched worker
+      that never started is a dangling symlink (exec, not exit) and an old verdict
+      cannot be read back through it — matches tests/test_qa_launch_retry.py::test_exec_and_exit_failures_are_distinguished;
+      (c) R9a guards (verification_failures + persisted dropped_wait_verdicts) hold
+      across the hold→reopen handoff and a restart; (d) launch_retries/dropped_wait_verdicts
+      round-trip through qa_resume.json, and the launching→running+attempts+1 conversion
+      bounds a controller that keeps dying mid-launch; (e) qa_status renders (launch-retry:n/6)
+      as a non-verdict and no other consumer parses that string (finalize prompt uses
+      state.scenario_verdicts). Tests (scratch venv, PATH=/usr/bin:$PATH): tests/test_qa_launch_retry.py
+      + test_qa_loop.py + test_qa_input_required.py = 201 passed; targeted subset
+      -k "qa or container or verdict or tmux or hook" = 1359 passed, 1 failed — only
+      test_hook_events::test_installer_writes_standalone_receiver, re-verified failing
+      on origin/master in a detached worktree. A full-suite run in this container
+      hangs in tests/test_popup_session_code.py::test_main_for_session_override (unrelated,
+      environment-specific — zombie-child wait), so the last full-suite evidence remains
+      the i2 note (4515 passed, 1 skipped, 1 known failure). Minor inert observations,
+      deliberately not changed: completed scenarios keep their launch_retries record
+      (status only renders waiting/launching, and a stale waiting record is reconciled
+      in one tick per E4); _start_op''s detail="stopped" is unreachable by the apply
+      block because the loop exits on the stop tick. Still open and unchanged, for
+      QA/signoff: the QA NEEDS_WORK on TUI-restart-mid-backoff and the scenario-9
+      INPUT_REQUIRED Then need fresh QA against this HEAD; the unreachable prompt_gen.generate_qa_child_prompt
+      instruction block is pre-existing (origin/master also clears instruction_path
+      in both launch paths) and remains a product decision, not a review fix.'
+    created_at: '2026-10-29T04:39:12Z'
+    last_edited: '2026-10-29T04:39:12Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
 - id: pr-00d5023
   plan: bugs
   title: 'Bug: picker/pr start ignore a PR window still named by its pre-gh_pr_number
@@ -38196,6 +38536,33 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-084e9a3
+  plan: bugs
+  title: 'Bug: stopping QA while verdict verification is in flight crashes the QA
+    thread and records ERROR'
+  branch: pm/pr-084e9a3-bug-stopping-qa-while-verdict-verification-is-in-f
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py _poll_tmux_verdicts, verification-flag
+    follow-up path (~line 3203-3208). Repro (host mode, fake-claude, 3 scenarios):
+    start QA with `t`; once all three PASS verdicts are verifying (verifier panes
+    created), press `zz t` to stop the loop. poll_for_verdict stop_check makes each
+    verification return None, which _verify_single_scenario reports as "verifier pane
+    disappeared" -> Verification FLAGGED -> the follow-up path runs send_keys(pane_id,
+    followup) then send_keys(pane_id, "") 1 s later; the target pane (concretizer/worker
+    left in the scenario window) can exit in between, so the second send-keys raises
+    subprocess.CalledProcessError and the whole QA background thread crashes ("QA
+    background thread crashed for <pr>", verdict ERROR, "QA thread crashed") instead
+    of a clean stop. Observed 2026-10-28 on pr-1ab9075 QA scenario 6: 14:48:59 stop,
+    14:48:59 "Verification: pane disappeared for scenario 7/8/9", 14:49:00 "Verification
+    FLAGGED scenario 7", 14:49:01 ERROR QA background thread crashed at tmux send-keys
+    -t %37 "" Enter. Expected: a stop while verifying settles cleanly (no follow-up
+    messaging, no crash).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T15:11:27.651194+00:00'
+  updated_at: '2026-10-28T15:11:27.651194+00:00'
 - id: pr-f98ac63
   plan: bugs
   title: 'Bug: prefix+P popup dispatch from a PR window resolves the session tag from
@@ -38250,75 +38617,78 @@ prs:
   notes: []
 - id: pr-592e4bd
   plan: improvements
-  title: Route QA scenario refinement and execution through claude-mixed work models; keep other
-    sessions on main Claude
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
   status: pending
   depends_on: []
-  description: 'The user expects the main Claude subscription to run out before reset. Integrate
-    the existing claude-mixed/work-model routing promptly so autonomous QA scenario refinement
-    and execution workers use the work account; all other PM sessions retain the main account
-    and plain Claude binary for remote control. Keep Opus5.5/high effort: work/claude-opus-5-5
-    for scenario refinement (qa_concretize) and execution (qa_scenario) workers, claude-opus-5-5
-    for the other roles unless the user changes that policy.
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
 
 
     Current integration points and gaps:
 
-    - PM already resolves models/providers independently for qa_planning, qa_scenario, qa_concretize,
-    qa_verification and qa_finalize via model_config.py, pm model set, and qa_loop._resolve_qa_model.
-    Reuse this configuration and the common launcher boundary rather than adding a parallel
-    scheduler.
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
 
-    - claude_launcher.py currently hardcodes the claude executable. The user''s host launcher
-    is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py with
-    ~/.config/claude-router/routes.json. The anthropic-work backend selects the work/ prefix,
-    strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
     on each request. Keep account credentials on the host; do not embed them in project.yaml,
     generated launch commands, logs or captures.
 
-    - Existing QA containers use slirp4netns. Probes from a real QA container failed to connect
-    to port8790 at both127.0.0.1 and host.containers.internal; the host router is up on127.0.0.1:8790.
-    Provide a tested container-compatible route/launcher using the existing host router without
-    publicly exposing the credential-bearing router or changing global networking for unrelated
-    sessions. Host QA must work too. Do not silently fall back to the main account when work
-    routing is unavailable.
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
 
-    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive QA
-    session from scenario-worker targeting so s0 stays on main/plain Claude and remains available
-    for remote control. Planning, verification, finalization, implementation, review, sign-off
-    and other interactive sessions also stay on main/plain Claude. Preserve fake-claude behavior,
-    hooks, transcript discovery and session identity.
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
 
 
     Acceptance:
 
-    A configured project can select the launcher/model route for QA scenario refinement and
-    execution workers only, with existing overrides and resumed/relaunched workers handled consistently.
-    Normal sessions retain their current main binary/account/model; no global claude replacement,
-    global account swap, or accidental model downgrade. Route selection is visible without exposing
-    credentials. Startup/auth/router errors explain the required remedy and leave a recoverable
-    state, not an unexplained human-judgment verdict or fallback billed to the main account.
-    Validate initial worker launch, replacement/retry and restart adoption, plus refinement
-    launch/retry paths and unaffected s0, planner, verifier, finalizer and review launch commands.
-    Add focused regressions and a real container/host smoke using a harmless prompt through
-    the work route when authentication is available; verify actual backend/model routing and
-    normal hooks/transcript output. Keep manual merge/spec-review gates.
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
 
 
-    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host smoke
-    through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result ok, reported model
-    work/claude-opus-5-5). Container transport and hooks/transcript smoke are still required.
-    Do not change login credentials yourself or copy tokens into containers. Host scripts claude-work-ping
-    / claude-work-expiry document the current refresh workflow; the router itself only reads
-    the token and does not refresh it.
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
 
 
-    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery changes;
-    keep this PR focused on role/account routing. No dependency on the larger Codex integration/refactor
-    is required. After merge, configure this project''s QA scenario refinement and execution
-    workers to the validated work route; leave already running sessions intact unless the user
-    requests migration.
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
 
     '
   agent_machine: null
@@ -38331,58 +38701,61 @@ prs:
   merged_at: null
   notes:
   - id: note-da1f854
-    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize) and execution
-      (qa_scenario) through the work account, retaining Opus5.5/high. All other roles, including
-      interactive QA s0, planning, verification and finalization, stay on main/plain Claude
-      for RC. User work login is complete; a host claude-mixed work/claude-opus-5-5 smoke returned
-      ok. Container/hook/transcript validation remains required. Main-account session limit
-      resets18:40UTC; supervisor will nudge the blocked non-QA runs after reset and shepherd
-      this PR to sign-off, preserving manual merge/spec gates.'
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
   - id: note-ae7cf29
-    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review. Three things
-      for this branch:
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
 
 
-      1. S127''s restart expectation is now the observable contract, not a cosmetic log: after
-      a plain TUI restart with auto-start off, the PR at qa whose return record says awaiting:
-      qa is started exactly once when the live `pm qa run` ends — one qa-<pr> window set, one
-      verifier, one finalizer, one qa_status.json — and no second loop ever starts over the
-      live run. master''s implementation also logs "Sign-off REQA for <pr> — QA starts once
-      the QA run another process drives ends" once per return episode (first poll tick or mount),
-      so an assertion on that line still holds there, but it is not the contract. Please relax
-      S127''s Then accordingly rather than requiring the line.
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
 
 
-      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the owed start
-      in app._pending_auto_qa + app._reqa_waiting — memory only, which is the bug pr-db3bf10
-      fixes. master now persists the obligation in signoff_return.awaiting + a qa_run.json run
-      record, reconciles it from qa_loop_ui.poll_qa_state and App.on_mount regardless of the
-      auto-start switch, and gates every starter (sign-off hop, auto-start pass, pm pr auto-sequence)
-      on signoff.claim_return_launch(..., require_status="qa"). On merge, route the REQA deferral
-      through qa_loop_ui.start_owed_reqa / reconcile_owed_reqa and drop the in-memory pending
-      entry: otherwise the durable path claims while the in-memory path calls start_qa directly,
-      and the two can each start a loop for the same obligation.
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
 
 
-      3. run_driven_elsewhere exists on both sides with the same signature and semantics. master''s
-      version has only qa_run.json (written at the top of run_qa_sync / resume_qa_sync, owner
-      pid + owner_start) and reuses resume_owned_elsewhere; this branch''s richer record set
-      (write_launch_record, own_run_driven_since, run_overlaps_own_run, launched_elsewhere)
-      should win on merge.'
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
     created_at: '2026-10-28T15:57:32Z'
     last_edited: '2026-10-28T15:57:32Z'
   - id: note-9b00f90
     text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
-      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd) but goes
-      further: a failed launch is retried up to 3 times and then reported as LAUNCH_FAILED (retryable)
-      instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
-      expects a single attempt and latest_verdict == "ERROR"; after both merge, update it to
-      expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR as an alias.
-      The no-traceback behavior is preserved (ReviewLaunchError is caught with _log.error, not
-      _log.exception), and _launch_review_window keeps the "Review window launch failed (rc=N):
-      <detail>" message shape.'
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39

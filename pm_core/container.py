@@ -365,6 +365,81 @@ def _run_runtime(*args: str, check: bool = True,
     return result
 
 
+# Resource-exhaustion signatures in runtime output.  A worker launch that
+# hits one of these is a host/container problem, not an agent verdict, so
+# callers surface the named cause and remediation instead of a bare failure.
+# Keyring EDQUOT reads "unable to create session key: disk quota exceeded"
+# under runc but "create keyring `…`: Disk quota exceeded" under crun; a bare
+# "disk quota exceeded" is a filesystem quota and is left unclassified.
+_KEYRING_MARKERS = ("session key", "keyring", "edquot")
+_PID_MARKERS = ("cannot fork", "fork: retry", "fork: resource temporarily",
+                "pids limit", "pids.max")
+
+
+def classify_runtime_error(text: str, name: str | None = None) -> str | None:
+    """Name the resource-exhaustion cause in container-runtime output.
+
+    Returns a short cause plus remediation for keyring-quota and PID-limit
+    exhaustion, or None when *text* matches neither.
+    """
+    low = (text or "").lower()
+    if any(m in low for m in _KEYRING_MARKERS):
+        return ("container keyring quota exhausted (kernel key quota, "
+                "EDQUOT) — reap orphaned containers "
+                "(see pr-1139060) or raise kernel.keys.maxkeys / "
+                "kernel.keys.maxbytes")
+    if any(m in low for m in _PID_MARKERS):
+        restart = (f" with `{_get_runtime()} restart {name}`"
+                   if name else "")
+        return ("container process (PID) limit exhausted (cannot fork) — "
+                f"restart the container{restart}; its files are kept")
+    return None
+
+
+def runtime_error_summary(text: str, name: str | None = None) -> str:
+    """Classified cause for *text*, else its last non-empty lines."""
+    classified = classify_runtime_error(text, name)
+    if classified:
+        return classified
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    tail = " | ".join(lines[-2:])
+    return tail[:300] if tail else "no error output"
+
+
+def launch_error_summary(exc: BaseException, name: str | None = None) -> str:
+    """Summarise a container-launch exception, preferring runtime stderr."""
+    text = ""
+    if isinstance(exc, subprocess.CalledProcessError):
+        text = "\n".join(str(p) for p in (exc.stderr, exc.output) if p)
+    return runtime_error_summary(text or str(exc), name)
+
+
+def diagnose_exec_failure(name: str) -> str:
+    """Probe why a worker ``exec`` into container *name* died.
+
+    Returns a cause string, or "" when the container is running and a
+    trivial exec now succeeds (the failure was transient).  Bounded by
+    short runtime timeouts; never raises.
+    """
+    try:
+        insp = _run_runtime("inspect", "-f", "{{.State.Status}}", name,
+                            check=False, timeout=10)
+        if insp.returncode != 0:
+            return (classify_runtime_error(insp.stderr, name)
+                    or f"container {name} not found")
+        status = insp.stdout.strip()
+        if status != "running":
+            return f"container {name} is {status or 'not running'}"
+        probe = _run_runtime("exec", name, "true", check=False, timeout=15)
+        if probe.returncode == 0:
+            return ""
+        return runtime_error_summary(f"{probe.stderr}\n{probe.stdout}", name)
+    except subprocess.TimeoutExpired:
+        return f"container runtime did not answer for {name} (timed out)"
+    except Exception as exc:
+        return f"could not probe container {name}: {exc}"
+
+
 def container_is_running(name: str) -> bool:
     """Return True if a container with *name* exists and is running."""
     result = _run_runtime(

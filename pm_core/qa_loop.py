@@ -44,6 +44,7 @@ from pm_core.verdict_transcript import (
     VerdictHit,
     extract_reason_from_text,
     extract_verdict_from_transcript,
+    extract_verdict_reason_from_transcript,
     find_verdict_turn,
     read_latest_assistant_text,
 )
@@ -64,8 +65,9 @@ _VERDICT_GRACE_PERIOD = 30  # QA sessions take a while to run
 _PLANNER_TIMEOUT = 60 * 60  # seconds to wait for planner output
 _PLANNER_GRACE = 15  # seconds before accepting planner completion
 _DEFAULT_MAX_SCENARIOS = 0  # 0 = unlimited
-_SCENARIO_MAX_RETRIES = 10  # max times to relaunch a dead scenario
+_SCENARIO_MAX_RETRIES = 6  # max relaunch attempts per scenario per run
 _SCENARIO_RETRY_BASE = 5  # base seconds for exponential backoff
+_SCENARIO_RETRY_MAX_DELAY = 300  # cap on a single backoff (seconds)
 _DEFAULT_VERIFICATION_MAX_RETRIES = 3
 
 
@@ -155,6 +157,11 @@ class QAScenario:
     title: str
     focus: str
     instruction_path: str | None = None
+    # Original pm/qa-relative instruction reference.  ``instruction_path``
+    # is rewritten to the installed scratch path and then cleared once the
+    # concretizer has inlined the steps, so a retry (or a resumed run) needs
+    # this to find the source file again.
+    instruction_source: str | None = None
     artifact_paths: list[str] = field(default_factory=list)
     mock_ids: list[str] = field(default_factory=list)
     steps: str = ""
@@ -252,6 +259,16 @@ class QALoopState:
     # prevents an endless relaunch loop for a worker that asks for input and
     # then dies.
     wait_relaunch_count: dict[int, int] = field(default_factory=dict)
+    # Scenarios whose provisional INPUT_REQUIRED was deliberately cleared so
+    # a fresh worker attempt can be made (a lost wait handed back to the
+    # retry path).  The cleared verdict is still the last turn in the dead
+    # worker's transcript, so the dead-pane collection must not read it back
+    # — that would settle a recoverable wait as a terminal result with no
+    # worker left to answer.  Persisted because the drop usually happens in
+    # the hold loop, which hands the scenario to a *fresh*
+    # ``_poll_tmux_verdicts`` invocation (and may be interrupted by a
+    # restart).  Cleared once a new worker attempt starts.
+    dropped_wait_verdicts: set[int] = field(default_factory=set)
     # Set by the TUI when it discards this run (fresh start / manual
     # stop-and-restart) and clears the resume snapshot.  In-memory only: a
     # superseded run must not rewrite the snapshot afterwards, or a later
@@ -266,6 +283,11 @@ class QALoopState:
     # planning.  Non-empty forces the overall verdict to NEEDS_WORK so the
     # change gets reviewed before sign-off.
     planner_code_changes: list[str] = field(default_factory=list)
+    # Per-scenario launch-retry records, keyed by scenario index (see
+    # _poll_tmux_verdicts): attempts, kind, cause, retry_at (wall clock,
+    # None while not waiting) and prior worker session ids.  Persisted in
+    # the resume snapshot so a restart keeps the retry budget and deadline.
+    launch_retries: dict[int, dict] = field(default_factory=dict)
     # Select the new qa-<pr> window on first-time creation.  Only
     # user-initiated starts (t / z t / zz t) set this; scheduler-driven
     # starts leave attached clients where they are.
@@ -809,9 +831,11 @@ def _write_status_file(status_path: Path, pr_id: str,
                        verification_failures: dict[int, int] | None = None,
                        error: str = "",
                        verdict_reasons: dict[int, str] | None = None,
-                       waiting_for_input: set[int] | None = None) -> None:
+                       waiting_for_input: set[int] | None = None,
+                       launch_retries: dict[int, dict] | None = None) -> None:
     """Atomically write the qa_status.json file."""
     _verifying = verifying_scenarios or set()
+    _retries = launch_retries or {}
     _queued = queued_scenarios or set()
     _verify_fails = verification_failures or {}
     _reasons = verdict_reasons or {}
@@ -827,8 +851,22 @@ def _write_status_file(status_path: Path, pr_id: str,
         })
     for s in scenarios:
         verdict = scenario_verdicts.get(s.index, "")
+        reason = _reasons.get(s.index, "")
         fails = _verify_fails.get(s.index, 0)
-        if s.index in _verifying:
+        rec = _retries.get(s.index) or {}
+        if not verdict and rec.get("state") in ("waiting", "launching"):
+            # Worker launch failed and is being retried: not a verdict.
+            attempt = int(rec.get("attempts", 0))
+            if rec["state"] == "waiting":
+                attempt += 1
+            verdict = f"(launch-retry:{attempt}/{_SCENARIO_MAX_RETRIES})"
+            label = _LAUNCH_FAILURE_LABELS.get(rec.get("kind", ""), "launch failed")
+            reason = f"{label}: {rec.get('cause') or 'unknown cause'}"
+            if rec["state"] == "waiting" and rec.get("retry_at"):
+                reason += time.strftime(
+                    " — next attempt at %H:%M:%S",
+                    time.localtime(float(rec["retry_at"])))
+        elif s.index in _verifying:
             if fails:
                 verdict = f"{verdict} (verifying:{fails})" if verdict else f"verifying:{fails}"
             else:
@@ -842,7 +880,7 @@ def _write_status_file(status_path: Path, pr_id: str,
             "index": s.index,
             "title": s.title,
             "verdict": verdict,
-            "verdict_reason": _reasons.get(s.index, ""),
+            "verdict_reason": reason,
             "window_name": s.window_name or "",
             "waiting_for_input": s.index in _waiting,
         })
@@ -891,6 +929,7 @@ def _scenario_to_resume_dict(s: QAScenario) -> dict:
         "title": s.title,
         "focus": s.focus,
         "instruction_path": s.instruction_path,
+        "instruction_source": s.instruction_source,
         "artifact_paths": list(s.artifact_paths),
         "mock_ids": list(s.mock_ids),
         "steps": s.steps,
@@ -915,6 +954,7 @@ def _scenario_from_resume_dict(d: dict) -> QAScenario:
         title=d.get("title", ""),
         focus=d.get("focus", ""),
         instruction_path=d.get("instruction_path"),
+        instruction_source=d.get("instruction_source"),
         artifact_paths=list(d.get("artifact_paths") or []),
         mock_ids=list(d.get("mock_ids") or []),
         steps=d.get("steps", ""),
@@ -942,6 +982,12 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     """
     if not state.qa_workdir or state.superseded:
         return
+    # Background launch / verification threads may add keys while we
+    # serialise.  A shallow copy can miss a key inserted concurrently but
+    # never raises ("changed size during iteration" comes from the iterator
+    # protocol); the snapshot is rewritten every poll tick anyway.
+    verdicts = dict(state.scenario_verdicts)
+    reasons = dict(state.scenario_verdict_reasons)
     data = {
         "pr_id": state.pr_id,
         "loop_id": state.loop_id,
@@ -955,12 +1001,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "use_containers": bool(use_containers),
         "concurrency_cap": int(concurrency_cap or 0),
         "finalize_verdict": state.finalize_verdict,
-        "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
-        "scenario_verdict_reasons": {
-            str(k): v for k, v in state.scenario_verdict_reasons.items()
-        },
+        "scenario_verdicts": {str(k): v for k, v in verdicts.items()},
+        "scenario_verdict_reasons": {str(k): v for k, v in reasons.items()},
         "scenario_verdict_sources": {
-            str(k): v for k, v in state.scenario_verdict_sources.items()
+            str(k): v
+            for k, v in dict(state.scenario_verdict_sources).items()
         },
         "verified_scenarios": sorted(state.verified_scenarios),
         "waiting_for_input": sorted(state.waiting_for_input),
@@ -974,6 +1019,10 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
         "queued_indices": sorted(queued_indices or set()),
+        "dropped_wait_verdicts": sorted(state.dropped_wait_verdicts),
+        "launch_retries": {
+            str(k): v for k, v in state.launch_retries.items()
+        },
         "scenarios": [_scenario_to_resume_dict(s) for s in state.scenarios],
         "scenario_0": (
             _scenario_to_resume_dict(state.scenario_0)
@@ -1331,6 +1380,14 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
         resume_data.get("planner_code_changes") or [])
+    state.launch_retries = {
+        int(k): dict(v)
+        for k, v in (resume_data.get("launch_retries") or {}).items()
+        if isinstance(v, dict)
+    }
+    state.dropped_wait_verdicts = {
+        int(i) for i in (resume_data.get("dropped_wait_verdicts") or [])
+    }
     return state
 
 
@@ -2194,20 +2251,30 @@ def _install_instruction_file(pm_root: Path, scenario: QAScenario,
     The instruction library lives in the pm project, not in the target repo.
     This copies the referenced file into ``{scratch_path}/qa-instructions/``
     and rewrites ``scenario.instruction_path`` to the absolute path as seen
-    by the agent (``{scratch_dir}/qa-instructions/{filename}``).
+    by the agent (``{scratch_dir}/qa-instructions/{filename}``).  The
+    original reference is remembered in ``scenario.instruction_source`` so a
+    retry can find the source again after ``instruction_path`` has been
+    cleared.
 
     *scratch_path* is the host-side path; *scratch_dir* is the path the
     agent sees (same on host, ``/scratch`` in containers).
     """
-    if not scenario.instruction_path:
+    if not scenario.instruction_path and not scenario.instruction_source:
         return
-    # instruction_path is e.g. "instructions/tui-manual-test.md"
-    src = pm_root / "qa" / scenario.instruction_path
+    # instruction_path is e.g. "instructions/tui-manual-test.md"; once an
+    # attempt has installed the file it holds the scratch path instead, so
+    # prefer the remembered source.  A create retry (or a resumed run)
+    # re-clones and re-concretizes the scenario, and without the source the
+    # retried concretizer would silently lose the instruction steps.
+    source = scenario.instruction_source or scenario.instruction_path
+    src = pm_root / "qa" / source
     if not src.is_file():
         _log.warning("Instruction file %s not found — clearing instruction_path",
                       src)
         scenario.instruction_path = None
+        scenario.instruction_source = None
         return
+    scenario.instruction_source = source
     dest_dir = scratch_path / "qa-instructions"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
@@ -2343,13 +2410,18 @@ def _launch_scenarios_in_tmux(
     repo_root: Path | None,
     workdir_path: str,
     pm_root: Path | None = None,
-    _status_scenarios: list | None = None,
+    scenarios: list[QAScenario] | None = None,
+    write_status: bool = True,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
     Both phases run in parallel: workdir cloning, concretizer window creation,
     and agent launch all happen concurrently across scenarios.  The scenario
     agent pane is split as soon as its concretizer finishes.
+
+    *scenarios* defaults to ``state.scenarios``; the verdict poll loop passes
+    a single scenario (from a background thread) together with
+    ``write_status=False`` and writes the status file itself.
     """
     from pm_core import tmux as tmux_mod
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
@@ -2389,8 +2461,10 @@ def _launch_scenarios_in_tmux(
         # scenario).  The concretizer inlines the file whole, so this is the
         # only copy it needs.
         instruction_content: str | None = None
-        if pm_root and scenario.instruction_path:
-            src = pm_root / "qa" / scenario.instruction_path
+        instruction_source = (scenario.instruction_source
+                              or scenario.instruction_path)
+        if pm_root and instruction_source:
+            src = pm_root / "qa" / instruction_source
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2428,6 +2502,8 @@ def _launch_scenarios_in_tmux(
         if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
+            state.scenario_verdict_reasons[scenario.index] = (
+                "tmux window creation failed")
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2438,10 +2514,11 @@ def _launch_scenarios_in_tmux(
                             clone_path, scratch_path, transcript, win_name,
                             instruction_content))
 
+    targets = state.scenarios if scenarios is None else scenarios
     prep_threads = [
         threading.Thread(target=_prepare_scenario, args=(sc,), daemon=True,
                          name=f"prepare-s{sc.index}")
-        for sc in state.scenarios
+        for sc in targets
     ]
     for t in prep_threads:
         t.start()
@@ -2450,11 +2527,11 @@ def _launch_scenarios_in_tmux(
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
-    if state.qa_workdir and pending:
+    if write_status and state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
             state.pr_id,
-            _status_scenarios if _status_scenarios is not None else state.scenarios,
+            state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
             verdict_reasons=state.scenario_verdict_reasons,
@@ -2491,6 +2568,9 @@ def _launch_scenarios_in_tmux(
             return
         if refined_steps:
             scenario.steps = refined_steps
+        if state.stop_requested:
+            # A stopped run must not spawn a worker after the fact.
+            return
 
         scenario_env: dict[str, str] = {}
         child_cmd, pane_cwd = _build_scenario_run_cmd(
@@ -2511,9 +2591,11 @@ def _launch_scenarios_in_tmux(
                 scenario.session_id = session_id_from_transcript(transcript)
             except Exception:
                 scenario.session_id = None
-        except Exception:
+        except Exception as exc:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
+            state.scenario_verdict_reasons[scenario.index] = (
+                f"worker pane creation failed: {exc}")
 
         if scenario.window_name:
             _log.info("Launched scenario %d (%s) in window %s",
@@ -2556,9 +2638,12 @@ def _launch_scenarios_in_containers(
     repo_root: Path | None,
     workdir_path: str,
     pm_root: Path | None = None,
-    _status_scenarios: list | None = None,
+    scenarios: list[QAScenario] | None = None,
+    write_status: bool = True,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
+
+    *scenarios* / *write_status*: see :func:`_launch_scenarios_in_tmux`.
 
     Each scenario gets:
       1. A local clone of the repo (standalone .git, no worktree pointers)
@@ -2617,8 +2702,10 @@ def _launch_scenarios_in_containers(
         # concretizer inlines the file whole, so this is the only copy it
         # needs.
         instruction_content: str | None = None
-        if pm_root and scenario.instruction_path:
-            src = pm_root / "qa" / scenario.instruction_path
+        instruction_source = (scenario.instruction_source
+                              or scenario.instruction_path)
+        if pm_root and instruction_source:
+            src = pm_root / "qa" / instruction_source
             if src.is_file():
                 try:
                     instruction_content = src.read_text()
@@ -2652,9 +2739,16 @@ def _launch_scenarios_in_containers(
                 pr_id=state.pr_id,
             )
             scenario.container_name = cname
-        except Exception:
+        except Exception as exc:
             _log.error("Failed to create container for scenario %d — aborting scenario",
                        scenario.index, exc_info=True)
+            # No container name in the remediation: a create failure usually
+            # means the container was never made, so "restart the container
+            # <name>" (the PID-exhaustion advice) would name something that
+            # does not exist.
+            state.scenario_verdict_reasons[scenario.index] = (
+                "container create failed: "
+                + container_mod.launch_error_summary(exc))
             return
 
         win_name = _scenario_window_name(pr_data, scenario.index)
@@ -2677,6 +2771,8 @@ def _launch_scenarios_in_containers(
         if not concretize_pane:
             _log.warning("Failed to create window for scenario %d",
                          scenario.index)
+            state.scenario_verdict_reasons[scenario.index] = (
+                "tmux window creation failed")
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2686,10 +2782,11 @@ def _launch_scenarios_in_containers(
             pending.append((scenario, concretize_pane, win_name, cname, transcript,
                             clone_path, instruction_content))
 
+    targets = state.scenarios if scenarios is None else scenarios
     prep_threads = [
         threading.Thread(target=_prepare_scenario, args=(sc,), daemon=True,
                          name=f"prepare-s{sc.index}")
-        for sc in state.scenarios
+        for sc in targets
     ]
     for t in prep_threads:
         t.start()
@@ -2698,11 +2795,11 @@ def _launch_scenarios_in_containers(
 
     # Write status with window names so the dashboard is navigable
     # while concretizers run (before the polling loop starts).
-    if state.qa_workdir and pending:
+    if write_status and state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
             state.pr_id,
-            _status_scenarios if _status_scenarios is not None else state.scenarios,
+            state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
             verdict_reasons=state.scenario_verdict_reasons,
@@ -2738,6 +2835,9 @@ def _launch_scenarios_in_containers(
             return
         if refined_steps:
             scenario.steps = refined_steps
+        if state.stop_requested:
+            # A stopped run must not spawn a worker after the fact.
+            return
 
         scenario_env: dict[str, str] = {}
         exec_cmd, pane_cwd = _build_scenario_run_cmd(
@@ -2757,9 +2857,11 @@ def _launch_scenarios_in_containers(
                 scenario.session_id = session_id_from_transcript(transcript)
             except Exception:
                 scenario.session_id = None
-        except Exception:
+        except Exception as exc:
             _log.warning("Failed to split scenario pane for scenario %d",
                          scenario.index, exc_info=True)
+            state.scenario_verdict_reasons[scenario.index] = (
+                f"worker pane creation failed: {exc}")
 
         if scenario.window_name:
             _log.info("Launched scenario %d (%s) in container %s (window %s)",
@@ -2878,6 +2980,28 @@ def _build_scenario_run_cmd(
 # Scenario retry helpers
 # ---------------------------------------------------------------------------
 
+def _kill_windows_named(session: str, name: str | None) -> None:
+    """Kill every tmux window called *name* (by id, so duplicates all go).
+
+    A dead worker can leave its window behind (e.g. a lingering concretizer
+    pane in the initial-launch window), and a relaunch then adds a second
+    window with the same name — which makes name-based pane lookup
+    (:func:`find_claude_pane`) and dashboard navigation ambiguous.
+    Best-effort: tmux errors are logged, never raised.
+    """
+    if not name:
+        return
+    from pm_core import tmux as tmux_mod
+    from pm_core import home_window
+    try:
+        for win in tmux_mod.list_windows(session):
+            if win["name"] == name:
+                home_window.park_if_on(session, win["id"])
+                tmux_mod.kill_window(session, win["id"])
+    except Exception:
+        _log.debug("Could not kill stale window %s", name, exc_info=True)
+
+
 def _relaunch_scenario_window(
     scenario: QAScenario,
     state: QALoopState,
@@ -2892,14 +3016,24 @@ def _relaunch_scenario_window(
     a new ``docker exec`` (container mode) or ``claude`` (host mode) in a
     fresh tmux window.
 
-    Returns True if the window was recreated successfully.
+    Returns True if the window was recreated successfully.  On failure
+    the cause is recorded in ``state.scenario_verdict_reasons``.
     """
     from pm_core import tmux as tmux_mod
     from pm_core.container import is_container_mode_enabled, _runtime_available
+    if state.stop_requested:
+        # A stop (e.g. ``z t`` fresh start) killed the windows; relaunching
+        # now would orphan a worker.
+        return False
     _qa_resolution = _resolve_qa_model(pr_data, data, session_type="qa_scenario")
 
     win_name = _scenario_window_name(pr_data, scenario.index)
     use_containers = is_container_mode_enabled() and _runtime_available()
+
+    # A dead worker can leave its old window behind (e.g. a lingering
+    # concretizer pane); kill it so the relaunched window keeps a unique
+    # name for pane lookup and dashboard navigation.
+    _kill_windows_named(session, win_name)
 
     # New transcript for the relaunched session (old one is stale)
     transcript = _scenario_transcript_path(state.qa_workdir, scenario.index)
@@ -2936,9 +3070,42 @@ def _relaunch_scenario_window(
             _log.debug("Registration/rebalance failed for relaunched scenario %d",
                        scenario.index, exc_info=True)
         return True
-    except Exception:
+    except Exception as exc:
         _log.warning("Failed to relaunch scenario %d", scenario.index, exc_info=True)
+        state.scenario_verdict_reasons[scenario.index] = (
+            f"worker window relaunch failed: {exc}")
         return False
+
+
+_LAUNCH_FAILURE_LABELS = {
+    "create": "worker could not be created",
+    "exec": "worker exited before Claude started",
+    "exit": "worker exited before any verdict",
+}
+# Fallback causes when nothing more specific was recorded.  They complement
+# the kind label above (shown as "<label>: <cause>"), so don't repeat it.
+_CREATE_CAUSE = "launcher recorded no error (see the pm debug log)"
+_EXEC_CAUSE = "pane died at startup; no runtime cause found"
+_EXEC_TRANSIENT_CAUSE = ("pane died at startup; a probe exec into the "
+                         "container now succeeds (transient)")
+_EXIT_CAUSE = "pane died mid-run (killed or crashed); no runtime cause found"
+
+
+def _retry_delay(attempts: int) -> float:
+    """Backoff before relaunch number ``attempts + 1`` (5, 10, 20, … s, capped)."""
+    return min(_SCENARIO_RETRY_BASE * (2 ** attempts), _SCENARIO_RETRY_MAX_DELAY)
+
+
+def _launch_failure_reason(rec: dict) -> str:
+    """Final verdict reason for a scenario whose relaunch budget ran out.
+
+    Names the runtime cause so the INPUT_REQUIRED is not mistaken for an
+    agent asking for human judgment.
+    """
+    label = _LAUNCH_FAILURE_LABELS.get(rec.get("kind", ""), "worker failed")
+    return (f"{label} (runtime failure, not an agent verdict); gave up after "
+            f"{int(rec.get('attempts', 0))} relaunch attempt(s): "
+            f"{rec.get('cause') or 'no cause recorded'}")
 
 
 # ---------------------------------------------------------------------------
@@ -3091,6 +3258,10 @@ def _clear_waiting(state: QALoopState, idx: int,
         state.scenario_verdict_sources.pop(idx, None)
         state.scenario_verdict_reasons.pop(idx, None)
         state.verified_scenarios.discard(idx)
+    else:
+        # The verdict stays as terminal evidence, so there is nothing left
+        # for a dead-pane collection to resurrect.
+        state.dropped_wait_verdicts.discard(idx)
 
 
 @dataclass
@@ -3124,6 +3295,7 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             _log.info("Waiting scenario %d attempt superseded — polling the "
                       "new attempt from scratch", idx)
             _clear_waiting(state, idx, drop_verdict=True)
+            state.dropped_wait_verdicts.add(idx)
             result.dropped.add(idx)
             result.changed = True
             continue
@@ -3211,6 +3383,7 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
         _log.warning("Waiting scenario %d worker pane is gone with no "
                      "follow-up — handing back to the retry path", idx)
         _clear_waiting(state, idx, drop_verdict=True)
+        state.dropped_wait_verdicts.add(idx)
         result.dropped.add(idx)
         result.changed = True
     return result
@@ -3311,8 +3484,17 @@ def _poll_tmux_verdicts(
 
     If *queued_scenarios* is provided, queued scenarios are launched as
     running scenarios complete, respecting *concurrency_cap*.
+
+    A scenario whose worker could not be created, died before Claude
+    started, or exited without a verdict is relaunched on its own bounded
+    backoff (:func:`_retry_delay`).  Launches, relaunches and container
+    diagnosis run in background threads and the loop only checks
+    per-scenario deadlines, so one failing worker never holds up verdict
+    collection, verification, queued launches or a stop request for the
+    others.
     """
     from pm_core import tmux as tmux_mod
+    from pm_core import container as container_mod
 
     verify_enabled = _is_verification_enabled()
     verify_max_retries = _get_verification_max_retries()
@@ -3333,22 +3515,32 @@ def _poll_tmux_verdicts(
     ]
     _queued_indices: set[int] = {s.index for s in _launch_queue}
 
-    # Scenarios with a window that still need a verdict.  Waiting-for-input
+    # Scenarios the poll loop must keep driving.  Waiting-for-input
     # scenarios are polled separately (for a follow-up), and scenarios that
     # already carry a terminal verdict are not re-consumed — a resumed/held
     # run must not re-read a completed scenario's stale turn.  An unverified
     # PASS is still polled so a restart during verification re-runs it.
+    # A scenario with no window is either queued (handled by the launch
+    # queue) or waiting out / running a launch retry: it stays pending so
+    # the loop keeps driving it and cannot exit before the retry runs.
     def _needs_polling(s: QAScenario) -> bool:
-        if not s.window_name or s.index in state.waiting_for_input:
-            return False
+        rec = state.launch_retries.get(s.index)
+        if rec is not None and rec.get("state") == "waiting":
+            # A retry record that is still due has to be reconciled by the
+            # loop: its scenario may already have a verdict (E4), in which
+            # case the record is stale and is dropped without relaunching.
+            return True
         verdict = state.scenario_verdicts.get(s.index)
+        if not s.window_name:
+            return verdict is None and s.index not in _queued_indices
+        if s.index in state.waiting_for_input:
+            return False
         if verdict is None:
             return True
         return (verdict == VERDICT_PASS and verify_enabled
                 and s.index not in state.verified_scenarios)
 
     pending = {s.index for s in state.scenarios if _needs_polling(s)}
-    retry_counts: dict[int, int] = {}  # scenario_index -> retries used
     # Track how many verification failures each scenario has had
     verification_failures: dict[int, int] = {}
     # Scenarios currently being verified (in a background thread)
@@ -3369,29 +3561,46 @@ def _poll_tmux_verdicts(
     from pm_core.claude_launcher import WorkspacePromptWatch
     _trust_watches: dict[int, WorkspacePromptWatch] = {}
 
-    # Scenarios that failed to create a window get INPUT_REQUIRED immediately
-    # (but skip queued scenarios — they don't have windows yet by design)
-    has_failed_creation = False
-    for scenario in state.scenarios:
-        if not scenario.window_name and scenario.index not in _queued_indices:
-            _log.warning("Scenario %d has no window — marking INPUT_REQUIRED",
-                         scenario.index)
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            # Keep a specific launch failure (e.g. clone/revision mismatch).
-            state.scenario_verdict_reasons.setdefault(
-                scenario.index,
-                "worker window never created (launch failed); no verdict",
-            )
-            has_failed_creation = True
-    if has_failed_creation:
-        _write_status_file(status_path, state.pr_id, state.scenarios,
-                           state.scenario_verdicts,
-                           scenario_0=state.scenario_0,
-                           queued_scenarios=_queued_indices,
-                           verdict_reasons=state.scenario_verdict_reasons,
-                           waiting_for_input=state.waiting_for_input)
+    # Launch retries: one record per scenario that failed to launch or lost
+    # its worker (see QALoopState.launch_retries).  Background launch /
+    # diagnosis steps live in ``launch_ops`` (at most one per scenario);
+    # their outcome is applied by this thread on a later tick.
+    retries = state.launch_retries
+    launch_ops: dict[int, threading.Thread] = {}
+    launch_results: dict[int, tuple[str, bool, str]] = {}
+    launch_lock = threading.Lock()
+    # Scenarios whose INPUT_REQUIRED was deliberately cleared so the attempt
+    # can be relaunched (``_scan_waiting_scenarios`` handing a lost wait back
+    # to the retry path).  Their old verdict is still in the dead worker's
+    # transcript, so the dead-pane collection below must not read it back —
+    # that would resurrect a cleared verdict and turn a recoverable wait into
+    # a terminal INPUT_REQUIRED.  Kept on the state (and in the resume
+    # snapshot) because the drop usually happens in the hold loop, which
+    # hands the scenario to this fresh invocation.  Cleared once a new worker
+    # attempt starts.
+    dropped_waits = state.dropped_wait_verdicts
+    for rec in retries.values():
+        if rec.get("state") == "launching":
+            # The previous controller died mid-launch: re-detect from the
+            # scenario's panes on the first tick.  The attempt is spent —
+            # without this, a controller that keeps dying mid-launch would
+            # retry forever instead of exhausting the bounded budget.
+            rec["state"] = "running"
+            rec["attempts"] = int(rec.get("attempts", 0)) + 1
 
-    grace_start = time.monotonic()
+    # Verdict grace is per scenario: a relaunch only delays polling of the
+    # relaunched worker, never of its healthy siblings.
+    _start_mono = time.monotonic()
+    grace_until: dict[int, float] = {
+        idx: _start_mono + _VERDICT_GRACE_PERIOD for idx in pending}
+    verdicts_changed = False
+    # Window names last written to the status file: a background launch
+    # sets its concretizer window mid-flight, and the dashboard should be
+    # able to navigate to it before the launch finishes.
+    status_windows = {s.index: s.window_name for s in state.scenarios}
+
+    def _scenario_by_index(idx: int) -> QAScenario | None:
+        return next((s for s in state.scenarios if s.index == idx), None)
 
     def _run_verification(scenario: QAScenario, verdict: str, content: str):
         """Background thread: run verification in this scenario's
@@ -3427,9 +3636,211 @@ def _poll_tmux_verdicts(
             # and ``pending`` is also empty the loop exits before it
             # sees the result (race condition).
 
+    def _settle(scenario: QAScenario, verdict: str) -> None:
+        """Hand a scenario whose verdict is recorded to verification, or
+        free its slot for the next queued scenario."""
+        # Only PASS verdicts need verification — NEEDS_WORK and
+        # INPUT_REQUIRED already indicate problems were found.
+        # Skip re-verification for a PASS that was already verified
+        # before a restart: ``verified_scenarios`` is persisted in
+        # the resume snapshot precisely so a resumed run trusts
+        # prior verification instead of re-spawning a verifier
+        # Claude session for every completed scenario each restart.
+        if (verdict == VERDICT_PASS and verify_enabled
+                and scenario.index not in state.verified_scenarios):
+            state.latest_output = (
+                f"Scenario {scenario.index} ({scenario.title}): "
+                f"{verdict} — verifying..."
+            )
+            _notify()
+
+            verifying.add(scenario.index)
+            # pane_output fallback is only consulted when the
+            # transcript is missing — which it never is in the
+            # hook-driven path — so pass "" here instead of
+            # scraping the pane.  Each scenario's verifier pane
+            # is created once and reused across re-verifications
+            # by _verify_single_scenario.
+            t = threading.Thread(
+                target=_run_verification,
+                args=(scenario, verdict, ""),
+                daemon=True,
+                name=f"qa-verify-{state.pr_id}-{scenario.index}",
+            )
+            t.start()
+        else:
+            state.latest_output = (
+                f"Scenario {scenario.index} ({scenario.title}): "
+                f"{verdict}"
+            )
+            _notify()
+            # Scenario fully done — launch next queued if available
+            _launch_next_queued()
+
+    def _worker_has_started(scenario: QAScenario) -> bool:
+        """True once the worker's Claude session actually ran — not merely
+        once its window was created.  Claude writes its transcript (the
+        target of the per-scenario symlink) as soon as it starts."""
+        if (scenario.session_id
+                and _hook_events.read_event(scenario.session_id) is not None):
+            return True
+        tp = scenario.transcript_path
+        return bool(tp) and Path(tp).exists()
+
+    def _launch_fresh(scenario: QAScenario) -> bool:
+        """Full launch (workdir, container, concretizer, worker) of one
+        scenario that has no worker yet.  Runs in a background thread."""
+        # Tear down what a failed earlier attempt left behind: the launcher
+        # re-clones the scenario dir, and create_container would reuse a
+        # running same-name container still mounting the deleted clone; a
+        # leftover concretizer window would duplicate the window name.
+        # Kill the computed name too, not only the recorded one: a controller
+        # that died mid-launch may never have published ``window_name``, and
+        # a missed window would leave two windows with the same name for
+        # name-based pane lookup / dashboard navigation to choose between.
+        names = [scenario.window_name]
+        try:
+            names.append(_scenario_window_name(pr_data, scenario.index))
+        except Exception:
+            # The computed name is only a teardown safety net; a pr_data
+            # without the fields it needs must not abort the relaunch.
+            _log.debug("Could not compute the window name for scenario %d",
+                       scenario.index, exc_info=True)
+        for name in dict.fromkeys(n for n in names if n):
+            _kill_windows_named(session, name)
+        if use_containers:
+            # Same reasoning for the container: a create attempt can die
+            # *after* ``container run`` succeeded (e.g. the setup-sentinel
+            # timeout), so ``container_name`` was never published and the
+            # recorded name is None exactly when the leftover exists.
+            # create_container would then reuse that running container,
+            # which still mounts the clone this retry deletes and re-creates.
+            cnames = (scenario.container_name,
+                      container_mod.qa_container_name(
+                          state.pr_id, state.loop_id, scenario.index,
+                          session_tag=state.session_tag))
+            for cname in dict.fromkeys(n for n in cnames if n):
+                try:
+                    container_mod.remove_container(cname)
+                except Exception:
+                    _log.debug("Could not remove stale container %s for "
+                               "scenario %d", cname, scenario.index,
+                               exc_info=True)
+        scenario.window_name = None
+        scenario.container_name = None
+        scenario.pane_id = None
+        scenario.session_id = None
+        # Drop the previous attempt's transcript pointer too: the "did a
+        # worker start?" check must describe THIS attempt, or a stale
+        # pointer would classify a creation failure as an ``exit`` and skip
+        # the full relaunch it needs.
+        scenario.transcript_path = None
+        launch = (_launch_scenarios_in_containers if use_containers
+                  else _launch_scenarios_in_tmux)
+        launch(state, data, pr_data, session, repo_root, workdir_path,
+               pm_root=pm_root, scenarios=[scenario], write_status=False)
+        return bool(scenario.pane_id)
+
+    def _start_op(scenario: QAScenario, op: str) -> None:
+        """Run one launch step for *scenario* off the poll thread.
+
+        *op* is ``launch`` (first launch of a queued scenario), ``create``
+        (full relaunch after a creation failure), ``relaunch`` (new worker
+        window in the existing clone/container) or ``diagnose`` (probe the
+        container for why its worker died).
+        """
+        idx = scenario.index
+
+        def _run() -> None:
+            ok, detail = False, ""
+            try:
+                if state.stop_requested:
+                    detail = "stopped"
+                elif op == "diagnose":
+                    ok = True
+                    detail = container_mod.diagnose_exec_failure(
+                        scenario.container_name)
+                elif op == "relaunch":
+                    ok = _relaunch_scenario_window(
+                        scenario, state, data, pr_data, session,
+                        workdir_path)
+                else:
+                    ok = _launch_fresh(scenario)
+            except Exception as exc:
+                _log.warning("Scenario %d %s step crashed", idx, op,
+                             exc_info=True)
+                detail = f"{op} crashed: {exc}"
+            with launch_lock:
+                launch_results[idx] = (op, ok, detail)
+
+        if op != "diagnose" and idx not in state.scenario_verdicts:
+            # This attempt's own failure (if any) replaces the last cause.
+            state.scenario_verdict_reasons.pop(idx, None)
+        t = threading.Thread(target=_run, daemon=True,
+                             name=f"qa-{op}-{state.pr_id}-{idx}")
+        launch_ops[idx] = t
+        t.start()
+
+    def _record_failure(scenario: QAScenario, kind: str, cause: str) -> None:
+        """Schedule the next relaunch of *scenario*, or give up once its
+        retry budget is spent.  Never sleeps."""
+        nonlocal verdicts_changed
+        idx = scenario.index
+        if idx in state.scenario_verdicts:
+            # A verdict landed while this failure was being classified
+            # (e.g. restored from a resume snapshot).  Retry bookkeeping
+            # must never replace a completed verdict, so settle it instead
+            # of recording a launch failure — including on exhaustion.
+            pending.discard(idx)
+            verdicts_changed = True
+            _settle(scenario, state.scenario_verdicts[idx])
+            return
+        rec = retries.setdefault(idx, {"attempts": 0, "sessions": []})
+        rec["kind"] = kind
+        rec["cause"] = cause
+        sessions = rec.setdefault("sessions", [])
+        if scenario.session_id and scenario.session_id not in sessions:
+            # Keep earlier worker sessions findable: each relaunch re-points
+            # the transcript symlink at a new session.
+            sessions.append(scenario.session_id)
+        verdicts_changed = True
+        attempts = int(rec.get("attempts", 0))
+        if attempts >= _SCENARIO_MAX_RETRIES:
+            rec["state"] = "failed"
+            rec["retry_at"] = None
+            reason = _launch_failure_reason(rec)
+            _log.warning("Scenario %d: %s", idx, reason)
+            state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
+            state.scenario_verdict_reasons[idx] = reason
+            state.latest_output = (
+                f"Scenario {idx} ({scenario.title}): "
+                f"{VERDICT_INPUT_REQUIRED} — {reason}"
+            )
+            pending.discard(idx)
+            _notify()
+            _launch_next_queued()
+            return
+        delay = _retry_delay(attempts)
+        rec["state"] = "waiting"
+        rec["retry_at"] = time.time() + delay
+        label = _LAUNCH_FAILURE_LABELS.get(kind, kind)
+        _log.warning("Scenario %d %s — relaunch %d/%d in %.0fs: %s",
+                     idx, label, attempts + 1, _SCENARIO_MAX_RETRIES,
+                     delay, cause)
+        state.latest_output = (
+            f"Scenario {idx} ({scenario.title}): {label} — relaunch "
+            f"{attempts + 1}/{_SCENARIO_MAX_RETRIES} in {delay:.0f}s: {cause}"
+        )
+        _notify()
+
     def _launch_next_queued():
-        """Launch the next queued scenario if concurrency allows."""
-        if not _launch_queue:
+        """Start launching the next queued scenario if concurrency allows.
+
+        The launch (workdir, container, concretizer, worker) runs in a
+        background thread; the scenario holds its slot in ``pending`` from
+        the moment it is dequeued.
+        """
+        if not _launch_queue or state.stop_requested:
             return
         # Count currently active (pending + verifying)
         active = len(pending) + len(verifying)
@@ -3439,41 +3850,11 @@ def _poll_tmux_verdicts(
         _queued_indices.discard(scenario.index)
         _log.info("Launching queued scenario %d (%s), %d remain in queue",
                   scenario.index, scenario.title, len(_launch_queue))
-        # Launch this single scenario by temporarily swapping state.scenarios
-        orig = state.scenarios
-        state.scenarios = [scenario]
-        try:
-            if use_containers:
-                _launch_scenarios_in_containers(
-                    state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root, _status_scenarios=orig,
-                )
-            else:
-                _launch_scenarios_in_tmux(
-                    state, data, pr_data, session, repo_root, workdir_path,
-                    pm_root=pm_root, _status_scenarios=orig,
-                )
-        finally:
-            state.scenarios = orig
-        if scenario.window_name:
-            pending.add(scenario.index)
-        else:
-            # Window creation failed — mark INPUT_REQUIRED so this
-            # scenario isn't silently lost (which could cause a false
-            # overall PASS).
-            _log.warning("Queued scenario %d window creation failed — "
-                         "marking INPUT_REQUIRED", scenario.index)
-            state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-            # Keep a specific launch failure (e.g. clone/revision mismatch).
-            state.scenario_verdict_reasons.setdefault(
-                scenario.index,
-                "worker window creation failed on dequeue; no verdict",
-            )
+        pending.add(scenario.index)
+        _start_op(scenario, "launch")
 
-    # Fill any open slots that were freed by initial workdir failures.
-    # Scenarios that fail workdir creation are marked INPUT_REQUIRED without
-    # entering ``pending``, so their slots would otherwise stay empty until
-    # a later verdict triggers ``_launch_next_queued``.
+    # Fill any open concurrency slots from the queue up front rather than
+    # waiting for a first verdict to trigger ``_launch_next_queued``.
     for _ in range(len(_launch_queue)):
         _launch_next_queued()  # returns immediately once cap is reached
 
@@ -3529,41 +3910,7 @@ def _poll_tmux_verdicts(
             _launch_next_queued()
             return
 
-        # Only PASS verdicts need verification — NEEDS_WORK and
-        # INPUT_REQUIRED already indicate problems were found.
-        # Skip re-verification for a PASS that was already verified
-        # before a restart: ``verified_scenarios`` is persisted in
-        # the resume snapshot precisely so a resumed run trusts
-        # prior verification instead of re-spawning a verifier
-        # Claude session for every completed scenario each restart.
-        if (verdict == VERDICT_PASS and verify_enabled
-                and idx not in state.verified_scenarios):
-            state.latest_output = (
-                f"Scenario {idx} ({scenario.title}): {verdict} — verifying..."
-            )
-            _notify()
-
-            verifying.add(idx)
-            # pane_output fallback is only consulted when the
-            # transcript is missing — which it never is in the
-            # hook-driven path — so pass "" here instead of
-            # scraping the pane.  Each scenario's verifier pane
-            # is created once and reused across re-verifications
-            # by _verify_single_scenario.
-            t = threading.Thread(
-                target=_run_verification,
-                args=(scenario, verdict, ""),
-                daemon=True,
-                name=f"qa-verify-{state.pr_id}-{idx}",
-            )
-            t.start()
-        else:
-            state.latest_output = (
-                f"Scenario {idx} ({scenario.title}): {verdict}"
-            )
-            _notify()
-            # Scenario fully done — launch next queued if available
-            _launch_next_queued()
+        _settle(scenario, verdict)
 
     def _poll_waiting() -> None:
         """Collect follow-ups from scenarios whose worker asked for input."""
@@ -3578,6 +3925,10 @@ def _poll_tmux_verdicts(
             # rather than skip the finalize pane as if it were still the
             # already-finalized held one.
             state.held = False
+        # A dropped attempt is handed back to the pending path; the scan
+        # already recorded it in ``state.dropped_wait_verdicts``, which the
+        # dead-pane collection below consults so it cannot read the cleared
+        # verdict back out of the dead worker's transcript.
         for idx in scan.dropped:
             pending.add(idx)
         for idx, hit in scan.follow_ups.items():
@@ -3626,7 +3977,8 @@ def _poll_tmux_verdicts(
                            queued_scenarios=_queued_indices,
                            verification_failures=verification_failures,
                            verdict_reasons=state.scenario_verdict_reasons,
-                           waiting_for_input=state.waiting_for_input)
+                           waiting_for_input=state.waiting_for_input,
+                           launch_retries=retries)
 
     # A resumed/held run may already have a follow-up in the transcript.
     # Accept it before the loop starts — and publish it, because the first
@@ -3641,12 +3993,64 @@ def _poll_tmux_verdicts(
 
         # Refresh the resume snapshot each iteration so a TUI restart can
         # re-enter this loop with up-to-date scenario pane/session state
-        # (queued launches and verdicts both mutate it).
+        # (queued launches, retries and verdicts all mutate it).
         _write_resume_file(state, use_containers, concurrency_cap,
                            _queued_indices)
 
-        in_grace = (time.monotonic() - grace_start) < _VERDICT_GRACE_PERIOD
+        now_mono = time.monotonic()
         verdicts_changed = False
+
+        # Apply finished background launch / diagnosis steps.
+        with launch_lock:
+            finished_ops = dict(launch_results)
+            launch_results.clear()
+        for idx, (op, ok, detail) in finished_ops.items():
+            launch_ops.pop(idx, None)
+            scenario = _scenario_by_index(idx)
+            if scenario is None or idx not in pending:
+                continue
+            # Apply the outcome even when a stop arrived: dropping it would
+            # leave the record "launching" with no op in flight, so the
+            # per-scenario loop below would re-classify the scenario as a
+            # fresh failure and overwrite the real cause.  Nothing here
+            # starts new work, and the loop exits on the next condition.
+            verdicts_changed = True
+            rec = retries.get(idx)
+            if op == "diagnose":
+                if _worker_has_started(scenario):
+                    _record_failure(scenario, "exit", detail or _EXIT_CAUSE)
+                else:
+                    _record_failure(scenario, "exec",
+                                    detail or _EXEC_TRANSIENT_CAUSE)
+                continue
+            if idx in state.scenario_verdicts:
+                # The relaunched concretizer settled it (rejected or
+                # trust-blocked) without launching a worker.
+                pending.discard(idx)
+                if rec:
+                    rec["state"] = "running"
+                _settle(scenario, state.scenario_verdicts[idx])
+                continue
+            if ok:
+                if rec:
+                    rec["state"] = "running"
+                # A new worker attempt started: its transcript is the new
+                # session's, so a verdict it emits may be collected again.
+                dropped_waits.discard(idx)
+                grace_until[idx] = now_mono + _VERDICT_GRACE_PERIOD
+                # Per-session state belongs to the dead worker: a fresh
+                # session must get its own grace, trust watch and first
+                # verdict-format reminder.
+                _last_scenario_hook_ts.pop(idx, None)
+                _trust_watches.pop(idx, None)
+                _last_reminder_sent.pop(idx, None)
+                _log.info("Scenario %d worker window created (%s)", idx, op)
+                continue
+            kind = ("create" if op in ("launch", "create")
+                    else (rec or {}).get("kind", "exec"))
+            _record_failure(scenario, kind, (
+                state.scenario_verdict_reasons.get(idx) or detail
+                or _CREATE_CAUSE))
 
         # Collect follow-ups from waiting scenarios while other runnable
         # work proceeds.
@@ -3775,8 +4179,11 @@ def _poll_tmux_verdicts(
                         verdicts_changed = True
                         _notify()
 
+        now = time.time()
         for scenario in state.scenarios:
-            if scenario.index not in pending or not scenario.window_name:
+            idx = scenario.index
+            if idx not in pending or idx in launch_ops:
+                # Not ours to poll, or a background launch step owns it.
                 continue
 
             # The concretizer already settled this scenario (rejected, or
@@ -3784,10 +4191,64 @@ def _poll_tmux_verdicts(
             # launched: keep its recorded reason instead of overwriting it
             # with "no session id" below.
             if (not scenario.session_id
-                    and scenario.index in state.scenario_verdicts):
-                pending.discard(scenario.index)
+                    and idx in state.scenario_verdicts):
+                pending.discard(idx)
                 verdicts_changed = True
                 _launch_next_queued()
+                continue
+
+            rec = retries.get(idx)
+            if rec is not None and rec.get("state") == "waiting":
+                if idx in state.scenario_verdicts:
+                    # A verdict landed before the retry came due (e.g. it
+                    # was restored from a resume snapshot): the retry record
+                    # is stale.  Relaunching would kill the finished
+                    # worker's window and spawn a second worker for a
+                    # scenario that already has a result, so ignore the
+                    # record and keep the verdict.
+                    pending.discard(idx)
+                    rec["state"] = "running"
+                    rec["retry_at"] = None
+                    verdicts_changed = True
+                    _settle(scenario, state.scenario_verdicts[idx])
+                    continue
+                if (now < float(rec.get("retry_at") or 0)
+                        or state.stop_requested):
+                    # Backoff still running (others keep moving), or the run
+                    # is stopping: a stop that lands in the same tick a retry
+                    # comes due must not start a launch the background thread
+                    # would only abort — that spends an attempt and records a
+                    # bogus failure cause.  The record stays waiting, so a
+                    # resume retries it immediately.
+                    continue
+                rec["attempts"] = int(rec.get("attempts", 0)) + 1
+                rec["state"] = "launching"
+                rec["retry_at"] = None
+                op = "create" if rec.get("kind") == "create" else "relaunch"
+                _log.info("Scenario %d: relaunch %d/%d (%s)", idx,
+                          rec["attempts"], _SCENARIO_MAX_RETRIES, op)
+                state.latest_output = (
+                    f"Scenario {idx} ({scenario.title}): relaunching "
+                    f"({rec['attempts']}/{_SCENARIO_MAX_RETRIES})"
+                )
+                _notify()
+                _start_op(scenario, op)
+                verdicts_changed = True
+                continue
+
+            # No worker pane was ever created for this attempt (workdir,
+            # container, window or split failure — possibly before any
+            # pane existed at all).  A worker that did start is an ``exit``
+            # failure instead: relaunching keeps its clone and commits,
+            # while a create retry re-clones them away.  Check that first:
+            # a started worker is never a creation failure, even when the
+            # attempt never recorded a window name.
+            if ((not scenario.window_name
+                 or (not scenario.pane_id and not scenario.session_id))
+                    and not _worker_has_started(scenario)):
+                _record_failure(scenario, "create", (
+                    state.scenario_verdict_reasons.get(idx)
+                    or _CREATE_CAUSE))
                 continue
 
             pane_id = scenario.pane_id or _get_scenario_pane(session, scenario.window_name)
@@ -3795,41 +4256,55 @@ def _poll_tmux_verdicts(
                 pane_id = None
                 scenario.pane_id = None
             if pane_id is None:
-                retries = retry_counts.get(scenario.index, 0)
-                if retries < _SCENARIO_MAX_RETRIES:
-                    backoff = _SCENARIO_RETRY_BASE * (2 ** retries)
-                    _log.warning(
-                        "Scenario %d window died — retry %d/%d "
-                        "(backoff %.0fs)",
-                        scenario.index, retries + 1,
-                        _SCENARIO_MAX_RETRIES, backoff)
-                    time.sleep(backoff)
-                    if state.stop_requested:
-                        # A stop (e.g. ``z t`` fresh start) killed the
-                        # window; relaunching would orphan a worker.
-                        break
-                    retry_counts[scenario.index] = retries + 1
-                    if _relaunch_scenario_window(
-                        scenario, state, data, pr_data,
-                        session, workdir_path,
-                    ):
-                        # Reset grace period for this retry
-                        grace_start = time.monotonic()
-                        _last_scenario_hook_ts.pop(scenario.index, None)
-                        continue
-                    # Relaunch failed — will retry on next poll iteration
+                if idx in state.scenario_verdicts:
+                    # Settled before its pane went away (e.g. restored from
+                    # the resume snapshot): never relaunch a finished worker.
+                    pending.discard(idx)
+                    verdicts_changed = True
+                    _settle(scenario, state.scenario_verdicts[idx])
                     continue
-                _log.warning("Scenario %d window exited without verdict "
-                             "(retries exhausted)",
-                             scenario.index)
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                state.scenario_verdict_reasons[scenario.index] = (
-                    f"worker exited before any verdict; no recovery after "
-                    f"{_SCENARIO_MAX_RETRIES} relaunches (killed/crashed mid-run)"
-                )
-                pending.discard(scenario.index)
-                verdicts_changed = True
-                _launch_next_queued()
+                # A worker that emitted its verdict just before its pane
+                # died must not be relaunched: the transcript is the verdict
+                # source of truth and the dead worker can never supersede it,
+                # so collect it now instead of spending a retry (R9 / E2).
+                # A scenario whose verdict was cleared on purpose is
+                # excluded — its old verdict is still in the transcript and a
+                # dead pane must not resurrect it: cleared for a verification
+                # re-evaluation, or cleared so a lost INPUT_REQUIRED wait can
+                # be relaunched for the user to answer.  ``verification_failures``
+                # is in-memory only (after a restart the stale PASS is
+                # re-collected and re-verified, which converges to NEEDS_WORK);
+                # the wait-drop guard is persisted because a resurrected
+                # INPUT_REQUIRED would be terminal with no worker to answer.
+                if (_worker_has_started(scenario)
+                        and idx not in verification_failures
+                        and idx not in dropped_waits):
+                    verdict = extract_verdict_from_transcript(
+                        scenario.transcript_path, ALL_VERDICTS)
+                    if verdict:
+                        reason = extract_verdict_reason_from_transcript(
+                            scenario.transcript_path)
+                        if reason:
+                            state.scenario_verdict_reasons[idx] = reason
+                        state.scenario_verdicts[idx] = verdict
+                        pending.discard(idx)
+                        verdicts_changed = True
+                        _log.info(
+                            "Scenario %d (%s) verdict: %s (worker pane gone; "
+                            "collected from its transcript)",
+                            idx, scenario.title, verdict)
+                        _settle(scenario, verdict)
+                        continue
+                if scenario.container_name:
+                    # Find out why the worker died before scheduling the
+                    # retry — off this thread, the runtime may be slow to
+                    # answer.  An exhausted container (PID / keyring) kills
+                    # running workers too, not only fresh execs.
+                    _start_op(scenario, "diagnose")
+                elif _worker_has_started(scenario):
+                    _record_failure(scenario, "exit", _EXIT_CAUSE)
+                else:
+                    _record_failure(scenario, "exec", _EXEC_CAUSE)
                 continue
 
             # Workers with no hook event yet may be sitting at the
@@ -3839,25 +4314,25 @@ def _poll_tmux_verdicts(
             # verdict grace + trust grace after launch.
             if (pane_id and scenario.session_id
                     and _hook_events.read_event(scenario.session_id) is None):
-                watch = _trust_watches.get(scenario.index)
+                watch = _trust_watches.get(idx)
                 if watch is None or watch.pane_id != pane_id:
                     watch = WorkspacePromptWatch(
                         pane_id, scenario.worktree_path,
                         transcript_path=scenario.transcript_path)
-                    _trust_watches[scenario.index] = watch
+                    _trust_watches[idx] = watch
                 blocked = watch.check()
                 if blocked:
                     _log.warning("Scenario %d worker blocked: %s",
-                                 scenario.index, blocked)
-                    state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                    state.scenario_verdict_reasons[scenario.index] = (
+                                 idx, blocked)
+                    state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
+                    state.scenario_verdict_reasons[idx] = (
                         _TRUST_BLOCKED_PREFIX + blocked)
-                    pending.discard(scenario.index)
+                    pending.discard(idx)
                     verdicts_changed = True
                     _launch_next_queued()
                     continue
 
-            if in_grace:
+            if now_mono < grace_until.get(idx, 0.0):
                 continue
 
             # Hook-driven gate: require a fresh idle_prompt/Stop event
@@ -3866,25 +4341,25 @@ def _poll_tmux_verdicts(
             # INPUT_REQUIRED so they don't silently stall.
             if not scenario.session_id:
                 _log.warning("Scenario %d has no session_id — marking INPUT_REQUIRED "
-                             "(hook-driven polling requires one)", scenario.index)
-                state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
-                state.scenario_verdict_reasons[scenario.index] = (
+                             "(hook-driven polling requires one)", idx)
+                state.scenario_verdicts[idx] = VERDICT_INPUT_REQUIRED
+                state.scenario_verdict_reasons[idx] = (
                     "no session id registered; verdict could not be polled"
                 )
-                pending.discard(scenario.index)
+                pending.discard(idx)
                 verdicts_changed = True
                 _launch_next_queued()
                 continue
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
-            last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
+            last_ts = _last_scenario_hook_ts.get(idx, 0.0)
             if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
                 # No new idle_prompt — skip this scenario this tick.
                 # Stop fires per-turn (not just at session end); relying
                 # on it here would drift from spec R9 and introduce
                 # false turn-boundary signals for multi-turn work.
                 continue
-            _last_scenario_hook_ts[scenario.index] = ev_ts
+            _last_scenario_hook_ts[idx] = ev_ts
 
             # Read verdict straight from the JSONL transcript.  The hook
             # event is the turn-boundary gate; the transcript is the
@@ -3899,9 +4374,9 @@ def _poll_tmux_verdicts(
             # verdict, nudge once per _reminder_timeout window.
             if (verdict is None and _reminder_timeout is not None
                     and scenario.pane_id):
-                now = time.monotonic()
-                last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
-                if now - last_reminded >= _reminder_timeout:
+                now_r = time.monotonic()
+                last_reminded = _last_reminder_sent.get(idx, 0.0)
+                if now_r - last_reminded >= _reminder_timeout:
                     reminder = (
                         "Reminder: your verdict must appear alone on its own "
                         "line — the line must contain only PASS, NEEDS_WORK, "
@@ -3909,10 +4384,10 @@ def _poll_tmux_verdicts(
                         "your verdict now if you have reached a conclusion."
                     )
                     tmux_mod.send_keys(pane_id, reminder)
-                    _last_reminder_sent[scenario.index] = now
+                    _last_reminder_sent[idx] = now_r
                     _log.info(
                         "Sent verdict-format reminder to scenario %d",
-                        scenario.index,
+                        idx,
                     )
 
             if hit is not None:
@@ -3922,7 +4397,10 @@ def _poll_tmux_verdicts(
         if completed_verifications:
             _launch_next_queued()
 
-        if verdicts_changed or completed_verifications:
+        windows = {s.index: s.window_name for s in state.scenarios}
+        if (verdicts_changed or completed_verifications
+                or windows != status_windows):
+            status_windows = windows
             _write_status()
 
 

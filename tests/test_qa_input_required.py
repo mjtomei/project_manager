@@ -8,6 +8,7 @@ baseline rule review_loop uses).  The run finalizes as INPUT_REQUIRED and is
 """
 
 import json
+import threading
 from unittest.mock import patch
 
 from pm_core import qa_loop
@@ -574,23 +575,38 @@ class TestReopenDoesNotDuplicateWorkers:
         mono = {"n": 0}
 
         def _monotonic():
-            # First call is grace_start; later calls must be past the
-            # verdict grace period or no transcript is ever polled.
+            # Advance monotonically.  Each worker gets its own grace window
+            # (per-scenario grace_until, set when its pane is created), so a
+            # clock that jumps once and then freezes would keep a queued
+            # scenario that was just launched from ever being polled.
             mono["n"] += 1
-            return 0 if mono["n"] == 1 else 100
+            return float(mono["n"])
 
         def _fake_launch(_state, *_a, **_k):
-            scenario = _state.scenarios[0]
+            # The launcher now takes an explicit scenarios list (the poll
+            # loop launches in a background thread instead of swapping
+            # ``state.scenarios``).
+            scenario = (_k.get("scenarios") or _state.scenarios)[0]
             launched.append(scenario.index)
             scenario.window_name = f"qa-s{scenario.index}"
             scenario.pane_id = f"%{scenario.index}"
             scenario.transcript_path = ok
             scenario.session_id = f"sid-{scenario.index}"
 
+        def _yield_sleep(_secs):
+            # Queued launches now run in a background thread.  A no-op sleep
+            # would spin this loop and starve that thread (and the launch
+            # outcome would never be applied), so yield to it here.
+            for th in threading.enumerate():
+                if (th is not threading.current_thread()
+                        and th.name.startswith("qa-")):
+                    th.join(1.0)
+
         with ExitStack() as stack:
             stack.enter_context(patch("pm_core.qa_loop._get_scenario_pane",
                                       return_value="%1"))
-            stack.enter_context(patch("pm_core.qa_loop.time.sleep"))
+            stack.enter_context(patch("pm_core.qa_loop.time.sleep",
+                                      side_effect=_yield_sleep))
             stack.enter_context(patch("pm_core.qa_loop.time.monotonic",
                                       side_effect=_monotonic))
             stack.enter_context(patch("pm_core.hook_events.read_event",
