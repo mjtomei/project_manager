@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T12:39:15.952185+00:00'
+  updated_at: '2026-10-29T13:40:51.376321+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37050,6 +37050,40 @@ prs:
       stays dropped.'
     created_at: '2026-10-29T12:39:15Z'
     last_edited: '2026-10-29T12:39:15Z'
+  - id: note-8198793
+    text: 'Review loop ebd1 i7: two leftovers in the kept recipe scope, both the PR
+      own class, found by a 39-mutation sweep of the kept guarantees. (1) The web-UI
+      port pre-check (web-ui-recording.md step 1) carries `--connect-timeout 2 --max-time
+      5`, and those flags are what make its own "exit 28" diagnosis reachable: curl
+      has no default deadline for a server that accepted the connection and never
+      answers, so an unbounded probe blocks the step instead of answering 28 (verified
+      live against a socket that accepts and never replies: the shipped probe exits
+      1 in 5.0 s with "could not check … exit 28", the same block without the flags
+      is still blocked in curl at 20 s) — the unbounded wait this PR removes everywhere
+      else, in the block every capture runs first. No case pinned them: the stub curl
+      answered by mode, not by arguments, so deleting the flags left the whole file
+      green (200 passed). The stub now logs each call argv and the new test_the_port_pre_check_is_bounded
+      requires the first call (the pre-check) to carry both bounds; the recipe comment
+      says why they cannot be dropped. (2) Step 2 attempt cleanup cleared this attempt
+      mp4/webm/trace/dom.html/*.png but not manifest.md — the document that presents
+      them. A driver retried after an attempt that already reached the finalize step,
+      then failing, left the earlier attempt manifest naming the recording.mp4 the
+      cleanup had just deleted (verified with the recipe own block: only driver.mjs,
+      node_modules and the manifest survived; after the fix, only the input and the
+      link) — R47 disagreement in the one block R47 did not touch. ./manifest.md joins
+      the cleanup, and test_web_ui_driver_failure_is_reported_and_clears_stale_outputs
+      seeds it. The sweep other six survivors are benign and recorded in impl.md R48
+      (notably step 5 cast `-s`: asciinema 2.1.0 writes its 115-byte header the moment
+      recording starts — verified with -c sleep 3 and -c true — so a 0-byte cast is
+      unreachable). Tests: file 201 pass; each mutation fails exactly the case it
+      names and those cases pass on the unmodified files; related suites 389 together
+      with the file; full suite 4595 passed, 1 skipped, 92 deselected, 0 failed (408.48
+      s, pytest<9 + markdown on the scratch path). Evidence: $(pm qa captures-path
+      pr-b19db15)/review-ebd1-i7/ (probe.log sections A-B, mutation-check.log with
+      the pre-fix half, suite.log, README.md, scripts/). No pm_core/ change; the dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T13:40:51Z'
+    last_edited: '2026-10-29T13:40:51Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
