@@ -484,7 +484,12 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 reason = f"review iteration {it}"
                 if review.get("follow_up"):
                     reason += " (INPUT_REQUIRED answered; follow-up running)"
-                elif last:
+                elif last and last != "LAUNCH_FAILED":
+                    # A re-armed retry keeps the previous episode's
+                    # ``LAUNCH_FAILED`` verdict until the new iteration lands;
+                    # "(last LAUNCH_FAILED)" would read as though the retry now
+                    # running had already failed.  Any other verdict is the
+                    # previous iteration's real outcome and stays useful.
                     reason += f" (last {last})"
                 return phase, "running", reason
             if last in _REVIEW_PASS:
@@ -493,6 +498,26 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     return (phase, "waiting", _awaiting_signoff_reason(
                         pr_id, inp, holds, "review passed; QA skipped (skip_qa)"))
                 return phase, "waiting", "review passed; QA transition pending"
+            if last == "LAUNCH_FAILED":
+                tag = "retryable" if review.get("retryable") else "needs attention"
+                reason = f"review launch failed ({tag})"
+                err = (review.get("error") or "").strip()
+                if err:
+                    reason += f": {err}"
+                artifact = review.get("artifact") or ""
+                # The concise error already names the artifact ("… (artifact:
+                # …)"); appending it again would print the path twice.
+                if artifact and artifact not in err:
+                    reason += f" [artifact: {artifact}]"
+                return phase, "failed", reason
+            if last == "HOLD":
+                # The launch itself succeeded; the review is sitting at a
+                # trust/permission prompt a human must answer, so this is a
+                # hold rather than a launch failure.
+                err = (review.get("error") or "").strip()
+                return (phase, "failed",
+                        "review held at a permission prompt" +
+                        (f": {err}" if err else " — needs human input"))
             if last in ("KILLED", "ERROR"):
                 return phase, "failed", f"review loop ended {last}"
             if last:
@@ -517,6 +542,14 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                     return (phase, "waiting",
                             "last QA run ended INPUT_REQUIRED (see QA note); "
                             "press t / z t to re-run QA")
+                if qa.get("held"):
+                    # A held run (pr-2c67d50) is still watching its scenario
+                    # worker panes for a follow-up verdict: the answer
+                    # belongs in the worker pane, not in the status
+                    # dashboard this row is rendered from.
+                    return (phase, "waiting",
+                            "QA INPUT_REQUIRED — answer in the scenario "
+                            "worker pane (still watching for a follow-up)")
                 return phase, "waiting", "QA INPUT_REQUIRED — answer in QA window"
             if verdict == "PASS":
                 return (phase, "waiting",
@@ -621,6 +654,10 @@ def build_status(inp: dict) -> dict:
                 # adoptable: neither a wait nor an answer.  Published so a
                 # status reader never has to string-match the reason.
                 "resuming": bool(review.get("resuming")),
+                "retryable": bool(review.get("retryable")),
+                "attempts": review.get("attempts") or 0,
+                "error": review.get("error") or "",
+                "artifact": review.get("artifact") or "",
             } if review else None),
             "qa": ({
                 "planning": bool(qa.get("planning")),
@@ -628,6 +665,12 @@ def build_status(inp: dict) -> dict:
                 "done": qa.get("done") or 0,
                 "counts": dict(qa.get("counts") or {}),
                 "running": bool(qa.get("running")),
+                # Still watching a scenario worker pane for an
+                # INPUT_REQUIRED follow-up (pr-2c67d50).  Reported alongside
+                # the derived ``reason`` so the JSON run entry does not lose
+                # the distinction a consumer would otherwise have to parse
+                # out of the text.
+                "held": bool(qa.get("held")),
                 "verdict": qa.get("verdict") or "",
                 "error": qa.get("error") or "",
                 "recorded": bool(qa.get("recorded")),
@@ -720,6 +763,10 @@ def _progress(run: dict) -> str:
         return f"qa {qa['verdict']}"
     rv = run.get("review")
     if rv and rv.get("iteration"):
+        # ``attempts`` is 1 for a normal first launch; only a *retry* (a
+        # second or later attempt) is worth calling out.
+        if rv.get("running") and (rv.get("attempts") or 0) > 1:
+            return f"review #{rv['iteration']} (launch retry {rv['attempts']})"
         return f"review #{rv['iteration']}"
     return ""
 
@@ -832,6 +879,9 @@ def qa_progress_input(state) -> dict:
     verdicts = dict(getattr(state, "scenario_verdicts", {}) or {})
     return {
         "running": bool(getattr(state, "running", False)),
+        # A held run (pr-2c67d50) has running=False but is still watching its
+        # scenario worker panes for an INPUT_REQUIRED follow-up.
+        "held": bool(getattr(state, "held", False)),
         "planning": bool(getattr(state, "planning_phase", False)),
         "total": len(getattr(state, "scenarios", []) or []),
         "done": len(verdicts),
@@ -857,7 +907,14 @@ def review_progress_input(state) -> dict:
     (see ``run_review_loop_sync``): ``_adopting_wait`` first, then
     ``iteration`` and ``input_required``.  A reader that sees the adopt flag
     already cleared is guaranteed to see the wait it published, or the
-    iteration that superseded it."""
+    iteration that superseded it.
+
+    The failed-launch retry evidence (``retryable``/``attempts``/``error``/
+    ``artifact``) is normalised the same way the runtime_state mirror does it
+    (``_on_complete_from_thread``): a HOLD carries only its own prompt
+    message, and only an exhausted launch retry (LAUNCH_FAILED) stays
+    retryable once the loop has stopped.
+    """
     running = bool(getattr(state, "running", False))
     # Read these in the order the writer updates them — do not reorder.
     adopting_wait = bool(getattr(state, "_adopting_wait", False))
@@ -865,14 +922,54 @@ def review_progress_input(state) -> dict:
     input_required = bool(getattr(state, "input_required", False))
     history = getattr(state, "history", None) or []
     last = history[-1] if history else None
+
+    verdict = getattr(state, "latest_verdict", "") or ""
+    # A HOLD is the trust/permission prompt the pane is sitting at.  Report
+    # that, not an earlier attempt's launch error from the same episode —
+    # matching the runtime_state mirror (`_on_complete_from_thread`).  The
+    # artifact belongs to that failed attempt too, so a hold does not carry
+    # one.
+    error = getattr(state, "last_launch_error", "") or ""
+    artifact = getattr(state, "last_launch_artifact", "") or ""
+    retryable = bool(getattr(state, "launch_retryable", False))
+    attempts = int(getattr(state, "launch_attempts", 0) or 0)
+    if verdict == "HOLD":
+        error = getattr(state, "latest_output", "") or error
+        artifact = ""
+        retryable = False
+        # The attempt count is retry-episode evidence that belongs to the
+        # failed launch, not to the hold; the runtime_state mirror drops it
+        # for a HOLD too (`_on_complete_from_thread`), so the live status
+        # path must not report it either.
+        attempts = 0
+    elif not running and verdict != "LAUNCH_FAILED":
+        # Only an exhausted launch retry (LAUNCH_FAILED) is retryable and
+        # re-armed by auto-start.  Once the loop has stopped with any other
+        # outcome — a user stop (KILLED), a verdict, an error — it must not
+        # keep the earlier attempts' retry evidence, or `pm autostart status`
+        # would report a cancelled loop as retryable.  A loop still running
+        # its retry episode (verdict not decided yet) keeps the evidence so
+        # the backoff is visible.  Matches the runtime_state mirror, which
+        # drops these fields for every non-LAUNCH_FAILED completion.
+        retryable = False
+        artifact = ""
+        error = ""
+        attempts = 0
     return {
         "running": running,
         "iteration": iteration,
-        "verdict": getattr(state, "latest_verdict", "") or "",
+        "verdict": verdict,
         "input_required": input_required,
         "resuming": bool(running and adopting_wait),
         "follow_up": bool(running and not input_required and not adopting_wait
                           and last is not None
                           and getattr(last, "iteration", None) == iteration
                           and getattr(last, "verdict", "") == "INPUT_REQUIRED"),
+        # Failed-launch retry evidence.  A HOLD keeps only its own prompt
+        # message as ``error``; the retryable flag, attempt count and
+        # artifact belong to a failed launch, not to a hold.
+        "retryable": retryable,
+        "attempts": attempts,
+        "error": error,
+        "artifact": artifact,
     }

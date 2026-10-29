@@ -22,6 +22,8 @@ required.  A follow-up that ends INPUT_REQUIRED again is a new question:
 the loop waits again on the same pane.
 """
 
+import os
+import re
 import secrets
 import subprocess
 import sys
@@ -29,6 +31,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from pm_core.paths import configure_logger
@@ -46,6 +49,13 @@ VERDICT_PASS = "PASS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
 VERDICT_KILLED = "KILLED"
+# Loop outcomes that are NOT agent verdicts.  A failed launch must never be
+# reported as PASS/NEEDS_WORK: exhaustion leaves an explicit retryable
+# failure instead.
+VERDICT_LAUNCH_FAILED = "LAUNCH_FAILED"
+VERDICT_HOLD = "HOLD"
+VERDICT_CLOSED = "CLOSED"
+VERDICT_ERROR = "ERROR"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 
@@ -57,6 +67,24 @@ _VERDICT_GRACE_PERIOD = 20
 # How often the INPUT_REQUIRED wait re-checks the transcript for the user's
 # answer between idle hook events, so status clears promptly.
 _FOLLOW_UP_POLL = 2.0
+
+# --- Failed-launch retry ---------------------------------------------------
+# A review iteration launch that fails before producing a transcript (e.g.
+# the old window was removed and container setup then failed) is retried a
+# bounded number of times with exponential backoff.  The budget is per
+# iteration episode and is persisted on ReviewLoopState so a merge-restart
+# resume continues it instead of restarting it.
+REVIEW_LAUNCH_MAX_ATTEMPTS = 3
+REVIEW_LAUNCH_BACKOFF_BASE = 5.0     # seconds before retry 1
+REVIEW_LAUNCH_BACKOFF_MAX = 60.0     # cap for the exponential backoff
+REVIEW_LAUNCH_REARM_SECONDS = 60.0   # auto-start cooldown after exhaustion
+REVIEW_LAUNCH_CLAIM_TTL = 180.0      # cross-driver launch lease TTL
+REVIEW_LAUNCH_CLAIM_WAIT = 15.0      # bounded wait for another owner to go
+_LAUNCH_TIMEOUT = 120                # `pm pr review` child timeout
+_WINDOW_WAIT = 2.0                   # wait for the tmux window to appear
+_LEASE_REFRESH_SECONDS = 30.0        # keepalive while polling a review
+_DISCOVERY_GRACE = 2.0               # wait for a starting pane's session id
+_ARTIFACT_DIRNAME = "launch-artifacts"
 
 
 @dataclass
@@ -73,6 +101,40 @@ def _generate_loop_id() -> str:
     return secrets.token_hex(2)
 
 
+class ReviewLaunchError(RuntimeError):
+    """An authorized review iteration launch failed before a verdict.
+
+    ``retryable`` distinguishes a transient setup/teardown failure (retry)
+    from an environment/auth/prompt problem (stop and surface it).  The
+    complete child output lives in *artifact*; ``str(exc)`` is the concise
+    UI error.
+    """
+
+    def __init__(self, message: str, *, returncode: int | None = None,
+                 stderr: str = "", stdout: str = "",
+                 artifact: str | None = None, retryable: bool = True,
+                 reason: str = ""):
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr = stderr
+        self.stdout = stdout
+        self.artifact = artifact
+        self.retryable = retryable
+        self.reason = reason
+
+
+class ReviewHoldError(RuntimeError):
+    """The review pane is held at a permission/auth/trust prompt.
+
+    Not retryable: the launch itself succeeded, and a retry would only sit
+    at the same prompt again.  A human must clear the hold.
+    """
+
+
+class ReviewClosedError(RuntimeError):
+    """The PR merged/closed while its review launch was being retried."""
+
+
 @dataclass
 class ReviewLoopState:
     """Tracks the state of a running review loop."""
@@ -86,6 +148,7 @@ class ReviewLoopState:
     loop_id: str = field(default_factory=_generate_loop_id)
     _ui_notified_done: bool = False
     _ui_notified_input: bool = False
+    _ui_notified_retry: int = 0
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: True while the review pane waits on the human — set
     # when the verdict lands, cleared once the user answers in the pane (the
@@ -98,6 +161,36 @@ class ReviewLoopState:
     # nobody has been shown yet.  Cleared as soon as the adopt decision is
     # made (adoptable: input_required is re-set; not: the iteration reruns).
     _adopting_wait: bool = False
+    # Failed-launch retry episode (persisted in the breadcrumb).
+    retry_iteration: int = 0
+    launch_attempts: int = 0
+    next_retry_at: float = 0.0
+    last_launch_error: str = ""
+    last_launch_artifact: str | None = None
+    launch_retryable: bool = False
+    retry_episodes: int = 0
+    retry_ready_at: float = 0.0
+    # Last iteration's session, so a retry can tell the historical window
+    # from a live attempt.
+    last_session_id: str = ""
+    # True once *this* loop has launched the current iteration.  Only then
+    # may pre-retry rediscovery adopt a transcript/verdict it finds: before
+    # that, any existing transcript belongs to an earlier loop run.
+    iteration_attempted: bool = False
+    # Session id of the iteration's transcript symlink *before* this loop
+    # first attempted the iteration.  The transcript dir outlives a loop,
+    # so after a failed launch that symlink can still point at an earlier
+    # run's iteration N; adopting its verdict would fabricate one.  Only a
+    # session id different from this one can be this loop's own attempt.
+    stale_session_id: str = ""
+    # Session id of the review window's pane *before* this loop first
+    # attempted the iteration.  That window is the historical one, not
+    # this iteration's attempt: a first attempt that fails before
+    # ``--fresh`` replaces it (route down, workdir gone, a tmux error on
+    # the kill) leaves it live, and iteration 1 has no ``last_session_id``
+    # or earlier symlink to recognise it by.  Adopting it would record an
+    # older review's verdict for an iteration that never ran.
+    stale_pane_session_id: str = ""
 
 
 def _match_verdict(line: str) -> str | None:
@@ -129,10 +222,117 @@ def _compute_review_window_name(pr_data: dict) -> str:
     return f"review-{display_id}"
 
 
+def _as_text(value) -> str:
+    """Decode a subprocess capture that may be bytes (TimeoutExpired)."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return str(value)
+
+
+def _concise_launch_detail(stderr: str, stdout: str) -> str:
+    """The shortest actionable line of a failed launch's output."""
+    # Strip *before* choosing a stream: whitespace-only stderr is truthy, and
+    # ``stderr or stdout`` would then hide the real error on stdout.
+    text = (stderr or "").strip() or (stdout or "").strip()
+    if not text:
+        return "no output from the launch command"
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    detail = lines[-1] if lines else text.strip()
+    if len(detail) > 300:
+        detail = detail[:297] + "..."
+    return detail
+
+
+def _write_launch_artifact(*, transcript: str | None, pr_id: str,
+                           iteration: int, loop_id: str, attempt: int,
+                           cmd: list[str], returncode: int | None,
+                           stdout: str, stderr: str,
+                           workdir: str | None = None,
+                           stale_session_id: str = "",
+                           note: str = "") -> str | None:
+    """Persist a failed launch attempt's complete output.
+
+    Lives next to the iteration transcript so it travels with the loop's
+    run dir.  The full (untruncated) stderr is the actionable artifact; the
+    failed attempt's prompt file is copied too when it still exists (a
+    container-setup failure skips the command's trailing ``rm -f``).
+
+    *stale_session_id* is the session the iteration's transcript symlink
+    pointed at before this loop first attempted the iteration.  A launch
+    that died before the child rewrote that symlink leaves it in place, so
+    its prompt file belongs to a *previous* run: copy nothing rather than
+    attach the wrong prompt to this failure.
+    """
+    if not transcript:
+        return None
+    try:
+        adir = Path(transcript).parent / _ARTIFACT_DIRNAME
+        adir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        base = f"review-{pr_id}-i{iteration}-attempt{attempt}-{stamp}"
+        path = adir / f"{base}.log"
+        parts = [
+            f"timestamp: {datetime.now().isoformat()}",
+            f"pr: {pr_id}",
+            f"iteration: {iteration}",
+            f"loop_id: {loop_id}",
+            f"attempt: {attempt}",
+            f"returncode: {returncode}",
+            f"cmd: {cmd}",
+        ]
+        if note:
+            parts.append(f"note: {note}")
+        sid = None
+        try:
+            from pm_core.claude_launcher import session_id_from_transcript
+            sid = session_id_from_transcript(transcript)
+        except Exception:
+            sid = None
+        if sid:
+            parts.append(f"session_id: {sid}")
+        if workdir and sid and sid == stale_session_id:
+            parts.append(
+                f"prompt: (skipped — the transcript symlink still points at "
+                f"the previous run's session {sid})")
+        elif workdir and sid:
+            prompt_file = Path(workdir) / "pm" / "prompts" / f"pm_prompt_{sid}.txt"
+            if prompt_file.exists():
+                try:
+                    prompt_copy = adir / f"{base}.prompt.txt"
+                    prompt_copy.write_text(
+                        prompt_file.read_text(encoding="utf-8", errors="replace"),
+                        encoding="utf-8")
+                    parts.append(f"prompt: {prompt_file}")
+                    parts.append(f"prompt_copy: {prompt_copy}")
+                except OSError:
+                    parts.append(f"prompt: {prompt_file} (copy failed)")
+        parts.append("")
+        parts.append(f"--- stderr ({len(stderr)} chars) ---")
+        parts.append(stderr)
+        parts.append("")
+        parts.append(f"--- stdout ({len(stdout)} chars) ---")
+        parts.append(stdout)
+        path.write_text("\n".join(parts), encoding="utf-8")
+        return str(path)
+    except OSError as e:
+        _log.warning("review_loop: could not write launch artifact: %s", e)
+        return None
+
+
 def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
                           loop_id: str = "",
-                          transcript: str | None = None) -> None:
-    """Launch a review window via ``pm pr review --fresh --review-loop``."""
+                          transcript: str | None = None,
+                          attempt: int = 1,
+                          workdir: str | None = None,
+                          stale_session_id: str = "") -> list[str]:
+    """Launch a review window via ``pm pr review --fresh --review-loop``.
+
+    Returns the command that was run (for the failure artifact).  Raises
+    :class:`ReviewLaunchError` on failure, retaining the child's complete
+    output in an artifact and raising a concise message.
+    """
     cmd = [sys.executable, "-m", "pm_core.wrapper",
            "pr", "review", "--fresh", "--review-loop",
            "--review-iteration", str(iteration)]
@@ -141,20 +341,82 @@ def _launch_review_window(pr_id: str, pm_root: str, iteration: int = 0,
     if transcript:
         cmd.extend(["--transcript", transcript])
     cmd.append(pr_id)
-    _log.info("relauncher: pr=%s iteration=%s loop_id=%s cmd=%s",
-              pr_id, iteration, loop_id, cmd)
+    _log.info("relauncher: pr=%s iteration=%s loop_id=%s attempt=%s cmd=%s",
+              pr_id, iteration, loop_id, attempt, cmd)
     t0 = time.monotonic()
-    result = subprocess.run(cmd, cwd=pm_root, capture_output=True, text=True, timeout=120)
+    try:
+        result = subprocess.run(cmd, cwd=pm_root, capture_output=True,
+                                text=True, timeout=_LAUNCH_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        stderr = _as_text(getattr(e, "stderr", ""))
+        stdout = _as_text(getattr(e, "stdout", ""))
+        artifact = _write_launch_artifact(
+            transcript=transcript, pr_id=pr_id, iteration=iteration,
+            loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
+            stdout=stdout, stderr=stderr, workdir=workdir,
+            stale_session_id=stale_session_id,
+            note=f"launch timed out after {_LAUNCH_TIMEOUT}s")
+        detail = _concise_launch_detail(stderr, stdout)
+        msg = (f"Review window launch timed out after {_LAUNCH_TIMEOUT}s: "
+               f"{detail}")
+        if artifact:
+            msg += f" (artifact: {artifact})"
+        _log.error("review_loop: %s", msg)
+        raise ReviewLaunchError(msg, returncode=None, stderr=stderr,
+                                stdout=stdout, artifact=artifact,
+                                retryable=True, reason="timeout") from e
     elapsed = time.monotonic() - t0
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else ""
-        stdout = result.stdout.strip() if result.stdout else ""
-        _log.error("review_loop: launch failed (rc=%d) stderr=%s stdout=%s",
-                   result.returncode, stderr[:1000], stdout[:500])
-        detail = stderr[:500] or stdout[:500]
-        raise RuntimeError(f"Review window launch failed (rc={result.returncode}): {detail}")
+        stderr = _as_text(result.stderr).strip()
+        stdout = _as_text(result.stdout).strip()
+        # Consider both streams: a child can report the real error on
+        # stdout while stderr carries only warnings.
+        reason = ("auth" if _looks_like_auth_failure(f"{stderr}\n{stdout}")
+                  else "launch")
+        # A transient failure is retried by the caller, so this attempt is a
+        # warning; only a non-retryable (auth) failure is an error at this
+        # level.  The loop logs ERROR when it gives up for good.
+        log_fn = _log.error if reason == "auth" else _log.warning
+        log_fn("review_loop: launch failed (rc=%d) stderr=%s stdout=%s",
+               result.returncode, stderr[:1000], stdout[:500])
+        artifact = _write_launch_artifact(
+            transcript=transcript, pr_id=pr_id, iteration=iteration,
+            loop_id=loop_id, attempt=attempt, cmd=cmd,
+            returncode=result.returncode, stdout=stdout, stderr=stderr,
+            workdir=workdir, stale_session_id=stale_session_id)
+        detail = _concise_launch_detail(stderr, stdout)
+        msg = f"Review window launch failed (rc={result.returncode}): {detail}"
+        if artifact:
+            msg += f" (artifact: {artifact})"
+        raise ReviewLaunchError(
+            msg, returncode=result.returncode, stderr=stderr, stdout=stdout,
+            artifact=artifact, retryable=(reason != "auth"), reason=reason)
     _log.info("relauncher: pr=%s rc=%d elapsed=%.2fs",
               pr_id, result.returncode, elapsed)
+    return cmd
+
+
+# Auth/trust failures are not retryable.  Deliberately excludes generic
+# filesystem/socket errors like "permission denied": a container teardown or
+# mount that fails that way is exactly the transient launch failure this
+# retry exists to recover, and treating it as an auth hold would strand the
+# target again.  A bare "401"/"403" is likewise not enough: any 3-digit token
+# in arbitrary child stderr (a pid, a port, an id) would match, and a
+# misclassified transient failure is a stranded target.  The HTTP codes only
+# count with auth/HTTP context around them.
+_AUTH_FAILURE_RE = re.compile(
+    r"unauthori[sz]ed|not logged in|authentication failed|invalid api key|"
+    r"\bforbidden\b|"
+    r"\b(?:http(?:/\d(?:\.\d)?)?|api|auth|authentication|status(?:\s+code)?|"
+    r"response)[^\n]{0,20}?\b(?:401|403)\b|"
+    r"\b(?:401|403)\b\s*(?:unauthorized|forbidden)\b|"
+    r"workspace trust|trust prompt",
+    re.IGNORECASE)
+
+
+def _looks_like_auth_failure(text: str) -> bool:
+    """Whether a launch failure is an auth/trust hold rather than transient."""
+    return bool(_AUTH_FAILURE_RE.search(text or ""))
 
 
 def _find_claude_pane(session: str, window_name: str) -> str | None:
@@ -162,14 +424,51 @@ def _find_claude_pane(session: str, window_name: str) -> str | None:
     return _find_claude_pane_shared(session, window_name)
 
 
+def _find_review_claude_pane(session: str, window_name: str,
+                             workdir: str | None = None) -> str | None:
+    """Find the review window's Claude pane (not its diff shell).
+
+    The shared first-pane helper can return the diff pane; prefer the pane
+    whose start command carries a ``--session-id`` (host launch) or is a
+    container ``exec`` (the Claude pane).  Falls back to the shared helper
+    so mocked callers/tests keep working.
+    """
+    from pm_core import tmux as tmux_mod
+    try:
+        from pm_core.claude_launcher import pane_transcript_path
+    except Exception:  # pragma: no cover - import cycle safety
+        pane_transcript_path = None
+
+    win = None
+    try:
+        win = tmux_mod.find_window_by_name(session, window_name)
+    except Exception:
+        win = None
+    if win and pane_transcript_path is not None:
+        try:
+            panes = tmux_mod.get_pane_indices(session, win["index"])
+        except Exception:
+            panes = []
+        for pane_id, _idx in panes:
+            try:
+                if pane_transcript_path(pane_id, workdir):
+                    return pane_id
+            except Exception:
+                continue
+        if panes:
+            return panes[0][0]
+    return _find_claude_pane(session, window_name)
+
+
 def _poll_for_verdict(pane_id: str, transcript_path: str,
                       grace_period: float = 0,
-                      workdir: str | None = None) -> str | None:
+                      workdir: str | None = None,
+                      stop_check: Callable[[], bool] | None = None) -> str | None:
     """Poll a pane for a verdict via Claude Code hook events."""
     return _poll_for_verdict_shared(
         pane_id, transcript_path, verdicts=ALL_VERDICTS,
         grace_period=grace_period, log_prefix="review_loop",
-        workdir=workdir,
+        workdir=workdir, stop_check=stop_check,
     )
 
 
@@ -182,9 +481,371 @@ class PaneKilledError(Exception):
     """Raised when the review pane disappears before producing a verdict."""
 
 
+def _verdict_output_if_present(transcript: str | None) -> str | None:
+    """The verdict output already present in *transcript*, or None.
+
+    Uses :func:`find_verdict_turn` (pr-8efa789) so a later ``/loop`` wakeup
+    turn cannot hide the verdict from ``parse_review_verdict``.  This is the
+    single verdict reader shared by :func:`_landed_verdict` and the
+    retry/adopt discovery paths.
+    """
+    if not transcript:
+        return None
+    try:
+        from pm_core.verdict_transcript import find_verdict_turn
+        hit = find_verdict_turn(transcript, ALL_VERDICTS)
+        if hit:
+            return hit.text or hit.verdict
+    except Exception:
+        _log.debug("review_loop: verdict read from %s failed", transcript,
+                   exc_info=True)
+    return None
+
+
+def _transcript_session_id(transcript: str | None) -> str | None:
+    """Session id of an existing transcript symlink, or None."""
+    if not transcript or not os.path.lexists(transcript):
+        return None
+    try:
+        from pm_core.claude_launcher import session_id_from_transcript
+        return session_id_from_transcript(transcript)
+    except Exception:
+        return None
+
+
+def _live_review_pane_session(pr_data: dict) -> str:
+    """Session id of the review window's pane right now, or "".
+
+    Used to snapshot the historical window when an iteration's retry
+    episode starts: whatever pane is live *then* belongs to an earlier
+    run, so rediscovery must replace it instead of adopting its verdict.
+    Total by design — a missing tmux session/window or an unresolvable
+    session just means "nothing to exclude".
+    """
+    session = _get_pm_session()
+    if not session:
+        return ""
+    try:
+        from pm_core.claude_launcher import (
+            pane_transcript_path, session_id_from_transcript,
+        )
+        workdir = pr_data.get("workdir")
+        pane_id = _find_review_claude_pane(
+            session, _compute_review_window_name(pr_data), workdir)
+        if not pane_id:
+            return ""
+        path = pane_transcript_path(pane_id, workdir)
+        return (session_id_from_transcript(path) or "") if path else ""
+    except Exception:
+        _log.debug("review_loop: episode-start pane snapshot failed",
+                   exc_info=True)
+        return ""
+
+
+def _landed_verdict(transcript: str | None) -> str | None:
+    """The verdict already recorded for an *idle* pane's transcript, or None.
+
+    The poller only wakes on idle events newer than its own start, so a
+    verdict that landed between discovery and the poll would otherwise be
+    waited on forever (there is no further idle event to wake it).  Only an
+    idle session counts: a still-running review's latest assistant turn is
+    not a verdict.
+    """
+    session_id = _transcript_session_id(transcript)
+    if not session_id:
+        return None
+    try:
+        from pm_core import hook_events
+        ev = hook_events.read_event(session_id)
+    except Exception:
+        _log.debug("review_loop: hook event read failed for %s",
+                   transcript, exc_info=True)
+        return None
+    if not ev or ev.get("event_type") != "idle_prompt":
+        return None
+    return _verdict_output_if_present(transcript)
+
+
+@dataclass
+class AttemptDiscovery:
+    """What rediscovery found for an iteration before (re)launching."""
+    kind: str  # verdict | adopt | other_owner | pending | launch
+    output: str | None = None
+    pane_id: str | None = None
+    transcript: str | None = None
+    reason: str = ""
+    owner: str = ""
+    # Session id of the transcript/verdict this discovery read.  The caller
+    # records it as the iteration's session so the *next* iteration treats a
+    # still-live pane running it as historical (replaced, not adopted again).
+    session_id: str = ""
+
+
+def _lease_owner(state: ReviewLoopState) -> str:
+    return f"loop:{state.loop_id}"
+
+
+def review_loop_owns_launch(pr_id: str) -> str:
+    """Owner of a live *native loop* launch lease for *pr_id*, or "".
+
+    Other drivers (``pm pr auto-sequence``) call this before launching a
+    review iteration: a live loop lease means the loop owns that launch
+    (including its bounded retries), so a second launch would duplicate or
+    kill it.
+    """
+    try:
+        from pm_core import runtime_state as _rs
+        lease = _rs.get_action_lease(pr_id, "review-loop",
+                                     REVIEW_LAUNCH_CLAIM_TTL)
+    except Exception:
+        return ""
+    owner = (lease or {}).get("owner") or ""
+    return owner if owner.startswith("loop:") else ""
+
+
+def _other_loop_owner(state: ReviewLoopState) -> str:
+    """The owner of a live launch lease held by a *different* loop, or ""."""
+    try:
+        from pm_core import runtime_state as _rs
+        lease = _rs.get_action_lease(state.pr_id, "review-loop",
+                                     REVIEW_LAUNCH_CLAIM_TTL)
+    except Exception:
+        return ""
+    owner = (lease or {}).get("owner") or ""
+    if owner.startswith("loop:") and owner != _lease_owner(state):
+        return owner
+    return ""
+
+
+def _is_historical_session(state: ReviewLoopState, transcript_dir: str,
+                           iteration: int, session_id: str | None) -> bool:
+    """Whether *session_id* belongs to an already-finished iteration."""
+    if not session_id:
+        return False
+    if getattr(state, "last_session_id", "") == session_id:
+        return True
+    if getattr(state, "stale_session_id", "") == session_id:
+        # The symlink that was already there when this loop first attempted
+        # the iteration: an earlier run's session, never this attempt.
+        return True
+    if getattr(state, "stale_pane_session_id", "") == session_id:
+        # The pane that was already live in the review window when this
+        # loop first attempted the iteration: the historical window (e.g.
+        # a manual review of older code), never this attempt.
+        return True
+    try:
+        from pm_core.claude_launcher import session_id_from_transcript
+        pattern = re.compile(
+            rf"^review-{re.escape(state.pr_id)}-i(\d+)\.jsonl$")
+        for p in Path(transcript_dir).glob(f"review-{state.pr_id}-i*.jsonl"):
+            m = pattern.match(p.name)
+            if not m:
+                continue
+            if int(m.group(1)) < iteration \
+                    and session_id_from_transcript(p) == session_id:
+                return True
+    except Exception:
+        _log.debug("review_loop: historical-session scan failed", exc_info=True)
+    return False
+
+
+def _discover_iteration(state: ReviewLoopState, pr_data: dict,
+                        transcript_dir: str, iteration: int,
+                        *, allow_recovery: bool = True) -> AttemptDiscovery:
+    """Rediscover this iteration's live attempt before launching again.
+
+    Looks for an already-landed verdict, a live pane/transcript that is
+    this attempt (possibly recovered) or another driver's review, another
+    native loop's lease, and the historical window that a fresh launch is
+    meant to replace.  Never launches anything itself.
+
+    ``allow_recovery`` must be False for the *first* attempt of an
+    iteration this loop has not launched yet: the transcript dir is shared
+    across loops (``manual-<token>`` lives for the whole TUI session), so
+    an existing ``review-<pr>-i<N>.jsonl`` symlink may be a previous run's
+    iteration N.  Adopting its verdict would fabricate a verdict for a
+    review that never ran.  The same reasoning applies *after* a failed
+    attempt: the symlink is only this attempt's when its session id is not
+    the one that was already there when the episode started
+    (``state.stale_session_id``) — a launch that fails before the child
+    writes the symlink leaves the older one in place.  The review window
+    that was already live when the episode started is historical for the
+    same reason (``state.stale_pane_session_id``): a launch that fails
+    before ``--fresh`` replaces it leaves that window (and its older
+    review's verdict) in place.
+    """
+    pr_id = state.pr_id
+    workdir = pr_data.get("workdir")
+    our_transcript = f"{transcript_dir}/review-{pr_id}-i{iteration}.jsonl"
+    our_sid = None
+    if allow_recovery:
+        our_sid = _transcript_session_id(our_transcript)
+        if our_sid and our_sid == getattr(state, "stale_session_id", ""):
+            our_sid = None
+    if our_sid:
+        output = _verdict_output_if_present(our_transcript)
+        if output:
+            return AttemptDiscovery("verdict", output=output,
+                                    session_id=our_sid)
+
+    other = _other_loop_owner(state)
+    session = _get_pm_session()
+    if not session:
+        return AttemptDiscovery("launch")
+
+    window_name = _compute_review_window_name(pr_data)
+    pane_id = _find_review_claude_pane(session, window_name, workdir)
+    if not pane_id:
+        if other:
+            return AttemptDiscovery("other_owner", owner=other)
+        return AttemptDiscovery("launch")
+
+    pane_transcript = None
+    pane_sid = None
+    try:
+        from pm_core.claude_launcher import (
+            pane_transcript_path, session_id_from_transcript,
+        )
+        pt = pane_transcript_path(pane_id, workdir)
+        if pt:
+            pane_transcript = str(pt)
+            pane_sid = session_id_from_transcript(pt)
+    except Exception:
+        _log.debug("review_loop: pane transcript discovery failed",
+                   exc_info=True)
+
+    if our_sid:
+        if pane_sid == our_sid:
+            # Our failed attempt's session is alive: adopt it.
+            return AttemptDiscovery("adopt", pane_id=pane_id,
+                                    transcript=our_transcript,
+                                    session_id=our_sid)
+        if pane_sid:
+            # A different session is live in the window.  If another loop
+            # owns it, stand down; otherwise another driver launched this
+            # review — adopt its verdict rather than kill it.
+            if other:
+                return AttemptDiscovery("other_owner", owner=other,
+                                        pane_id=pane_id,
+                                        transcript=pane_transcript)
+            if _is_historical_session(state, transcript_dir, iteration,
+                                      pane_sid):
+                # A failed launch can leave the *previous* iteration's window
+                # live (e.g. its removal failed) after the child already wrote
+                # this iteration's transcript symlink.  That window's verdict
+                # belongs to an earlier iteration: replace it with the fresh
+                # launch, never adopt it as this iteration's.
+                return AttemptDiscovery("launch")
+            output = _verdict_output_if_present(pane_transcript)
+            if output:
+                return AttemptDiscovery("verdict", output=output,
+                                        session_id=pane_sid)
+            return AttemptDiscovery("adopt", pane_id=pane_id,
+                                    transcript=pane_transcript,
+                                    session_id=pane_sid)
+        # Pane is still starting (no session id visible yet).  If Claude has
+        # begun writing our transcript, adopt it; otherwise wait a bounded
+        # grace for the session to expose itself before replacing the pane.
+        try:
+            transcript_live = Path(our_transcript).resolve().exists()
+        except OSError:
+            transcript_live = False
+        if transcript_live:
+            return AttemptDiscovery("adopt", pane_id=pane_id,
+                                    transcript=our_transcript,
+                                    session_id=our_sid)
+        return AttemptDiscovery("pending", pane_id=pane_id,
+                                transcript=our_transcript,
+                                reason="pane has no session id yet")
+
+    # No transcript of ours for this iteration.
+    if other:
+        return AttemptDiscovery("other_owner", owner=other, pane_id=pane_id,
+                                transcript=pane_transcript)
+    if pane_sid and _is_historical_session(state, transcript_dir, iteration,
+                                           pane_sid):
+        # The previous iteration's window: a fresh launch replaces it.
+        return AttemptDiscovery("launch")
+    if allow_recovery and pane_sid and pane_transcript:
+        # This loop has already launched this iteration, so a live session
+        # that is not one of our historical windows is either our own
+        # recovered attempt (it produced no transcript symlink yet) or
+        # another driver's launch for the same iteration — e.g. a sign-off
+        # route racing a scheduled retry.  Adopt it instead of killing it
+        # with another ``--fresh`` launch.
+        output = _verdict_output_if_present(pane_transcript)
+        if output:
+            return AttemptDiscovery("verdict", output=output,
+                                    session_id=pane_sid)
+        return AttemptDiscovery("adopt", pane_id=pane_id,
+                                transcript=pane_transcript,
+                                session_id=pane_sid)
+    if allow_recovery and not pane_sid:
+        # A live pane that has not exposed a session id yet may be a
+        # just-started recovery or another driver's launch; give it the
+        # same bounded grace the "our attempt" path uses instead of killing
+        # it with a second ``--fresh``.  The caller replaces it if the
+        # session never appears.
+        return AttemptDiscovery("pending", pane_id=pane_id,
+                                transcript=pane_transcript,
+                                reason="pane has no session id yet")
+    # Unknown pane (e.g. a user-opened review window) on the first attempt
+    # of an iteration this loop has not launched: keep the loop's existing
+    # --fresh replacement semantics.
+    return AttemptDiscovery("launch")
+
+
+def _lease_keepalive(state: ReviewLoopState) -> Callable[[], bool]:
+    """A ``stop_check`` that refreshes the loop's launch lease.
+
+    Long reviews outlive the lease TTL; refreshing keeps other drivers from
+    treating the loop as dead.  The first check claims immediately: the
+    restart-handoff adopt path polls a live review without going through
+    ``_claim_launch``, so until it holds the lease another driver
+    (``pm pr auto-sequence``) would treat that launch as unowned.
+    Always returns False (never stops the poll).
+    """
+    from pm_core import runtime_state as _rs
+    # ``last`` starts one refresh interval in the past so the very first
+    # ``_check`` claims; a plain ``time.monotonic()`` would leave the adopt
+    # path unowned for ``_LEASE_REFRESH_SECONDS``.
+    last = {"t": time.monotonic() - _LEASE_REFRESH_SECONDS}
+
+    def _check() -> bool:
+        if state.stop_requested:
+            # A stopping loop must not re-take a lease the superseding loop
+            # has just claimed (or is about to claim).
+            return False
+        now = time.monotonic()
+        if now - last["t"] >= _LEASE_REFRESH_SECONDS:
+            last["t"] = now
+            try:
+                _rs.claim_action_lease(
+                    state.pr_id, "review-loop", _lease_owner(state),
+                    REVIEW_LAUNCH_CLAIM_TTL, state="running",
+                    iteration=state.iteration, loop_id=state.loop_id)
+                if state.stop_requested:
+                    # A stop landed *while* we were claiming: the stop check
+                    # above ran before the superseding loop set
+                    # ``stop_requested`` and released this lease, so the
+                    # claim just re-took it.  Hand it straight back instead of
+                    # holding it until the TTL — otherwise the new loop's
+                    # bounded claim wait expires into a non-retryable
+                    # LAUNCH_FAILED and the target is re-stranded.
+                    _release_lease(state)
+            except Exception:
+                _log.debug("review_loop: lease refresh failed", exc_info=True)
+        return False
+
+    return _check
+
+
 def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
                        transcript: str,
-                       iteration: int = 0, loop_id: str = "") -> str:
+                       iteration: int = 0, loop_id: str = "",
+                       attempt: int = 1,
+                       attempt_info: dict | None = None,
+                       state: ReviewLoopState | None = None) -> str:
     """Launch a review window and poll its JSONL transcript for the verdict.
 
     ``transcript`` is required — it is the path to the per-iteration
@@ -194,42 +855,115 @@ def _run_claude_review(pr_id: str, pm_root: str, pr_data: dict,
 
     Returns the captured assistant text containing the verdict.
     Raises :class:`PaneKilledError` if the pane disappears before a
-    verdict.  Raises :class:`RuntimeError` for setup failures (no tmux
-    session, window failed to launch).
+    verdict.  Raises :class:`ReviewLaunchError` when the launch itself
+    failed (with the full child output in an artifact), and
+    :class:`ReviewHoldError` for a permission/auth/trust hold.
     """
     from pm_core import tmux as tmux_mod
 
     session = _get_pm_session()
     if not session:
-        raise RuntimeError("Not in a pm tmux session")
+        raise ReviewLaunchError("Not in a pm tmux session",
+                                retryable=False, reason="environment")
     if not tmux_mod.session_exists(session):
-        raise RuntimeError(f"tmux session '{session}' no longer exists")
+        raise ReviewLaunchError(f"tmux session '{session}' no longer exists",
+                                retryable=False, reason="environment")
 
     window_name = _compute_review_window_name(pr_data)
+    workdir = pr_data.get("workdir")
+    stale_session_id = getattr(state, "stale_session_id", "") if state else ""
 
-    _launch_review_window(pr_id, pm_root, iteration=iteration, loop_id=loop_id,
-                          transcript=transcript)
+    cmd = _launch_review_window(
+        pr_id, pm_root, iteration=iteration, loop_id=loop_id,
+        transcript=transcript, attempt=attempt, workdir=workdir,
+        stale_session_id=stale_session_id) or []
 
     # Wait briefly for the window to appear
-    time.sleep(2)
+    time.sleep(_WINDOW_WAIT)
 
-    pane_id = _find_claude_pane(session, window_name)
+    pane_id = _find_review_claude_pane(session, window_name, workdir)
     if not pane_id:
-        raise RuntimeError(f"Review window '{window_name}' not found after launch")
+        artifact = _write_launch_artifact(
+            transcript=transcript, pr_id=pr_id, iteration=iteration,
+            loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
+            stdout="", stderr="", workdir=workdir,
+            stale_session_id=stale_session_id,
+            note=f"window '{window_name}' not found after launch")
+        msg = f"Review window '{window_name}' not found after launch"
+        if artifact:
+            msg += f" (artifact: {artifact})"
+        raise ReviewLaunchError(msg, retryable=True, reason="window",
+                                artifact=artifact)
+
+    from pm_core.claude_launcher import (
+        session_id_from_transcript, WorkspaceTrustBlocked,
+    )
+    session_id = session_id_from_transcript(transcript) if transcript else None
+    if not session_id:
+        artifact = _write_launch_artifact(
+            transcript=transcript, pr_id=pr_id, iteration=iteration,
+            loop_id=loop_id, attempt=attempt, cmd=cmd, returncode=None,
+            stdout="", stderr="", workdir=workdir,
+            stale_session_id=stale_session_id,
+            note="launch produced no transcript session id")
+        msg = "Review window launched but produced no transcript session id"
+        if artifact:
+            msg += f" (artifact: {artifact})"
+        raise ReviewLaunchError(msg, retryable=True, reason="transcript",
+                                artifact=artifact)
+
+    if attempt_info is not None:
+        attempt_info["pane_id"] = pane_id
+        attempt_info["session_id"] = session_id
 
     _log.info("review_loop: polling pane %s in window %s (transcript=%s)",
               pane_id, window_name, transcript)
 
-    content = _poll_for_verdict(pane_id, transcript,
-                                 grace_period=_VERDICT_GRACE_PERIOD,
-                                 workdir=pr_data.get("workdir"))
+    stop_check = _lease_keepalive(state) if state is not None else None
+    try:
+        content = _poll_for_verdict(pane_id, transcript,
+                                     grace_period=_VERDICT_GRACE_PERIOD,
+                                     workdir=workdir,
+                                     stop_check=stop_check)
+    except WorkspaceTrustBlocked as e:
+        raise ReviewHoldError(str(e)) from e
     if content is None:
         raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
     return content
 
 
+def _poll_adopted_review(state: ReviewLoopState, pane_id: str,
+                         transcript: str, pr_data: dict) -> str | None:
+    """Read a just-landed verdict or poll an adopted review pane.
+
+    Shared by the restart handoff (:func:`_adopt_in_flight_review`) and the
+    retry's adopt path.  The poller only wakes on idle events newer than its
+    own start, so a verdict that landed between discovery and this call is
+    read first instead of being waited on until the pane dies.  The poll has
+    no startup grace: the adopted session was launched *before* this call, so
+    the startup-false-positive window the grace protects against has already
+    passed (with a grace, an idle event inside it is discarded and the poll
+    waits for a second event an idle session never emits — the loop would
+    hang until the pane died).
+
+    Raises :class:`ReviewHoldError` for a workspace-trust/permission prompt.
+    Returns None when the pane disappears.
+    """
+    output = _landed_verdict(transcript)
+    if output:
+        return output
+    from pm_core.claude_launcher import WorkspaceTrustBlocked
+    try:
+        return _poll_for_verdict(
+            pane_id, transcript, workdir=pr_data.get("workdir"),
+            stop_check=_lease_keepalive(state))
+    except WorkspaceTrustBlocked as e:
+        raise ReviewHoldError(str(e)) from e
+
+
 def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
-                            transcript_dir: str | None) -> str | None:
+                            transcript_dir: str | None,
+                            result: dict | None = None) -> str | None:
     """Collect the verdict of an iteration that was in flight at a TUI restart.
 
     A resumed loop (breadcrumb restore) whose counter was bumped but has
@@ -238,42 +972,373 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     kill it and start the next iteration).  Returns the verdict output,
     ``None`` when there is nothing to adopt (no window / transcript), and
     raises :class:`PaneKilledError` if the adopted pane dies first.
-    """
-    import os
-    from pm_core import hook_events
-    from pm_core.claude_launcher import session_id_from_transcript
-    from pm_core.verdict_transcript import find_verdict_turn
 
-    session = _get_pm_session()
-    if not session or not transcript_dir:
+    *result* receives ``transcript``: the transcript the returned verdict
+    actually came from.  Discovery can adopt another pane's transcript (a
+    review another driver launched for the same iteration), so the caller
+    must not assume the loop's own ``review-<pr>-i<N>.jsonl`` — an
+    INPUT_REQUIRED follow-up has to be waited on in the transcript that
+    asked the question.
+    """
+    if not transcript_dir:
         return None
-    window_name = _compute_review_window_name(pr_data)
-    pane_id = _find_claude_pane(session, window_name)
-    transcript = _iteration_transcript(state, transcript_dir)
-    if not pane_id or not os.path.lexists(transcript):
+    from pm_core.claude_launcher import session_id_from_transcript
+
+    discovery = _discover_iteration(
+        state, pr_data, transcript_dir, state.iteration,
+        allow_recovery=(state.iteration_attempted
+                        or state.launch_attempts > 0))
+    if discovery.kind == "verdict":
+        # Record whose verdict this was so a later iteration replaces (rather
+        # than re-adopts) a still-live pane running that session.
+        if discovery.session_id:
+            state.last_session_id = discovery.session_id
+        if result is not None:
+            result["transcript"] = (discovery.transcript
+                                    or _iteration_transcript(state,
+                                                             transcript_dir))
+        return discovery.output
+    # A restart handoff trusts its own iteration transcript even when the
+    # pane has not exposed its session id yet: poll it (the retry path,
+    # which must avoid killing a starting session, treats "pending"
+    # differently).
+    if discovery.kind not in ("adopt", "pending") or not discovery.pane_id \
+            or not discovery.transcript:
         return None
-    session_id = session_id_from_transcript(transcript)
-    if not session_id:
-        return None
+    if result is not None:
+        result["transcript"] = discovery.transcript
 
     _log.info("review_loop: adopting in-flight iteration %d for %s "
               "(pane %s, transcript=%s)", state.iteration, state.pr_id,
-              pane_id, transcript)
+              discovery.pane_id, discovery.transcript)
+    session_id = session_id_from_transcript(discovery.transcript)
+    if not session_id:
+        # The poller needs the session id; without one, relaunch the
+        # iteration instead of raising a terminal error from inside it.
+        return None
     # The verdict may have landed between the breadcrumb write and now;
     # the poller only wakes on idle events newer than its start.
-    ev = hook_events.read_event(session_id)
-    if ev and ev.get("event_type") == "idle_prompt":
-        hit = find_verdict_turn(transcript, ALL_VERDICTS)
-        if hit:
-            # Return the verdict turn's text so a later /loop wakeup turn
-            # cannot hide the verdict from parse_review_verdict.
-            return hit.text or hit.verdict
-
-    content = _poll_for_verdict(pane_id, transcript,
-                                 workdir=pr_data.get("workdir"))
+    state.last_session_id = session_id
+    content = _poll_adopted_review(state, discovery.pane_id,
+                                   discovery.transcript, pr_data)
     if content is None:
-        raise PaneKilledError(f"Review pane disappeared (window: {window_name})")
+        raise PaneKilledError(
+            f"Review pane disappeared (window: "
+            f"{_compute_review_window_name(pr_data)})")
     return content
+
+
+# ---------------------------------------------------------------------------
+# Bounded retry of a failed authorized review launch
+# ---------------------------------------------------------------------------
+
+def _release_lease(state: ReviewLoopState) -> None:
+    """Release this loop's cross-driver launch lease (idempotent)."""
+    try:
+        from pm_core import runtime_state as _rs
+        _rs.release_action_lease(state.pr_id, "review-loop",
+                                 _lease_owner(state))
+    except Exception:
+        _log.debug("review_loop: lease release failed", exc_info=True)
+
+
+def _wait_for_claim(state: ReviewLoopState, pm_root: str | None,
+                    iteration: int) -> bool:
+    """Wait (bounded) for another loop's launch lease to expire/release."""
+    deadline = time.monotonic() + REVIEW_LAUNCH_CLAIM_WAIT
+    while time.monotonic() < deadline:
+        if state.stop_requested:
+            return False
+        _interruptible_sleep(2.0, state, pm_root)
+        if state.stop_requested:
+            return False
+        if _pr_is_terminal(state.pr_id, pm_root):
+            # The PR merged/closed while we waited for the lease: never
+            # launch a review for it just because the lease freed up.  The
+            # caller reports CLOSED for this False.
+            return False
+        if _claim_launch(state, iteration, state.launch_attempts + 1):
+            return True
+    return False
+
+
+def _claim_launch(state: ReviewLoopState, iteration: int, attempt: int) -> bool:
+    """Take the cross-driver launch lease for this attempt (one owner)."""
+    if state.stop_requested:
+        # A stopping loop must not take (or re-take) the lease.  A
+        # superseding loop releases the old lease and claims immediately
+        # after setting ``stop_requested``; if the old loop won that race it
+        # would launch a fresh review window the user just asked to replace,
+        # and the new loop's bounded claim wait would expire into a
+        # non-retryable LAUNCH_FAILED — re-stranding the target.
+        return False
+    try:
+        from pm_core import runtime_state as _rs
+        if _rs.claim_action_lease(
+                state.pr_id, "review-loop", _lease_owner(state),
+                REVIEW_LAUNCH_CLAIM_TTL, state="running",
+                iteration=iteration, loop_id=state.loop_id,
+                launch_attempt=attempt):
+            return True
+    except Exception:
+        _log.debug("review_loop: claim launch lease failed", exc_info=True)
+        # Fail open: a broken runtime_state must not block reviews.
+        return True
+    # Lost the claim — but that is only another loop's business when one is
+    # actually live.  An unwritable/corrupt runtime file also yields False,
+    # and standing down for it would strand the target this fix exists for.
+    if _other_loop_owner(state):
+        return False
+    _log.debug("review_loop: launch lease unavailable for %s; proceeding",
+               state.pr_id)
+    return True
+
+
+def _pr_is_terminal(pr_id: str, pm_root: str | None) -> bool:
+    """Whether the PR merged/closed (stop retrying, never resurrect it)."""
+    if not pm_root:
+        return False
+    try:
+        from pm_core import store
+        data = store.load(Path(pm_root))
+        pr = store.get_pr(data, pr_id)
+    except Exception:
+        return False
+    return (pr or {}).get("status") in ("merged", "closed")
+
+
+def _interruptible_sleep(seconds: float, state: ReviewLoopState,
+                         pm_root: str | None = None) -> None:
+    """Sleep in small chunks, waking on cancellation or PR closure."""
+    end = time.monotonic() + max(0.0, float(seconds))
+    next_terminal_check = 0.0
+    while True:
+        if state.stop_requested:
+            return
+        now = time.monotonic()
+        if now >= end:
+            return
+        if pm_root and now >= next_terminal_check:
+            next_terminal_check = now + 2.0
+            if _pr_is_terminal(state.pr_id, pm_root):
+                return
+        time.sleep(min(0.25, end - now))
+
+
+def _clear_launch_failure(state: ReviewLoopState) -> None:
+    """Drop the failed-attempt evidence of an episode.
+
+    Shared by :func:`_reset_launch_retry` (a launch succeeded) and the
+    start of a new iteration's episode so the two cannot drift apart.
+    ``retry_episodes`` (the auto-start re-arm cap) is the one field that
+    spans episodes; it is cleared by the caller that owns it.
+    """
+    state.launch_attempts = 0
+    state.next_retry_at = 0.0
+    state.last_launch_error = ""
+    state.last_launch_artifact = None
+    state.launch_retryable = False
+    # The TUI announces each retry attempt once, keyed on the attempt
+    # number.  The key is per episode (attempts restart at 1), so a new
+    # episode must forget what the previous one announced — otherwise its
+    # attempt 2 looks already-notified and is silently swallowed.
+    state._ui_notified_retry = 0
+
+
+def _reset_launch_retry(state: ReviewLoopState) -> None:
+    """A launch succeeded: clear the episode and its retry metadata."""
+    _clear_launch_failure(state)
+    state.retry_episodes = 0
+    state.retry_ready_at = 0.0
+    # This iteration is over, so nothing of ours is in flight any more.
+    # Clearing the flag here (not only at the next episode's start) keeps
+    # the restart handoff's fabrication guard intact across the counter
+    # bump: `run_review_loop_sync` increments ``state.iteration`` *before*
+    # ``_run_iteration_with_retry`` re-snapshots the episode, and a merge
+    # restart landing in that window would otherwise persist this
+    # iteration's ``True`` for the *next* iteration number — letting the
+    # handoff adopt an earlier run's ``review-<pr>-i<N>.jsonl`` verdict for
+    # an iteration this loop never launched.
+    state.iteration_attempted = False
+    # ``_ui_notified_retry`` is cleared by ``_clear_launch_failure`` (the
+    # per-episode notice key) so a later iteration's attempt 2 is announced.
+
+
+def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
+                              pr_data: dict, transcript_dir: str,
+                              iteration: int,
+                              result: dict | None = None) -> str:
+    """Run (or adopt) one review iteration, retrying failed launches.
+
+    Only a genuine launch failure is retried; a pane that disappears
+    (cancellation/closure), a hold, a real verdict and a merged/closed PR
+    all stop the retry.  The iteration number is never advanced by a retry.
+
+    *result* receives ``transcript``: the transcript the returned verdict
+    actually came from.  Rediscovery can adopt another pane's transcript (a
+    review another driver launched for the same iteration), so an
+    INPUT_REQUIRED follow-up must be waited on there and not on this loop's
+    own ``review-<pr>-i<N>.jsonl``.
+    """
+    pr_id = state.pr_id
+    transcript = f"{transcript_dir}/review-{pr_id}-i{iteration}.jsonl"
+
+    if state.retry_iteration != iteration:
+        # A different iteration: start a fresh episode.  Nothing of ours
+        # exists for it yet, so rediscovery must not adopt an older run's
+        # transcript for this iteration number.
+        state.retry_iteration = iteration
+        _clear_launch_failure(state)
+        state.retry_ready_at = 0.0
+        state.iteration_attempted = False
+        # Snapshot the transcript symlink *before* any attempt: if the
+        # launch fails before the child replaces it, rediscovery must not
+        # mistake an earlier run's iteration-N transcript for this attempt.
+        state.stale_session_id = _transcript_session_id(transcript) or ""
+        # Same for the live review window: it is the historical window, and
+        # a first attempt that fails before ``--fresh`` replaces it must not
+        # have its (older code's) verdict adopted on the retry.
+        state.stale_pane_session_id = _live_review_pane_session(pr_data)
+
+    # A merge-restart may land mid-backoff: honour the remaining delay.
+    if state.next_retry_at > time.time():
+        _interruptible_sleep(state.next_retry_at - time.time(), state, pm_root)
+
+    pending_checks = 0
+    while True:
+        if state.stop_requested:
+            raise PaneKilledError("Review loop stopped during launch retry")
+        if _pr_is_terminal(pr_id, pm_root):
+            raise ReviewClosedError(
+                f"PR {pr_id} merged/closed during review launch")
+
+        # Claim before discovery so a concurrent driver sees this loop owns
+        # the launch for the whole discover -> launch window.
+        next_attempt = state.launch_attempts + 1
+        if not _claim_launch(state, iteration, next_attempt):
+            if not _wait_for_claim(state, pm_root, iteration):
+                if state.stop_requested:
+                    # Cancelled while waiting: this is a user stop, not a
+                    # launch failure (it must not surface as LAUNCH_FAILED).
+                    raise PaneKilledError(
+                        "Review loop stopped while waiting for the launch "
+                        "lease")
+                if _pr_is_terminal(pr_id, pm_root):
+                    raise ReviewClosedError(
+                        f"PR {pr_id} merged/closed during review launch")
+                _log.info("review_loop: %s launch is owned by another loop; "
+                          "standing down", pr_id)
+                raise ReviewLaunchError(
+                    "Review launch owned by another loop",
+                    retryable=False, reason="superseded")
+
+        discovery = _discover_iteration(state, pr_data, transcript_dir,
+                                        iteration,
+                                        allow_recovery=(
+                                            state.iteration_attempted
+                                            or state.launch_attempts > 0))
+        # Remember whose session this iteration resolved to: the *next*
+        # iteration must treat a still-live pane running it as historical
+        # (replaced by ``--fresh``), never adopt its verdict a second time.
+        if discovery.kind in ("verdict", "adopt") and discovery.session_id:
+            state.last_session_id = discovery.session_id
+        if discovery.kind == "verdict":
+            _reset_launch_retry(state)
+            if result is not None:
+                result["transcript"] = discovery.transcript or transcript
+            return discovery.output
+        if discovery.kind == "adopt":
+            # Discovery ran a moment ago; the adopted pane may have landed
+            # its verdict since.  ``_poll_adopted_review`` reads that first,
+            # then polls without the startup grace (the adopted session was
+            # launched before this poll).
+            content = _poll_adopted_review(
+                state, discovery.pane_id, discovery.transcript, pr_data)
+            if content is None:
+                raise PaneKilledError(
+                    "Review pane disappeared during launch retry")
+            _reset_launch_retry(state)
+            if result is not None:
+                result["transcript"] = discovery.transcript or transcript
+            return content
+        if discovery.kind == "other_owner":
+            # Another native loop owns this PR: never launch over it.
+            _log.info("review_loop: %s launch owned by %s; standing down",
+                      pr_id, discovery.owner)
+            raise ReviewLaunchError(
+                f"Review launch owned by another loop ({discovery.owner})",
+                retryable=False, reason="superseded")
+        if discovery.kind == "pending":
+            pending_checks += 1
+            if pending_checks > 3:
+                # A pane that never exposes a Claude session is half-created
+                # debris: replace it with a fresh launch.
+                _log.info("review_loop: %s iteration %d pane never exposed a "
+                          "session; replacing it", pr_id, iteration)
+                discovery = AttemptDiscovery("launch")
+            else:
+                _log.debug("review_loop: %s iteration %d %s; waiting %.0fs",
+                           pr_id, iteration,
+                           discovery.reason or "pane not ready yet",
+                           _DISCOVERY_GRACE)
+                _interruptible_sleep(_DISCOVERY_GRACE, state, pm_root)
+                continue
+
+        # kind == "launch"
+        if state.stop_requested:
+            # The stop can land after the loop-top check, while the claim or
+            # discovery runs.  Never create a review window for a loop the
+            # user just stopped or superseded.
+            raise PaneKilledError("Review loop stopped during launch retry")
+        if state.launch_attempts >= REVIEW_LAUNCH_MAX_ATTEMPTS:
+            raise ReviewLaunchError(
+                state.last_launch_error or "Review launch failed",
+                retryable=True, reason="exhausted",
+                artifact=state.last_launch_artifact)
+
+        attempt = next_attempt
+        state.launch_attempts = attempt
+        # From here on a transcript/verdict for this iteration may be ours:
+        # rediscovery may adopt it instead of launching a duplicate.
+        state.iteration_attempted = True
+        # Each launch attempt gets its own bounded grace for a pane that is
+        # still starting.  A counter carried over from an earlier attempt
+        # would replace a just-started session on the first pending check of
+        # a later one.
+        pending_checks = 0
+
+        info: dict = {}
+        try:
+            output = _run_claude_review(
+                pr_id, pm_root, pr_data, iteration=iteration,
+                loop_id=state.loop_id, transcript=transcript,
+                attempt=attempt, attempt_info=info, state=state)
+        except ReviewHoldError:
+            raise
+        except ReviewLaunchError as e:
+            state.last_launch_error = str(e)
+            state.last_launch_artifact = e.artifact
+            state.launch_retryable = e.retryable
+            if not e.retryable:
+                raise
+            if attempt >= REVIEW_LAUNCH_MAX_ATTEMPTS:
+                raise
+            delay = min(
+                REVIEW_LAUNCH_BACKOFF_MAX,
+                REVIEW_LAUNCH_BACKOFF_BASE * (2 ** (attempt - 1)))
+            state.next_retry_at = time.time() + delay
+            _log.warning(
+                "review_loop: launch attempt %d/%d failed for %s (%s); "
+                "retrying in %.0fs", attempt, REVIEW_LAUNCH_MAX_ATTEMPTS,
+                pr_id, e.reason or "launch", delay)
+            _interruptible_sleep(delay, state, pm_root)
+            continue
+
+        state.last_session_id = info.get("session_id") or state.last_session_id
+        _reset_launch_retry(state)
+        if result is not None:
+            result["transcript"] = transcript
+        return output
 
 
 def _iteration_transcript(state: ReviewLoopState,
@@ -294,7 +1359,11 @@ def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
     session = _get_pm_session()
     if not session or not transcript_dir:
         return None
-    if not _find_claude_pane(session, _compute_review_window_name(pr_data)):
+    # Workdir-aware: the shared first-pane helper can return the review
+    # window's diff shell, which is not the pane that asked the question.
+    if not _find_review_claude_pane(
+            session, _compute_review_window_name(pr_data),
+            pr_data.get("workdir")):
         return None
     transcript = _iteration_transcript(state, transcript_dir)
     if not os.path.lexists(transcript):
@@ -393,10 +1462,22 @@ def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
     # and Claude won't idle again.  An idle older than the answer (e.g. the
     # question's own) is ignored below.
     hook_baseline = 0.0
-    stop_check = lambda: state.stop_requested  # noqa: E731
+    # The wait can last minutes while the user interacts in the pane, which
+    # is far longer than REVIEW_LAUNCH_CLAIM_TTL.  Refresh the launch lease
+    # from the same stop_check the wait already polls: without it another
+    # driver treats the loop as dead and relaunches ``--fresh`` over the live
+    # question pane — the bug this loop exists to fix.  ``_lease_keepalive``
+    # always returns False, so it only ever adds the refresh.
+    keepalive = _lease_keepalive(state)
+
+    def stop_check() -> bool:
+        return state.stop_requested or keepalive()
 
     while not stop_check():
-        if not _find_claude_pane(session, window_name):
+        # Workdir-aware: the review window's first pane can be the diff
+        # shell, and a pane that is not the reviewer never asked a question.
+        if not _find_review_claude_pane(session, window_name,
+                                        pr_data.get("workdir")):
             _log.warning("review_loop: pane gone during follow-up wait")
             return None
         ev = hook_events.wait_for_event(
@@ -561,7 +1642,13 @@ def run_review_loop_sync(
     # state it was resumed from.
     state._adopting_wait = adopt_wait
     state.running = True
-    state.stop_requested = False
+    # ``stop_requested`` is owned by the caller, not reset here: ``_start_loop``
+    # marks the loop running *before* it creates this thread (so a second
+    # starter cannot launch a duplicate), and a stop that lands in the window
+    # between those two would be swallowed — the user would be told the loop is
+    # stopping while it launched a review window anyway.  ``_start_loop``
+    # clears the flag for a resumed loop; a fresh state already defaults to
+    # False.
 
     try:
         while state.iteration < max_iterations or adopt or adopt_wait:
@@ -613,19 +1700,31 @@ def run_review_loop_sync(
                 state.input_required = False
                 try:
                     output = None
+                    adopted: dict = {}
                     if adopt:
                         adopt = False
                         output = _adopt_in_flight_review(
-                            state, pr_data, saved_transcript_dir)
+                            state, pr_data, saved_transcript_dir, adopted)
                         if output is None:
                             # Nothing live to adopt — rerun the same iteration.
                             state.iteration -= 1
                         else:
-                            # Its follow-up (if INPUT_REQUIRED) lives in the
-                            # transcript it was launched under, not the new
-                            # dir (a manual loop gets a fresh one on restart).
-                            wait_transcript = _iteration_transcript(
-                                state, saved_transcript_dir)
+                            # The adopted iteration is complete: clear its
+                            # retry episode and ``iteration_attempted`` here
+                            # too.  The counter is bumped below and only then
+                            # does ``_run_iteration_with_retry`` re-snapshot
+                            # the next episode; a merge restart in that window
+                            # would otherwise persist this iteration's
+                            # ``True`` for the *next* iteration number and let
+                            # the restart handoff adopt an earlier run's
+                            # transcript for it.
+                            _reset_launch_retry(state)
+                            # An INPUT_REQUIRED follow-up lives in the
+                            # transcript the verdict actually came from:
+                            # discovery can adopt another pane's transcript,
+                            # not necessarily this loop's own
+                            # ``review-<pr>-i<N>.jsonl``.
+                            wait_transcript = adopted.get("transcript")
                     if output is None:
                         state.iteration += 1
                         # A new iteration owns the work: the resumed wait is
@@ -633,25 +1732,59 @@ def run_review_loop_sync(
                         # entry no longer belongs to the current iteration,
                         # so the resuming flag is cleared only now.
                         state._adopting_wait = False
-                        _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
-                        iter_transcript = _iteration_transcript(state, transcript_dir)
-                        output = _run_claude_review(
-                            state.pr_id, pm_root, pr_data,
-                            iteration=state.iteration, loop_id=state.loop_id,
-                            transcript=iter_transcript,
+                        _log.info("review_loop: iteration %d for %s",
+                                  state.iteration, state.pr_id)
+                        launched: dict = {}
+                        output = _run_iteration_with_retry(
+                            state, pm_root, pr_data, transcript_dir,
+                            state.iteration, launched,
                         )
+                        wait_transcript = launched.get("transcript")
                 except PaneKilledError as e:
-                    _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
+                    _log.warning("review_loop: pane killed on iteration %d: %s",
+                                 state.iteration, e)
                     state.latest_verdict = VERDICT_KILLED
                     state.latest_output = str(e)
                     break
+                except ReviewClosedError as e:
+                    _log.info("review_loop: %s", e)
+                    state.latest_verdict = VERDICT_CLOSED
+                    state.latest_output = str(e)
+                    break
+                except ReviewHoldError as e:
+                    _log.warning("review_loop: review held on iteration %d "
+                                 "(permission/trust prompt): %s",
+                                 state.iteration, e)
+                    state.latest_verdict = VERDICT_HOLD
+                    state.latest_output = str(e)
+                    state.launch_retryable = False
+                    break
+                except ReviewLaunchError as e:
+                    # A genuine failed authorized launch.  Never fabricate an
+                    # agent verdict: surface an explicit, retryable failure
+                    # with the complete child output retained in its artifact.
+                    _log.error("review_loop: review launch failed on "
+                               "iteration %d: %s", state.iteration, e)
+                    state.latest_verdict = VERDICT_LAUNCH_FAILED
+                    state.latest_output = str(e)
+                    state.launch_retryable = e.retryable
+                    state.last_launch_error = str(e)
+                    state.last_launch_artifact = e.artifact
+                    if e.retryable:
+                        state.retry_ready_at = (time.time()
+                                                + REVIEW_LAUNCH_REARM_SECONDS)
+                    break
                 except Exception as e:
-                    _log.exception("review_loop: review failed on iteration %d", state.iteration)
-                    state.latest_verdict = "ERROR"
+                    _log.exception(
+                        "review_loop: review failed on iteration %d",
+                        state.iteration)
+                    state.latest_verdict = VERDICT_ERROR
                     state.latest_output = str(e)
                     break
 
                 verdict = parse_review_verdict(output)
+                # Set with the verdict, before on_iteration: a new question
+                # must never read as "answered; follow-up running" in between.
                 state.input_required = verdict == VERDICT_INPUT_REQUIRED
                 state.latest_verdict = verdict
                 state.latest_output = output
@@ -663,7 +1796,8 @@ def run_review_loop_sync(
                 )
                 state.history.append(iteration_result)
 
-                _log.info("review_loop: iteration %d verdict=%s", state.iteration, verdict)
+                _log.info("review_loop: iteration %d verdict=%s",
+                          state.iteration, verdict)
 
                 if on_iteration:
                     try:
@@ -702,6 +1836,7 @@ def run_review_loop_sync(
         # Status reads input_required before running: a loop that died
         # mid-wait must not report a human request nobody can answer.
         state.input_required = False
+        _release_lease(state)
 
     return state
 

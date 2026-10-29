@@ -129,6 +129,13 @@ def env(tmp_path, monkeypatch):
     find_pane = lambda s, w: "%1" if pane_alive["alive"] else None  # noqa: E731
     monkeypatch.setattr(rl, "_find_claude_pane", find_pane)
     monkeypatch.setattr(loop_shared, "find_claude_pane", find_pane)
+    # The failed-launch retry layer (pr-e040aeb) is covered by
+    # test_review_launch_retry.py.  Here it would only put a launch lease and
+    # a discovery pass around the stubbed launch; neutralise it so these
+    # tests keep exercising the wait state itself.
+    monkeypatch.setattr(rl, "_claim_launch", lambda *a, **k: True)
+    monkeypatch.setattr(rl, "_pr_is_terminal", lambda *a, **k: False)
+    monkeypatch.setattr(rl, "_DISCOVERY_GRACE", 0.0)
     tdir = tmp_path / "transcripts"
     tdir.mkdir()
     return tdir, pane_alive
@@ -157,7 +164,8 @@ def _status(state) -> tuple[str, str, dict]:
 def _start(state, tdir, launches, on_iteration=None):
     """Run the loop in a thread; ``launches`` maps iteration → callable
     returning the review output (it may block to keep the iteration live)."""
-    def fake_review(pr_id, pm_root, pr_data, transcript, iteration=0, loop_id=""):
+    def fake_review(pr_id, pm_root, pr_data, transcript, iteration=0,
+                    loop_id="", **_kw):
         return launches[iteration]()
     p = patch.object(rl, "_run_claude_review", side_effect=fake_review)
     mock = p.start()
@@ -786,10 +794,17 @@ class TestLiveFlow:
 # ---------------------------------------------------------------------------
 
 def _restored(tdir, iteration, verdicts, input_required=True):
-    """State as ``consume_breadcrumb`` rebuilds it."""
+    """State as ``consume_breadcrumb`` rebuilds it.
+
+    ``iteration_attempted`` is what the breadcrumb persists for a loop that
+    had already launched the in-flight iteration; without it the restart
+    handoff's fabrication guard correctly refuses to adopt the transcript
+    (pr-e040aeb), and the resumed loop relaunches instead.
+    """
     st = ReviewLoopState(pr_id=PR_ID, iteration=iteration,
                          latest_verdict=verdicts[-1],
                          input_required=input_required,
+                         iteration_attempted=True,
                          _transcript_dir=str(tdir))
     for i, v in enumerate(verdicts, start=1):
         st.history.append(ReviewIteration(iteration=i, verdict=v, output=""))

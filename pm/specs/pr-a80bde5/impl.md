@@ -48,9 +48,22 @@ are all wrong together.  The fix belongs in the loop's state, not in formatting.
 ## Requirements
 
 R1. **New iteration owns the work.**  When the review loop launches a new
-    iteration (`_run_claude_review`) or adopts an in-flight non-INPUT_REQUIRED
-    iteration (`_adopt_in_flight_review`), `state.input_required` is False.
-    (`review_loop.run_review_loop_sync`.)
+    iteration or adopts an in-flight non-INPUT_REQUIRED iteration,
+    `state.input_required` is False.  (`review_loop.run_review_loop_sync`.)
+
+    Since the integration with master@4a74d880 (pr-e040aeb, failed-launch
+    retry) the launch is `_run_iteration_with_retry`, not a bare
+    `_run_claude_review`: the call may discover an existing attempt, adopt
+    another driver's transcript, or retry a failed launch with backoff
+    before a review is ever launched.  All of those are "the iteration owns
+    the work", so `run_review_loop_sync` clears `input_required` before it
+    enters that call and never re-sets it from the launch path — only from
+    the parsed verdict (and, for INPUT_REQUIRED, the follow-up waiter).
+    `_adopt_in_flight_review` and `_run_iteration_with_retry` take an
+    optional ``result`` dict and record there the transcript the returned
+    verdict actually came from: discovery can adopt *another pane's*
+    transcript, so the follow-up wait must not assume the loop's own
+    ``review-<pr>-i<N>.jsonl``.
 
 R2. **Restart/adoption of an INPUT_REQUIRED wait.**  A resumed state whose
     `history[-1]` is `(state.iteration, INPUT_REQUIRED)` is a wait that was in
@@ -60,6 +73,14 @@ R2. **Restart/adoption of an INPUT_REQUIRED wait.**  A resumed state whose
     breadcrumb flag.  If there is no live pane or no transcript, nobody can answer
     any more: clear `input_required` and continue as before, launching the next
     iteration.
+
+    The pane check is `_find_review_claude_pane` (workdir-aware), not the
+    shared first-pane helper: a review window's first pane can be the diff
+    shell, and a shell never asked the question.  An iteration adopted *in
+    flight* at the restart waits on the transcript its verdict came from
+    (`_adopt_in_flight_review`'s ``result["transcript"]``), which can be a
+    different dir than the resumed loop's own — a manual loop gets a fresh
+    ``manual-<token>`` dir on restart.
 
 R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
     appended to the iteration's transcript after the INPUT_REQUIRED turn means
@@ -177,6 +198,17 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
 - The waiter must poll the transcript at a short cadence (~2 s) so status is
   close to real time.  It reads incrementally (byte offset) so large transcripts
   are not re-read on every tick.
+- **Lease invariant (integration with pr-e040aeb).**  Master's cross-driver
+  launch lease (`runtime_state` action lease ``review-loop``,
+  `REVIEW_LAUNCH_CLAIM_TTL` = 180 s) makes one driver own a PR's review
+  launch.  `_run_claude_review` and `_poll_adopted_review` refresh it through
+  `_lease_keepalive`; so does this PR's follow-up waiter, through the same
+  `stop_check` it already polls.  Without the refresh a wait longer than the
+  TTL looks like a dead loop to `pm pr auto-sequence`, which then launches
+  ``--fresh`` over the live question pane — the very bug this PR fixes.  A
+  stopping loop must not refresh (and must hand the lease straight back if a
+  refresh races the stop).  `run_review_loop_sync` releases the lease in its
+  ``finally``, alongside clearing `_adopting_wait` and `input_required`.
 
 ## Ambiguities (resolved)
 
@@ -335,3 +367,22 @@ R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker 
   helper.  `pm/project.yaml` was resolved with `store.merge_3way` (master's
   newer registry state for every untouched entry; this branch's own PR entry
   and notes winning true conflicts).
+- Master overlap #2 (SIGNOFF_IMPL, **resolved at integration**): master
+  @4a74d880 grew the failed-launch retry layer (pr-e040aeb) — `ReviewLaunchError`
+  /`ReviewHoldError`/`ReviewClosedError`, `_run_iteration_with_retry`,
+  `_discover_iteration`/`AttemptDiscovery`, the cross-driver launch lease and
+  the extra `ReviewLoopState` retry fields.  It rewrote
+  `run_review_loop_sync`, adoption and the follow-up waiter, so the two
+  conflicted in `review_loop.py`, `autostart_state.py` and `pm/project.yaml`.
+  Reconciled by keeping master's loop body and retry/adopt machinery and
+  re-threading the PR's wait gate through it: the adopt-wait gate
+  (`adopt_wait`/`_adopting_wait`/`wait_transcript`/`wait_watch`, publish-then-
+  clear ordering) sits in front of master's try/except, the retry path hands
+  back the transcript it resolved, the waiter takes master's
+  `_lease_keepalive`, and the `finally` does both `_release_lease` and the
+  flag clears.  `autostart_state` unions `follow_up`/`resuming` with the
+  HOLD/LAUNCH_FAILED retry-field normalisation, and `review_progress_input`
+  keeps the `_adopting_wait` → `iteration` → `input_required` reader order.
+  `pm/project.yaml` was again resolved with `store.merge_3way`.
+  `test_follow_up_wait_refreshes_the_launch_lease` was rewritten to drive the
+  PR's waiter (it patched `_wait_for_follow_up_shared`, which the PR deletes).
