@@ -504,7 +504,8 @@ class TestRecipes:
                      "capture-pane -p -t pm-recorder",
                      "send-keys -t pm-recorder",
                      "kill-session -t pm-recorder",
-                     "attach -t $TARGET"):
+                     "attach -t $TARGET",
+                     'pipe-pane -t "$TARGET'):
             assert bare not in block, (
                 f"tmux recipe targets a session with a bare name ({bare!r}), "
                 "which tmux prefix-matches — it would act on another session "
@@ -513,7 +514,8 @@ class TestRecipes:
                       'capture-pane -p -t "=pm-recorder:0.0"',
                       'send-keys -t "=pm-recorder:0.0"',
                       'kill-session -t "=pm-recorder"',
-                      "attach -t =$TARGET"):
+                      "attach -t =$TARGET",
+                      'pipe-pane -t "=$TARGET:0.0"'):
             assert exact in block, (
                 f"tmux recipe does not use the exact session handle {exact!r}")
 
@@ -2861,6 +2863,18 @@ case "$sub" in
       esac
       for a in "$@"; do v=$a; done
       printf '%s\n' "$v" > "$STATE/claim.$r"
+      # `pipegap`: the target session ends in the gap between step 2's
+      # exact-session assert and the pipe attach, and a grouped `<base>~1`
+      # session (pm creates one per extra co-viewing client) is left behind.
+      # That is the state a *bare* pipe target prefix-matches: real tmux
+      # (3.2a, verified) answers "can't find session: pm-test" for
+      # `pipe-pane -t '=pm-test:0.0'` and attaches to `pm-test~1` for
+      # `-t pm-test:0.0`, so a bare handle streams another session's output
+      # into this run's transcript and the run then exits 0.
+      if [ "$STUB_MODE" = pipegap ]; then
+          rm -f "$STATE/pm-test" "$STATE/claim.pm-test"
+          touch "$STATE/pm-test~1"
+      fi
       exit 0 ;;
   list-sessions)
       for f in "$STATE"/*; do
@@ -3662,6 +3676,34 @@ class TestCaptureFlowExecution:
         assert r.returncode != 0, (
             "a failed transcript pipe was ignored and the run continued")
         assert "could not stream" in r.stderr, r.stderr
+
+    def test_the_transcript_pipe_targets_the_exact_session(self, tmp_path):
+        """The pipe is a target handle too: a bare one streams another session.
+
+        Step 2 asserts that ``$TARGET`` is an exact session and then attaches
+        the transcript pipe. A target that ends in that gap is exactly the
+        state a *bare* pipe target prefix-matches — pm leaves a grouped
+        ``<base>~1`` session behind, and real tmux (3.2a, verified) answers
+        "can't find session: pm-test" for ``pipe-pane -t '=pm-test:0.0'``
+        while ``-t pm-test:0.0`` attaches to ``pm-test~1`` and the file grows.
+        A bare handle therefore records a session pm never started as this
+        run's transcript, and the rest of the flow then passes on it — the
+        run exits 0 with a cast, a status and a transcript, none of which
+        came from the target. The exact handle makes the attach fail where it
+        happens, and the failure path releases the claim (R25's rule).
+        """
+        r, _cast = _run_capture_block(
+            "tmux-screen-recording.md", "pipegap", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "the transcript pipe attached to the grouped session the target "
+            "left behind, so this run recorded a session it did not target "
+            "and reported success: " + r.stderr)
+        assert "could not stream" in r.stderr, r.stderr
+        assert not (tmp_path / "cap" / "transcript.log").exists(), (
+            "the pipe wrote a transcript after the target session was gone, "
+            "so it streamed the grouped session instead")
+        assert not (tmp_path / "state" / "claim.pm-test~1").exists(), (
+            "the failed pipe left a capture-dir claim behind")
 
     def test_tmux_recorder_exiting_before_drawing_fails(self, tmp_path):
         r, cast = _run_capture_block(

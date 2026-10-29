@@ -160,6 +160,16 @@ recording-recipe bugs that any worker following the recipe hits:
   `capture-pane`/`send-keys`, which need it to honour `=`) and the attach
   names `=$TARGET`. The CLI recipe's `-t rec` stays plain: its `-L scaffold`
   socket is recipe-private and every session on it is named `rec`.
+- the transcript pipe's target is a session handle too (review loop ebd1 i1):
+  the recipe already names it `"=$TARGET:0.0"` (R37), but no test guarded it
+  — all fourteen handles made bare left the file green. A bare target is
+  prefix-matched, so a target that ends between step 2's exact-session assert
+  and the pipe attach leaves the pipe attached to pm's grouped `pm-test~1`
+  and streams *that* session into this run's `transcript.log`; the rest of
+  the flow (cast, status, transcript) then passes and the run exits 0 on
+  evidence that is not the target's (verified on tmux 3.2a, and reproduced in
+  the harness: the block exits 0 with the bare handle). The text guard and
+  the new `pipegap` execution case now fail on the bare form.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
@@ -193,7 +203,11 @@ step's detach race: after the scenario
 ends the pm session itself, a stop step run while the recorder is winding
 down must pass on the complete cast and `recorder.status` 0 (not report "the
 cast is incomplete"), while a recorder killed as the session ends must still
-fail on the non-zero status. S25 also re-checks the captures-path guard: step 1 pasted with an
+fail on the non-zero status. S23 also re-checks the transcript pipe's target:
+with the target session gone and only a grouped `<base>~1` session left on
+the server, the pipe must fail ("could not stream …") instead of attaching
+to the grouped session — a bare `pipe-pane -t "$TARGET:0.0"` attaches to it
+and the run then reports success on that session's transcript. S25 also re-checks the captures-path guard: step 1 pasted with an
 unsubstituted `PR_ID` (or outside the project) must stop with "could not
 resolve the captures directory" and create nothing, not run the capture in
 `/scenarios/1/web-ui`. S26 also re-checks the driver block's two new
