@@ -44,6 +44,20 @@ an earlier run left in it — the cast, the transcript, the rendered video and
 the recorder diagnostics:
 
 ```
+# <capture-dir> has to be an absolute path (or start with ~/): the no-TTY
+# scaffold's pane command and step 4's checks resolve it against whichever
+# shell pasted them (step 4 is usually a fresh one), so a relative path only
+# works while every paste shares one directory — otherwise the cast is written
+# somewhere the stop step never looks, and it reports "asciinema wrote no
+# cast" for a recording that finished. Stop here instead.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "the scaffold's pane command and step 4 resolve it against" \
+            "whichever shell pasted them, so a relative path writes the cast" \
+            "where the checks do not look" >&2
+        exit 1 ;;
+esac
 # A capture directory that cannot be created must stop the run here: every
 # form below writes into it, and asciinema reports "asciicast saved" and
 # exits 0 even when it wrote nothing, so the failure would read as success.
@@ -155,6 +169,20 @@ where the CLI runs.
 #    needs, and every failure path below tears the pane down. The recorded
 #    command's own stderr still goes to the pty and is recorded.
 tmux -L scaffold kill-session -t rec 2>/dev/null || true
+# <capture-dir> has to be an absolute path or start with ~/ (the preamble
+# above explains why):
+# the pane command below and step 4's checks resolve it against whichever
+# shell pasted them, and this block is pasted whole by a worker who may never
+# have pasted the preamble. Stop here instead of writing the cast somewhere
+# step 4 does not look.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "the scaffold's pane command and step 4 resolve it against" \
+            "whichever shell pasted them, so a relative path writes the cast" \
+            "where the checks do not look" >&2
+        exit 1 ;;
+esac
 mkdir -p <capture-dir>/<short-name> || {
     echo "could not create <capture-dir>/<short-name> — check the path and" \
         "its permissions" >&2
@@ -167,10 +195,13 @@ rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
       <capture-dir>/<short-name>/recorder-pane.log
-# Failure paths below tear the scaffold server down, so each one saves the
-# pane's last screen into the capture dir first — otherwise the messages that
-# point at the pane point at evidence that no longer exists. The save is
-# written out at each site rather than defined as a function here: step 4 is
+# Failure paths below that tear the scaffold server down save the pane's last
+# screen into the capture dir first — otherwise the messages that point at the
+# pane point at evidence that no longer exists. The stop step's two failures
+# are the exception: they leave the recorder running (the recording is what
+# the worker retries the step against), and the timeout case saves the pane
+# while it is still up. The save is written out at each site rather than
+# defined as a function here: step 4 is
 # pasted on its own for an interactive recording (step 3 is what drives the
 # shell, so the block cannot run as one paste), and a function defined in this
 # block does not exist in that shell.
@@ -237,7 +268,14 @@ done
 #    prefix this block with RECORDER_STOP_TIMEOUT=120 (the variable does not
 #    survive a separate shell invocation, so set it in the same call). The
 #    bound is a hang detector, not a time limit on the recorded work, and
-#    killing a healthy recording loses the evidence.
+#    killing a healthy recording loses the evidence — so neither failure
+#    below (a mistyped value, or a bound that ran out on a long command)
+#    tears the recorder down: the recording is exactly what the worker
+#    re-runs this step against. Killing it here made the documented remedy
+#    impossible: re-running with a larger bound then failed with "recorder
+#    status is missing", because the previous run had already destroyed the
+#    pane it was told to wait for (verified live: `sleep 6` recorded, stop
+#    with RECORDER_STOP_TIMEOUT=1, re-run with 60 → the recording was gone).
 stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 # Validate the bound before the arithmetic that uses it. A non-numeric value
 # (`2m`, `1.5h`) makes `$(( … ))` fail and leaves `deadline` empty — and in an
@@ -248,8 +286,9 @@ stop_timeout=${RECORDER_STOP_TIMEOUT:-30}
 case $stop_timeout in
     *[!0-9]*)
         echo "RECORDER_STOP_TIMEOUT must be whole seconds (got" \
-            "'$stop_timeout'); e.g. RECORDER_STOP_TIMEOUT=120" >&2
-        tmux -L scaffold kill-server 2>/dev/null
+            "'$stop_timeout'); the recording is still running — re-run this" \
+            "step with a whole number of seconds, e.g." \
+            "RECORDER_STOP_TIMEOUT=120" >&2
         exit 1 ;;
 esac
 deadline=$(( $(date +%s) + 10#$stop_timeout ))
@@ -257,11 +296,13 @@ while tmux -L scaffold has-session -t rec 2>/dev/null; do
     if [ "$(date +%s)" -ge "$deadline" ]; then
         tmux -L scaffold capture-pane -p -t rec \
             > <capture-dir>/<short-name>/recorder-pane.log 2>/dev/null || true
-        echo "recorder did not exit within ${stop_timeout}s — for a longer" \
-            "command set RECORDER_STOP_TIMEOUT; an interactive recording" \
-            "needs 'exit' in the recorded shell (step 3); the pane is saved" \
-            "in <capture-dir>/<short-name>/recorder-pane.log" >&2
-        tmux -L scaffold kill-server 2>/dev/null
+        echo "recorder did not exit within ${stop_timeout}s — the recording" \
+            "is still running: for a longer command re-run this step with a" \
+            "larger RECORDER_STOP_TIMEOUT; an interactive recording needs" \
+            "'exit' in the recorded shell (step 3); if it is stuck, 'tmux -L" \
+            "scaffold kill-server' ends it and the capture must be" \
+            "re-recorded; the pane is saved in" \
+            "<capture-dir>/<short-name>/recorder-pane.log" >&2
         exit 1
     fi
     sleep 0.2

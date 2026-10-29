@@ -61,6 +61,20 @@ recording-recipe bugs that any worker following the recipe hits:
   Both recording recipes' produced-files lists name the flow's diagnostics
   (`recorder.status`, `recorder-stderr.log`, and `recorder-pane.log` when a
   wait gives up) so the manifest's `## Files` section matches the directory.
+- a check that cannot tell one state from another says so instead of guessing
+  (review loop 9265 i4): the web-UI port pre-check treats only "connection
+  refused" (curl exit 7) as a free port — a listener that accepts and never
+  answers (28), a wrong URL (6) or a missing curl (127) stops the step with
+  curl's own status and the `ss -ltnp` hunt, instead of starting an app that
+  cannot bind and reporting "app did not answer" at the deadline; both
+  recording recipes (and the CLI preamble and scaffold) refuse a relative
+  `<capture-dir>`, because tmux runs the transcript pipe in the pm session's
+  directory and each paste resolves the path against its own shell, so a
+  relative path writes the cast/transcript where the end-of-run checks never
+  look; and the CLI stop step's two failures (a bound that ran out, a
+  mistyped `RECORDER_STOP_TIMEOUT`) leave the recording running, so the
+  larger-bound re-run they prescribe can actually be applied instead of
+  meeting a torn-down pane.
 
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.

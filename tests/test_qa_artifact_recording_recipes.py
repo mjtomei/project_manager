@@ -253,8 +253,10 @@ class TestRecipes:
             f"{name}: the runnable scaffold never creates the capture dir")
         assert mkdir < block.index("asciinema rec"), (
             f"{name}: the capture dir is created only after recording starts")
-        if "pipe-pane" in block:
-            assert mkdir < block.index("pipe-pane"), (
+        # The command, not the bare word: the recipe's prose and failure
+        # messages mention "pipe-pane" too.
+        if "tmux pipe-pane" in block:
+            assert mkdir < block.index("tmux pipe-pane"), (
                 f"{name}: the capture dir is created after the transcript "
                 "pipe opens, so the transcript is lost")
 
@@ -293,7 +295,7 @@ class TestRecipes:
         block = _scaffold_block(_recipe_text("tmux-screen-recording.md"))
         rm = re.search(r"^rm -f [^\n]*transcript\.log", block, re.M)
         assert rm, "tmux recipe never removes an earlier transcript.log"
-        assert rm.start() < block.index("pipe-pane"), (
+        assert rm.start() < block.index("tmux pipe-pane"), (
             "the stale transcript is removed only after the pipe is attached")
 
     @pytest.mark.parametrize("name", RECIPES)
@@ -2082,6 +2084,10 @@ n=$((n + 1)); echo "$n" > "$STUB_CURL_COUNT"
 case "$STUB_MODE" in
   inuse) exit 0 ;;
   never) exit 7 ;;
+  # `hung`: something accepts the connection and never answers, so curl exits
+  # 28 (its own timeout) on every call — the port pre-check's "not free" case
+  # that is *not* an HTTP answer.
+  hung) exit 28 ;;
 esac
 # Call 1 is the recipe's own "is the port free?" pre-check; the app answers
 # from call 2 on.
@@ -2163,6 +2169,32 @@ class TestWebUiStartExecution:
             "message has to name the manual pid hunt: " + r.stderr)
         assert not launched.exists(), (
             "the recipe started the app on a port another server holds")
+
+    def test_a_port_that_accepts_but_never_answers_is_refused(self, tmp_path):
+        """curl exit 28 is not a free port, and the app cannot bind it.
+
+        The pre-check treated every curl failure as "free", but only
+        "connection refused" (7) means that: a listener that accepts the
+        connection and never answers times curl out (28), and a previous
+        run's hung server would satisfy the readiness wait as soon as it did.
+        Verified live with a socket that accepts and never replies: the
+        pre-check passed, the app's own "Address already in use" was lost,
+        and the block reported "app did not answer … check its startup
+        output" after the full deadline and killed the app it had started —
+        the misdiagnosis class the recipe removes elsewhere.
+        """
+        r, launched = _run_web_ui_start("hung", tmp_path)
+        assert r.returncode != 0, (
+            "a port that accepts and never answers was treated as free")
+        assert "could not check" in r.stderr, (
+            "the refusal does not name the check that failed: " + r.stderr)
+        assert "exit 28" in r.stderr, (
+            "the refusal does not say how curl failed: " + r.stderr)
+        assert "ss -ltnp" in r.stderr, (
+            "the refusal names no way to find the listener: " + r.stderr)
+        assert not launched.exists(), (
+            "the recipe started the app on a port it could not bind, so the "
+            "failure surfaces later as 'app did not answer'")
 
     def test_a_server_that_never_answers_fails_at_the_deadline(self, tmp_path):
         r, launched = _run_web_ui_start("never", tmp_path)
@@ -2714,12 +2746,12 @@ class TestCaptureFlowExecution:
     def test_cli_stop_timeout_saves_the_pane(self, tmp_path):
         """A failing wait must leave the pane where its message says it is.
 
-        Every failure path tears the scaffold server down, so a message that
-        says "check the pane" points at evidence that no longer exists —
-        verified live: the readiness timeout printed exactly that and the
-        next line killed the server, after which ``capture-pane`` answered
-        "no server running". The pane is saved before the teardown and the
-        message names the file.
+        Failure paths that tear the scaffold server down do so after saving
+        the pane, so a message that says "check the pane" does not point at
+        evidence that no longer exists — verified live: the readiness timeout
+        printed exactly that and the next line killed the server, after which
+        ``capture-pane`` answered "no server running". The pane is saved
+        before any teardown and the message names the file.
         """
         r, cast = _run_capture_block(
             "cli-recording.md", "stuck", tmp_path,
@@ -2733,6 +2765,55 @@ class TestCaptureFlowExecution:
         assert log.exists(), "the failing wait left no pane evidence"
         assert "TUI drawn" in log.read_text(), (
             "the saved pane does not hold what the recorder drew")
+
+    def test_cli_stop_timeout_leaves_the_recording_for_a_retry(self, tmp_path):
+        """The timeout must not destroy the recording its remedy retries.
+
+        The bound is a hang detector, not a time limit on the recorded work
+        (the step says so), and its message tells the worker to re-run with a
+        larger ``RECORDER_STOP_TIMEOUT``. The block used to kill the scaffold
+        server on the way out, so that remedy could not work: verified live
+        with a one-shot ``sleep 6`` recorded and ``RECORDER_STOP_TIMEOUT=1``,
+        the timeout killed the pane, and the re-run with 60 answered
+        "recorder status is missing" — the recording was gone. The recorder
+        has to survive the timeout so the step can be re-run against it.
+        """
+        r, cast = _run_block(
+            _stop_block("cli-recording.md"), "stuck", tmp_path,
+            sessions=("rec",),
+            files={"recording.cast": '{"version": 2}\n'},
+            state_files={"pane": "TUI drawn\n"},
+            env_extra={"RECORDER_STOP_TIMEOUT": "2"})
+        assert r.returncode != 0, r.stderr
+        assert "still running" in r.stderr, (
+            "the timeout does not say the recording survived: " + r.stderr)
+        assert (tmp_path / "state" / "rec").exists(), (
+            "the stop timeout killed the recording it tells the worker to "
+            "re-run this step against")
+        assert (cast.parent / "recorder-pane.log").exists()
+
+    def test_cli_mistyped_bound_leaves_the_recording_for_a_retry(self, tmp_path):
+        """A typo in the bound is not a reason to destroy the recording.
+
+        Same remedy, same failure: the validation branch killed the scaffold
+        server and then said "e.g. RECORDER_STOP_TIMEOUT=120", so the re-run
+        it asked for met a torn-down pane. Nothing has been waited on yet at
+        that point, so the recording is intact and the corrected value can be
+        applied to it.
+        """
+        r, _cast = _run_block(
+            _stop_block("cli-recording.md"), "stuck", tmp_path,
+            sessions=("rec",),
+            files={"recording.cast": '{"version": 2}\n'},
+            env_extra={"RECORDER_STOP_TIMEOUT": "2m"}, timeout=20)
+        assert r.returncode != 0, r.stderr
+        assert "RECORDER_STOP_TIMEOUT must be whole seconds" in r.stderr, (
+            "the bad bound is not named: " + r.stderr)
+        assert "still running" in r.stderr, (
+            "the refusal does not say the recording survived: " + r.stderr)
+        assert (tmp_path / "state" / "rec").exists(), (
+            "a mistyped bound killed the recording the corrected value was "
+            "meant to be applied to")
 
     def test_cli_stop_refuses_a_non_numeric_timeout(self, tmp_path):
         """A mistyped RECORDER_STOP_TIMEOUT must fail, not remove the bound.
@@ -3327,6 +3408,49 @@ class TestCaptureFlowExecution:
             "did not start within" not in r.stderr, (
             f"{name}: the unusable capture directory is reported as a "
             "recorder problem instead of the directory: " + r.stderr)
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_dir_must_be_absolute(self, name, tmp_path):
+        """A relative capture dir writes the promised files where nothing looks.
+
+        The steps are pasted into separate shells, and tmux runs the
+        transcript pipe's command in the *pm session's* directory rather than
+        the shell that pasted it (verified: ``pipe-pane`` from /tmp/b with
+        ``cat >> rel.log`` wrote /tmp/a/rel.log). So a relative
+        ``<capture-dir>`` puts the transcript (tmux) or the cast (CLI, whose
+        pane command and step 4 checks each resolve against their own paste)
+        somewhere the end-of-run checks never look, and the run fails as
+        "transcript.log is empty" / "asciinema wrote no cast" for a recording
+        that finished. Verified live in the tmux recipe: the stop step pasted
+        from another directory answered "asciinema wrote no cast" while the
+        cast sat in the worker's directory. Step 0 refuses the path instead.
+        """
+        raw = _scaffold_block(_recipe_text(name))
+        block = (raw.replace("<capture-dir>", "relcap")
+                    .replace("<short-name>", "run")
+                    .replace("<command-to-record>", "echo hi"))
+        state = tmp_path / "state"
+        bindir = tmp_path / "bin"
+        state.mkdir()
+        bindir.mkdir()
+        _stub_tool(bindir, "tmux", _STUB_TMUX)
+        _stub_tool(bindir, "pm", _STUB_PM)
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}",
+                   STUB_STATE=str(state), STUB_MODE="ok",
+                   STUB_CAST=str(tmp_path / "relcap" / "run"
+                                 / "recording.cast"))
+        r = subprocess.run(["bash"], input=block, env=env,
+                           capture_output=True, text=True, timeout=60,
+                           cwd=str(tmp_path))
+        assert r.returncode != 0, (
+            f"{name}: a relative capture directory was accepted, so the "
+            "capture's files land wherever each paste happens to run")
+        assert "must be an absolute path" in r.stderr, (
+            f"{name}: the relative capture directory is not named: "
+            + r.stderr)
+        assert not (tmp_path / "relcap").exists(), (
+            f"{name}: the block wrote into a relative capture directory "
+            "before refusing it")
 
 
 @pytest.mark.parametrize("name,marker,probe_bound", [

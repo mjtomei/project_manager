@@ -27,7 +27,8 @@ names):
   library, works offline. The `.cast` stays as the small,
   exact-replay/grep source.
 - `recorder.status`, `recorder-stderr.log` (and `recorder-pane.log` when a
-  wait gives up) — the capture flow's diagnostics: asciinema's own exit
+  wait gives up or the driving step's send fails) — the capture flow's
+  diagnostics: asciinema's own exit
   status, its error output, and the pane's last screen. They are failure
   evidence rather than capture artifacts; mention whichever exist in the
   manifest's `## Files` section.
@@ -51,7 +52,11 @@ the same tmux server is enough to break that recursion.
 
 Step 0 of the capture flow clears the recorder session and the files an
 earlier run left behind, then creates the capture directory with
-`mkdir -p <capture-dir>`. All of them matter. A leftover `pm-recorder`
+`mkdir -p <capture-dir>`. All of them matter, and `<capture-dir>` has to be
+an absolute path (or start with `~/`): tmux runs the transcript pipe's
+command in the pm session's directory, so a relative path writes the
+transcript somewhere these steps never look (step 0 refuses one rather than
+failing later as an empty transcript). A leftover `pm-recorder`
 session makes step 3's `new-session` fail with "duplicate session", and the
 readiness wait below would then pass on the *previous* run's attach
 client. That name is shared by every run on the same tmux server, so two
@@ -74,7 +79,8 @@ evidence. `recorder.status` holds this run's recorder exit status (step 5);
 a leftover one would let a recorder that was torn down before it finished
 pass that check. `recorder-stderr.log` and `recorder-pane.log` are this
 run's failure evidence — asciinema's own diagnostics, and the pane's last
-screen when a wait gives up — so an earlier run's copies go too.
+screen when a wait gives up or the driving step's send fails — so an earlier
+run's copies go too.
 The render outputs go with them: the render step clears `recording.mp4` and
 the intermediate `recording.gif` before it runs, but a capture that *fails*
 here exits before that step ever runs, so the previous run's video would
@@ -85,6 +91,26 @@ clears its mp4 in step 1 for the same reason.)
 ```
 # 0. Clear what an earlier run left behind before anything writes into it:
 #    the recorder session, the capture directory, and the files in it.
+# <capture-dir> has to be an absolute path (or start with ~/). tmux runs the
+# transcript pipe's
+# command in the pm session's directory, not in the shell that pasted the
+# step, so a relative path puts transcript.log somewhere these steps never
+# look (verified: a transcript pipe attached from /tmp/b with
+# `cat >> rel.log` wrote /tmp/a/rel.log, the session's directory), and step 5
+# then reports "transcript.log is empty — the pipe-pane stream never wrote to
+# it" for a transcript that was written, one directory over. The recorder's
+# cast and every `test -s` below resolve against whichever shell pasted them
+# (step 5 is usually a fresh one), so a relative path only works while every
+# paste shares one directory. Stop here instead of failing somewhere
+# misleading.
+case "<capture-dir>" in
+    /* | "~"/*) ;;
+    *)  echo "<capture-dir> must be an absolute path (or start with ~/) —" \
+            "tmux runs the transcript pipe in the pm session's directory, so" \
+            "a relative path writes the transcript somewhere these steps" \
+            "never look" >&2
+        exit 1 ;;
+esac
 tmux kill-session -t pm-recorder 2>/dev/null || true
 # A capture directory that cannot be created must stop the run here. Every
 # later step writes into it, and their failures read as something else: the

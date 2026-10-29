@@ -104,6 +104,16 @@ rm -f "$CAPDIR/recording.mp4" \
 # run's app never bound the port: a capture of the wrong build, presented as
 # this run's evidence. `curl` without `-f` on purpose: any HTTP answer,
 # including a 404, means the port is taken.
+# Only "connection refused" (curl exit 7) means the port is *free*. Any other
+# failure is not a free port: a timeout (28) means something accepted the
+# connection and did not answer — a previous run's hung server would satisfy
+# the readiness wait below as soon as it did — and a usage or resolution error
+# (1, 6, 127, …) means the URL or the tool is wrong. Treating those as free
+# starts this run's app on a port it cannot bind, and the failure then
+# surfaces at the readiness deadline as "app did not answer — check its
+# startup output", which names neither the cause nor the process holding the
+# port (verified: with a listener that accepts and never answers, the app's
+# own "Address already in use" was reported that way, after the full 120 s).
 if curl -s -o /dev/null --connect-timeout 2 --max-time 5 "$APP_URL/"; then
     # The cleanup above already removed server.pid, and the server answering
     # is not necessarily this capture's (another scenario may hold the port),
@@ -114,6 +124,16 @@ if curl -s -o /dev/null --connect-timeout 2 --max-time 5 "$APP_URL/"; then
         "(this step cleared it): find it with 'ss -ltnp' on the port and stop" \
         "it, or pick another PORT" >&2
     exit 1
+else
+    curl_rc=$?
+    if [ "$curl_rc" != 7 ]; then
+        echo "could not check $APP_URL with curl (exit $curl_rc; only" \
+            "'connection refused', 7, means the port is free): something may" \
+            "be listening without answering, the URL may be wrong, or curl" \
+            "may not be installed. Find a listener with 'ss -ltnp' on the" \
+            "port and stop it, or pick another PORT" >&2
+        exit 1
+    fi
 fi
 
 # Launch the web UI on the chosen port and background it; keep the pid so
