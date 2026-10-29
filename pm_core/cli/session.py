@@ -239,15 +239,59 @@ def _known_ambient_session() -> str | None:
     return None
 
 
-def _resolve_start_session_name() -> str:
+def _ambient_share_mode(ambient: str) -> str | None:
+    """Return the share mode *ambient* was created with (``None`` = private).
+
+    Shared sessions record ``PM_SHARE_MODE`` in their session environment
+    at creation, so this distinguishes them without guessing from names —
+    which matters for workdir clones, whose git-root hash never matches
+    the session hosting them.
+    """
+    return tmux_mod.get_session_environment(ambient, "PM_SHARE_MODE")
+
+
+def _ambient_session_for_share_mode(wanted: str | None) -> str | None:
+    """Return the ambient session only when it has the *wanted* share mode.
+
+    Share mode is mixed into the session tag, so a shared session and a
+    private one for the same repo are different sessions on different
+    sockets.  Without this check ``pm session kill --global`` run from
+    inside a private session would fall back to that private session and
+    kill it, and ``pm session --global`` would attach to it without
+    sharing anything.  The same-name fast path avoids a tmux query in the
+    common case.  A session whose environment cannot be read counts as
+    private, which is also what every private session is: pm records the
+    variable only for shared sessions.
+    """
+    ambient = _known_ambient_session()
+    if not ambient:
+        return None
+    if ambient == _get_session_name_for_cwd():
+        return ambient
+    return ambient if _ambient_share_mode(ambient) == wanted else None
+
+
+def _resolve_start_session_name(shared: bool = False) -> str:
     """Return the pm session name ``pm session`` should attach/create.
 
     Prefers the ambient tmux session (workdir clones and meta workdirs
     hash differently from the session hosting them) but only when this
     HOME knows it; otherwise uses the cwd-derived name, which creates an
     isolated session instead of touching a foreign one.
+
+    With an explicit ``--global``/``--group`` (*shared*), the ambient
+    session is only reused when it was created with that same share mode:
+    a plain ``pm session`` inside a shared session inherits the mode, but
+    ``pm session --global`` run from inside a *private* session must
+    create/attach the shared-tag session instead of silently reattaching
+    to the private one.
     """
-    return _known_ambient_session() or _get_session_name_for_cwd()
+    if shared:
+        ambient = _ambient_session_for_share_mode(
+            os.environ.get("PM_SHARE_MODE"))
+    else:
+        ambient = _known_ambient_session()
+    return ambient or _get_session_name_for_cwd()
 
 
 def _pick_existing_session(candidates: list[str]) -> str:
@@ -271,12 +315,13 @@ def _resolve_target_session() -> str:
     Prefers the cwd-derived session and falls back to the session this
     process is running inside (workdir clones hash to their own tag, so
     the cwd name is usually absent while the ambient one is live).  A
-    foreign HOME's inherited session is never a candidate (R5b), and a
-    different project's ambient session is never preferred over the cwd's
-    live one.
+    foreign HOME's inherited session is never a candidate (R5b), and the
+    ambient fallback must have the share mode this command is running
+    under: ``pm session kill --global`` from inside a private session has
+    no shared session to act on, and must not kill the private one.
     """
     candidates = [_get_session_name_for_cwd()]
-    ambient = _known_ambient_session()
+    ambient = _ambient_session_for_share_mode(os.environ.get("PM_SHARE_MODE"))
     if ambient and ambient not in candidates:
         candidates.append(ambient)
     return _pick_existing_session(candidates)
@@ -429,8 +474,9 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     else:
         # Prefer the actual tmux session if we're already inside one (e.g. meta
         # workdirs whose git-root hash differs from the session they belong to),
-        # but never adopt a foreign session from a different HOME.
-        session_name = _resolve_start_session_name()
+        # but never adopt a foreign session from a different HOME, and never
+        # adopt one created under a different share mode (--global/--group).
+        session_name = _resolve_start_session_name(is_shared)
 
     # Every pm session gets its own tmux server.  Derive the socket from the
     # final session name (not from the cwd) so workdir clones and --dir joins
@@ -702,8 +748,11 @@ def session(ctx, share_global, share_group, start_dir, print_connect, disconnect
             session_name = f"pm-{tag}"
         else:
             # Same resolution as `pm session` itself, so the printed
-            # command names the session that would actually be attached.
-            session_name = _resolve_start_session_name()
+            # command names the session that would actually be attached —
+            # including the share-mode check, so `--global --print-connect`
+            # inside a private session prints the shared session.
+            session_name = _resolve_start_session_name(
+                bool(share_global or share_group))
         sp = str(session_socket_path(session_name.removeprefix("pm-")))
         hosting_socket, on_private = tmux_mod.find_session_server(session_name)
         if hosting_socket is not None and not on_private:

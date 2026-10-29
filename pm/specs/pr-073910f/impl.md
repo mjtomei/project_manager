@@ -816,3 +816,75 @@ disposable socket: private server created, `PM_TMUX_SOCKET` in the session
 env, the global env and the hooks, default server untouched.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i7)
+
+Verification pass over the integrated head; one correctness fix in session
+selection.  No requirement changes.  Share mode is mixed into the session
+tag (`get_session_tag`), so a `--global`/`--group` session and the private
+session for the same repo are different sessions on different sockets.
+Two paths ignored that when reusing the ambient session:
+
+1. **`pm session --global` run from inside a private session attached to
+   the private session and shared nothing.**  `_resolve_start_session_name()`
+   preferred the ambient session (whose pane registry proves it belongs to
+   this HOME) over the share-mode-tagged cwd name, so
+   `_resolve_session_socket()` derived the *private* socket, found the
+   private session running, and took the attach path — where no
+   `set_shared_socket_permissions`/`server-access` grant is made (they only
+   run on the create path).  The socket stayed 0600, so nobody could join,
+   and the private session was additionally given `window-size=smallest`
+   for its group.  Verified end to end on a disposable socket before the
+   fix: `pm session --global` created nothing and printed
+   `Attaching to session 'pm-…~1'`; after the fix it creates the
+   shared-tag session on its own socket and prints
+   `Session shared with all users.`
+2. **`pm session kill --global` run from inside a private session killed
+   the private session.**  `_resolve_target_session()` tried the cwd name
+   (share-mode tag, not running) and then the ambient session, which is
+   private — so the first *running* candidate was the private session and
+   it was killed.  Verified end to end on a disposable socket before the
+   fix (`Killed session 'pm-…'`, private server gone); after the fix it
+   reports `No session 'pm-…<shared tag>' found` and leaves the private
+   session running.
+
+Fix: the ambient session is now only reused when it was created with the
+same share mode.  New `tmux.get_session_environment(session, key)` reads a
+session variable (``None`` when unset, marked-for-removal, or tmux cannot
+be queried); `session._ambient_share_mode()` uses it for `PM_SHARE_MODE`,
+which shared sessions record in their session environment at creation —
+names cannot be compared for workdir clones, whose git-root hash never
+matches the session hosting them.  `_ambient_session_for_share_mode(wanted)`
+keeps the ambient candidate only on a same-name fast path or a matching
+recorded mode, and both call sites use it:
+
+- `_resolve_start_session_name(shared)` — with `--global`/`--group` the
+  ambient must match; without them the ambient's mode is inherited
+  (`_set_share_mode_env` clears `PM_SHARE_MODE`, so a plain `pm session`
+  inside a shared session still reattaches to it rather than creating a
+  private twin).  `pm session --print-connect` passes the same flag so the
+  printed command names the session that would actually be attached.
+- `_resolve_target_session()` — `kill`/`mobile` filter the ambient fallback
+  by the mode they run under (`PM_SHARE_MODE`, inherited from the pane when
+  no flags are given).  The workdir-clone fallback (R3.2) still works,
+  including inside a shared session.
+
+Known limitation (safe direction): a shared session created by an old pm
+that did not record `PM_SHARE_MODE` in its session environment is read as
+private, so `pm session kill` from a workdir clone inside it reports "no
+session" instead of killing it; passing `--global`/`--group` (which uses
+the tag-derived cwd name) or running from the repo directory is unaffected.
+
+New tests: `TestGetSessionEnvironment` (value / unset / marked-for-removal
+/ tmux missing), an integration check that the variable is read from the
+named server, `TestStartSessionName::test_shared_start_never_adopts_a_private_ambient_session`
+and `::test_shared_start_reuses_a_shared_ambient_session`,
+`TestSessionKillServerSelection::test_shared_kill_never_falls_back_to_a_private_ambient`
+and `::test_shared_kill_still_falls_back_to_a_shared_ambient`,
+`TestResolveTargetSession::test_ambient_session_with_a_different_share_mode_is_ignored`
+and `::test_ambient_share_mode_reads_the_session_environment`.  The kill
+unit tests now pin `_ambient_share_mode` so no unit test can query a real
+tmux server.
+
+Validation: see the PR note for this iteration (full suite + disposable
+smoke test, no live session or server touched).

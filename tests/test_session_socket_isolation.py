@@ -284,6 +284,38 @@ class TestServerAlive:
         assert tmux.server_alive("/tmp/pm-sessions/pm-x") is True
 
 
+class TestGetSessionEnvironment:
+    """Reading a session's environment is how share mode is recovered."""
+
+    def test_returns_the_value(self, monkeypatch):
+        monkeypatch.setattr(
+            tmux, "_run",
+            lambda *a, **kw: MagicMock(returncode=0,
+                                       stdout="PM_SHARE_MODE=global\n"))
+        assert tmux.get_session_environment(
+            "pm-x", "PM_SHARE_MODE") == "global"
+
+    def test_unset_variable_is_none(self, monkeypatch):
+        # tmux exits non-zero for a variable the session does not have.
+        monkeypatch.setattr(
+            tmux, "_run",
+            lambda *a, **kw: MagicMock(returncode=1, stdout=""))
+        assert tmux.get_session_environment("pm-x", "PM_SHARE_MODE") is None
+
+    def test_marked_for_removal_is_none(self, monkeypatch):
+        monkeypatch.setattr(
+            tmux, "_run",
+            lambda *a, **kw: MagicMock(returncode=0, stdout="-PM_SHARE_MODE\n"))
+        assert tmux.get_session_environment("pm-x", "PM_SHARE_MODE") is None
+
+    def test_tmux_missing_is_none(self, monkeypatch):
+        def boom(*a, **kw):
+            raise OSError("no tmux")
+
+        monkeypatch.setattr(tmux, "_run", boom)
+        assert tmux.get_session_environment("pm-x", "PM_SHARE_MODE") is None
+
+
 # ---------------------------------------------------------------------------
 # tmux: precise client detach
 # ---------------------------------------------------------------------------
@@ -829,7 +861,8 @@ class TestSessionKillServerSelection:
     """``pm session kill`` must target the server that hosts the session."""
 
     def _invoke(self, monkeypatch, tmp_path, hosting, *, ambient=None,
-                hosting_for=None, alive=False):
+                ambient_share_mode=None, hosting_for=None, alive=False,
+                args=("kill",)):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
         from pm_core import container, push_proxy
@@ -842,6 +875,9 @@ class TestSessionKillServerSelection:
                             lambda: "pm-repo-abc")
         monkeypatch.setattr(session_mod, "_known_ambient_session",
                             lambda: ambient)
+        # Never query a real tmux server from a unit test.
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: ambient_share_mode)
         if hosting_for is None:
             monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
                                 lambda name: hosting)
@@ -864,7 +900,7 @@ class TestSessionKillServerSelection:
                             lambda tag: 0)
         monkeypatch.setattr(push_proxy, "stop_session_proxies", lambda tag: 0)
 
-        result = CliRunner().invoke(session_mod.session, ["kill"])
+        result = CliRunner().invoke(session_mod.session, list(args))
         return result, killed
 
     def test_private_session_kills_on_its_own_socket(self, monkeypatch,
@@ -971,6 +1007,43 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 1
         assert killed == []
 
+    def test_shared_kill_never_falls_back_to_a_private_ambient(
+            self, monkeypatch, tmp_path):
+        """``pm session kill --global`` must not kill the private session.
+
+        Share mode is mixed into the tag, so the shared session the user
+        asked about is a *different* session from the private one hosting
+        the pane.  When it is not running there is nothing to kill.
+        """
+        sock = str(tmp_path / "pm-ambient")
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (None, False),
+            ambient="pm-ambient",
+            ambient_share_mode=None,        # the ambient session is private
+            hosting_for={"pm-ambient": (sock, True)},
+            args=("kill", "--global"),
+        )
+
+        assert result.exit_code == 1, result.output
+        assert killed == []
+
+    def test_shared_kill_still_falls_back_to_a_shared_ambient(
+            self, monkeypatch, tmp_path):
+        """A workdir clone inside a shared session kills that session."""
+        sock = str(tmp_path / "pm-ambient")
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (None, False),
+            ambient="pm-ambient",
+            ambient_share_mode="global",    # same mode as --global
+            hosting_for={"pm-ambient": (sock, True)},
+            args=("kill", "--global"),
+        )
+
+        assert result.exit_code == 0, result.output
+        assert killed == [("pm-ambient~1", sock), ("pm-ambient", sock)]
+
 
 class TestResolveTargetSession:
     """``pm session kill``/``mobile`` share one candidate list."""
@@ -978,13 +1051,50 @@ class TestResolveTargetSession:
     def test_falls_back_to_a_known_ambient_session(self, monkeypatch):
         from pm_core.cli import session as session_mod
 
+        monkeypatch.delenv("PM_SHARE_MODE", raising=False)
         monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
                             lambda: "pm-cwd")
         monkeypatch.setattr(session_mod, "_known_ambient_session",
                             lambda: "pm-ambient")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: None)
         monkeypatch.setattr(session_mod, "_pick_existing_session",
                             lambda cands: cands[-1])
         assert session_mod._resolve_target_session() == "pm-ambient"
+
+    def test_ambient_share_mode_reads_the_session_environment(
+            self, monkeypatch):
+        """The mode comes from the session env, not from the name."""
+        from pm_core.cli import session as session_mod
+
+        seen: list[tuple[str, str]] = []
+
+        def fake_env(name, key):
+            seen.append((name, key))
+            return "group:staff" if name == "pm-x" else None
+
+        monkeypatch.setattr(session_mod.tmux_mod, "get_session_environment",
+                            fake_env)
+        assert session_mod._ambient_share_mode("pm-x") == "group:staff"
+        assert seen == [("pm-x", "PM_SHARE_MODE")]
+
+    def test_ambient_session_with_a_different_share_mode_is_ignored(
+            self, monkeypatch):
+        """A private ambient session is not a target for a shared kill."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-shared")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: "pm-private")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: None)
+        seen: list[list[str]] = []
+        monkeypatch.setattr(session_mod, "_pick_existing_session",
+                            lambda cands: seen.append(cands) or cands[0])
+        assert session_mod._resolve_target_session() == "pm-shared"
+        assert seen == [["pm-shared"]]
 
     def test_never_uses_an_unknown_ambient_session(self, monkeypatch):
         from pm_core.cli import session as session_mod
@@ -1117,6 +1227,47 @@ class TestStartSessionName:
         assert session_mod._known_ambient_session() == "pm-live"
         assert session_mod._resolve_start_session_name() == "pm-live"
 
+    def test_shared_start_never_adopts_a_private_ambient_session(
+            self, monkeypatch, tmp_path):
+        """``pm session --global`` inside a private session starts the shared one.
+
+        Share mode is mixed into the tag, so the ambient private session is
+        a different session: adopting it would attach without sharing and
+        leave the socket at 0600 (observed before the share-mode check).
+        """
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-live")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-shared")
+        monkeypatch.setattr(session_mod.pane_registry, "registry_path",
+                            lambda name: tmp_path / f"{name}.json")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: None)      # private session
+        (tmp_path / "pm-live.json").write_text("{}")
+
+        assert session_mod._resolve_start_session_name(shared=True) == "pm-shared"
+
+    def test_shared_start_reuses_a_shared_ambient_session(
+            self, monkeypatch, tmp_path):
+        """A workdir clone inside a shared session reattaches to it."""
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setenv("PM_SHARE_MODE", "global")
+        monkeypatch.setattr(session_mod, "_get_current_pm_session",
+                            lambda: "pm-live")
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-clone")
+        monkeypatch.setattr(session_mod.pane_registry, "registry_path",
+                            lambda name: tmp_path / f"{name}.json")
+        monkeypatch.setattr(session_mod, "_ambient_share_mode",
+                            lambda name: "global")
+        (tmp_path / "pm-live.json").write_text("{}")
+
+        assert session_mod._resolve_start_session_name(shared=True) == "pm-live"
+
 
 # ---------------------------------------------------------------------------
 # TUI quit/restart use no server-wide tmux operations
@@ -1157,8 +1308,9 @@ class TestPrintConnect:
         from pm_core.cli import session as session_mod
 
         monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        # ``shared`` reflects --global/--group; this invocation passes none.
         monkeypatch.setattr(session_mod, "_resolve_start_session_name",
-                            lambda: "pm-repo-abc")
+                            lambda shared=False: "pm-repo-abc")
         monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
                             lambda name: hosting)
         return CliRunner().invoke(session_mod.session, ["--print-connect"])
@@ -1363,11 +1515,13 @@ def _attach_client(sock, session):
 
 
 def _close(proc, sock):
-    try:
-        if proc.poll() is None:
-            proc.kill()
-    except Exception:
-        pass
+    """Tear down one disposable server (and its attached client, if any)."""
+    if proc is not None:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except Exception:
+            pass
     _tmux(sock, "kill-server")
     try:
         Path(sock).unlink(missing_ok=True)
@@ -1458,6 +1612,22 @@ class TestServerIsolationIntegration:
         finally:
             _close(proc, sock)
 
+    def test_session_environment_comes_from_the_named_server(
+            self, short_sock_dir):
+        """Share mode is read from the session env, on that session's server."""
+        sock = short_sock_dir / "env.sock"
+        _make_server(sock, "pm-iso-env")
+        try:
+            assert tmux.get_session_environment(
+                "pm-iso-env", "PM_SHARE_MODE", socket_path=str(sock)) is None
+            _tmux(sock, "set-environment", "-t", "pm-iso-env",
+                  "PM_SHARE_MODE", "global")
+            assert tmux.get_session_environment(
+                "pm-iso-env", "PM_SHARE_MODE",
+                socket_path=str(sock)) == "global"
+        finally:
+            _close(None, sock)
+
     def test_server_alive_distinguishes_stale_from_live(self, short_sock_dir):
         """Only a socket no server answers on may be removed."""
         sock = short_sock_dir / "alive.sock"
@@ -1486,5 +1656,5 @@ class TestServerIsolationIntegration:
             assert "run-shell false" in hooks_b
             assert "run-shell true" not in hooks_b
         finally:
-            _close(MagicMock(poll=lambda: 0), sock_a)
-            _close(MagicMock(poll=lambda: 0), sock_b)
+            _close(None, sock_a)
+            _close(None, sock_b)

@@ -988,6 +988,31 @@ def set_environment(session: str, key: str, value: str, socket_path: str | None 
     )
 
 
+def get_session_environment(session: str, key: str,
+                            socket_path: str | None = None) -> str | None:
+    """Return *key* from a tmux session's environment, or ``None``.
+
+    ``None`` covers both "the variable is not set" (tmux reports that as a
+    non-zero exit) and "the session/server cannot be queried", so callers
+    treat an unknown value the same as an absent one.
+    """
+    try:
+        result = _run(
+            _tmux_cmd("show-environment", "-t", session, key,
+                      socket_path=socket_path),
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    # Output is ``KEY=value``; tmux prints ``-KEY`` for a variable marked
+    # for removal, which counts as unset.
+    line = result.stdout.strip()
+    prefix = f"{key}="
+    return line[len(prefix):] if line.startswith(prefix) else None
+
+
 def list_clients_in_group(base: str, socket_path: str | None = None) -> list[dict]:
     """List all clients attached to any session in the group (base + base~*).
 
