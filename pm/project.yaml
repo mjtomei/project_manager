@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T01:57:14.014776+00:00'
+  updated_at: '2026-10-29T02:27:13.404156+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37907,6 +37907,37 @@ prs:
       for native review then QA re-evaluation after integration.'
     created_at: '2026-10-29T01:57:13Z'
     last_edited: '2026-10-29T01:57:13Z'
+  - id: note-93cbd22
+    text: 'Review-loop d468 i1 (2026-10-29): no behavioural change to the fix. (a)
+      `_live_transcript_owners` now resolves the tmux session through `auto_start._app_session`
+      instead of the raw `_session_name` — a stub app attribute may be a non-string
+      and must not reach `tmux list-windows` from inside a bulk finalize; new test
+      `test_live_owners_ignore_a_stub_app_session` fails without it. (b) impl.md corrected
+      where it had drifted from the code: archive-on-replace is no-clobber create
+      + unlink, NOT an atomic `rename` (implicit requirement 1, the design and edge-case
+      bullets now say so with the failure/recoverability semantics), the non-UUID-symlink
+      archive key (`<stem>.<random-12-hex>.jsonl`) is documented, the container bullet
+      names `cwd` not `write_dir`, and the test count is 29. (c) Cross-PR note left
+      on pr-22ea6a2: its superseded-loop hunk ("do not finalize the transcripts either")
+      was written for shared `review-<pr>-i<n>.jsonl` names; with loop-scoped names
+      + the session-id ownership check, finalizing the superseded loop own paths is
+      safe, so that merge must keep this PR finalize block ahead of the early return.
+      Verified: 642 passed across affected suites; full suite 4518 passed / 1 skipped
+      (6m13s); pre/post-fix captures re-checked (repro.py: all three symptoms pre-fix,
+      all three fixed post-fix). Review observations for QA, not code defects: (1)
+      QA S6 INPUT_REQUIRED is a scenario-text conflict, not a code bug — the committed
+      qa.md R7 asks that superseded attempts be archived and entries never overwritten,
+      which the end state satisfies (3 impl-A / 3 signoff-A entries, canonical frozen
+      by the spec-required disable sweep); the "exactly two entries + readlink names
+      the third sid" expectation only holds at the post-return checkpoint, so the
+      scenario Then should be measured there. (2) qa.md R2 calls the launch stamp
+      `signoff-<pr>.jsonl.head`; the code (`signoff_launch_stamp`) writes `signoff-<pr>.head`.
+      (3) Known limitation unchanged: a live step window makes its canonical transcript
+      skipped for the whole sweep, so the final impl/signoff session of a run can
+      stay a symlink until Claude prunes it; unbounded archive growth is already filed
+      as pr-bab46cf. (2026-10-29T02:35:00Z)'
+    created_at: '2026-10-29T02:27:13Z'
+    last_edited: '2026-10-29T02:27:13Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
@@ -39669,11 +39700,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-10-29T02:19:32.208181+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-78cadd9
+    text: 'Merge note from pr-9ee4d64 (run-transcript archives): this PR''s `_on_complete_from_thread`
+      hunk says "Do not finalize the transcripts either" for a superseded loop, because
+      the successor reuses `review-<pr>-i<n>.jsonl`. After pr-9ee4d64 lands, iteration
+      transcripts are loop-scoped (`review-<pr>-<loop_id>-i<n>.jsonl`) and finalization
+      is session-id ownership-checked, so a superseded loop CAN safely finalize its
+      own loop-scoped paths before the supersede early-return. When resolving the
+      merge conflict, keep 9ee4d64''s loop-scoped finalize block (with `state.iteration_sessions`)
+      ahead of the early return; dropping it leaves the superseded loop''s iteration
+      transcripts as unfinalized symlinks that nothing else finalizes.'
+    created_at: '2026-10-29T02:19:32Z'
+    last_edited: '2026-10-29T02:19:32Z'
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
