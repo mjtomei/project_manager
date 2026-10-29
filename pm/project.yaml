@@ -35907,7 +35907,7 @@ prs:
   plan: null
   title: Resume autostart after user feedback in an existing implementation session
   branch: pm/pr-22ea6a2-resume-autostart-after-user-feedback-in-an-existin
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'After a PR has reached review, a user may stop the review loop, give
     feedback in the existing implementation session, then ask autostart to take the
@@ -35953,7 +35953,39 @@ prs:
     review/QA evidence merely to unblock the flow.
 
 
-    This PR is filed for follow-up, not authorized for autostart by this request.'
+    User explicitly authorized starting this PR with DeepSeek on Oct26 evening (Oct27
+    UTC).
+
+
+    User clarification, Oct26 evening: use an explicit "fresh autostart" action, shortcut
+    z a, as the signal that a later-stage PR is returning to implementation after
+    human feedback. Current a opens the runs popup and z a has no reset behavior;
+    do not describe the proposed shortcut as already available.
+
+
+    User story: Given a PR in review/QA/sign-off with a retained implementation session
+    where the user has resumed work, when the user explicitly invokes fresh autostart
+    from implementation, then atomically return it to in_progress, supersede obsolete
+    review/QA/sign-off ownership and completion events, adopt the existing implementation
+    session without restarting it, and wait for the current implementation handoff
+    before starting one fresh review and the required QA/sign-off. Preserve source,
+    context, unsent drafts, historical evidence, model assignments, and manual merge
+    gates. Ordinary autostart add/re-arm must remain a continuation from the current
+    phase, so routine retry does not unexpectedly rewind a PR.
+
+
+    Resetting only the status field is insufficient: stopped review-loop objects and
+    prior idle/PASS events must not block or prematurely advance the new handoff.
+    Cover busy and already-completed current turns, repeated fresh-autostart requests,
+    controller restart, and active downstream ownership. This is a workflow reset,
+    not a fresh implementation client. The user''s current #253 hold remains in force;
+    this PR does not itself release or reset #253.
+
+
+    Implement the explicitly requested z a fresh-autostart action plus its CLI equivalent.
+    Plain a continues to open the runs popup. Preserve the existing implementation
+    agent and its current work; do not implement this as pr start --fresh. Starting
+    this feature PR is separate from exercising it on #253.'
   agent_machine: null
   gh_pr: null
   gh_pr_number: null
@@ -35963,6 +35995,215 @@ prs:
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-950f3c0
+    text: 'review-loop b810 i1: fixed wait-status accuracy (stale idle flag cleared
+      at reset only when the pane is idle; permission prompts keep their reason),
+      SUPERSEDED QA sentinel now treated as no verdict, consume_handoff only written
+      for real fresh attempts, latest_turn_state grows its tail window (oversized
+      final assistant record no longer reads unknown), repeated fresh records the
+      newly requested policy on the same attempt, no duplicate signoff_history, partial
+      reset failures printed by the CLI. Added latest_turn_state + poll-routing tests.
+      Known limitations documented in pm/specs/pr-22ea6a2/impl.md: (1) removing the
+      target while waiting is undone by a TUI restart (resume_pending re-adds it);
+      (2) an out-of-process QA driver launched before the reset that finishes after
+      it could still record a post-reset PASS (needs a per-run id in the QA runtime
+      record).'
+    created_at: '2026-10-27T05:46:58Z'
+    last_edited: '2026-10-27T05:46:58Z'
+  - id: note-22a53c1
+    text: 'review-loop b2e1 i1: no functional changes to the fresh flow. Fixed the
+      CLI reply printer echoing the owner message on failure (duplicate error text
+      on stderr+stdout) by gating on ok; added pm autostart fresh to the README verb
+      list; added tests for z O/z A key wiring + plain-A continuation + no-selection,
+      the missing-implementation-window status reason, fresh leaving unrelated targets/policies
+      untouched, and the failed-reply single-error CLI contract. 50 fresh tests pass;
+      442 related tests pass. Pre-existing env-only failures (git push/pull, markdown
+      dep) unchanged vs master.'
+    created_at: '2026-10-27T06:19:26Z'
+    last_edited: '2026-10-27T06:19:26Z'
+  - id: note-fe3b5ed
+    text: 'review-loop 367f i1: z-prefix safety fix — the i2 cancellation set omitted
+      keys whose handlers consume z (S start-with-companion, e/v plan panes, n/L/m/H/c
+      views), so `z e`/`z v`/`z c` silently lost their "kill existing before next"
+      behaviour (App.on_key runs before the binding action). The set now matches the
+      _consume_z() callers; the prefix also expires after the same 2 s chord window
+      the w/y prefixes use, because j/k/arrows are swallowed by the tech tree before
+      App.on_key so the set alone could never cancel them. Added regression tests
+      for the key set, the non-z keys (i/Y/g/p), the expiry, and multi-PR all-or-nothing
+      validation. 58 fresh tests pass; full suite unchanged vs master (43 failed/17
+      errors are the known git-push env failures present on master).'
+    created_at: '2026-10-27T07:37:24Z'
+    last_edited: '2026-10-27T07:37:24Z'
+  - id: note-4565b0f
+    text: 'review-loop 367f i2: no functional changes to the fresh flow. Added direct
+      tests for the two fences that had none: the sign-off timestamp guard in fresh_recorded_verdict
+      (a pre-requested_at record is ignored even when a racing write never set invalidated)
+      and the review-loop SUPERSEDED sentinel fresh loop_id that makes late old-thread
+      callbacks bow out. Pinned the partial-reset-failure contract (validation reads
+      the TUI in-memory rows, reset re-reads disk under the lock: the other PRs still
+      reset and the failure lands in failed for the CLI failed: lines) and resume_pending
+      fallback to stop_before_merge for an unknown marker policy. Dropped the duplicate
+      aggregate "resumed fresh attempt" log line in _deferred_startup (resume_pending
+      logs each PR through add_targets confirmation). Clarified spec R2 (pane adoption
+      is the existing lazy registration in _poll_impl_idle, not a separate fresh_start
+      step). 63 fresh tests pass; full suite failure set identical to master (73 known
+      git-push/pull + markdown env failures). (2026-10-27T08:02:11Z)'
+    created_at: '2026-10-27T08:02:16Z'
+    last_edited: '2026-10-27T08:02:16Z'
+  - id: note-1e113b8
+    text: 'review-loop 367f i3: implemented the explicitly requested lowercase `z
+      a` fresh autostart (commit 8c87f4af). `a` now consumes the z prefix: plain `a`
+      still opens the runs popup; `z a` = fresh_start(policy=None, source="key:za");
+      `z O`/`z A` remain the explicit stop-before-merge / auto-merge variants. Policy
+      mapping: `z a` preserves an existing target policy (including wait_for_merge
+      and its dependency-wide hold, coordinated with sibling #261) and defaults a
+      new target to stop_before_merge; live-session adoption, historical evidence,
+      model assignments and manual merge gates unchanged. Updated _Z_PREFIX_KEYS +
+      prefix hint, help screen, README, CLI/module docstrings and the spec (interface,
+      R1, edge cases, files, i5 notes). Added tests: z a key wiring, plain a popup,
+      z a no-selection, "a" in the prefix key set, and the policy mapping (new target
+      stop; existing wait_for_merge/auto_merge preserved). 69 fresh tests pass; full
+      suite 3865 passed with only the 13 known env-only failures (markdown dep + hook
+      installer), identical to master. (2026-10-27T09:05:00Z)'
+    created_at: '2026-10-27T08:52:03Z'
+    last_edited: '2026-10-27T08:52:03Z'
+  - id: note-post-oom-resume-20261027
+    text: 'USER RESTART 2026-10-27 after OOM host restart/explicit cleanup: resume
+      this PR''s native flow with DeepSeek Flash1017/high for implementation/review/QA/helpers
+      and work Opus5.5/high signoff. Manual wait_for_merge, spec review OFF. Current
+      source e7aabdfa includes original review367f i5 fixes and tests; preserve dirty
+      project metadata and original evidence. Old i6 failed before the host restart;
+      no old reviewer/container is live and no old recovery request should be replayed.
+      Fresh reviewer must independently inspect existing implementation/spec and run
+      appropriate validation; use native QA/signoff when ready. Do not start unrelated
+      PRs or merge the PR.'
+    created_at: '2026-10-27T14:37:30.566168+00:00'
+    last_edited: '2026-10-27T14:37:30.566168+00:00'
+  - id: note-05a6afb
+    text: 'review-loop 2aac i1 (commit 548df728): no changes to the fresh flow itself.
+      (1) latest_turn_state now skips Claude Code `!` shell-command user records (<bash-input>/<bash-stdout>/<bash-stderr>,
+      verified against real transcripts) — a trailing `!git status` previously read
+      as in_progress and stalled the handoff. (2) _on_complete_from_thread finalizes
+      review transcripts only while the loop still owns its runtime_state entry: a
+      superseded loop can finish up to its 15 s verdict timeout after the reset, by
+      which time the successor has created review-<pr>-i1.jsonl in the same run dir,
+      and finalizing it froze the new loop transcript (fresh review hang). (3) partial
+      reset failures are named in the TUI log line. (4) the three z-chord handlers
+      now share _fresh_autostart_from_key. Full suite 3876 passed; 13 known env-only
+      failures unchanged vs master.'
+    created_at: '2026-10-27T15:02:45Z'
+    last_edited: '2026-10-27T15:02:45Z'
+  - id: note-d5b5963
+    text: 'review-loop 2aac i2: no functional changes to the fresh flow. Deduplicated
+      the review-window teardown: the z d path, the zz d supersede path and autostart_fresh
+      each carried their own find-window → park → kill copy; they now share park_and_kill_review_window()
+      in review_loop_ui (same park-by-id / kill-by-name behavior, only when the window
+      is found, failures logged at debug). Dropped an unused FakeApp local in test_resume_skips_advanced_prs
+      (pyflakes). Reviewed but deliberately left alone: the partial add_targets-failure
+      path after a successful reset (only reachable if the PR vanishes between validation
+      and add; resume_pending recovers on restart) and the fresh-marker policy not
+      tracking a later plain A/O policy change until the next fresh request. Full
+      suite 3889 passed, 1 skipped; 131 fresh tests pass. (2026-10-27T15:35:00Z)'
+    created_at: '2026-10-27T15:25:19Z'
+    last_edited: '2026-10-27T15:25:19Z'
+  - id: note-57b71d1
+    text: 'review-loop 2aac i3: fixed latest_turn_state misreading a streamed thinking
+      block as a completed turn. Claude Code writes content blocks as separate records
+      with stop_reason:null while streaming, so a long thinking block sits at the
+      transcript tail for 4-42 s; the 5 s handoff poll could start the fresh review
+      over in-flight work. A stop_reason:null assistant record with no text now reads
+      in_progress; the answer text record still ends the turn (verified against all
+      ~/.claude/projects transcripts: 9/9 null-thinking records are followed by another
+      assistant record, 7252/7252 text records by user/EOF). Added two direct tests;
+      i2/i3 spec notes. Full suite 3891 passed, 1 skipped. (2026-10-27T16:05:00Z)'
+    created_at: '2026-10-27T16:01:29Z'
+    last_edited: '2026-10-27T16:01:29Z'
+  - id: note-6f747f3
+    text: 'review-loop 2aac i5 (commit a71b1744): no changes to the fresh flow itself.
+      Fixed the one remaining robustness gap in the handoff poll: _poll_impl_idle
+      runs the (cheap, idempotent) handoff check every 1 s tick, but the launch it
+      triggers (_auto_review_idle_prs -> `pr review --no-window`) leaves the PR in
+      in_progress when it fails (store lock timeout, corrupt YAML, subprocess error)
+      while the transcript still reads "complete", so the next tick re-ran the whole
+      thing — a subprocess plus two log lines every second, forever, on the TUI thread.
+      autostart_fresh.handoff_attempt_due() now allows one launch per PR per _HANDOFF_RETRY_SECONDS
+      (15 s), recorded on the app (_fresh_handoff_attempts) so a restarted TUI retries
+      immediately; it is evaluated after handoff_ready (short-circuit), so a waiting
+      PR never burns its window and the first launch after the turn completes is immediate,
+      and fresh_start''s explicit immediate handoff is unaffected. Added a poll-routing
+      test (two ticks inside the window -> one launch, after the window -> a second)
+      + spec note. 78 fresh tests / 462 related tests pass; full suite 3822 passed
+      with the identical 55 failed/17 errors env-only set (git push/pull proxy, markdown
+      dep, hook installer) present before the change.'
+    created_at: '2026-10-27T18:35:45Z'
+    last_edited: '2026-10-27T18:35:45Z'
+  - id: note-7b99693
+    text: 'review-loop 2aac i10 (commit f139c30b): no functional change to the fresh
+      flow. (1) reset_pr now reads the attempt counter defensively — a hand-edited/corrupt
+      fresh_autostart.attempt raised ValueError out of the locked update and escaped
+      fresh_start as an owner-side "internal" error with no detail; it now falls back
+      to attempt 1. (2) fresh_start guards each PR reset: an unexpected exception
+      used to abort the loop after earlier PRs in the same call were already reset
+      on disk (their changes dropped from the reply, their old loop/QA/sign-off state
+      unretired, their target never added); it is now a per-PR failed entry while
+      the remaining PRs still reset (the i4 partial-failure contract). Added tests
+      for both. Spec: corrected the i5 note''s stale "1 s tick / every second" poll
+      cadence in place, completed the files list (pm tui keys, pm command list, README),
+      added the i10 notes. Full suite 3901 passed, 1 skipped.'
+    created_at: '2026-10-27T22:00:16Z'
+    last_edited: '2026-10-27T22:00:16Z'
+  - id: note-cad083a
+    text: 'review-loop 4e99 i1: two hardening fixes, no change to the fresh flow design.
+      (1) fresh_start now polls the implementation pane before its immediate handoff
+      check, like _poll_impl_idle: a pane that died since the last ~5 s poll left
+      is_gone False and its (possibly finalized) transcript complete, so the reset
+      could start the review over the old code instead of waiting for the scheduler
+      relaunch. (2) retire_in_memory unregisters a popped QA loop scenario tracker
+      keys (poll_qa_state is the only other unregister path and never sees the popped
+      loop); done before the SUPERSEDED sentinel because _runtime_mirror_clear would
+      wipe it. Tests: TestFreshStart::test_dead_pane_does_not_hand_off_immediately,
+      TestRetirement::test_qa_scenario_tracker_keys_are_dropped (both verified to
+      fail without their fix). 87 fresh tests pass; 538 related tests pass. Full suite:
+      55 failed/17 errors, identical counts to master (git proxy, markdown dep).'
+    created_at: '2026-10-27T23:23:01Z'
+    last_edited: '2026-10-27T23:23:01Z'
+  - id: note-b27b893
+    text: 'review-loop 4e4d i1: no functional change to the fresh flow. Fixed the
+      R6 wait status after a TUI restart: a restarted TUI re-registers the impl pane
+      and reads the previous turn''s idle_prompt as its newest hook event, so the
+      tracker reported idle while the user''s feedback turn was still running and
+      the row said "fresh autostart: implementation turn complete; starting fresh
+      review" for the whole wait (retire_in_memory only resets a pane that was already
+      tracked at reset time). New autostart_fresh.reconcile_idle_status clears the
+      stale flag when the transcript (the authoritative handoff signal) says in_progress;
+      called from _poll_impl_idle''s fresh branch and after fresh_start''s pre-handoff
+      poll. A gone pane is left alone (mark_active would clear gone) and a live permission
+      prompt is never idle. Added TestIdleStatusReconcile (4 cases) and a poll-routing
+      test that fails without the call site. 92 fresh tests / 452 related tests pass;
+      full suite 3904 passed, 1 skipped with the markdown dep installed (12 markdown
+      env-only failures without it, unchanged vs master).'
+    created_at: '2026-10-27T23:57:34Z'
+    last_edited: '2026-10-27T23:57:34Z'
+  - id: note-0d9cfde
+    text: 'review 2649 i1 incidental: pm_core/verdict_transcript.py JSONL scanners
+      used str.splitlines(), which splits on U+2028/U+2029/U+0085 that JSON leaves
+      unescaped inside strings (7 of 15,764 local transcripts contain one). Such a
+      record fragmented into unparseable pieces and was skipped, so the newest turn/verdict
+      was read from an older record. latest_turn_state + extract_verdict_from_transcript
+      + read_latest_assistant_text now split on "\n" only; the assistant-content scanner
+      keeps splitlines. Covered by 3 new tests in tests/test_verdict_transcript.py.'
+    created_at: '2026-10-28T02:28:37Z'
+    last_edited: '2026-10-28T02:28:37Z'
+  - id: note-9f49032
+    text: 'review-loop 4a2b i1: no functional change to the fresh flow. retire_in_memory
+      now shares _retire_runtime_action() for the review-loop/QA SUPERSEDED runtime_state
+      sentinels (the review-loop loop_id fence is kept); SUPERSEDED is defined once
+      in autostart_state and used by both the writer (autostart_fresh) and the reader
+      (auto_start.recorded_qa_verdict); the not_later_stage rejection message derives
+      its stage list from _LATER_STAGES. Full suite 3924 passed, 1 skipped, 0 failures
+      (223 s).'
+    created_at: '2026-10-28T03:11:56Z'
+    last_edited: '2026-10-28T03:11:56Z'
   - id: note-64cdbe3
     text: 'QA S6 (2026-10-28, 2nd pass, HEAD 42a7471d): two scenario Thens do not
       match the product; neither is a defect in this PR. (1) Story 1: `pm autostart
@@ -36221,6 +36462,31 @@ prs:
       the immediate handoff. Captures: /pm-captures/scenarios/12/.'
     created_at: '2026-10-28T09:42:29Z'
     last_edited: '2026-10-28T09:42:29Z'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
@@ -36233,7 +36499,7 @@ prs:
     qa_finalize: provider:deepseek-flash
     qa_interactive: provider:deepseek-flash
     merge: provider:deepseek-flash
-    signoff: provider:claude-work
+    signoff: provider:claude-work-xhigh-249
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id

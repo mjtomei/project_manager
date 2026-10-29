@@ -307,6 +307,23 @@ Feature-specific fixture notes:
   relaunch creates it; the wait then applies to that session.
 - Removing the target while waiting → no review; a TUI restart re-adds the
   attempt (documented limitation).
+- Transcript tail shapes that must not read as "turn complete": a streamed
+  thinking block (an assistant record with `stop_reason: null` and no text,
+  which the real client leaves at the tail for tens of seconds), Claude Code
+  `!` shell-command records (`<bash-input>` / `<bash-stdout>` /
+  `<bash-stderr>`), and a record containing an unescaped U+2028/U+2029/U+0085
+  inside a string (JSONL must be split on `\n` only).  Each of these at the
+  tail must keep the status at "waiting for the current implementation turn".
+- An interrupt marker (`[Request interrupted by user`) whose own timestamp is
+  missing or unreadable → treated as still in progress (conservative), not as
+  a completed turn.
+- The "implementation window missing; relaunching" reason appears only while
+  the pane is actually absent: the reset and the scheduler's in-progress
+  relaunch can happen in the same scheduler pass, so immediately after the
+  command the row normally already reads "waiting for the current
+  implementation turn".  Check the missing-window reason by closing the
+  implementation window while the attempt waits, and confirm it resolves on
+  the next pass once the pane is recreated.
 
 ## Pass/Fail Criteria
 
@@ -356,5 +373,16 @@ Resolved:
    a failure of this PR unless it is the TUI-driven flow.
 7. **No TUI running** — `pm autostart fresh` is a session-queue command like
    `add`/`remove`; without an owner it exits with `owner_unavailable`.
+8. **Status/list are owner-mediated too** — `pm autostart status` / `pm
+   autostart list` are read over the same session command queue, so with no
+   running TUI they exit 2 with `owner_unavailable` instead of printing an
+   offline target list.  This matches the base behaviour of `add`/`remove`
+   and is not a defect of this PR; observe status from a pane inside the test
+   tmux session while the TUI runs.
+9. **When the missing-window reason is observable** — the fresh reset and the
+   `pm pr start --background` that recreates a missing pane happen in the same
+   scheduler pass, so "implementation window missing; relaunching" is only
+   visible while the pane is genuinely gone (or for a few seconds when a spec
+   gate delays the relaunch), never as an immediate post-command state.
 
 No unresolved ambiguities.
