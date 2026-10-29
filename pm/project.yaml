@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T09:50:42.464237+00:00'
+  updated_at: '2026-10-29T10:05:28.779568+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41046,6 +41046,38 @@ prs:
       work rather than half-fixed here.'
     created_at: '2026-10-29T09:50:42Z'
     last_edited: '2026-10-29T09:50:42Z'
+  - id: note-02687d4
+    text: 'Review-loop 5c3e i2 second pass (on f17568f1). (1) The already-`in_review`
+      branch of `pm pr review` now runs `_review_post_gate_refusal` even when the
+      caller already gated (`--skip-base-check`, the auto-sequence path): that gate
+      was its own network round-trip, so a base return another driver recorded after
+      it was invisible and the reviewer launched beside the rework — the exact R3
+      writer-beside-return case, in the branch that writes no status and therefore
+      has no atomic guard. `_launch_review_iteration` now converts an exit 3 raised
+      by the command it invokes into its own `base_conflict: ...` status line (its
+      contract is a status line, not a process exit); other refusal codes still propagate,
+      so a genuine error is not masked. (2) `run_qa_sync`''s post-gate re-read now
+      treats a PR removed from the project during the fetch like `merged`/`closed`
+      (absent from the freshly loaded data) instead of falling through to "not merged/closed"
+      and creating a QA workdir/window for a PR that no longer exists; the pre-gate
+      check already aborted on that. Tests: the skip-base-check re-read (verified
+      to fail without the fix — the reviewer window is launched), the exit-3 conversion
+      plus the non-3 re-raise, and the removed-during-the-gate QA abort (verified
+      to fail without the fix — the QA workdir is created). Spec R3 + test plan items
+      28-29 updated. Full suite after both passes: 4598 passed, 1 skipped, 0 failed.
+      Reviewed but not fixed (documented in R7 as a known limitation; needs a design
+      change, not a gate fix): the supersede path in `return_to_impl` mints a fresh
+      `launch_claim` without consulting the existing one, and `clear_return_awaiting`/`release_impl_claim`
+      act on whichever open return has `awaiting == impl` rather than on the episode
+      their launcher created. If two drivers run `impl_completion` on the same idle
+      returned PR while the base moves between their two fetches, both see a moved
+      pair, both supersede and both launch (`--fresh`, so the second kills the first),
+      and a late `clear_return_awaiting` can stamp `launched_at` from the other driver''s
+      launch — which weakens the post-relaunch idle guard. Closing it needs an episode/generation
+      token threaded through `pm pr start`; the single-driver paths (the normal case)
+      remain one-owner as specified.'
+    created_at: '2026-10-29T10:05:28Z'
+    last_edited: '2026-10-29T10:05:28Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
