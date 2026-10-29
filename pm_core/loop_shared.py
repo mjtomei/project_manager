@@ -664,6 +664,7 @@ def poll_for_verdict(
     outcome_request: str | Callable[[], str] | None = None,
     retry_prompt: str | Callable[[], str] | None = None,
     send: Callable[[str], None] | None = None,
+    baseline_line: int | None = None,
 ) -> str | None:
     """Block until Claude signals idle, then extract a verdict from the
     JSONL transcript.
@@ -701,9 +702,17 @@ def poll_for_verdict(
     submit partial input), but the in-tree callers still use the short
     resume/outcome requests — the original prompt is already in the
     session's context.
+
+    *baseline_line* is for a caller that prompted the pane itself and then
+    calls this poller (the QA verifier's re-check): the answer can land —
+    and its ``idle_prompt`` fire — during the caller's send/settle window,
+    i.e. before the hook baseline below, so the event loop would never see
+    it.  The transcript is scanned once before blocking and a verdict newer
+    than *baseline_line* is returned immediately (the verdict that prompted
+    the call sits at *baseline_line* and is not mistaken for the answer).
     """
-    from pm_core import tmux as tmux_mod
     from pm_core import hook_events
+    from pm_core import tmux as tmux_mod
     from pm_core.claude_launcher import (
         WorkspacePromptWatch, WorkspaceTrustBlocked, session_id_from_transcript,
     )
@@ -760,6 +769,33 @@ def poll_for_verdict(
             newer_than=newer_than,
             stop_check=stop_check,
         )
+
+    def _scan():
+        """The current task's verdict, honouring *baseline_line* if given.
+
+        With a baseline, only a verdict newer than the one that prompted the
+        call counts (the re-check case): ``find_verdict_turn`` is
+        task-scoped, so a follow-up that is not recorded as a task boundary
+        would otherwise let the prompting verdict be returned as the answer.
+        """
+        hit = find_verdict_turn(transcript_path, verdicts)
+        if hit is None:
+            return None
+        if baseline_line is not None and hit.line_index <= baseline_line:
+            return None
+        return hit
+
+    if baseline_line is not None:
+        # A caller that prompted the pane itself may already have the answer
+        # in the transcript: its idle event fired during the caller's
+        # send/settle window and therefore predates ``hook_baseline``, so the
+        # event loop below would never see it (the hang this recovery exists
+        # to prevent).
+        _early = _scan()
+        if _early is not None:
+            _log.info("%s: verdict %s already in transcript (session_id=%s)",
+                      log_prefix, _early.verdict, session_id)
+            return _early.text or _early.verdict
 
     while True:
         if stop_check and stop_check():
@@ -831,7 +867,7 @@ def poll_for_verdict(
                         time.sleep(min(0.25, max(
                             0.0, grace_end - time.monotonic())))
 
-        hit = find_verdict_turn(transcript_path, verdicts)
+        hit = _scan()
         if hit:
             _log.info("%s: hook-driven verdict %s (session_id=%s)",
                       log_prefix, hit.verdict, session_id)
@@ -850,8 +886,7 @@ def poll_for_verdict(
             float(ev.get("timestamp") or hook_baseline),
             wait_for_newer=_wait_newer,
             stop_check=stop_check,
-            verdict_check=lambda: bool(
-                find_verdict_turn(transcript_path, verdicts)),
+            verdict_check=lambda: bool(_scan()),
         )
         if result.status == "stopped":
             # stop_check fired while we waited out the settle window; do not
@@ -863,7 +898,7 @@ def poll_for_verdict(
             # Return the verdict turn's text, not the tail (pr-8efa789): a
             # /loop wakeup or Monitor postscript after the verdict must not
             # hide the output downstream parsers need.
-            hit = find_verdict_turn(transcript_path, verdicts)
+            hit = _scan()
             if hit:
                 _log.info("%s: hook-driven verdict %s (session_id=%s)",
                           log_prefix, hit.verdict, session_id)

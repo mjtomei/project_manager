@@ -431,6 +431,17 @@ alongside the episode/settle state on nudge, verdict, exhaustion and relaunch.
   `TestStoppedRunAggregation::test_stop_before_any_verdict_is_stopped_not_input_required`
   and `::test_stopped_before_any_verdict_skips_the_finalizer`; the partial
   case stays pinned by `::test_missing_verdict_is_input_required`.
+  **A stop before the workers exist is the same teardown.** The launch skips
+  a stopping run, so its scenarios have no window; `_poll_tmux_verdicts`
+  would otherwise retire each one as `INPUT_REQUIRED` ("worker window never
+  created (launch failed)") and fill open slots by launching queued workers.
+  Both defeat `stopped_clean` (a launch-failure verdict is still a verdict),
+  so a run stopped between "plan parsed" and "workers launched" surfaced a
+  missing-outcome failure and recorded a QA note. `_poll_tmux_verdicts` now
+  returns immediately when the run is already stopping, and
+  `_launch_next_queued` refuses to launch while stopping. Regression tests:
+  `TestStoppedRunBeforeLaunch` (no verdict recorded, no queued launch, the
+  aggregation still ends `STOPPED`).
 * **A stop during finalize is the same teardown** — the finalize pane is the
   run's last step (it confirms the scenario pushes and reconciles the PR
   workdir), so a stop that lands while it is polling means the run never
@@ -609,11 +620,20 @@ into this branch. The conflict resolution keeps both sides' behaviour:
   back to review. A held (restored) run still skips the duplicate finalize.
 * **Verifier re-check.** The re-verification follow-up uses
   `poll_for_verdict` (bounded recovery) with verifier-specific requests, not
-  the unbounded human `wait_for_follow_up_verdict`; master's
-  `baseline_line` snapshot is unnecessary there because the poller waits for
-  a new idle and `find_verdict_turn` is task-scoped, so the previous round's
-  verdict is never taken as the answer. The test was rewritten to assert
-  that contract.
+  the unbounded human `wait_for_follow_up_verdict`. Master's
+  `baseline_line` snapshot *is* still needed, and is kept: the follow-up is
+  sent before the poll starts, so the verifier can answer during the
+  send/settle window and its `idle_prompt` then predates the poller's hook
+  baseline — the event loop would never see it and the re-check would block
+  until the response timeout (the hang class this PR targets). `poll_for_verdict`
+  therefore grew an optional `baseline_line` kwarg: when set it scans the
+  transcript once before blocking and returns a verdict *newer* than the
+  snapshot, and every later scan (`_scan`) filters out the prompting verdict
+  at or below the baseline. `find_verdict_turn` is task-scoped, but a
+  follow-up the transcript does not record as a task boundary would
+  otherwise let the prompting verdict be returned as the answer. The test
+  asserts the contract (the poller is used, `baseline_line` is passed, and an
+  answer already in the transcript is returned).
 * **Project registry.** `pm/project.yaml` conflicts were resolved as a union
   of both sides' PR entries and notes (518 PRs, no duplicate ids, no lost
   notes); `active_pr` takes master's value.
@@ -644,13 +664,17 @@ into this branch. The conflict resolution keeps both sides' behaviour:
   nudge restarts it, so an answered session is not later retired with
   `no_progress`); a verdict flushed during the settle window
   returns `"completed"` and is never nudged (unit, `poll_for_verdict`, and
-  QA-tick-loop cases). Also holds the loop wiring tests below.
+  QA-tick-loop cases); `baseline_line` returns an answer already in the
+  transcript (the re-check's send/settle race) and never returns the
+  prompting verdict at or below the baseline. Also holds the loop wiring
+  tests below.
 * `tests/test_loop_recovery.py` (review/watcher wiring): exhaustion →
   `NO_VERDICT`, history entry, callback fired; QA refiner label (and
   `(None, None)` — not a `no refiner outcome` reason — when the stop lands
   inside recovery, with the poll itself given the stop check), verifier
   reason (initial poll and the machine-driven re-check follow-up, which must
-  call the shared poller rather than the unbounded human wait), finalize
+  call the shared poller — with `baseline_line` — rather than the unbounded
+  human wait), finalize
   `NO_VERDICT` (and `None` — not `NO_VERDICT` — when the stop lands inside
   recovery), scenario-worker exhaustion
   (`INPUT_REQUIRED` + reason, slot freed); a verdict landing on the tick the

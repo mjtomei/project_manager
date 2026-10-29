@@ -793,6 +793,55 @@ class TestPollForVerdictRecovery:
         )
         assert "PASS" in content
 
+    def test_baseline_line_returns_a_verdict_already_in_the_transcript(
+            self, tmp_path, monkeypatch):
+        """A caller that prompted the pane must not hang on its answer.
+
+        The verifier re-check sends its follow-up and only then starts
+        polling.  If the verifier answers during the send/settle window its
+        ``idle_prompt`` predates the poller's hook baseline, so the event
+        loop would never see it and the poll would block until the response
+        timeout — the hang bounded recovery exists to prevent.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "verify"),
+                                   ("assistant", "VERIFIED")])
+        # No hook event ever arrives: the answer predates the poll.
+        _patch_poll_env(monkeypatch, [])
+
+        content = loop_shared.poll_for_verdict(
+            "%1", str(link), ("VERIFIED", "FLAGGED_END"),
+            grace_period=0, wait_timeout=0.01, send=lambda _m: None,
+            baseline_line=-1, log_prefix="test",
+        )
+        assert content == "VERIFIED"
+
+    def test_baseline_line_ignores_the_prompting_verdict(
+            self, tmp_path, monkeypatch):
+        """The verdict that prompted the re-check is never the answer.
+
+        ``find_verdict_turn`` is task-scoped; a follow-up the transcript does
+        not record as a task boundary would otherwise let the prompting
+        FLAGGED be returned as the re-checked verdict.  With ``baseline_line``
+        the poll keeps waiting and exhausts instead.
+        """
+        link, target = _uuid_transcript(tmp_path)
+        _write_transcript(target, [("user", "verify"),
+                                   ("assistant", "FLAGGED_END")])
+        # The prompting verdict is the last line of the transcript.
+        from pm_core.verdict_transcript import find_verdict_turn
+        prior = find_verdict_turn(str(target), ("VERIFIED", "FLAGGED_END"))
+        assert prior is not None
+        _patch_poll_env(monkeypatch,
+                        [_idle(1), None, _idle(2), None, _idle(3)])
+
+        with pytest.raises(VerdictRecoveryExhausted):
+            loop_shared.poll_for_verdict(
+                "%1", str(link), ("VERIFIED", "FLAGGED_END"),
+                grace_period=0, wait_timeout=0.01, send=lambda _m: None,
+                baseline_line=prior.line_index, log_prefix="test",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Review loop wiring
@@ -1123,6 +1172,11 @@ class TestQARecoveryWiring:
         assert polled.call_args.kwargs["verdicts"] == (
             "VERIFIED", "FLAGGED_END")
         assert "FLAGGED_START" in polled.call_args.kwargs["outcome_request"]
+        # The verdict that prompted the re-check is snapshotted before the
+        # follow-up is sent, so the poller can return an answer that landed
+        # during the send/settle window (its idle predates the poll) without
+        # mistaking the prompting verdict for it.
+        assert polled.call_args.kwargs["baseline_line"] == -1
 
     def test_scenario_worker_exhaustion_marks_input_required(
             self, tmp_path, monkeypatch):

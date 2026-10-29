@@ -2389,6 +2389,80 @@ class TestStoppedRunAggregation:
         assert state.finalize_verdict is None
 
 
+class TestStoppedRunBeforeLaunch:
+    """A stop before workers exist must not be reported as a launch failure.
+
+    ``_poll_tmux_verdicts`` used to retire every scenario that never got a
+    window as INPUT_REQUIRED ("worker window never created (launch failed)")
+    and fill open slots by launching queued workers — even when the run was
+    being torn down.  That turned a user stop into a missing-outcome failure
+    (with a QA note) instead of the clean STOPPED teardown, because the
+    aggregation only reports STOPPED when no scenario carries a verdict.
+    """
+
+    def _poll(self, state, queued=None, status_path=None):
+        from pm_core.qa_loop import _poll_tmux_verdicts
+        with patch("pm_core.qa_loop._get_scenario_pane", return_value=None), \
+             patch("pm_core.qa_loop.time.sleep"), \
+             patch("pm_core.hook_events.read_event", return_value=None), \
+             patch("pm_core.tmux.pane_exists", return_value=False), \
+             patch("pm_core.qa_loop._is_verification_enabled",
+                   return_value=False), \
+             patch("pm_core.qa_loop._launch_scenarios_in_tmux") as launch:
+            _poll_tmux_verdicts(
+                state, {}, {}, "sess", "/tmp/work",
+                status_path or Path("/tmp/pm-status.json"), lambda *a: None,
+                queued_scenarios=queued,
+            )
+        return launch
+
+    def test_no_window_scenario_is_not_retired_on_stop(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = None
+        state.scenarios = [QAScenario(index=1, title="A", focus="a")]
+        state.stop_requested = True
+
+        self._poll(state, status_path=tmp_path / "status.json")
+
+        assert state.scenario_verdicts == {}
+        assert state.scenario_verdict_reasons == {}
+
+    def test_queued_scenario_is_not_launched_on_stop(self, tmp_path):
+        state = QALoopState(pr_id="pr-001")
+        state.qa_workdir = None
+        queued = QAScenario(index=2, title="B", focus="b")
+        state.scenarios = [queued]
+        state.stop_requested = True
+
+        launch = self._poll(state, queued=[queued],
+                            status_path=tmp_path / "status.json")
+
+        launch.assert_not_called()
+        assert state.scenario_verdicts == {}
+
+    def test_stopped_run_with_no_windows_aggregates_stopped(self, tmp_path):
+        """The two guards compose: a stopped, unlaunched run ends STOPPED."""
+        from pm_core import qa_loop
+        state = QALoopState(pr_id="pr-001")
+        state.scenarios = [QAScenario(index=1, title="A", focus="a")]
+        state.stop_requested = True
+        with patch("pm_core.qa_loop._poll_tmux_verdicts") as poll, \
+             patch("pm_core.qa_loop._write_status_file") as write_status, \
+             patch("pm_core.qa_loop._write_resume_file"), \
+             patch("pm_core.qa_loop._persist_scenario_verdicts"), \
+             patch("pm_core.qa_loop._run_qa_finalize_pane") as finalize:
+            # Simulate the real (now guarded) poller: nothing gets a verdict.
+            poll.side_effect = lambda *a, **k: None
+            qa_loop._execute_and_finalize(
+                state, tmp_path, {"branch": "b"}, {}, "pm-test", "qa-w",
+                str(tmp_path), tmp_path / "status.json", None,
+                use_containers=False, concurrency_cap=0,
+                queued_scenarios=[], notify=lambda: None)
+        assert state.latest_verdict == VERDICT_STOPPED
+        assert write_status.call_args.kwargs["overall"] == VERDICT_STOPPED
+        finalize.assert_not_called()
+
+
 class TestPlannerStopTeardown:
     """A stop while the planner is still working is a clean teardown.
 

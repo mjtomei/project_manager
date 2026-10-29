@@ -3418,6 +3418,17 @@ def _poll_tmux_verdicts(
     """
     from pm_core import tmux as tmux_mod
 
+    if state.stop_requested:
+        # A stop that landed before polling begins is teardown, not a missing
+        # outcome.  The setup below would otherwise retire every scenario that
+        # never got a window (the launch skips a stopping run) as
+        # INPUT_REQUIRED — "worker window never created (launch failed)" — and
+        # fill open slots by launching queued workers, so a run the user
+        # cancelled would surface a missing-outcome failure and record a QA
+        # note instead of ending in the clean STOPPED state.  Leave everything
+        # unverdicted so the aggregation can see it is teardown.
+        return
+
     verify_enabled = _is_verification_enabled()
     verify_max_retries = _get_verification_max_retries()
     if verify_enabled:
@@ -3557,6 +3568,11 @@ def _poll_tmux_verdicts(
 
     def _launch_next_queued():
         """Launch the next queued scenario if concurrency allows."""
+        if state.stop_requested:
+            # Never spawn a worker for a run that is being torn down; a stop
+            # can land mid-iteration, after the ``while`` condition was
+            # evaluated.
+            return
         if not _launch_queue:
             return
         # Count currently active (pending + verifying)
@@ -4705,12 +4721,15 @@ def _verify_single_scenario(
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
-        # The follow-up is sent before the wait starts, so the verifier can
-        # answer during the send/settle below.  poll_for_verdict is not
-        # fooled by that (pr-8efa789): it waits for a *new* idle_prompt and
-        # its find_verdict_turn scan is task-scoped, so a verdict from the
-        # turn that prompted the re-check is never mistaken for the answer
-        # to it.
+        # Snapshot the verdict that prompted this re-check *before* sending:
+        # the verifier can answer during the send/settle below, and its idle
+        # event then predates the poller's hook baseline, so the poller would
+        # never be woken by it.  ``baseline_line`` makes the poller scan the
+        # transcript once and return the new answer, without mistaking the
+        # prompting verdict for it (pr-8efa789).
+        _prior = find_verdict_turn(
+            scenario.verifier_transcript, _VERIFICATION_VERDICTS)
+        baseline_line = _prior.line_index if _prior else -1
         tmux_mod.send_keys(scenario.verifier_pane_id, msg)
         for _ in range(2):
             time.sleep(1)
@@ -4732,6 +4751,7 @@ def _verify_single_scenario(
                 workdir=scenario.verifier_cwd,
                 outcome_request=_VERIFIER_OUTCOME_REQUEST,
                 resume_request=_VERIFIER_RESUME_REQUEST,
+                baseline_line=baseline_line,
             )
         except VerdictRecoveryExhausted as e:
             # Bounded recovery could not get VERIFIED / FLAGGED out of the
