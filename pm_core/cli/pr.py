@@ -3340,8 +3340,10 @@ def pr_cleanup(pr_id: str | None, force: bool, cleanup_all: bool, prune: bool,
 
     # `closed` is a normal terminal state (pr-62ad13d retains those records and
     # `pm pr close` points here for the explicit cleanup), so it is not worth a
-    # "not merged" warning; anything else still is.
-    if pr_entry.get("status") not in ("merged", "in_review", "closed"):
+    # "not merged" warning; anything else still is.  `in_review` is cleanable
+    # too, so it is named alongside the terminal set rather than by duplicating
+    # its members.
+    if pr_entry.get("status") not in ("in_review", *TERMINAL_PR_STATES):
         click.echo(f"Warning: {pr_id} status is '{pr_entry.get('status')}' (not merged).", err=True)
         click.echo("Cleaning up anyway.", err=True)
 
@@ -3650,13 +3652,20 @@ def pr_close(pr_id: str | None, keep_github: bool, keep_branch: bool,
         kept = _retained_resources(pr_entry)
         if kept:
             click.echo(f"  Kept: {', '.join(kept)}")
+        # Everything the entry owned is now unreachable through pm: `pm pr
+        # cleanup` resolves the registry entry, and its --resources mode does
+        # the same, so the retained workdir *and* any live tmux windows /
+        # containers become orphans with no pointer.  Say so instead of
+        # leaving the user to discover it.
         if pr_entry.get("workdir"):
-            # `pm pr cleanup` resolves the registry entry, so the retained
-            # workdir is no longer reachable through pm — say so instead of
-            # leaving the user with an orphaned directory and no pointer.
-            click.echo("  Note: that workdir is no longer tracked by pm "
-                       "(the registry entry is gone) — delete it by hand "
-                       "when you are done with it.")
+            click.echo("  Note: that workdir and any tmux windows/containers "
+                       "for this PR are no longer tracked by pm (the registry "
+                       "entry is gone) — clean them up by hand when you are "
+                       "done with them.")
+        else:
+            click.echo("  Note: any tmux windows/containers for this PR are "
+                       "no longer tracked by pm (the registry entry is gone) "
+                       "— clean them up by hand when you are done with them.")
     else:
         click.echo(f"Closed {display_id}: {pr_entry.get('title', '???')} "
                    f"(status: closed)")

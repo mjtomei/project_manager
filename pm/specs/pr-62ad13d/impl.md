@@ -376,6 +376,27 @@ workdirs are touched.
     describes `closed` — retained as history, terminal like `merged`, never
     satisfying a dependency, with the reopen / drop-dependency ways out — so
     a watcher session cannot read a retired PR as "merge it to unblock".
+42. `--remove` output names every resource it orphans (review e89f i2):
+    `pm pr cleanup` and its `--resources` mode both resolve the registry
+    entry, so after `--remove` the retained workdir *and* any live tmux
+    window/container are unreachable through pm.  The note says so, and
+    adapts to an entry with no workdir (naming only the live resources)
+    instead of claiming a workdir it never had.  Covered by
+    `test_remove_says_live_resources_are_no_longer_reachable` and
+    `test_remove_without_a_workdir_claims_only_the_branch`.
+43. `closed_at` is a lifecycle timestamp in the store backfill (review e89f
+    i2): `_validate_pr_statuses` backfills `created_at`/`updated_at` from
+    `started_at`/`reviewed_at`/`merged_at`, and now from `closed_at` too —
+    closing is the last lifecycle event, so it outranks the mid-lifecycle
+    timestamps for `updated_at`.  A hand-edited or imported `closed` entry
+    that carries only `closed_at` therefore still sorts by its closure.
+    Covered by `test_backfill_from_closed_at` and
+    `test_backfill_from_closed_at_alone`.
+44. `pm pr cleanup`'s "unexpected status" warning list derives from
+    `pr_utils.TERMINAL_PR_STATES` (`("in_review", *TERMINAL_PR_STATES)`)
+    instead of re-listing `merged`/`closed` (review e89f i2), so the
+    single-definition claim in item 27 holds for that path too.  No behavior
+    change.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -515,7 +536,11 @@ No **[UNRESOLVED]** ambiguities.
   `closed`, so following close's help to the explicit cleanup is not flagged
   as unexpected (review c02f i10), and its id-less auto-select offers the
   terminal statuses (`merged` or `closed`) rather than `merged` alone (review
-  c02f i12).
+  c02f i12); the warning set now derives from `TERMINAL_PR_STATES` (review
+  e89f i2).
+- `pm_core/store.py` — `_validate_pr_statuses` backfills `created_at`/
+  `updated_at` from `closed_at` too (review e89f i2), so a retained `closed`
+  record is treated as a lifecycle timestamp like `merged_at`.
 - `pm_core/pr_sync.py` — keep local `closed` when GitHub reports OPEN, at
   snapshot time and again inside the locked apply.
 - `pm_core/tui/sync.py` — the startup GitHub sync's apply applies the same

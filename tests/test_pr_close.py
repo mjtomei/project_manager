@@ -844,14 +844,28 @@ def test_remove_deletes_only_the_registry_entry(tmp_path):
 
 
 def test_remove_without_a_workdir_claims_only_the_branch(tmp_path):
-    """--remove must not claim it kept a workdir the PR never had."""
+    """--remove must not claim it kept a workdir the PR never had — but it
+    must still say that live tmux windows/containers are now unreachable."""
     project = _make_project(tmp_path, workdir=False, with_dependent=False)
     result = _run_close(project["pm_dir"], "pr-001", "--remove")
 
     assert result.exit_code == 0, result.output
     assert "Kept: branch 'pm/pr-001'" in result.output
     assert "workdir" not in result.output
-    assert "no longer tracked by pm" not in result.output
+    assert "tmux windows/containers" in result.output
+    assert "no longer tracked by pm" in result.output
+
+
+def test_remove_says_live_resources_are_no_longer_reachable(tmp_path):
+    """`pm pr cleanup` and `--resources` both resolve the registry entry, so
+    after --remove the retained workdir *and* any tmux window/container are
+    orphans with no pointer — the output must name both (review e89f i2)."""
+    project = _make_project(tmp_path, with_dependent=False)
+    result = _run_close(project["pm_dir"], "pr-001", "--remove")
+
+    assert result.exit_code == 0, result.output
+    assert "that workdir and any tmux windows/containers" in result.output
+    assert "no longer tracked by pm" in result.output
 
 
 def test_remove_with_keep_github_touches_nothing_remote(tmp_path):
