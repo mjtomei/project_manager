@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T09:17:03.163193+00:00'
+  updated_at: '2026-10-29T09:35:08.833733+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5033,6 +5033,37 @@ prs:
       pm/specs/pr-073910f/impl.md).'
     created_at: '2026-10-29T09:17:03Z'
     last_edited: '2026-10-29T09:17:03Z'
+  - id: note-9d3a663
+    text: 'Review loop 7af7 i3 (commit 11bcb5cf; full suite 4602 passed / 1 skipped).
+      No requirement changes. One cross-session hazard in TUI-pane discovery, plus
+      a docstring correction. (1) _find_tui_pane() cwd branch resolved a DIFFERENT
+      pm session: it ran unconditionally and returned its result even when the in-tmux
+      branch had already identified the ambient pm session. From inside pm-a with
+      its TUI pane unregistered (heal testing / a respawn that did not update the
+      registry), a cwd inside another project whose session pm-b was running returned
+      pm-b pane and re-pointed PM_TMUX_SOCKET at pm-b server — pm tui send/view/restart
+      deliver keys to a bare pane id and pm pr merge kills windows by session name,
+      i.e. the same cross-session damage 7af7 i1/i2 closed for the fallback scan,
+      one branch earlier. The cwd lookup now runs only when nothing identified a session
+      (a plain shell); a pm pane whose cwd is the session own repo is unaffected because
+      the ambient branch already answered. Test: test_cwd_session_does_not_override_the_ambient_one
+      (verified to fail without the guard: returned pm-b %9 and selected /tmp/pm-sessions/pm-b).
+      (2) The _find_tui_pane docstring claimed (None, None) is returned only "when
+      no session can be identified at all"; the implicit path also returns it when
+      a session was identified but no live TUI pane was found. Validation: full suite
+      4602 passed / 1 skipped (scratch pytest<9 + markdown, PATH without the push-proxy
+      git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared); pm/specs/pr-073910f/session_start_smoke.py
+      re-run end to end on a disposable socket (private server, session env, global
+      env, hooks correct; default server untouched). No live session, server or shared
+      host configuration was touched; the new test is unit-level. Residual notes unchanged
+      and non-blocking (impl.md i3 section). Architectural note for later, not changed
+      here: private sessions keep their 0600 sockets in the world-writable /tmp/pm-sessions,
+      which is what forces the uid/lstat/sticky-bit/symlink machinery; a per-uid directory
+      for private sockets (/tmp/pm-sessions-<uid>, shared dir only for --global/--group)
+      would remove all of it, but it changes the socket-path contract so it needs
+      its own change.'
+    created_at: '2026-10-29T09:35:08Z'
+    last_edited: '2026-10-29T09:35:08Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
