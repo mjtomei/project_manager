@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T12:21:42.630422+00:00'
+  updated_at: '2026-10-29T13:45:37.657121+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5159,6 +5159,46 @@ prs:
       /pm-captures/scenarios/5/{legacy-attach,session-list-connect,paste-connect,tui-cross-session,legacy-kill}/.'
     created_at: '2026-10-29T12:21:42Z'
     last_edited: '2026-10-29T12:21:42Z'
+  - id: note-b8f12a4
+    text: 'QA S6 (concurrent starts/kills/lists/attaches) found two real defects on
+      the scenario THEN bullets and fixed both (commit 5b350cd6, full suite 4612 passed
+      / 1 skipped). (1) Paired simultaneous `pm session` starts for one project crash
+      the loser: between the caller''s `session_exists` check and `new-session`, the
+      loser gets "duplicate session" and dies with an unhandled CalledProcessError
+      traceback before the attach; the grouped session (`new-session -t pm-x -s pm-x~1`)
+      has the same race on the attach path (hit in 3/3 paired-start rounds; round
+      2 hit the grouped path, rounds 1 and 3 the base path). `create_session`/`create_grouped_session`
+      now treat the failure as a lost race only when the exact name (`has-session
+      -t =name`) exists afterwards and converge on the winner; any other failure is
+      still re-raised. (2) `pm session kill` destroyed a live grouped session when
+      the base had been killed elsewhere: tmux resolves a bare `-t pm-x` as a *prefix*,
+      so `has-session -t pm-x` also matched the surviving `pm-x~1`. R8 requires `No
+      session ... found.` with the socket and client untouched; instead it printed
+      `Killed session ...`, exited 0, killed `~1` (detaching its client) and unlinked
+      the live server socket. New `tmux.find_exact_session_server()` (target `=name`)
+      is used only by the kill path; `find_session_server` keeps prefix matching so
+      `pm tui view -s pm-x` still reaches the group TUI after the base is gone (verified
+      both ways at runtime, which is why the exact match was NOT applied globally).
+      Tests: TestConcurrentCreate + TestFindSessionServer prefix/exact cases, each
+      verified to fail against the pre-fix code. Runtime re-verification of all four
+      stories post-fix: story 1 three paired-start rounds with only the expected no-TTY
+      attach failures; story 2 40 list runs (0 stderr, 0 tracebacks) with A killed,
+      B CLIENTS 1, C 0, C TUI still rendering; story 3 kill with a client attached
+      (client back at a prompt and accepting input, `pm tui view -s A` exactly "No
+      TUI pane found. Is there a pm tmux session running?" rc 1, B/C untouched); story
+      4 base killed elsewhere -> `No session ... found.` rc 1, socket kept, `~1 attached=1`,
+      C row still CLIENTS 1, client still rendering. Captures: /pm-captures/scenarios/6/{pre-fix,post-fix}/{story1-paired-starts,story2-concurrent-churn,story3-kill-attached,story4-grouped-only-kill}.
+      Residual (out of scope, filed as pr-ea98f71): a concurrent start can still false-positive
+      the "TUI pane missing — respawning..." heal path (seen in 2/3 post-fix rounds;
+      final state still converges). Harness notes for the next run: the client host
+      must be the default-server session (qa6) — attaching to a private server from
+      a `tmux -L scaffold` pane fails with "sessions should be nested with care";
+      kill every fixture with `tmux -S <sock> kill-server` between stories, because
+      after the exact-match fix `pm session kill` correctly refuses a `~1`-only session
+      and would otherwise leave C dirty; agg is absent from the container (fetch agg-aarch64-unknown-linux-gnu
+      v1.5.0 to render casts).'
+    created_at: '2026-10-29T13:45:37Z'
+    last_edited: '2026-10-29T13:45:37Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
