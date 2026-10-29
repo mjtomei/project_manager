@@ -1077,8 +1077,21 @@ def detach_current_client(socket_path: str | None = None) -> bool:
     3. Detach the most recently active one by TTY.
 
     Returns True when a client was detached.  Never issues a bare
-    ``detach-client``.
+    ``detach-client``.  Returns False (rather than raising) when tmux
+    cannot be run: ``quit_app`` calls this from the TUI's key handler, and
+    a missing/unexecutable tmux must degrade to "nothing to detach" like
+    every other probe in this module.
     """
+    try:
+        return _detach_current_client(socket_path)
+    except OSError:
+        _log.warning("detach_current_client: tmux cannot be run; "
+                     "leaving clients attached")
+        return False
+
+
+def _detach_current_client(socket_path: str | None) -> bool:
+    """Implementation of :func:`detach_current_client` (may raise OSError)."""
     pane = os.environ.get("TMUX_PANE")
     if not pane:
         return False

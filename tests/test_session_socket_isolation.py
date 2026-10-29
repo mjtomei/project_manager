@@ -513,6 +513,19 @@ class TestDetachCurrentClient:
         monkeypatch.delenv("TMUX_PANE", raising=False)
         assert tmux.detach_current_client() is False
 
+    def test_tmux_missing_does_not_crash_the_quit_path(self, monkeypatch):
+        """``quit_app`` must degrade, not raise, when tmux cannot be run.
+
+        The TUI's quit handler calls this directly; an ``OSError`` from a
+        missing/unexecutable tmux would surface as an exception instead of
+        "nothing to detach" (the same degrade-never-crash contract the
+        discovery paths follow).
+        """
+        monkeypatch.setenv("TMUX_PANE", "%7")
+        monkeypatch.setattr(tmux, "_run",
+                            MagicMock(side_effect=OSError("no tmux")))
+        assert tmux.detach_current_client() is False
+
     @patch("pm_core.tmux.subprocess.run")
     def test_explicit_socket_is_used_for_every_call(self, mock_run,
                                                     monkeypatch):
@@ -816,6 +829,33 @@ class TestFindTuiPaneAcrossServers:
 
         assert helpers._find_tui_pane() == (None, None)
         assert "PM_TMUX_SOCKET" not in os.environ
+
+    def test_failed_lookup_restores_the_original_socket(self, monkeypatch,
+                                                       tmp_path):
+        """The cwd branch selects a server *before* the scan runs.
+
+        A failed lookup must restore the socket this process came in with,
+        not the cwd session's socket the earlier branch happened to select.
+        """
+        from pm_core.cli import helpers
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/original.sock")
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        # The cwd session is running, so _select_session_socket re-points
+        # PM_TMUX_SOCKET at it — but its registry has no live TUI pane.
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: True)
+        monkeypatch.setattr(helpers.tmux_mod, "pane_exists", lambda p: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [])
+        monkeypatch.setattr(helpers.pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+
+        assert helpers._find_tui_pane() == (None, None)
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/original.sock"
 
     def test_last_resort_finds_an_unregistered_tui_pane(self, monkeypatch):
         """A live ``pm _tui`` pane with no registry entry is still found.

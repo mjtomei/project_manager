@@ -1035,3 +1035,39 @@ entry skipped).  No live session, server or shared host configuration was
 touched.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i11)
+
+Verification pass over the integrated head; no requirement changes.  Two
+"degrade, never crash" / truthful-state fixes, both in code that runs on
+the paths this PR exists to protect:
+
+1. **`_find_tui_pane()`'s failure restore used a value it had already
+   overwritten.**  The cross-server scan re-points `PM_TMUX_SOCKET` at
+   each server it probes and restores the "ambient" value when nothing is
+   found — but that value was read *after* the cwd branch had already
+   called `_select_session_socket()`, so when the cwd session was running
+   with no live TUI pane the "restore" put the process back on the cwd
+   session's server rather than the one it came in with.  The value is
+   now captured on entry, before any branch can select a server, so the
+   documented contract ("a failed lookup leaves the process where it
+   was") actually holds.  Test:
+   `test_failed_lookup_restores_the_original_socket` (verified to fail
+   with the late capture: it restored the cwd session's socket).
+2. **`detach_current_client()` could raise out of the TUI's quit
+   handler.**  Every other tmux probe in this change degrades when tmux
+   cannot be run (i2/i6/i9), but `detach_current_client()` called
+   `pane_window_id()`/`_run()` unguarded, so an `OSError` from a missing
+   or unexecutable tmux (a container, or a forwarded `$TMUX` without the
+   binary) propagated into `quit_app()`.  The body moved to
+   `_detach_current_client()` and the public function now logs a warning
+   and returns `False`, i.e. "nothing to detach".  Test:
+   `test_tmux_missing_does_not_crash_the_quit_path` (verified to fail
+   with the guard removed).
+
+Validation on the integrated head: full suite re-run after these edits
+(see the PR note for this iteration).  No live session, server or shared
+host configuration was touched; both new tests are unit-level and touch no
+tmux server.
+
+Residual notes unchanged and still non-blocking (see the i3 section).

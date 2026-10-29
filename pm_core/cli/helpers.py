@@ -1384,6 +1384,11 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     - Otherwise, tries to find session matching current directory
     - Falls back to scanning every pm server for a live TUI pane
     """
+    # The scan below re-points PM_TMUX_SOCKET at each server it probes, and
+    # the cwd branch selects a server before that scan runs, so read the
+    # value this process started with *first*: a failed lookup has to leave
+    # the caller addressing the server it came in with.
+    ambient_socket = os.environ.get("PM_TMUX_SOCKET")
     # If session specified, use it (and its server).  The recorded pane is
     # returned as-is: naming the session is this branch's job, and
     # liveness is `_find_live_tui_pane`'s.
@@ -1424,9 +1429,8 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     # Fall back to scanning every pm server (private sockets + legacy
     # default) for a session with a live registered TUI pane.  The scan
-    # re-points PM_TMUX_SOCKET at each server in turn; remember the
-    # ambient value so a failed lookup leaves the process where it was.
-    ambient_socket = os.environ.get("PM_TMUX_SOCKET")
+    # re-points PM_TMUX_SOCKET at each server in turn; the value captured
+    # on entry is restored below if nothing is found.
     servers = tmux_mod.list_pm_sessions()
     for info in servers:
         _use_tmux_socket(info["socket"])
