@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T11:17:25.708549+00:00'
+  updated_at: '2026-10-29T11:37:39.462089+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5108,6 +5108,33 @@ prs:
       instead. Captures under /pm-captures/scenarios/2/{tui-send-isolation,cli-cross-session,qa-regression-guard}.'
     created_at: '2026-10-29T11:17:25Z'
     last_edited: '2026-10-29T11:17:25Z'
+  - id: note-41febbd
+    text: 'QA S3 PASS (2026-10-29, scenario 3: two clients on one private session
+      — grouped sessions, layout, mobile, per-client detach). All four stories verified
+      on a live private socket (/tmp/pm-sessions/pm-qa-a-1793273339-8adb22a7): (1)
+      a second `pm session` attached as `~2` on the same socket while a first client
+      held `~1` (no extra socket file under /tmp/pm-sessions/), both clients rendering
+      one window/pane set, window rebalanced 200x49 panes 100/99 -> 160x44 panes 80/79
+      with `#{window_layout}` byte-identical through base, ~1 and ~2, and `pm session
+      list` collapsing them to one row with CLIENTS=2; (2) `pm session mobile --force`
+      reported Mobile active True / Force flag True / Window width 200 (threshold
+      110), one `C-b o` moved the active pane %2->%0 and set `#{window_zoomed_flag}`=1
+      in base, ~1 AND ~2, with session B (own socket) byte-identical before/after;
+      (3) `pm tui send C-q` detached exactly one client (list-clients 2->1), the detached
+      driver pane showed its `__DETACHED__` marker and a bash prompt, the survivor
+      kept the TUI framebuffer (`pm tui view`), `pm session list` CLIENTS=1, and has-session
+      succeeded with base/~1/~2 still listed; (4) `pm tui frames -s <base>~2` printed
+      `[Session: <base>]` with a frame body identical to `-s <base>` and `-s <base>~1`,
+      exit 0. No code changes needed. Capture: /pm-captures/scenarios/3/ (recording.cast
+      + recording.mp4 of the second terminal doing mobile -> attach -> C-b o zoom
+      -> C-q detach -> list-clients/session list/frames -s ~2, plus tmux-level evidence
+      .txt files). Harness notes: term2 was a plain shell (started without `pm session`)
+      so the "unattached second terminal" GIVEN held and it attached during story
+      1, reusing the free `~1`; story 3 detach markers were exercised on the driver
+      terminals. Disposable sessions and the driver server torn down afterwards; /tmp/pm-sessions
+      is empty.'
+    created_at: '2026-10-29T11:37:39Z'
+    last_edited: '2026-10-29T11:37:39Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
