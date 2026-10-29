@@ -881,7 +881,9 @@ def test_pr_review_does_not_start_beside_a_return_recorded_during_the_gate(w):
          patch("pm_core.base_check.gate", side_effect=_returned_during_gate), \
          patch.object(pr_mod, "_launch_review_window") as window:
         result = runner.invoke(pr_mod.pr, ["review", PR])
-    assert result.exit_code == 1, result.output
+    # Exit 3 (not 1): the PR was returned to implementation, which
+    # review_loop maps to VERDICT_BASE_CONFLICT — routing, not a failure.
+    assert result.exit_code == 3, result.output
     window.assert_not_called()
     assert pr(w)["status"] == "in_progress"
     assert base_check.open_return(pr(w)) is not None
@@ -1107,3 +1109,31 @@ def test_pr_review_does_not_demote_a_pr_that_moved_on_during_the_gate(w):
     assert result.exit_code == 1, result.output
     window.assert_not_called()
     assert pr(w)["status"] == "qa"
+
+
+def test_pr_review_iteration_does_not_start_beside_a_return_during_the_gate(w):
+    """The in_review branch (review iterations >= 2) has the same race.
+
+    ``review_loop`` launches iteration N on a PR whose status is already
+    in_review, so this branch is the *normal* path for every later
+    iteration.  A conflict return another driver records inside the gate's
+    fetch must stop the reviewer just like it does on the first iteration.
+    """
+    from click.testing import CliRunner
+    from pm_core.cli import pr as pr_mod
+
+    set_pr(w, status="in_review")
+
+    def _returned_during_gate(*_a, **_k):
+        _return_during_gate(w, base_check.STAGE_REVIEW_ITERATION)
+        return base_check.GateResult(base_check.PROCEED,
+                                     base_check.STAGE_REVIEW_ITERATION)
+
+    runner = CliRunner()
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch("pm_core.base_check.gate", side_effect=_returned_during_gate), \
+         patch.object(pr_mod, "_launch_review_window") as window:
+        result = runner.invoke(pr_mod.pr, ["review", "--review-iteration", "2", PR])
+    window.assert_not_called()
+    assert pr(w)["status"] == "in_progress"
+    assert base_check.open_return(pr(w)) is not None

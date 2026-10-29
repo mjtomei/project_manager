@@ -1614,6 +1614,37 @@ def _retire_review_window_for_return(pr_entry: dict) -> None:
                    exc_info=True)
 
 
+def _review_post_gate_refusal(root, pr_id: str) -> tuple[int, str] | None:
+    """Re-read the PR after the gate's network round-trip.
+
+    Returns ``(exit_code, why)`` when the reviewer must not start, else
+    ``None``.  The gate fetches the base, so a concurrent merge, a phase
+    transition or a conflict return recorded by another driver can land
+    inside it.  The first-iteration path guards its ``in_review`` write
+    atomically; the already-``in_review`` branch writes no status, so it has
+    no such guard and needs this re-read (it is the normal path for review
+    iterations >= 2).  Without it a reviewer starts beside the
+    implementation rework the return just launched.
+
+    Exit code 3 is the routing code ``review_loop`` maps to
+    ``VERDICT_BASE_CONFLICT``: no reviewer ran, and the PR is being reworked.
+    """
+    from pm_core import base_check
+    try:
+        pr = store.get_pr(store.load(root), pr_id)
+    except Exception as e:  # a read failure must not block a review
+        _log.warning("review post-gate re-read for %s failed: %s", pr_id, e)
+        return None
+    if pr is None:
+        return None
+    if base_check.has_open_return(pr):
+        return 3, ("was returned to implementation for a base conflict "
+                   "during the base check")
+    if pr.get("status") not in ("in_progress", "in_review"):
+        return 1, "left the pre-review phase during the base check"
+    return None
+
+
 def _review_base_gate(root, pr_entry: dict, *, review_iteration: int,
                       transcript: str | None, review_loop: bool,
                       review_loop_id: str) -> int | None:
@@ -1717,6 +1748,19 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
                 review_loop_id=review_loop_id)
             if code:
                 raise SystemExit(code)
+            # This branch writes no status, so the atomic guard below (which
+            # only runs on the first-iteration path) does not cover it:
+            # re-read after the gate's fetch before launching a reviewer.
+            refusal = _review_post_gate_refusal(root, pr_id)
+            if refusal:
+                code, why = refusal
+                if code == 3:
+                    from pm_core import base_check
+                    base_check.ensure_impl_status(root, pr_id)
+                    _retire_review_window_for_return(pr_entry)
+                click.echo(f"PR {_pr_display_id(pr_entry)} {why}; review "
+                           f"not started.", err=True)
+                raise SystemExit(code)
         _launch_review_window(data, pr_entry, fresh=fresh, background=background,
                               review_loop=review_loop,
                               review_iteration=review_iteration,
@@ -1780,7 +1824,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
-    entered = {"ok": False, "why": ""}
+    entered = {"ok": False, "why": "", "code": 1}
     from pm_core import base_check
 
     def apply(data):
@@ -1797,15 +1841,19 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         # a concurrent review may have written it already).
         if pr.get("status") not in ("in_progress", "in_review"):
             entered["why"] = "left the pre-review phase during the base check"
+            entered["code"] = 1
             return
         # The base can also move *into* a conflict inside that same window
         # (another driver's gate, or the TUI completion check, records a
         # return).  The return owns the PR now: writing in_review and
         # launching a reviewer would put a review writer beside the
-        # implementation rework the return just started.
+        # implementation rework the return just started.  Exit 3 is the
+        # routing code ``review_loop`` maps to ``VERDICT_BASE_CONFLICT`` (no
+        # reviewer ran), not a launch failure.
         if base_check.has_open_return(pr):
             entered["why"] = ("was returned to implementation for a base "
                               "conflict during the base check")
+            entered["code"] = 3
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
@@ -1816,7 +1864,7 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         click.echo(
             f"PR {_pr_display_id(pr_entry)} {entered['why']}; review not "
             f"started.", err=True)
-        raise SystemExit(1)
+        raise SystemExit(entered["code"])
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     if no_window:

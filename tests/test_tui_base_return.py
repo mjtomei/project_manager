@@ -48,6 +48,7 @@ def _app(tmp_path, prs):
     app._self_driving_qa = {}
     app._pane_idle_tracker = MagicMock()
     app._base_completion_checks = {}
+    app._base_launch_attempts = {}
     return app
 
 
@@ -402,7 +403,83 @@ def test_poll_impl_idle_catches_up_base_rework_with_auto_start(tmp_path):
         review_loop_ui._poll_impl_idle(app)
 
     catch_up.assert_called_once_with(app, "pr-001")
-    tracker.mark_active.assert_called_with("pr-001")
+    # The idle turn is left unconsumed: the catch-up may not have taken the
+    # claim (a launcher is still running, or a failed one released it), and a
+    # later tick must be able to retry.
+    tracker.mark_active.assert_not_called()
+
+
+def test_base_rework_catch_up_is_retried_after_a_released_claim(tmp_path):
+    """A failed relaunch must be retried by the idle poll.
+
+    ``launch_impl`` releases the claim and keeps ``awaiting`` when ``pm pr
+    start`` fails (e.g. a pending spec).  The idle poll is the only driver
+    for a manual TUI session, and no later hook event follows an idle old
+    session, so consuming the idle turn here would leave the PR with no
+    launcher and no completion check.
+    """
+    from pm_core.tui import review_loop_ui
+
+    pr = _pr("in_progress", base_return=_return(awaiting="impl"))
+    app = _app(tmp_path, [pr])
+    app._session_name = "pm-test"
+    app._pending_merge_prs = set()
+    app._base_launch_attempts = {}
+    tracker = app._pane_idle_tracker
+    tracker.is_tracked.return_value = True
+    tracker.is_gone.return_value = False
+    tracker.is_idle.return_value = True
+
+    with patch("pm_core.tui.review_loop_ui._find_impl_pane",
+               return_value="%1"), \
+         patch("pm_core.tui.auto_start.get_transcript_dir",
+               return_value=str(tmp_path)), \
+         patch("pm_core.base_check.claim_impl_launch",
+               return_value=False) as claim, \
+         patch("pm_core.tui.review_loop_ui._base_completion_tick") as tick:
+        review_loop_ui._poll_impl_idle(app)
+        assert review_loop_ui._catch_up_base_impl(app, "pr-001") is False
+        # Inside the retry window the lock-taking claim is not repeated ...
+        review_loop_ui._poll_impl_idle(app)
+        assert claim.call_count == 1
+        # ... but a later tick tries again.
+        app._base_launch_attempts["pr-001"] -= review_loop_ui.BASE_LAUNCH_RETRY_SECONDS + 1
+        review_loop_ui._poll_impl_idle(app)
+    assert claim.call_count == 2
+    # The completion check is never reached while the launch is pending.
+    tick.assert_not_called()
+    tracker.mark_active.assert_not_called()
+
+
+def test_catch_up_base_impl_reloads_state_after_a_launch(tmp_path):
+    """The in-process relaunch must refresh the TUI's snapshot.
+
+    ``pm pr start`` clears ``awaiting`` on disk; nothing else reloads
+    ``app._data`` for this in-process launch (a CLI subprocess would), so the
+    next idle tick would re-enter the awaiting branch with the stale marker
+    and never reach the completion check.
+    """
+    import asyncio
+
+    from pm_core.tui import review_loop_ui
+
+    app = _app(tmp_path, [_pr("in_progress",
+                              base_return=_return(awaiting="impl"))])
+    app._base_launch_attempts = {}
+    workers: list = []
+    app.run_worker = workers.append
+
+    with patch("pm_core.base_check.claim_impl_launch", return_value=True), \
+         patch("pm_core.tui.auto_start.get_transcript_dir",
+               return_value=str(tmp_path)), \
+         patch("pm_core.base_check.launch_impl",
+               return_value=(True, "")) as launch:
+        assert review_loop_ui._catch_up_base_impl(app, "pr-001") is True
+        assert len(workers) == 1
+        asyncio.run(workers[0])
+
+    launch.assert_called_once()
+    app._load_state.assert_called_once()
 
 
 # --- raced status repair in the schedulers --------------------------------

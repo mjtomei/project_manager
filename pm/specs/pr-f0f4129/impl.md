@@ -94,15 +94,23 @@ already drops it because the status is no longer `qa`.
   loop in `poll_qa_state` with a log line.
   The gate is a network round-trip inserted between the phase check and the
   status write / window creation, so both choke points re-check the PR is
-  still eligible afterwards: `pr_review`'s `in_review` write refuses (exit 1,
-  no window) unless the PR is still in a pre-review status
+  still eligible afterwards: `pr_review`'s `in_review` write refuses (no
+  window) unless the PR is still in a pre-review status
   (`in_progress`/`in_review`) and has no open base return — so neither a
-  concurrent merge/close, a concurrent `qa`/`sign_off` transition, nor a
-  conflict return another driver recorded inside the same fetch (which would
-  otherwise start a reviewer beside the rework that return just launched) is
-  demoted back to `in_review`; and `run_qa_sync` re-checks `merged`/`closed`
-  and an open base return after the gate. Neither may demote a finished PR or
-  start a writer against it.
+  concurrent merge/close, a concurrent `qa`/`sign_off` transition (exit 1),
+  nor a conflict return another driver recorded inside the same fetch (exit
+  3, the routing code `review_loop` maps to `VERDICT_BASE_CONFLICT`, since no
+  reviewer ran; otherwise it would start a reviewer beside the rework that
+  return just launched) is demoted back to `in_review`; and `run_qa_sync`
+  re-checks `merged`/`closed` and an open base return after the gate.
+  Neither may demote a finished PR or start a writer against it.
+  The already-`in_review` branch of `pr_review` (the normal path for review
+  iterations ≥ 2, which writes no status and therefore has no atomic guard)
+  re-reads the PR after the gate too (`_review_post_gate_refusal`): an open
+  return there exits **3** — the routing code `review_loop` maps to
+  `VERDICT_BASE_CONFLICT`, so no iteration is recorded and the reviewer never
+  starts beside the rework — and a PR that left the pre-review phase exits
+  **1** with no window.
 - **R4 — Clean integration continues.** `clean` / `up_to_date` / `in_base`
   resolve any open base return and let the caller proceed exactly as before.
   No review/QA reset, no status change, no re-run.
@@ -231,7 +239,19 @@ already drops it because the status is no longer `qa`.
   whose rework never launched is caught up from the idle poll regardless of
   auto-start (the launch claim keeps one owner; `check_and_start` only
   drives in-scope PRs, so a manual loop on a non-target PR would otherwise
-  strand its rework).
+  strand its rework). That catch-up is **retryable**, not one-shot: a claim
+  still held (the gate's own `pm pr start` is running) or one released by a
+  failed launch (`release_impl_claim` keeps `awaiting`) is re-attempted on a
+  later tick, throttled to `BASE_LAUNCH_RETRY_SECONDS` because each attempt
+  takes the project.yaml lock. The idle turn is therefore left unconsumed
+  (`mark_active` is not called) for a base return — an idle old session emits
+  no further hook event, so consuming it would leave the PR with no launcher
+  and no completion check. A successful in-process relaunch reloads
+  `app._data` (`_load_state`): `pm pr start` cleared `awaiting` on disk, and
+  no CLI-subprocess reload (`trigger_tui_refresh` / `_run_command_async`)
+  follows this launch, so without it the next idle tick re-enters the
+  awaiting branch with the stale marker and never reaches the completion
+  check.
   `_base_completion_tick` never reaches the git helpers with an empty cwd
   (they raise, inside the shared
   poll timer), and returns a plain "no project root" verdict instead of
@@ -384,10 +404,14 @@ No unresolved ambiguities.
 17. a `qa`/`sign_off` transition landing during the gate's fetch is not
     demoted to `in_review` (exit 1, no window).
 18. a base conflict return another driver records during the gate's fetch:
-    `pm pr review` does not write `in_review` (exit 1, no window) and the PR
+    `pm pr review` does not write `in_review` (exit 3, no window) and the PR
     stays `in_progress` with the return open.
 19. the same race at the QA choke point: `run_qa_sync` creates no QA workdir,
     reports `base_returned`, and leaves the PR `in_progress`.
+20. the same race on the already-`in_review` branch (review iterations ≥ 2,
+    which writes no status): `pm pr review --review-iteration 2` does not
+    launch the reviewer, exits 3, and leaves the PR `in_progress` with the
+    return open.
 
 `tests/test_review_loop.py` additions: exit code 3 → `BaseConflictError` →
 `VERDICT_BASE_CONFLICT`, no history entry, loop stops; `next_review_iteration`
@@ -410,7 +434,12 @@ TUI: `_start_loop`/`start_qa`/`_auto_start_review_loops`/
 status); `_poll_impl_idle` does not advance on a background-test idle
 (settle/pair/dirty) and does advance after a genuine commit; a missing
 workdir or project root never reaches the git helpers; `_resume_returned_loop`
-never starts a second loop; `poll_qa_state` drops a returned run.
+never starts a second loop; `poll_qa_state` drops a returned run. The base
+rework catch-up is retried: a held/released claim leaves the idle turn
+unconsumed (no `mark_active`) and is re-attempted after
+`BASE_LAUNCH_RETRY_SECONDS` (throttled, not once per poll tick), and a
+successful in-process relaunch reloads `app._data` so the completion check is
+reachable.
 
 ## 6. Out of scope
 

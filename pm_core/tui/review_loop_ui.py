@@ -1010,15 +1010,22 @@ def _poll_impl_idle(app) -> None:
                     base_ret is not None
                     and base_check.return_awaiting(pr) == "impl"):
                 # Sent back but the rework session has not launched yet: an
-                # idle (old) session is not finished work.  Catch up the
-                # relaunch when no other driver owns it (the claim makes this
-                # one owner).  Not gated on auto-start: a manual loop on a PR
-                # outside the auto-start scope is skipped by
-                # ``check_and_start``, and would otherwise strand its rework.
-                _log.info("impl_idle: %s awaiting rework launch", pr_id)
+                # idle (old) session is not finished work.
                 if base_ret is not None:
+                    # Not gated on auto-start: ``check_and_start`` only drives
+                    # in-scope PRs, so for a manual loop this poll is the only
+                    # driver of the relaunch.  A claim that is still held (the
+                    # gate's own ``pm pr start``) or was released by a failed
+                    # launch must therefore be retried later, so leave the
+                    # idle state unconsumed instead of marking it active (no
+                    # later hook event would undo that).
                     _catch_up_base_impl(app, pr_id)
-                tracker.mark_active(pr_id)
+                    _log.debug("impl_idle: %s base rework launch pending",
+                               pr_id)
+                else:
+                    _log.info("impl_idle: %s awaiting sign-off rework launch",
+                              pr_id)
+                    tracker.mark_active(pr_id)
                 continue
             if base_ret is not None:
                 # A base-conflict return: an idle turn is not completion.
@@ -1222,6 +1229,12 @@ def _poll_impl_idle(app) -> None:
 # checks run inline.
 BASE_CHECK_POLL_SECONDS = 15.0
 
+# How often the TUI re-attempts a base rework relaunch whose claim is still
+# held (the gate's own ``pm pr start`` is running) or was released by a
+# failed launch.  Each attempt takes the project.yaml lock, so this is not
+# retried on every 5 s poll tick.
+BASE_LAUNCH_RETRY_SECONDS = 15.0
+
 
 def _base_completion_tick(app, pr_id: str, pr: dict,
                           tracker) -> tuple[bool, str, bool]:
@@ -1326,15 +1339,37 @@ def _base_completion_tick(app, pr_id: str, pr: dict,
     return False, "checking base integration", False
 
 
-def _catch_up_base_impl(app, pr_id: str) -> None:
-    """Relaunch a base-return rework session that no other driver claimed."""
+def _catch_up_base_impl(app, pr_id: str) -> bool:
+    """Relaunch a base-return rework session that no other driver claimed.
+
+    Returns True when this call took the launch claim (a relaunch is now in
+    flight).  A claim still held belongs to another launcher (the gate's own
+    ``pm pr start``, which runs inside a subprocess); a claim that was
+    released means that launcher failed and kept ``awaiting`` for a retry
+    (``release_impl_claim``).  The idle poll is the *only* driver for a
+    manual TUI session, so the caller must leave the idle state unconsumed
+    when this returns False: no later hook event follows an idle old session
+    to re-trigger the catch-up, and the PR would sit with no launcher and no
+    completion check.
+
+    Throttled per PR: each attempt that reaches ``claim_impl_launch`` takes
+    the project.yaml lock and rewrites the (large) file.
+    """
     from pm_core import base_check
     from pm_core.tui import auto_start as _auto_start
 
     if not app._root:
-        return
+        return False
+    attempts = getattr(app, "_base_launch_attempts", None)
+    if not isinstance(attempts, dict):
+        attempts = {}
+        app._base_launch_attempts = attempts
+    now = time.monotonic()
+    if now - float(attempts.get(pr_id) or 0.0) < BASE_LAUNCH_RETRY_SECONDS:
+        return False
+    attempts[pr_id] = now
     if not base_check.claim_impl_launch(app._root, pr_id):
-        return
+        return False
     tdir = _auto_start.get_transcript_dir(app)
 
     async def _run():
@@ -1343,10 +1378,16 @@ def _catch_up_base_impl(app, pr_id: str) -> None:
             base_check.launch_impl, app._root, pr_id, tdir)
         if not ok:
             app.log_message(f"{pr_id}: base rework relaunch failed: {detail}")
-        else:
-            _log.info("impl_idle: relaunched base rework for %s", pr_id)
+            return
+        _log.info("impl_idle: relaunched base rework for %s", pr_id)
+        # ``pm pr start`` cleared ``awaiting`` on disk.  This relaunch runs
+        # in-process, so nothing else refreshes the TUI's snapshot: without
+        # this the next idle tick re-enters the awaiting branch with the
+        # stale marker and never reaches the completion check.
+        app._load_state()
 
     app.run_worker(_run())
+    return True
 
 
 def _resume_returned_loop(app, pr_id: str) -> None:
@@ -1398,6 +1439,7 @@ def _auto_review_idle_prs(app, newly_idle: list[tuple[str, dict, bool]]) -> set[
     started: set[str] = set()
 
     for entry in newly_idle:
+        # Tolerate a 2-tuple (pr_id, pr): only the first element is used.
         pr_id = entry[0]
         # Scope to the union of the targets' dependency closures
         if not _auto_start.in_scope(app, pr_id, prs):
