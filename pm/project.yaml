@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T04:12:53.580152+00:00'
+  updated_at: '2026-10-29T04:44:58.229107+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14654,6 +14654,24 @@ prs:
       but not closed_at.'
     created_at: '2026-10-29T04:12:53Z'
     last_edited: '2026-10-29T04:12:53Z'
+  - id: note-934396e
+    text: 'Review e89f i3: no change to the close contract itself. (1) The A4/R4 live-resource
+      regression test was mis-targeted: it patched `pm_core.cli.helpers.kill_pr_windows`,
+      but `pr.py` imports the name directly, so a call from `pm pr close` would not
+      have been intercepted (the i2 claim that the spies were "verified to fire on
+      a direct call" was not backed by the test). It now patches `pm_core.cli.pr.kill_pr_windows`
+      as well and ends with a positive control that fires every spy through its binding
+      (kill_pr_windows, cleanup_pr_resources, kill_window, cleanup_pr_containers),
+      so the empty call list is a real guarantee; it still asserts neither the default
+      close nor --remove reaches a teardown path and the workdir survives. (2) Spec
+      synced (R11 item 39; §5 test list gains tests/test_store_validation.py). (3)
+      Recorded two more id-indexing sites of the same class in `pm pr sync` on pr-77c4f91
+      (note-b14a12e) - the pre-lock detection loop and the locked apply - not fixed
+      here, outside this PR close/cleanup scope. Full suite 4559 passed, 1 skipped,
+      0 failed (/pm-captures/review-e89f-i3/full-suite.log; markdown on PYTHONPATH,
+      PM_HOST_HOME unset).'
+    created_at: '2026-10-29T04:44:58Z'
+    last_edited: '2026-10-29T04:44:58Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
