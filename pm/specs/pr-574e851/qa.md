@@ -42,19 +42,47 @@ This spec is written against the user-visible surfaces: `pm qa run`,
   - `_fail_run_infrastructure()` — single publisher of the ERROR state
     (`running`/`held` cleared, verdict `ERROR`, one-line `latest_output`,
     full cause+remedy in `_error`, status file).
+  - `_launch_scenarios_in_containers` also fails the run closed when the
+    scenario *window* cannot be created after its container exists (same
+    `ContainerLaunchError`, only that attempt's container released) — the
+    container exists but nothing can run in it.
+  - `_write_resume_file` / `build_resume_state` — the resume snapshot now
+    carries `error`, so a resumed run keeps its original diagnostics and an
+    errored run with no scenario verdicts cannot re-aggregate as `PASS`
+    after a restart.
+  - `_record_qa_note` (TUI) — a mid-run `ERROR` (a queued scenario's create
+    failure, or a relaunch whose container is gone, after another scenario
+    already has a verdict) appends the cause+remedy to the `QA ERROR` note;
+    `_resume_incomplete_qa` restores the error from `qa_status.json` when it
+    adopts a run that completed during downtime.
+  - Queued-status wiring (`_status_scenarios`, `_queued_indices`) — the
+    status write performed *during* the initial launch keeps the
+    not-yet-started scenarios listed as `queued`, for the container **and**
+    host launchers (the launch batch no longer narrows the status file).
 - `pm_core/cli/qa.py`: `qa_run` prints `qa_error_detail(state)` (cause +
-  remedy) after the progress line; `qa_debug` resolves container mode and
-  fails closed **before** creating a workdir/clone, and converts any
-  `create_qa_container` failure into a message + exit 1 (only its own
-  container released).
+  remedy) on stderr after the progress line and exits nonzero when the
+  result is `ERROR` (a completed PASS/NEEDS_WORK/INPUT_REQUIRED still exits
+  0); `qa_debug` resolves container mode and fails closed **before**
+  creating a workdir/clone, and converts any `create_qa_container` failure
+  into a message + exit 1 (only its own container released).
 
 Intentionally **not** changed (do not assert as bugs): QA Scenario 0, the QA
-planner, and the authoring helpers (`pm qa launch/standalone/regression/
-author-*`) are host-only roles. On a run that reaches planning, the planner
-(and Scenario 0) legitimately run on the host — "zero host launches" in this
-spec always means **zero host launches of a container-eligible
-refiner/worker/scenario agent**, and, for the fresh-run preflight abort,
-zero launches of anything at all.
+planner, the QA verifier and finalizer, and the authoring helpers (`pm qa
+launch/standalone/regression/author-*`) are host-only roles. On a run that
+reaches planning, the planner (and Scenario 0) legitimately run on the host —
+"zero host launches" in this spec always means **zero host launches of a
+container-eligible refiner/worker/scenario agent**, and, for the fresh-run
+preflight abort, zero launches of anything at all.
+
+## Status of the earlier QA run (2026-10-29)
+
+The first QA run drove scenarios 1–7 and covered R1–R14: six PASS, one
+NEEDS_WORK (a queued scenario vanished from `qa_status.json` — fixed in
+`868d48e8`). After that run, i4/i6 (`pm qa run` prints the cause and exits 1
+on `ERROR`; the QA note carries a mid-run cause), `868d48e8` (queued rows
+persist) and c534 i1 (window-create failure fails closed; resume keeps the
+error; a recovered `ERROR` keeps its cause) landed. New scenarios cover
+those changes; the locked scenarios 1–7 are not re-emitted.
 
 ## Requirements (Given / When / Then)
 
@@ -69,7 +97,10 @@ zero launches of anything at all.
     an execution boundary,
   - it offers both remedies: start/install the runtime and verify
     `<runtime> info`, or deliberately `pm container disable`,
-  - the final line is `Result: ERROR`,
+  - the full cause+remedy is also printed (on stderr) after the progress
+    line, not only the one-line progress entry,
+  - the final line is `Result: ERROR` and the command exits nonzero, so a
+    scripted caller cannot read the infrastructure failure as success,
   - no QA scenario window is created, and no host agent process is launched,
   - the run's `qa_status.json` has `overall: "ERROR"` carrying the same
     cause+remedy.
@@ -139,6 +170,10 @@ zero launches of anything at all.
   - the scenario is **not** recorded as INPUT_REQUIRED / PASS / NEEDS_WORK in
     `qa_status.json`, the PR note, or the QA status pane,
   - no refiner/worker runs on the host,
+  - the same holds when the container is created but its scenario *window*
+    cannot be created (the pm session is gone or tmux refuses the window):
+    the run ends ERROR, no INPUT_REQUIRED is invented, and only that
+    attempt's container is released,
   - the workdir, status file, logs and any already-created containers are
     preserved (no broad cleanup), and the failed attempt's own container is
     gone.
@@ -191,6 +226,33 @@ zero launches of anything at all.
   shared `container-enabled` setting file still reads enabled — neither run
   silently disabled container mode to "succeed".
 
+### R15 — Queued scenarios stay visible from the initial launch
+- **Given** a QA plan with more scenarios than the concurrency cap
+  (`qa-max-scenarios`, e.g. 1) and container mode enabled (and, as a control,
+  container mode disabled),
+- **When** the user starts QA and the first batch launches,
+- **Then** the QA status pane and `qa_status.json` list **every** planned
+  scenario from the start — the launched ones as pending/running and the rest
+  as `queued` — and the queued rows do not disappear when the launch step
+  rewrites the status file; as each queued scenario is dequeued it flips to
+  running and launches in its own container (or on the host in the disabled
+  control).
+
+### R16 — A mid-run infrastructure ERROR keeps its cause in the note and across a restart
+- **Given** a container-mode run where a container fails **after** another
+  scenario already has a verdict (a lost container, or a queued scenario's
+  create failure),
+- **When** the run fails,
+- **Then** the `QA ERROR` note on the PR carries the cause and the retry
+  remedy (not a bare per-scenario summary with no reason), `qa_status.json`
+  records `overall: "ERROR"` with the same error text, and the QA status pane
+  shows the error block.
+- **Given** that failed run and a TUI restart,
+- **When** the TUI comes back (whether or not it processed the completion
+  before it died),
+- **Then** the recovered run still carries the cause, is not re-adopted or
+  re-run, and no host agent starts.
+
 ## Setup (cross-cutting)
 
 - Install pm from the PR checkout (`pip install -e .`, or `./install.sh
@@ -232,6 +294,12 @@ zero launches of anything at all.
 | Worker window dies, container alive | Relaunch inside the same container |
 | Worker window dies, container removed | Run ERROR; no host relaunch; other scenarios preserved |
 | Queued scenario dequeued while runtime is down | Run ERROR; no INPUT_REQUIRED for it |
+| Capped run launches its first batch | Status pane/`qa_status.json` keep every planned scenario; the rest show `queued` |
+| Container exists but its window cannot be created | Run ERROR; only that container released; no INPUT_REQUIRED |
+| Container lost after another scenario already has a verdict | Note and status carry the cause+remedy, not a bare per-scenario summary |
+| TUI restarts after a mid-run ERROR | Recovered ERROR keeps its cause; not re-run; no host launch |
+| `pm qa run` ends ERROR | Cause+remedy printed, `Result: ERROR`, exit code nonzero |
+| `pm qa run` completes with a verdict | Exit code 0 (PASS / NEEDS_WORK / INPUT_REQUIRED) |
 | Resume snapshot says container, runtime down | ERROR; no host; mode not switched |
 | Resume snapshot says host, container mode now enabled | Resumes on the host |
 | Container mode disabled, runtime absent | Host execution unchanged |
@@ -268,9 +336,14 @@ infrastructure failures.
   `claude` marker stub) and the capture manifest states which was used. Real
   nested podman is preferred for R10/R11 when the scenario image supports it;
   a stub runtime that models container names is acceptable otherwise.
-- **`pm qa run` exit code on ERROR.** The command prints `Result: ERROR`; the
-  spec does not require a nonzero exit code for `qa run` (only `qa debug` is
-  specified to exit nonzero).
+- **`pm qa run` exit code on ERROR (resolved by i6).** The command now prints
+  the cause+remedy and exits nonzero when the result is `ERROR`; a completed
+  verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) still exits 0. Scenarios
+  should assert both — a scripted caller depends on it.
+- **Queued-status visibility (resolved by `868d48e8`).** The earlier QA run's
+  NEEDS_WORK scenario found queued scenarios vanishing from `qa_status.json`
+  during the initial launch. That is fixed and covered by R15; a queued row
+  with an empty verdict in an `ERROR` status file is not a regression.
 - **Auto-start retry loop and `pm pr auto-sequence` ERROR handling** are
   known, separately-filed gaps (pr-7b1dd2e, pr-7abb052). They are out of
   scope here: a scenario must not report them as regressions of this PR, but
