@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T08:39:11.846898+00:00'
+  updated_at: '2026-10-29T09:00:16.346924+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42732,6 +42732,32 @@ prs:
       a plain restart drops auto-start. Keep the hold under 182 s.'
     created_at: '2026-10-29T07:31:59Z'
     last_edited: '2026-10-29T07:31:59Z'
+  - id: note-f4fe9e4
+    text: 'QA S133 (2026-10-29, host, real claude 2.1.312 routed reviews vs main +
+      acme router stubs, fake impl/sign-off; HEAD f1fdd96c vs control 4aff1dd4 vs
+      post-fix; captures /pm-captures/scenarios/133/README.md, mp4 for every story,
+      pre-fix/ + post-fix/): CODE CHANGE 7fb5df75 needs normal re-review. Bug: every
+      auto-start re-arm of a retryable review LAUNCH_FAILED waited the full 120 s
+      _LAUNCH_TIMEOUT before attempt 1. The resumed loop ran the restart handoff,
+      and S82 _wait_for_launching_window took the dangling review-<pr>-iN.jsonl symlink
+      left by the failed child for an in-flight launch (19c68f43 x #259, from the
+      integration; a restart inside the backoff hits it too). Fix: ReviewLoopState.last_attempt_failed,
+      carried by the breadcrumb, skips that wait after a failed attempt. Post-fix
+      every re-arm starts attempt 1 at +0 s (5/5); round (b) PASS 112 s after chmod
+      (pre-fix 231 s). 4 new tests fail pre-fix; suite 5183 passed. Story 1 PASS:
+      providers.yaml becomes a regular 0600 file and the symlink is replaced silently,
+      so the dotfiles copy diverges (observation); the key reaches the session only
+      via ~/.pm/run/env-*.sh. Story 2 PASS: 120 concurrent commands all rc 0, no lost
+      entries, longest 141 ms, silent flock. Story 3 otherwise PASS: 3 attempts 5/10
+      s apart, 60 s re-arm, 6 episodes and 18 artifacts, cap message, zz d and launcher
+      recovery onto the router; control gives a one-shot ERROR. Story 4 PASS on HEAD,
+      post-fix and control: hold landed, in-flight iteration 1 adopted, 0 relaunchers,
+      one window, one PASS; round 2 took the window-found path. Spec notes: the fake
+      impl never signals done, so zz d starts the review; with auto-start targets
+      restored the TUI logs "Auto-start: resumed after merge restart", not "Resumed
+      review loop state after restart".'
+    created_at: '2026-10-29T09:00:16Z'
+    last_edited: '2026-10-29T09:00:16Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
