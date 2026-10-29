@@ -44,6 +44,7 @@ from pm_core.cli.helpers import (
     _resolve_pr_id,
     _resolve_repo_dir,
     _resolve_repo_id,
+    _terminal_status_at_lock,
     _workdirs_dir,
     echo_record,
     emit_paged,
@@ -1124,10 +1125,19 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
     # Update state under lock — only advance from pending; don't regress in_review/merged
     machine = platform.node()
     work_path_str = str(work_path)
+    terminal_at_lock: str | None = None
 
     def apply(data):
+        nonlocal terminal_at_lock
         pr = store.get_pr(data, pr_id)
         if not pr:
+            return
+        # A `pm pr close`/merge that landed while this start was cloning and
+        # pushing wins: attaching a workdir, the active pointer and an
+        # `in_progress` timestamp to a terminal record would erase its
+        # closed_at and re-activate a retired PR (pr-62ad13d).
+        terminal_at_lock = _terminal_status_at_lock(pr)
+        if terminal_at_lock:
             return
         if pr.get("status") == "pending":
             pr["status"] = "in_progress"
@@ -1140,6 +1150,12 @@ def pr_start(pr_id: str | None, workdir: str, fresh: bool, background: bool, tra
         data["project"]["active_pr"] = pr_id
 
     data = store.locked_update(root, apply)
+    if terminal_at_lock:
+        click.echo(
+            f"PR {pr_id} became {terminal_at_lock} while starting — not "
+            f"recording the start. Any prepared workdir is left in place.",
+            err=True)
+        raise SystemExit(1)
     # Reload pr_entry from updated data (now contains gh_pr_number)
     pr_entry = store.get_pr(data, pr_id) or pr_entry
     trigger_tui_refresh()
@@ -1690,14 +1706,29 @@ def pr_review(pr_id: str | None, fresh: bool, background: bool, review_loop: boo
         else:
             click.echo("Warning: Failed to upgrade draft PR. It may already be ready or was closed.", err=True)
 
+    terminal_at_lock: str | None = None
+
     def apply(data):
+        nonlocal terminal_at_lock
         pr = store.get_pr(data, pr_id)
         if not pr:
+            return
+        # Upgrading the draft PR and resolving the workdir happen outside the
+        # lock; a `pm pr close`/merge landing meanwhile must win — moving a
+        # terminal record back to `in_review` would resurrect it and erase
+        # its closed_at (pr-62ad13d).
+        terminal_at_lock = _terminal_status_at_lock(pr)
+        if terminal_at_lock:
             return
         pr["status"] = "in_review"
         _record_status_timestamp(pr, "in_review")
 
     store.locked_update(root, apply)
+    if terminal_at_lock:
+        click.echo(
+            f"PR {pr_id} became {terminal_at_lock} while opening the review — "
+            f"not marked in_review and no review window was opened.", err=True)
+        raise SystemExit(1)
     click.echo(f"PR {_pr_display_id(pr_entry)} marked as in_review.")
     trigger_tui_refresh()
     if no_window:

@@ -22,6 +22,7 @@ from pm_core.paths import configure_logger
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout
 from pm_core import pane_registry
+from pm_core.pr_utils import TERMINAL_PR_STATES
 
 _log = configure_logger("pm.cli")
 
@@ -482,6 +483,23 @@ def _record_status_timestamp(pr_entry: dict, status: str | None = None, *,
         pr_entry["merged_at"] = now
     elif status == "closed" and previous_status != "closed":
         pr_entry["closed_at"] = now
+
+
+def _terminal_status_at_lock(pr: dict | None) -> str | None:
+    """Return *pr*'s status when a launch command must not record its work.
+
+    ``pm pr start`` and ``pm pr review`` guard against a merged/closed PR from
+    their pre-lock snapshot, but they clone/push/create a draft PR before
+    writing the transition under the store lock.  A ``pm pr close`` (or a
+    merge) landing in that window would otherwise be resurrected: the launch
+    writes ``in_progress``/``in_review`` over the terminal record, which also
+    erases ``closed_at`` and (for a start) re-activates the retired PR.
+
+    Re-checking inside the lock makes the concurrent close win.  The caller
+    no-ops on a non-None result and reports it instead of proceeding.
+    """
+    status = (pr or {}).get("status") or "pending"
+    return status if status in TERMINAL_PR_STATES else None
 
 
 def _canonical_session(session: str) -> str:

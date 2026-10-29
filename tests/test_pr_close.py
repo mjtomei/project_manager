@@ -1019,6 +1019,86 @@ def test_closed_pr_cannot_be_started(tmp_path):
     assert "closed" in start.output.lower()
 
 
+def _racing_close(pm_dir: Path, pr_id: str = "pr-001",
+                  closed_at: str = "2026-09-01T00:00:00+00:00"):
+    """A ``store.locked_update`` stand-in that closes *pr_id* on the way in.
+
+    The launch commands check their pre-lock snapshot, then do real work
+    (clone/push, draft-PR upgrade) before writing the transition under the
+    store lock — the window a concurrent `pm pr close` lands in.
+    """
+    real_locked_update = store.locked_update
+
+    def racing_update(root, fn, **kwargs):
+        data = store.load(root)
+        entry = store.get_pr(data, pr_id)
+        entry["status"] = "closed"
+        entry["closed_at"] = closed_at
+        store.save(data, root)
+        return real_locked_update(root, fn, **kwargs)
+
+    return racing_update
+
+
+def test_start_does_not_record_a_start_on_a_concurrently_closed_pr(tmp_path):
+    """`pm pr start` clones and pushes before it writes the start under the
+    lock; a close landing in that window must win — the terminal record keeps
+    its closed_at and must not become the active PR again (pr-62ad13d)."""
+    project = _make_project(tmp_path, status="in_progress")
+    # pr_start verifies the PR is committed on the base branch.
+    repo = project["pm_dir"]
+    _git(repo, "init", "-q", "-b", "master")
+    _git(repo, "config", "user.email", "close@example.com")
+    _git(repo, "config", "user.name", "Close Test")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "project state")
+    # The active pointer names another PR, so a start that leaked through
+    # would be visible as it claiming the pointer.
+    data = store.load(repo)
+    data["project"]["active_pr"] = "pr-002"
+    store.save(data, repo)
+
+    racing = _racing_close(repo)
+    runner = CliRunner()
+    with _fake_gh(), \
+         mock.patch.object(pr_mod, "state_root", return_value=repo), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod.store, "locked_update", racing), \
+         mock.patch.object(pr_mod, "_get_pm_session", return_value=None):
+        result = runner.invoke(pr_mod.pr, ["start", "pr-001"])
+
+    assert result.exit_code != 0, result.output
+    assert "closed" in result.output.lower()
+    after = store.load(repo)
+    entry = store.get_pr(after, "pr-001")
+    assert entry["status"] == "closed"
+    assert entry["closed_at"] == "2026-09-01T00:00:00+00:00"
+    assert after["project"]["active_pr"] == "pr-002"
+
+
+def test_review_does_not_resurrect_a_concurrently_closed_pr(tmp_path):
+    """`pm pr review` upgrades the draft PR and resolves the workdir outside
+    the lock; a close landing meanwhile must win — a closed record must not be
+    moved back to in_review, and no review window may be opened."""
+    project = _make_project(tmp_path, status="in_progress",
+                            with_dependent=False)
+    racing = _racing_close(project["pm_dir"])
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod.store, "locked_update", racing), \
+         mock.patch.object(pr_mod, "_launch_review_window") as launch:
+        result = runner.invoke(pr_mod.pr, ["review", "pr-001"])
+
+    assert result.exit_code != 0, result.output
+    assert "closed" in result.output.lower()
+    assert not launch.called
+    entry = _load_entry(project["pm_dir"])
+    assert entry["status"] == "closed"
+    assert entry["closed_at"] == "2026-09-01T00:00:00+00:00"
+
+
 def test_auto_sequence_reports_a_closed_pr_without_advancing_it(tmp_path):
     """`closed` is terminal exactly like `merged` for the auto-sequence
     driver: it reports the status (exit 0) instead of "unknown status"

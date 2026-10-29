@@ -401,6 +401,25 @@ workdirs are touched.
     instead of re-listing `merged`/`closed` (review e89f i2), so the
     single-definition claim in item 27 holds for that path too.  No behavior
     change.
+45. Launch commands re-check terminal status under the lock (review e89f i4):
+    `pm pr start` and `pm pr review` guard against a merged/closed PR from
+    their pre-lock snapshot, but both do real work before writing the
+    transition — `start` clones/pushes/creates a draft PR, `review` upgrades
+    the draft PR and resolves the workdir.  A `pm pr close` landing in that
+    window used to be resurrected: `start` erased `closed_at` (via
+    `_record_status_timestamp(pr, "in_progress")`), attached a workdir and
+    re-pointed `active_pr` at the terminal record (violating A2), and
+    `review` rewrote `closed` → `in_review` outright.  Both applies now call
+    the shared `helpers._terminal_status_at_lock` on the freshly loaded entry
+    and no-op when it reports a terminal status; the command then exits 1 with
+    a message naming the status (for `start`, noting the prepared workdir is
+    left in place) and never launches a review window.  Covered by
+    `test_start_does_not_record_a_start_on_a_concurrently_closed_pr` and
+    `test_review_does_not_resurrect_a_concurrently_closed_pr` (both fail on
+    the previous head — the probe shows `start` claiming the active pointer
+    and `review` printing "marked as in_review").  `pm pr signoff`,
+    `pm pr qa-run-bg` and the auto-sequence bounce already guard their apply
+    on the expected source status, so a concurrent close no-ops there.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -413,7 +432,11 @@ be rewritten to assert retention.
   raise — re-check `store.get_pr` inside `apply` and no-op. The merged guard is
   re-checked inside `apply` too: a merge landing between the pre-lock load and
   the lock must not be rewritten to `closed` (the pre-lock refusal message is
-  reused and the command exits 1).
+  reused and the command exits 1).  The same rule applies in the other
+  direction: a *launch* whose pre-lock guard saw an active status must re-check
+  terminal status inside its own `apply`, or a `pm pr close` landing during its
+  long pre-lock work is overwritten (review e89f i4,
+  `helpers._terminal_status_at_lock`).
 - **TUI refresh.** Keep `trigger_tui_refresh()` so the TUI reloads; closed PRs
   are already hidden by default (`pm_core/tui/tree_layout.py:172`) and filtered
   from `pm pr list --open` (`pm_core/cli/pr.py:517`).
@@ -523,13 +546,16 @@ No **[UNRESOLVED]** ambiguities.
   `pr_add` (retained closed entries now match its duplicate check), and
   `pr_edit` dropping `closed_at` on a deliberate reopen (review c02f i13),
   plus terminal-status reporting in `pr_auto_sequence` and a closed guard in
-  `pr_signoff` (review 8820 i1).
+  `pr_signoff` (review 8820 i1), and the in-lock terminal re-check in
+  `pr_start` / `pr_review` so a close landing during their long pre-lock work
+  is not resurrected (review e89f i4).
 - `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
   premise of its ruleset item obsolete (review c02f i13).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`, plus the
   `previous_status` parameter that makes the helper the single owner of the
   field's history (drop on leaving `closed`, keep on restating it; review
-  b320 i1).
+  b320 i1), and `_terminal_status_at_lock` — the in-lock re-check `pm pr
+  start` / `pm pr review` use so a concurrent close wins (review e89f i4).
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
 - `pm_core/autostart_state.py`, `pm_core/cli/session.py`, `pm_core/qa_loop.py`,
