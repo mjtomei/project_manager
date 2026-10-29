@@ -1962,6 +1962,37 @@ def test_web_ui_start_clears_a_stale_server_pid(tmp_path):
         "signal a recycled pid")
 
 
+def test_a_refused_start_clears_the_previous_pid(tmp_path):
+    """The cleanup runs *before* the port pre-check, and the refusal relies on it.
+
+    Step 1 clears the previous run's outputs before it probes the port, and
+    the busy-port refusal says so: "Its pid is no longer in server.pid (this
+    step cleared it)". The cleanup's *list* is pinned as text
+    (``test_web_ui_clears_a_previous_video``), but nothing observed the
+    refusal path — moving the whole ``rm`` below the pre-check left the file
+    green (204 passed). A start refused for a busy port then leaves the
+    previous run's ``server.pid`` in place: it is the handle the recipe's
+    teardown reads, so a worker who runs the teardown next signals whatever
+    process has since reused that pid — while the message that sent them there
+    says the file is gone. The success path cannot see this: its own
+    ``printf`` overwrites the pid.
+    """
+    capdir = _web_ui_capdir(tmp_path)
+    capdir.mkdir(parents=True)
+    (capdir / "server.pid").write_text("999999\n")
+
+    r, launched = _run_web_ui_start("inuse", tmp_path)
+
+    assert r.returncode != 0, r.stderr
+    assert "already answers" in r.stderr, r.stderr
+    assert not launched.exists(), (
+        "the recipe started the app on a port another server holds")
+    assert not (capdir / "server.pid").exists(), (
+        "the refused start left the previous run's server.pid in place, so "
+        "the teardown can signal a recycled pid although the refusal message "
+        "says this step cleared it")
+
+
 def test_web_ui_teardown_uses_the_pid_step_one_recorded(tmp_path):
     """The teardown has to stop *this* run's app from a fresh shell.
 
@@ -3392,6 +3423,19 @@ def _step_two_block():
     return raw[raw.index("# 2."):raw.index("# 3.")]
 
 
+def _cli_preamble_block():
+    """The CLI recipe's capture-section preamble (create and clear the dir).
+
+    The first fenced block under ``## Capture``: the one a worker following the
+    recipe top-down pastes before any of the recording forms. The no-TTY
+    scaffold repeats its steps for a worker who pastes the scaffold whole, so
+    the preamble carries its own copy of the guards.
+    """
+    section = _recipe_text("cli-recording.md").split(
+        "## Capture", 1)[1].split("## Render to video", 1)[0]
+    return re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+
+
 class TestCaptureFlowExecution:
     """Run the capture block end to end against a stub tmux server."""
 
@@ -4108,6 +4152,52 @@ class TestCaptureFlowExecution:
             "a retry in the same session was refused as a collision because "
             "its own claim was written with a `~/` spelling: " + r.stderr)
 
+    def test_a_shared_dir_is_recognized_through_a_symlink(self, tmp_path):
+        """`pwd -P` is the other half of the canonical claim, and it had no case.
+
+        Step 2 compares the claim as a *directory*: `cd` + `pwd -P` collapses
+        a trailing slash and a symlinked path, so a second session that reaches
+        the capture directory through a symlink to it is still refused. The
+        `~/` spelling is pinned above, but nothing exercised the symlink — the
+        prose claims it, and replacing every `pwd -P` with `pwd` left the whole
+        file green (verified, 201 passed). The two spellings then differ, both
+        runs pass the collision check and write into one directory, reading
+        each other's cast, status and transcript.
+        """
+        real = tmp_path / "real"
+        (real / "cap").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(real)
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True, capture=tmp_path / "link" / "cap",
+            state_files={"pm-other": "",
+                         "claim.pm-other": str(real / "cap")})
+        assert r.returncode != 0, (
+            "a second session recorded the same capture directory through a "
+            "symlinked spelling, so both runs read each other's evidence")
+        assert ("is already being recorded by pm session pm-other"
+                in r.stderr), r.stderr
+
+    def test_a_retry_is_not_refused_through_a_symlink(self, tmp_path):
+        """The mirror: the same run's own claim, reached through a symlink.
+
+        With the claim stored as the real path and the retry pasted with the
+        symlinked one, a text comparison refuses a retry that is not a
+        collision (and, with the cross-session case above, the pair is what
+        makes `pwd -P` load-bearing rather than incidental).
+        """
+        real = tmp_path / "real"
+        (real / "cap").mkdir(parents=True)
+        (tmp_path / "link").symlink_to(real)
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True, capture=tmp_path / "link" / "cap",
+            state_files={"claim.pm-test": str(real / "cap")})
+        assert r.returncode == 0, (
+            "a retry in the same session was refused as a collision because "
+            "its own claim was written against the real path and the step was "
+            "pasted with the symlinked one: " + r.stderr)
+
     def test_tmux_transcript_that_is_never_written_fails(self, tmp_path):
         """The pipe can accept the attach and still write nothing.
 
@@ -4578,9 +4668,7 @@ class TestCaptureFlowExecution:
         fixed for the scaffold). Run the preamble itself: it must stop with
         "could not create" and create nothing.
         """
-        text = _recipe_text("cli-recording.md")
-        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
-        preamble = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        preamble = _cli_preamble_block()
         blocker = tmp_path / "blocker"
         blocker.write_text("not a directory")
         capture = blocker / "cap"
@@ -4598,6 +4686,38 @@ class TestCaptureFlowExecution:
             "every form below records into a path that is not there")
         assert "could not create" in r.stderr, r.stderr
         assert not capture.exists()
+
+    def test_cli_preamble_refuses_a_relative_capture_dir(self, tmp_path):
+        """The preamble's own copy of the path guard had no case.
+
+        ``test_capture_dir_must_be_absolute`` runs each recipe's *scaffold*, so
+        the CLI preamble — the first block under ``## Capture``, and the block
+        a worker following the recipe top-down pastes before any of the
+        recording forms — was never run with a relative ``<capture-dir>``.
+        Deleting its ``case`` guard left the whole file green (verified, 201
+        passed), and the preamble then ran on and exited 0 with
+        ``relcap/run`` created and cleared in the worker's cwd: the exact
+        "writes where the checks never look" state the guard exists for, in
+        the paste that precedes every form (the scaffold's own copy refuses
+        the path, but only after this block has already written into it).
+        """
+        block = (_cli_preamble_block()
+                 .replace("<capture-dir>", "relcap")
+                 .replace("<short-name>", "run"))
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        _stub_tool(bindir, "tmux", "exit 1\n")
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+        r = subprocess.run(["bash"], input=block, env=env, cwd=str(tmp_path),
+                           capture_output=True, text=True, timeout=60)
+
+        assert r.returncode != 0, (
+            "the preamble accepted a relative capture directory, so every "
+            "form below records into a path each paste resolves for itself")
+        assert "must be an absolute path" in r.stderr, r.stderr
+        assert not (tmp_path / "relcap").exists(), (
+            "the preamble created a relative capture directory before "
+            "refusing it, so it wrote and cleared files in the worker's cwd")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_capture_dir_must_be_absolute(self, name, tmp_path):

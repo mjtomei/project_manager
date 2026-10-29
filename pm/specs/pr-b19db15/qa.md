@@ -223,6 +223,29 @@ recording-recipe bugs that any worker following the recipe hits:
   deleted — R47's disagreement in the one block R47 did not cover. Neither is
   a change to a nominal flow.
 
+- three claimed guards had no case (review loop ebd1 i8): the CLI recipe's
+  capture preamble carries its own copy of the absolute-path guard, and
+  `test_capture_dir_must_be_absolute` runs each recipe's *scaffold* — so the
+  preamble, the first block under `## Capture`, was never run with a relative
+  `<capture-dir>`. Deleting its `case` guard left the whole file green (201
+  passed) and the preamble then exited 0 with `relcap/run` created and cleared
+  in the worker's cwd. Step 2's claim comparison canonicalizes with `pwd -P`,
+  and the prose claims it collapses a symlinked path, but only the `~/`
+  spelling had a case: replacing every `pwd -P` with `pwd` also left the file
+  green, and two runs reaching one capture directory through a symlink and its
+  target would then both proceed (and a retry through the symlink be refused
+  as a collision). And the web-UI start block's cleanup runs *before* its port
+  pre-check, which the busy-port refusal states ("Its pid is no longer in
+  server.pid (this step cleared it)"); the cleanup's list was text-pinned but
+  the refusal path was not, so moving the `rm` below the pre-check left the
+  file green and a refused start then left the previous run's `server.pid`
+  for the teardown to signal. All three are now execution-tested
+  (`test_cli_preamble_refuses_a_relative_capture_dir`,
+  `test_a_shared_dir_is_recognized_through_a_symlink`,
+  `test_a_retry_is_not_refused_through_a_symlink`,
+  `test_a_refused_start_clears_the_previous_pid`); the recipe text is
+  unchanged, so no scenario gains a new surface.
+
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
 
@@ -595,9 +618,11 @@ bug in the document that interprets the rest (review loop ebd1 i6, R47).
   is, so a stale one names files this step just deleted) before the app
   starts — `driver.mjs` is the one file kept, because it is the run's input,
   not its evidence — and the driver step repeats the attempt-scoped
-  cleanup (`recording.mp4`, `*.webm`, `trace.zip`, `dom.html`, `*.png`) after
-  its `cd`, so a failed run cannot present the earlier run's video, trace,
-  screenshots or protocol logs as this run's evidence. The driver's own exit status is the
+  cleanup (`recording.mp4`, `*.webm`, `trace.zip`, `dom.html`, `*.png`,
+  `manifest.md`) after its `cd`, so a failed run cannot present the earlier
+  run's video, trace, screenshots or protocol logs as this run's evidence, nor
+  leave the earlier attempt's manifest naming the video that cleanup deleted
+  (R48). The driver's own exit status is the
   completion handle: the driver block stops with "the driver failed — this
   run's video, trace and screenshots are incomplete" instead of letting the
   finalize step transcode whatever is on disk (which misreports a driver
