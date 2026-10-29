@@ -38197,7 +38197,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-29T09:58:09.088267+00:00'
+  updated_at: '2026-10-29T10:01:34.047628+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -38662,6 +38662,49 @@ prs:
       line. Captures /pm-captures/scenarios/15/{story1,story2,story3}/.'
     created_at: '2026-10-29T09:58:08Z'
     last_edited: '2026-10-29T09:58:08Z'
+  - id: note-76d5e38
+    text: 'QA scenario 14 (R9a/E9a/E9b, dropped INPUT_REQUIRED wait) PASS 4/4 stories
+      on 31392557. (1) Live loop: worker exits after collecting INPUT_REQUIRED ->
+      within one 5 s tick the row reads `launch retry 1/6` + `↳ worker exited before
+      any verdict: pane died mid-run (killed or crashed); no runtime cause found —
+      next attempt at HH:MM:SS`, the target window survives with its concretizer pane
+      (the old fallback would have adopted it), no `collected from its transcript`
+      line, sibling PASSes/verifies independently, relaunch 1/6 replaces the window
+      worker-only and re-points transcript-s1.jsonl at the new session; relaunch 2/6
+      (10 s) gets the scripted PASS, verified, `Overall: PASS`, `QA complete: PASS
+      [finalize: FINALIZE_DONE]`. (2) TUI restart mid-backoff: qa_resume.json had
+      dropped_wait_verdicts=[1], launch_retries[1]={attempts:2,state:waiting,retry_at},
+      target windowless; `pm tui restart` -> `Resuming QA for <pr> after restart...`
+      / `Resuming incomplete QA from disk`, row still `launch retry 3/6` with the
+      same due time, overdue retry fired on the first resumed tick as relaunch 3/6
+      (not 1/6), sibling not re-verified, Overall PASS. (3) Held run (sibling verified
+      first, run holds INPUT_REQUIRED): the HOLD scan is the first to notice the dead
+      worker -> `QA hold for <pr>: 0 follow-up(s), 1 dropped — reopening the run`
+      / `QA resumed after INPUT_REQUIRED — collecting the follow-up verdict`, status
+      overall cleared, three held-scan drops then restart mid-backoff -> relaunch
+      3/6, Overall PASS, sibling verified exactly once. (4) Bounded budget: gaps exactly
+      5/10/20/40/80/160 s, row 1/6..6/6, only scenario 1 has retry records, then `Waiting
+      scenario 1 worker pane is gone with no follow-up after 6 relaunches — recording
+      INPUT_REQUIRED as terminal`, no 7th s1 window, `Overall: INPUT_REQUIRED`, TUI
+      `QA complete: INPUT_REQUIRED [finalize: FINALIZE_DONE] — Wait drop alpha: INPUT_REQUIRED;
+      Long running sibling: PASS`. Captures /pm-captures/scenarios/14/{story1,story2,story3,story4}/.
+      Caveats for the next run: (a) pm rebuilds the QA window on each relaunch, which
+      drops the status-pane zoom, so after ~09:51 the dashboard clips the `↳ reason`
+      line — re-zoom after every relaunch if a still is needed, or read the reason
+      from the debug log; (b) the story-1 Then `Progress: 1/2 scenarios complete (1
+      relaunching)` at the target second backoff is timing-sensitive: with the scripted
+      sibling PASS delay 90 its 30 s verification grace lands 5 s after the 10 s backoff
+      ends, so the snapshot during the backoff reads `0/2 scenarios complete (1 verifying)
+      (1 relaunching)`; the substantive claim (sibling verified independently while
+      the target is in its retry episode) holds; (c) with target relaunch holds of
+      50 s the run can hold INPUT_REQUIRED for ~5 s after the worker has already exited
+      (finalize grace 30 s > hold 50 s - collection delay) before the hold scan drops
+      it — expected fixture timing, immediately self-corrected, not a defect; (d)
+      fixture setup needs a real commit on the PR branch before the first QA start
+      or the planner handoff fails `PR branch ... not found in workdir`. No code change.
+      (2026-10-29T10:01:00Z)'
+    created_at: '2026-10-29T10:01:33Z'
+    last_edited: '2026-10-29T10:01:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
