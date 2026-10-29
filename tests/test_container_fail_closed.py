@@ -133,6 +133,11 @@ def test_run_qa_sync_fails_closed_when_runtime_unavailable(tmp_path, home):
     assert "no agent was launched on the host" in state._error
     # Nothing launched, so there is no resumable snapshot to re-enter.
     resume.assert_not_called()
+    # The failure is published for the dashboard and the next TUI, with the
+    # original cause (not just a bare ERROR).
+    status = (tmp_path / "qa" / "qa_status.json").read_text()
+    assert '"overall": "ERROR"' in status
+    assert "runtime unavailable" in status
 
 
 def test_run_qa_sync_uses_containers_when_runtime_healthy(tmp_path, home):
@@ -392,6 +397,41 @@ def test_relaunch_reuses_the_running_container(tmp_path, home):
     assert scenario.pane_id == "%1"
 
 
+def test_relaunch_host_mode_control(tmp_path, home):
+    """Explicitly disabled container mode still relaunches on the host: a
+    host run has no container name, must not be probed for one, and keeps
+    the pm session in the prompt shape."""
+    state = QALoopState(pr_id="pr-c")
+    state.qa_workdir = str(tmp_path)
+    scenario = QAScenario(index=1, title="S1", focus="f",
+                          container_name=None, worktree_path=str(tmp_path))
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=SimpleNamespace(
+                                      model=None, provider=None, effort=None)))
+        running = stack.enter_context(patch.object(
+            container_mod, "container_is_running", return_value=False))
+        build = stack.enter_context(patch(
+            "pm_core.qa_loop._build_scenario_run_cmd",
+            return_value=("HOST-CMD", str(tmp_path))))
+        new_window = stack.enter_context(patch(
+            "pm_core.tmux.new_window_get_pane", return_value="%1"))
+        stack.enter_context(patch("pm_core.tmux.pane_window_id",
+                                  return_value=None))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.session_id_from_transcript",
+            return_value="sid"))
+        relaunched = qa_loop._relaunch_scenario_window(
+            scenario, state, {}, {"id": "pr-c", "branch": "b"},
+            "pm-s", str(tmp_path), use_containers=False)
+
+    assert relaunched is True
+    running.assert_not_called()  # no container is consulted in host mode
+    assert build.call_args.kwargs["session"] == "pm-s"
+    assert new_window.call_args.args[2] == "HOST-CMD"
+
+
 def test_resume_fails_closed_when_runtime_unavailable(tmp_path, home):
     pr, data, workdir, qa_workdir = _pm_fixture(tmp_path)
     state = _execution_only_state(qa_workdir)
@@ -412,9 +452,15 @@ def test_resume_fails_closed_when_runtime_unavailable(tmp_path, home):
 
     assert result is state
     assert state.running is False
+    assert state.held is False
     assert state.latest_verdict == "ERROR"
     assert "no agent was launched on the host" in state._error
     finalize.assert_not_called()
+    # The completed ERROR is published so a TUI restart clears the snapshot
+    # instead of re-adopting the same unusable container run.
+    status = (qa_workdir / "qa_status.json").read_text()
+    assert '"overall": "ERROR"' in status
+    assert "no agent was launched on the host" in status
 
 
 def test_qa_debug_fails_closed_when_runtime_unavailable(tmp_path, home):
@@ -480,6 +526,16 @@ def test_runtime_status_reports_the_cause():
             ok, problem = container_mod._runtime_status()
         assert ok is False
         assert "exited 1" in problem and "daemon not running" in problem
+
+        # capture_output without text=True hands back bytes; the diagnostic
+        # must still read as text.
+        with patch("subprocess.run") as run:
+            run.return_value = MagicMock(returncode=125,
+                                         stderr=b"permission denied\n",
+                                         stdout=b"")
+            ok, problem = container_mod._runtime_status()
+        assert ok is False
+        assert "exited 125" in problem and "permission denied" in problem
 
         with patch("subprocess.run") as run:
             run.return_value = MagicMock(returncode=0, stderr="", stdout="")

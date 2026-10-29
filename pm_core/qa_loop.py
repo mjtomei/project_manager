@@ -868,6 +868,54 @@ def _write_status_file(status_path: Path, pr_id: str,
     tmp_path.rename(status_path)
 
 
+def _fail_run_infrastructure(
+    state: QALoopState,
+    status_path: Path,
+    *,
+    latest_output: str,
+    error: str,
+    scenarios: list[QAScenario] | None = None,
+) -> None:
+    """Publish an infrastructure ERROR for a container-mode launch and stop.
+
+    Container mode is an execution boundary: an unusable runtime, or a
+    container that cannot be created or is lost, fails the run.  Every
+    fail-closed launch path publishes that failure here so they cannot drift
+    apart: ``running``/``held`` cleared, verdict ``ERROR`` (never an invented
+    scenario verdict), a one-line ``latest_output`` for the TUI log, the full
+    cause+remedy in ``_error``, and the status file the dashboard and the next
+    TUI read.
+
+    *scenarios* overrides the status-file scenario list for callers that
+    temporarily swapped ``state.scenarios`` (the initial launch).  The status
+    write is best-effort: the run is already failing, and a display-file
+    error must not crash the driver thread on top of it.
+    """
+    state.running = False
+    state.held = False
+    state.latest_verdict = "ERROR"
+    state.latest_output = latest_output
+    state._error = error
+    try:
+        _write_status_file(
+            status_path, state.pr_id,
+            state.scenarios if scenarios is None else scenarios,
+            state.scenario_verdicts, overall="ERROR",
+            scenario_0=state.scenario_0, error=error,
+            verdict_reasons=state.scenario_verdict_reasons)
+    except Exception:
+        _log.warning("Failed to write ERROR status for %s", state.pr_id,
+                     exc_info=True)
+
+
+def _first_line(text: str, fallback: str) -> str:
+    """The first non-empty line of *text*, for a single-line TUI log entry."""
+    for line in str(text).splitlines():
+        if line.strip():
+            return line.strip()
+    return fallback
+
+
 # ---------------------------------------------------------------------------
 # Resume snapshot (restart survival)
 # ---------------------------------------------------------------------------
@@ -4656,17 +4704,12 @@ def _run_qa_sync(
             _log.error("QA aborted for %s: container mode is enabled but the "
                        "runtime is unavailable (%s); refusing to launch on "
                        "the host", state.pr_id, _runtime_problem)
-            state.running = False
-            state.latest_verdict = "ERROR"
-            state.latest_output = (
-                "Container mode is enabled but the container runtime is "
-                f"unavailable: {_runtime_problem}")
-            state._error = container_unavailable_message(_runtime_problem)
-            _write_status_file(
-                status_path, state.pr_id, state.scenarios,
-                state.scenario_verdicts, overall="ERROR",
-                scenario_0=state.scenario_0, error=state._error,
-                verdict_reasons=state.scenario_verdict_reasons)
+            _fail_run_infrastructure(
+                state, status_path,
+                latest_output=(
+                    "Container mode is enabled but the container runtime is "
+                    f"unavailable: {_runtime_problem}"),
+                error=container_unavailable_message(_runtime_problem))
             if on_update:
                 on_update(state)
             return state
@@ -5125,16 +5168,11 @@ def _run_qa_sync(
         # record the infrastructure failure as a scenario verdict.
         _log.error("QA container launch failed for %s: %s",
                    state.pr_id, exc)
-        state.running = False
-        state.latest_verdict = "ERROR"
-        state.latest_output = (
-            "Container launch failed: " + str(exc).splitlines()[0])
-        state._error = str(exc)
-        _write_status_file(
-            status_path, state.pr_id, all_scenarios,
-            state.scenario_verdicts, overall="ERROR",
-            scenario_0=state.scenario_0, error=state._error,
-            verdict_reasons=state.scenario_verdict_reasons)
+        _fail_run_infrastructure(
+            state, status_path,
+            latest_output="Container launch failed: "
+                          + _first_line(exc, "container launch failed"),
+            error=str(exc), scenarios=all_scenarios)
         _notify()
         return state
     finally:
@@ -5214,17 +5252,11 @@ def _execute_and_finalize(
             # on the host or recording an invented scenario verdict.
             _log.error("QA container launch failed for %s: %s",
                        state.pr_id, exc)
-            state.running = False
-            state.held = False
-            state.latest_verdict = "ERROR"
-            state.latest_output = (
-                "Container launch failed: " + str(exc).splitlines()[0])
-            state._error = str(exc)
-            _write_status_file(
-                status_path, state.pr_id, state.scenarios,
-                state.scenario_verdicts, overall="ERROR",
-                scenario_0=state.scenario_0, error=state._error,
-                verdict_reasons=state.scenario_verdict_reasons)
+            _fail_run_infrastructure(
+                state, status_path,
+                latest_output="Container launch failed: "
+                              + _first_line(exc, "container launch failed"),
+                error=str(exc))
             notify()
             return state
 
@@ -5448,7 +5480,7 @@ def _resume_qa_sync(
     """The body of :func:`resume_qa_sync` (see it for the phases)."""
     from pm_core import store
 
-    def _abort(message: str, error: str | None = None) -> QALoopState:
+    def _abort(message: str) -> QALoopState:
         """Publish a resume failure and stop advertising the run as live.
 
         ``held`` is cleared like the background-thread crash handlers do: a
@@ -5457,16 +5489,11 @@ def _resume_qa_sync(
         report a wait for a run nothing is watching.  Notifying publishes
         ``latest_output`` so the failure reaches the TUI log, not only the
         daemon log.
-
-        *error* carries the full diagnostic (cause + remedy) in
-        ``state._error`` so it survives into the QA status/PR note.
         """
         state.running = False
         state.held = False
         state.latest_verdict = "ERROR"
         state.latest_output = message
-        if error is not None:
-            state._error = error
         if on_update:
             on_update(state)
         return state
@@ -5515,24 +5542,19 @@ def _resume_qa_sync(
                        state.pr_id, _runtime_problem)
             # One-line summary for the TUI log; the full cause + remedy
             # stays in ``_error`` for the status file and the QA note,
-            # matching the fresh-run preflight in ``_run_qa_sync``.
-            result = _abort(
-                "Container mode is enabled but the container runtime is "
-                f"unavailable: {_runtime_problem}",
+            # matching the fresh-run preflight in ``_run_qa_sync``.  The
+            # status file also lets a TUI restart see a completed ERROR
+            # result and clear the snapshot instead of re-adopting the same
+            # unusable container run forever.
+            _fail_run_infrastructure(
+                state, status_path,
+                latest_output=(
+                    "Container mode is enabled but the container runtime is "
+                    f"unavailable: {_runtime_problem}"),
                 error=container_unavailable_message(_runtime_problem))
-            # Publish the failure so a TUI restart sees a completed ERROR
-            # result and clears the snapshot instead of re-adopting the
-            # same unusable container run forever.
-            try:
-                _write_status_file(
-                    status_path, state.pr_id, state.scenarios,
-                    state.scenario_verdicts, overall="ERROR",
-                    scenario_0=state.scenario_0, error=state._error,
-                    verdict_reasons=state.scenario_verdict_reasons)
-            except Exception:
-                _log.debug("Failed to write container-resume status for %s",
-                           state.pr_id, exc_info=True)
-            return result
+            if on_update:
+                on_update(state)
+            return state
     concurrency_cap = int(resume_data.get("concurrency_cap", 0) or 0)
     queued_idx = set(resume_data.get("queued_indices") or [])
     queued_scenarios = [s for s in state.scenarios if s.index in queued_idx]

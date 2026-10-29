@@ -396,3 +396,32 @@ The implementation matched this spec. Additions made during review:
   the healthy relaunch control (running container → exec command, `session=None`);
   and the `OSError` branch of `_runtime_status`.
 
+
+## Review iteration (f951 i2)
+
+- `pm qa debug` now catches **any** `create_qa_container` failure (not only
+  `ContainerError`), so a runtime that dies between the preflight and the
+  create (e.g. the binary disappearing → `OSError`) still reports the cause
+  and the remedy instead of a traceback. It releases only its own `cname`.
+- Tests added: the non-`ContainerError` create path; no resume snapshot on
+  the fresh-run preflight abort; `container_preflight_error()` inert when
+  container mode is disabled; a persisted host run resuming on the host.
+
+## Review iteration (f951 i3)
+
+- The four ERROR publish sites — the R2 fresh-run preflight abort, the R3
+  initial-launch handler, the R3 queued/relaunch handler in
+  `_execute_and_finalize`, and the R5 resume abort — now go through one
+  helper, `qa_loop._fail_run_infrastructure()`, so they cannot drift apart
+  in what they set (`running`/`held` cleared, verdict `ERROR`, one-line
+  `latest_output`, full cause+remedy in `_error`, status file). The status
+  write is best-effort: a display-file error no longer crashes the driver
+  thread on top of the failure it is already reporting.
+  `_resume_qa_sync._abort()` drops its now-unused `error` parameter.
+- `qa_loop._first_line()` replaces `str(exc).splitlines()[0]`, which raised
+  `IndexError` for an exception with an empty message.
+- Tests added: the host-mode relaunch control (`use_containers=False` never
+  probes a container, keeps the pm session in the prompt shape); the
+  fresh-run preflight abort and the resume abort both publish
+  `overall=ERROR` with the cause in `qa_status.json`; the bytes-stderr branch
+  of `_runtime_status`.
