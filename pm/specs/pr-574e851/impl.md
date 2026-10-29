@@ -107,6 +107,11 @@ with `True` (once P1 stops writing `False`) can resume into P2/P4.
 
 - QA Scenario 0 (`qa_loop.py:2140-2145`: "always runs on the host").
 - QA planner (`qa_loop.py:4600-4675`, built unwrapped).
+- QA verifier (`_verify_single_scenario`, `qa_loop.py` — `build_claude_shell_cmd`
+  into a split pane in the PR workdir, never wrapped) and QA finalizer
+  (`_run_qa_finalize_pane`, likewise unwrapped). Neither ever consults
+  container mode, so neither can "downgrade"; they are host-only roles like
+  the planner, and are left as-is by this PR.
 - `pm qa launch`, `pm qa standalone`, `pm qa regression`, `pm qa author-*`
   (`cli/qa.py:599,690,305,234`) never consult container mode; they are
   authoring/host helpers, not container-eligible launchers, and do not
@@ -469,3 +474,34 @@ environmental/pre-existing (the `markdown` module is missing;
   the review loop's `VERDICT_LAUNCH_FAILED` + episode cap + cooldown, or hold
   on `ERROR`). This is the auto-start sibling of the auto-sequence gap filed
   as pr-7abb052 in i4.
+
+## Review iteration (f951 i6)
+
+Re-audited the fail-closed paths and the reporting/evidence surfaces:
+
+- Re-checked every container-mode gate in the tree
+  (`is_container_mode_enabled`, `_runtime_available`, `wrap_claude_cmd`,
+  `build_exec_cmd`, `container_is_running`). The QA launch boundary is
+  closed: fresh-run preflight, initial container launch, queued launch and
+  relaunch (inside `_poll_tmux_verdicts`, including the held-run reopen),
+  `pm qa debug`, and resume. The remaining host-only roles are enumerated
+  above (planner, Scenario 0, verifier, finalizer, authoring helpers); none
+  consults the runtime, so none is a downgrade path.
+- `pm qa run` now exits nonzero when the run ends `ERROR` (no result at
+  all — e.g. a fail-closed launch), matching `pm qa debug`; a completed
+  scenario verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) still exits 0.
+  Without it a scripted caller read "Result: ERROR" as success.
+- `_record_qa_note` now appends the fail-closed cause+remedy when the verdict
+  is `ERROR` and the summary does not already carry it. `qa_outcome_detail`
+  only surfaces `state._error` when *no* scenario ran, so a mid-run failure
+  (queued scenario create failure, or a relaunch whose container is gone,
+  after another scenario already has a verdict) produced a note reading
+  "QA ERROR: S1: PASS" with no reason — the PR note is the handoff channel
+  for the next session, so the cause has to be in it. The text is flattened
+  to one line and skipped when the summary already contains it.
+- Tests added: `pm qa run` ERROR → exit 1 and the NEEDS_WORK control → 0;
+  the note carries the cause mid-run, does not duplicate it when nothing
+  ran, and verdict notes are unchanged; the host (`_launch_scenarios_in_tmux`)
+  launcher's `_status_scenarios` / `_queued_indices` wiring, which closes
+  the test gap the 868d48e8 queued-status fix left (it covered only the
+  container launcher).

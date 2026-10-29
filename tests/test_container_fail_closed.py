@@ -664,7 +664,8 @@ def test_qa_error_detail_only_for_error_verdicts(tmp_path, home):
 def test_qa_run_prints_the_full_cause_and_remedy(tmp_path, home):
     """`pm qa run` is the primary execution entry point: it must report the
     fail-closed launch's cause and retry remedy, not only the one-line
-    progress entry ``on_update`` prints."""
+    progress entry ``on_update`` prints, and must exit nonzero so a scripted
+    caller does not read the infrastructure failure as success."""
     from pm_core.cli.qa import qa as qa_group
 
     root = tmp_path / "pm"
@@ -702,12 +703,47 @@ def test_qa_run_prints_the_full_cause_and_remedy(tmp_path, home):
         result = CliRunner().invoke(qa_group,
                                     ["run", "repro", "--pr", "pr-c"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     # The actionable detail the CLI would otherwise drop (run_qa_sync is
     # stubbed here, so this is the only place it can come from).
     assert "no agent was launched on the host" in result.output
     assert "pm container disable" in result.output
     assert "Result: ERROR" in result.output
+
+
+def test_qa_run_exits_zero_for_a_completed_verdict(tmp_path, home):
+    """Control: a run that produced a scenario verdict still exits 0 — only
+    ERROR (no result at all) is a CLI failure."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    data = {"project": {"name": "t"}, "prs": [], "plans": []}
+    pr = {"id": "pr-c", "title": "T", "branch": "b", "status": "qa"}
+
+    done = QALoopState(pr_id="pr-c", planning_phase=False)
+    done.scenarios = [QAScenario(index=1, title="S1", focus="f")]
+    done.scenario_verdicts = {1: "NEEDS_WORK"}
+    done.latest_verdict = "NEEDS_WORK"
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.cli.helpers._resolve_pr_id",
+                                  return_value=pr))
+        stack.enter_context(patch("pm_core.qa_loop.run_qa_sync",
+                                  return_value=done))
+        result = CliRunner().invoke(qa_group,
+                                    ["run", "repro", "--pr", "pr-c"])
+
+    assert result.exit_code == 0
+    assert "Result: NEEDS_WORK" in result.output
 
 
 def test_initial_launch_keeps_queued_scenarios_visible(tmp_path, home):
@@ -738,6 +774,53 @@ def test_initial_launch_keeps_queued_scenarios_visible(tmp_path, home):
     assert kwargs["_queued_indices"] == {2}
 
     status = json.loads((tmp_path / "qa" / "qa_status.json").read_text())
+    by_index = {s["index"]: s for s in status["scenarios"]}
+    assert by_index[1]["verdict"] == ""
+    assert by_index[2]["verdict"] == "queued"
+    assert status["overall"] == ""
+
+
+def test_initial_launch_keeps_queued_scenarios_visible_in_tmux_mode(
+        tmp_path, home):
+    """The host (tmux) launcher needs the same ``_status_scenarios`` /
+    ``_queued_indices`` wiring as the container one: a concurrency cap must
+    not drop the queued scenarios from the dashboard while the first batch
+    runs.  (The 868d48e8 fix touched both helpers.)"""
+    import json
+
+    from pm_core.qa_loop import _launch_scenarios_in_tmux
+
+    s1 = QAScenario(index=1, title="S1", focus="f")
+    s2 = QAScenario(index=2, title="S2", focus="f")
+    state = QALoopState(pr_id="pr-c", planning_phase=False)
+    state.qa_workdir = str(tmp_path)
+    # ``run_qa_sync`` narrows state.scenarios to the launch batch.
+    state.scenarios = [s1]
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    with ExitStack() as stack:
+        stack.enter_context(patch(
+            "pm_core.qa_loop._resolve_qa_model",
+            return_value=SimpleNamespace(model=None, provider=None,
+                                         effort=None)))
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch("pm_core.tmux.new_window_get_pane",
+                                  return_value="%1"))
+        stack.enter_context(patch(
+            "pm_core.qa_loop._concretize_scenario",
+            return_value=(None, "rejected")))
+        _launch_scenarios_in_tmux(
+            state, {}, {"id": "pr-c", "branch": "b"}, "pm-s",
+            None, str(tmp_path),
+            _status_scenarios=[s1, s2], _queued_indices={2},
+        )
+
+    status = json.loads((tmp_path / "qa_status.json").read_text())
     by_index = {s["index"]: s for s in status["scenarios"]}
     assert by_index[1]["verdict"] == ""
     assert by_index[2]["verdict"] == "queued"

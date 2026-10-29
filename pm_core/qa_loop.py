@@ -920,8 +920,12 @@ def _fail_run_infrastructure(
                      exc_info=True)
 
 
-def _first_line(text: str, fallback: str) -> str:
-    """The first non-empty line of *text*, for a single-line TUI log entry."""
+def _first_line(text: object, fallback: str) -> str:
+    """The first non-empty line of *text*, for a single-line TUI log entry.
+
+    Takes ``object`` because the callers pass an exception (the
+    ``ContainerLaunchError`` a fail-closed launch raised).
+    """
     for line in str(text).splitlines():
         if line.strip():
             return line.strip()

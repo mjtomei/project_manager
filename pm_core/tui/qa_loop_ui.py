@@ -22,6 +22,7 @@ from pm_core.qa_loop import (
     _compute_qa_window_name,
     planner_code_changes_suffix,
     input_wait_changes_suffix,
+    qa_error_detail,
     qa_outcome_detail,
 )
 from pm_core.loop_shared import get_pm_session
@@ -1082,6 +1083,16 @@ def _record_qa_note(app, state: QALoopState) -> None:
     try:
         from datetime import datetime, timezone
         note_text = f"QA {state.latest_verdict}: " + qa_outcome_detail(state)
+        # A run that failed on infrastructure (e.g. a container-mode launch
+        # that could not create its container) records the cause+remedy in
+        # the run's error.  ``qa_outcome_detail`` only surfaces that error
+        # when no scenario ran, so a failure mid-run (a queued scenario or a
+        # relaunch after another scenario already has a verdict) would
+        # otherwise leave a note that says "QA ERROR: S1: PASS" with no
+        # reason — the next session could not tell why QA failed.
+        error_detail = " ".join(qa_error_detail(state).split())
+        if error_detail and error_detail not in note_text:
+            note_text += " — " + error_detail
         # Tell the next review session why QA bounced an all-PASS run.
         note_text += planner_code_changes_suffix(state)
         # ... or why a follow-up PASS after an INPUT_REQUIRED wait still

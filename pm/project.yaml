@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T07:38:34.674170+00:00'
+  updated_at: '2026-10-29T08:38:36.981393+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42255,6 +42255,27 @@ prs:
       success — already filed as pr-436d18a, not fixed here.'
     created_at: '2026-10-29T07:38:34Z'
     last_edited: '2026-10-29T07:38:34Z'
+  - id: note-b9cd1a0
+    text: 'Review i6 (f951): two reporting gaps on the fail-closed path closed, plus
+      a test gap. (1) `pm qa run` now exits 1 when the result is ERROR (no verdict
+      at all, e.g. a fail-closed launch) — it printed "Result: ERROR" but exited 0,
+      so a scripted caller read an infrastructure failure as success; completed verdicts
+      (PASS/NEEDS_WORK/INPUT_REQUIRED) still exit 0. (2) `_record_qa_note` now appends
+      the fail-closed cause+remedy when the verdict is ERROR and the summary does
+      not already carry it: `qa_outcome_detail` only surfaces `state._error` when
+      no scenario ran, so a mid-run failure (queued create failure, or a relaunch
+      whose container is gone, after another scenario already has a verdict) produced
+      a note reading "QA ERROR: S1: PASS" with no reason — the note is the next session''s
+      handoff channel. (3) Test for the host (`_launch_scenarios_in_tmux`) side of
+      the 868d48e8 queued-status fix (it was covered only for the container launcher).
+      Spec updated (impl.md i6; out-of-scope list now names the QA verifier and finalizer
+      as host-only roles). Full pytest: 4498 passed, 13 failed — the same environmental
+      failures as i5 (markdown module, PM_HOST_HOME); tests/test_container_fail_closed.py
+      23 passed, note tests 27 passed. Capture note added to /pm-captures/impl/post-fix/qa-run/manifest.md:
+      the recorded `pm qa run exit=0` predates the exit-code change; the fail-closed
+      behaviour and the absence of any host launch are unchanged. (2026-10-29T08:55:00Z)'
+    created_at: '2026-10-29T08:38:36Z'
+    last_edited: '2026-10-29T08:38:36Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

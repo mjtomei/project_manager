@@ -435,6 +435,13 @@ def qa_run(instruction_id: str, pr_id: str | None):
         click.echo("", err=True)
         click.echo(detail, err=True)
     click.echo(f"\nResult: {verdict}")
+    if verdict == "ERROR":
+        # ERROR means the run never produced a result (e.g. a fail-closed
+        # container launch), so report the failure in the exit code too:
+        # a scripted caller must not read "Result: ERROR" as success.  A
+        # scenario verdict (PASS / NEEDS_WORK / INPUT_REQUIRED) is a
+        # completed run and keeps exiting 0.
+        raise SystemExit(1)
 
 
 @qa.command("debug")
