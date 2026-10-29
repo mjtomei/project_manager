@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T04:37:23.506467+00:00'
+  updated_at: '2026-10-29T05:01:51.721124+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4773,6 +4773,48 @@ prs:
       no --session flag today.'
     created_at: '2026-10-29T04:37:23Z'
     last_edited: '2026-10-29T04:37:23Z'
+  - id: note-2b581db
+    text: 'Review loop d1c0 i6 (no requirement changes; full suite 4572 passed / 1
+      skipped). Verification pass over the integrated head; three reuse/coverage items
+      in TUI-pane discovery, all in pm_core/cli/helpers.py. (1) _find_tui_pane()''s
+      last-resort scan re-implemented the list-panes query that _live_panes_and_tuis()
+      already performs, with a different format string (pane_current_command + pane_start_command)
+      and a substring match over the concatenation, while _find_live_tui_pane() uses
+      pane_start_command only — two definitions of "a pane running the TUI". It now
+      iterates _live_panes_and_tuis() per server; that also removes an unguarded subprocess.run
+      from a path whose contract is "degrade, never crash" (an OSError raised after
+      list_pm_sessions() had succeeded would have escaped _find_tui_pane()). The pane_current_command
+      half could not match a real pm _tui pane anyway: the foreground process is pm/python,
+      not _tui. (2) _recorded_tui_pane() and _registry_tui_pane() each walked the
+      registry looking for role="tui"; both now share _iter_registry_tui_panes(),
+      with the liveness filter staying only in _registry_tui_pane(). (3) _canonical_session()
+      was a third copy of "strip the ~N suffix"; it now delegates to pane_registry.base_session_name(),
+      matching i1''s change to _find_live_tui_pane(). Also documented (docstring only)
+      that _find_tui_pane() always returns the BASE session name — that normalisation
+      is what makes `pm tui frames -s pm-x~2` read the file the TUI actually wrote
+      (it previously looked for pm-x~2-frames.json, which never exists, because frame_capture
+      keys off the base name). New tests: test_last_resort_finds_an_unregistered_tui_pane
+      (the direct scan''s success path was previously untested — only its failure
+      path was) and TestSessionMobileServerSelection::test_status_queries_the_hosting_server
+      (pm session mobile''s _select_session_socket() wiring was untested; without
+      it the status query hits the default server and reports a live private session
+      as "not running"). Validation on the integrated head: full suite 4572 passed
+      / 1 skipped (scratch pytest<9 + markdown, PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME
+      cleared); pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a
+      disposable socket (private server, session env, global env and hooks correct;
+      default server untouched); pm session list verified end-to-end against a disposable
+      socket (private + (shared) marker rows). Residual notes unchanged and non-blocking:
+      uid ownership check only on pm session start (other paths fail closed via 0600
+      sockets + server-access ACL); the /tmp/pm-sessions literal stays duplicated
+      in wrapper._mark_tmux_socket and qa_status._tmux_argv by design (no early pm_core
+      import); pane IDs are no longer globally unique across servers but every consumer
+      resolves a pane together with its session/socket; R5b relies on the pane registry
+      file (deleting it while a session is live makes pm session create a separate
+      session — fail-safe); the TUI connect screen keeps a bare `tmux attach -t <name>`
+      only as an unreachable last resort. No live session, server or shared host configuration
+      was touched.'
+    created_at: '2026-10-29T05:01:51Z'
+    last_edited: '2026-10-29T05:01:51Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
