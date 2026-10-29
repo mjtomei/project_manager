@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T08:31:46.560294+00:00'
+  updated_at: '2026-10-29T09:26:36.135292+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -40984,6 +40984,36 @@ prs:
       needs PM_HOST_HOME unset).'
     created_at: '2026-10-29T08:31:46Z'
     last_edited: '2026-10-29T08:31:46Z'
+  - id: note-3a4e654
+    text: 'Review-loop 5c3e i1 fixes (on 2de66e5c). (1) `run_review_loop_sync`''s
+      `max_iterations` now counts the iterations *this run* performs (`state.iteration
+      - start_iteration`) instead of the absolute iteration number. A fresh loop continues
+      numbering after the PR''s existing transcripts (`next_review_iteration`, so
+      earlier evidence is never overwritten), so an absolute bound silently ran **zero**
+      iterations — and reported no verdict — for a long-lived PR already carrying
+      `max_iterations` transcripts; this PR''s own iteration count (a6f7 i1-i11, be50
+      i1-i2, 30a9, 5c3e) makes that reachable. (2) `return_to_impl` keeps the open
+      episode''s `resume_loop` marker when it is superseded, the same way it already
+      keeps `launched_at`: a one-shot gate (a manual `d`, `resume_loop=False`) superseding
+      a review-loop bounce dropped the marker, so the interrupted loop never restarted
+      after the rework even though the episode originated from a loop. (3) `base_check.impl_transcript_links`
+      is now the single scan for a PR''s `transcripts/*/impl-<pr>.jsonl` links, shared
+      by `share_impl_transcript` (re-point them all) and `tui/review_loop_ui._shared_impl_transcript`
+      (watch the newest after a restart); the two had duplicated the glob patterns
+      and the rationale comment. Tests: a loop seeded at iteration 48 with `max_iterations=3`
+      runs three iterations (48->51); a one-shot gate supersede keeps `resume_loop=True`.
+      Both verified failing without their fix. Spec R6/R10 + test plan items 25-26
+      updated. Full suite: 4577 passed, 1 skipped, 0 failed (test_markdown_render
+      needs the `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset). Reviewed but not changed (documented residuals):
+      the writer-launch gate self-heal can resolve an open return while a mid-turn
+      impl has a clean tree (impl_completion is the normal resolver); the CLI auto-sequence
+      runs one ls-remote per tick through impl_completion; worst-case gate latency
+      (300s repo lock + 300s `pm pr start`) can exceed the 360s review child budget;
+      `pm/project.yaml` carries ~700 lines of unrelated YAML re-wrapping from pm''s
+      own save (systemic, not this PR''s choice).'
+    created_at: '2026-10-29T09:26:36Z'
+    last_edited: '2026-10-29T09:26:36Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
