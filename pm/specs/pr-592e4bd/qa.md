@@ -54,6 +54,29 @@ criteria stay open:
 - S102, frozen mid-run by the user. Its worktree and evidence are kept,
   and it has no verdict.
 
+Scope update (2026-10-29, master integration 67353d44 of origin/master
+4a74d880; impl.md "Master integration 2026-10-29"; note-3ce8529; user
+authorization note-user-restart-all-20261029). Where an older Then names
+the replaced mechanism, the integrated behaviour wins:
+- Provider values reach a pane only through master's private env file
+  (`~/.pm/run/env-*.sh`, sourced and deleted by the pane's shell; #268).
+  The secret-file expansion is gone. Commands, `#{pane_start_command}`,
+  pm logs and the pane registry carry names only. This closes pr-740ae41.
+- `providers.yaml` is always saved 0600, and a symlinked file is replaced
+  by a regular file (#273 A3). This supersedes S98's write-through.
+- The sign-off REQA is owed on disk (#276, pr-db3bf10). RQ56 states the
+  contract. The in-memory deferral and its "waiting for project.yaml to
+  be unlocked" sticky line are gone.
+- A held INPUT_REQUIRED run keeps being polled (#271, pr-2c67d50). The
+  user's answer in the worker pane gives a follow-up verdict that is
+  recorded as a new result.
+- A review launch that fails is LAUNCH_FAILED (retryable, one error line,
+  an artifact), not ERROR (#259). This supersedes S84's one-shot ERROR.
+- Test isolation is mandatory for every scenario
+  (note-user-restart-all-20261029). Use a private HOME/`~/.pm` and a
+  private tmux socket, scrub `TMUX`/`TMUX_PANE` and routing vars, and
+  kill only sessions the scenario created.
+
 ## 1. Requirements (Given / When / Then)
 
 ### Route definition and visibility
@@ -1053,23 +1076,32 @@ S13, S14, S22, S101.
     to sign-off. When the driver records a verdict (even if a tick lands
     between the verdict write and the driver's exit), that verdict is
     the hand-off's QA result: no second full QA, one sign-off hand-off.
-  - The TUI sign-off REQA hop (S117 c9ce4f6a). When a run is driven
-    elsewhere (a live `pm qa run`), the hop clears the judged run's qa
-    entry and does not start QA. It shows the sticky line "Sign-off REQA
-    for <pr> — QA starts once the QA run another process drives ends".
-    That pending start is owed whether auto-start is on, off or no longer
-    covers the PR. It is retried each poll tick and starts one full QA
-    once the CLI run ends. The CLI run's windows are kept, and its
-    one-instruction verdict is never taken as the re-run's result. If
-    project.yaml is busy when the start fires, it waits for the lock and
-    is not dropped; its sticky line then reads "Sign-off REQA for <pr> —
-    waiting for project.yaml to be unlocked to start QA" (d7e65156; it
-    said "Review PASS for" before). Known gap, filed and not in scope:
-    pr-db3bf10. The pending start lives only in memory, so a TUI restart
-    while it waits loses it. `awaiting: qa` stays on disk. After a plain
-    restart `t` only focuses the leftover `qa-<pr>` window; `z t` (or an
-    auto-start pass) starts the re-run (S119 story 7; the earlier "`t`
-    starts the re-run" was inaccurate).
+  - The sign-off REQA, rewritten 2026-10-29 for master's durable path
+    (#276, pr-db3bf10, merged in 67353d44). It replaces the in-memory
+    deferral of S117 c9ce4f6a and d7e65156. The owed run is on disk: the
+    PR's `signoff_return` says `awaiting: qa`. Several starters can act on
+    it: the TUI sign-off hop, the TUI poll tick and mount reconciler (not
+    gated by auto-start), an auto-start pass and a `pm pr auto-sequence`
+    tick. Each must win the launch claim with the PR at `qa`, so exactly
+    one starts the run.
+    - While a run is driven elsewhere (a live `pm qa run` or `qa-run-bg`),
+      nothing starts. The TUI shows "Sign-off REQA for <pr> — QA starts
+      once the QA run another process drives ends" once per return
+      episode. A tick's hop prints "sign_off: re-qa deferred: a QA run is
+      in flight" (or `running: qa`).
+    - Once that run ends, one full QA starts: one `qa-<pr>` window set,
+      one verifier, one finalizer and one new `qa_status.json`. This also
+      holds with auto-start off and after a plain `pm tui restart`. This
+      is S127's contract (note-ae7cf29 item 1, note-da2d795), and the
+      sticky line is not part of it.
+    - The live run's windows are never touched. The re-run may replace
+      windows left by a finished CLI or full run of the same PR (user
+      decision note-32a12ee). The one-instruction verdict is never the
+      re-run's result.
+    - When project.yaml is busy as the start fires, the obligation stays
+      on disk and a later tick starts it.
+    - A run whose record has `ended_at` (`end_run_record`) no longer
+      drives the PR, even while its process (a TUI) lives.
   - An interrupted `pm qa run` (Ctrl-C: no verdict, snapshot kept) is
     never adopted by the TUI resume scan after a restart. Only a full QA
     run's snapshot is resumed (S119 b402464e, c774b5af).
@@ -2622,6 +2654,83 @@ S13, S14, S22, S101.
       `tui/auto_start.py`, `tmux.py`, `signoff.py`, `claude_launcher.py`,
       `container.py` and `providers.py`. A master integration needs an
       implementation session, then a merge smoke QA, before sign-off.
+    Results (run 5e24fa13d2e08300):
+    - S126 PASS (stories 1–4 and 6, controls 89914811 and ca2a0657).
+      Finding (note-a42ae19): every clone's `pm qa run` of a PR rewrites
+      the shared `<pr>-cli-<pr>/qa_run.json`. A second clone's start
+      therefore drops the first clone's `[working]` badge and its REQA
+      hold. This comes from master's shared CLI workdir, and master also
+      holds no REQA over a `pm qa run` (pr-d7d4601, note added). The
+      shared workdir also hangs the first clone's run (pr-571a13b, filed).
+    - S127 INPUT_REQUIRED. Story 1 held every routing Then and ran exactly
+      one routed re-run. Story 2's TUI line after a plain `pm tui restart`
+      was open. The user deferred restart behaviour to pr-db3bf10
+      (note-da2d795). That fix merged with master, and its contract (one
+      owed run after the live run ends, also with auto-start off) is now
+      RQ56. S130 reruns S127 against it.
+    - S128 INPUT_REQUIRED. Every RQ52 and REQA Then held. The open point,
+      "Killing stale QA window" for a finished `pm qa run`'s window, is
+      accepted by the user (note-32a12ee). A fresh run of the same PR may
+      replace finished windows, but live runs and evidence stay
+      protected.
+    - The master integration came next: 67353d44 (origin/master 4a74d880,
+      21 conflicted files, note-3ce8529). After it, review 0897 made
+      5855077b (the resume snapshot's temp file is written under its
+      locks) and fc1e7d77 (`result_recorded_by` is kept across a held
+      run's snapshot rewrites). 5f204dc2 is test-only. i4 PASS.
+  - Forty-fifth pass (S129+), merge smoke, QA45 planner 2026-10-29, HEAD
+    5f204dc2. Product changes since run 5e24fa13d2e08300 are the master
+    integration 67353d44, 5855077b and fc1e7d77. None of them has run
+    live. Every scenario publishes `recording.mp4`. Controls, run beside
+    HEAD:
+    - 4aff1dd4, the PR head before the integration;
+    - 4a74d880, master;
+    - 67353d44, before 5855077b;
+    - 5855077b, before fc1e7d77.
+    A PASS shows the control differing wherever the integration or a fix
+    changed behaviour, and matching HEAD wherever it should not.
+    Test isolation is mandatory (note-user-restart-all-20261029; the #267
+    leak killed a real session):
+    - Run pm under a private HOME/`~/.pm` and a private tmux socket.
+    - Scrub `TMUX`, `TMUX_PANE` and the inherited routing vars.
+    - Keep `PM_CAPTURES_PR` exported.
+    - Name and kill only tmux sessions the scenario created, and check
+      ownership before cleanup.
+    - Never change global tmux options or shared host config.
+    Harness: `/pm-captures/scenarios/127/scripts` (container, router stub
+    with per-PR sign-off sequence, `myview` recorder), `128` (host
+    outage), `126` (two clones), `113` (R9 env probe), `114` (bridge
+    refusal) and `106` (fault fixtures). The S125 PID 1 reaping rule
+    still applies. Not to redo as such: S103–S128. This pass reruns their
+    core flows only as the merge smoke.
+    - S129: container mode. A routed refiner/worker PR beside an
+      unrouted PR goes from review through QA to sign-off. This is the
+      merge smoke for the env channel (#268): values reach panes only
+      through the private env file, which is gone once the pane runs.
+      Refused and failed launches leave no env file (pr-740ae41). Also
+      covered: the bridge mount only on routed containers, stub logs,
+      hooks, transcripts and R9 env. Two containers push through the
+      git proxy at the same time (#255/#262).
+    - S130: container mode. S127 again, under the durable owed-REQA
+      contract. A routed PR's REQA meets the user's live `pm qa run`, with
+      a plain `pm tui restart`, auto-start off and ticks from outside
+      tmux. Exactly one routed re-run follows the CLI run's end.
+    - S131: host, fake-claude. Several starters race for one owed REQA:
+      the TUI tick and mount, auto-start, ticks and a second TUI. Also a
+      busy project.yaml, two owed PRs, a finished TUI run that no longer
+      holds (`end_run_record`), and a user's grouped view driving
+      CLI→TUI commands and restarts (#263).
+    - S132: host, real claude routed worker. A held INPUT_REQUIRED run
+      (#271) with the 0897 fixes. The user's answer in the routed pane
+      gives one recorded follow-up result. Also covered: a TUI restart
+      and a second clone during the hold, `z t` over a held run, and
+      completion marks racing snapshot writes.
+    - S133: host. Provider configuration and review launches after the
+      merge. providers.yaml stays 0600 and a symlinked file is replaced.
+      Two shells edit providers at once. A claude-type key is given by
+      variable reference. A review role whose provider fails at launch
+      ends LAUNCH_FAILED (retryable, bounded) and runs on the route after
+      the fix. S81/S82 restarts are covered too.
 
 ## 3. Edge cases
 
