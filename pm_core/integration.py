@@ -888,6 +888,18 @@ def revision_of(value) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _text(value, default: str = "?") -> str:
+    """*value* when it is text, else *default*.
+
+    ``project.yaml`` is hand-editable state: a reader must not print a value
+    the record does not hold, so an absent (or non-string) ``base_branch`` /
+    ``target_repo`` / ``error`` renders as the ``?`` placeholder every other
+    surface uses — not the literal ``None`` or a mapping's repr.  The same
+    rule :func:`pm_core.signoff._text` applies to the return text.
+    """
+    return value if isinstance(value, str) and value else default
+
+
 _OBJECT_NAME_RE = re.compile(r"[0-9a-fA-F]{7,64}\Z")
 
 
@@ -2665,7 +2677,11 @@ def summary(record: dict) -> str:
     record = _mapping(record)
     status = record.get("status")
     base_rev = revision_of(record.get("base_sha"))
-    base = f"{record.get('base_branch')}@{(base_rev or '?')[:8]}"
+    # ``base_branch`` is hand-editable state and this line is printed by the
+    # sign-off prompt, the router's coercion reason, `pm pr show` and
+    # `pm pr signoff integrate`: an absent (or non-string) value must read as
+    # the ``?`` placeholder, not the literal ``None`` or a mapping's repr.
+    base = f"{_text(record.get('base_branch'))}@{(base_rev or '?')[:8]}"
     if status == UP_TO_DATE:
         return f"up to date with {base}"
     if status == CLEAN:
@@ -2704,7 +2720,9 @@ def summary(record: dict) -> str:
         return text
     if status == IN_BASE:
         return f"already contained in {base}"
-    return f"integration check failed: {record.get('error') or 'unknown error'}"
+    # Same rule for the failure text: a hand-edited non-string ``error`` must
+    # not print its repr as the reason.
+    return f"integration check failed: {_text(record.get('error'), 'unknown error')}"
 
 
 # --- apply (PR branch only) -----------------------------------------------
@@ -2774,7 +2792,7 @@ def _apply_locked(pr: dict, record: dict, workdir: str):
     base_sha = _sha_like(record.get("base_sha"))
     if not base_sha:
         return None, "the integration record has no base revision"
-    msg = (f"Integrate {record.get('base_branch')}@{base_sha[:8]} into "
+    msg = (f"Integrate {_text(record.get('base_branch'))}@{base_sha[:8]} into "
            f"{branch or 'PR branch'}")
     if status == RESOLVED:
         return _apply_resolution(record, workdir, head, base_sha, msg)

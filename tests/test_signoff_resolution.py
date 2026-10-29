@@ -6738,3 +6738,78 @@ def test_a_malformed_applied_merge_does_not_contradict_the_not_applied_label():
         block = _block(value)
         assert "Not applied" in block, value
         assert "Base changes since this PR branched" not in block, value
+
+
+def test_a_hand_edited_base_branch_reads_as_a_placeholder_everywhere():
+    """A reader must not print a value the record does not hold.
+
+    ``base_branch``/``target_repo``/``error`` are hand-editable project.yaml
+    state, and every surface below can be handed the *stored* record
+    (``prepare`` returns it when a concurrent apply won the race).  The
+    one-line summary and the CLI/``pm pr show`` readers used to print the
+    literal ``None`` (``None@89e3c501``) or a mapping's repr instead of the
+    ``?`` placeholder the rest of those surfaces use.
+    """
+    for value in (None, {"x": 1}, ["x"], 5, True, ""):
+        summary = integration.summary(
+            {"status": "up_to_date", "base_branch": value,
+             "base_sha": "a" * 40})
+        assert summary.startswith("up to date with ?@"), summary
+        assert "None@" not in summary and "{'x'" not in summary, summary
+    # A real branch name is still printed.
+    assert integration.summary(
+        {"status": "up_to_date", "base_branch": "master",
+         "base_sha": "a" * 40}) == "up to date with master@aaaaaaaa"
+    # The failure text follows the same rule: a non-string ``error`` is not a
+    # reason, so the generic placeholder stands in for it.
+    assert integration.summary(
+        {"status": "error", "error": {"x": 1}}
+    ) == "integration check failed: unknown error"
+    assert integration.summary(
+        {"status": "error", "error": "boom"}
+    ) == "integration check failed: boom"
+
+
+def test_integrate_cli_renders_a_malformed_stored_record_as_placeholders(w):
+    """``prepare`` can hand the CLI the stored (hand-editable) record.
+
+    A concurrent apply that won the race makes ``prepare`` return what is on
+    the PR, so the ``target``/``head``/``base``/``candidate tree`` lines read
+    project.yaml state: a non-string value must render the placeholder, not
+    the literal ``None`` or a mapping's repr.
+    """
+    stored = {"status": "resolved", "base_branch": {"x": 1},
+              "target_repo": None, "head": ["h"], "base_sha": {"s": 1},
+              "candidate_tree": 5}
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir), \
+         patch.object(integration, "prepare", return_value=dict(stored)):
+        r = CliRunner().invoke(pr_mod.pr,
+                               ["signoff", "integrate", PR, "--apply"])
+    assert r.exit_code == 0, r.output
+    assert "target: ? of ?" in r.output
+    assert "head:   ?" in r.output
+    assert "base:   ?" in r.output
+    assert "candidate tree:" not in r.output
+    assert "None" not in r.output
+    assert "{'x': 1}" not in r.output and "{'s': 1}" not in r.output
+
+
+def test_pr_show_renders_a_malformed_integration_as_placeholders(w):
+    """``pm pr show``'s ``## Integration`` reader against hand-edited state."""
+    def _malformed(d):
+        store.get_pr(d, PR)["integration"] = {
+            "status": {"x": 1}, "target_repo": ["r"], "base_branch": None,
+            "base_sha": {"s": 1}}
+    store.locked_update(w.pm_dir, _malformed)
+
+    with patch.object(pr_mod, "state_root", return_value=w.pm_dir):
+        r = CliRunner().invoke(pr_mod.pr, ["show", PR])
+    assert r.exit_code == 0, r.output
+    assert "## Integration" in r.output
+    # No field is printed with a value the record does not hold.  (The PR
+    # header above the section prints its own ``Status:`` line, so only the
+    # integration fields are checked here.)
+    assert "Base branch:" not in r.output
+    assert "Base sha:" not in r.output
+    assert "Target:" not in r.output
+    assert "None" not in r.output

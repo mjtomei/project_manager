@@ -937,6 +937,9 @@ def pr_show(pr_id: str):
     root = state_root()
     data = store.load(root)
     pr_entry = _require_pr(data, pr_id)
+    # Imported here (not at module scope) like the other readers below: the
+    # integration module is imported lazily across the CLI.
+    from pm_core import integration
 
     click.echo(format_pr_line(pr_entry))
     for label, key in (
@@ -1047,10 +1050,10 @@ def pr_show(pr_id: str):
             # Render the placeholder rather than the literal ``None`` — the
             # same rule the notes readers follow (a reader must not print a
             # value the record does not hold).
-            base = (f"`{ret_integ.get('base_branch') or '?'}` @ "
-                    f"`{ret_integ.get('base_sha') or '?'}` from "
-                    f"`{ret_integ.get('target_repo') or '?'}`")
-            click.echo(f"Integration: {ret_integ.get('status') or '?'} "
+            base = (f"`{integration._text(ret_integ.get('base_branch'))}` @ "
+                    f"`{integration._text(ret_integ.get('base_sha'))}` from "
+                    f"`{integration._text(ret_integ.get('target_repo'))}`")
+            click.echo(f"Integration: {integration._text(ret_integ.get('status'))} "
                        f"with {base}")
             _path_list_lines(ret_integ)
     integ = pr_entry.get("integration")
@@ -1063,7 +1066,10 @@ def pr_show(pr_id: str):
             ("Base sha", "base_sha"),
             ("Status", "status"),
         ):
-            val = integ.get(key)
+            # Hand-edited state: only text is a value this reader can print
+            # (a mapping/list would render its repr), so it reads as absent —
+            # the same rule the prompt block and the return text follow.
+            val = integration._text(integ.get(key), "")
             if val:
                 click.echo(f"{label}: {val}")
         _path_list_lines(integ)
@@ -1071,7 +1077,6 @@ def pr_show(pr_id: str):
         # (which records pm combined, what it applied, what it could not
         # reconcile).  Prompt builders point here when the integration lists
         # are abbreviated, so a resolved candidate must not be a dead end.
-        from pm_core import integration
         resolution = integration.resolution_of(integ)
         if resolution:
             candidate = integration.revision_of(integ.get("candidate_tree"))
@@ -2328,7 +2333,9 @@ def pr_signoff_record(pr_id: str):
     base_note = ""
     if bound:
         bound_base = integration.revision_of(bound.get("base_sha")) or "?"
-        base_note = (f", base {bound.get('base_branch')}@"
+        # The binding is the stored (hand-editable) check: a non-string
+        # ``base_branch`` is no branch to print.
+        base_note = (f", base {integration._text(bound.get('base_branch'))}@"
                      f"{bound_base[:12]}")
     click.echo(
         f"Recorded sign-off verdict {verdict} for {pr_id} "
@@ -2397,11 +2404,17 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
         # output names must exist for the resolution to be inspectable.
         integration.write_resolution_delta(pr_id, rec)
     click.echo(f"PR {pr_id}: {integration.summary(rec)}")
-    click.echo(f"  target: {rec.get('base_branch')} of {rec.get('target_repo')}")
-    click.echo(f"  head:   {rec.get('head')}")
-    click.echo(f"  base:   {rec.get('base_sha')}")
-    if rec.get("candidate_tree"):
-        click.echo(f"  candidate tree: {rec['candidate_tree']}")
+    # ``prepare`` can return the *stored* record when a concurrent apply won the
+    # race, so these are hand-editable state: a value that is not text reads as
+    # the ``?`` placeholder the rest of the output uses instead of the literal
+    # ``None`` or a mapping's repr.
+    click.echo(f"  target: {integration._text(rec.get('base_branch'))} of "
+               f"{integration._text(rec.get('target_repo'))}")
+    click.echo(f"  head:   {integration._text(rec.get('head'))}")
+    click.echo(f"  base:   {integration._text(rec.get('base_sha'))}")
+    candidate_tree = integration.revision_of(rec.get("candidate_tree"))
+    if candidate_tree:
+        click.echo(f"  candidate tree: {candidate_tree}")
     for label, key in (("conflicts", "conflicts"),
                        ("changed on both sides", "overlap")):
         # A stale stored record (``prepare`` can return it when a concurrent
@@ -2454,9 +2467,10 @@ def pr_signoff_integrate(pr_id: str, record: bool, apply_: bool,
     if applied_clean:
         # ``prepare`` can return the stored record when a concurrent apply won:
         # hand-edited state, so a non-string revision reads as absent instead
-        # of raising out of the CLI.
+        # of raising out of the CLI (and a non-string ``base_branch`` reads as
+        # the placeholder rather than the literal ``None``).
         applied_base = integration.revision_of(rec.get("base_sha")) or ""
-        click.echo(f"Merged {rec.get('base_branch')}@"
+        click.echo(f"Merged {integration._text(rec.get('base_branch'))}@"
                    f"{applied_base[:12]} into the PR branch as "
                    f"{applied_clean[:12]}.")
     applied_merge = integration.revision_of(resolution.get("applied_merge_sha"))
