@@ -34423,11 +34423,22 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T22:50:28.195013+00:00'
-  updated_at: '2026-10-12T22:50:28.195013+00:00'
+  updated_at: '2026-10-29T04:18:47.676391+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-6d85071
+    text: 'Reproduced 2026-10-29 in QA S15 (pr-049649a, integrated head 33d02424)
+      on an isolated fixture: after `kill -TERM $(tmux -S "$SOCK" list-panes -t "$S:main"
+      -F "#{pane_pid}")` (the documented way to stop the TUI) and `( pm session >/dev/null
+      2>&1 & )`, window 0 comes back named `python3`, and `tmux list-panes -t "$S:main"`
+      fails with "can-t find window: main". Cause is unchanged on this head: pm_core/pane_layout.py:632
+      `_respawn_tui` -> `tmux_mod.create_window(session, "pm _tui")` passes no `-n
+      main`, so tmux auto-names the window after the running command. Evidence: /pm-captures/scenarios/15/story1/
+      (screen-after-restart.txt, windows-after-downtime.txt).'
+    created_at: '2026-10-29T04:18:47Z'
+    last_edited: '2026-10-29T04:18:47Z'
 - id: pr-97614ed
   plan: bugs
   title: 'Bug: finished review loop summary (⟳N✓ badge, runs popup/status review block)
