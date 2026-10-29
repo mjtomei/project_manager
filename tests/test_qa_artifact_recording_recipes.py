@@ -40,7 +40,10 @@ hits, regardless of how it waits for a background job:
   claims the capture directory in a session option — before attaching the
   pipe, so the read/write gap does not cover the takeover it guards — and
   refuses a session recording a different directory, or a directory another
-  live session records into; a finished run releases the claim;
+  live session records into; a finished run releases the claim, and the claim
+  is compared as a canonical directory rather than as the text typed (step 0
+  accepts `~/cap`, and a quoted `~` never expands, so one directory spelled
+  two ways was two claims);
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
   run's mp4 (which the manifest would present as this run's evidence); the
@@ -2344,6 +2347,26 @@ def _web_ui_layer2_block():
     return re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
 
 
+def test_web_ui_produced_files_list_names_the_playwright_link():
+    """Step 2 leaves a ``node_modules`` link in the capture directory.
+
+    The link is what makes the driver's bare ``import 'playwright'`` resolve
+    (Node's ES-module resolver ignores ``NODE_PATH``), and it stays beside the
+    capture, while the recipe's manifest section asks for "every file above".
+    A worker reading only the produced-files list does not know it is there,
+    so the manifest and the directory disagree — the same class as the
+    recording recipes' diagnostics list (R17).
+    """
+    text = _recipe_text("web-ui-recording.md")
+    section = text.split("## What this recipe produces", 1)[1]
+    assert "node_modules" in section.split("## Capture", 1)[0], (
+        "the produced-files list never names the node_modules link step 2 "
+        "creates in the capture directory")
+    manifest = text.split("## Manifest format", 1)[1].split("## Reviewing", 1)[0]
+    assert "node_modules" in manifest, (
+        "the manifest's `## Files` example does not name the node_modules link")
+
+
 def test_web_ui_layer2_block_refuses_an_unset_capdir(tmp_path):
     """The protocol block is pasted alone too, and its redirects are raw paths.
 
@@ -2558,11 +2581,16 @@ case "$sub" in
             printf "can't find session: pm-test\n" > "$STATE/pane"
             ( sleep 0.02; rm -f "$STATE/$s" ) & ;;
         *)
-            printf '{"version": 2}\n' > "$STUB_CAST"
+            # `detachnocast`/`detachnostatus`: the recorder draws and the
+            # detach ends it (the pm session survives, as it does in a real
+            # finish), so step 5 reaches its own cast/status check — the two
+            # branches after the claim is taken that no other mode reaches
+            # with the session still there to hold the claim.
+            [ "$STUB_MODE" = detachnocast ] || printf '{"version": 2}\n' > "$STUB_CAST"
             printf 'TUI drawn\n' > "$STATE/pane"
             if [ -n "$STUB_STATUS_FILE" ]; then
                 case "$STUB_MODE" in
-                  nostatus)  : ;;
+                  nostatus|detachnostatus) : ;;
                   badstatus|midbothbad) printf '137\n' > "$STUB_STATUS_FILE" ;;
                   *)         printf '0\n' > "$STUB_STATUS_FILE" ;;
                 esac
@@ -2952,7 +2980,7 @@ class TestCaptureFlowExecution:
             "nostart", tmp_path, target=True)
         assert r.returncode != 0, r.stderr
         seen = tmp_path / "state" / "pipeclaim"
-        assert seen.read_text().strip() == str(tmp_path / "cap"), (
+        assert seen.read_text().strip() == str((tmp_path / "cap").resolve()), (
             "step 2 did not claim the capture directory before attaching the "
             "pipe")
 
@@ -3006,7 +3034,7 @@ class TestCaptureFlowExecution:
         r, _cast = _run_block(_step_two_block(), "ok", tmp_path, target=True)
         assert r.returncode == 0, r.stderr
         seen = tmp_path / "state" / "pipeclaim"
-        assert seen.read_text().strip() == str(tmp_path / "cap"), (
+        assert seen.read_text().strip() == str((tmp_path / "cap").resolve()), (
             "step 2 attached the transcript pipe before claiming the capture "
             "directory, so a concurrent run can pass the same check and take "
             "the pipe over")
@@ -3023,7 +3051,8 @@ class TestCaptureFlowExecution:
         r, _cast = _run_block(
             _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
             tmp_path, target=True,
-            state_files={"claim.pm-test": str(tmp_path / "other-cap")})
+            state_files={"claim.pm-test":
+                        str((tmp_path / "other-cap").resolve())})
         assert r.returncode != 0, "a second capture dir took over the session"
         assert "already being recorded into" in r.stderr, r.stderr
 
@@ -3041,7 +3070,7 @@ class TestCaptureFlowExecution:
             _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
             tmp_path, target=True,
             state_files={"pm-other": "",
-                         "claim.pm-other": str(tmp_path / "cap")})
+                         "claim.pm-other": str((tmp_path / "cap").resolve())})
         assert r.returncode != 0, "a shared capture dir was recorded twice"
         assert "is already being recorded by pm session pm-other" in r.stderr, (
             r.stderr)
@@ -3060,7 +3089,7 @@ class TestCaptureFlowExecution:
             _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
             tmp_path, target=True,
             state_files={"pm-other": "",
-                         "claim.pm-other": str(tmp_path / "cap")})
+                         "claim.pm-other": str((tmp_path / "cap").resolve())})
         assert r.returncode != 0, r.stderr
         assert "tmux set-option -u -t pm-other @pm_capture_dir" in r.stderr, (
             "the shared-directory refusal does not say how to clear a stale "
@@ -3078,6 +3107,76 @@ class TestCaptureFlowExecution:
         assert r.returncode == 0, r.stderr
         assert not (tmp_path / "state" / "claim.pm-test").exists(), (
             "the finished run left its capture-dir claim on the session")
+
+    @pytest.mark.parametrize("mode,message", [
+        # The two step-5 branches after the claim is taken that no other mode
+        # reaches with the pm session still alive: the recorder draws and the
+        # detach ends it, as in a real finish, but the cast (or the status)
+        # was never written. The session survives, so a claim left behind
+        # would refuse the next attempt in it.
+        ("detachnocast", "asciinema wrote no cast"),
+        ("detachnostatus", "recorder status is missing"),
+    ])
+    def test_step_five_failures_release_the_claim(self, mode, message,
+                                                  tmp_path):
+        """The cast/status branches must release the claim like the others.
+
+        Every failure path after step 2 takes the claim releases it, or the
+        next attempt in that session is refused by a capture that already
+        ended. ``midbothbad`` covers the non-zero-status branch; these two
+        cover the missing-cast and missing-status ones, which the recipe
+        releases the same way.
+        """
+        r, _cast = _run_capture_block(
+            "tmux-screen-recording.md", mode, tmp_path, target=True)
+        assert r.returncode != 0, (
+            f"{mode}: the fixture was expected to fail the run")
+        assert message in r.stderr, (
+            f"{mode}: the run failed somewhere other than the branch under "
+            "test, so its claim release is not exercised: " + r.stderr)
+        assert not (tmp_path / "state" / "claim.pm-test").exists(), (
+            f"{mode}: the failed run left its capture-dir claim on the "
+            "session, so the next attempt in this session is refused by a "
+            "capture that is no longer running")
+
+    def test_a_shared_dir_is_recognized_through_a_tilde_spelling(self,
+                                                                tmp_path):
+        """One directory spelled two ways is still one directory.
+
+        Step 0 accepts `~/cap` as well as an absolute path, and a quoted `~`
+        is never expanded, so comparing the claim as text let a *different*
+        session claim the same directory: both runs then write its cast and
+        transcript and read each other's evidence (the collision the claim
+        exists to stop). Verified live on tmux 3.2a: `~/capA` claimed on one
+        session, `/home/<user>/capA` on another ran on (rc 0).
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True,
+            env_extra={"HOME": str(tmp_path)},
+            state_files={"pm-other": "", "claim.pm-other": "~/cap"})
+        assert r.returncode != 0, (
+            "a second session recorded the same capture directory through a "
+            "`~/` spelling, so both runs read each other's evidence")
+        assert ("is already being recorded by pm session pm-other"
+                in r.stderr), r.stderr
+
+    def test_a_retry_is_not_refused_by_its_own_tilde_claim(self, tmp_path):
+        """The same run's own claim, in the other spelling, is not a collision.
+
+        The mirror of the case above: the session already holds `~/cap` for
+        the directory this run records into, and comparing the strings
+        refused the retry with "already being recorded into ~/cap" — a
+        collision that does not exist.
+        """
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")), "ok",
+            tmp_path, target=True,
+            env_extra={"HOME": str(tmp_path)},
+            state_files={"claim.pm-test": "~/cap"})
+        assert r.returncode == 0, (
+            "a retry in the same session was refused as a collision because "
+            "its own claim was written with a `~/` spelling: " + r.stderr)
 
     def test_tmux_transcript_that_is_never_written_fails(self, tmp_path):
         """The pipe can accept the attach and still write nothing.
@@ -3316,7 +3415,7 @@ class TestCaptureFlowExecution:
             _driving_block(), "sendfail", tmp_path, target=True,
             sessions=("pm-recorder",),
             state_files={"pane": "TUI drawn\n",
-                         "claim.pm-test": str(tmp_path / "cap")})
+                         "claim.pm-test": str((tmp_path / "cap").resolve())})
         assert r.returncode != 0, r.stderr
         assert "pm tui send failed" in r.stderr, r.stderr
         state = tmp_path / "state"

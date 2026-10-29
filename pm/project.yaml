@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T01:55:43.180010+00:00'
+  updated_at: '2026-10-29T03:04:22.247985+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36368,6 +36368,45 @@ prs:
       back for native review.'
     created_at: '2026-10-29T01:55:32Z'
     last_edited: '2026-10-29T01:55:43Z'
+  - id: note-6ce88ba
+    text: 'Review loop 7c9c i1: one leftover in the kept tmux-recipe scope, the PR''s
+      own class — the capture-directory claim was compared as text, not as a directory.
+      Step 0 accepts `<capture-dir>` as an absolute path or one starting with `~/`,
+      and a quoted `~` never expands, so `@pm_capture_dir` stored the literal `~/cap`.
+      Verified live on tmux 3.2a with the recipe''s own step-2 block on a private
+      server: with `~/capA` claimed on one session, a second session pasting step
+      2 with `/home/<user>/capA` — the same directory — ran on (rc 0) and claimed
+      it too, so both runs wrote that directory''s cast and transcript and each stop
+      step read the other''s evidence (the R24/S24 collision the claim exists to stop);
+      the mirror case, a retry in the same session with the other spelling, was refused
+      as a collision that does not exist. Step 2 now compares canonically (`claim_dir`
+      = `cd <capture-dir> && pwd -P`, which also collapses a trailing slash and a
+      symlink; a stored claim is normalized the same way with its `~/` prefix expanded),
+      and the canonical path is what the cross-session scan matches and what step
+      2 writes; a directory that cannot be entered keeps the text as typed. Post-fix
+      live on the same server: `~/capA` stored as `/home/<user>/capA`, the other session
+      refused, the same-session retry rc 0; the nominal full capture block still ends
+      rc 0 with cast, transcript, `recorder.status` 0 and the claim released. Tests:
+      two spelling cases (both fail against HEAD''s step 2, checked by restoring the
+      pre-fix recipe in place and then restoring the post-fix copy), coverage for
+      the two step-5 claim-release branches no execution mode reached with the pm
+      session alive (`detachnocast`/`detachnostatus`; they fail when the release is
+      removed from their branch), and a web-UI produced-files case. Also: the web-UI
+      recipe''s produced-files list and manifest now name the `node_modules` link
+      step 2 creates in the capture directory (R17''s rule, one file over). File 158
+      pass; related suites (`test_qa_artifact_web_ui_recording`, `test_qa_instructions`,
+      `test_qa_loop`, `test_markdown_render`) 188 pass; full suite `env -u PM_HOST_HOME
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py`
+      -> 4532 passed, 1 skipped, 92 deselected, 1 failed + 19 errors, all environment:
+      `test_git_ops::TestPullRebase::test_keeps_unpushed_merge` (documented baseline)
+      and `test_sync_merge_integrity.py` (setup `git push` rejected by this container''s
+      push proxy: "only pm/pr-b19db15-... is allowed"); none touch the changed area.
+      Evidence: $(pm qa captures-path pr-b19db15)/review-7c9c-i1/ (probe-prefix.log,
+      probe-postfix.log, nominal.log, the pre/post step-2 blocks, the stub pm). impl.md
+      R29 + Files/verification/evidence and qa.md updated. No pm_core/ change; the
+      dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T03:04:22Z'
+    last_edited: '2026-10-29T03:04:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

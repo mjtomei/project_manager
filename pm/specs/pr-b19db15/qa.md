@@ -91,10 +91,13 @@ failure modes), S23 (tmux TUI capture, bounded readiness/stop), S24 (dead
 recorders, failed drives, colliding runs — it found the collision the claim
 fixes, and its post-fix captures cover the fix), S25 (web-UI start and
 readiness) and S26 (web-UI driver + finalize). Re-run those against the
-current PR head. The older S14/S18/S20 covered the same recipe ground before
-the reduction; S15, S16, S17 and S19 exercised the dropped helper, the shared
-prompt guidance and the QA-loop helper install, none of which exist in this
-PR any more.
+current PR head. S24 also re-checks the claim's canonical comparison: two
+sessions reaching one capture directory through different spellings (`~/cap`
+vs its absolute path) must be refused, and a same-session retry must not be
+refused by its own `~/`-spelled claim. The older S14/S18/S20 covered the
+same recipe ground before the reduction; S15, S16, S17 and S19 exercised the
+dropped helper, the shared prompt guidance and the QA-loop helper install,
+none of which exist in this PR any more.
 
 ## Setup (cross-cutting)
 
@@ -454,7 +457,13 @@ run's video in the capture directory.
   messages name the manual clear (`tmux set-option -u -t <session>
   @pm_capture_dir`) — "end that capture" alone is impossible advice for a
   claim whose capture already ended. Both
-  collisions now fail loudly on at least one side instead of passing. A raw
+  collisions now fail loudly on at least one side instead of passing. The
+  claim is compared as a canonical directory (`cd` + `pwd -P`, with a stored
+  claim's `~/` prefix expanded), not as the text a worker typed: `~/cap` and
+  an absolute path to the same directory are one claim, so a second session
+  that reaches the directory through the other spelling is still refused (it
+  used to run on and share the directory), and a retry is not refused by its
+  own `~/`-spelled claim. A raw
   `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
   record it as a limitation, not a pass.
 

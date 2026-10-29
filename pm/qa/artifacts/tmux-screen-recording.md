@@ -192,6 +192,10 @@ done
 #    that was killed outright (no failure path runs) is cleared with
 #    `tmux set-option -u -t <session> @pm_capture_dir` — both refusal messages
 #    below say so, because a stale claim would otherwise block the next run.
+#    The claim is compared as a *directory*, not as the text typed: `~/cap`
+#    and an absolute path to it are one claim (a quoted `~` never expands, so
+#    comparing the strings let two runs claim one directory), and `pwd -P`
+#    collapses a trailing slash or a symlink.
 #    The claim is written *before* the pipe is attached: tmux has no
 #    compare-and-set, so two runs that read the option at the same instant can
 #    still both pass the check, but taking the claim first keeps the window
@@ -207,8 +211,25 @@ if [ -z "$TARGET" ]; then
         "step with pm on PATH, in the project directory" >&2
     exit 1
 fi
+# The claim names a *directory*, so compare it canonically rather than as the
+# text a worker typed. Step 0 accepts `~/cap` as well as an absolute path, and
+# a quoted `~` never expands, so one directory spelled two ways passed the
+# cross-session check below — two runs then wrote into it and read each
+# other's cast and transcript (verified live: `~/capA` claimed on one session,
+# `/home/<user>/capA` on another ran on and took the same directory) — while a
+# retry in the same session was refused as a collision that does not exist.
+# `pwd -P` also collapses a trailing slash and a symlinked path. A directory
+# that cannot be entered keeps the text as typed, and nothing is recording
+# into it then.
+claim_dir=$(cd <capture-dir> 2>/dev/null && pwd -P)
+[ -n "$claim_dir" ] || claim_dir="<capture-dir>"
+# A stored claim may itself hold the `~/` spelling (a quoted `~` never expands
+# there either), so normalize both sides before comparing.
 claimed=$(tmux show-options -t "$TARGET" -v @pm_capture_dir 2>/dev/null || true)
-if [ -n "$claimed" ] && [ "$claimed" != "<capture-dir>" ]; then
+case "$claimed" in "~/"*) claimed="$HOME/${claimed#"~/"}";; esac
+claimed_dir=$(cd "$claimed" 2>/dev/null && pwd -P)
+[ -n "$claimed_dir" ] || claimed_dir="$claimed"
+if [ -n "$claimed" ] && [ "$claimed_dir" != "$claim_dir" ]; then
     echo "$TARGET is already being recorded into $claimed — end that capture," \
         "or clear the claim with 'tmux set-option -u -t $TARGET" \
         "@pm_capture_dir' if it is stale" >&2
@@ -220,7 +241,10 @@ fi
 other=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | while read -r s; do
     [ "$s" = "$TARGET" ] && continue
     v=$(tmux show-options -t "$s" -v @pm_capture_dir 2>/dev/null || true)
-    [ "$v" = "<capture-dir>" ] && { echo "$s"; break; }
+    case "$v" in "~/"*) v="$HOME/${v#"~/"}";; esac
+    vd=$(cd "$v" 2>/dev/null && pwd -P)
+    [ -n "$vd" ] || vd="$v"
+    [ "$vd" = "$claim_dir" ] && { echo "$s"; break; }
 done)
 if [ -n "$other" ]; then
     echo "<capture-dir> is already being recorded by pm session $other —" \
@@ -237,7 +261,7 @@ fi
 # cannot be attached — nothing is recording then — and every later failure
 # path releases it the same way (step 5 does at the end of a successful run),
 # so a failed run does not leave a stale claim behind.
-tmux set-option -t "$TARGET" @pm_capture_dir "<capture-dir>" || {
+tmux set-option -t "$TARGET" @pm_capture_dir "$claim_dir" || {
     echo "could not claim <capture-dir> on $TARGET — the session went away" >&2
     exit 1
 }

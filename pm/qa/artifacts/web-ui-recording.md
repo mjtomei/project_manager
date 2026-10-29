@@ -52,6 +52,10 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
 - `http.log` — curl snapshots of the UI's routes.
 - `sse.log` — `curl -N` transcript of the SSE endpoint (if the UI is
   SSE-driven).
+- `node_modules` — a link to the image's global Playwright install, created
+  by step 2 when the driver needed it and there was no local install (the
+  ES-module resolver ignores `NODE_PATH`); it stays in the capture directory,
+  so the manifest names it.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above.
 
@@ -531,6 +535,8 @@ fencing deep:
     - `dom.html` — DOM dump at a representative state.
     - `http.log` — curl snapshots of the UI's routes.
     - `sse.log` — SSE event-stream transcript.
+    - `node_modules` — link to the image's Playwright install (if step 2
+      created one).
 
 ## Reviewing
 
