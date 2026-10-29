@@ -56,7 +56,18 @@ _USER_RE = re.compile(r'"type"\s*:\s*"user"')
 
 
 def _read_transcript_text(transcript_path: str | Path | None) -> str:
-    """Read a Claude transcript, tolerating slug-mismatched symlinks.
+    """Read a whole Claude transcript (see :func:`_resolve_transcript_file`)."""
+    path = _resolve_transcript_file(transcript_path)
+    if path is None:
+        return ""
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
+    """The readable JSONL for *transcript_path*, tolerating broken symlinks.
 
     Band-aid for pr-488b748: when ``build_claude_shell_cmd`` creates the
     transcript symlink it derives the target's parent dir from the cwd
@@ -67,46 +78,10 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
     target never appears. The session_id is unique, though, so we can
     recover the real path by scanning ``~/.claude/projects/*/`` for the
     matching ``<session_id>.jsonl``.
-    """
-    if not transcript_path:
-        return ""
-    p = Path(transcript_path)
-    try:
-        return p.read_text(errors="replace")
-    except (OSError, FileNotFoundError):
-        pass
-    # Symlink target missing — fall back to a session-id glob.
-    sid: str | None = None
-    try:
-        if p.is_symlink():
-            sid = Path(os.readlink(p)).stem
-    except OSError:
-        sid = None
-    if not sid:
-        sid = p.stem
-    if not (len(sid) == 36 and sid.count("-") == 4):
-        return ""
-    projects_dir = Path.home() / ".claude" / "projects"
-    try:
-        matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
-    except OSError:
-        return ""
-    if not matches:
-        return ""
-    # Pick the most recently modified — handles edge cases where stale
-    # files with the same sid linger from a prior run.
-    real = max(matches, key=lambda m: m.stat().st_mtime)
-    try:
-        return real.read_text(errors="replace")
-    except OSError:
-        return ""
 
-
-def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
-    """The readable JSONL for *transcript_path*, tolerating broken symlinks.
-
-    Mirrors :func:`_read_transcript_text`'s slug-mismatch band-aid but
-    returns a path so callers can read only the tail of a large transcript.
+    Returns None when nothing readable resolves.  Callers that need the
+    whole file go through :func:`_read_transcript_text`; the fresh-autostart
+    handoff reads only the tail of what this returns.
     """
     if not transcript_path:
         return None
@@ -136,6 +111,8 @@ def _resolve_transcript_file(transcript_path: str | Path | None) -> Path | None:
         return None
     if not matches:
         return None
+    # Pick the most recently modified — handles edge cases where stale
+    # files with the same sid linger from a prior run.
     try:
         return max(matches, key=lambda m: m.stat().st_mtime)
     except OSError:

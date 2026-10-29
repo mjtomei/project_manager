@@ -160,9 +160,16 @@ Before/around the reset, retire the old attempt's live and in-memory state:
   `_auto_start_review_loops` nor `_auto_review_idle_prs` sees a stale loop.
   Mirror a terminal `runtime_state` sentinel with a new `loop_id` so late
   callbacks from the old thread bow out (`_is_active_loop`).
-* Running QA: set `stop_requested`, pop `app._qa_loops[pr_id]` and
-  `app._self_driving_qa[pr_id]`; mirror a `qa` runtime record with verdict
-  `SUPERSEDED` (and the old verdict under `previous_verdict`) so
+* Running QA: pop `app._qa_loops[pr_id]` and `app._self_driving_qa[pr_id]`,
+  and discard the run through `qa_loop_ui.discard_qa_state` — the one path
+  the code documents for dropping a tracked run (it sets `stop_requested`,
+  marks the run `superseded` so a still-winding-down thread cannot rewrite
+  its resume snapshot, and clears that snapshot).  Checking `running` alone
+  is not enough: a run that finalized with INPUT_REQUIRED is *held* with
+  `running` False while it keeps polling its worker panes.  Drop the run's
+  `qa:<pr>:s<n>` tracker keys (a popped loop never reaches
+  `poll_qa_state`'s unregister path), then mirror a `qa` runtime record with
+  verdict `SUPERSEDED` (and the old verdict under `previous_verdict`) so
   `recorded_qa_verdict` cannot suppress the new QA.
 * Sign-off: `signoff.retire_signoff_run()` (window + transcript + launch
   stamp), clear `signoff_ui._signoff_acted` and its launch timestamp; the

@@ -1650,6 +1650,16 @@ class TestStatus:
         assert run["state"] == "waiting"
         assert "implementation window missing" in run["reason"]
 
+    def test_permission_prompt_reason_is_distinct(self):
+        # A live permission prompt keeps its own reason: the turn is not
+        # complete, it is blocked on the user answering the dialog.
+        pr = _pr(status="in_progress", gh_pr_number=1,
+                 **{FRESH_KEY: {"requested_at": st.now_iso(),
+                                "awaiting_handoff": True}})
+        run = self._status(pr, "waiting")["runs"][0]
+        assert run["state"] == "waiting"
+        assert "permission prompt in implementation window" in run["reason"]
+
     def test_idle_reason_says_review_is_starting(self):
         pr = _pr(status="in_progress", gh_pr_number=1,
                  **{FRESH_KEY: {"requested_at": st.now_iso(),
