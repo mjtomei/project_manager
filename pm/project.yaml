@@ -42125,7 +42125,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-29T08:38:36.981393+00:00'
+  updated_at: '2026-10-29T09:11:52.687065+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42276,6 +42276,25 @@ prs:
       behaviour and the absence of any host launch are unchanged. (2026-10-29T08:55:00Z)'
     created_at: '2026-10-29T08:38:36Z'
     last_edited: '2026-10-29T08:38:36Z'
+  - id: note-0f0fcab
+    text: 'Review c534 i1: three fail-closed gaps closed. (1) A container-mode scenario
+      whose tmux window cannot be created after its container exists now records a
+      launch failure and raises ContainerLaunchError (run ERROR) instead of leaking
+      that container and becoming an invented INPUT_REQUIRED — same class as the create
+      failure; only that attempt''s own container is released, other scenarios'' live
+      containers/windows are untouched. (2) qa_resume.json persists state._error and
+      build_resume_state restores it: a resumed run keeps its original diagnostics,
+      and an errored no-scenario run can no longer re-aggregate as PASS after a restart.
+      (3) _resume_incomplete_qa restores the error field from qa_status.json when
+      it adopts a run that completed during downtime, so the recovered "QA ERROR"
+      note carries its cause (the snapshot is written before the poll, so a mid-run
+      container failure only ever reached the status file). Tests added: window-failure
+      launch error, resume error round-trip, recovered ERROR cause, healthy `pm qa
+      debug` container control. Full suite 4516 passed, 1 skipped. Spec impl.md updated
+      (c534 i1). Host-mode window-failure -> INPUT_REQUIRED left as-is: it is host
+      mode (no container requested) and the INPUT_REQUIRED is deliberate there.'
+    created_at: '2026-10-29T09:11:52Z'
+    last_edited: '2026-10-29T09:11:52Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
