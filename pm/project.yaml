@@ -14280,7 +14280,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-29T04:44:58.229107+00:00'
+  updated_at: '2026-10-29T05:11:48.991327+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -14672,6 +14672,24 @@ prs:
       PM_HOST_HOME unset).'
     created_at: '2026-10-29T04:44:58Z'
     last_edited: '2026-10-29T04:44:58Z'
+  - id: note-9ec1270
+    text: 'Review e89f i4: closed-status durability in the launch commands. `pm pr
+      start` and `pm pr review` check the pre-lock snapshot, then do real work (clone/push/draft-PR
+      create; draft upgrade/workdir resolve) before writing under the lock — a `pm
+      pr close` landing in that window was overwritten: start erased `closed_at`,
+      attached a workdir and re-pointed `active_pr` at the terminal record (A2), review
+      rewrote closed -> in_review. Both applies now call the new shared `helpers._terminal_status_at_lock`
+      on the freshly loaded entry, no-op on a terminal status, and the command exits
+      1 naming it (start notes the prepared workdir is left in place) with no review
+      window opened. signoff/qa-run-bg/auto-sequence already gate their apply on the
+      expected source status, so a concurrent close no-ops there. Tests: test_start_does_not_record_a_start_on_a_concurrently_closed_pr,
+      test_review_does_not_resurrect_a_concurrently_closed_pr (both fail on the previous
+      head — probe: start claimed the active pointer, review printed "marked as in_review").
+      Spec synced (R11 item 45, implicit Lock discipline, §5). Full suite 4549 passed,
+      1 skipped, 12 failed = tests/test_markdown_render.py env-only (no `markdown`
+      package in the pm venv). Rest of the PR re-reviewed as-is — no other changes.'
+    created_at: '2026-10-29T05:11:48Z'
+    last_edited: '2026-10-29T05:11:48Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
