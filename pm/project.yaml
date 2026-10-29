@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T19:12:56.729278+00:00'
+  updated_at: '2026-10-29T20:09:17.188131+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37368,6 +37368,42 @@ prs:
       No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T19:12:56Z'
     last_edited: '2026-10-29T19:12:56Z'
+  - id: note-b69036c
+    text: 'Review loop ebd1 i16: one leftover in the kept recipe scope, the PR own
+      class (a step that cannot do its job must say so where it fails — and a remedy
+      that runs but cannot work). Both recording recipes render blocks were the last
+      blocks that write into the capture directory (the intermediate gif and the mp4)
+      without the missing/unwritable guard R54/R55 gave the capture steps and the
+      web-UI finalize/driver/Layer 2 blocks. Verified live in this container with
+      real agg 1.9.0 and ffmpeg 4.4.2 and the recipes own render blocks extracted
+      verbatim: a mode-500 capture directory holding a cast makes `rm -f` fail silently
+      (the earlier run recording.mp4 survives), `agg` fail to create its gif, and
+      the block exit 1 with "render produced no mp4 — agg failed on the cast — is
+      agg installed?" — a remedy that cannot work, because the install block is guarded
+      on `agg --version` and, with a working agg on PATH, exits 0 without downloading
+      or changing anything (verified), so the worker loops; and a capture directory
+      that does not exist is reported as "there is no cast to render (the recording
+      wrote nothing)" for a path that is not there. Fix: both render blocks derive
+      the cast directory (`cast_dir=${cast%/*}` — the capture dir in the tmux recipe,
+      its `<short-name>` subdirectory in the CLI one) and stop before the `rm` with
+      "capture directory … does not exist — create it and run the capture step first"
+      / "capture directory … cannot be written — the render writes the mp4 and the
+      intermediate gif there; check the path and its permissions", so a refused block
+      leaves the earlier run outputs alone (verified: no agg/ffmpeg invocation, rc
+      1). Tests: test_render_refuses_a_capture_dir_it_cannot_write (both recipes;
+      must name the directory and must not be the agg message; skips under root) and
+      test_render_names_a_missing_capture_dir (both recipes; must say the directory
+      does not exist and not that the recording wrote nothing), with _run_render gaining
+      capture/capdir_mode/create_capture_dir knobs; all four fail against HEAD render
+      blocks (restored in place) and pass after. File 227 passed (was 223). Full suite
+      env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py -> 4621 passed, 1 skipped, 92 deselected,
+      0 failed (393.79 s). Evidence: $(pm qa captures-path pr-b19db15)/review-ebd1-i16/
+      (probe.log, mutation-check.log, suite.log, README.md, scripts/). impl.md R57
+      + Files/verification/evidence and qa.md updated. No pm_core/ change; the dropped
+      helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T20:09:17Z'
+    last_edited: '2026-10-29T20:09:17Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
