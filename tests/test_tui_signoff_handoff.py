@@ -64,6 +64,18 @@ class App:
         self.logs: list[str] = []
         self.log_kw: list[dict] = []
         self.workers: list = []
+        self.timers: list = []    # (delay, callback) from app.set_timer
+
+    def set_timer(self, delay, callback):
+        """Stand-in for Textual's one-shot timer (recorded, fired by tests)."""
+        self.timers.append((delay, callback))
+        return object()
+
+    def fire_timers(self):
+        """Run the callbacks ``set_timer`` was given, oldest first."""
+        pending, self.timers = self.timers, []
+        for _delay, callback in pending:
+            callback()
 
     def log_message(self, msg, **kw):
         self.logs.append(msg)
@@ -492,6 +504,100 @@ def test_reqa_route_restarts_tui_qa(world_factory):
     rs.assert_any_call(PR, "qa", None)     # stale PASS record dropped
     assert not w.window                    # router window retired
     assert w.merges() == []
+
+
+def test_reqa_route_waits_for_a_run_driven_elsewhere(world_factory):
+    """A ``pm qa run`` of the PR is live when sign-off says REQA (S117): a
+    start now would retire its windows as stale and run QA twice.  The owed
+    start stays on disk (``awaiting: qa``) and runs once that run ends —
+    also with auto-start off, which is what a plain restart leaves."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=True,
+               create=True), \
+         patch("pm_core.tui.review_loop_ui._ensure_poll_timer") as timer:
+        _poll(app)
+        assert app.pr()["status"] == "qa"
+        sq.assert_not_called()
+        timer.assert_called_once_with(app)      # the retry tick is armed
+        assert app.pr()["signoff_return"]["awaiting"] == "qa"
+        # The hop arms the mount-style hook: the reconcile is deferred past
+        # the first frame (it costs two locked project.yaml rewrites), so the
+        # deferral line lands on the timer, not in the hop.
+        assert app.timers
+        app.fire_timers()
+        assert any("QA starts once" in m and PR in m for m in app.logs)
+
+        # The live run ends: the owed start happens once, and only once.
+        app._auto_start = False                 # what a plain restart leaves
+        app._auto_start_targets = {}
+        with patch("pm_core.qa_loop.run_driven_elsewhere",
+                   return_value=False, create=True):
+            qa_loop_ui.reconcile_owed_reqa(app)
+            qa_loop_ui.reconcile_owed_reqa(app)
+    sq.assert_called_once_with(app, PR)
+
+
+def test_reqa_route_claims_the_launch_before_starting(world_factory):
+    """The hop is one of several drivers of the same obligation (a TUI tick,
+    another TUI, an auto-sequence tick): it claims the launch, so only one of
+    them starts the run."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False,
+               create=True):
+        _poll(app)
+    sq.assert_called_once_with(app, PR)
+    assert app.pr()["signoff_return"]["launch_claim"]["hop"] == "qa"
+
+
+def test_reqa_route_keeps_a_running_loop_entry(world_factory):
+    """A QA loop can still be running when sign-off routes the PR back (the
+    user pressed ``i`` while a ``zz t`` loop ran).  Popping its entry would
+    let the owed-REQA start — and every reconciler tick — start a second full
+    run over it; the loop owns the PR until it ends."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    running = QALoopState(pr_id=PR)
+    running.running = True
+    app._qa_loops[PR] = running
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False,
+               create=True):
+        _poll(app)
+    sq.assert_not_called()
+    assert app._qa_loops.get(PR) is running
+    # The obligation stays on disk for the reconciler once the loop ends.
+    assert app.pr()["signoff_return"]["awaiting"] == "qa"
+
+
+def test_reqa_route_retires_held_follow_up_before_owed_run(world_factory, tmp_path):
+    """A fresh REQA supersedes the old input wait without leaving its poller
+    or restart snapshot alive, while still claiming exactly one owed run."""
+    app, w = world_factory(wait=True)
+    _qa_pass(app)
+    w.emit("SIGNOFF_REQA")
+    held = QALoopState(pr_id=PR)
+    held.running = False
+    held.held = True
+    held.qa_workdir = str(tmp_path)
+    snapshot = tmp_path / "qa_resume.json"
+    snapshot.write_text('{"held": true}')
+    app._qa_loops[PR] = held
+    with patch("pm_core.tui.qa_loop_ui.start_qa") as sq, \
+         patch("pm_core.qa_loop.run_driven_elsewhere", return_value=False):
+        _poll(app)
+    assert held.stop_requested is True
+    assert held.superseded is True
+    assert not snapshot.exists()
+    assert app._qa_loops.get(PR) is not held
+    sq.assert_called_once_with(app, PR)
+    assert app.pr()["signoff_return"]["launch_claim"]["hop"] == "qa"
 
 
 def test_review_route_restarts_review_loop(world_factory):
