@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T13:40:51.376321+00:00'
+  updated_at: '2026-10-29T14:34:25.481807+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37084,6 +37084,41 @@ prs:
       helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T13:40:51Z'
     last_edited: '2026-10-29T13:40:51Z'
+  - id: note-132bbf2
+    text: 'Review loop ebd1 i8: three guards in the kept recipe scope had no case,
+      and no recipe change. (1) The CLI recipe''s capture preamble carries its own
+      copy of the absolute-path guard; test_capture_dir_must_be_absolute runs each
+      recipe''s scaffold, so the preamble — the first block under ## Capture, pasted
+      before every recording form — was never run with a relative <capture-dir>. Deleting
+      its case guard left the file green (201 passed, the count before these cases)
+      and the preamble then exited 0 with relcap/run created and cleared in the worker''s
+      cwd. New test_cli_preamble_refuses_a_relative_capture_dir runs the preamble
+      itself (new _cli_preamble_block helper, shared with the uncreatable-dir case)
+      and fails with the guard removed. (2) Step 2 canonicalizes the capture-directory
+      claim with cd + pwd -P, and the prose claims it collapses a symlinked path,
+      but only the ~/ spelling had a case; replacing all three pwd -P sites (claim_dir,
+      claimed_dir, vd) with pwd also left the file green (201 passed). New test_a_shared_dir_is_recognized_through_a_symlink
+      (another session''s claim on the real path, capture dir reached through a symlink:
+      refused naming that session) and test_a_retry_is_not_refused_through_a_symlink
+      (the same session''s claim on the real path, step pasted through the symlink:
+      proceeds) fail under that mutation. (3) The web-UI start block clears the previous
+      run''s outputs, including the server.pid a run that stopped before the teardown
+      leaves, before its port pre-check, and the busy-port refusal says the step cleared
+      it; the cleanup list was text-pinned but the refusal path was not. Moving the
+      whole rm below the pre-check left the file green (204 passed at that point)
+      and a refused start then left the seeded pid in place while the message said
+      it was gone — the handle the recipe''s teardown reads. New test_a_refused_start_clears_the_previous_pid
+      seeds the pid and runs the start block against a taken port; it fails under
+      the reorder. Also corrected qa.md''s driver-step edge case, which still listed
+      the attempt cleanup without manifest.md (R48). Tests: file 205 pass; related
+      suites 393 together with the file; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 4599 passed, 1 skipped, 92 deselected, 0 failed (398.56 s). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-ebd1-i8/ (mutation-check.log, probe.log,
+      README.md, suite.log). impl.md R49 + Files/verification/evidence and qa.md updated.
+      No pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
+    created_at: '2026-10-29T14:34:25Z'
+    last_edited: '2026-10-29T14:34:25Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
