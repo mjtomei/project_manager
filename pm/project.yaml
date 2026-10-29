@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-991aaab
+  active_pr: pr-6de8207
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -42422,6 +42422,36 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T18:02:48.130836+00:00'
   updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-6de8207
+  plan: bugs
+  title: 'Bug: a repo directory containing "~" breaks grouped-session name parsing
+    (base_session_name truncates the tag)'
+  branch: pm/pr-6de8207-bug-a-repo-directory-containing-breaks-grouped-ses
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/pane_registry.py:27 base_session_name() returns
+    session.split("~")[0], and ~15 other call sites do the same (tui_pidfile.py:139/168/190/216,
+    home_window/__init__.py:138, home_window/pr_list.py:32, tui/auto_start.py:354,
+    tui/app.py:90, cli/session.py:127, tmux.py:213/1058/1174). Repro: mkdir /tmp/my~project
+    && git init && cd there && pm session. get_session_tag() (pm_core/paths.py:212)
+    uses the git-root directory name unsanitised, so the session is pm-my~project-<hash>
+    and its grouped session is pm-my~project-<hash>~1; base_session_name() then yields
+    "pm-my", so the pane registry (~/.pm/pane-registry/pm-my.json), TUI pidfile, capture
+    dirs and _find_tui_pane/_find_live_tui_pane all key on the wrong name and the
+    TUI cannot be found. pm_core/cli/helpers.py:_get_current_pm_session() uses rsplit("~",1)
+    instead and disagrees with every other site. Pre-existing (not introduced by pr-073910f,
+    which merely switched one more site to the shared helper for consistency); the
+    real fix is to sanitise the tag (or escape ~) in get_session_tag. Found while
+    reviewing pr-073910f.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T03:19:50.032775+00:00'
+  updated_at: '2026-10-29T03:19:50.032775+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
