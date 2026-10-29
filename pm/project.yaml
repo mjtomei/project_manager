@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T03:59:02.239476+00:00'
+  updated_at: '2026-10-29T04:22:16.672590+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -34929,6 +34929,40 @@ prs:
       captures_dir(create=False) now exists.'
     created_at: '2026-10-29T03:45:59Z'
     last_edited: '2026-10-29T03:59:02Z'
+  - id: note-f6f395c
+    text: 'Review-loop 5297 i4 (fc1fca51): no blocking code defects in the provenance
+      implementation — captures.py, the qa_loop sync points and shared-mount guard,
+      the prompt/dashboard/merge-gate bindings and the suite all still hold up. One
+      robustness gap fixed: captures._valid_manifest read a manifest whose `scenarios`
+      was present but not a list (a bare int, null, a mapping from a hand edit or
+      partial rewrite) as a run with zero members, so `pm qa evidence` printed "(none)"
+      with NO anomaly and the sign-off block told the session the run "captured no
+      coverage" — a confident claim about a fact the file does not state (the same
+      class of damage i3 fixed on the qa_status.json side). Such a manifest is now
+      rejected as damaged, so readers fall back to qa_runs/<run_id>.json (membership
+      survives a damaged pointer) and the audit reports "damaged (its scenario list
+      is not a list)"; a manifest with the key absent still reads as owning nothing.
+      Reproduced on the old code before the change: read_manifest returned {"run_id":
+      "run1", "scenarios": []} and audit returned zero anomalies. Also: (a) the four
+      duplicated root-pointer anomaly branches in audit() collapsed into _root_pointer_anomaly(),
+      which gives the new case one wording in both the "not run-bound" and "recovered
+      from qa_runs/" variants; (b) neither reader calls an existing-but-refused manifest
+      absent any more (`pm qa evidence` prints "a qa_manifest.json exists but is unusable",
+      the sign-off block says the same) — the session can see the file, so "no manifest"
+      invited it to trust the record pm refused; (c) signoff.report_meta() now resolves
+      the captures root with create=False (a reader must not conjure the tree; same
+      result as before). Tests: tests/test_captures_provenance.py 77 passed (+4: non-list
+      scenarios rejected and recovered from the run copy; audit reports damaged-not-empty
+      in both membership branches; the sign-off block and `pm qa evidence` say unusable
+      rather than absent). Full suite on the edited tree: 4553 passed, 1 skipped,
+      13 failed — all environmental (12 test_markdown_render "No module named markdown",
+      1 test_hook_events PM_HOST_HOME), the documented baseline. Spec impl.md R1/R6
+      updated with the damaged-manifest rule. Residual unchanged for QA: the impl
+      pre/post captures remain a modelled repro, so the live nested-fixture/enclosing-run
+      membership check still belongs to the next QA round (QA S3 Part 1 demonstrated
+      the direct-write variant).'
+    created_at: '2026-10-29T04:22:16Z'
+    last_edited: '2026-10-29T04:22:16Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
