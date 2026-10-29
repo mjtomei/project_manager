@@ -38197,7 +38197,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-29T07:07:30.245822+00:00'
+  updated_at: '2026-10-29T07:47:44.262249+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -38500,6 +38500,45 @@ prs:
       log is binary: shell grep needs -a. Captures /pm-captures/scenarios/10/.'
     created_at: '2026-10-29T07:07:30Z'
     last_edited: '2026-10-29T07:07:30Z'
+  - id: note-62f47ea
+    text: 'QA scenario 12 PASS 4/4 stories at 3819d767 (real podman, fake-claude,
+      dedicated tmux socket /tmp/qa12-tmux, fixture /scratch/qa12/pm-test-1793258225,
+      PR pr-aa37eb8). (A) exec-kind retry: stopping the s2 container is noticed in
+      7 s -> row `launch retry 1/6` (never a verdict) with `worker exited before Claude
+      started: container <name> is exited — next attempt at HH:MM:SS`; siblings PASS
+      at +120 s and log `Verification passed for scenario 1/3`, pane reads `Progress:
+      2/3 scenarios complete (1 relaunching)` while the failed row keeps retrying;
+      only the failed scenario advances its counter. (B) exhaustion: gaps exactly
+      5/10/20/40/80/160 s, 6/6 -> INPUT_REQUIRED with `worker exited before Claude
+      started (runtime failure, not an agent verdict); gave up after 6 relaunch attempt(s):
+      container <name> is exited`, `Overall: INPUT_REQUIRED`, siblings PASS/verified,
+      `QA complete ... INPUT_REQUIRED (finalize=FINALIZE_DONE, waiting=[])`, TUI `QA
+      complete: INPUT_REQUIRED [finalize: FINALIZE_DONE]` + `QA INPUT_REQUIRED for
+      pr-aa37eb8 — paused for human input`, no scenario retrying, qa_resume.json deleted
+      once processed. (C) stop at a due retry: row `launch retry 2/6` due 07:37:53,
+      `zzt` at 07:37:52 -> no relaunch (identical window lists after the due time,
+      no `Scenario 8: relaunch 2/6`), no attempt spent, snapshot written as the run
+      stopped carries `launch_retries["8"]={state:waiting,attempts:1,retry_at:07:37:53}`,
+      `QA complete` 2 s after the request, `Overall: INPUT_REQUIRED` with the failed
+      row reading `pending`. (D) create-kind failure via a synthetic keyring wrapper
+      ($HOME/.pm/podman-wrap/podman, runtime setting restored afterwards): `launch
+      retry n/6` with `worker could not be created: container create failed: container
+      keyring quota exhausted (kernel key quota, EDQUOT) — reap orphaned containers
+      (see pr-1139060) or raise kernel.keys.maxkeys / kernel.keys.maxbytes`, never
+      an agent verdict, gaps 5/10/20/40/80/160 s, then `worker could not be created
+      (runtime failure, not an agent verdict); gave up after 6 relaunch attempt(s):
+      <same cause>`, INPUT_REQUIRED, no container named. Captures /pm-captures/scenarios/12/{storyA-B,storyC,storyD}/.
+      Caveats for the next run: (1) qa_resume.json is written on state transitions,
+      not every tick, so at stop time it can still read the previous state (`running`,
+      retry_at null) for a few seconds after the pane already shows `launch retry
+      n/6` — read the due time from the row (story C run 1 hit this; run 2 timed the
+      stop correctly); (2) dashboard `launch retry N/6` vs persisted `attempts = N-1`
+      (same wording inversion noted for scenario 9); (3) the PID-exhaustion create
+      variant was NOT COVERED (keyring was); (4) zoom the QA status pane (`tmux resize-pane
+      -Z`) before the run — pm resets it when it rebuilds the window, so re-zoom after
+      the run starts.'
+    created_at: '2026-10-29T07:47:44Z'
+    last_edited: '2026-10-29T07:47:44Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
