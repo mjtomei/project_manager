@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T09:36:42.582766+00:00'
+  updated_at: '2026-10-29T10:01:33.302889+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38184,6 +38184,28 @@ prs:
       it to the fixture. Not a product bug — no source change.'
     created_at: '2026-10-29T09:36:42Z'
     last_edited: '2026-10-29T09:36:42Z'
+  - id: note-580e6a1
+    text: 'QA scenario 16 (CLI drivers keep history; a CLI sweep respects a live TUI
+      loop) — PASS on all three stories. Evidence: /pm-captures/scenarios/16/{story1-auto-sequence,story2-watcher,story3-live-loop-sweep}/
+      (cast+mp4+manifest). Verified: (1) auto-sequence tick sequence reached sign_off
+      -> return with impl link re-pointed to a new rework sid, archive/impl-<pr>.<old-sid>.jsonl
+      holding the pre-return session, archive/signoff-<pr>.<sid>.jsonl holding SIGNOFF_IMPL,
+      canonical signoff + signoff-<pr>.head gone, both "transcript: archived" lines
+      logged, nothing else removed/truncated; (2) pm watcher --max-iterations 2 --wait
+      0 froze both auto-start-i{1,2}.jsonl into regular files with sid-keyed archive
+      copies, zero symlinks under the run dir, two "transcript: finalized" log lines;
+      (3) with the TUI running and a review loop mid-iteration, the ws watcher start/stop
+      swept the shared run dir and left review-<pr>-<loop>-i1.jsonl a live link while
+      freezing auto-start-i1.jsonl, then the loop finished NEEDS_WORK->PASS (review_loop_ui:
+      loop complete verdict=PASS iterations=2) and finalized both iterations. One
+      deviation from the scenario text, already an accepted limitation in impl.md
+      (i2 note): after the sweep the impl canonical impl-pr-ee74dfd.jsonl is still
+      a symlink because the impl window is still open (live step window is skipped
+      for the whole sweep). Its target is readable and nothing was removed, so R5
+      holds; flagging it only so a later run does not read that bullet as a failure.
+      Also re-ran tests/test_transcript_archive.py: 35 passed.'
+    created_at: '2026-10-29T10:01:33Z'
+    last_edited: '2026-10-29T10:01:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
