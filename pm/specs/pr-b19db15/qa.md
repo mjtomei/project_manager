@@ -178,6 +178,24 @@ recording-recipe bugs that any worker following the recipe hits:
   the harness: the block exits 0 with the bare handle). The text guard and
   the new `pipegap` execution case now fail on the bare form.
 
+- an artifact that exists but is empty is not an input the next stage can use
+  (review loop ebd1 i5, test coverage only): the render/finalize blocks'
+  stage-input checks are `test -s`, so a 0-byte cast, gif or webm — the state
+  each message names ("the recording wrote nothing", "or a 0-byte gif") — is
+  rejected as a missing input instead of being handed to the next stage, and
+  the final mp4 check rejects an encoder that reports success and writes
+  nothing. No test modelled the empty-file shape (only the absent file), so
+  weakening any of the checks to `-e` left the whole file green; the
+  misdiagnosis is reachable and was verified live with the recipes' own
+  blocks: a 0-byte cast → real agg's "Error: empty file" → "agg failed on the
+  cast — is 'agg' installed?"; a 0-byte gif → real ffmpeg's "Invalid data
+  found" → "ffmpeg failed on the gif"; a 0-byte webm → "ffmpeg failed on the
+  driver's webm"; and deleting the final mp4 check → rc 0 with a 0-byte
+  `recording.mp4`. The cases now cover both shapes and the final check, and
+  the CLI preamble block (the one fenced block no case executed) is run too.
+  No recipe change, so no scenario gains a new surface; the re-QA may re-check
+  the empty-artifact shapes in S21/S22 (cast, gif, mp4) and S26 (webm).
+
 - the manifest example has to name the files the run keeps (review loop
   ebd1 i4): the web-UI `## Files` example listed the `node_modules` link but
   neither `server.pid` (a run stopped before the teardown) nor the

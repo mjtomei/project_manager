@@ -55,7 +55,12 @@ hits, regardless of how it waits for a background job:
   run's mp4 (which the manifest would present as this run's evidence); the
   web-UI driver's trace, screenshots and DOM dump are cleared the same way,
   and the web-UI finalize step refuses to run at all with no ``CAPDIR``
-  rather than aim its cleanup and ffmpeg at the filesystem root;
+  rather than aim its cleanup and ffmpeg at the filesystem root; every
+  stage-input check is ``test -s``, because an artifact that exists but is
+  empty is not an input the next stage can use (a 0-byte cast, gif or webm
+  must be named as the stage that wrote nothing, not blamed on the stage
+  after it), and the final mp4 check rejects an encoder that reports success
+  and writes nothing;
 - the render steps name their renderer prerequisite: ``agg`` may be missing
   (the image used for QA on 2026-10-27 did not have it, although the bundled
   Dockerfile now installs it), and the render fails loudly, so the recipe
@@ -1134,12 +1139,14 @@ def test_failed_render_leaves_no_video(name, tmp_path):
 
 
 def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
-                ffmpeg_body=None, with_cast=True):
+                ffmpeg_body=None, with_cast=True, cast_body=None):
     """Run a recipe's render block against stubbed ``agg``/``ffprobe``/``ffmpeg``.
 
     Returns ``(proc, mp4_path, gif_path)``. The stubs are the real stage
     contracts: ``agg`` writes the gif, ``ffprobe`` reports dimensions then the
-    codec, ``ffmpeg`` writes the mp4.
+    codec, ``ffmpeg`` writes the mp4. ``cast_body`` writes the cast's contents
+    (``""`` is the 0-byte cast a recording that wrote nothing leaves, which the
+    block's ``test -s`` is there for); ``with_cast=False`` leaves no file.
     """
     block = _render_block(name)
     cast_rel = re.search(r"^cast=(\S+)$", block, re.M).group(1)
@@ -1149,7 +1156,8 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
                        .replace("<short-name>", "run"))
     cast.parent.mkdir(parents=True, exist_ok=True)
     if with_cast:
-        cast.write_text('{"version": 2}\n')
+        cast.write_text(cast_body if cast_body is not None
+                        else '{"version": 2}\n')
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     _stub_tool(bindir, "agg", agg_body or (
@@ -1260,7 +1268,9 @@ def test_render_names_a_missing_encoder(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", RECIPES)
-def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path):
+@pytest.mark.parametrize("agg_shape", ["absent", "empty"],
+                         ids=["no-file", "0-byte-file"])
+def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path, agg_shape):
     """A gif that was never written is not an ffmpeg failure.
 
     ``agg``'s own exit status is the handle for a render that failed, but a
@@ -1272,10 +1282,20 @@ def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path):
     ``agg`` that exits 0 without writing: both printed exactly that). The
     same misdiagnosis as reporting a missing cast as an ``agg`` problem, and
     as the web-UI finalize step's missing webm (R19), one stage over.
+
+    Both shapes of "wrote nothing" are exercised, because they are different
+    code paths for the check: no file at all, and the **0-byte** gif the
+    block's own comment names ("or a 0-byte gif"). Only the first was
+    modelled, so weakening the check from ``-s`` to ``-e`` left the whole
+    file green — and a 0-byte gif then reached real ffmpeg, which answers
+    "Invalid data found when processing input" and the run reports "ffmpeg
+    failed on the gif" (verified with the recipes' own blocks and real
+    ffmpeg 4.4.2: the empty-file case is exactly the misdiagnosis the check
+    exists to prevent).
     """
-    # Model ffmpeg's real contract: it fails on a missing input. The default
-    # stub writes its output unconditionally, which would hide the
-    # misdiagnosis behind a successful-looking encode.
+    # Model ffmpeg's real contract: it fails on a missing input *and* on an
+    # empty one. The default stub writes its output unconditionally, which
+    # would hide the misdiagnosis behind a successful-looking encode.
     ffmpeg_body = (
         'in=; out=\n'
         'while [ $# -gt 0 ]; do\n'
@@ -1283,8 +1303,12 @@ def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path):
         'done\n'
         '[ -f "$in" ] || { echo "ffmpeg: $in: No such file or directory" >&2; '
         'exit 1; }\n'
+        '[ -s "$in" ] || { echo "ffmpeg: $in: Invalid data found when '
+        'processing input" >&2; exit 1; }\n'
         'printf mp4 > "$out"\n')
-    r, mp4, gif = _run_render(name, tmp_path, agg_body="exit 0\n",
+    agg_body = ("exit 0\n" if agg_shape == "absent" else
+                'for a in "$@"; do last=$a; done\n: > "$last"\nexit 0\n')
+    r, mp4, gif = _run_render(name, tmp_path, agg_body=agg_body,
                               ffmpeg_body=ffmpeg_body)
 
     assert r.returncode != 0, (
@@ -1302,7 +1326,9 @@ def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", RECIPES)
-def test_render_says_when_there_is_no_cast(name, tmp_path):
+@pytest.mark.parametrize("cast_shape", ["absent", "empty"],
+                         ids=["no-file", "0-byte-file"])
+def test_render_says_when_there_is_no_cast(name, tmp_path, cast_shape):
     """A missing cast is not an `agg` problem, and must not send the worker there.
 
     The CLI recipe documents a `tee transcript.log` fallback for a host with
@@ -1310,14 +1336,57 @@ def test_render_says_when_there_is_no_cast(name, tmp_path):
     used to fail with "check 'agg' is installed and the cast is readable" for
     every failure, so a worker on that path went and installed a renderer it
     already had. The message has to name the actual state.
+
+    The check is ``test -s``, and its message says "the recording wrote
+    nothing" — so the 0-byte cast is one of the states it is for, and only the
+    absent file was modelled. Weakened to ``-e`` the file stayed green, and
+    the empty cast reached real ``agg`` 1.9.0, which answers "Error: empty
+    file" and the run reports "agg failed on the cast — is 'agg' installed?"
+    (verified with the recipes' own blocks) — the same misdiagnosis for a
+    recording that wrote nothing.
     """
-    r, mp4, gif = _run_render(name, tmp_path, with_cast=False)
+    r, mp4, gif = _run_render(
+        name, tmp_path,
+        with_cast=cast_shape != "absent",
+        cast_body="" if cast_shape == "empty" else None)
 
     assert r.returncode != 0, f"{name}: a render with no cast succeeded"
     assert "there is no cast to render" in r.stderr, r.stderr
     assert "is 'agg' installed" not in r.stderr, (
         f"{name}: the no-cast failure sends the worker to install a renderer")
     assert not mp4.exists()
+    assert not gif.exists()
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_an_encoder_that_writes_no_mp4(name, tmp_path):
+    """A renderer that reports success and writes nothing is a failure.
+
+    The block checks ``agg``'s and ``ffmpeg``'s exit statuses, and the mp4
+    last: the status proves the encode ran, and ``test -s`` catches an encoder
+    that exits 0 and writes nothing. That final check had no case at all for
+    either recording recipe (deleting it left the whole file green), and the
+    false success it guards is real: with the recipe's own block, a stub
+    ``ffmpeg`` that exits 0 after creating its output leaves a **0-byte**
+    ``recording.mp4`` and the block exits **0** — an empty video the manifest
+    and the report present as this run's recording. The web-UI finalize step
+    has the same check and its own case
+    (``test_web_ui_transcode_that_writes_nothing_leaves_no_mp4``); this is the
+    recording recipes' counterpart.
+    """
+    r, mp4, gif = _run_render(name, tmp_path, ffmpeg_body=(
+        'for a in "$@"; do last=$a; done\n: > "$last"\nexit 0\n'))
+
+    assert r.returncode != 0, (
+        f"{name}: a render whose encoder wrote no mp4 was reported as a "
+        "successful render")
+    assert "render produced no mp4" in r.stderr, r.stderr
+    assert "ffmpeg wrote no mp4" in r.stderr, (
+        f"{name}: the failure does not name the stage that wrote nothing: "
+        + r.stderr)
+    assert not mp4.exists(), (
+        f"{name}: the empty mp4 is left behind for the manifest to present as "
+        "this run's video")
     assert not gif.exists()
 
 
@@ -1634,7 +1703,9 @@ def test_web_ui_finalize_transcodes_when_capdir_is_set(tmp_path):
         "the finalize step keeps the webm although the mp4 exists")
 
 
-def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path):
+@pytest.mark.parametrize("webm_shape", ["absent", "empty"],
+                         ids=["no-file", "0-byte-file"])
+def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path, webm_shape):
     """A missing webm is not an ffmpeg problem, and must not send the worker there.
 
     The driver block checks the driver's exit status (R18), but a driver that
@@ -1644,12 +1715,21 @@ def test_web_ui_finalize_says_when_there_is_no_webm(tmp_path):
     mp4 — ffmpeg failed on the driver's webm" (verified live), which points at
     the encoder: the same misdiagnosis R12 fixed for a missing cast. The stale
     mp4 must still go, so a failed run cannot present the previous run's video.
+
+    The check is ``test -s``, so a **0-byte** webm is one of the states it is
+    for, and only the absent file was modelled — the same gap the recording
+    recipes' cast and gif checks had. Weakened to ``-e`` the file stayed
+    green, and real ffmpeg answers "EBML header parsing failed … Invalid data
+    found when processing input" for the empty file, which the step reports as
+    a failed transcode of the driver's webm.
     """
     block = _web_ui_finalize_block()
 
     capdir = tmp_path / "cap"
     capdir.mkdir()
     (capdir / "recording.mp4").write_bytes(b"an earlier run's video")
+    if webm_shape == "empty":
+        (capdir / "recording.webm").write_bytes(b"")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     called = tmp_path / "ffmpeg-called"
@@ -4334,6 +4414,41 @@ class TestCaptureFlowExecution:
             "refusing a capture directory it cannot create, so a worker "
             "pasting an unusable path kills a concurrent capture's recorder: "
             + calls_text)
+
+    def test_cli_preamble_refuses_an_uncreatable_capture_dir(self, tmp_path):
+        """The preamble is a paste of its own, and its `mkdir` has to refuse too.
+
+        ``cli-recording.md`` opens the Capture section with a block that
+        creates and clears the capture directory "before any of the forms
+        below", and the no-TTY scaffold repeats it for a worker who pastes the
+        scaffold whole. ``test_capture_dir_that_cannot_be_created_is_reported``
+        runs the *scaffold*, so weakening the preamble's guard to ``|| true``
+        left the whole file green — the preamble is the block a worker
+        following the recipe top-down pastes, and without the guard the run
+        goes on to fail as "asciinema wrote no cast" (the misdiagnosis R15
+        fixed for the scaffold). Run the preamble itself: it must stop with
+        "could not create" and create nothing.
+        """
+        text = _recipe_text("cli-recording.md")
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        preamble = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory")
+        capture = blocker / "cap"
+        block = (preamble.replace("<capture-dir>", str(capture))
+                          .replace("<short-name>", "run"))
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        _stub_tool(bindir, "tmux", "exit 1\n")
+        env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
+        r = subprocess.run(["bash"], input=block, env=env,
+                           capture_output=True, text=True, timeout=60)
+
+        assert r.returncode != 0, (
+            "the preamble accepted a capture directory it cannot create, so "
+            "every form below records into a path that is not there")
+        assert "could not create" in r.stderr, r.stderr
+        assert not capture.exists()
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_capture_dir_must_be_absolute(self, name, tmp_path):
