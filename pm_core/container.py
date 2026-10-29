@@ -365,6 +365,23 @@ def container_preflight_error() -> str | None:
     return None if ok else problem
 
 
+def container_retry_remedy(first_step: str) -> str:
+    """The shared ``To retry:`` block for container-mode launch errors.
+
+    Every fail-closed container launch offers the same two remedies: fix the
+    runtime and retry, or deliberately give up the isolation with
+    ``pm container disable``.  *first_step* is the situation-specific half of
+    the first bullet (which runtime check to fix).  Keeping this in one place
+    stops the messages on the different launch paths from drifting apart.
+    """
+    return (
+        "To retry:\n"
+        f"  - {first_step}; or\n"
+        "  - if host execution is intended, disable container mode "
+        "explicitly with 'pm container disable'."
+    )
+
+
 def container_unavailable_message(problem: str) -> str:
     """Actionable error for a container-mode launch blocked by the runtime.
 
@@ -380,11 +397,9 @@ def container_unavailable_message(problem: str) -> str:
         f"Cause: {problem}\n\n"
         "Container mode is an execution boundary, not a best-effort "
         "preference; pm will not silently run this agent on the host.\n\n"
-        "To retry:\n"
-        f"  - start or install the '{runtime}' container runtime and verify "
-        f"that '{runtime} info' succeeds, then retry this launch; or\n"
-        "  - if host execution is intended, disable container mode "
-        "explicitly with 'pm container disable'."
+        + container_retry_remedy(
+            f"start or install the '{runtime}' container runtime and verify "
+            f"that '{runtime} info' succeeds, then retry this launch")
     )
 
 

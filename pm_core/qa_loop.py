@@ -2736,11 +2736,9 @@ def _launch_scenarios_in_containers(
             "QA scenario could not be created, so the run was stopped "
             "instead of launching on the host.\n\n"
             f"Cause: {details}\n\n"
-            "To retry:\n"
-            "  - fix the container runtime/image (check 'pm container "
-            "status'), then retry QA; or\n"
-            "  - if host execution is intended, disable container mode "
-            "explicitly with 'pm container disable'."
+            + container_mod.container_retry_remedy(
+                "fix the container runtime/image (check 'pm container "
+                "status'), then retry QA")
         )
 
     # Write status with window names so the dashboard is navigable
@@ -2961,8 +2959,8 @@ def _relaunch_scenario_window(
                 f"Scenario {scenario.index} has no container to relaunch. "
                 "Container mode is enabled, so the worker will not be "
                 "relaunched on the host.\n\n"
-                "Retry QA after fixing the container runtime, or disable "
-                "container mode explicitly with 'pm container disable'."
+                + container_mod.container_retry_remedy(
+                    "fix the container runtime, then retry QA")
             )
         try:
             container_running = container_mod.container_is_running(
@@ -2975,8 +2973,8 @@ def _relaunch_scenario_window(
                 f"{scenario.index} is no longer running. Container mode is "
                 "enabled, so the worker will not be relaunched on the "
                 "host.\n\n"
-                "Retry QA after fixing the container runtime, or disable "
-                "container mode explicitly with 'pm container disable'."
+                + container_mod.container_retry_remedy(
+                    "fix the container runtime, then retry QA")
             )
 
     # New transcript for the relaunched session (old one is stale)
@@ -5515,8 +5513,13 @@ def _resume_qa_sync(
             _log.error("QA resume aborted for %s: container mode was "
                        "requested but the runtime is unavailable (%s)",
                        state.pr_id, _runtime_problem)
-            message = container_unavailable_message(_runtime_problem)
-            result = _abort(message, error=message)
+            # One-line summary for the TUI log; the full cause + remedy
+            # stays in ``_error`` for the status file and the QA note,
+            # matching the fresh-run preflight in ``_run_qa_sync``.
+            result = _abort(
+                "Container mode is enabled but the container runtime is "
+                f"unavailable: {_runtime_problem}",
+                error=container_unavailable_message(_runtime_problem))
             # Publish the failure so a TUI restart sees a completed ERROR
             # result and clears the snapshot instead of re-adopting the
             # same unusable container run forever.

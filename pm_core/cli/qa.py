@@ -564,14 +564,35 @@ End with a summary of which steps work and which don't, then one of:
         session_tag = session.removeprefix("pm-") if session else None
         cname = f"{container_mod.CONTAINER_PREFIX}qa-debug-{instruction_id}-{debug_id}"
 
-        container_mod.create_qa_container(
-            name=cname,
-            config=config,
-            workdir=clone_path,
-            scratch_path=scratch_path,
-            allowed_push_branch=base_branch,
-            session_tag=session_tag,
-        )
+        try:
+            container_mod.create_qa_container(
+                name=cname,
+                config=config,
+                workdir=clone_path,
+                scratch_path=scratch_path,
+                allowed_push_branch=base_branch,
+                session_tag=session_tag,
+            )
+        except container_mod.ContainerError as exc:
+            # Container mode is an execution boundary: report the
+            # infrastructure failure instead of dropping into the host
+            # branch (or leaking a traceback) below.  Release only this
+            # attempt's own container (a setup timeout can leave a
+            # half-configured one behind); nothing else is touched.
+            try:
+                container_mod.remove_container(cname)
+            except Exception:
+                pass
+            click.echo(
+                "Container mode is enabled, but the QA debug container "
+                f"could not be created: {exc}\n\n"
+                "No session was launched on the host.\n\n"
+                + container_mod.container_retry_remedy(
+                    "fix the container runtime/image (check 'pm container "
+                    "status'), then retry"),
+                err=True,
+            )
+            raise SystemExit(1)
 
         claude_cmd = build_claude_shell_cmd(
             prompt=prompt,

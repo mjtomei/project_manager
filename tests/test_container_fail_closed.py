@@ -69,12 +69,13 @@ def _execution_only_state(qa_workdir: Path) -> QALoopState:
 
 
 def _run_execution_only(tmp_path, *, container_enabled: bool,
-                        runtime_available: bool):
+                        runtime_available: bool,
+                        container_launch_error: BaseException | None = None):
     """Drive run_qa_sync's execution-only path with launch spies."""
     pr, data, workdir, qa_workdir = _pm_fixture(tmp_path)
     state = _execution_only_state(qa_workdir)
     host_launch = MagicMock()
-    container_launch = MagicMock()
+    container_launch = MagicMock(side_effect=container_launch_error)
     scenario0 = MagicMock()
     finalize = MagicMock(return_value=state)
     with ExitStack() as stack:
@@ -149,6 +150,80 @@ def test_run_qa_sync_host_execution_when_container_disabled(tmp_path, home):
     container_launch.assert_not_called()
     finalize.assert_called_once()
     assert state.latest_verdict != "ERROR"
+
+
+def test_run_qa_sync_reports_error_when_container_launch_raises(
+        tmp_path, home):
+    """A create/setup failure during the initial launch stops the run with
+    ERROR: no host launch, no finalize pane, no invented scenario verdict."""
+    from pm_core.qa_loop import ContainerLaunchError
+
+    state, host_launch, container_launch, scenario0, finalize = (
+        _run_execution_only(
+            tmp_path, container_enabled=True, runtime_available=True,
+            container_launch_error=ContainerLaunchError(
+                "image not found; refusing to launch on the host")))
+
+    host_launch.assert_not_called()
+    finalize.assert_not_called()
+    assert state.running is False
+    assert state.latest_verdict == "ERROR"
+    # latest_output stays a single TUI log line; the full cause+remedy is
+    # preserved in _error (and the status file).
+    assert "\n" not in state.latest_output
+    assert state.latest_output.startswith("Container launch failed:")
+    assert "refusing to launch on the host" in state._error
+    assert state.scenario_verdicts == {}
+    # The infrastructure failure is published, not dropped.
+    status = (tmp_path / "qa" / "qa_status.json").read_text()
+    assert '"overall": "ERROR"' in status
+
+
+def test_queued_container_create_failure_raises_from_poll(tmp_path, home):
+    """A queued scenario whose container cannot be created must raise out of
+    the polling loop (so _execute_and_finalize publishes ERROR) instead of
+    being recorded as an invented INPUT_REQUIRED verdict."""
+    from pm_core.qa_loop import ContainerLaunchError, _poll_tmux_verdicts
+
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    queued = QAScenario(index=2, title="S2", focus="f")
+    state = QALoopState(pr_id="pr-c", planning_phase=False)
+    state.qa_workdir = str(tmp_path)
+    state.session_tag = "s"
+    state.scenarios = [queued]
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=SimpleNamespace(
+                                      model=None, provider=None, effort=None)))
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        create = stack.enter_context(patch.object(
+            container_mod, "create_qa_container",
+            side_effect=container_mod.ContainerError("image not found")))
+        remove = stack.enter_context(
+            patch.object(container_mod, "remove_container"))
+        new_window = stack.enter_context(patch(
+            "pm_core.tmux.new_window_get_pane", return_value="%1"))
+        stack.enter_context(patch("pm_core.qa_loop._write_status_file"))
+
+        with pytest.raises(ContainerLaunchError):
+            _poll_tmux_verdicts(
+                state, {}, {"id": "pr-c", "branch": "b"}, "pm-s",
+                str(tmp_path), tmp_path / "qa_status.json", lambda *a: None,
+                queued_scenarios=[queued], use_containers=True,
+            )
+
+    create.assert_called_once()  # the container path ran, not the host path
+    # Only the failed attempt's exact container is released.
+    assert remove.call_count == 1
+    new_window.assert_not_called()
+    assert state.scenario_verdicts == {}
+    assert state.scenarios == [queued]  # the queue swap was unwound
 
 
 def test_container_create_failure_raises_instead_of_host_launch(tmp_path, home):
@@ -271,6 +346,46 @@ def test_relaunch_refuses_when_container_lost(tmp_path, home):
     new_window.assert_not_called()
 
 
+def test_relaunch_reuses_the_running_container(tmp_path, home):
+    """Healthy control: a container run whose worker pane died but whose
+    container is still alive relaunches via the container (exec) command —
+    it does not host-launch and does not downgrade the run."""
+    state = QALoopState(pr_id="pr-c")
+    state.qa_workdir = str(tmp_path)
+    scenario = QAScenario(index=1, title="S1", focus="f",
+                          container_name="pm-x", worktree_path=str(tmp_path))
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=SimpleNamespace(
+                                      model=None, provider=None, effort=None)))
+        stack.enter_context(patch.object(container_mod,
+                                         "container_is_running",
+                                         return_value=True))
+        build = stack.enter_context(patch(
+            "pm_core.qa_loop._build_scenario_run_cmd",
+            return_value=("EXEC-CMD", "/clone")))
+        new_window = stack.enter_context(patch(
+            "pm_core.tmux.new_window_get_pane", return_value="%1"))
+        stack.enter_context(patch("pm_core.tmux.pane_window_id",
+                                  return_value=None))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.session_id_from_transcript",
+            return_value="sid"))
+        relaunched = qa_loop._relaunch_scenario_window(
+            scenario, state, {}, {"id": "pr-c", "branch": "b"},
+            "pm-s", str(tmp_path), use_containers=True)
+
+    assert relaunched is True
+    new_window.assert_called_once()
+    # The container shapes the prompt without a host pm session, and the
+    # pane runs the container command.
+    assert build.call_args.kwargs["session"] is None
+    assert new_window.call_args.args[2] == "EXEC-CMD"
+    assert scenario.container_name == "pm-x"
+    assert scenario.pane_id == "%1"
+
+
 def test_resume_fails_closed_when_runtime_unavailable(tmp_path, home):
     pr, data, workdir, qa_workdir = _pm_fixture(tmp_path)
     state = _execution_only_state(qa_workdir)
@@ -345,6 +460,12 @@ def test_runtime_status_reports_the_cause():
                    side_effect=subprocess.TimeoutExpired("podman info", 10)):
             ok, problem = container_mod._runtime_status()
         assert ok is False and "timed out" in problem
+
+        with patch("subprocess.run",
+                   side_effect=OSError("permission denied")):
+            ok, problem = container_mod._runtime_status()
+        assert ok is False
+        assert "could not run" in problem and "permission denied" in problem
 
         with patch("subprocess.run") as run:
             run.return_value = MagicMock(returncode=1,

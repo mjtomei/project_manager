@@ -147,6 +147,11 @@ start/install the runtime and verify `<runtime> info`, **or** deliberately
 `pm container disable`. It must state that no agent was launched on the host
 because container mode is an execution boundary.
 
+The `To retry:` block is factored into
+`container_retry_remedy(first_step)` so the four fail-closed messages (runtime
+preflight, container create failure, relaunch with no container, relaunch with
+a lost container) cannot drift apart; each passes only its own first bullet.
+
 ### R2 — `_run_qa_sync` aborts before any window/agent when the runtime is unusable
 
 Replace P1. Keep `use_containers = is_container_mode_enabled()` (the
@@ -369,3 +374,25 @@ If the full CLI repro is blocked (tmux/pm-session plumbing inside this impl
 container), fall back to a direct `_run_qa_sync`/`_relaunch_scenario_window`
 driver script that uses the same fakes and still asserts absence of host
 launch, and note the substitution in the capture manifest.
+
+## Review iteration (f951 i1)
+
+The implementation matched this spec. Additions made during review:
+
+- `container.container_retry_remedy(first_step)` — one shared `To retry:`
+  block for all four fail-closed messages (R1/R3/R4), so the remedy text
+  cannot diverge per path. `container_unavailable_message` now composes it.
+- `_resume_qa_sync`'s container preflight abort now keeps `latest_output` a
+  single line (`Container mode is enabled but the container runtime is
+  unavailable: <cause>`) and puts the full cause+remedy in `state._error`,
+  matching the fresh-run preflight in `_run_qa_sync` (R2) and keeping the TUI
+  log line readable.
+- `pm qa debug` (R6) now also converts a `create_qa_container` failure after
+  the preflight into a clear message + `SystemExit(1)` instead of a traceback,
+  releasing only its own `cname`. Still no host launch.
+- Tests added: `_run_qa_sync`'s `ContainerLaunchError` handler (ERROR + status
+  file + no finalize); a queued scenario create failure raising out of
+  `_poll_tmux_verdicts` (proves the queued path never becomes INPUT_REQUIRED);
+  the healthy relaunch control (running container → exec command, `session=None`);
+  and the `OSError` branch of `_runtime_status`.
+
