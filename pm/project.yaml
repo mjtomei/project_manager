@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T10:48:45.693863+00:00'
+  updated_at: '2026-10-29T11:21:23.621235+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29909,6 +29909,36 @@ prs:
       vfr.'
     created_at: '2026-10-29T10:48:45Z'
     last_edited: '2026-10-29T10:48:45Z'
+  - id: note-0d27572
+    text: 'QA S38 PASS (held run keeps shared surfaces live; viewing never duplicates).
+      All four stories verified live on an isolated HOME + private tmux socket with
+      fake-claude: (1) A held on INPUT_REQUIRED (dashboard "1 Basic functionality
+      INPUT_REQUIRED (waiting)", "QA INPUT_REQUIRED for <A> — waiting for input in
+      the scenario worker pane") while a separate `pm qa run direct-qa-b --pr <B>`
+      in a session shell pane finished PASS and the TUI adopted it with no restart
+      — "Recovered completed QA from disk: pr-ee11bbd → PASS" 2s after completion,
+      runtime actions.qa done/PASS, exactly one QA PASS note, picker row "[open] [done
+      PASS]"; A untouched (dashboard still (waiting), same worker pids, no new qa-<A>
+      window, one note, no B verdict in its runtime). (2) Plain `t` on A and on B
+      each logged "Focused QA window for <pr>" and moved the client to the existing
+      qa window with no second run (window list + pane pids unchanged, hold intact).
+      (3) `zz t` on the held run logged "QA loop stopping for <A> (finishing current
+      run)..." then "QA complete: INPUT_REQUIRED [finalize: FINALIZE_DONE]" in 3s
+      — no STOPPED, no NO_VERDICT, no second note, runtime done/INPUT_REQUIRED, worker
+      pane left open, PR stayed qa. (4) `z t` replaced the stale windows and ran planner→concretizer→worker
+      PASS→verifier VERIFIED→finalizer FINALIZE_DONE to "Overall: PASS" + "QA PASS
+      for <A>", no sign-off window, PR stayed qa. Zero NO_VERDICT/recovery/exhaustion
+      lines in the whole session log. Harness notes for a re-run: (a) `tmux send-keys
+      -t <pane> C-b P` does NOT trigger prefix+P — send-keys bypasses the client prefix
+      table and types literal ^BP into the pane; write the prefix to the attached
+      client tty instead (`printf "\002P" > /dev/pts/N`) or run `pm _popup-show picker
+      <client> <session>`; (b) scenario numbering continues per PR, so a fresh start
+      after a stop uses qa-<pr>-s2, not -s1; (c) agg is absent from this container
+      — v1.9.0 aarch64 from the upstream release works, and this ffmpeg 4.4.2 needs
+      -vsync vfr not -fps_mode; (d) unset PM_HOST_HOME and use a fresh HOME or pm
+      installs hooks into the real user home.'
+    created_at: '2026-10-29T11:21:23Z'
+    last_edited: '2026-10-29T11:21:23Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
