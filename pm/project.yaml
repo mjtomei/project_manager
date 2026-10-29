@@ -42953,6 +42953,37 @@ prs:
       sticky line (h1b/c1b rerun).'
     created_at: '2026-10-29T13:44:32Z'
     last_edited: '2026-10-29T13:44:32Z'
+  - id: note-4e4886c
+    text: 'S139 refine: test HEAD 701e5a84 (code 44ea3dd7) against control 74cebe25;
+      for host-mode windows they differ only in which windows kill_windows_of_run
+      matches. The reopened awaiting:qa lasts about 0.1 s (_OWED_REQA_ARM_DELAY),
+      so a 0.5 s project.yaml sampler can miss it. The evidence is the debug-log order
+      (reopened, then "owed REQA: starting the QA run") plus exactly one new claim.
+      The reopen, the busy-lock warning, "died with this process" and "Killing QA
+      window" lines are logged only (pm log grep, or ~/.pm/debug); they never show
+      in the TUI. The pr-f1d825b finalize-window ticks (advance before the TUI PASS
+      line, about 15 "(driven elsewhere)" during an owed re-run) are expected on both
+      trees per RQ57 Ticks. /scratch is empty and agg is not installed (v1.9.0 agg-aarch64-unknown-linux-gnu).'
+    created_at: '2026-10-29T12:59:10Z'
+    last_edited: '2026-10-29T12:59:10Z'
+  - id: note-15d7475
+    text: 'QA S139 (2026-10-29, host, all fake-claude, HEAD 701e5a84 (code 44ea3dd7)
+      vs control 74cebe25 side by side, fresh setups/PRs per story; captures /pm-captures/scenarios/139/README.md
+      + analysis.txt, 38/38 mp4): PASS, no code change. RQ57/RQ56 held with the decided
+      Thens on both trees, identically: (1) t run cut off by a plain restart: died
+      + Killing qa-A-s0, qa-A kept, one sticky cut-off line, 2nd restart silent, t
+      focuses, z t one run/one window set; tick advance 30 s before the TUI PASS (pr-f1d825b,
+      allowed). (2) breadcrumb restart: died x2, Killing x2, Auto-start QA B, resumed,
+      then one cut-off line for C only; B restarted once. (3) owed REQA: died, Killing,
+      reopened, starting (one new claim), one re-run qa-D-s0/qa-D/qa-D-s2, 15 (driven
+      elsewhere) ticks from the overall=PASS write to run end, one advance. (3b) busy
+      pm edit: lock warning, awaiting unset, one cut-off line, nothing restarts for
+      250 s, z t one run. (4) clone 1 restart beside clone-2 t run, pm qa run, tick
+      qa-run-bg run: no died/Killing, no cut-off, ids unchanged, each run finishes
+      once, picker [working] 11/11. 44ea3dd7 changes nothing on host. Push proxy belongs
+      to s-138 (fetch via /usr/bin/git up to date).'
+    created_at: '2026-10-29T13:36:33Z'
+    last_edited: '2026-10-29T13:36:33Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
