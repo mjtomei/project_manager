@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T11:55:44.055765+00:00'
+  updated_at: '2026-10-29T12:39:15.952185+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37003,6 +37003,53 @@ prs:
       pm_core/ change; the dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T11:55:27Z'
     last_edited: '2026-10-29T11:55:44Z'
+  - id: note-bd74b08
+    text: 'Review loop ebd1 i6: one leftover in the kept recipe scope, the PR own
+      class (stale state passing as fresh evidence) — and no product change. `manifest.md`
+      was the one produced file no step 0 cleared. All three recipes list it among
+      the files they produce (it is the document that says what the capture is: workdir,
+      the commands, the `## Files` list) and every other produced artifact is removed
+      before a run starts. Verified with each recipe own step-0 clear run verbatim
+      over a capture directory seeded with every produced artifact: `manifest.md`
+      is the only survivor (`driver.mjs` in the web-UI recipe is the other, and deliberately
+      so — it is the run input, not its evidence, and a retry drives the same one).
+      Both recording recipes capture blocks then run end to end with the previous
+      `manifest.md` and `recording.mp4` seeded and a failing recorder (`norec`): the
+      mp4 is gone and the manifest stays, its `## Files` naming `recording.cast` and
+      `recording.mp4`, neither of which exists — a manifest that disagrees with the
+      directory it describes, in the one file a reviewer reads to interpret the rest.
+      Fix: `manifest.md` joins each step-0 clear — tmux step 0, the CLI preamble and
+      scaffold (each block is pasted on its own), and the web-UI step-1 cleanup —
+      with the reason written out at each site and named in the produced-files lists.
+      Also corrected, same pass: `qa.md` R3 said the readiness/stop waits "clean up
+      (kills the recorder/session)", which is false for the CLI stop timeout — R21/R27
+      deliberately leave the recording running so the larger-bound re-run its own
+      message prescribes can be applied, and the recipe edge case says so; R3 now
+      says which failure tears down what, and R1/R2/R4 require the stale manifest
+      clear. Tests: `test_capture_section_clears_the_previous_manifest` (both recipes,
+      first block + scaffold), `test_a_failed_capture_leaves_no_previous_manifest`
+      (both recipes, executed), `test_web_ui_start_clears_a_previous_manifest` (executed
+      start block), the web-UI cleanup text case now requires `manifest.md`, and `test_web_ui_layer2_route_snapshots_are_bounded`
+      now also pins the SSE reader own `--max-time` (the block other request, an unbounded
+      stream whose best-effort `kill` is otherwise the only thing that stops it; removing
+      the bound fails the case). Six cases fail against the pre-fix recipes (checked
+      by restoring them in place, then restoring the post-fix copies) and pass on
+      the unmodified ones. File 200 pass; related suites (test_qa_artifact_web_ui_recording,
+      test_qa_instructions, test_qa_loop, test_markdown_render) 388 together with
+      the file; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q
+      --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 4594 passed, 1 skipped, 92 deselected, 0 failed (408.71 s, with the pytest<9
+      and markdown deps on the scratch path). Nominal flows re-run live in this container
+      after the edit with real tmux 3.2a + asciinema 2.1.0: the tmux recipe rc 0 (a
+      ~3 KB cast, recorder.status 0, 35-byte transcript, previous manifest and mp4
+      gone, no recorder session left) and the CLI scaffold rc 0 (a 162-byte cast holding
+      the recorded command, status 0, previous manifest and mp4 gone). Evidence: $(pm
+      qa captures-path pr-b19db15)/review-ebd1-i6/ (probe.log, probe-pre-fix.log,
+      mutation-check.log, live-nominal.log, README.md, scripts/). impl.md R47 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T12:39:15Z'
+    last_edited: '2026-10-29T12:39:15Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

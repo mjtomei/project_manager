@@ -36,7 +36,9 @@ names):
   came from, the exact commands that produced it, the pre-fix/post-fix
   state demonstrated, and any external setup the recording assumes.
   Include a `## Files` section listing every non-default file the
-  capture produced with a one-line description each.
+  capture produced with a one-line description each. A previous run's
+  copy is cleared in step 0 like every other file above, so the manifest
+  in the directory is always this run's.
 
 ## Capture
 
@@ -89,7 +91,13 @@ a leftover one would let a recorder that was torn down before it finished
 pass that check. `recorder-stderr.log` and `recorder-pane.log` are this
 run's failure evidence — asciinema's own diagnostics, and the pane's last
 screen when a wait gives up or the driving step's send fails — so an earlier
-run's copies go too.
+run's copies go too. The previous run's `manifest.md` goes with them, and for
+the same reason one level up: it is the document that says what this capture
+is (workdir, commands, `## Files`), so a re-run that fails before the worker
+writes a new one would leave a manifest describing the *previous* run — and
+naming a cast and a video that step 0 has just deleted. A manifest that
+disagrees with the directory is worse evidence than none, and every other
+file the flow writes is already cleared here.
 The render outputs go with them: the render step clears `recording.mp4` and
 the intermediate `recording.cast.gif` before it runs, but a capture that
 *fails* here exits before that step ever runs, so the previous run's video
@@ -153,11 +161,17 @@ tmux kill-session -t "=pm-recorder" 2>/dev/null || true
 rm -f <capture-dir>/recording.cast <capture-dir>/transcript.log \
       <capture-dir>/recording.mp4 <capture-dir>/recording.cast.gif \
       <capture-dir>/recorder.status <capture-dir>/recorder-stderr.log \
-      <capture-dir>/recorder-pane.log
+      <capture-dir>/recorder-pane.log <capture-dir>/manifest.md
 # The mp4 and the intermediate gif are here, not only in the render step: a
 # capture that fails below exits before that step runs, so the previous run's
 # video would otherwise be the only recording this capture directory holds —
 # a stale artifact the manifest and the report would present as this run's.
+# The manifest itself goes too: it is what *says* what this capture is
+# (workdir, commands, `## Files`), so a re-run that fails before a new one is
+# written leaves the previous run's manifest describing files this `rm` just
+# deleted — the manifest and the directory disagreeing is the same
+# stale-evidence bug as a leftover cast, in the document that interprets the
+# rest.
 # The gif's name is `recording.cast.gif`, not `recording.gif`: the render block
 # holds the cast in `cast=<capture-dir>/recording.cast` and renders to
 # `"$cast.gif"`, so a cleanup aimed at `recording.gif` would remove nothing

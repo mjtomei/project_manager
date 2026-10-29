@@ -35,7 +35,9 @@ substitutes the actual captures directory for `<capture-dir>`):
 - `manifest.md` — frontmatter + prose: workdir, the exact command(s)
   recorded, what the recording demonstrates, pre/post-fix state if
   relevant. Include a `## Files` section listing every non-default
-  file the capture produced with a one-line description each.
+  file the capture produced with a one-line description each. A previous
+  run's copy is cleared with the rest before recording, so the manifest in
+  the directory is always this run's.
 
 ## Capture
 
@@ -72,7 +74,8 @@ rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/recording.cast.gif \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
-      <capture-dir>/<short-name>/recorder-pane.log
+      <capture-dir>/<short-name>/recorder-pane.log \
+      <capture-dir>/<short-name>/manifest.md
 ```
 
 `asciinema rec` reports "asciicast saved" and exits 0 even when the
@@ -101,7 +104,11 @@ failure. The render outputs (`recording.mp4` and the intermediate
 render step clears the video pair before it runs, but a capture that *fails*
 exits before that step ever runs, so the previous run's video would
 otherwise be the only recording in the capture directory — a stale artifact
-the manifest and the report would present as this run's evidence.
+the manifest and the report would present as this run's evidence. The
+previous run's `manifest.md` goes with them for the same reason one level up:
+it is the document that says what this capture is, so a re-run that fails
+before the worker writes a new one would leave a manifest describing the
+previous run and naming a cast and a video that were just deleted.
 
 ### One command, end-to-end
 
@@ -224,7 +231,14 @@ rm -f <capture-dir>/<short-name>/recording.cast \
       <capture-dir>/<short-name>/recording.cast.gif \
       <capture-dir>/<short-name>/recorder.status \
       <capture-dir>/<short-name>/recorder-stderr.log \
-      <capture-dir>/<short-name>/recorder-pane.log
+      <capture-dir>/<short-name>/recorder-pane.log \
+      <capture-dir>/<short-name>/manifest.md
+# The manifest goes with the rest: it is the document that says what this
+# capture is (workdir, the recorded command, `## Files`), so a re-run that
+# fails before a new one is written would leave the previous run's manifest
+# describing a cast and a video this `rm` just deleted. The manifest and the
+# directory disagreeing is the same stale-evidence bug as a leftover cast, in
+# the document that interprets the rest.
 # Failure paths below that tear the scaffold server down save the pane's last
 # screen into the capture dir first — otherwise the messages that point at the
 # pane point at evidence that no longer exists. The stop step's two failures

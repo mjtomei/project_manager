@@ -385,6 +385,33 @@ class TestRecipes:
             f"{name}: the cleanup names `recording.gif`, which nothing writes "
             f"— the intermediate is `{intermediate}`")
 
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_capture_section_clears_the_previous_manifest(self, name):
+        """The manifest is the one produced file the cleanup did not clear.
+
+        It is the document that says what the capture is — workdir, the
+        commands, the ``## Files`` list — so a re-run that fails before the
+        worker writes a new one leaves the previous run's manifest in the
+        capture directory describing a cast and a video that the step-0
+        ``rm`` has just deleted. A manifest that disagrees with the directory
+        is the same "stale evidence presented as this run's" bug as a leftover
+        cast, in the file that interprets all the rest (and the QA report
+        enumerates the capture directory). Every other artifact is cleared
+        here already; ``driver.mjs`` in the web-UI recipe is the counterpart
+        that is deliberately kept, because it is the run's input, not its
+        evidence.
+        """
+        text = _recipe_text(name)
+        section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
+        first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
+        assert "manifest.md" in _statement(first_block, "rm -f "), (
+            f"{name}: the first capture block keeps an earlier run's "
+            "manifest.md, so a re-run that fails before a new one is written "
+            "leaves a manifest describing the previous run")
+        assert "manifest.md" in _statement(_scaffold_block(text), "rm -f "), (
+            f"{name}: the scaffold's own cleanup keeps an earlier run's "
+            "manifest.md, so a scaffold-only paste has the same hole")
+
     def test_cli_capture_section_clears_a_stale_transcript(self):
         """The `tee` fallback's transcript must not survive into a later run.
 
@@ -1888,6 +1915,31 @@ def test_web_ui_start_records_the_server_pid(tmp_path):
     assert pidfile.read_text().strip().isdigit(), pidfile.read_text()
 
 
+def test_web_ui_start_clears_a_previous_manifest(tmp_path):
+    """Step 1 must not leave the previous run's manifest describing this run.
+
+    The manifest is the document that says what the capture is (workdir, the
+    app URL, ``## Files``). Seeded with the previous run's copy, a start step
+    that does not clear it leaves the directory holding a manifest whose file
+    list names the video, trace and logs this same step just deleted — the
+    manifest-and-directory disagreement the produced-files rules exist to
+    prevent, in the file that interprets the rest. ``driver.mjs`` is the one
+    file the cleanup keeps on purpose: it is the run's input, not its
+    evidence.
+    """
+    capdir = _web_ui_capdir(tmp_path)
+    capdir.mkdir(parents=True)
+    (capdir / "manifest.md").write_text("previous run's manifest\n")
+
+    r, _launched = _run_web_ui_start("ok", tmp_path)
+
+    assert r.returncode == 0, r.stderr
+    assert not (capdir / "manifest.md").exists(), (
+        "step 1 kept the previous run's manifest.md, so a run that fails "
+        "before the worker writes a new one leaves a manifest describing the "
+        "previous run and naming files this step deleted")
+
+
 def test_web_ui_start_clears_a_stale_server_pid(tmp_path):
     """A stale pid would let the teardown signal whatever reused it."""
     capdir = _web_ui_capdir(tmp_path)
@@ -2722,7 +2774,7 @@ def test_web_ui_clears_a_previous_video():
         "transcodes the previous run into this run's recording")
     for artifact in ("*.webm", "recording.mp4", "trace.zip",
                      "dom.html", "http.log", "sse.log", "server.pid",
-                     "*.png"):
+                     "manifest.md", "*.png"):
         assert artifact in clear, (
             f"web-ui recipe leaves a previous run's {artifact} in place, so a "
             "failed driver presents the earlier run's evidence as this run's")
@@ -2884,6 +2936,17 @@ def test_web_ui_layer2_route_snapshots_are_bounded():
     loop = block[block.index("for route in"):block.index("\n} > ")]
     assert "--max-time" in loop and "--connect-timeout" in loop, (
         "the protocol block's route snapshots are unbounded: " + loop)
+    # The SSE reader is the block's other request, and it is an *unbounded*
+    # stream (`curl -N`): the `kill` after the trigger is best-effort
+    # (`2>/dev/null || true`), so without its own deadline a failed kill
+    # leaves an orphan curl writing into `sse.log` for the rest of the
+    # session — the same unbounded request the route snapshots were bounded
+    # for, one line over.
+    sse = next(ln for ln in block.splitlines()
+               if ln.lstrip().startswith("curl") and "-N" in ln)
+    assert "--max-time" in sse, (
+        "the SSE reader is unbounded, so a failed kill leaves it running: "
+        + sse)
 
 
 def test_web_ui_layer2_block_writes_both_logs(tmp_path):
@@ -3321,6 +3384,32 @@ class TestCaptureFlowExecution:
             f"{name}: a failed capture left the previous run's "
             f"{intermediate} (the intermediate the render block writes) "
             "behind")
+
+    @pytest.mark.parametrize("name", RECIPES)
+    def test_a_failed_capture_leaves_no_previous_manifest(self, name, tmp_path):
+        """The stale manifest is what makes the stale files look deliberate.
+
+        Seeded with the previous run's ``manifest.md`` and a previous video,
+        and forced to fail at the recorder, the directory ends with the video
+        gone (step 0) — but before this case's fix the previous run's manifest
+        was still there, its ``## Files`` section naming the cast and the mp4
+        that had just been deleted. That is the manifest-and-directory
+        disagreement the produced-files rules exist to prevent, in the one
+        file a reviewer reads to interpret the rest.
+        """
+        raw = _scaffold_block(_recipe_text(name))
+        r, cast = _run_block(
+            raw, "norec", tmp_path, target=True,
+            files={"manifest.md": "previous run's manifest\n",
+                   "recording.mp4": "previous video"})
+        assert r.returncode != 0, r.stderr
+        cap = cast.parent
+        assert not (cap / "recording.mp4").exists(), (
+            f"{name}: the fixture did not exercise the stale-video cleanup")
+        assert not (cap / "manifest.md").exists(), (
+            f"{name}: a failed capture left the previous run's manifest.md in "
+            "the capture directory, where it describes a run whose cast and "
+            "video this run just deleted")
 
     def test_cli_failed_capture_leaves_no_previous_transcript(self, tmp_path):
         """The `tee` fallback's transcript must not outlive a later run.

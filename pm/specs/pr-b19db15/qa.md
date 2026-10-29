@@ -312,8 +312,10 @@ foreground render block,
   `recording.mp4`/`recording.cast.gif` from the earlier run in the capture
   directory — the render step's own cleanup never runs on that path, and the
   intermediate's real name is the one the render block writes (`$cast.gif`,
-  where `cast=…/recording.cast`) — and the earlier run's `transcript.log` is
-  cleared with them;
+  where `cast=…/recording.cast`) — and the earlier run's `transcript.log`
+  and `manifest.md` are cleared with them, so the manifest left in the
+  directory is this run's rather than a description of the run whose files
+  were just deleted;
 - `manifest.md` exists and its `## Files` section lists the produced files;
   on a host without asciinema the documented `| tee …` fallback writes
   `transcript.log` into the capture directory (not the worker's cwd), and the
@@ -365,30 +367,40 @@ session, stop the recorder, and render the cast,
   landing in the TUI as input (verified live both ways);
 - `recording.mp4` is fresh and H.264, and `manifest.md` lists the files; a
   capture that fails leaves no `recording.mp4`/`recording.cast.gif` from the
-  earlier run behind (the render step's cleanup never runs on that path), and
-  a host with no `ffmpeg` stops with "ffmpeg is not installed — the render
-  step needs it" instead of reporting the gif as failed.
+  earlier run behind (the render step's cleanup never runs on that path) and
+  no earlier run's `manifest.md` either (review loop ebd1 i6, R47), and a host
+  with no `ffmpeg` stops with "ffmpeg is not installed — the render step
+  needs it" instead of reporting the gif as failed.
 
 ### R3 — Recipe readiness and stop waits are bounded, and stale files are cleared
 
 **Given** a `pm session` that never appears (including with a leftover
 `pm-recorder` session already on the server), or a recorder that never exits,
 **When** the worker runs the recipe's readiness/stop wait,
-**Then** it exits within the stated deadline with an actionable message and
-cleans up (kills the recorder/session) instead of hanging or passing on the
-wrong session — and the number the message states is the number the code
-waits (tmux 60 s for the pm session and 30 s for the recorder readiness and
-the stop, the CLI 30 s, the web-UI 120 s; review loop ebd1 i2, R43), so a
-worker told "within 30s" is not looking at a 5 s wait; and
-**Given** a cast, transcript, recorder status, recorder session, or render
-output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
+**Then** it exits within the stated deadline with an actionable message
+instead of hanging or passing on the wrong session — and the number the
+message states is the number the code waits (tmux 60 s for the pm session and
+30 s for the recorder readiness and the stop, the CLI 30 s, the web-UI 120 s;
+review loop ebd1 i2, R43), so a worker told "within 30s" is not looking at a
+5 s wait. What each failure tears down differs, and the message says which:
+both readiness waits stop the recorder/session they started, and the tmux
+stop timeout kills the recorder it could not detach (the cast stops there and
+the run is not a recording) — while the CLI stop timeout deliberately leaves
+the recording *running*, because the larger-bound re-run its own message
+prescribes needs it, and killing it made that remedy impossible (R21/R27);
+and
+**Given** a cast, transcript, recorder status, recorder session, manifest, or
+render output (`recording.mp4`/`recording.cast.gif`) left by an earlier run,
 **When** the capture step starts, **Then** the stale files and session are
 cleared first, so the recorder does not abort with "recording already exists"
 and a duplicate session does not stop the run at "could not start the recorder
 session" (the start check reports that, so the run never reaches the readiness
 wait with the previous run's recorder in place), the new cast is this run's,
-the transcript holds only this run, and a capture that fails before the render
-step still leaves no earlier run's video in the capture directory.
+the transcript holds only this run, a capture that fails before the render
+step still leaves no earlier run's video in the capture directory, and the
+directory's `manifest.md` is this run's rather than the previous run's — a
+manifest naming files the step-0 clear just deleted is the same stale-evidence
+bug in the document that interprets the rest (review loop ebd1 i6, R47).
 
 ### R4 — The web-UI recipe's readiness wait is bounded and cleans up
 
@@ -557,8 +569,11 @@ step still leaves no earlier run's video in the capture directory.
   `http://localhost:8000` and record whatever answers there.
 - A web-UI driver fails before it produces its outputs in a capture directory
   that already holds them → step 1 clears the previous run's mp4, `*.webm`,
-  `trace.zip`, `dom.html`, `*.png`, `http.log`, `sse.log` and `server.pid`
-  before the app starts, and the driver step repeats the attempt-scoped
+  `trace.zip`, `dom.html`, `*.png`, `http.log`, `sse.log`, `server.pid` and
+  `manifest.md` (R47: the manifest is the document that says what the capture
+  is, so a stale one names files this step just deleted) before the app
+  starts — `driver.mjs` is the one file kept, because it is the run's input,
+  not its evidence — and the driver step repeats the attempt-scoped
   cleanup (`recording.mp4`, `*.webm`, `trace.zip`, `dom.html`, `*.png`) after
   its `cd`, so a failed run cannot present the earlier run's video, trace,
   screenshots or protocol logs as this run's evidence. The driver's own exit status is the

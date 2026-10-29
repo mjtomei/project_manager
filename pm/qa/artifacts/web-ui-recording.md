@@ -70,7 +70,9 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   which step 2 says not to finalize) — mention it in the manifest when it
   does.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
-  with a `## Files` section listing every file above.
+  with a `## Files` section listing every file above. A previous run's
+  copy is cleared in step 1 like the rest, so the manifest in the
+  directory is always this run's.
 
 ## Capture — Layer 1: rendered browser recording
 
@@ -131,9 +133,16 @@ mkdir -p "$CAPDIR" || {
 # PNG and webm there.
 # `server.pid` (written below) goes too: a stale one would make the teardown
 # signal whatever process has since reused that pid.
+# The previous run's `manifest.md` goes with them: it is the document that
+# says what this capture is (workdir, the app URL, `## Files`), so a run that
+# fails before the worker writes a new one would leave a manifest describing
+# the previous run and naming a video this `rm` just deleted. `driver.mjs` is
+# the one file here that is deliberately *not* cleared: it is the run's input
+# (the adapted skeleton), not its evidence, and a retry drives the same one.
 rm -f "$CAPDIR/recording.mp4" \
       "$CAPDIR/trace.zip" "$CAPDIR/dom.html" \
       "$CAPDIR/http.log" "$CAPDIR/sse.log" "$CAPDIR/server.pid" \
+      "$CAPDIR/manifest.md" \
       "${CAPDIR:?}"/*.webm "${CAPDIR:?}"/*.png
 
 # Fail fast if something is *already* answering on the port. A previous run's
