@@ -42036,3 +42036,77 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-c7aba99
+  plan: bugs
+  title: 'Bug: publish QA planner spec updates before scenario handoff and account for them
+    in finalization'
+  branch: pm/pr-c7aba99-bug-publish-qa-planner-spec-updates-before-scenari
+  status: pending
+  depends_on: []
+  description: 'QA planners can edit an existing QA spec without committing it, leaving important
+    changes only in the canonical PR workdir. Post-QA finalization then preserves these as
+    pre-existing changes and reports FINALIZE_DONE because scenario commits landed and the
+    branch was pulled.
+
+
+    Confirmed 2026-10-29 UTC: #260/pr-22ea6a2 has 28 added qa.md lines from planner f2ce1352-5d0f-4838-9d4f-155a2bb17613
+    and no planner git commit. The finalizer stashed/reapplied them and explicitly reported
+    they were not on origin. #247/pr-1ab9075 and #246/pr-62fdd54 have the same planner-authored
+    existing-spec edits left uncommitted. #260 also has unrelated local routing, preserved
+    historical notes and user scope clarifications; those must not be swept into a commit
+    blindly. Its scenario implementation fixes were already committed and pushed.
+
+
+    Root cause: pm_core/spec_gen.py spec_generation_preamble returns nothing when a spec already
+    exists. Its new-QA-spec path instructs commit/push; format_spec_for_prompt asks to revise
+    an existing spec but has no equivalent publication step. pm_core/qa_finalize_prompt.py
+    checks scenario-worktree commits and synchronization of the canonical PR workdir, without
+    explicitly accounting for planner-owned edits in that workdir.
+
+
+    Fix the existing handoff with minimal complexity. Require the planner to publish its own
+    QA spec changes, including updates to existing specs, before handing off the plan/scenario
+    clones. Make finalization account for planner-owned changes as well as scenario commits
+    and give an actionable blocked result if required changes cannot be safely reconciled.
+    Preserve unrelated user/session edits, routing overrides, dirty metadata, stashes, verifier
+    drafts and evidence. Do not use git add -A, blanket commits, force pushes or automatic
+    discards; pre-existing does not by itself establish whether a file is intentional local
+    state or unfinished work from an earlier phase. Follow the existing authorized push mechanism.
+
+
+    Regression coverage: existing-spec edits reach the branch before scenario handoff; newly
+    generated specs still work; finalization detects unreconciled planner edits; commit/push
+    failures are surfaced; and unrelated pre-existing dirty files/routing remain unchanged.
+    Preserve current review/QA verdict and manual merge gates. Coordinate with #246/pr-62fdd54,
+    which handles upstream synchronization before planning but does not cover this missing
+    publication step.
+
+
+    USER-REQUIRED SPEC/PROMPT REVIEW: Start on DeepSeek 1017/high, with work Opus 5.5/xhigh
+    for sign-off and wait_for_merge. Before product implementation or the review loop, prepare
+    the implementation spec and the COMPLETE proposed prompt text for each affected planner/new-spec/existing-spec/finalizer
+    path. Include readable rendered examples for an existing-spec update with unrelated dirty
+    files and a new-spec handoff. Store these beside the implementation spec and link them
+    from it. Present the spec and full prompt changes for the user''s manual review, then
+    STOP at implementation spec review. Do not self-approve or begin implementation/review
+    until the user explicitly approves.
+
+
+    Evidence: /home/matt/.local/state/pm-pr-shepherd/check-20261029T001409Z/planner-dirty-handoff-finding.json
+    and the per-PR planner-spec-provenance.json files in that directory. Treat these as diagnostic
+    evidence, not runtime dependencies.
+
+    '
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T00:24:44.132916+00:00'
+  updated_at: '2026-10-29T00:24:44.132916+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+  model: provider:deepseek-flash
+  review_spec: true
+  session_models:
+    signoff: provider:claude-work-xhigh-249
