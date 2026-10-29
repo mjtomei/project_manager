@@ -38197,7 +38197,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/247
   gh_pr_number: 247
   created_at: '2026-10-22T15:34:40.862915+00:00'
-  updated_at: '2026-10-29T03:51:57.421380+00:00'
+  updated_at: '2026-10-29T04:39:12.217584+00:00'
   started_at: '2026-10-22T17:21:04.879323+00:00'
   reviewed_at: '2026-10-22T18:43:52.122594+00:00'
   merged_at: null
@@ -38417,6 +38417,40 @@ prs:
       not just a live-loop tick.'
     created_at: '2026-10-29T03:51:57Z'
     last_edited: '2026-10-29T03:51:57Z'
+  - id: note-3c7e6ff
+    text: 'Review-loop cd51 i3 (2026-10-29): fresh native review of the merged branch
+      (f52145b9 + i1/i2) found nothing to change — PASS, no code edits, no new commits
+      beyond this note. What was verified: (a) no blocking call remains in _poll_tmux_verdicts
+      except the 5 s poll tick and the pre-existing 2 s verification follow-up Enter
+      sleep; every non-progress branch of the per-scenario state machine either schedules
+      a retry or discards from pending, so a failing worker cannot livelock or delay
+      aggregation; (b) _worker_has_started is correct against the real launcher: build_claude_shell_cmd
+      eagerly re-links the transcript symlink to a fresh UUID, so a relaunched worker
+      that never started is a dangling symlink (exec, not exit) and an old verdict
+      cannot be read back through it — matches tests/test_qa_launch_retry.py::test_exec_and_exit_failures_are_distinguished;
+      (c) R9a guards (verification_failures + persisted dropped_wait_verdicts) hold
+      across the hold→reopen handoff and a restart; (d) launch_retries/dropped_wait_verdicts
+      round-trip through qa_resume.json, and the launching→running+attempts+1 conversion
+      bounds a controller that keeps dying mid-launch; (e) qa_status renders (launch-retry:n/6)
+      as a non-verdict and no other consumer parses that string (finalize prompt uses
+      state.scenario_verdicts). Tests (scratch venv, PATH=/usr/bin:$PATH): tests/test_qa_launch_retry.py
+      + test_qa_loop.py + test_qa_input_required.py = 201 passed; targeted subset
+      -k "qa or container or verdict or tmux or hook" = 1359 passed, 1 failed — only
+      test_hook_events::test_installer_writes_standalone_receiver, re-verified failing
+      on origin/master in a detached worktree. A full-suite run in this container
+      hangs in tests/test_popup_session_code.py::test_main_for_session_override (unrelated,
+      environment-specific — zombie-child wait), so the last full-suite evidence remains
+      the i2 note (4515 passed, 1 skipped, 1 known failure). Minor inert observations,
+      deliberately not changed: completed scenarios keep their launch_retries record
+      (status only renders waiting/launching, and a stale waiting record is reconciled
+      in one tick per E4); _start_op''s detail="stopped" is unreachable by the apply
+      block because the loop exits on the stop tick. Still open and unchanged, for
+      QA/signoff: the QA NEEDS_WORK on TUI-restart-mid-backoff and the scenario-9
+      INPUT_REQUIRED Then need fresh QA against this HEAD; the unreachable prompt_gen.generate_qa_child_prompt
+      instruction block is pre-existing (origin/master also clears instruction_path
+      in both launch paths) and remains a product decision, not a review fix.'
+    created_at: '2026-10-29T04:39:12Z'
+    last_edited: '2026-10-29T04:39:12Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-1ab9075-bug-one-failed-qa-worker-blocks-verd-c740d896
   model: provider:deepseek-flash
   effort: high
