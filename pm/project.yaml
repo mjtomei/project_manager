@@ -38482,7 +38482,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T17:26:01.208880+00:00'
-  updated_at: '2026-10-29T10:51:05.380037+00:00'
+  updated_at: '2026-10-29T12:02:53.072603+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -42808,6 +42808,35 @@ prs:
       venv.'
     created_at: '2026-10-29T10:51:05Z'
     last_edited: '2026-10-29T10:51:05Z'
+  - id: note-c235557
+    text: 'QA S136 (2026-10-29, container podman 3 slirp4netns, real claude 2.1.312
+      impl/review/s0/sign-off/refiner/worker vs main + acme router + decoy stubs,
+      fake planner/verifier/finalizer; HEAD 74cebe25 vs controls 5f204dc2 (RQ60) and
+      f9a6343d (RQ57), post-fix 44ea3dd7; captures /pm-captures/scenarios/136/README.md,
+      every story mp4): CODE CHANGE 44ea3dd7 needs normal re-review, and it is LOCAL
+      ONLY: this QA container push proxy is wired to the sibling workdir s-135 (git-proxy
+      rejected: request workdir .../s-136/repo does not match .../s-135/repo), so
+      push it from the host clone /home/matt/.pm/workdirs/qa/pr-592e4bd-6ba3e63ef0492096/s-136/repo.
+      Bug (RQ57 container mode, as the planner predicted): a plain pm tui restart
+      ended the cut-off run record and showed the press-z-t line, but kill_windows_of_run
+      matched only cwd inside the QA workdir, so container scenario windows qa-<pr>-s1/-s2
+      (cwd = PR workdir) and their held refiners survived. Fix: also match a qa-*
+      window whose start command execs into the dead run container (...-qa-<pr>-<loop>-s<N>);
+      unit test added; full suite 5197 passed 1 skipped. Post-fix: s0/s1/s2 killed,
+      z t cleanup removes the 2 dead containers before the planner, routed run PASS.
+      Held on HEAD: story 1 merge smoke (routing split, /run/pm-route only on R QA
+      containers, env files 0600 deleted at sh, 0 marker hits, Routes line, tick stderr
+      only the SIGNOFF_MERGE coercion note), story 2 provider remove (one QA stopped
+      line, scenario 2 never launched, status PASS/queued/stopped), story 3 bridge-symlink
+      refusals (rc 1, one line, nothing left), story 4 z t, story 5 RQ60 (Removing
+      container ... it mounts the clone of an earlier run, new Id, PASS). Control
+      5f204dc2 reproduced the reused-container bug but ended Result: INPUT_REQUIRED
+      with no window-died retries (run-1 qa-<R>-s1 window still open, so the by-name
+      pane lookup found a live pane). Harness: shared podman storage pins h tmp dir;
+      killing a setup that owns the podman pause breaks podman for all (cannot re-exec
+      process) until the stale pause.pid is removed.'
+    created_at: '2026-10-29T12:02:52Z'
+    last_edited: '2026-10-29T12:02:52Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
