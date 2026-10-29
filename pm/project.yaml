@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T08:32:47.299270+00:00'
+  updated_at: '2026-10-29T09:05:06.834999+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -29814,22 +29814,45 @@ prs:
     created_at: '2026-10-29T08:32:47Z'
     last_edited: '2026-10-29T08:32:47Z'
   - id: note-4be11ed
-  text: 'S35 refine findings (verified live): (1) A planner-phase stop has NO status
-  dashboard — the qa status pane is only added after planning succeeds, so do
-  not expect ''Overall: STOPPED'' for a planner-episode stop; assert the TUI log
-  ''QA stopped for <pr> — no verdict recorded'' + runtime/<pr>.json qa done STOPPED
-  + ''last QA run was stopped'' in pm autostart status. (2) The fake planner''s
-  no-verdict episode is only ~20-25s (11 deferrals x ~2s refresh), so send the
-  QA-loop stop as soon as the qa-<A> window appears; if it exhausts first the
-  run ends INPUT_REQUIRED and records a QA note. (3) A finished ''pm qa run''
-  is adopted by the live TUI''s resume scan within ~5s (runtime_state done/PASS
-  + a QA note) without a restart. (4) When auto-start later targets a qa PR with
-  a recorded PASS, signoff_ui.advance_all hands it to sign_off (a signoff-<pr>
-  window, not a QA rerun) — configure signoff: SIGNOFF_BLOCKED to park it deterministically.
-  (5) Command-bar text must be sent in small chunks (~0.3s apart); fast tmux send-keys
-  drops characters (''loop'' -> ''oop'').'
-  created_at: '2026-10-29T08:28:59Z'
-  last_edited: '2026-10-29T08:28:59Z'
+    text: 'S35 refine findings (verified live): (1) A planner-phase stop has NO status
+      dashboard — the qa status pane is only added after planning succeeds, so do not
+      expect ''Overall: STOPPED'' for a planner-episode stop; assert the TUI log ''QA
+      stopped for <pr> — no verdict recorded'' + runtime/<pr>.json qa done STOPPED +
+      ''last QA run was stopped'' in pm autostart status. (2) The fake planner''s no-verdict
+      episode is only ~20-25s (11 deferrals x ~2s refresh), so send the QA-loop stop
+      as soon as the qa-<A> window appears; if it exhausts first the run ends INPUT_REQUIRED
+      and records a QA note. (3) A finished ''pm qa run'' is adopted by the live TUI''s
+      resume scan within ~5s (runtime_state done/PASS + a QA note) without a restart.
+      (4) When auto-start later targets a qa PR with a recorded PASS, signoff_ui.advance_all
+      hands it to sign_off (a signoff-<pr> window, not a QA rerun) — configure signoff:
+      SIGNOFF_BLOCKED to park it deterministically. (5) Command-bar text must be sent
+      in small chunks (~0.3s apart); fast tmux send-keys drops characters (''loop''
+      -> ''oop'').'
+    created_at: '2026-10-29T08:28:59Z'
+    last_edited: '2026-10-29T08:28:59Z'
+  - id: note-3297fa0
+    text: 'QA S35 (concurrent CLI + TUI QA runs) — found+fixed 02e5b004. Story 1 exposed
+      that the shared 1 s poll timer stopped at the end of the tick that processed
+      a TUI QA stop: both its arm and stop predicates required an active PR to carry
+      a `workdir` in the in-memory `_data`, and QA creates that workdir itself, so
+      `_data` never had it. Consequence on the pre-fix head: `~/.pm/runtime/<pr>.json`
+      was never written for the stopped run, and a concurrent `pm qa run` finishing
+      PASS was not adopted (no `QA PASS for <pr>`, no runtime record, no note) for
+      82 s — until an unrelated state reload. Fix: `_has_active_pr` (status-only)
+      + `_qa_poll_needed` (running/held/verdict-awaiting-cleanup) back both `ensure_animation_timer`
+      and the stop check; live re-run adopts in the same second. 3 new tests in tests/test_qa_self_driving.py
+      (each fails pre-fix) + a control; full suite 4604 passed, 1 skipped. Story 2
+      (restart holds A as "last QA run was stopped", B handed to sign-off BLOCKED,
+      no spurious INPUT_REQUIRED/NO_VERDICT, no cross-mentions) passed unchanged.
+      Captures: /pm-captures/scenarios/35/{pre-fix,post-fix}. Harness notes: (1) with
+      an isolated HOME the tmux server must keep /home/pm/.local/bin on PATH (fake-claude
+      shim) and use PM_TMUX_SOCKET for isolation; (2) a QA stop that lands within
+      3 s of the loop start has its stop log lines suppressed by the "QA loop started
+      … z t to stop" sticky (pm log marks them "(hidden by sticky message)") — wait
+      ~5 s if the lines must be visible; (3) `markdown` must be installed into the
+      pytest --target dir or 13 test_markdown_render tests fail as an env gap.'
+    created_at: '2026-10-29T09:05:06Z'
+    last_edited: '2026-10-29T09:05:06Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
