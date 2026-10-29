@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T09:35:08.833733+00:00'
+  updated_at: '2026-10-29T10:17:11.026280+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5064,6 +5064,34 @@ prs:
       its own change.'
     created_at: '2026-10-29T09:35:08Z'
     last_edited: '2026-10-29T09:35:08Z'
+  - id: note-fed4a23
+    text: 'Review loop 0e4c i1 (no requirement changes; full suite 4605 passed / 1
+      skipped, +3 tests). One test gap in a user-visible guard, one import tidy, one
+      documented cross-PR note. (1) The b972-i2 requirement that `pm qa regression`
+      target a session with a LIVE TUI pane had no test: added three cases to tests/test_cli_qa.py
+      (no session -> refuse; session whose recorded TUI pane is dead -> refuse and
+      launch nothing; live pane -> launch with the session name and pane id in the
+      prompt). The dead-pane case was verified to fail with the guard removed (it
+      launched a runner against a dead pane). (2) `show_connect`s `from pm_core.paths
+      import default_socket_path` was a function-local import while pane_ops already
+      imports pm_core.paths at module scope; hoisted (no cycle, the ShowConnect tests
+      patch the tmux/registry seams, not that import). (3) impl.md now records that
+      `pane_registry.base_session_name()` (`split("~")[0]`, which this PR made the
+      single definition for three more call sites) truncates at the first `~`, so
+      a repo directory whose name contains `~` makes the registry/pidfile/capture
+      lookups disagree. Pre-existing (the previous `rsplit` site was wrong for base-session
+      panes too, where pm panes live) and already filed as pr-6de8207; the fix belongs
+      in get_session_tag (sanitise the tag), not in the callers, so it is left out
+      of scope here. Validation on the integrated head: full suite 4605 passed / 1
+      skipped (scratch pytest<9 + markdown on PYTHONPATH, PATH without the push-proxy
+      git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared); pm/specs/pr-073910f/session_start_smoke.py
+      re-run end to end on a disposable socket (private server, session env, global
+      env and hooks correct; default server untouched); `pm session list` verified
+      end to end in this container (read-only, "No pm sessions found.", no socket
+      dir created). No live session, server or shared host configuration was touched;
+      the new tests are unit-level and bind no tmux server.'
+    created_at: '2026-10-29T10:17:10Z'
+    last_edited: '2026-10-29T10:17:10Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
