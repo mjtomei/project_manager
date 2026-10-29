@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-7b1dd2e
+  active_pr: pr-43090e6
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -42360,6 +42360,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-29T04:56:40.625999+00:00'
   updated_at: '2026-10-29T04:56:40.625999+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-43090e6
+  plan: bugs
+  title: 'Bug: re-running `pm qa run` in the same pm session adds a duplicate qa-status
+    pane to the qa-<pr> window'
+  branch: pm/pr-43090e6-bug-re-running-pm-qa-run-in-the-same-pm-session-ad
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py `_add_status_pane` (called from `_run_qa_sync`).
+
+
+    Repro: with a pm session running, run `pm qa run <instruction> --pr <pr-id>` twice
+    in the same session (e.g. fix the container image and retry, as QA scenario 4
+    does). The first run creates qa-<pr> with 2 panes (main + status). The second
+    run reuses the window via `_ensure_qa_main_pane` and `_add_status_pane` splits
+    ANOTHER `python3 pm_core/qa_status.py <same status_path> <session>` pane, so the
+    window ends with 4 panes (2 identical status dashboards, both polling the same
+    qa_status.json).
+
+
+    Expected: the second run should reuse (or retire and replace) the existing qa-status
+    pane instead of adding another.
+
+
+    Observed in QA scenario 4 on pr-574e851: after the retry run the window showed
+    panes `sleep` (QA execution), status, status, fake-claude FINALIZE_DONE. Not a
+    correctness failure of the verdict, but the window grows by one pane per `pm qa
+    run`. The TUI/planning path avoids this because `_cleanup_stale_scenario_windows(include_main=True)`
+    kills the main QA window first; the CLI `pm qa run` path (planning_phase=False)
+    never calls it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T06:47:08.079510+00:00'
+  updated_at: '2026-10-29T06:47:08.079510+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
