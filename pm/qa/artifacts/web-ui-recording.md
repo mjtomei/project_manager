@@ -46,6 +46,10 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   Playwright records VP8 webm natively; the finalize step transcodes it
   to H.264 mp4 so it plays everywhere including iOS Safari (VP8/VP9
   webm does not decode on iOS).
+- `recording.webm` — Playwright's native video. The finalize step drops it
+  once the mp4 exists, so it survives only when the transcode failed (it is
+  kept deliberately, so the step can be retried without re-driving the UI) —
+  mention it in the manifest when it does.
 - `driver.mjs` — the driver that produced this capture: the adapted
   skeleton (locators, interactions, side-channel trigger). Keep it in the
   capture directory so a reviewer can see what was actually driven.
@@ -60,6 +64,11 @@ substitutes the per-PR captures directory — `$(pm qa captures-path
   by step 2 when the driver needed it and there was no local install (the
   ES-module resolver ignores `NODE_PATH`); it stays in the capture directory,
   so the manifest names it.
+- `server.pid` — the pid of the app step 1 started, which the teardown reads
+  when `SERVER_PID` is gone from its shell. The teardown removes it, so it
+  survives only when a run stopped before the teardown (a failed driver,
+  which step 2 says not to finalize) — mention it in the manifest when it
+  does.
 - `manifest.md` — frontmatter + prose per the standard recipe format,
   with a `## Files` section listing every file above.
 

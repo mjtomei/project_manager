@@ -61,7 +61,14 @@ recording-recipe bugs that any worker following the recipe hits:
   `/usr/lib/node_modules/playwright` exists (otherwise `npm i playwright`).
   Both recording recipes' produced-files lists name the flow's diagnostics
   (`recorder.status`, `recorder-stderr.log`, and `recorder-pane.log` when a
-  wait gives up) so the manifest's `## Files` section matches the directory.
+  wait gives up) so the manifest's `## Files` section matches the directory,
+  and the web-UI list names `server.pid` (present when a run stopped before
+  the teardown) and the `recording.webm` a failed transcode keeps for a
+  retry (R44).
+- step 1 of the tmux recipe refuses a `pm session name` that printed nothing
+  before its readiness wait, as steps 2, 4 and 5 do: with an empty target the
+  wait polls `has-session -t "="` to its deadline and reports "pm session  did
+  not appear within 60s" for a `pm` that is not on PATH (R44).
 - a check that cannot tell one state from another says so instead of guessing
   (review loop 9265 i4): the web-UI port pre-check treats only "connection
   refused" (curl exit 7) as a free port — a listener that accepts and never

@@ -2693,6 +2693,30 @@ def test_web_ui_produced_files_list_names_the_playwright_link():
         "the manifest's `## Files` example does not name the node_modules link")
 
 
+def test_web_ui_produced_files_list_names_the_files_a_failed_run_keeps():
+    """Two files the flow leaves in the capture directory are not listed.
+
+    ``server.pid`` is written by step 1 and removed by the teardown, so it is
+    present exactly when a run stopped before the teardown — a failed driver,
+    which step 2 tells the worker not to finalize, is the ordinary case.
+    ``recording.webm`` is kept deliberately when the transcode fails, so the
+    step can be retried without re-driving the UI. The recipe's manifest
+    section asks for "every file above", and the recording recipes' lists
+    already name their failure evidence (R17), so a worker following this list
+    leaves both out of ``## Files`` while the capture directory holds them —
+    the same "the manifest and the directory disagree" class, two files over.
+    """
+    text = _recipe_text("web-ui-recording.md")
+    produced = text.split("## What this recipe produces", 1)[1].split(
+        "## Capture", 1)[0]
+    for fname in ("server.pid", "recording.webm"):
+        assert fname in produced, (
+            "the produced-files list never names " + fname + ", which the "
+            "flow leaves in the capture directory (a run stopped before the "
+            "teardown; a failed transcode), so the manifest's `## Files` "
+            "section and the directory disagree")
+
+
 def test_web_ui_layer2_block_refuses_an_unset_capdir(tmp_path):
     """The protocol block is pasted alone too, and its redirects are raw paths.
 
@@ -3389,6 +3413,31 @@ class TestCaptureFlowExecution:
         assert cast.stat().st_size > 0, "the completed cast is missing"
         assert "can't find session" not in r.stderr, (
             "a clean run prints a tmux error while stopping the transcript pipe")
+
+    def test_step_one_refuses_an_empty_target(self, tmp_path):
+        """`pm session name` printing nothing must stop step 1, not the wait.
+
+        Step 1's readiness wait is ``has-session -t "=$TARGET"``, and with an
+        empty target that is ``-t "="`` — which can never match — so the run
+        would burn the whole deadline and report "pm session  did not appear
+        within 60s" for a `pm` that is not on PATH (or a `pm session name`
+        that failed). Steps 2, 4 and 5 each refuse an empty target, and their
+        guards are execution-tested; step 1's identical guard had no case, so
+        deleting it left the file green and turned a precise, immediate
+        failure into a slow one that names an empty session.
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "ok", tmp_path,
+            env_extra={"STUB_PM_NAME": ""})
+        assert r.returncode != 0, (
+            "step 1 ran with no target session, so its wait polls `-t \"=\"` "
+            "until the deadline")
+        assert "pm session name printed nothing" in r.stderr, r.stderr
+        assert "did not appear within" not in r.stderr, (
+            "an empty target is reported as a pm session that never started "
+            "instead of as a `pm session name` that printed nothing: "
+            + r.stderr)
+        assert not cast.exists()
 
     def test_tmux_readiness_wait_requires_the_exact_session(self, tmp_path):
         """``has-session -t <name>`` is not exact: tmux falls back to a prefix.
