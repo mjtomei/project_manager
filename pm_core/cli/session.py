@@ -416,10 +416,14 @@ def _session_start(share_global: bool = False, share_group: str | None = None,
     # resolve the same server as the session they target.
     socket_path, legacy = _resolve_session_socket(session_name, is_shared)
     if legacy:
+        # Avoid the word "shared": in pm that means --global/--group, and
+        # this session is private — it is only on the default tmux server
+        # because it predates per-session servers.
         click.echo(
-            f"Note: existing session '{session_name}' runs on the shared "
-            "default tmux server; attaching there. Run 'pm session kill' "
-            "and start again to move it to a private server."
+            f"Note: existing session '{session_name}' was started before "
+            "per-session tmux servers and still runs on the default tmux "
+            "server; attaching there. Run 'pm session kill' and start "
+            "again to move it to a private server."
         )
 
     _log.info("checking if session exists: %s (socket=%s)", session_name, socket_path)

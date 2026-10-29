@@ -1108,7 +1108,7 @@ def list_pm_sessions() -> list[dict]:
     the socket is group/world accessible (``--global``/``--group``
     sessions chmod it; private servers are 0600).
     """
-    from pm_core.paths import SHARED_SOCKET_DIR
+    from pm_core.paths import SHARED_SOCKET_DIR, default_socket_path
 
     def is_shared(sock: Path | None) -> bool:
         if sock is None:
@@ -1123,7 +1123,6 @@ def list_pm_sessions() -> list[dict]:
 
     def collect(socket_path: str | None) -> None:
         """Collect one server; ``socket_path=None`` means the default one."""
-        from pm_core.paths import default_socket_path
         # Address the default server explicitly: tmux would otherwise
         # follow $TMUX and list the private server this process runs on.
         cmd_socket = socket_path or str(default_socket_path())

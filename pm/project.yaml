@@ -4357,7 +4357,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T00:40:46.909366+00:00'
+  updated_at: '2026-10-29T01:08:32.749969+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4520,6 +4520,35 @@ prs:
       that same legacy session, wrong only if pasted into a different pm pane).'
     created_at: '2026-10-29T00:40:46Z'
     last_edited: '2026-10-29T00:40:46Z'
+  - id: note-03ae5ba
+    text: 'Review loop b972 i6 (no requirement changes; full suite 4143 passed / 1
+      skipped). Verification pass over the whole change set — re-ran the preserved
+      disposable-socket smoke test (pm/specs/pr-073910f/session_start_smoke.py) end-to-end:
+      private server created, PM_TMUX_SOCKET in the session env, the global server
+      env and the hooks; default server untouched. Three small fixes: (1) the legacy
+      rollout note said "shared default tmux server", but in pm "shared" means --global/--group;
+      the legacy session is private, so it now says it "was started before per-session
+      tmux servers and still runs on the default tmux server", with a comment so the
+      word does not creep back. (2) `pm session kill`''s ambient-candidate wiring
+      (the R5b guard feeding R3.2''s selection) was only covered by unit tests of
+      its two halves; added test_kills_the_ambient_session_when_the_cwd_one_is_absent
+      (a workdir clone kills the session hosting it, on that session''s socket) and
+      test_ignores_an_ambient_session_this_home_does_not_know (a foreign HOME''s inherited
+      session is never killed). (3) list_pm_sessions() imports default_socket_path
+      once beside SHARED_SOCKET_DIR instead of inside the per-server closure. Residual
+      non-blocking notes unchanged from i5: uid ownership check exists only on pm
+      session start (other paths fail closed via 0600 sockets + server-access ACL);
+      the /tmp/pm-sessions literal stays duplicated in wrapper._mark_tmux_socket and
+      qa_status._tmux_argv by design; pane IDs are no longer globally unique across
+      servers but every consumer resolves a pane together with its session/socket;
+      R5b relies on the pane registry file, so deleting ~/.pm/pane-registry/<session>.json
+      while a session is live makes `pm session` create a separate session rather
+      than adopt the live one (fail-safe); `pm session --print-connect` still prints
+      a plain `tmux attach -t <name>` for legacy sessions (correct from a plain shell
+      and from inside that same legacy session, wrong only if pasted into a different
+      pm pane).'
+    created_at: '2026-10-29T01:08:32Z'
+    last_edited: '2026-10-29T01:08:32Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

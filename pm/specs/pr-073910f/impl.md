@@ -458,3 +458,33 @@ Robustness and truthfulness of the detach result; no requirement changes.
    unreadable entries in the shared socket directory.
 
 Full suite: 4141 passed / 1 skipped.
+
+## Review iteration (2026-10-28, review-loop b972 i6)
+
+Verification pass plus small clarity/coverage fixes; no requirement changes.
+
+1. **The legacy rollout note said "shared default tmux server".**  In pm,
+   "shared" means `--global`/`--group`; the legacy session is private and is
+   only on the default server because it predates per-session servers.
+   Reworded to "was started before per-session tmux servers and still runs
+   on the default tmux server", with a comment so the word does not creep
+   back.
+2. **`pm session kill`'s ambient-candidate wiring had no test.**  The
+   `_known_ambient_session()` guard (R5b) and `_pick_existing_session()`
+   (R3.2) are unit-tested individually, but nothing asserted the two-line
+   wiring in `session_kill`.  Added
+   `test_kills_the_ambient_session_when_the_cwd_one_is_absent` (a workdir
+   clone kills the session hosting it, on that session's socket) and
+   `test_ignores_an_ambient_session_this_home_does_not_know` (a foreign
+   HOME's inherited session is never killed).  `_invoke` gained optional
+   `ambient` / `hosting_for` knobs for the per-name case.
+3. **`list_pm_sessions()` import tidy:** `default_socket_path` is imported
+   once beside `SHARED_SOCKET_DIR` instead of inside the `collect()`
+   closure on every server.
+
+Also re-verified the full `_session_start` path end-to-end with
+`pm/specs/pr-073910f/session_start_smoke.py` on a disposable socket (private
+server, session env, global env and hooks all correct; the default server
+untouched).
+
+Full suite: 4143 passed / 1 skipped.

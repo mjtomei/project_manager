@@ -626,7 +626,8 @@ class TestResolveSessionSocket:
 class TestSessionKillServerSelection:
     """``pm session kill`` must target the server that hosts the session."""
 
-    def _invoke(self, monkeypatch, tmp_path, hosting):
+    def _invoke(self, monkeypatch, tmp_path, hosting, *, ambient=None,
+                hosting_for=None):
         from click.testing import CliRunner
         from pm_core.cli import session as session_mod
         from pm_core import container, push_proxy
@@ -635,9 +636,17 @@ class TestSessionKillServerSelection:
         monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
         monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
                             lambda: "pm-repo-abc")
-        monkeypatch.setattr(session_mod, "_known_ambient_session", lambda: None)
-        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
-                            lambda name: hosting)
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: ambient)
+        if hosting_for is None:
+            monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                                lambda name: hosting)
+        else:
+            # Per-name hosting, so the cwd session can be absent while the
+            # ambient one is live.
+            monkeypatch.setattr(
+                session_mod.tmux_mod, "find_session_server",
+                lambda name: hosting_for.get(name, (None, False)))
         killed: list[tuple[str, str | None]] = []
         monkeypatch.setattr(
             session_mod.tmux_mod, "list_grouped_sessions",
@@ -680,6 +689,37 @@ class TestSessionKillServerSelection:
         assert result.exit_code == 1
         assert killed == []
         assert not stale.exists()
+
+    def test_kills_the_ambient_session_when_the_cwd_one_is_absent(
+            self, monkeypatch, tmp_path):
+        """A workdir clone must kill the session that hosts it (R3.2).
+
+        The clone's git-root hash gives a different name from the session
+        it runs inside, so the cwd-derived candidate does not exist and the
+        ambient session has to be chosen — and killed on its own server.
+        """
+        sock = str(tmp_path / "pm-ambient")
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (None, False),
+            ambient="pm-ambient",
+            hosting_for={"pm-ambient": (sock, True)},
+        )
+
+        assert result.exit_code == 0, result.output
+        assert killed == [("pm-ambient~1", sock), ("pm-ambient", sock)]
+
+    def test_ignores_an_ambient_session_this_home_does_not_know(
+            self, monkeypatch, tmp_path):
+        """A foreign HOME's inherited session must never be killed (R5b)."""
+        foreign = str(tmp_path / "pm-live")
+        result, killed = self._invoke(
+            monkeypatch, tmp_path, (None, False),
+            ambient=None,
+            hosting_for={"pm-live": (foreign, True)},
+        )
+
+        assert result.exit_code == 1
+        assert killed == []
 
 
 class TestPickExistingSession:
