@@ -42712,6 +42712,26 @@ prs:
       REQA ... QA starts once ..." just after a tick''s start (allowed).'
     created_at: '2026-10-29T08:33:42Z'
     last_edited: '2026-10-29T08:39:11Z'
+  - id: note-e2023d0
+    text: 'S133 refine (HEAD 463700ce = 5f204dc2 code), from reading the code: (1)
+      pm provider add replaces a symlinked ~/.pm/providers.yaml with a regular 0600
+      file and prints no notice. The dotfiles target is left unchanged, so it silently
+      diverges; only ls -l shows the change. Control 4aff1dd4 writes through the link
+      and keeps the target mode (0640). (2) The providers.yaml.lock flock blocks with
+      no timeout and no wait message. (3) A claude-type provider needs --api-base.
+      The ${VAR} key resolves in the launching process env (the TUI or cli pane),
+      and an unset VAR gives an empty key with no warning. HEAD passes it via ~/.pm/run/env-*.sh;
+      4aff1dd4 uses "$(cat <workdir>/pm/prompts/pm_env_*)". (4) A review launch with
+      a missing provider or a non-executable launcher exits rc=1 with an Error: line
+      (no traceback). It is retryable LAUNCH_FAILED: 3 attempts (5 s and 10 s backoff),
+      a 60 s re-arm, and 5 re-arms (6 episodes), then "Run review-loop start to retry".
+      The TUI Error line is cut at 300 chars; the path is on its own Artifact: line.
+      4aff1dd4 gives a one-shot ERROR and no re-arm. (5) A busy project.yaml slows
+      a review launch only when it clears a sign-off REVIEW return (awaiting: review).
+      Hold the lock with flock on window creation, then pm tui restart --breadcrumb;
+      a plain restart drops auto-start. Keep the hold under 182 s.'
+    created_at: '2026-10-29T07:31:59Z'
+    last_edited: '2026-10-29T07:31:59Z'
   model: provider:claude-work
 - id: pr-4edf491
   plan: bugs
