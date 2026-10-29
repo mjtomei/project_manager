@@ -94,10 +94,12 @@ readiness) and S26 (web-UI driver + finalize). Re-run those against the
 current PR head. S24 also re-checks the claim's canonical comparison: two
 sessions reaching one capture directory through different spellings (`~/cap`
 vs its absolute path) must be refused, and a same-session retry must not be
-refused by its own `~/`-spelled claim. The older S14/S18/S20 covered the
-same recipe ground before the reduction; S15, S16, S17 and S19 exercised the
-dropped helper, the shared prompt guidance and the QA-loop helper install,
-none of which exist in this PR any more.
+refused by its own `~/`-spelled claim; with another pm session on the server
+that holds no claim, step 2 pasted from *inside* the capture directory must
+proceed and take the claim, not refuse the run as a collision. The older
+S14/S18/S20 covered the same recipe ground before the reduction; S15, S16,
+S17 and S19 exercised the dropped helper, the shared prompt guidance and the
+QA-loop helper install, none of which exist in this PR any more.
 
 ## Setup (cross-cutting)
 
@@ -463,7 +465,12 @@ run's video in the capture directory.
   an absolute path to the same directory are one claim, so a second session
   that reaches the directory through the other spelling is still refused (it
   used to run on and share the directory), and a retry is not refused by its
-  own `~/`-spelled claim. A raw
+  own `~/`-spelled claim. A session that holds **no** claim is not recording
+  into anything: the scan skips an empty answer instead of normalizing it,
+  because `cd ""` succeeds and stays in the worker's cwd — normalizing it made
+  every other session on the server look like it recorded into the directory
+  step 2 was pasted from, so a worker pasting the step from inside the capture
+  directory was refused as a collision that does not exist. A raw
   `tmux pipe-pane` that does not go through step 2 still bypasses the claim —
   record it as a limitation, not a pass.
 

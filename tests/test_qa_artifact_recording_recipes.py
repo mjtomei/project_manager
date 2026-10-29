@@ -43,7 +43,10 @@ hits, regardless of how it waits for a background job:
   live session records into; a finished run releases the claim, and the claim
   is compared as a canonical directory rather than as the text typed (step 0
   accepts `~/cap`, and a quoted `~` never expands, so one directory spelled
-  two ways was two claims);
+  two ways was two claims), and a session holding no claim must not be read as
+  claiming the worker's cwd (``cd ""`` stays put, so normalizing an empty
+  answer made every other session look like it recorded into the directory the
+  step was pasted from);
 - the render steps delete this run's outputs before rendering, so a failed
   ``agg``/``ffmpeg``/transcode ends with no video instead of the previous
   run's mp4 (which the manifest would present as this run's evidence); the
@@ -2638,7 +2641,7 @@ exit 0
 
 def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
                sessions=(), files=None, state_files=None, capture=None,
-               timeout=120):
+               cwd=None, timeout=120):
     """Run one recipe block against stub tmux/pm; return (proc, cast path).
 
     ``raw`` is the block text as a worker pastes it, ``sessions`` the tmux
@@ -2646,7 +2649,9 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
     sessions steps 1-3 left behind), ``files`` the capture-dir files and
     ``state_files`` the stub's own files (``pane``) to seed. ``capture``
     overrides the capture directory (a test that wants it unusable passes a
-    path that cannot be created).
+    path that cannot be created). ``cwd`` is the directory the block is pasted
+    from — the recipes resolve some paths against it, so a case that depends
+    on the worker's location has to say where that is.
     """
     state = tmp_path / "state"
     bindir = tmp_path / "bin"
@@ -2687,7 +2692,7 @@ def _run_block(raw, mode, tmp_path, target=False, env_extra=None,
         # the stub cannot run the pane command, so it writes the status the
         # recipe's step 4 reads.
         env["STUB_STATUS_FILE"] = str(capture / sub / "recorder.status")
-    r = subprocess.run(["bash"], input=block, env=env,
+    r = subprocess.run(["bash"], input=block, env=env, cwd=cwd,
                        capture_output=True, text=True, timeout=timeout)
     return r, capture / sub / "recording.cast"
 
@@ -3138,6 +3143,29 @@ class TestCaptureFlowExecution:
             f"{mode}: the failed run left its capture-dir claim on the "
             "session, so the next attempt in this session is refused by a "
             "capture that is no longer running")
+
+    def test_a_session_with_no_claim_is_not_a_collision(self, tmp_path):
+        """A session holding no claim is not recording into the worker's cwd.
+
+        `tmux show-options -v` answers nothing for a session that holds no
+        claim, and `cd ""` succeeds and stays in the *current* directory — so
+        normalizing the empty answer compared the pasting shell's cwd with the
+        capture directory. Step 2 pasted from inside the capture directory
+        then refused the run as "already being recorded by pm session …" for a
+        capture that does not exist, and took no claim of its own. Verified
+        live on tmux 3.2a: with another session holding no claim at all, step
+        2 run from the capture directory exited 1 naming that session.
+        """
+        r, _cast = _run_block(_step_two_block(), "ok", tmp_path, target=True,
+                              sessions=("pm-other",), cwd=tmp_path / "cap")
+        assert r.returncode == 0, (
+            "a session holding no claim was read as recording into the "
+            "capture directory step 2 was pasted from: " + r.stderr)
+        assert "already being recorded" not in r.stderr, r.stderr
+        claim = tmp_path / "state" / "claim.pm-test"
+        assert claim.exists(), (
+            "the run took no claim of its own, so the refusal happened before "
+            "step 2 claimed the directory")
 
     def test_a_shared_dir_is_recognized_through_a_tilde_spelling(self,
                                                                 tmp_path):

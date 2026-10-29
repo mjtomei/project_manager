@@ -224,11 +224,17 @@ fi
 claim_dir=$(cd <capture-dir> 2>/dev/null && pwd -P)
 [ -n "$claim_dir" ] || claim_dir="<capture-dir>"
 # A stored claim may itself hold the `~/` spelling (a quoted `~` never expands
-# there either), so normalize both sides before comparing.
+# there either), so normalize both sides before comparing. An empty answer is
+# "this session holds no claim", not a claim on the current directory: `cd ""`
+# succeeds and stays put, so normalizing an empty one would compare this
+# shell's cwd with the claim instead of skipping it.
 claimed=$(tmux show-options -t "$TARGET" -v @pm_capture_dir 2>/dev/null || true)
-case "$claimed" in "~/"*) claimed="$HOME/${claimed#"~/"}";; esac
-claimed_dir=$(cd "$claimed" 2>/dev/null && pwd -P)
-[ -n "$claimed_dir" ] || claimed_dir="$claimed"
+claimed_dir=
+if [ -n "$claimed" ]; then
+    case "$claimed" in "~/"*) claimed="$HOME/${claimed#"~/"}";; esac
+    claimed_dir=$(cd "$claimed" 2>/dev/null && pwd -P)
+    [ -n "$claimed_dir" ] || claimed_dir="$claimed"
+fi
 if [ -n "$claimed" ] && [ "$claimed_dir" != "$claim_dir" ]; then
     echo "$TARGET is already being recorded into $claimed — end that capture," \
         "or clear the claim with 'tmux set-option -u -t $TARGET" \
@@ -241,6 +247,15 @@ fi
 other=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | while read -r s; do
     [ "$s" = "$TARGET" ] && continue
     v=$(tmux show-options -t "$s" -v @pm_capture_dir 2>/dev/null || true)
+    # A session with no claim is not recording into anything, and an empty
+    # answer must not be normalized: `cd ""` succeeds and stays in *this*
+    # shell's directory, so an unset option became "the worker's cwd" and
+    # every other session on the server looked like it recorded into the
+    # directory step 2 was pasted from — pasting it from inside the capture
+    # directory refused the run as a collision that does not exist (verified
+    # live on tmux 3.2a: with another session holding no claim at all, step 2
+    # run from the capture directory exited 1 naming that session).
+    [ -n "$v" ] || continue
     case "$v" in "~/"*) v="$HOME/${v#"~/"}";; esac
     vd=$(cd "$v" 2>/dev/null && pwd -P)
     [ -n "$vd" ] || vd="$v"

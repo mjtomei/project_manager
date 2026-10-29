@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T03:04:22.247985+00:00'
+  updated_at: '2026-10-29T03:27:02.294292+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36407,6 +36407,46 @@ prs:
       dropped helper/prompt/verifier work stays dropped.'
     created_at: '2026-10-29T03:04:22Z'
     last_edited: '2026-10-29T03:04:22Z'
+  - id: note-6ba4154
+    text: 'Review loop 7c9c i2: one leftover in the kept tmux-recipe scope, the PR''s
+      own class — a session that holds no capture-directory claim was read as a claim
+      on the directory the step was pasted from. `tmux show-options -t S -v @pm_capture_dir`
+      answers nothing for an unset user option (tmux 3.2a: exit 0, empty output),
+      and the cross-session scan normalized that empty answer with `cd "$v" && pwd
+      -P` — but `cd ""` succeeds and stays in the current directory, so the value
+      became the *pasting shell''s* cwd. Step 2 pasted from inside the capture directory
+      therefore matched every other pm session on the server and refused the run with
+      "<capture-dir> is already being recorded by pm session <other>" for a session
+      that was not recording anything, taking no claim of its own (the check runs
+      before the claim). Verified live on tmux 3.2a with the recipe''s own step-2
+      block on a private TMUX_TMPDIR: with pm-other holding no claim, the pre-fix
+      block run from the capture directory exited 1 naming pm-other; post-fix the
+      same run exits 0, stores the canonical directory on pm-test and attaches the
+      pipe (#{pane_pipe}=1). A real collision is unchanged: with pm-other holding
+      /tmp/capA, the same block still refuses it and leaves pm-test without a claim.
+      The same-session branch had the same empty-answer normalization; it was harmless
+      only because its refusal was already gated on a non-empty claim, and it now
+      normalizes only when there is one. Tests: one new execution case (step 2 run
+      from the capture directory against a session with no claim must proceed and
+      claim the directory), which fails against HEAD''s step 2 (checked by restoring
+      the pre-fix recipe in place, then restoring the post-fix copy); `_run_block`
+      gained a `cwd` argument so a case can say where the block is pasted from. File
+      159 pass; related suites (test_qa_artifact_web_ui_recording, test_qa_instructions,
+      test_qa_loop) 175 pass; full suite `env -u PM_HOST_HOME pytest tests/ -q --deselect
+      tests/test_merge_publish.py --deselect tests/test_signoff_integration.py` ->
+      4541 passed, 1 skipped, 92 deselected, 12 failed, all tests/test_markdown_render.py
+      with ModuleNotFoundError for the absent `markdown` dep (the same file passes
+      13/13 once it is installed on the scratch path); none touch the changed area.
+      Considered and rejected: a relative-`CAPDIR` guard in the web-UI recipe — its
+      blocks all run in the worker''s own shell and fail loudly (`cd`/directory guards)
+      rather than silently writing where the checks do not look, which is what tmux''s
+      pipe-pane in the pm session''s directory does. Evidence: $(pm qa captures-path
+      pr-b19db15)/review-7c9c-i2/ (probe.log cases A-D, README.md, scripts/ with the
+      pre/post step-2 and full capture blocks and the stub pm). impl.md R30 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T03:27:02Z'
+    last_edited: '2026-10-29T03:27:02Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
