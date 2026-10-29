@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T06:36:19.323825+00:00'
+  updated_at: '2026-10-29T07:09:21.704304+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35067,6 +35067,31 @@ prs:
       of S7 depends on it. (2026-10-29T06:36:00Z)'
     created_at: '2026-10-29T06:36:19Z'
     last_edited: '2026-10-29T06:36:19Z'
+  - id: note-f4d0332
+    text: 'QA S10 (2026-10-29): PASS — two QA runs racing for the same PR evidence
+      tree. Drove the real race on a throwaway pm project (isolated HOME + private
+      tmux socket, fake-claude): run A (1728aae00c579ea1, Scenario 1) went PASS and
+      sat live in its delayed qa_finalize; `z t` stopped it and started run B (876e816a3beb3b6e)
+      in the same session, which renumbered to Scenario 2. After B: pm qa evidence
+      printed `QA run: 876e816a3beb3b6e` with only Scenario 2 under authoritative
+      membership and `scenarios/1: prior QA run 1728aae00c579ea1` under Anomalies;
+      scenarios/1/scenario.json byte-identical to the pre-z-t snapshot (sha256 1e95f12e…610f);
+      no scenarios/_foreign/; qa_runs/ held both copies each listing only its own
+      scenario; root qa_manifest.json named B and cmp-ed identical to qa_runs/<runB>.json.
+      Concurrent readers: a dashboard plus a 141-iteration reader loop spanning the
+      manifest switch (121 samples of A, 20 of B) — every pm qa evidence exited 0
+      with no unreadable/damaged/unusable wording, every jq check on qa_manifest.json
+      passed (string run_id + list scenarios, never torn), every observed run_id had
+      its qa_runs/<run_id>.json present, and every dashboard refresh returned 200.
+      Supplement: tests/test_captures_provenance.py 77 passed. Captures under /pm-captures/scenarios/10/
+      (story1-tui-race TUI cast+mp4+transcript, story2-concurrent-readers CLI cast+mp4+reader.log+verification.txt).
+      Residual, not a defect: reusing one fixture for the second story drifts scenario
+      indices (the second race numbered Scenario 3/4, not 1/2) because the planner
+      is told scenario_start past existing s-* workdirs — expected renumbering, not
+      a membership bug; and `t` on a PR whose QA already finished focuses the QA window
+      instead of starting a new run (by design; `z t` is the fresh-start path). (2026-10-29T07:10:00Z)'
+    created_at: '2026-10-29T07:09:21Z'
+    last_edited: '2026-10-29T07:09:21Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
