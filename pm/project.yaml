@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T07:40:46.516170+00:00'
+  updated_at: '2026-10-29T08:40:33.433434+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38120,6 +38120,31 @@ prs:
       breadcrumb+review_loop 117 passed.'
     created_at: '2026-10-29T07:40:46Z'
     last_edited: '2026-10-29T07:40:46Z'
+  - id: note-52bb468
+    text: 'QA scenario 12 capture follow-up (2026-10-29, after the first verdict was
+      flagged): the three story captures that shipped only manifest+tui-pane+evidence
+      now have the full tmux-screen-recording artifact set, and all five stories carry
+      a cli-recording capture. Provenance: stories 1, 3 and 5 were fully RE-EXECUTED
+      in fresh isolated HOME/tmux-socket envs with the recorder attached (and each
+      also has a separate CLI-driven run); stories 2 and 4 keep their original tmux
+      recordings (genuine executions, not replays) and gained a separate CLI-driven
+      re-execution. Results: story1 crash-breadcrumb resume adopts the in-flight legacy
+      review-<pr>-i1.jsonl (no Killed existing review window, no second symlink, poll
+      names the legacy path), freezes it with an sid-keyed archive copy, PR stays
+      in_review; story2 a fresh loop never reuses a FROZEN legacy file (loop B i1
+      NEEDS_WORK / i2 PASS, 2 iterations, sha256sum -c OK, polls name only loop-scoped
+      paths); story3 a fresh loop never takes over another session LIVE legacy link
+      ("now belongs to session X (not Y); leaving it live", readlink unchanged, old
+      verdict intact); story4 blank/missing/wrong-type 1234 loop ids regenerate to
+      fd0a4971 / e47a209b / b1421218 at the 8-hex width, each still adopting and finalizing
+      its legacy iteration, no consume_breadcrumb failed, no traceback; story5 valid
+      loop_id 93dc preserved verbatim, own loop-scoped path polled, frozen + archived,
+      no legacy file created. Artifacts per story: transcript.log + recording.cast
+      + recording.mp4 (tmux recipe, h264 3892x2284) and cli/recording.cast + cli/recording.mp4
+      (cli recipe); manifests rewritten to describe both. /pm-captures/scenarios/12/story{1..5}/.
+      Test servers torn down; no processes left.'
+    created_at: '2026-10-29T08:40:19Z'
+    last_edited: '2026-10-29T08:40:33Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
