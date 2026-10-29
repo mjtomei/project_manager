@@ -1473,28 +1473,38 @@ def end_runs_orphaned_by_restart(
 
 
 def kill_windows_of_run(session: str, qa_workdir: str | Path) -> int:
-    """Kill the ``qa-*`` windows of *session* that work inside *qa_workdir*.
+    """Kill the ``qa-*`` windows of *session* that belong to the run in *qa_workdir*.
 
     For a run that died before its main ``qa-<pr>`` window existed: the next
     run's stale-window cleanup is keyed on that window, so the dead run's
     scenario windows (scenario 0's, opened first) would sit beside the new
-    run's under the same names.  Returns how many windows were killed.
+    run's under the same names.  A host scenario window works inside
+    *qa_workdir*; a container one is opened in the PR workdir and execs into
+    the run's scenario container, so it is matched by that container's name
+    (``…-qa-<pr>-<loop_id>-s<N>``) in its start command (S136).  Returns how
+    many windows were killed.
     """
     from pm_core import tmux as tmux_mod
     from pm_core import home_window
 
     inside = str(Path(qa_workdir)) + os.sep
+    rec = read_run_record(qa_workdir) or {}
+    ctr = (f"-qa-{rec['pr_id']}-{rec['loop_id']}-s"
+           if rec.get("pr_id") and rec.get("loop_id") else None)
     result = tmux_mod._run(
         tmux_mod._tmux_cmd("list-panes", "-s", "-t", session, "-F",
                            "#{window_id}\t#{window_name}\t"
-                           "#{pane_current_path}"), text=True)
+                           "#{pane_current_path}\t#{pane_start_command}"),
+        text=True)
     if result.returncode != 0:
         return 0
     doomed = {}
     for line in result.stdout.splitlines():
-        parts = line.split("\t")
-        if (len(parts) == 3 and parts[1].startswith("qa-")
-                and (parts[2] + os.sep).startswith(inside)):
+        parts = line.split("\t", 3)
+        if len(parts) < 3 or not parts[1].startswith("qa-"):
+            continue
+        if ((parts[2] + os.sep).startswith(inside)
+                or (ctr and len(parts) == 4 and ctr in parts[3])):
             doomed[parts[0]] = parts[1]
     for wid, name in doomed.items():
         _log.info("Killing QA window %s of the dead run in %s", name,

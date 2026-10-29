@@ -900,6 +900,34 @@ def test_kill_windows_of_run_matches_only_that_runs_qa_windows(tmp_path):
                                                      ("pm-test", "@4")]
 
 
+def test_kill_windows_of_run_matches_that_runs_container_windows(tmp_path):
+    """Container scenario windows are opened in the PR workdir, not the QA
+    workdir; they are the dead run's by the container they exec into (S136:
+    a plain restart left ``qa-<pr>-s1``/``-s2`` and their refiners alive)."""
+    from pm_core import tmux as tmux_mod
+    wd = tmp_path / "qa" / f"{PR}-0684f96ec911541c"
+    wd.mkdir(parents=True)
+    (wd / "qa_run.json").write_text(json.dumps(
+        {"pr_id": PR, "loop_id": "0684f96ec911541c"}))
+    prwd = tmp_path / "workdirs" / f"pm-{PR}"
+    run = f"sh -c 'podman exec -it -e X pm-tag-qa-{PR}-0684f96ec911541c-s%d bash -c claude'"
+    other = f"sh -c 'podman exec -it pm-tag-qa-{PR}-1111111111111111-s1 bash -c claude'"
+    panes = "\n".join([
+        f"@1\tqa-{PR}-s0\t{wd}/s-0/repo\tsh -c 'claude'",   # host s0
+        f"@2\tqa-{PR}-s1\t{prwd}\t" + run % 1,               # the dead run's
+        f"@3\tqa-{PR}-s2\t{prwd}\t" + run % 2,
+        f"@4\tqa-{PR}-s1\t{prwd}\t" + other,                 # another run's
+        f"@5\tqa-{PR}\t{prwd}\tsh -c 'echo QA execution'",   # main window
+        f"@6\t{PR}\t{prwd}\t" + run % 1,                     # not a QA window
+    ])
+    with patch.object(tmux_mod, "_run", return_value=SimpleNamespace(
+            returncode=0, stdout=panes)), \
+         patch.object(tmux_mod, "kill_window") as kill, \
+         patch("pm_core.home_window.park_if_on"):
+        assert qa_loop.kill_windows_of_run("pm-test", wd) == 3
+    assert [c.args[1] for c in kill.call_args_list] == ["@1", "@2", "@3"]
+
+
 def test_restart_recovery_is_wired_into_mount_before_the_owed_arm():
     """The recovery must run before ``arm_owed_reqa`` reads the obligation."""
     import inspect
