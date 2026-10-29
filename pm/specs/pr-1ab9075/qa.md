@@ -54,6 +54,11 @@ What a user can now observe in the TUI and in `qa_status.json`:
 7. **Queued launches run off the poll thread.** A slow or stalled concretizer
    for a dequeued scenario no longer blocks verdict collection, verification,
    retries or stop.
+8. **A cleared verdict is never resurrected.** A worker that asked for input
+   and then lost its pane/window is handed back to the retry path and
+   relaunched — not settled terminally from the old `INPUT_REQUIRED` still in
+   its transcript. The same holds when the drop is noticed by the held run's
+   follow-up scan, and when the controller restarts before the relaunch.
 
 ## Requirements
 
@@ -172,6 +177,28 @@ still go through verification, and the overall verdict follows the existing
 aggregation (any NEEDS_WORK → NEEDS_WORK, any INPUT_REQUIRED/unverdicted →
 INPUT_REQUIRED, all PASS → PASS).
 
+### R9a — A deliberately cleared verdict is never resurrected
+**Given** a worker that emitted `INPUT_REQUIRED` (the run is waiting for the
+user's answer) and whose pane/window then dies with no follow-up,
+**When** the loop notices the dead worker,
+**Then** the provisional `INPUT_REQUIRED` is cleared and the scenario enters a
+bounded launch retry (shown as `launch retry n/6`) instead of being settled
+`INPUT_REQUIRED` from the dead worker's own transcript; the run does not
+finalize `INPUT_REQUIRED` with no worker left to answer.
+
+**Given** the same drop is noticed by the held run's follow-up scan, or the TUI
+restarts between the drop and the relaunch,
+**When** the run reopens / resumes,
+**Then** the scenario is still relaunched rather than re-collected from the old
+transcript, and the guard survives the restart (it is persisted in
+`qa_resume.json`).
+
+**Given** a worker that keeps asking for input and then dying,
+**When** it is relaunched repeatedly,
+**Then** the relaunches are bounded by the same 6-attempt budget and the
+scenario ends terminally `INPUT_REQUIRED` with a reason, instead of
+relaunching forever.
+
 ### R10 — Verification re-evaluation and launch retries interact safely
 **Given** a worker that emitted PASS and whose verification was FLAGGED, so
 its verdict was cleared and a follow-up was sent for re-evaluation,
@@ -185,10 +212,26 @@ normally. Repeated flags/crashes must end at NEEDS_WORK via the existing
 verification-retry budget, not silently at PASS and not as an unexplained
 INPUT_REQUIRED.
 
+Two behaviours here are deliberate, not findings:
+
+- `verification_failures` is in-memory only, so a restart during a flagged
+  re-evaluation re-collects the stale PASS and re-runs the verifier. That is
+  bounded by `qa-verify-retries` and converges to NEEDS_WORK; it must never
+  end at a silent PASS.
+- If the whole scenario *window* is destroyed, PASS verification cannot find a
+  pane to split, so a preserved verdict ends `INPUT_REQUIRED` ("window gone
+  during PASS verification"). This is pre-existing (identical before this PR)
+  and out of scope — record it as an observation, not a regression of this PR.
+
 ## Setup
 
 Cross-cutting setup (per scenario, in its own container):
 
+- **Test isolation is mandatory.** Drive the whole test from a dedicated tmux
+  socket (`export PM_TMUX_SOCKET=/tmp/qa-<scenario>-tmux.sock`) and an isolated
+  `HOME` (so `~/.pm` state, sessions and settings are the test's own). Never
+  touch, kill or reuse panes from the user's real `pm-*` session, and never
+  change shared host configuration as cleanup. Preserve failed-run evidence.
 - Follow `tui-manual-test.md`: install pm into a venv from the PR clone, set
   `PYTHONPATH=/workspace` (verify with `pm which`), create a throwaway git
   project, `pm init --backend local --no-import`, `pm pr add` one or more PRs
@@ -221,6 +264,17 @@ Cross-cutting setup (per scenario, in its own container):
   sequence is not per scenario. `hold: 0` makes a worker exit right after
   writing its verdict (E2); a `delay` longer than the kill time makes it die
   before it ever starts (E7 `exec`).
+- **Fake-claude exits on any stdin input**, so a verification follow-up typed
+  into a live fake worker kills it. Pick `hold` per role: `hold: 0` for a
+  worker that should die right after its verdict, a short hold (e.g. 50 s) for
+  one that must outlive the 30 s verdict grace but be gone before a later
+  re-evaluation follow-up, and a long hold (e.g. 600 s) for
+  concretizer/verifier panes that should ignore input.
+- To stall only a *queued* scenario's concretizer, use a scripted
+  `qa_concretize` list with a `delay` on the entry that launch will consume
+  (the cursor is global to the session, not per scenario), and keep QA
+  concurrency below the scenario count so the queue is real
+  (`qa-max-scenarios`).
 
 ## Edge cases
 
@@ -275,13 +329,27 @@ follow-up are sent to the worker pane without re-checking that it still
 exists, so a pane that dies between them is a candidate crash of the poll
 loop — record it as an incidental finding if it reproduces.
 
+### E9a — A dropped INPUT_REQUIRED wait survives hold and restart
+A worker emits `INPUT_REQUIRED`, the run enters its held/waiting state, and the
+user kills that worker's pane without answering. The scan must hand the
+scenario back to the retry path (relaunch), not settle it `INPUT_REQUIRED` from
+the old transcript. Repeat with the drop noticed by the held run's follow-up
+scan and with a TUI restart before the retry fires: the persisted guard must
+still force a relaunch. A worker that keeps asking and dying must hit the
+bounded relaunch budget and end terminally `INPUT_REQUIRED`.
+
 ### E10 — Restart during a create-kind backoff
 A scenario whose container/workdir/window creation failed (no pane ever
 existed) is waiting out a `create` retry when the TUI is restarted. The
 attempt count and deadline must survive; the past-due retry must fire on the
 first resumed tick; the retry must re-clone and re-install the scenario's
-instruction file (the `instruction_source` field exists for exactly this), and
-must not leave a duplicate window or the previous attempt's container behind.
+instruction file into the new attempt's scratch `qa-instructions/` directory
+and pass its content to the re-run concretizer. Do **not** assert the
+instruction file reference appears in the worker's `prompt.md`: both launch
+paths deliberately clear `instruction_path` once the concretizer has inlined
+the steps. The retry must not leave a duplicate window or the previous
+attempt's container behind. A restart that lands mid-concretizer tears that
+attempt down and re-runs the concretizer (it is not adopted).
 
 ## Pass/Fail criteria
 
@@ -306,6 +374,13 @@ list. Specific failures:
   overall verdict becomes PASS with a scenario still retrying/unverdicted.
 - Stop takes longer than a couple of poll intervals during backoff, or a
   worker/window is created after the stop.
+- Stop leaves a scenario stuck as "launching" with no operation in flight, or
+  spends a retry attempt that a later resume cannot use.
+- A dropped `INPUT_REQUIRED` wait is settled from the dead worker's old
+  transcript (resurrected verdict) instead of being relaunched.
+- A restart during a create-kind backoff loses the instruction steps (the
+  retried concretizer runs without them), or a restart during a flagged
+  re-evaluation makes the flagged PASS final without re-running verification.
 
 ## Ambiguities (resolved)
 
@@ -315,7 +390,8 @@ inside the scenario container). If the environment cannot run nested podman,
 exercise the equivalent host-mode paths (pane death → `exec`/`exit` retry,
 stop, restart, queued launch) and record the container-specific coverage
 (container diagnosis, container create failure, keyring/PID classification) as
-**UNRESOLVED / missing** rather than passing it.
+**UNRESOLVED / missing** rather than passing it. Superseded by A6: nested
+podman is available here, so this fallback does not apply.
 
 A2. **Synthetic runtime failures are sanctioned** by the PR description for
 PID/keyring exhaustion ("bounded synthetic failure rather than creating a real
@@ -352,3 +428,25 @@ A8. **Fake-claude makes a worker die on the verification follow-up.** When a
 worker runs under fake-claude and the verifier FLAGs its PASS, the follow-up
 `send_keys` is read as stdin by the fake, which then exits — so E9 can be
 driven deterministically without killing panes by hand.
+
+A9. **QA scenario 9's instruction-file Then was wrong (resolved
+2026-10-29).** It asserted the worker's `prompt.md` contains the
+"Test setup instructions are available at: …" reference. Both launch paths
+deliberately clear `instruction_path` because the concretizer inlines the
+instruction body; the file is copied into the scenario's scratch
+`qa-instructions/` and its content goes to the concretizer. The corrected
+assertion is in E10. Everything else in scenario 9 held (attempt/deadline
+survived the restart, overdue retry fired on the first resumed tick, exactly
+one container and one window, verdicts preserved and not re-verified).
+
+A10. **Deliberate residuals, out of scope.** (a) A restart during a flagged
+re-evaluation re-collects the stale PASS and re-runs the verifier (bounded by
+`qa-verify-retries`, converges to NEEDS_WORK). (b) A scenario whose whole
+window is destroyed during PASS verification ends `INPUT_REQUIRED`
+("window gone during PASS verification"); identical before this PR. Neither is
+a regression of this PR — record them as observations only.
+
+A11. **The E2 finding is fixed.** The dead-pane branch now collects a verdict
+from the transcript and settles the scenario instead of spending a retry, with
+the R9a guards preventing a resurrected `INPUT_REQUIRED`/flagged PASS. A run
+that still relaunches a worker which already emitted a verdict is a finding.

@@ -38451,6 +38451,23 @@ prs:
       in both launch paths) and remains a product decision, not a review fix.'
     created_at: '2026-10-29T04:39:12Z'
     last_edited: '2026-10-29T04:39:12Z'
+  - id: note-e375c12
+    text: 'QA scenario 9 (restart during a create-kind backoff) was INPUT_REQUIRED
+      for one Then that contradicted spec-correct behaviour: it asserted the worker
+      prompt.md contains "Test setup instructions are available at: /scratch/qa-instructions/restart-check.md".
+      Both launch paths deliberately clear instruction_path because the concretizer
+      inlines the instruction body, so the worker prompt never carries the file ref.
+      Corrected scenario for the next run: after a create-kind backoff, restart the
+      TUI mid-backoff and let the overdue retry fire; assert (a) attempts/retry_at
+      survive in qa_resume.json and the retry fires on the first resumed tick, (b)
+      the retry re-clones and re-installs the instruction file into the NEW attempt
+      scratch qa-instructions/ dir and passes its content to the re-run concretizer
+      (visible in the concretizer transcript/log; NOT in the worker prompt), (c) exactly
+      one window and one same-named container, no leftover from the failed attempt,
+      (d) completed PASSes stay verified and are not re-verified. Everything else
+      scenario 9 checked held. QA spec updated (E10, A9).'
+    created_at: '2026-10-29T04:48:42Z'
+    last_edited: '2026-10-29T04:48:42Z'
   - id: note-5fb9cdb
     text: 'QA S11 (2026-10-29, HEAD 9966dcb6): stories 1/2/4/5 PASS; found + fixed
       one in-scope bug in E9a. BUG: a worker that asks for input and then exits on
