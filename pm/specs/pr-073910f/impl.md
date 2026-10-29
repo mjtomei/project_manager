@@ -1253,3 +1253,42 @@ binds no tmux server.
 
 Residual notes unchanged and still non-blocking (see the i3 section of this
 document).
+
+## Review iteration (2026-10-29, review-loop 0e4c i1)
+
+Verification pass over the integrated head; no requirement changes.  The
+change set was re-read against R1–R7, the suite re-run, and the review
+looked specifically for behaviour the suite does not assert.
+
+1. **`pm qa regression`'s dead-pane guard had no test.**  The b972 i2
+   change made the runner require a *live* TUI pane (`_find_live_tui_pane`
+   reports the session name even when the recorded pane is gone, because
+   history/frames callers need that), but nothing asserted either the
+   refusal or the launch path.  Added to `tests/test_cli_qa.py`:
+   `test_qa_regression_reports_a_missing_session`,
+   `test_qa_regression_requires_a_live_tui_pane` (verified to fail with
+   the guard removed: the command launched a runner against a dead pane)
+   and `test_qa_regression_launches_with_the_live_pane` (the prompt names
+   the session and the pane the runner must drive).
+
+Nothing else surfaced: the socket derivation, the default-server
+addressing rule (R4.3), the discovery scoping fixes (7af7 i1–i3), the
+detach selection (R5), the rollout path (R6) and the fail-closed socket
+directory/ownership checks (d1c0 i10/i12) all match the spec, and every
+other new helper already has direct coverage.
+
+Cross-PR, out of scope here: `pane_registry.base_session_name()` (now the
+single "grouped session base" definition, which this PR switched three
+more call sites to) truncates at the first `~`, so a repo directory whose
+name contains `~` yields a session name the registry/pidfile/capture
+lookups then disagree on.  Pre-existing (the previous `rsplit` call site
+was wrong for base-session panes too) and filed as **pr-6de8207**; the fix
+belongs in `get_session_tag()` (sanitise the tag), not in the callers.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration).  No live session, server or shared host
+configuration was touched; the new tests are unit-level and bind no tmux
+server.
+
+Residual notes unchanged and still non-blocking (see the i3 section of this
+document).

@@ -8,7 +8,7 @@ import os
 import shlex
 from pathlib import Path
 
-from pm_core.paths import configure_logger, command_log_file
+from pm_core.paths import configure_logger, command_log_file, default_socket_path
 from pm_core import tmux as tmux_mod
 from pm_core import pane_layout, pane_registry
 from pm_core import store, guide, notes
@@ -757,7 +757,6 @@ def show_connect(app) -> None:
         # session there for the same reason: attaching to the default
         # server without `-t` picks whichever legacy session tmux considers
         # current.
-        from pm_core.paths import default_socket_path
         if socket_path == str(default_socket_path()):
             target = f" -t {session}"
     if socket_path:
