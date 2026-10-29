@@ -116,6 +116,10 @@ Add `--remove` to `pm pr close`:
 
 - Auto-start: `graph.ready_prs` only selects `pending` PRs; `auto_start` also
   refuses terminal targets. No change needed.
+- `pm pr auto-sequence` (the driver a watcher session ticks) reports `merged`
+  and returns today.  `closed` must do the same: report the status and stop
+  (exit 0), instead of falling through to `unknown status: closed` (exit 2),
+  which a driving session reads as a broken PR (review 8820 i1).
 - Manual `pm pr start`: only `merged` is refused today (`pm_core/cli/pr.py:938`).
   Add a `closed` guard next to it: refuse with exit 1 and point at
   `pm pr edit <id> --status pending` to reopen deliberately.
@@ -264,6 +268,10 @@ workdirs are touched.
     preservation tuple in `pr_sync.sync_from_github`.  The two remaining
     literal checks in `pr.py` (`pr_review`, `pr_qa_run_bg`) use the constant
     as well, so no path can disagree about which statuses are terminal.
+    `review_loop._pr_is_terminal` (the check that stops a review loop from
+    resurrecting a retired PR) is the last one (review 8820 i1): it now uses
+    the constant too, so the loop's "stop retrying" set cannot drift from the
+    sync guards'.  No behavior change (same two statuses).
 28. Cleanup after close (review c02f i10): `pm pr cleanup <id>` is the
     explicit workdir-removal step `pm pr close` points at, and `closed` is now
     its normal input — it no longer prints the "status is 'closed' (not
@@ -319,6 +327,17 @@ workdirs are touched.
     `usable_prs`, like every other id-indexing loop (such an entry is skipped,
     not rewritten).  Covered by `test_cleanup_all_tolerates_a_malformed_entry`
     and `test_prune_tolerates_a_malformed_entry`.
+37. `pm pr auto-sequence <closed>` (review 8820 i1): a terminal record reports
+    its status and returns (exit 0) exactly like `merged`; it never falls
+    through to `unknown status: closed` (exit 2) and never launches another
+    phase, so a watcher tick cannot resurrect a PR the user retired.  Covered
+    by `test_auto_sequence_reports_a_closed_pr_without_advancing_it` (fails on
+    the previous head: exit 2 with "unknown status: closed").
+38. `pm pr signoff <closed>` (review 8820 i1) names the deliberate reopen
+    (`pm pr edit <id> --status pending`) like the `start`/`merge` guards,
+    instead of the generic "sign-off runs after QA" complaint about a status
+    the PR is not going to leave on its own.  Covered by
+    `test_signoff_refuses_a_closed_pr_and_names_the_reopen`.
 
 Existing test `tests/test_pr_enhancements.py:746` (`TestGitHubCloseResilience`)
 asserts the *old* destructive outcome (workdir removed, entry removed) and must
@@ -437,15 +456,18 @@ No **[UNRESOLVED]** ambiguities.
 - `pm_core/cli/pr.py` — `pr_close` rewrite (`--remove`, warnings, messages),
   `pr_start` and `pr_merge` closed guards, a closed-duplicate hint in
   `pr_add` (retained closed entries now match its duplicate check), and
-  `pr_edit` dropping `closed_at` on a deliberate reopen (review c02f i13).
+  `pr_edit` dropping `closed_at` on a deliberate reopen (review c02f i13),
+  plus terminal-status reporting in `pr_auto_sequence` and a closed guard in
+  `pr_signoff` (review 8820 i1).
 - `pm/plans/plan-a35369f.md` — `note` bullet marking the branch-deletion
   premise of its ruleset item obsolete (review c02f i13).
 - `pm_core/cli/helpers.py` — `_record_status_timestamp` `closed_at`.
 - `pm_core/pr_utils.py` — `TERMINAL_PR_STATES` (the `merged`/`closed` pair
   shared by the sync guards and the `pm pr list --open` filter).
 - `pm_core/autostart_state.py`, `pm_core/cli/session.py`, `pm_core/qa_loop.py`,
-  `pm_core/home_window/pr_list.py` — the pre-existing terminal-status
-  duplicates derive from the `pr_utils` constant (review c02f i10/i11).
+  `pm_core/home_window/pr_list.py`, `pm_core/review_loop.py` — the
+  pre-existing terminal-status duplicates derive from the `pr_utils` constant
+  (review c02f i10/i11, review 8820 i1).
 - `pm_core/cli/pr.py` — `pr_cleanup`'s "not merged" warning set also accepts
   `closed`, so following close's help to the explicit cleanup is not flagged
   as unexpected (review c02f i10), and its id-less auto-select offers the

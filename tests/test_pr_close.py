@@ -842,6 +842,42 @@ def test_closed_pr_cannot_be_started(tmp_path):
     assert "closed" in start.output.lower()
 
 
+def test_auto_sequence_reports_a_closed_pr_without_advancing_it(tmp_path):
+    """`closed` is terminal exactly like `merged` for the auto-sequence
+    driver: it reports the status (exit 0) instead of "unknown status"
+    (exit 2), and never launches another phase."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"), \
+         mock.patch.object(pr_mod, "_get_pm_session", return_value=None), \
+         mock.patch.object(pr_mod, "pr_start") as start:
+        result = runner.invoke(pr_mod.pr, ["auto-sequence", "pr-001"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "closed"
+    assert not start.called
+    assert _load_entry(project["pm_dir"])["status"] == "closed"
+
+
+def test_signoff_refuses_a_closed_pr_and_names_the_reopen(tmp_path):
+    """The sign-off guard names the way out (like start/merge) instead of the
+    generic "sign-off runs after QA" complaint about a retained closed
+    record."""
+    project = _make_project(tmp_path, status="closed", with_dependent=False)
+    runner = CliRunner()
+    with mock.patch.object(pr_mod, "state_root",
+                           return_value=project["pm_dir"]), \
+         mock.patch.object(pr_mod, "trigger_tui_refresh"):
+        result = runner.invoke(pr_mod.pr, ["signoff", "pr-001"])
+
+    assert result.exit_code != 0
+    assert "closed" in result.output.lower()
+    assert "pm pr edit pr-001 --status pending" in result.output
+    assert _load_entry(project["pm_dir"])["status"] == "closed"
+
+
 def _run_merge(pm_dir: Path, tmp_path: Path, *args: str):
     """Invoke `pm pr merge` with the per-PR lock kept out of ~/.pm."""
     lock_dir = tmp_path / "workdirs"

@@ -1769,6 +1769,13 @@ def pr_signoff(pr_id: str | None, fresh: bool, background: bool,
     if status == "merged":
         click.echo(f"PR {pr_id} is already merged.", err=True)
         raise SystemExit(1)
+    if status == "closed":
+        # A retained closed record (pr-62ad13d) is terminal: name the way out
+        # instead of the generic "sign-off runs after QA" status complaint.
+        click.echo(
+            f"PR {pr_id} is closed — reopen it first with "
+            f"'pm pr edit {pr_id} --status pending'.", err=True)
+        raise SystemExit(1)
     # With project.skip_qa there is no QA stage: sign-off follows review.
     entry_statuses = ("qa",)
     if (data.get("project") or {}).get("skip_qa"):
@@ -3883,9 +3890,11 @@ def pr_auto_sequence(pr_id: str):
     ``sign_off`` step (comprehensive review + verdict router); a verified
     sign-off reports ``ready_to_merge`` (sign-off never merges itself).
 
-    Output is a single status line on stdout.  Exit codes:
-      0 — advanced or status reported normally
-      2 — PR not found / unknown state
+    Output is a single status line on stdout.  A terminal PR (merged or
+    closed) reports its status and is not advanced.
+
+    Exit codes: 0 — advanced or status reported normally; 2 — PR not found or
+    an unknown state.
     """
     root = state_root()
     data = store.load(root)
@@ -3896,8 +3905,13 @@ def pr_auto_sequence(pr_id: str):
     tdir = _auto_seq_transcript_dir(root, pr_id)
     tdir.mkdir(parents=True, exist_ok=True)
 
-    if status == "merged":
-        click.echo("merged")
+    if status in TERMINAL_PR_STATES:
+        # `closed` is terminal exactly like `merged` (pr-62ad13d retains the
+        # record): report the status and stop.  Falling through would answer
+        # "unknown status: closed" (exit 2), which a driving session reads as
+        # a broken PR, and driving another phase would resurrect a PR the
+        # user retired.
+        click.echo(status)
         return
 
     if status == "pending":
