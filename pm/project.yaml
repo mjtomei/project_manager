@@ -28676,7 +28676,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-29T14:35:12.713465+00:00'
+  updated_at: '2026-10-29T14:46:03.161332+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -30041,6 +30041,29 @@ prs:
       + README.md.'
     created_at: '2026-10-29T14:35:12Z'
     last_edited: '2026-10-29T14:35:12Z'
+  - id: note-43ad5a7
+    text: 'QA S40 re-evaluation (supersedes the "PASS 5/5" note above on two points).
+      (1) Stories 2 and 4 were re-executed from a reset state — stale ~/.pm/runtime/<A>.json
+      removed, plain `pm tui restart`, board confirmed free of the ⟳ marker — so the
+      scheduler itself starts the loop: observed `Auto-start: targets += …`, `Auto-start:
+      review loop for pr-95325c4`, `Review loop started for pr-95325c4 loop=ef24`,
+      then the 60 s re-arm `Auto-start: retrying review launch` + `Review loop resumed
+      … loop=ef24` (same id, no second start line), and the idempotent `pm autostart
+      add` printing `unchanged:` / `(already a target)` with no new resume. The earlier
+      run only re-armed the manual episode left by story 1 and was not valid evidence
+      for those Givens; superseded casts are kept under prior-rearm-only-run/ in each
+      story dir. (2) Story 1 prompt:/prompt_copy: was excused by code reading before;
+      it is now OBSERVED — the fake backend never writes a prompt file (find for pm_prompt_*.txt
+      is empty, no <workdir>/pm/prompts), so the same window-killed failure was re-run
+      on the real launch branch with the fake config disabled and a sleeping stub
+      `claude` first on PATH (no API call); that artifact carries prompt: <workdir>/pm/prompts/pm_prompt_<sid>.txt
+      and prompt_copy: …attempt3-….prompt.txt (7438 B). Remaining literal deviation
+      only: window-not-found artifacts record `returncode: None` where the Then prose
+      says the child exited 0 — None is that branch code for "no child failure observed".
+      Captures: /pm-captures/scenarios/40/ (each story manifest lists its files; story1
+      has real-launch-branch-observation/).'
+    created_at: '2026-10-29T14:46:03Z'
+    last_edited: '2026-10-29T14:46:03Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
