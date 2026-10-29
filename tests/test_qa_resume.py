@@ -20,6 +20,7 @@ Covers:
 """
 
 import json
+import threading
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -700,6 +701,37 @@ def test_restore_floor_claim_never_overwrites_a_live_claim(tmp_path):
     other = QALoopState(pr_id="pr-002")
     qa_loop.restore_floor_claim(other, {**data, "floor_container": "x"})
     assert qa_loop._floor_slot["name"] == "pm-t-qa-pr-001-s1"
+
+
+def test_restore_floor_claim_does_not_wait_on_a_launch_admission(tmp_path):
+    """The resume scan runs on the TUI event loop.  Another run's admission
+    holds _launch_admission_lock across ``podman ps``/inspect (30 s + 60 s
+    timeouts, longer in an outage); a restore that waited for it would
+    freeze the TUI for that long."""
+    state = _make_state(tmp_path)
+    held, release = threading.Event(), threading.Event()
+
+    def _admission():
+        with qa_loop._launch_admission_lock:
+            held.set()
+            release.wait(10)
+
+    admission = threading.Thread(target=_admission, daemon=True)
+    admission.start()
+    try:
+        assert held.wait(5)
+        restorer = threading.Thread(
+            target=qa_loop.restore_floor_claim, daemon=True,
+            args=(state, {"use_containers": True,
+                          "floor_container": "pm-t-qa-pr-001-s1"}))
+        restorer.start()
+        restorer.join(2)
+        assert not restorer.is_alive(), "restore blocked on the admission lock"
+        assert qa_loop._floor_slot == {"run": ("pr-001", "abc123"),
+                                       "name": "pm-t-qa-pr-001-s1"}
+    finally:
+        release.set()
+        admission.join(5)
 
 
 @pytest.mark.parametrize("holder", ["pr-001", "pr-002"])

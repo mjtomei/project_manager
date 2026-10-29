@@ -4900,6 +4900,11 @@ _inflight_launches: dict[object, frozenset[str]] = {}
 # a readable inventory that shows the count back within the limit or that
 # container gone (see _floor_slot_taken).
 _floor_slot: dict[str, object] = {}
+# Guards writes to _floor_slot. Admission decides and claims under
+# _launch_admission_lock, which is held across runtime inventories; the TUI
+# event loop restores claims (restore_floor_claim) and must never wait on
+# ``podman ps``, so it takes only this lock, which is never held across one.
+_floor_slot_lock = threading.Lock()
 
 
 def _reserve_launches(names) -> object:
@@ -5124,14 +5129,18 @@ def _floor_slot_taken(run: tuple, running_count: int | None, limit: int,
                 free = not (name in reserved or any(
                     info.running and info.name == name for info in inventory))
         if free:
-            _floor_slot.clear()
+            # Only a restore writes outside the admission lock, and it fills
+            # an empty slot, never this occupied one.
+            with _floor_slot_lock:
+                _floor_slot.clear()
             return False
     return _floor_slot.get("run") != run
 
 
 def _claim_floor_slot(run: tuple, name: str) -> None:
     """Record that *run* made this process's floor launch of container *name*."""
-    _floor_slot.update(run=run, name=name)
+    with _floor_slot_lock:
+        _floor_slot.update(run=run, name=name)
 
 
 def _own_floor_container(state: QALoopState) -> str | None:
@@ -5140,7 +5149,8 @@ def _own_floor_container(state: QALoopState) -> str | None:
     Reads a copy without :data:`_launch_admission_lock`, which is held across
     runtime inventories: a resume snapshot must not wait on ``podman ps``.
     """
-    slot = dict(_floor_slot)
+    with _floor_slot_lock:
+        slot = dict(_floor_slot)
     return slot.get("name") if slot.get("run") == (state.pr_id, state.loop_id) else None
 
 
@@ -5151,13 +5161,20 @@ def restore_floor_claim(state: QALoopState, resume_data: dict) -> None:
     cannot take the empty slot first.  A live claim is never overwritten,
     and a stale one frees itself on the next readable inventory (see
     :func:`_floor_slot_taken`).
+
+    Runs on the TUI event loop (the resume scan), so it takes only
+    :data:`_floor_slot_lock`: :data:`_launch_admission_lock` is held across
+    runtime inventories, which can block for a minute or more in an outage.
+    An admission that found the slot empty and then claims it overwrites a
+    claim restored in between, the same outcome as a restore that waited
+    for that admission and found the slot taken.
     """
     name = resume_data.get("floor_container")
     if not name or not resume_data.get("use_containers"):
         return
-    with _launch_admission_lock:
+    with _floor_slot_lock:
         if not _floor_slot:
-            _claim_floor_slot((state.pr_id, state.loop_id), name)
+            _floor_slot.update(run=(state.pr_id, state.loop_id), name=name)
 
 
 def _execute_and_finalize(

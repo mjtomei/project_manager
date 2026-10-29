@@ -612,7 +612,9 @@ crashing `pm container status`.
   inventory shows the count back within the limit or its container gone
   (not running and not reserved). The occupant is saved in its run's resume
   snapshot and restored before any resumed poll starts, so a TUI restart cannot
-  free the slot for a second floor launch. A run whose start or resume was blind counts its
+  free the slot for a second floor launch. The restore runs in the resume scan on
+  the TUI event loop, so it never waits on the admission lock that launches hold
+  across runtime inventories (IR3). A run whose start or resume was blind counts its
   settled, release-deferred workers as held from its first poll, so a
   start-time floor worker that settles does not admit a second blind launch.
   Resume must not recreate already
