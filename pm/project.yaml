@@ -38218,7 +38218,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/248
   gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-29T03:00:16.824668+00:00'
+  updated_at: '2026-10-29T05:07:25.829470+00:00'
   started_at: '2026-10-22T17:21:14.028691+00:00'
   reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
@@ -39555,6 +39555,48 @@ prs:
       that its slash-command-echo bug is fixed here (baa8 i3).'
     created_at: '2026-10-29T03:00:16Z'
     last_edited: '2026-10-29T03:00:16Z'
+  - id: note-02d9c81
+    text: 'QA scenario 26 (restart during an INPUT_REQUIRED wait) PASS at 6faf7496,
+      all 5 stories driven live with a real TUI + interactive stand-in on a throwaway
+      local-backend project, private HOME and a dedicated tmux socket (no host state
+      touched). (1) Unanswered wait + `pm tui restart --breadcrumb`: save/consume
+      breadcrumb + `Review loop resumed at iteration 1`, one new adopt line `(transcript=<live
+      pane session>.jsonl, unanswered)`, no `has no live pane`, no new relauncher,
+      same window @4 / pane / pane_pid, question still on screen, launch counter 1.
+      231 tight text+JSON samples across the restart: 230 `waiting / review INPUT_REQUIRED
+      (iteration 1)` + exactly 1 `running / review resuming (iteration 1)` (resuming=true,
+      ir=false, fu=false); zero follow-up/phantom-answer shapes. Tree `⏸1<spinner>`
+      before and after. (2) Answered before restart: post-mount `INPUT_REQUIRED answered;
+      follow-up running` (ir=false, fu=true, resuming=false, never waiting), adopt
+      `(answered)`, one `follow-up verdict=NEEDS_WORK` + one `iteration 2 for`, iteration
+      stayed 2 for 20 s, transcript has exactly one answer record and one NEEDS_WORK
+      turn. (3) NEEDS_WORK in the restart gap with the idle suppressed: `follow-up
+      verdict NEEDS_WORK already in transcript` (no hook-driven line), iteration 2,
+      never answered/follow-up after mount. (4) PASS in the gap: `already in transcript`
+      PASS, `Review loop done ... ✓ PASS (1 iteration)`, review object verdict=PASS/running=false/iteration=1
+      (still so after the qa transition), iteration 2 never launched. (5) `z d` during
+      a wait: `Stopped review loop` + `z d killed running loop`, paused/review `review
+      loop stopped (last INPUT_REQUIRED)` with running=false/ir=false/fu=false/resuming=false/verdict=INPUT_REQUIRED,
+      tree settles `⟳1⏸`, no new follow-up verdict, fresh non-loop review window does
+      not re-arm the wait. No code changes. Harness notes for the next runner: (a)
+      the breadcrumb restart re-execs the TUI in place in ~0.2-0.4 s here, so the
+      scenario stories 3-4 timing (`sleep 0.5` + a 1 s response) lands AFTER the resumed
+      loop has already started its wait; drive the gap with `sleep 0.1` and a 0 s
+      response so the answer+verdict precede the adopt line. (b) Observation (not
+      a failed Then, outside qa.md E10 wording): when the verdict lands after the
+      wait starts and the idle_prompt is suppressed/overwritten, `_wait_for_follow_up_verdict`
+      never re-reads the transcript (it reads once at wait start and thereafter only
+      on idle_prompt events), so the loop stays in `INPUT_REQUIRED answered; follow-up
+      running` indefinitely; a periodic transcript re-read in the `ev is None` branch
+      when `watch.assistant_after_answer` is true would close it. (c) In the sampler
+      a JSON read and the text read ~0.2 s later can disagree at a transition instant
+      (e.g. JSON resuming=true then text already waiting) - that is two instants,
+      not a contradiction. (d) After PASS the QA phase fails with `QA spec was not
+      generated during planning` (bundled fake planner) - harness noise, the review
+      object stays PASS. Captures: /pm-captures/scenarios/26/ (story1 + story5 TUI
+      casts+mp4, story5 CLI status cast+mp4, per-story status/log/sample evidence).'
+    created_at: '2026-10-29T05:07:25Z'
+    last_edited: '2026-10-29T05:07:25Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
   model: provider:deepseek-flash
   effort: high
