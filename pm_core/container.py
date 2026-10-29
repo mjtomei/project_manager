@@ -1368,12 +1368,21 @@ def cleanup_pr_containers(pr_id: str,
 
 
 def cleanup_orphaned_qa_containers(session: str, pr_id: str,
-                                   session_tag: str | None = None) -> int:
+                                   session_tag: str | None = None,
+                                   display_id: str | None = None) -> int:
     """Remove QA containers whose tmux windows no longer exist.
 
     Called at the start of a new QA run.  Scans all containers matching
     the QA prefix for *pr_id* (any loop_id) and removes those whose
     corresponding tmux scenario window is gone.
+
+    Window names use the PR's *display* id (``#116`` for GitHub PRs,
+    the PR id otherwise) while container names use ``pr_id``, so the
+    caller passes ``display_id`` to map one to the other.  The match is
+    exact and scoped to this PR: matching on the ``-s{N}`` suffix alone
+    spares a stale container whenever *another* PR happens to have a
+    ``qa-<other>-s{N}`` window open, which leaks one container per
+    stopped run in a multi-PR project.
 
     Returns the number of containers removed.
     """
@@ -1407,15 +1416,13 @@ def cleanup_orphaned_qa_containers(session: str, pr_id: str,
                 continue
             # Container name: pm[-{session_tag}]-qa-{pr_id}-{loop_id}-s{N}
             # Window name:    qa-{display_id}-s{N}
-            # Extract the -s{N} suffix to check against windows.
-            parts = cname.split("-s")
-            if len(parts) < 2:
+            _, sep, suffix_index = cname.rpartition("-s")
+            if not sep or not suffix_index.isdigit():
                 continue
-            suffix = f"-s{parts[-1]}"
-            # Check if ANY window ending with this suffix exists
-            has_window = any(w.endswith(suffix) and w.startswith("qa-")
-                             for w in live_windows)
-            if not has_window:
+            # Exact, PR-scoped window name — a bare "-s{N}" suffix match
+            # would treat another PR's window as this container's.
+            expected_window = f"qa-{display_id or pr_id}-s{suffix_index}"
+            if expected_window not in live_windows:
                 remove_container(cname)
                 count += 1
 

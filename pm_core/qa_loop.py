@@ -5134,8 +5134,10 @@ def _run_qa_sync(
         # windows no longer exist.
         if use_containers:
             from pm_core import container as container_mod
+            from pm_core.cli.helpers import _pr_display_id
             container_mod.cleanup_orphaned_qa_containers(
-                session, state.pr_id, session_tag=state.session_tag)
+                session, state.pr_id, session_tag=state.session_tag,
+                display_id=_pr_display_id(pr_data))
 
         # Final out-of-band status guard, immediately before any QA window is
         # created (scenario 0 / planner).  Re-load fresh: a concurrent merge

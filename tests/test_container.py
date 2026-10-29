@@ -19,6 +19,7 @@ from pm_core.container import (
     image_exists,
     remove_container,
     cleanup_qa_containers,
+    cleanup_orphaned_qa_containers,
     cleanup_session_containers,
     cleanup_all_containers,
     wrap_claude_cmd,
@@ -1099,6 +1100,78 @@ class TestCleanupContainers:
         count = cleanup_all_containers()
         assert count == 3
         assert mock_rm.call_count == 3
+
+
+class TestCleanupOrphanedQaContainers:
+    """Orphan cleanup must match this PR's own scenario windows, not any window."""
+
+    @patch("pm_core.tmux.list_windows")
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_removes_container_whose_window_is_gone(self, mock_docker, mock_rm,
+                                                    mock_windows):
+        mock_windows.return_value = [{"name": "qa-pr1-s2"}]
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-qa-pr1-loop1-s1\n")
+
+        count = cleanup_orphaned_qa_containers("sess", "pr1")
+
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-qa-pr1-loop1-s1")
+
+    @patch("pm_core.tmux.list_windows")
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_spares_container_whose_own_window_exists(self, mock_docker, mock_rm,
+                                                      mock_windows):
+        mock_windows.return_value = [{"name": "qa-pr1-s1"}]
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-qa-pr1-loop1-s1\n")
+
+        assert cleanup_orphaned_qa_containers("sess", "pr1") == 0
+        mock_rm.assert_not_called()
+
+    @patch("pm_core.tmux.list_windows")
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_another_prs_window_does_not_spare_the_container(
+            self, mock_docker, mock_rm, mock_windows):
+        """Regression: a bare ``-s1`` suffix match leaked containers whenever
+        another PR had a ``qa-<other>-s1`` window open."""
+        mock_windows.return_value = [{"name": "qa-pr2-s1"},
+                                     {"name": "qa-pr3-s1"}]
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-qa-pr1-loop1-s1\n")
+
+        count = cleanup_orphaned_qa_containers("sess", "pr1")
+
+        assert count == 1
+        mock_rm.assert_called_once_with("pm-qa-pr1-loop1-s1")
+
+    @patch("pm_core.tmux.list_windows")
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_display_id_maps_github_pr_windows(self, mock_docker, mock_rm,
+                                               mock_windows):
+        mock_windows.return_value = [{"name": "qa-#116-s1"}]
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-qa-pr1-loop1-s1\n")
+
+        assert cleanup_orphaned_qa_containers(
+            "sess", "pr1", display_id="#116") == 0
+        mock_rm.assert_not_called()
+
+    @patch("pm_core.tmux.list_windows")
+    @patch("pm_core.container.remove_container")
+    @patch("pm_core.container._run_runtime")
+    def test_non_numeric_suffix_is_skipped(self, mock_docker, mock_rm,
+                                           mock_windows):
+        mock_windows.return_value = []
+        mock_docker.return_value = MagicMock(
+            returncode=0, stdout="pm-qa-pr1-loop1\n")
+
+        assert cleanup_orphaned_qa_containers("sess", "pr1") == 0
+        mock_rm.assert_not_called()
 
 
 class TestIntegration:
