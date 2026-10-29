@@ -39458,7 +39458,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-29T04:26:28.036630+00:00'
+  updated_at: '2026-10-29T06:03:18.827837+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -40034,6 +40034,45 @@ prs:
       ever makes key handlers async. Spec updated with the i4 notes.'
     created_at: '2026-10-29T04:26:27Z'
     last_edited: '2026-10-29T04:26:27Z'
+  - id: note-718a2ed
+    text: 'QA S15 fixture prerequisite (fresh-autostart handoff with fake-claude):
+      start the implementation pane from the TUI (s key) or let auto-start launch
+      it. That path passes --transcript, which gives fake-claude a --session-id and
+      makes it write the native JSONL transcript the fresh handoff reads (symlink:
+      <pm-root>/transcripts/<run-dir>/impl-<pr>.jsonl). A bare CLI ''pm pr start <pr>''
+      passes no transcript, so the fake writes no JSONL and the handoff can never
+      resolve a turn (it waits forever). To simulate a mid-turn feedback reply, append
+      a type:user record to that JSONL and later append the assistant reply; the poll
+      tick re-checks the transcript tail every tick.'
+    created_at: '2026-10-29T05:33:55Z'
+    last_edited: '2026-10-29T05:33:55Z'
+  - id: note-7f008ec
+    text: 'QA S15 (fresh autostart under the merged wait-for-merge model) PASS, all
+      4 stories, no code change. Captures: /pm-captures/scenarios/15/{01-fresh-wait-for-merge,02-repeat-policy-preservation,03-cli-conflict-and-alias,04-help-surfaces}.
+      Verified at runtime on the fake backend: z a on an in_review PR with the feedback
+      turn in flight logs the fresh-run line then "waiting for the current implementation
+      turn", leaves B in_progress with target wait-for-merge and the dependency row
+      "[wait-for-merge ← B]" (JSON held_by [B], effective_policy wait_for_merge) while
+      A stays in_review with its killed loop; finishing the turn opens exactly one
+      review window; PASS → QA → sign-off parks at the manual merge gate ("signed
+      off (fresh SIGNOFF_MERGE) … waiting for manual merge (held by B) — press g"),
+      no merge-* window. z A / z O repeats are no-ops on attempt/requested_at (only
+      policy moves; popup shows [auto-merge] then [wait-for-merge]; the hold on A
+      disappears and returns). CLI: --stop-before-merge + --auto-merge exits 1 with
+      conflicting_flags and changes nothing (same updated_at), the alias alone prints
+      "fresh: <C> (in_review → in_progress)" + waiting and lists wait-for-merge. Help
+      popup renders 66 cols with all six rows; tui keys, both --help texts and the
+      README carry the new wording. FIXTURE PREREQUISITES for the next run: (1) the
+      impl pane must be started from the TUI (s) so fake-claude gets --transcript
+      and writes the JSONL the handoff reads (a bare CLI pm pr start writes none);
+      (2) fake-claude never writes pm/specs/<pr>/qa.md, so QA ends INPUT_REQUIRED
+      "QA spec missing after planning" — commit a qa.md in the PR workdir and re-run
+      with z t; (3) set review verdicts to {"PASS":100} before finishing the turn
+      to reach sign-off; (4) to re-create a fresh-waiting Given from a sign_off PR,
+      append an in-flight user record first, then z a (otherwise the completed tail
+      hands off immediately).'
+    created_at: '2026-10-29T06:03:18Z'
+    last_edited: '2026-10-29T06:03:18Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
