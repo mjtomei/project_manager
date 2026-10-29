@@ -38537,7 +38537,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-28T23:38:06.022543+00:00'
+  updated_at: '2026-10-29T00:58:05.606812+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -38754,6 +38754,39 @@ prs:
       (excluding tests/test_markdown_render.py, which needs the `markdown` package).'
     created_at: '2026-10-28T23:38:05Z'
     last_edited: '2026-10-28T23:38:05Z'
+  - id: note-d5b4378
+    text: 'Review-loop a6f7 i11 fixes (on ce70877d). (1) `pr_review`s already-`in_review`
+      branch — the normal path for review iterations >= 2 — ran the base gate and
+      then launched the reviewer without re-reading the PR; that branch writes no
+      status, so it had none of the atomic guard the first-iteration path uses, and
+      a base return another driver recorded inside the gate fetch started a reviewer
+      beside the rework it had just launched (the i10 race, in the other branch).
+      It now re-reads after the gate (`_review_post_gate_refusal`): an open return
+      exits 3 (the routing code `review_loop` maps to VERDICT_BASE_CONFLICT, so no
+      iteration is recorded and the loop is not marked ERROR) and a PR that left the
+      pre-review phase exits 1. The first-iteration atomic guard now exits 3 for the
+      return case too, so both iterations classify the same event the same way (`test_pr_review_does_not_start_beside_a_return_recorded_during_the_gate`
+      updated 1 -> 3). (2) The TUI base-rework catch-up was one-shot: `_poll_impl_idle`
+      called `_catch_up_base_impl` once and then `mark_active`, which pins the tracker
+      so the branch is not re-entered until a new hook event — and an idle old session
+      never emits one. A claim still held by the gates own `pm pr start`, or one released
+      by a failed launch (`release_impl_claim` keeps `awaiting`, e.g. a pending spec),
+      therefore stranded the PR with no launcher and no completion check (nothing
+      else drives a manual TUI sessions relaunch). The catch-up is now retryable:
+      the idle turn is left unconsumed for a base return (the sign-off branch keeps
+      `mark_active`; `check_and_start` drives its relaunch) and attempts are throttled
+      to BASE_LAUNCH_RETRY_SECONDS because each takes the project.yaml lock. A successful
+      in-process relaunch now reloads `app._data` — `pm pr start` cleared `awaiting`
+      on disk and no CLI-subprocess reload follows this launch, so the stale marker
+      would otherwise keep the tick in the awaiting branch and never reach the completion
+      check. Also `_base_completion_checks`/`_base_launch_attempts` are initialised
+      in `App.__init__`. Tests: the in_review-branch race (fails without the guard:
+      the reviewer window is launched), the retried catch-up (throttled, idle not
+      consumed), the post-launch reload. Spec R3/R13 + test plan updated. Full suite:
+      4159 passed, 1 skipped; the only failure is the known `test_push_proxy` socket
+      flake (passes in isolation).'
+    created_at: '2026-10-29T00:58:05Z'
+    last_edited: '2026-10-29T00:58:05Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
