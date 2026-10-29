@@ -25598,7 +25598,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-28T10:11:07.093621+00:00'
+  updated_at: '2026-10-29T01:09:14.640293+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -26319,6 +26319,30 @@ prs:
       (cast + mp4 + transcript + evidence). No code changes were needed.'
     created_at: '2026-10-28T10:09:48Z'
     last_edited: '2026-10-28T10:09:48Z'
+  - id: note-28c9fb8
+    text: 'QA S27 PASS (dashboard truth, R18 + error-block rendering): verified live
+      that (a) a planner that never emits a complete QA_PLAN ends INPUT_REQUIRED and
+      the status pane keeps the ERROR block, the recovery detail (session uuid + Pane
+      %3284), the guidance line, the "0 Interactive Session interactive" row AND "Overall:
+      INPUT_REQUIRED" — the table/verdict are no longer hidden by the error; (b) with
+      qa-max-scenarios 2 a three-scenario run renders rows 1/2 pending + row 3 queued
+      + "Progress: 0/3 (1 queued)", retires the verdictless worker with its own reason
+      line (uuid bded507b… = that pane Pane %3313), dequeues Gamma (queued→pending→PASS),
+      and ends INPUT_REQUIRED / finalize FINALIZE_DONE with Overall INPUT_REQUIRED,
+      PR still qa, no sign-off. Captures: ~/.pm/sessions/project_manager-5b29c418/captures/pr-6566901/scenarios/27/{story1,story2}.
+      Two scenario-step mismatches (NOT defects): (1) pm log grep "QA finalize: skipped
+      for prA" never matches on the no-plan path — the planner-exhaustion branch returns
+      before _execute_and_finalize, so no finalize log line is emitted (check for
+      the absence of a FINALIZE/finalizer pane instead); (2) pm log grep "exhausted
+      recovery" matches only the planner path; a retired scenario worker logs "Scenario
+      N: qa-scenario-N: session <uuid> … Pane %N was left open for inspection" at
+      WARNING. Env notes for the next run: create the throwaway project session with
+      `env -u TMUX -u TMUX_PANE pm session` (otherwise it adopts the enclosing orchestrator
+      session); `pm which` from the clone depends on ~/.pm/sessions/<repo-tag>/override
+      — a stale one pointed at pr-592e4bd and had to be repointed; ffmpeg is not on
+      PATH (use /tmp/ffmpeg-7.0.2-arm64-static).'
+    created_at: '2026-10-29T01:09:14Z'
+    last_edited: '2026-10-29T01:09:14Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
