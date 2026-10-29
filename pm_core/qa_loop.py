@@ -259,6 +259,16 @@ class QALoopState:
     # prevents an endless relaunch loop for a worker that asks for input and
     # then dies.
     wait_relaunch_count: dict[int, int] = field(default_factory=dict)
+    # Scenarios whose provisional INPUT_REQUIRED was deliberately cleared so
+    # a fresh worker attempt can be made (a lost wait handed back to the
+    # retry path).  The cleared verdict is still the last turn in the dead
+    # worker's transcript, so the dead-pane collection must not read it back
+    # — that would settle a recoverable wait as a terminal result with no
+    # worker left to answer.  Persisted because the drop usually happens in
+    # the hold loop, which hands the scenario to a *fresh*
+    # ``_poll_tmux_verdicts`` invocation (and may be interrupted by a
+    # restart).  Cleared once a new worker attempt starts.
+    dropped_wait_verdicts: set[int] = field(default_factory=set)
     # Set by the TUI when it discards this run (fresh start / manual
     # stop-and-restart) and clears the resume snapshot.  In-memory only: a
     # superseded run must not rewrite the snapshot afterwards, or a later
@@ -1009,6 +1019,7 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "planner_head": state.planner_head,
         "planner_code_changes": list(state.planner_code_changes),
         "queued_indices": sorted(queued_indices or set()),
+        "dropped_wait_verdicts": sorted(state.dropped_wait_verdicts),
         "launch_retries": {
             str(k): v for k, v in state.launch_retries.items()
         },
@@ -1373,6 +1384,9 @@ def build_resume_state(resume_data: dict) -> QALoopState:
         int(k): dict(v)
         for k, v in (resume_data.get("launch_retries") or {}).items()
         if isinstance(v, dict)
+    }
+    state.dropped_wait_verdicts = {
+        int(i) for i in (resume_data.get("dropped_wait_verdicts") or [])
     }
     return state
 
@@ -3244,6 +3258,10 @@ def _clear_waiting(state: QALoopState, idx: int,
         state.scenario_verdict_sources.pop(idx, None)
         state.scenario_verdict_reasons.pop(idx, None)
         state.verified_scenarios.discard(idx)
+    else:
+        # The verdict stays as terminal evidence, so there is nothing left
+        # for a dead-pane collection to resurrect.
+        state.dropped_wait_verdicts.discard(idx)
 
 
 @dataclass
@@ -3277,6 +3295,7 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
             _log.info("Waiting scenario %d attempt superseded — polling the "
                       "new attempt from scratch", idx)
             _clear_waiting(state, idx, drop_verdict=True)
+            state.dropped_wait_verdicts.add(idx)
             result.dropped.add(idx)
             result.changed = True
             continue
@@ -3364,6 +3383,7 @@ def _scan_waiting_scenarios(state: QALoopState) -> _WaitingScan:
         _log.warning("Waiting scenario %d worker pane is gone with no "
                      "follow-up — handing back to the retry path", idx)
         _clear_waiting(state, idx, drop_verdict=True)
+        state.dropped_wait_verdicts.add(idx)
         result.dropped.add(idx)
         result.changed = True
     return result
@@ -3554,8 +3574,11 @@ def _poll_tmux_verdicts(
     # to the retry path).  Their old verdict is still in the dead worker's
     # transcript, so the dead-pane collection below must not read it back —
     # that would resurrect a cleared verdict and turn a recoverable wait into
-    # a terminal INPUT_REQUIRED.  Cleared once a new worker attempt starts.
-    recovered_waits: set[int] = set()
+    # a terminal INPUT_REQUIRED.  Kept on the state (and in the resume
+    # snapshot) because the drop usually happens in the hold loop, which
+    # hands the scenario to this fresh invocation.  Cleared once a new worker
+    # attempt starts.
+    dropped_waits = state.dropped_wait_verdicts
     for rec in retries.values():
         if rec.get("state") == "launching":
             # The previous controller died mid-launch: re-detect from the
@@ -3902,9 +3925,12 @@ def _poll_tmux_verdicts(
             # rather than skip the finalize pane as if it were still the
             # already-finalized held one.
             state.held = False
+        # A dropped attempt is handed back to the pending path; the scan
+        # already recorded it in ``state.dropped_wait_verdicts``, which the
+        # dead-pane collection below consults so it cannot read the cleared
+        # verdict back out of the dead worker's transcript.
         for idx in scan.dropped:
             pending.add(idx)
-            recovered_waits.add(idx)
         for idx, hit in scan.follow_ups.items():
             scenario = next(
                 (s for s in state.scenarios if s.index == idx), None)
@@ -4010,7 +4036,7 @@ def _poll_tmux_verdicts(
                     rec["state"] = "running"
                 # A new worker attempt started: its transcript is the new
                 # session's, so a verdict it emits may be collected again.
-                recovered_waits.discard(idx)
+                dropped_waits.discard(idx)
                 grace_until[idx] = now_mono + _VERDICT_GRACE_PERIOD
                 # Per-session state belongs to the dead worker: a fresh
                 # session must get its own grace, trust watch and first
@@ -4245,10 +4271,14 @@ def _poll_tmux_verdicts(
                 # excluded — its old verdict is still in the transcript and a
                 # dead pane must not resurrect it: cleared for a verification
                 # re-evaluation, or cleared so a lost INPUT_REQUIRED wait can
-                # be relaunched for the user to answer.
+                # be relaunched for the user to answer.  ``verification_failures``
+                # is in-memory only (after a restart the stale PASS is
+                # re-collected and re-verified, which converges to NEEDS_WORK);
+                # the wait-drop guard is persisted because a resurrected
+                # INPUT_REQUIRED would be terminal with no worker to answer.
                 if (_worker_has_started(scenario)
                         and idx not in verification_failures
-                        and idx not in recovered_waits):
+                        and idx not in dropped_waits):
                     verdict = extract_verdict_from_transcript(
                         scenario.transcript_path, ALL_VERDICTS)
                     if verdict:

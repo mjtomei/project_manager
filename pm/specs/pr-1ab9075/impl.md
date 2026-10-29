@@ -191,6 +191,19 @@ the user to answer, turning a recoverable wait into a terminal result.  The
 exclusion lasts until a new worker attempt starts (the relaunched session's
 transcript may be collected normally).
 
+The wait-drop guard lives on the state (`QALoopState.dropped_wait_verdicts`)
+and in the resume snapshot, not in a loop-local set: a held run does its
+scanning in `_hold_for_follow_up`, which hands the dropped scenario to a
+*fresh* `_poll_tmux_verdicts` invocation, and the controller can restart in
+between — a loop-local guard is empty in both cases and the cleared verdict
+is collected straight back.  It is set where `_scan_waiting_scenarios`
+records a drop and cleared when a background launch reports that a new
+worker started (and when the wait is settled terminally, `drop_verdict=False`).
+`verification_failures` stays in-memory: after a restart the stale PASS can
+be re-collected and re-verified, which re-runs the verifier (bounded by
+`qa-verify-retries`, converging to NEEDS_WORK) rather than turning a
+recoverable wait into a terminal result.
+
 R10. **No verdict-criteria or verification change.**  Verdict extraction,
 idle-hook gating, verification, and aggregation in `_execute_and_finalize`
 are unchanged apart from per-scenario grace.
@@ -312,3 +325,9 @@ loop owns the run.
   collection until a new attempt starts
   (`test_dropped_waiting_attempt_is_relaunched_not_recollected`,
   `test_recovered_wait_collects_a_verdict_from_its_new_worker`).
+- E9a. The same holds when the drop happens in the hold loop
+  (`_hold_for_follow_up`) and the run reopens in a fresh
+  `_poll_tmux_verdicts` call, and when the controller restarts before the
+  retry runs: the guard is persisted
+  (`test_hold_dropped_wait_is_relaunched_not_recollected`,
+  `test_dropped_wait_guard_survives_a_restart`).

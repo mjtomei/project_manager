@@ -1252,3 +1252,83 @@ def test_diagnose_exec_failure():
         raise subprocess.TimeoutExpired(args, 10)
     with patch("pm_core.container._run_runtime", side_effect=hung):
         assert "timed out" in container_mod.diagnose_exec_failure("pm-c")
+
+
+def test_hold_dropped_wait_is_relaunched_not_recollected(tmp_path):
+    """The hold loop drops a waiting attempt whose worker pane died with no
+    follow-up, then reopens the live loop in a *fresh* ``_poll_tmux_verdicts``
+    call.  The reopened loop must not read the cleared INPUT_REQUIRED back out
+    of the dead worker's transcript: the "do not resurrect a cleared verdict"
+    guard has to survive the hold → reopen handoff, not just one live-loop
+    tick."""
+    from pm_core.qa_loop import _scan_waiting_scenarios
+
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="wait", focus="f", window_name="w1",
+                    pane_id="%1", session_id="sid-1", transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.scenarios = [sc]
+    state.scenario_verdicts = {1: VERDICT_INPUT_REQUIRED}
+    state.scenario_verdict_reasons = {1: "need a decision"}
+    state.waiting_for_input = {1}
+    state.waiting_input_sources = {1: {
+        "pr_id": "pr-x", "loop_id": state.loop_id, "scenario": 1,
+        "session_id": "sid-1", "turn_id": "turn-ir", "timestamp": "1.0",
+        "transcript_path": str(tp),
+    }}
+
+    # The hold loop's scan drops the attempt (dead pane, no follow-up).
+    with patch("pm_core.tmux.pane_exists", return_value=False):
+        scan = _scan_waiting_scenarios(state)
+    assert scan.dropped == {1}
+    assert state.scenario_verdicts == {}
+
+    def on_tick(clock):
+        if state.launch_retries:
+            state.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {str(tp): VERDICT_INPUT_REQUIRED}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+    ]
+    _run(state, tmp_path, patches)
+
+    # Handed back to the retry path, not settled from the stale verdict.
+    assert state.scenario_verdicts == {}
+    assert state.launch_retries[1]["kind"] == "exit"
+    assert state.launch_retries[1]["state"] == "waiting"
+
+
+def test_dropped_wait_guard_survives_a_restart(tmp_path):
+    """A dropped wait is usually handed to the reopened loop minutes later,
+    and the controller can restart in between.  The "do not resurrect the
+    cleared INPUT_REQUIRED" guard must survive the resume snapshot, or a
+    restart turns the recoverable wait into a terminal INPUT_REQUIRED."""
+    tp = tmp_path / "t1.jsonl"
+    tp.write_text("{}\n")
+    sc = QAScenario(index=1, title="wait", focus="f", window_name="w1",
+                    pane_id=None, session_id="sid-1", transcript_path=str(tp))
+    state = QALoopState(pr_id="pr-x")
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [sc]
+    state.dropped_wait_verdicts = {1}
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+
+    restored = build_resume_state(_load_resume_file(tmp_path))
+    assert restored.dropped_wait_verdicts == {1}
+
+    def on_tick(clock):
+        if restored.launch_retries:
+            restored.stop_requested = True
+
+    clock = FakeClock(on_tick)
+    patches = _base_patches(clock, {}, {str(tp): VERDICT_INPUT_REQUIRED}) + [
+        patch("pm_core.tmux.pane_exists", return_value=False),
+        patch("pm_core.qa_loop._get_scenario_pane", return_value=None),
+    ]
+    _run(restored, tmp_path, patches)
+
+    assert restored.scenario_verdicts == {}
+    assert restored.launch_retries[1]["kind"] == "exit"
