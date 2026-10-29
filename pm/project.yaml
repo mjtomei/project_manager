@@ -37685,7 +37685,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/275
   gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-29T06:52:59.281223+00:00'
+  updated_at: '2026-10-29T07:40:46.516170+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -38101,6 +38101,25 @@ prs:
       ahead of ~/.local/bin.'
     created_at: '2026-10-29T06:52:59Z'
     last_edited: '2026-10-29T06:52:59Z'
+  - id: note-d4cdbf7
+    text: 'QA scenario 12 (legacy rules on the integrated branch) PASS — 5/5 stories,
+      all driven through the TUI/CLI surfaces with per-story isolated HOME + tmux
+      socket: (1) crash-breadcrumb resume ADOPTS the in-flight legacy review-<pr>-i1.jsonl
+      (no Killed existing review window, no second symlink, poll names the legacy
+      path), then freezes it to a regular file with an sid-keyed archive copy and
+      leaves PR in_review; (2) a fresh loop never reuses a FROZEN legacy file — writes
+      loop-scoped i1(NEEDS_WORK)/i2(PASS), 2 iterations, frozen file byte-identical
+      (sha256sum -c); (3) a fresh loop never takes over another session LIVE legacy
+      link — "now belongs to session X (not Y); leaving it live", readlink unchanged,
+      both transcripts intact; (4) blank / missing / wrong-type(1234) breadcrumb loop
+      ids each regenerate an 8-hex id (bf0859ee, 5d29c059, 0f45997f) and still adopt
+      + finalize the legacy iteration, no traceback; (5) a valid loop_id 93dc is preserved
+      verbatim, polls its own review-<pr>-93dc-i1.jsonl, freezes + archives it, and
+      creates no legacy file. Captures /pm-captures/scenarios/12/story{1..5}/ (story2
+      and story4 have cast+mp4). Also green: tests/test_transcript_archive.py 35 passed,
+      breadcrumb+review_loop 117 passed.'
+    created_at: '2026-10-29T07:40:46Z'
+    last_edited: '2026-10-29T07:40:46Z'
   workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
   model: provider:deepseek-flash
   effort: high
