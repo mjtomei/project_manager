@@ -765,3 +765,54 @@ session env, the global env and the hooks, default server untouched.
 No live session, server or shared host configuration was touched.
 
 Residual notes unchanged and still non-blocking (see the i3 section).
+
+## Review iteration (2026-10-29, review-loop d1c0 i6)
+
+Verification pass over the integrated head; no requirement changes.  Three
+reuse/coverage items in the TUI-pane discovery code, all in
+`pm_core/cli/helpers.py`:
+
+1. **`_find_tui_pane()`'s last-resort scan re-implemented the tmux query
+   that `_live_panes_and_tuis()` already performs.**  It ran its own
+   `list-panes -a` with a different format string
+   (`pane_current_command` *and* `pane_start_command`) and decided "is this
+   a TUI pane" by substring-matching the concatenation, while
+   `_find_live_tui_pane()` uses `_live_panes_and_tuis()` and its
+   `pane_start_command`-only rule.  Two definitions of "a pane running the
+   TUI" is the divergence risk the i3 note removed elsewhere.  The scan now
+   iterates `_live_panes_and_tuis()` per server, so the rule lives in one
+   place.  (The `pane_current_command` half could not match a real
+   `pm _tui` pane anyway: the foreground process is `pm`/`python`, not
+   `_tui`.)  This also closes a "degrade, never crash" gap: the old call
+   was an unguarded `subprocess.run`, so an `OSError` raised after
+   `list_pm_sessions()` had succeeded would have escaped `_find_tui_pane()`
+   — the contract i2 established for the rest of the scan.
+2. **`_recorded_tui_pane()` and `_registry_tui_pane()` each walked the
+   registry looking for `role="tui"`.**  Both now share
+   `_iter_registry_tui_panes()`; the liveness filter stays only in
+   `_registry_tui_pane()`.
+3. **`_canonical_session()` was a third copy of "strip the `~N` suffix"**
+   (`_canonical_session`, `pane_registry.base_session_name`, and the inline
+   `split("~", 1)` in `find_session_server`).  It now delegates to
+   `base_session_name()`, matching the i1 change to `_find_live_tui_pane()`.
+
+Also documented (docstring only): `_find_tui_pane()` always returns the
+*base* session name, normalising a grouped `pm-x~2` — the registry, pidfile
+and history/frames files are all keyed by the base name, so this is what
+makes `pm tui frames -s pm-x~2` read the file the TUI actually wrote.
+
+New tests: `test_last_resort_finds_an_unregistered_tui_pane` (the direct
+scan's success path, previously untested — only its failure path was) and
+`TestSessionMobileServerSelection::test_status_queries_the_hosting_server`
+(`pm session mobile`'s `_select_session_socket()` wiring, previously
+untested; without it the status query hits the default server and reports a
+live private session as "not running").
+
+Validation on the integrated head: full suite **4572 passed / 1 skipped**
+(scratch `pytest<9` + `markdown`, `PATH` without the push-proxy `git`,
+`TMUX`/`TMUX_PANE`/`PM_*`/`PM_HOST_HOME` cleared).
+`pm/specs/pr-073910f/session_start_smoke.py` re-run end to end on a
+disposable socket: private server created, `PM_TMUX_SOCKET` in the session
+env, the global env and the hooks, default server untouched.
+
+Residual notes unchanged and still non-blocking (see the i3 section).

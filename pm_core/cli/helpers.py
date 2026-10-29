@@ -481,7 +481,7 @@ def _canonical_session(session: str) -> str:
     same canonical file the TUI actually wrote, so external mutations
     (``pm pr edit`` -> SIGUSR1 reload) reach the TUI.
     """
-    return session.split("~")[0]
+    return pane_registry.base_session_name(session)
 
 
 def _tui_pidfile_for_session(session: str) -> Path:
@@ -1322,6 +1322,16 @@ def _select_session_socket(session_name: str) -> str | None:
     return sock if on_private else None
 
 
+def _iter_registry_tui_panes(session: str):
+    """Yield the pane ids the registry records with ``role="tui"``."""
+    data = pane_registry.load_registry(session)
+    for _, pane in pane_registry._iter_all_panes(data):
+        if pane.get("role") == "tui":
+            pane_id = pane.get("id")
+            if pane_id:
+                yield pane_id
+
+
 def _recorded_tui_pane(session: str) -> str | None:
     """Return the pane id the registry records for *session*'s TUI.
 
@@ -1329,13 +1339,7 @@ def _recorded_tui_pane(session: str) -> str | None:
     ``_find_live_tui_pane``, and ``pm autostart`` needs the recorded pane
     to report a stale pidfile for the right session.
     """
-    data = pane_registry.load_registry(session)
-    for _, pane in pane_registry._iter_all_panes(data):
-        if pane.get("role") == "tui":
-            pane_id = pane.get("id")
-            if pane_id:
-                return pane_id
-    return None
+    return next(_iter_registry_tui_panes(session), None)
 
 
 def _registry_tui_pane(session: str) -> str | None:
@@ -1345,19 +1349,14 @@ def _registry_tui_pane(session: str) -> str | None:
     cwd and cross-server branches of ``_find_tui_pane``): a pane that no
     longer exists must not be attributed to the server being probed.
     """
-    data = pane_registry.load_registry(session)
-    for _, pane in pane_registry._iter_all_panes(data):
-        if pane.get("role") == "tui":
-            pane_id = pane.get("id")
-            if not pane_id:
-                continue
-            try:
-                if tmux_mod.pane_exists(pane_id):
-                    return pane_id
-            except OSError:
-                # tmux missing/unexecutable: no pane is live (same contract
-                # as find_session_server's degrade).
-                return None
+    for pane_id in _iter_registry_tui_panes(session):
+        try:
+            if tmux_mod.pane_exists(pane_id):
+                return pane_id
+        except OSError:
+            # tmux missing/unexecutable: no pane is live (same contract
+            # as find_session_server's degrade).
+            return None
     return None
 
 
@@ -1371,6 +1370,10 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     files off the session, and ``pm autostart`` reports a stale pidfile
     from it.  Callers that *drive* the pane use ``_find_live_tui_pane``,
     which filters dead panes.
+
+    The returned session name is always the *base* session: a grouped
+    suffix (``pm-x~2``) is normalised away, because the registry, the
+    pidfile and the history/frames files are all keyed by the base name.
 
     Every pm session has its own tmux server, so resolution also selects
     the server hosting the found session: subsequent ``tmux_mod`` calls in
@@ -1426,23 +1429,16 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     # Last resort: search tmux directly for a pane running 'pm _tui'.
     # This handles cases where the TUI pane was removed from the registry
-    # (e.g. during heal testing) but is still alive in tmux.
+    # (e.g. during heal testing) but is still alive in tmux.  Reuses
+    # ``_live_panes_and_tuis`` — the same query ``_find_live_tui_pane``
+    # filters — so "a pane running the TUI" has one definition, and a tmux
+    # that cannot be run degrades to "nothing found" instead of raising.
     for info in servers:
         _use_tmux_socket(info["socket"])
-        result = subprocess.run(
-            tmux_mod._tmux_cmd(
-                "list-panes", "-a",
-                "-F", "#{pane_id} #{session_name} #{pane_current_command} #{pane_start_command}"),
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            continue
-        for line in result.stdout.strip().splitlines():
-            parts = line.split(None, 3)
-            if len(parts) >= 3 and parts[1].startswith("pm-"):
-                cmd_text = " ".join(parts[2:])
-                if "_tui" in cmd_text:
-                    return parts[0], pane_registry.base_session_name(parts[1])
+        _, live_tuis = _live_panes_and_tuis()
+        for pane_id, tui_session in live_tuis:
+            if tui_session.startswith("pm-"):
+                return pane_id, pane_registry.base_session_name(tui_session)
 
     # Nothing found: undo the scan's env mutations so the caller keeps the
     # server it started with.

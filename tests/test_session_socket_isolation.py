@@ -703,6 +703,39 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == (None, None)
         assert "PM_TMUX_SOCKET" not in os.environ
 
+    def test_last_resort_finds_an_unregistered_tui_pane(self, monkeypatch):
+        """A live ``pm _tui`` pane with no registry entry is still found.
+
+        The direct scan is what catches a TUI whose registry entry was
+        removed (e.g. during heal testing).  It shares the pane query with
+        ``_find_live_tui_pane`` and normalises a grouped session name to
+        its base.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions",
+                            lambda: [{"name": "pm-target", "socket": "/tmp/s",
+                                      "attached": 0, "shared": False}])
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **kw: MagicMock(
+                returncode=0,
+                stdout="%7 pm-target~1 pm _tui\n%8 pm-other bash\n"))
+
+        assert helpers._find_tui_pane() == ("%7", "pm-target")
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
+
     def test_explicit_session_selects_its_server(self, monkeypatch, tmp_path):
         from pm_core.cli import helpers
         from pm_core import pane_registry
@@ -978,6 +1011,44 @@ class TestResolveTargetSession:
                             lambda cands: seen.append(cands) or cands[0])
         session_mod._resolve_target_session()
         assert seen == [["pm-same"]]
+
+
+class TestSessionMobileServerSelection:
+    """``pm session mobile`` must address the server hosting the session.
+
+    The session name is the same on either server, so without selecting the
+    hosting server the status query would hit the default one and report a
+    live private session as "not running".
+    """
+
+    def test_status_queries_the_hosting_server(self, monkeypatch, tmp_path):
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        sock = str(tmp_path / "pm-abc")
+        # Restored by monkeypatch; _use_tmux_socket assigns os.environ
+        # directly, so the test must not leak it.
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(session_mod, "_resolve_target_session",
+                            lambda: "pm-abc")
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (sock, True))
+        monkeypatch.setattr(session_mod.pane_layout, "mobile_flag_path",
+                            lambda name: tmp_path / "pm-abc.mobile")
+        seen: dict[str, str | None] = {}
+
+        def fake_session_exists(name, socket_path=None, use_env=True):
+            seen["env"] = os.environ.get("PM_TMUX_SOCKET")
+            return False
+
+        monkeypatch.setattr(session_mod.tmux_mod, "session_exists",
+                            fake_session_exists)
+
+        result = CliRunner().invoke(session_mod.session, ["mobile"])
+
+        assert result.exit_code == 0, result.output
+        assert seen["env"] == sock
+        assert "not running" in result.output
 
 
 class TestPickExistingSession:
