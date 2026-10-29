@@ -43,7 +43,11 @@ hits, regardless of how it waits for a background job:
   claims the capture directory in a session option — before attaching the
   pipe, so the read/write gap does not cover the takeover it guards — and
   refuses a session recording a different directory, or a directory another
-  live session records into; a finished run releases the claim, and the claim
+  live session records into; a finished run releases the claim, and every
+  claim handle names the session exactly (``-t "=$TARGET:0.0"``), because a
+  plain target is prefix-matched when the target has ended — the write then
+  succeeds on a grouped ``<base>~N`` session and the "could not claim … the
+  session went away" guard never fires; the claim
   is compared as a canonical directory rather than as the text typed (step 0
   accepts `~/cap`, and a quoted `~` never expands, so one directory spelled
   two ways was two claims), and a session holding no claim must not be read as
@@ -548,7 +552,10 @@ class TestRecipes:
                      "send-keys -t pm-recorder",
                      "kill-session -t pm-recorder",
                      "attach -t $TARGET",
-                     'pipe-pane -t "$TARGET'):
+                     'pipe-pane -t "$TARGET',
+                     'show-options -t "$TARGET',
+                     'set-option -t "$TARGET',
+                     'set-option -u -t "$TARGET'):
             assert bare not in block, (
                 f"tmux recipe targets a session with a bare name ({bare!r}), "
                 "which tmux prefix-matches — it would act on another session "
@@ -558,7 +565,10 @@ class TestRecipes:
                       'send-keys -t "=pm-recorder:0.0"',
                       'kill-session -t "=pm-recorder"',
                       "attach -t =$TARGET",
-                      'pipe-pane -t "=$TARGET:0.0"'):
+                      'pipe-pane -t "=$TARGET:0.0"',
+                      'show-options -t "=$TARGET:0.0"',
+                      'set-option -t "=$TARGET:0.0" @pm_capture_dir',
+                      'set-option -u -t "=$TARGET:0.0" @pm_capture_dir'):
             assert exact in block, (
                 f"tmux recipe does not use the exact session handle {exact!r}")
 
@@ -3088,9 +3098,12 @@ val() { f=$1; shift; while [ $# -gt 0 ]; do
 # exact name wins, and when no session has the whole name the target is
 # matched by *prefix* — `has-session -t pm-test` exits 0 with only
 # `pm-test~1` on the server, which is how pm's grouped `base~N` sessions get
-# picked up. A leading `=` forces an exact match; `has-session` and
-# `pipe-pane` honour it, while `show-options`/`set-option` do not (verified:
-# "no such session: =pm-test"). Echoes the resolved name, or fails.
+# picked up. A leading `=` forces an exact match; a *bare* `=pm-test` target is
+# refused by `show-options`/`set-option` (verified: "no such session:
+# =pm-test"), but the `=pm-test:0.0` pane form they also accept is exact
+# (verified: it answers "no such session" with only the grouped session on the
+# server), so those two strip the pane spec like the pane-target commands do.
+# Echoes the resolved name, or fails.
 resolve() {
     t=$1; exact=0
     case "$t" in =*) exact=1; t=${t#=} ;; esac
@@ -3165,7 +3178,7 @@ case "$sub" in
   # `set-option -u` round-trip; a grouped session does not inherit it).
   show-options)
       s=$(val -t "$@")
-      r=$(resolve "$s")
+      r=$(resolve "${s%%:*}")
       case "$*" in
         *@pm_capture_dir*)
             [ -n "$r" ] && [ -f "$STATE/claim.$r" ] && {
@@ -3179,7 +3192,18 @@ case "$sub" in
       exit 0 ;;
   set-option)
       s=$(val -t "$@")
-      r=$(resolve "$s")
+      # `claimgap`: the target ends between step 2's exact-session assert and
+      # the claim write, and pm's grouped `pm-test~1` session is left behind —
+      # the shape a *bare* set-option target prefix-matches. Real tmux (3.2a,
+      # verified) writes the option on the grouped session and exits 0, so the
+      # step's guard cannot fire; the `=pm-test:0.0` form is exact and answers
+      # "no such session". `claimgone` is the other half: no session matches
+      # the prefix, so even a bare write fails.
+      if [ "$STUB_MODE" = claimgap ]; then
+          rm -f "$STATE/pm-test" "$STATE/claim.pm-test"
+          touch "$STATE/pm-test~1"
+      fi
+      r=$(resolve "${s%%:*}")
       [ -z "$r" ] && { echo "no such session: $s" >&2; exit 1; }
       case " $* " in
         *" -u "*) rm -f "$STATE/claim.$r"; exit 0 ;;
@@ -3887,6 +3911,43 @@ class TestCaptureFlowExecution:
             "worker is sent to look at a pane that never existed: "
             + r.stderr)
 
+    def test_a_claim_written_to_a_prefix_session_is_reported(self, tmp_path):
+        """`set-option` prefix-matches too, so the write needs the exact handle.
+
+        The guard above reports a target that went away, and it depends on the
+        write *failing* — which a plain `-t "$TARGET"` does not do. Real tmux
+        (3.2a, verified on a private server: `set-option -t pm-test
+        @pm_capture_dir /cap` with only `pm-test~1` present) exits **0** and
+        writes the option on the grouped session; only the `=pm-test:0.0` pane
+        form is exact, and it answers "no such session" in the same state. With
+        the bare handle the guard never fires: the run goes on with its claim
+        on the grouped session, where the exact read above can never see it
+        (the collision guard is off), and it fails one step later as
+        "could not stream … — check that pane exists" — a pane named for a
+        session that went away, the same misdiagnosis `claimgone` covers for
+        the shape where nothing matches the prefix. The grouped session's own
+        claim must also survive: a bare write would overwrite it.
+        """
+        other = str((tmp_path / "other-cap").resolve())
+        r, _cast = _run_block(
+            _scaffold_block(_recipe_text("tmux-screen-recording.md")),
+            "claimgap", tmp_path, target=True,
+            state_files={"claim.pm-test~1": other})
+        assert r.returncode != 0, (
+            "a run that could not take its capture-dir claim was reported as "
+            "a success: " + r.stderr)
+        assert "could not claim" in r.stderr, r.stderr
+        assert "could not stream" not in r.stderr, (
+            "the vanished session is reported as a failed pipe attach, so the "
+            "worker is sent to check a pane that never existed: " + r.stderr)
+        assert "already being recorded" not in r.stderr, (
+            "the claim was read from the grouped session the target's prefix "
+            "matched instead of from the target: " + r.stderr)
+        assert (tmp_path / "state" / "claim.pm-test~1").read_text().strip() \
+            == other, (
+            "the claim write landed on the grouped session pm-test~1 (the "
+            "prefix match), overwriting the claim another run holds there")
+
     def test_the_claim_is_released_only_after_the_pipe_is_stopped(self):
         """The cleanup order is a race guard, and it needs its own case.
 
@@ -3916,7 +3977,7 @@ class TestCaptureFlowExecution:
                 cur = []
         releases = [i for i, st in enumerate(stmts)
                     if st.startswith(
-                        'tmux set-option -u -t "$TARGET" @pm_capture_dir')]
+                        'tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir')]
         assert releases, "the tmux recipe releases no capture-dir claim"
         stop = 'tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null'
         for i in releases:

@@ -145,9 +145,10 @@ recording-recipe bugs that any worker following the recipe hits:
   its step-5 witness and pipe stops all name the session with `=`. With only a
   grouped session on the server the old block recorded and reported *it* and
   exited 0 while `pm session` had created nothing; the fixed block fails at the
-  readiness wait. `show-options`/`set-option` do not accept `=`, so step 2
-  asserts the exact session first and lets exact-match-wins make its plain
-  claim targets mean what they say.
+  readiness wait. A *bare* `show-options`/`set-option -t '=name'` is refused,
+  so step 2 asserts the exact session first; the claim handles themselves take
+  the `=name:0.0` pane form, which those commands do accept and resolve
+  exactly (review loop ebd1 i9, below).
 - a missing runtime is not a missing package (review loop 7c9c i9): the web-UI
   driver block checks `command -v node` before it links anything, because
   without the runtime its import check fails exactly as a missing Playwright
@@ -177,6 +178,23 @@ recording-recipe bugs that any worker following the recipe hits:
   evidence that is not the target's (verified on tmux 3.2a, and reproduced in
   the harness: the block exits 0 with the bare handle). The text guard and
   the new `pipegap` execution case now fail on the bare form.
+
+- the capture-directory claim's handles were the last bare session targets
+  (review loop ebd1 i9): step 2 asserted the exact target and then read, wrote
+  and released `@pm_capture_dir` with a plain `-t "$TARGET"`. The bare
+  `=pm-test` form is refused by `show-options`/`set-option` ("no such
+  session"), but the `=pm-test:0.0` pane form is accepted and exact (verified
+  on tmux 3.2a), and a plain target is prefix-matched once the exact session
+  is gone — so a target that ended between the assert and the claim write did
+  not fail the write: `set-option -t pm-test @pm_capture_dir <cap>` exited 0
+  and put the claim on pm's grouped `pm-test~1`, the "could not claim … the
+  session went away" guard never fired, and the run failed one step later as
+  "could not stream … — check that pane exists" (a pane for a session that
+  went away). The read took a grouped session's claim for this session's, and
+  the release — a no-op once the target has ended — cleared the grouped
+  session's option instead. Every claim handle now names `"=$TARGET:0.0"`, so
+  the write fails where the guard can report it and nothing lands on the
+  grouped session. No nominal flow changes.
 
 - an artifact that exists but is empty is not an input the next stage can use
   (review loop ebd1 i5, test coverage only): the render/finalize blocks'
@@ -263,7 +281,12 @@ sessions reaching one capture directory through different spellings (`~/cap`
 vs its absolute path) must be refused, and a same-session retry must not be
 refused by its own `~/`-spelled claim; with another pm session on the server
 that holds no claim, step 2 pasted from *inside* the capture directory must
-proceed and take the claim, not refuse the run as a collision. S21/S23 also
+proceed and take the claim, not refuse the run as a collision. S24 also
+re-checks the claim handle's exactness (review loop ebd1 i9): with the target
+session ended and a grouped `<base>~1` session left on the server, step 2 must
+fail with "could not claim … — the session went away" and must not write the
+claim on the grouped session (a plain `-t "$TARGET"` writes it there and the
+run then fails as "could not stream … — check that pane exists"). S21/S23 also
 re-check the `agg` install: with `agg` missing and `~/.local/bin` **not** on
 `PATH`, the install block must fail with the export it names rather than
 exit 0. S21/S22 also re-check the CLI scaffold's refusal order: pasted with a

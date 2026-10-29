@@ -271,11 +271,17 @@ fi
 # claim below would then be read from and written to the grouped session while
 # the target does not exist — and once it does, exact match wins, so the claim
 # written on the grouped one is invisible and two runs can claim one capture
-# directory (the collision this step exists to prevent). The claim's
-# `show-options`/`set-option` do *not* accept `=` (verified on tmux 3.2a:
-# "no such session: =pm-test"), so assert the exact session here and let
-# exact-match-wins make the plain targets below mean it; `has-session` and
-# `pipe-pane` take the `=` directly.
+# directory (the collision this step exists to prevent). A *bare*
+# `show-options`/`set-option -t pm-test` is prefix-matched the same way
+# (verified on tmux 3.2a: with only `pm-test~1` on the server,
+# `set-option -t pm-test @pm_capture_dir /cap` exits 0 and writes the option on
+# the grouped session), and the bare `=pm-test` form is refused ("no such
+# session: =pm-test") — but the `=pm-test:0.0` pane form is accepted and
+# *exact* (verified: it answers "no such session" with only the grouped session
+# present, and round-trips on the real one), so every claim handle below takes
+# it. Assert the exact session here as well: it refuses a missing target where
+# the step starts, with a message that explains the grouped session, instead of
+# leaving the read below to act on one.
 tmux has-session -t "=$TARGET" 2>/dev/null || {
     echo "there is no session named exactly $TARGET on this server — tmux" \
         "would otherwise match a grouped session ($TARGET~N) or any session" \
@@ -299,7 +305,7 @@ claim_dir=$(cd <capture-dir> 2>/dev/null && pwd -P)
 # "this session holds no claim", not a claim on the current directory: `cd ""`
 # succeeds and stays put, so normalizing an empty one would compare this
 # shell's cwd with the claim instead of skipping it.
-claimed=$(tmux show-options -t "$TARGET" -v @pm_capture_dir 2>/dev/null || true)
+claimed=$(tmux show-options -t "=$TARGET:0.0" -v @pm_capture_dir 2>/dev/null || true)
 claimed_dir=
 if [ -n "$claimed" ]; then
     case "$claimed" in "~/"*) claimed="$HOME/${claimed#"~/"}";; esac
@@ -347,14 +353,23 @@ fi
 # cannot be attached — nothing is recording then — and every later failure
 # path releases it the same way (step 5 does at the end of a successful run),
 # so a failed run does not leave a stale claim behind.
-tmux set-option -t "$TARGET" @pm_capture_dir "$claim_dir" || {
+#    The write names the target exactly (`=…:0.0`), and the guard below depends
+# on it: a plain `-t "$TARGET"` is prefix-matched when the target ends between
+# the assert above and this write, so it *succeeds* against a grouped
+# `<base>~N` session (verified on tmux 3.2a: the write exited 0 with the option
+# on `pm-test~1`), the guard never fires, the run goes on with its claim where
+# the exact read above can never see it, and the pipe attach then fails as
+# "could not stream … — check that pane exists", naming a pane for a session
+# that went away. Exact, the write fails with "no such session" and the message
+# below is the one that fires.
+tmux set-option -t "=$TARGET:0.0" @pm_capture_dir "$claim_dir" || {
     echo "could not claim <capture-dir> on $TARGET — the session went away" >&2
     exit 1
 }
 tmux pipe-pane -t "=$TARGET:0.0" "cat >> <capture-dir>/transcript.log" || {
     echo "could not stream $TARGET:0.0 to <capture-dir>/transcript.log —" \
         "check that pane exists" >&2
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 
@@ -393,7 +408,7 @@ tmux new-session -d -s pm-recorder -x 200 -y 50 \
     # Nothing is recording any more, so release the claim this run took (step
     # 2) — otherwise the next attempt in this session, into another capture
     # directory, is refused by this failed one.
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 # Wait (bounded) for the recorder to draw: the detach key in step 5 (and
@@ -408,7 +423,7 @@ while :; do
         echo "recorder exited before it drew — see the cast and" \
             "<capture-dir>/recorder-stderr.log" >&2
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-        tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+        tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
         exit 1
     fi
     tmux capture-pane -p -t "=pm-recorder:0.0" 2>/dev/null \
@@ -421,7 +436,7 @@ while :; do
             "in recorder-stderr.log" >&2
         tmux kill-session -t "=pm-recorder" 2>/dev/null
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-        tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+        tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
         exit 1
     fi
     sleep 0.2
@@ -438,7 +453,7 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
     echo "recorder exited before it drew — see the cast and" \
         "<capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 fi
 
@@ -481,7 +496,7 @@ send_failed() {
         > <capture-dir>/recorder-pane.log 2>/dev/null || true
     tmux kill-session -t "=pm-recorder" 2>/dev/null
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     echo "pm tui send failed — the TUI is gone, so this scenario step never" \
         "ran; re-run the capture instead of accepting it (the recorder pane," \
         "if the recorder was still up, is saved in" \
@@ -529,9 +544,12 @@ pm tui send a -s "$TARGET" || send_failed   # open the picker
 #    `recorder…` would then stand in for it — the readiness check would take
 #    that pane as "the TUI drew", the detach would be sent into another
 #    project's session, and the stop timeout would kill it. The claim release
-#    stays a plain name: step 2 refuses a non-exact target, so no run holds a
-#    claim on a grouped session, and a release against a session that is gone
-#    is a no-op.
+#    takes the `=` too (`=…:0.0`, the form `show-options`/`set-option` accept):
+#    a plain name is prefix-matched, so a target that has ended would have the
+#    release clear a grouped `<base>~N` session's option instead of being the
+#    no-op this best-effort cleanup is meant to be — and step 2 writes its
+#    claim with the same exact handle, so no claim can sit on a grouped session
+#    for it to find anyway.
 TARGET=${TARGET:-$(pm session name)}
 if [ -z "$TARGET" ]; then
     echo "TARGET is unset and 'pm session name' printed nothing — run this" \
@@ -553,7 +571,7 @@ if ! tmux has-session -t "=pm-recorder" 2>/dev/null; then
         # best-effort like the pipe stop — the session may be gone, which
         # takes the claim with it — and every failure path below releases it
         # too.
-        tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+        tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
         exit 1
     fi
     # Both are gone: the session itself ended, which ended the attach and so
@@ -592,7 +610,7 @@ else
             echo "recorder exited before the detach — the cast is incomplete," \
                 "not a finished recording" >&2
             tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-            tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+            tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
             exit 1
         fi
         # Both gone: the session ended (which ended the attach), so there is
@@ -614,7 +632,7 @@ while tmux has-session -t "=pm-recorder" 2>/dev/null; do
             "The pane is saved in <capture-dir>/recorder-pane.log" >&2
         tmux kill-session -t "=pm-recorder" 2>/dev/null
         tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-        tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+        tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
         exit 1
     fi
     sleep 0.2
@@ -623,7 +641,7 @@ test -s <capture-dir>/recording.cast || {
     echo "asciinema wrote no cast — see" \
         "<capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 # A non-empty cast is not proof the recording finished: an asciinema that was
@@ -642,14 +660,14 @@ status=$(cat <capture-dir>/recorder.status 2>/dev/null) || {
         "asciinema exited, so the cast is incomplete, not a finished" \
         "recording" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 [ "$status" = 0 ] || {
     echo "asciinema exited $status — the cast is incomplete, not a finished" \
         "recording; see <capture-dir>/recorder-stderr.log" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 # The recipe promises a transcript as well as a cast, and the pipe can accept
@@ -660,7 +678,7 @@ test -s <capture-dir>/transcript.log || {
     echo "transcript.log is empty — the pipe-pane stream never wrote to it," \
         "so this capture has no transcript" >&2
     tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-    tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+    tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
     exit 1
 }
 tmux pipe-pane -t "=$TARGET:0.0" 2>/dev/null || true   # stop the pipe
@@ -670,7 +688,7 @@ tmux kill-session -t "=pm-recorder" 2>/dev/null || true   # already gone if it e
 # this run's cleanup must not be able to stop *that* run's pipe — so the pipe
 # goes first. Best-effort like the pipe stop: the session may already be gone,
 # which is why the claim lives on the session in the first place.
-tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+tmux set-option -u -t "=$TARGET:0.0" @pm_capture_dir 2>/dev/null || true
 ```
 
 ## Render to video
