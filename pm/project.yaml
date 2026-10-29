@@ -34738,7 +34738,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T21:35:03.724695+00:00'
-  updated_at: '2026-10-29T06:03:38.118383+00:00'
+  updated_at: '2026-10-29T06:36:19.323825+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -35042,6 +35042,31 @@ prs:
       exercised once the loop itself runs this branch.'
     created_at: '2026-10-29T06:03:38Z'
     last_edited: '2026-10-29T06:03:38Z'
+  - id: note-bb9e19e
+    text: 'QA S9 (2026-10-29): PASS 7/7 stories, no code change. Downstream consumers
+      were driven against a throwaway local-backend project (5 PRs) using a private
+      tmux socket and an isolated HOME, with the branch pm installed editable and
+      PYTHONPATH=/workspace so /opt/pm-src could not shadow it. S1 dashboard: only
+      the PR whose report names run-A while qa_manifest.json names run-B carried the
+      stale-run span, title exactly "report reviewed QA run run-A; the PR''s current
+      QA run is run-B"; the other four rows had no marker. S2 merge gate: refused
+      exit 1 with the superseded-evidence message, no Merging/Updated master lines,
+      master sha unchanged, PR left unmerged. S3 matching run, S4 legacy report with
+      no pm-signoff-qa-run tag (manifest run-B), S5 report with no qa_manifest.json:
+      no marker, merge published and marked merged, exit 0. S6 readers: pm qa evidence
+      on a never-QAed PR exited 0 with Captures (none) / QA run (no qa_manifest.json
+      - membership not run-bound) / Scenarios (none) / anomaly no captures dir, pm
+      pr merge refused with no sign-off verdict recorded yet, dashboard showed no
+      report yet, and the per-PR captures dir was still absent after all three. S7
+      sign-off prompt generation in a real pm-session pane printed Integration: already
+      contained in master@af3ee732 and wrote only integration.json (the launch integration
+      check); no qa_manifest.json, qa_runs/ or scenarios/ appeared, and pm qa evidence
+      then reported Captures <path> with still no manifest. Artifacts: /pm-captures/scenarios/9/{merge-gate,dashboard,nocaps-signoff}.
+      One scenario-text mismatch recorded, not a product defect: pm fake-claude config
+      set {"_all": {}} produced SIGNOFF_MERGE rather than a no-verdict mock; no Then
+      of S7 depends on it. (2026-10-29T06:36:00Z)'
+    created_at: '2026-10-29T06:36:19Z'
+    last_edited: '2026-10-29T06:36:19Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
