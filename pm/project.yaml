@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T14:02:32.697489+00:00'
+  updated_at: '2026-10-29T14:22:01.534708+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41202,6 +41202,27 @@ prs:
       no entry or field lost).'
     created_at: '2026-10-29T14:02:32Z'
     last_edited: '2026-10-29T14:02:32Z'
+  - id: note-8e3ed4a
+    text: 'Review-loop 3b50 i3 fix (on 49ecd21c). (1) `base_check._retry_after` computed
+      `RETRY_MIN_SECONDS * 2 ** (attempts - 1)` straight from `pr["base_check"]["attempts"]`,
+      which lives in the git-tracked project.yaml. A hand-edited `attempts: 10000000`
+      makes that int too large to multiply into a float (`OverflowError`) and a much
+      larger one allocates for a long time before that; the raise escapes `_record_error`''s
+      locked update, so the probe failure is never persisted — `_retry_open` keeps
+      reading the stale record and the backoff the gate/completion check rely on never
+      advances. The exponent is now clamped before the shift (the delay saturates
+      at RETRY_MAX_SECONDS by attempt 5 anyway), the same corrupt-yaml hardening the
+      module already applies to `base_return`/`base_check`. Test: `test_huge_attempts_value_still_records_a_probe_failure`
+      (verified failing without the fix — `retry_after` is never written because the
+      recorder raises). Spec R5 + test plan item 35; R10 now documents why a fresh
+      loop sets `adopt_in_flight=False` (a seeded `next_review_iteration` would otherwise
+      be treated as an in-flight iteration and could adopt an older live pane verdict)
+      while a restored breadcrumb loop keeps the default; test plan item 36. Full
+      suite: 4593 passed, 1 skipped, 1 deselected (test_markdown_render needs the
+      `markdown` package; test_hook_events::test_installer_writes_standalone_receiver
+      needs PM_HOST_HOME unset).'
+    created_at: '2026-10-29T14:22:01Z'
+    last_edited: '2026-10-29T14:22:01Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
