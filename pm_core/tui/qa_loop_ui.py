@@ -769,9 +769,11 @@ def _resume_incomplete_qa(app) -> None:
         # Is the run already complete (daemon wrote overall, TUI died
         # before processing)?  Read the display status file.
         overall = ""
+        status_error = ""
         try:
             sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
             overall = sdata.get("overall", "")
+            status_error = sdata.get("error", "") or ""
         except (json.JSONDecodeError, OSError):
             overall = ""
 
@@ -821,6 +823,13 @@ def _resume_incomplete_qa(app) -> None:
             # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
             state.latest_verdict = overall
+            # Keep the failure diagnostics the daemon published.  The
+            # snapshot is written before the poll, so a failure raised from
+            # inside it (e.g. a container-mode launch that could not create
+            # or lost its container) only survives in qa_status.json.  The
+            # QA note is the handoff channel for the next session, so a
+            # recovered "QA ERROR" must carry its cause there too.
+            state._error = status_error or state._error
             _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
                       pr_id, overall, state.completion_processed)
             if not state.completion_processed:

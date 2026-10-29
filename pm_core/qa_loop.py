@@ -1029,6 +1029,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         "use_containers": bool(use_containers),
         "concurrency_cap": int(concurrency_cap or 0),
         "finalize_verdict": state.finalize_verdict,
+        # Why the run has no scenario coverage (planner produced nothing,
+        # handoff failed, …).  Persisted so a resumed run keeps the cause —
+        # and so the aggregate cannot read an errored run with no scenarios
+        # as a clean PASS after a restart.
+        "error": state._error,
         "scenario_verdicts": {str(k): v for k, v in state.scenario_verdicts.items()},
         "scenario_verdict_reasons": {
             str(k): v for k, v in state.scenario_verdict_reasons.items()
@@ -1402,6 +1407,7 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     # A held flag only makes sense while something is actually waiting.
     state.held = state.held and bool(state.waiting_for_input)
     state.finalize_verdict = resume_data.get("finalize_verdict")
+    state._error = resume_data.get("error") or ""
     state.planner_head = resume_data.get("planner_head")
     state.planner_code_changes = list(
         resume_data.get("planner_code_changes") or [])
@@ -2669,10 +2675,12 @@ def _launch_scenarios_in_containers(
     pending: list[tuple] = []
     pending_lock = threading.Lock()
     # Container create/setup failures are infrastructure errors, not
-    # scenario verdicts.  Collected here and raised after the prep threads
-    # join so the caller fails the run instead of letting
-    # _poll_tmux_verdicts invent an INPUT_REQUIRED for the windowless
-    # scenario (and never falls back to the host).
+    # scenario verdicts.  So is a scenario window that cannot be created
+    # after its container exists: nothing can run in that container either.
+    # Both are collected here and raised after the prep threads join, so the
+    # caller fails the run instead of letting _poll_tmux_verdicts invent an
+    # INPUT_REQUIRED for the windowless scenario (and never falls back to
+    # the host).
     launch_failures: list[tuple[int, BaseException]] = []
 
     def _prepare_scenario(scenario: QAScenario) -> None:
@@ -2770,8 +2778,23 @@ def _launch_scenarios_in_containers(
         except Exception:
             concretize_pane = None
         if not concretize_pane:
-            _log.warning("Failed to create window for scenario %d",
+            # The container exists but nothing can run in it (the pm session
+            # is gone, or tmux refused the window).  That is the same
+            # infrastructure failure as a failed create: without a window the
+            # poll loop would record an invented INPUT_REQUIRED verdict and
+            # the container would leak until the next run's orphan cleanup.
+            _log.warning("Failed to create window for scenario %d — "
+                         "aborting the QA run (no host fallback)",
                          scenario.index)
+            try:
+                container_mod.remove_container(cname)
+            except Exception:
+                _log.debug("Failed-launch cleanup of %s failed", cname,
+                           exc_info=True)
+            with pending_lock:
+                launch_failures.append((
+                    scenario.index,
+                    RuntimeError("could not create the scenario window")))
             return
 
         # Set window_name now so the status dashboard can navigate to
@@ -2792,15 +2815,15 @@ def _launch_scenarios_in_containers(
         t.join()
 
     if launch_failures:
-        # Never let a container create/setup failure become a scenario
-        # verdict, and never launch anything else on the host.  Windows and
-        # containers already created for other scenarios stay alive so the
-        # user can inspect them; only the failed attempt was released above.
+        # Never let a container launch failure become a scenario verdict, and
+        # never launch anything else on the host.  Windows and containers
+        # already created for other scenarios stay alive so the user can
+        # inspect them; only the failed attempt was released above.
         details = "; ".join(
             f"scenario {idx}: {exc}" for idx, exc in launch_failures)
         raise ContainerLaunchError(
-            "Container mode is enabled, but the container for at least one "
-            "QA scenario could not be created, so the run was stopped "
+            "Container mode is enabled, but at least one QA scenario could "
+            "not be launched in its container, so the run was stopped "
             "instead of launching on the host.\n\n"
             f"Cause: {details}\n\n"
             + container_mod.container_retry_remedy(

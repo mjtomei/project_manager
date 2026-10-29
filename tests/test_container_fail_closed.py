@@ -280,6 +280,46 @@ def test_container_create_failure_raises_instead_of_host_launch(tmp_path, home):
     assert state.scenario_verdicts == {}
 
 
+def test_container_window_failure_is_a_launch_error(tmp_path, home):
+    """A scenario whose container was created but whose tmux window cannot be
+    created has nothing able to run in that container.  That is the same
+    infrastructure failure as a failed create: it must fail the run (and
+    release its container) instead of leaking the container and becoming an
+    invented INPUT_REQUIRED verdict."""
+    state = QALoopState(pr_id="pr-c", planning_phase=False)
+    state.qa_workdir = str(tmp_path)
+    state.scenarios = [QAScenario(index=1, title="S1", focus="f")]
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.qa_loop._resolve_qa_model",
+                                  return_value=SimpleNamespace(
+                                      model=None, provider=None, effort=None)))
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch.object(
+            container_mod, "create_qa_container"))
+        remove = stack.enter_context(
+            patch.object(container_mod, "remove_container"))
+        stack.enter_context(patch("pm_core.tmux.new_window_get_pane",
+                                  return_value=None))
+        stack.enter_context(patch("pm_core.qa_loop._write_status_file"))
+
+        with pytest.raises(qa_loop.ContainerLaunchError) as excinfo:
+            qa_loop._launch_scenarios_in_containers(
+                state, {}, {"id": "pr-c", "branch": "pm/c"}, "pm-s",
+                None, str(tmp_path))
+
+    assert "could not create the scenario window" in str(excinfo.value)
+    # Only the failed attempt's own, never-exec'd container is released.
+    remove.assert_called_once()
+    assert state.scenario_verdicts == {}
+
+
 def test_execute_and_finalize_publishes_error_on_container_launch_failure(
         tmp_path, home):
     state = QALoopState(pr_id="pr-c", planning_phase=False)
@@ -566,6 +606,63 @@ def test_container_preflight_error_only_when_enabled_and_unavailable():
             patch.object(container_mod, "_runtime_status",
                          return_value=(True, "")):
         assert container_mod.container_preflight_error() is None
+
+
+def test_qa_debug_uses_a_container_when_the_runtime_is_healthy(
+        tmp_path, home):
+    """Healthy control: with container mode enabled and a usable runtime the
+    debug session still runs inside its container (via ``exec``), not on the
+    host."""
+    from pm_core.cli.qa import qa as qa_group
+
+    root = tmp_path / "pm"
+    root.mkdir()
+    instr = tmp_path / "repro.md"
+    instr.write_text("# repro\n")
+    item = {"path": str(instr), "title": "Repro", "description": "d"}
+    data = {"project": {"name": "t"}, "prs": [], "plans": []}
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    create = MagicMock()
+    build_cmd = MagicMock(return_value="CLAUDE-CMD")
+    exec_cmd = MagicMock(return_value="EXEC-CMD")
+    new_window = MagicMock(return_value="%1")
+    with ExitStack() as stack:
+        stack.enter_context(patch("pm_core.cli.qa.state_root",
+                                  return_value=root))
+        stack.enter_context(patch("pm_core.qa_instructions.get_instruction",
+                                  return_value=item))
+        stack.enter_context(patch("pm_core.store.load", return_value=data))
+        stack.enter_context(patch("pm_core.loop_shared.get_pm_session",
+                                  return_value="pm-s"))
+        stack.enter_context(patch.object(container_mod,
+                                         "is_container_mode_enabled",
+                                         return_value=True))
+        _patch_runtime(stack, True)
+        stack.enter_context(patch(
+            "pm_core.qa_loop.create_scenario_workdir",
+            return_value=(clone, scratch)))
+        stack.enter_context(patch.object(
+            container_mod, "create_qa_container", create))
+        stack.enter_context(patch.object(
+            container_mod, "build_exec_cmd", exec_cmd))
+        stack.enter_context(patch(
+            "pm_core.claude_launcher.build_claude_shell_cmd", build_cmd))
+        stack.enter_context(patch("pm_core.tmux.new_window_get_pane",
+                                  new_window))
+        result = CliRunner().invoke(qa_group,
+                                    ["debug", "repro", "--branch", "b"])
+
+    assert result.exit_code == 0
+    create.assert_called_once()
+    # The pane runs the container exec command, and the prompt was built for
+    # the in-container workdir — not a host claude session.
+    exec_cmd.assert_called_once()
+    assert new_window.call_args.args[2] == "EXEC-CMD"
+    assert build_cmd.call_args.kwargs["cwd"] == container_mod._CONTAINER_WORKDIR
 
 
 def test_qa_debug_fails_closed_when_create_raises_non_container_error(

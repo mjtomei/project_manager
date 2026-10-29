@@ -314,6 +314,7 @@ No **[UNRESOLVED]** ambiguities.
 | enabled + healthy runtime | refiners/workers launch via `_launch_scenarios_in_containers` |
 | disabled + runtime missing or healthy | host execution unchanged |
 | enabled + create/setup failure (image missing, run nonzero, setup timeout) | ERROR; exact failed container best-effort removed; live containers preserved; no INPUT_REQUIRED |
+| enabled + scenario window cannot be created after its container exists | ERROR (same launch-failure path); that container released; no INPUT_REQUIRED, no leak |
 | enabled + queued scenario create failure | ERROR from inside `_execute_and_finalize`; no host launch |
 | enabled + worker pane dies, container still running | existing retry → relaunch in the same container |
 | enabled + worker pane dies, container gone | `ContainerLaunchError` → ERROR, no host relaunch |
@@ -505,3 +506,50 @@ Re-audited the fail-closed paths and the reporting/evidence surfaces:
   launcher's `_status_scenarios` / `_queued_indices` wiring, which closes
   the test gap the 868d48e8 queued-status fix left (it covered only the
   container launcher).
+
+## Review iteration (c534 i1)
+
+Re-audited the fail-closed boundary end to end (fresh run, initial launch,
+queued launch, relaunch, resume, `pm qa debug`) and closed three remaining
+gaps:
+
+- **A container whose scenario window cannot be created now fails the run
+  too.** In `_launch_scenarios_in_containers`, `new_window_get_pane`
+  returning `None` (pm session gone, tmux refused the window) used to log
+  and return: the container had already been created, so it leaked until the
+  next run's orphan cleanup and `_poll_tmux_verdicts` recorded an invented
+  `INPUT_REQUIRED` for the windowless scenario — the same class of failure
+  R3 removes for a failed create. It now records a launch failure and
+  releases only that attempt's own container, so the run ends `ERROR`. The
+  `ContainerLaunchError` text was widened from "the container … could not be
+  created" to "at least one QA scenario could not be launched in its
+  container".
+- **`_error` survives a resume snapshot.** `_write_resume_file` now persists
+  `state._error` and `build_resume_state` restores it. Two consequences: a
+  resumed run keeps its original diagnostics, and a run the planner produced
+  nothing for (no scenarios, no verdicts, `_error` set) can no longer
+  re-aggregate as a clean `PASS` after a restart — the aggregate reads
+  `state._error` as `INPUT_REQUIRED`, as the live run did.
+- **A recovered completed `ERROR` keeps its cause.** `_resume_incomplete_qa`
+  now also reads the `error` field from `qa_status.json` when it adopts a
+  run that finished during downtime. The snapshot is written *before* the
+  poll, so a failure raised from inside it (queued create failure, lost
+  container) only ever reached the status file; without this the note the
+  TUI records — the next session's handoff — read "QA ERROR: S1: PASS" with
+  no reason. `status_error` wins over the snapshot's (fresher), and the
+  snapshot's is kept as a fallback for older files.
+
+Tests added: a container-mode scenario whose window cannot be created raises
+`ContainerLaunchError`, releases exactly its own container, records no
+verdict; the resume snapshot round-trips `_error` (and tolerates snapshots
+without the key); a completed `ERROR` recovered from disk carries the
+status file's cause into `_on_qa_complete`; a healthy `pm qa debug` control
+(runtime up → `create_qa_container` + `build_exec_cmd`, in-container cwd, no
+host claude).
+
+Intentionally unchanged: the window-failure path in the **host** launcher
+(`_launch_scenarios_in_tmux`) still records `INPUT_REQUIRED` for a windowless
+scenario. That is host mode — no container was requested, so nothing is
+downgraded — and the `INPUT_REQUIRED` is deliberate there: it keeps the
+scenario from being silently lost, which could produce a false overall
+`PASS`.
