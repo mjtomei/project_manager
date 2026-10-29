@@ -57,9 +57,10 @@ an absolute path (or start with `~/`): tmux runs the transcript pipe's
 command in the pm session's directory, so a relative path writes the
 transcript somewhere these steps never look (step 0 refuses one rather than
 failing later as an empty transcript). A leftover `pm-recorder`
-session makes step 3's `new-session` fail with "duplicate session", and the
-readiness wait below would then pass on the *previous* run's attach
-client. That name is shared by every run on the same tmux server, so two
+session makes step 3's `new-session` fail with "duplicate session" — step 3
+reports that as a start failure, so the run stops there instead of passing
+the readiness wait on the *previous* run's attach client. That name is shared
+by every run on the same tmux server, so two
 captures must not run at once on one server: the later run's step 0 ends the
 earlier run's recorder, and the earlier run's step 5 detaches the later one.
 Run captures one after the other, or give each worker its own server with a
@@ -472,8 +473,16 @@ else
     # between the check above and this key send, `send-keys` fails (the
     # session, or its pane, is gone), the wait below exits at once, and
     # `test -s` then passes on the truncated cast — a run reported as a
-    # successful recording although it is not one. Treat the failed detach as
-    # the same failure as above.
+    # successful recording although it is not one. But the same failed send
+    # has a second cause: the scenario ended the pm session itself, and the
+    # quit raced this key send — the attach followed the session out (a
+    # legitimate finish) and the recorder is gone by the time the key is
+    # sent. That case is the one the branch above accepts when it happens a
+    # moment earlier, so do not report it as a truncated recording here:
+    # the session is the witness that tells the two apart (a recorder gone
+    # while the session it attached to is *still there* died mid-scenario),
+    # and when it is gone too the status check below decides, exactly as in
+    # the both-gone branch.
     #    The key is the server's prefix, not a hard-coded C-b:
     #    `~/.tmux.conf` may set another one (the dev container this recipe was
     #    last exercised in sets `C-\`), and then `C-b d` is ordinary input to
@@ -485,13 +494,20 @@ else
     #    default, and the send then fails as before.
     detach_key=$(tmux show-options -gv prefix 2>/dev/null)
     [ -n "$detach_key" ] || detach_key=C-b
-    tmux send-keys -t pm-recorder "$detach_key" d || {
-        echo "recorder exited before the detach — the cast is incomplete," \
-            "not a finished recording" >&2
-        tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
-        tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
-        exit 1
-    }
+    if ! tmux send-keys -t pm-recorder "$detach_key" d; then
+        if tmux has-session -t "$TARGET" 2>/dev/null; then
+            echo "recorder exited before the detach — the cast is incomplete," \
+                "not a finished recording" >&2
+            tmux pipe-pane -t "$TARGET:0.0" 2>/dev/null || true   # stop the pipe
+            tmux set-option -u -t "$TARGET" @pm_capture_dir 2>/dev/null || true
+            exit 1
+        fi
+        # Both gone: the session ended (which ended the attach), so there is
+        # nothing left to detach. Fall through to the cast, status and
+        # transcript checks below — the status file is the witness there,
+        # because no live session is left to tell a finished recording from
+        # a recorder that was killed as the session ended.
+    fi
 fi
 deadline=$(( $(date +%s) + 30 ))
 while tmux has-session -t pm-recorder 2>/dev/null; do

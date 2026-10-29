@@ -2718,6 +2718,16 @@ case "$sub" in
           [ "$last2" = "${STUB_PREFIX:-C-b}" ] || exit 0
       fi
       rm -f "$STATE/$s"
+      # `detachboth`/`detachbothbad`: the detach races the pm session's own
+      # end. The attach followed the session out, so the recorder is already
+      # gone when the key is sent (`send-keys` fails) and the session it was
+      # attaching to is gone too — the legitimate "the scenario ended the pm
+      # session" finish, a moment later than the both-gone branch sees it.
+      # The session's death takes its claim with it.
+      case "$STUB_MODE" in
+        detachboth|detachbothbad)
+            rm -f "$STATE/pm-test" "$STATE/claim.pm-test"; exit 1 ;;
+      esac
       [ "$STUB_MODE" = detachfail ] && exit 1
       exit 0 ;;
   new-session)
@@ -2748,7 +2758,7 @@ case "$sub" in
             if [ -n "$STUB_STATUS_FILE" ]; then
                 case "$STUB_MODE" in
                   nostatus|detachnostatus) : ;;
-                  badstatus|midbothbad) printf '137\n' > "$STUB_STATUS_FILE" ;;
+                  badstatus|midbothbad|detachbothbad) printf '137\n' > "$STUB_STATUS_FILE" ;;
                   *)         printf '0\n' > "$STUB_STATUS_FILE" ;;
                 esac
             fi ;;
@@ -3461,6 +3471,43 @@ class TestCaptureFlowExecution:
             "a detach that failed because the recorder was already gone was "
             "reported as a finished recording")
         assert "incomplete" in r.stderr, r.stderr
+
+    def test_tmux_detach_race_with_the_sessions_own_end_passes(self, tmp_path):
+        """A quit that races the detach is not a truncated recording.
+
+        The same failed ``send-keys`` has two causes. The one above is a
+        recorder that died mid-scenario while the session it attached to is
+        still there — a truncated cast. The other is the scenario ending the
+        pm session itself, with the quit racing the key send: the attach
+        followed the session out, so the recorder is already gone and the key
+        has nowhere to go. That is exactly the "both gone" finish step 5
+        accepts when it happens a moment earlier, and reporting it as "the
+        cast is incomplete" fails a complete recording. The session is the
+        witness — when it is gone too, asciinema's own status decides (0 for
+        a recording that ran to completion).
+        """
+        r, cast = _run_capture_block(
+            "tmux-screen-recording.md", "detachboth", tmp_path, target=True)
+        assert r.returncode == 0, (
+            "a complete recording whose pm session ended as the detach was "
+            "sent was reported as an incomplete one: " + r.stderr)
+        assert cast.stat().st_size > 0
+
+    def test_tmux_detach_race_still_fails_on_a_killed_recorder(self, tmp_path):
+        """The widened branch must not pass a recorder that was killed.
+
+        With the session gone as well there is no live witness, so the
+        status handle is what decides — the same rule the both-gone branch
+        already follows. A recorder killed as the session ended leaves 137,
+        and the run must still fail rather than accept the truncated cast.
+        """
+        r, _cast = _run_capture_block(
+            "tmux-screen-recording.md", "detachbothbad", tmp_path, target=True)
+        assert r.returncode != 0, (
+            "a killed recorder passed as a finished recording once the "
+            "session was gone too")
+        assert "incomplete" in r.stderr, r.stderr
+        assert "137" in r.stderr, r.stderr
 
     def test_tmux_detach_uses_the_servers_prefix(self, tmp_path):
         """The detach key is the server's prefix, not a hard-coded ``C-b``.

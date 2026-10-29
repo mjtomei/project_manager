@@ -89,6 +89,17 @@ recording-recipe bugs that any worker following the recipe hits:
   into `/scenarios/1/web-ui` at the filesystem root, which `mkdir -p` creates
   when the worker is root — the capture then lands outside the per-PR
   captures directory while every later check passes on those files.
+- a completion check that cannot tell a finished recording from a dead one
+  (review loop 7c9c i5): the tmux stop step's failed detach is a hard failure
+  only while the pm session it was attaching to is still there — a recorder
+  gone while that session lives died mid-scenario, and its cast is truncated.
+  When the session is gone too (the scenario quit pm and the quit raced the
+  detach key), the recording is the same legitimate "the session ended, the
+  attach followed it out" finish the both-gone branch accepts, so the cast,
+  `recorder.status` and transcript checks decide: status 0 passes, 128+N or a
+  missing status file still fails. Both recipes' step-0 prose also no longer
+  claims a leftover recorder session would pass the readiness wait — the
+  start check stops a duplicate `new-session` before that.
 - a missing input is not a failed job (review loop 7c9c i4): the web-UI
   driver block refuses a missing `driver.mjs` with "there is no driver.mjs in
   …" instead of letting `node driver.mjs` fail and reporting "the driver
@@ -119,7 +130,11 @@ that holds no claim, step 2 pasted from *inside* the capture directory must
 proceed and take the claim, not refuse the run as a collision. S21/S23 also
 re-check the `agg` install: with `agg` missing and `~/.local/bin` **not** on
 `PATH`, the install block must fail with the export it names rather than
-exit 0. S25 also re-checks the captures-path guard: step 1 pasted with an
+exit 0. S23 also re-checks the stop step's detach race: after the scenario
+ends the pm session itself, a stop step run while the recorder is winding
+down must pass on the complete cast and `recorder.status` 0 (not report "the
+cast is incomplete"), while a recorder killed as the session ends must still
+fail on the non-zero status. S25 also re-checks the captures-path guard: step 1 pasted with an
 unsubstituted `PR_ID` (or outside the project) must stop with "could not
 resolve the captures directory" and create nothing, not run the capture in
 `/scenarios/1/web-ui`. S26 also re-checks the driver block's two new

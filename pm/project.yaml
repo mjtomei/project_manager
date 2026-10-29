@@ -34821,7 +34821,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-29T04:44:19.808807+00:00'
+  updated_at: '2026-10-29T05:15:22.313398+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -36536,6 +36536,51 @@ prs:
       dropped.'
     created_at: '2026-10-29T04:44:19Z'
     last_edited: '2026-10-29T04:44:19Z'
+  - id: note-6ba8d38
+    text: 'Review loop 7c9c i5: one leftover in the kept tmux-recipe scope, the PR
+      own class — a completion check that cannot tell a finished recording from a
+      dead one, in step 5''s failed-detach branch. Step 5 checks the recorder session
+      is up and then sends the detach key; a failed `send-keys` was reported as "recorder
+      exited before the detach — the cast is incomplete, not a finished recording".
+      But that same failed send has a second cause: the scenario ended the pm session
+      itself and the quit raced the detach — the attach followed the session out,
+      asciinema exited 0 and the pane shell wrote `recorder.status`, so the key has
+      nowhere to go. That is exactly the "both gone" finish the branch one line above
+      accepts when it happens a moment earlier, so a complete recording was reported
+      as incomplete. The status handle already decides this ambiguity everywhere else
+      in the step (the both-gone branch, the CLI scaffold); the detach-failure branch
+      now uses it too — the failed send is a hard failure only while the target session
+      is still there (the witness that says the recorder died mid-scenario), and when
+      it is gone too the cast/status/transcript checks decide: status 0 passes, 128+N
+      or a missing status file still fails. Verified live in this container with real
+      tmux 3.2a + asciinema 2.1.0 on a private TMUX_TMPDIR, the recipe own step-3
+      recorder and a `tmux` shim that reports the "is the recorder still up?" check
+      as true exactly once (the race instant; the failed send, the wait and the checks
+      are real tmux): after the fake pm session ends, the pre-fix step 5 exits 1 on
+      a complete recording (`recorder.status` 0, 2623-byte cast) while the fixed block
+      exits 0; with asciinema SIGKILLed and the session gone the fixed block still
+      exits 1 with "asciinema exited 137 — the cast is incomplete" (status 137). The
+      nominal capture block was re-run end to end after the edit (rc 0, cast + transcript
+      + status 0, claim released). Tests: two new execution cases (stub modes `detachboth`/`detachbothbad`:
+      status 0 must pass, status 137 must still fail on the status message), both
+      failing against HEAD''s step 5 (checked by restoring the pre-fix recipe in place,
+      then restoring the post-fix copy); the target-still-alive detach failure and
+      the server-prefix cases pass unchanged. Also corrected in both recipes: the
+      step-0 prose said a leftover recorder session would make the readiness wait
+      "pass on the previous run''s recorder", but since R15 a duplicate `new-session`
+      stops the run at "could not start the recorder session", so that failure mode
+      is unreachable. File 167 pass; related suites (test_qa_artifact_web_ui_recording,
+      test_qa_instructions, test_qa_loop) 342 together with the file; full suite `env
+      -u PM_HOST_HOME PATH=/usr/bin:/bin pytest tests/ -q --deselect tests/test_merge_publish.py
+      --deselect tests/test_signoff_integration.py` -> 4561 passed, 1 skipped, 92
+      deselected, 0 failed (401 s, with the `markdown` dep on the scratch path). Evidence:
+      $(pm qa captures-path pr-b19db15)/review-7c9c-i5/ (probe.log with the three
+      live runs and the mutation check, README.md, scripts/ with the pre/post step-5
+      blocks, the shim and the live driver). impl.md R33 + Files/verification/evidence
+      and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier work
+      stays dropped.'
+    created_at: '2026-10-29T05:15:22Z'
+    last_edited: '2026-10-29T05:15:22Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash

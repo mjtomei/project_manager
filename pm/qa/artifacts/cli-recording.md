@@ -83,8 +83,9 @@ capture that wrote nothing — and a leftover cast is worse: without
 still produce a fresh-looking video of the *previous* run. The no-TTY
 scaffold repeats both steps, and also clears a `rec` session an earlier run
 left behind: a leftover one makes `new-session` fail with "duplicate
-session: rec" and the readiness wait would then pass on the previous run's
-recorder. `recorder.status` holds this run's recorder exit status (step 4 of
+session: rec" — the scaffold reports that as a start failure, instead of
+letting the readiness wait pass on the previous run's recorder.
+`recorder.status` holds this run's recorder exit status (step 4 of
 the no-TTY scaffold); a leftover one would let a recorder that was torn down
 before it finished pass that check. `recorder-stderr.log` and
 `recorder-pane.log` are this run's failure evidence — asciinema's own
