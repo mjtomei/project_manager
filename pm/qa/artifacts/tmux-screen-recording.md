@@ -278,10 +278,14 @@ fi
 # the grouped session), and the bare `=pm-test` form is refused ("no such
 # session: =pm-test") — but the `=pm-test:0.0` pane form is accepted and
 # *exact* (verified: it answers "no such session" with only the grouped session
-# present, and round-trips on the real one), so every claim handle below takes
-# it. Assert the exact session here as well: it refuses a missing target where
-# the step starts, with a message that explains the grouped session, instead of
-# leaving the read below to act on one.
+# present, and round-trips on the real one), so every claim handle that names
+# `$TARGET` below takes it. (The cross-session scan below reads names
+# `list-sessions` just returned, so exact match wins there and it keeps the
+# bare form; a name that vanished between the two calls is prefix-matched, but
+# a grouped `<base>~N` session carries no claim of its own, so the scan still
+# skips it.) Assert the exact session here as well: it refuses a missing
+# target where the step starts, with a message that explains the grouped
+# session, instead of leaving the read below to act on one.
 tmux has-session -t "=$TARGET" 2>/dev/null || {
     echo "there is no session named exactly $TARGET on this server — tmux" \
         "would otherwise match a grouped session ($TARGET~N) or any session" \

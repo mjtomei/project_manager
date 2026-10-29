@@ -69,8 +69,11 @@ hits, regardless of how it waits for a background job:
   (the image used for QA on 2026-10-27 did not have it, although the bundled
   Dockerfile now installs it), and the render fails loudly, so the recipe
   carries the per-architecture release-binary install line — guarded on
-  ``command -v agg``, because re-downloading over a working binary can
-  truncate it earlier on PATH;
+  ``agg --version``, which only a binary that actually *runs* answers: a
+  working ``agg`` leaves the block a no-op (re-downloading over it can
+  truncate it earlier on PATH), while a truncated one that still resolves —
+  ``command -v agg`` answers that file — is replaced instead of leaving the
+  render's "is 'agg' installed?" pointing at a remedy that does nothing;
 - the CLI scaffold's ``<command-to-record>`` placeholder sits inside single
   quotes inside the outer double-quoted argument, so the recipe has to show
   the escaped form — pasting the plain ``bash -c "..."`` form ends the outer
@@ -2627,6 +2630,15 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
     the earlier attempt's manifest, whose ``## Files`` names the deleted mp4;
     with the manifest in the cleanup the directory holds only the input and
     the link.
+
+    The Layer 2 protocol logs go too (R53): an attempt that already ran the
+    protocol layer leaves ``http.log``/``sse.log``, which the manifest's
+    ``## Files`` names as this capture's evidence. A retry drives the UI
+    again, and the protocol layer is *supplementary* — a worker may not
+    re-run it — so without this clear the retried capture presents the
+    earlier attempt's route snapshots and event stream as this run's. Step 1
+    clears them for a fresh run for exactly that reason (R18); this covers
+    the step-2-only retry the block exists for.
     """
     capdir = tmp_path / "cap"
     capdir.mkdir()
@@ -2635,6 +2647,8 @@ def test_web_ui_driver_failure_is_reported_and_clears_stale_outputs(tmp_path):
              "trace.zip": "an earlier trace\n",
              "dom.html": "<html>an earlier dump</html>\n",
              "01-loaded.png": "an earlier screenshot\n",
+             "http.log": "===== GET / =====\nan earlier attempt\n",
+             "sse.log": "data: an earlier attempt\n",
              "manifest.md": "## Files\n- `recording.mp4` — the walk-through\n"}
     for name, content in stale.items():
         (capdir / name).write_text(content)

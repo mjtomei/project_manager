@@ -329,7 +329,11 @@ listener that accepts and never answers, the step must refuse in about five
 seconds with "could not check … exit 28" (an unbounded probe blocks instead),
 and S26 re-checks the driver retry's cleanup: with an earlier attempt's
 `manifest.md` seeded beside its mp4, a retried driver that fails must leave no
-manifest naming the deleted video. S26's recipe-content check includes the
+manifest naming the deleted video, and with the earlier attempt's `http.log`
+and `sse.log` seeded the retry must clear them too — the protocol layer is
+supplementary, so a retry that does not re-run it would otherwise present the
+earlier attempt's route snapshots and event stream as this run's evidence
+(review loop ebd1 i12, R53). S26's recipe-content check includes the
 manifest example: it must list `server.pid` and `recording.webm` beside the
 files it already named (R45). S26 also re-checks the driver block's two new
 messages: pasting step 2 with no `driver.mjs` in the capture directory must

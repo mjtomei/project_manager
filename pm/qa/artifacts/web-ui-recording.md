@@ -274,7 +274,15 @@ cd "$CAPDIR" || {                            # where driver.mjs lives
 # `rm` just deleted — so a retry that fails would end with a manifest
 # describing files that are gone (step 1 clears it for a fresh run; this
 # covers step 2 alone, the same reason the rest of this cleanup exists).
-rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png ./manifest.md
+# The Layer 2 protocol logs go with them: an attempt that already ran the
+# protocol layer leaves `http.log` and `sse.log`, which the manifest's
+# `## Files` names as this capture's evidence. A retry drives the UI again,
+# and the protocol layer is *supplementary* — a worker may not re-run it — so
+# without this the retried capture presents the earlier attempt's route
+# snapshots and event stream as this run's (step 1 clears them for a fresh
+# run for exactly that reason; this covers the step-2-only retry).
+rm -f ./recording.mp4 ./*.webm ./trace.zip ./dom.html ./*.png ./manifest.md \
+      ./http.log ./sse.log
 # The driver this block runs is the one the prose above says to save here.
 # Without it `node driver.mjs` answers "Cannot find module …/driver.mjs" and
 # the run-failure message below would report that as a driver that ran and
