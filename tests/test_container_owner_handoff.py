@@ -415,6 +415,8 @@ def test_plan_release_records_respect_runtime_domain(monkeypatch, current, recor
     monkeypatch.setattr(reaper, "pending_failures", lambda: {})
     monkeypatch.setattr(reaper, "list_containers", lambda: [
         reaper.ContainerInfo(NAME, id="cid", running=True, created=0)])
+    # The listed allocation still holds the name (not the host's runtime).
+    monkeypatch.setattr(cm, "current_container_id", lambda n: "cid")
     monkeypatch.setattr(reaper, "_owner_panes", lambda *a, **k: (["%live"], False))
     decision, = reaper.plan().decisions
     assert decision.released is release_allowed

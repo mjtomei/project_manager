@@ -1218,6 +1218,13 @@ class TestProxyRelease:
         killed = []
         monkeypatch.setattr(push_proxy, "_kill_proxy_socket",
                             lambda path, **kw: killed.append(path) or True)
+
+        def runtime(*args, **kwargs):
+            # No other allocation mounts this directory.  Never ask the host's
+            # real runtime: its containers would decide the outcome.
+            assert args[:2] == ("ps", "-aq"), args
+            return subprocess.CompletedProcess(args, 0, "", "")
+        monkeypatch.setattr(cm, "_run_runtime", runtime)
         push_proxy.stop_push_proxy(name)
         assert killed == [str(sock_dir / "push.sock")]
 

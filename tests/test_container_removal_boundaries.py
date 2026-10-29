@@ -138,8 +138,11 @@ def test_named_pass_preserves_release_for_renamed_allocation(monkeypatch, replac
     assert reaper.pending_releases()[NAME]["id"] == CID
 
 
-def test_full_pass_prunes_confirmed_absent_release():
+def test_full_pass_prunes_confirmed_absent_release(monkeypatch):
     reaper._record_release(NAME, CID, "epoch", "pane-exit")
+    # The runtime confirms the captured ID is gone (asked of a fake, never the
+    # host's real runtime).
+    monkeypatch.setattr(cm, "current_container_id", lambda ident: "")
     reaper._prune_releases(reaper.Outcome(), reaper.Scope(), time.time() + 1)
     assert reaper.pending_releases() == {}
 
