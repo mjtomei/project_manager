@@ -40461,7 +40461,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/274
   gh_pr_number: 274
   created_at: '2026-10-28T13:41:51.469975+00:00'
-  updated_at: '2026-10-29T13:35:18.481394+00:00'
+  updated_at: '2026-10-29T14:02:32.697489+00:00'
   started_at: '2026-10-28T13:44:04.216828+00:00'
   reviewed_at: null
   merged_at: null
@@ -41168,6 +41168,40 @@ prs:
       no PR entry or field changed).'
     created_at: '2026-10-29T13:35:18Z'
     last_edited: '2026-10-29T13:35:18Z'
+  - id: note-3111567
+    text: 'Review-loop 3b50 i2 fixes. (1) `ReviewLoopState.iterations_performed` is
+      now a declared field (`int | None = None`) instead of an undeclared attribute
+      set in `run_review_loop_sync` and read back through `getattr`; the spec documents
+      it as a field, and None still means "this loop never ran" so `_done_iteration_count`
+      keeps the counter fallback. (2) A gate that loses the return race (`return_to_impl`
+      returns None because another driver recorded the return inside this gate fetch)
+      built its WAIT result from the pre-fetch snapshot, which has no return: status/head/base_sha/conflicts
+      were empty while the log said "return already recorded". It now reports the
+      episode the existing post-loss re-read finds. (3) `_shared_impl_transcript`
+      fell back to `pm_home()` and scanned `~/.pm/transcripts` (never holds these
+      links — transcripts live under the project root); it returns None instead, like
+      `_base_completion_tick`/`_catch_up_base_impl`. (4) `_auto_review_idle_prs` unpacks
+      its documented (pr_id, pr, resume) 3-tuple; the only 2-tuple caller was its
+      own retarget regression test, updated. Tests: test_losing_gate_reports_the_episode_that_landed
+      (verified failing without (2)), the iteration-2 race test now asserts the documented
+      exit 3, the fallback test pins the field default; spec test plan item 34. Full
+      suite: 4607 passed, 1 skipped, 0 failed (markdown in the session scratchpad,
+      PM_HOST_HOME unset, PATH=/usr/bin:/bin so the push-proxy git wrapper stays out
+      of the real-git tests). Reviewed but not changed (already-documented residuals,
+      unchanged): the supersede path in `return_to_impl` can still double-launch if
+      two drivers run `impl_completion` while the base moves between their fetches
+      (needs an episode/generation token); the writer-launch gate self-heal can resolve
+      an open return while a mid-turn impl has a clean tree; the CLI auto-sequence
+      runs one ls-remote per tick through `impl_completion`; worst-case gate latency
+      (300 s repo lock + 300 s `pm pr start`) can exceed the 360 s review child budget;
+      the TUI review-loop resume path runs `pm pr review --no-window` synchronously
+      on the event loop; the QA gate deliberately applies only to a `qa`-status PR;
+      `_run_qa_sync` runs the gate before `write_run_record` (second-planner window,
+      needs an atomic QA-run claim); `pm/project.yaml` carries unrelated YAML re-wrapping
+      from pm own save (verified: only pr-f0f4129 added, one cross-PR note on pr-9ee4d64,
+      no entry or field lost).'
+    created_at: '2026-10-29T14:02:32Z'
+    last_edited: '2026-10-29T14:02:32Z'
   model: provider:deepseek-flash
   effort: high
   session_models:
