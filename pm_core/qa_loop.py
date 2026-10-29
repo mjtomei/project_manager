@@ -1138,13 +1138,12 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
     }
     path = _resume_file_path(state.qa_workdir)
     tmp = path.with_suffix(".tmp")
+    text = json.dumps(data, indent=2)
     try:
-        tmp.write_text(json.dumps(data, indent=2))
         with state._resume_lock, _RESUME_WRITE_LOCK:
             # The run may have been superseded (snapshot cleared for good)
             # while this snapshot was being built or waiting for the lock.
             if state.superseded:
-                tmp.unlink(missing_ok=True)
                 return
             # These two are set by the TUI thread (mark_completion_processed)
             # while the held loop writes snapshots.  Re-read them under the
@@ -1154,7 +1153,12 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
                      "latest_verdict": state.latest_verdict or ""}
             if any(data.get(k) != v for k, v in fresh.items()):
                 data.update(fresh)
-                tmp.write_text(json.dumps(data, indent=2))
+                text = json.dumps(data, indent=2)
+            # The temp file is written under the lock too:
+            # mark_completion_processed renames the same path, so a write
+            # outside it could be renamed into place half-done, or vanish
+            # before this rename.
+            tmp.write_text(text)
             tmp.rename(path)
     except OSError:
         _log.warning("Failed to write QA resume snapshot for %s",

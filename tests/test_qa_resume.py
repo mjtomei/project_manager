@@ -1701,6 +1701,40 @@ def test_supersede_waits_for_an_in_flight_rename(tmp_path):
     assert not _resume_file_path(tmp_path).exists()
 
 
+def test_snapshot_write_racing_a_completion_mark_keeps_both(tmp_path):
+    """The TUI thread's mark_completion_processed rewrites the snapshot
+    through the same temp path while the loop thread writes one.  The
+    loop's newer verdicts and the TUI's flag must both land: a temp file
+    written outside the lock was renamed away by the mark, so the loop's
+    rename failed and its verdicts were lost."""
+    import threading
+    from pathlib import Path
+
+    state = _make_state(tmp_path)
+    _write_resume_file(state, use_containers=False, concurrency_cap=0)
+    state.completion_processed = True        # already set when serialized
+    state.scenario_verdicts[2] = VERDICT_PASS  # new in this write
+    real_write_text = Path.write_text
+    marker: list[threading.Thread] = []
+
+    def write_then_mark(self, *a, **kw):
+        out = real_write_text(self, *a, **kw)
+        if self.name == "qa_resume.tmp" and not marker:
+            marker.append(threading.Thread(
+                target=qa_loop.mark_completion_processed, args=(state,)))
+            marker[0].start()
+            marker[0].join(0.5)   # held off while the write owns the lock
+        return out
+
+    with patch.object(Path, "write_text", write_then_mark):
+        _write_resume_file(state, use_containers=False, concurrency_cap=0)
+        marker[0].join(10)
+    assert not marker[0].is_alive()
+    data = json.loads(_resume_file_path(tmp_path).read_text())
+    assert data["scenario_verdicts"] == {"1": VERDICT_PASS, "2": VERDICT_PASS}
+    assert data["completion_processed"] is True
+
+
 def test_fresh_start_drops_superseded_snapshot_before_new_run_has_one(
         tmp_path):
     """z t over a running loop: the new run writes no snapshot while it

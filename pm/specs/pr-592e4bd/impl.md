@@ -1858,7 +1858,12 @@ both sides.
   plain user stop keeps master's behaviour (the hold persists its settled
   wait).  Snapshot writes take the run's `_resume_lock` then master's
   `_RESUME_WRITE_LOCK` (the order `supersede_run` → `clear_resume_file`
-  uses); the file is serialized before either lock is taken.
+  uses).  The JSON is serialized before either lock is taken, but the
+  temp file is written and renamed only under both (review loop 0897 i1):
+  `mark_completion_processed` rewrites the snapshot through the same
+  `qa_resume.tmp`, and a temp file written outside the lock was renamed
+  away under the loop's write, losing its verdicts
+  (`test_snapshot_write_racing_a_completion_mark_keeps_both`).
 - Review launches (#259): master's retry/artifact/`_discover_iteration`
   design, with this branch's child timeout (+ lock timeout + sign-off
   return clear wait, S81) and the in-flight launch wait before discovery
