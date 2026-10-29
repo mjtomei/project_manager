@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T13:45:37.657121+00:00'
+  updated_at: '2026-10-29T14:17:58.590292+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5199,6 +5199,33 @@ prs:
       v1.5.0 to render casts).'
     created_at: '2026-10-29T13:45:37Z'
     last_edited: '2026-10-29T13:45:37Z'
+  - id: note-0299b32
+    text: 'Review loop 3cc7 i1 (no requirement changes; full suite 4614 passed / 1
+      skipped, +2 tests). Verification pass over the QA scenario 6 fix commit (5b350cd6).
+      Three items: (1) The kill path''s exact-match wiring was untested: TestSessionKillServerSelection._invoke
+      stubs find_session_server AND find_exact_session_server with the same resolver,
+      so a revert of session_kill to prefix matching would have passed every kill
+      test. New test_kill_uses_the_exact_matcher_not_prefix makes them disagree the
+      way tmux does (prefix finds the surviving pm-x~1, exact finds nothing) and asserts
+      "No session ... found.", no kill-session calls and the live server''s socket
+      kept; verified to fail with session_kill reverted to find_session_server. (2)
+      _find_tui_pane''s last-resort scan could not see a server whose socket file
+      is gone: it scopes the scan through list_pm_sessions, which enumerates socket
+      FILES, so a live server whose socket was unlinked (an old pm''s kill, a cleaned
+      /tmp/pm-sessions) was invisible - and with the registry entry also gone (the
+      one case that scan exists for) discovery returned (None, None) where the pre-change
+      scan on the ambient server found the pane. The in-tmux branch now records resolve_ambient_socket()
+      and scans that server when list_pm_sessions cannot report the identified session;
+      new test verified to fail without the fallback. (3) impl.md had no record of
+      the QA S6 fixes: added a "QA scenario 6 fixes (2026-10-29)" section, extended
+      R3.2 with the exact-match rule and R3.4 with the ambient-server scan. Residual
+      unchanged and non-blocking: pr-ea98f71 covers the concurrent-start heal false
+      positive; the per-uid socket directory remains a future hardening option (i3
+      note). No live session, server or shared host configuration was touched; the
+      preserved session_start_smoke.py was re-run end to end on a disposable socket
+      (private server, session env, global env, hooks correct; default server untouched).'
+    created_at: '2026-10-29T14:17:58Z'
+    last_edited: '2026-10-29T14:17:58Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

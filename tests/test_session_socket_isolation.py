@@ -1004,6 +1004,36 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == ("%7", "pm-target")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/s"
 
+    def test_last_resort_scans_the_ambient_server_without_a_socket_file(
+            self, monkeypatch):
+        """A live server can outlive its socket file; the scan must see it.
+
+        ``list_pm_sessions`` enumerates *socket files*, so a server whose
+        socket was unlinked while it kept running (an old pm's kill, or a
+        cleaned ``/tmp/pm-sessions``) is invisible to it — and the
+        last-resort scan exists for exactly that session when its registry
+        entry is gone too (heal testing).  The ambient server is still
+        known, so it has to be scanned anyway.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.setenv("PM_TMUX_SOCKET", "/tmp/pm-sessions/pm-a")
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            lambda: "pm-a")
+        # No socket files left to enumerate.
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **kw: MagicMock(
+                returncode=0, stdout="%7 pm-a~1 pm _tui\n"))
+
+        assert helpers._find_tui_pane() == ("%7", "pm-a")
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-a"
+
     def test_fallback_never_crosses_to_another_pm_session(self, monkeypatch):
         """A fallback must stay on the identified session's server.
 
@@ -1365,6 +1395,52 @@ class TestSessionKillServerSelection:
         # The default server is addressed by path, never by omitting -S.
         assert killed == [("pm-repo-abc~1", default),
                           ("pm-repo-abc", default)]
+
+    def test_kill_uses_the_exact_matcher_not_prefix(self, monkeypatch,
+                                                    tmp_path):
+        """A surviving ``pm-x~1`` must not make ``pm-x`` look killable.
+
+        ``_invoke`` stubs ``find_session_server`` and
+        ``find_exact_session_server`` with the same resolver, so it cannot
+        catch a revert of the kill path to prefix matching.  Here they
+        disagree the way tmux would: prefix matching finds the grouped
+        session, exact matching finds nothing (QA scenario 6).
+        """
+        from click.testing import CliRunner
+        from pm_core.cli import session as session_mod
+
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", tmp_path)
+        monkeypatch.setattr(session_mod.tmux_mod, "has_tmux", lambda: True)
+        # A live server: the socket file must be left alone.
+        monkeypatch.setattr(session_mod.tmux_mod, "server_alive",
+                            lambda sock: True)
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-repo-abc")
+        monkeypatch.setattr(session_mod, "_known_ambient_session",
+                            lambda: None)
+        sock = tmp_path / "pm-repo-abc"
+        sock.write_text("")
+        # Prefix matching resolves the surviving grouped session ...
+        monkeypatch.setattr(session_mod.tmux_mod, "find_session_server",
+                            lambda name: (str(sock), True))
+        # ... but the exact name is gone.
+        monkeypatch.setattr(session_mod.tmux_mod,
+                            "find_exact_session_server",
+                            lambda name: (None, False))
+        killed: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "list_grouped_sessions",
+            lambda name, socket_path=None: [f"{name}~1"])
+        monkeypatch.setattr(
+            session_mod.tmux_mod, "kill_session",
+            lambda name, socket_path=None: killed.append((name, socket_path)))
+
+        result = CliRunner().invoke(session_mod.session, ["kill"])
+
+        assert result.exit_code == 1
+        assert "No session 'pm-repo-abc' found." in result.output
+        assert killed == []          # the grouped session survives
+        assert sock.exists()         # and so does its live server's socket
 
     def test_missing_session_unlinks_stale_socket(self, monkeypatch, tmp_path):
         stale = tmp_path / "pm-repo-abc"

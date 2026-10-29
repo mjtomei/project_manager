@@ -1414,6 +1414,12 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # *different* pm session's live ``pm _tui`` pane would drive the wrong
     # TUI — the cross-session damage this whole change exists to prevent.
     identified: str | None = None
+    # The server this process is attached to, when it is a pm one.  Used
+    # only by the scan below, which normally finds it through
+    # `list_pm_sessions`: that enumerates *socket files*, so a server whose
+    # socket was unlinked while it kept running (an old pm's kill, or a
+    # cleaned /tmp/pm-sessions) would be invisible to it.
+    ambient_server: str | None = None
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():
@@ -1428,6 +1434,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         if current_session.startswith("pm-"):
             base = pane_registry.base_session_name(current_session)
             identified = base
+            ambient_server = tmux_mod.resolve_ambient_socket()
             pane_id = _registry_tui_pane(base)
             if pane_id:
                 return pane_id, base
@@ -1466,6 +1473,14 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     servers = tmux_mod.list_pm_sessions()
     if identified is not None:
         servers = [info for info in servers if info["name"] == identified]
+        if not servers and ambient_server is not None:
+            # The identified session is the one this process is attached to
+            # and its socket file is gone (or lives outside the pm socket
+            # directory), so the enumeration above cannot see it.  Scan the
+            # ambient server directly: the last-resort scan below exists
+            # precisely for a live TUI with no registry entry.
+            servers = [{"name": identified, "socket": ambient_server,
+                        "attached": 0, "shared": False}]
     for info in servers:
         _use_tmux_socket(info["socket"])
         pane_id = _registry_tui_pane(info["name"])

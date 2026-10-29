@@ -77,7 +77,11 @@ sessions today).
    tries the cwd-derived name first and the ambient session second, choosing
    the first that is actually running — so a workdir clone kills the session
    hosting it, while a different project's ambient session is never preferred
-   over the cwd's live one.
+   over the cwd's live one.  The destructive lookup matches the session name
+   **exactly** (`find_exact_session_server`, target `=name`): a bare tmux
+   target is a prefix match, so a surviving grouped session `pm-x~1` must not
+   make `pm-x` look alive to kill (QA scenario 6; discovery keeps prefix
+   matching on purpose — see `find_session_server`).
 3. New `pm session list` enumerates pm sessions across **all** pm servers:
    every `pm-*` socket in `/tmp/pm-sessions/` plus the default server
    (legacy). It reports base session name, socket, attached client count,
@@ -93,7 +97,11 @@ sessions today).
    loop 7af7 i3). The final scan covers *all* servers only when neither
    branch above identified a session (a plain shell); when one did, it is
    scoped to that session's server, because pane ids are per server and
-   `pm tui send` delivers keys unscoped (review-loop 7af7 i1).
+   `pm tui send` delivers keys unscoped (review-loop 7af7 i1).  When the
+   identified session is the ambient one, its server is scanned even if
+   `list_pm_sessions()` does not report it — that function enumerates
+   socket *files*, and a live server can outlive an unlinked socket
+   (review-loop 3cc7 i1).
 5. `pm_core/tmux.py` gains `list_pm_sessions()` and
    `socket_path_from_tmux_env()`; `pm_core/paths.py` gains
    `session_socket_path()` / `ensure_socket_dir()`.
@@ -1292,3 +1300,84 @@ server.
 
 Residual notes unchanged and still non-blocking (see the i3 section of this
 document).
+
+## QA scenario 6 fixes (2026-10-29)
+
+QA scenario 6 ("Concurrent starts, kills, lists and attaches") found two
+defects against its THEN bullets; both are fixed in the same commit as this
+section (`qa: converge concurrent session starts and make session kill
+match exactly`).  No requirement changes.
+
+1. **Paired simultaneous `pm session` starts crashed the loser.**  Both
+   invocations pass the caller's `session_exists` check and then race into
+   `new-session`; the loser gets "duplicate session" and died with an
+   unhandled `CalledProcessError` *before* the attach (the grouped session
+   `new-session -t pm-x -s pm-x~1` has the same race on the attach path).
+   `create_session` / `create_grouped_session` now treat the failure as a
+   lost race only when the exact name exists afterwards
+   (`has-session -t =name`) and converge on the winner's session; any other
+   failure is still re-raised.  Tests: `TestConcurrentCreate` (converge and
+   re-raise for both create paths).
+2. **`pm session kill` destroyed a live grouped session.**  tmux resolves a
+   bare `-t pm-x` as a *prefix*, so `has-session -t pm-x` also matched a
+   surviving `pm-x~1`: with the base already killed elsewhere, the kill
+   reported "Killed session 'pm-x'.", killed the grouped session (detaching
+   its client) and unlinked the live server's socket.  New
+   `tmux.find_exact_session_server()` (target `=name`) is used by the
+   destructive path only; `find_session_server` keeps prefix matching, so
+   `pm tui view -s pm-x` still reaches the group's TUI after the base is
+   gone (verified both ways at runtime).  Tests: the prefix/exact cases in
+   `TestFindSessionServer`, plus
+   `TestSessionKillServerSelection::test_kill_uses_the_exact_matcher_not_prefix`
+   — the other kill tests stub both resolvers identically, so they cannot
+   catch a revert of the kill path to prefix matching.
+
+Residual, filed as **pr-ea98f71** and out of scope here: a concurrent start
+can still false-positive the "TUI pane missing — respawning..." heal path,
+because the create path clears the pane registry before `new-session`; the
+final state still converges.
+
+Validation: full suite 4612 passed / 1 skipped on the QA-fix commit
+(before the review-loop edits below).
+
+## Review iteration (2026-10-29, review-loop 3cc7 i1)
+
+Verification pass over the QA scenario 6 fix commit; no requirement
+changes.  One test gap in that fix, one documentation gap, and one
+discovery robustness gap of the class the earlier iterations closed.
+
+1. **The kill path's exact-match wiring had no test.**  The QA fix made
+   `pm session kill` resolve the session through
+   `find_exact_session_server`, but
+   `TestSessionKillServerSelection._invoke` stubs `find_session_server`
+   and `find_exact_session_server` with the *same* resolver, so a revert
+   to prefix matching would have passed every kill test.  New
+   `test_kill_uses_the_exact_matcher_not_prefix` makes the two disagree
+   the way tmux does (prefix finds the surviving `pm-x~1`, exact finds
+   nothing) and asserts `No session ... found.`, no `kill-session` calls
+   and the live server's socket left in place; verified to fail with
+   `session_kill` reverted to `find_session_server`.
+2. **`impl.md` had no record of the QA scenario 6 fixes.**  Added the
+   "QA scenario 6 fixes" section above and extended R3.2 with the
+   exact-match rule.
+3. **The last-resort TUI scan could not see a server whose socket file is
+   gone.**  `_find_tui_pane` scopes the scan to the identified session's
+   server through `list_pm_sessions()`, which enumerates socket *files*.
+   A live server can outlive an unlinked socket (an old pm's kill, or a
+   cleaned `/tmp/pm-sessions`), and when that session's registry entry is
+   also gone — the one case the last-resort scan exists for — discovery
+   returned `(None, None)` although `pm tui view` from inside the session
+   used to find the pane (the pre-change scan ran on the ambient server).
+   The in-tmux branch now records `resolve_ambient_socket()` and, when
+   `list_pm_sessions()` does not report the identified session, scans that
+   server directly.  Test:
+   `test_last_resort_scans_the_ambient_server_without_a_socket_file`
+   (verified to fail without the fallback).
+
+Validation on the integrated head: full suite **4614 passed / 1 skipped**
+(4612 + the two new tests).  `pm/specs/pr-073910f/session_start_smoke.py`
+was re-run end to end on a disposable socket with `TMUX_TMPDIR` on a
+scratch dir (private server, session env, global env and hooks correct;
+default server untouched).  No live session, server or shared host
+configuration was touched; every new test is unit-level and binds no tmux
+server.
