@@ -9,7 +9,7 @@ project:
   repo: https://github.com/mjtomei/project_manager.git
   base_branch: master
   backend: github
-  active_pr: pr-991aaab
+  active_pr: pr-1ab9075
   guide_deps_reviewed: true
   repo_id: 828c8d0a91034cd541f443dd0aee62961e2af75a
   last_pr_sync: '2026-03-02T01:48:48.618942+00:00'
@@ -42432,6 +42432,44 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T18:02:48.130836+00:00'
   updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-997c086
+  plan: bugs
+  title: 'Bug: another project''s TUI deletes an orphaned QA resume snapshot, so a
+    hard TUI kill loses the QA run'
+  branch: pm/pr-997c086-bug-another-project-s-tui-deletes-an-orphaned-qa-r
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py::_resume_incomplete_qa (~lines
+    735-766). The scan globs the GLOBAL ~/.pm/workdirs/qa/*/qa_resume.json but resolves
+    each pr_id against store.load(app._root) of the SCANNING project. When store.get_pr(project_data,
+    pr_id) returns None (a PR of a different project) the branch treats it as "PR
+    has left QA" and calls qa_loop.clear_resume_file(resume_file.parent), deleting
+    the other project''s snapshot.
+
+
+    Repro (observed 2026-10-29, QA scenario 10 of pr-1ab9075): two pm projects A and
+    B on one machine, each with a live TUI (separate sessions, shared HOME). Start
+    a QA run in A and let a per-scenario retry sit in backoff (qa_resume.json present,
+    launch_retries[n].state == "waiting"). Kill A''s TUI pane process (kill -TERM
+    $(tmux list-panes -t $SESSION:0 -F "#{pane_pid}")). While A''s owner_pid is dead,
+    B''s 5 s poll tick sees the snapshot, resume_owned_elsewhere() returns False,
+    the PR is not in B''s registry, and the file is deleted within ~1 s. Restarting
+    A then logs no "Resuming incomplete QA from disk": the run is abandoned, the overdue
+    relaunch never fires and the attempt count is lost.
+
+
+    Fix direction: clear the snapshot only when the PR is found in this project AND
+    its status is not "qa"; when the PR is not in this project at all, skip the snapshot
+    without deleting it.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:06:43.736897+00:00'
+  updated_at: '2026-10-29T07:06:43.736897+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
