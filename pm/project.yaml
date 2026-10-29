@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T07:10:58.735253+00:00'
+  updated_at: '2026-10-29T07:36:52.645200+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -4914,6 +4914,33 @@ prs:
       (see the i3 section of impl.md).'
     created_at: '2026-10-29T07:10:58Z'
     last_edited: '2026-10-29T07:10:58Z'
+  - id: note-df49ef4
+    text: 'Review loop d1c0 i11 (no requirement changes; full suite 4593 passed /
+      1 skipped). Two "degrade, never crash" / truthful-state fixes. (1) _find_tui_pane()''s
+      failure restore used a value it had already overwritten: the cross-server scan
+      restores PM_TMUX_SOCKET when nothing is found, but it read that "ambient" value
+      *after* the cwd branch had called _select_session_socket(), so a running cwd
+      session with no live TUI pane left the process on the cwd session''s server
+      instead of the one it came in with. The value is now captured on entry, before
+      any branch can select a server, so the documented contract holds (new test test_failed_lookup_restores_the_original_socket,
+      verified to fail with the late capture). (2) detach_current_client() called
+      pane_window_id()/_run() unguarded, so an OSError from a missing/unexecutable
+      tmux (a container, or a forwarded $TMUX without the binary) propagated into
+      quit_app()''s key handler — every other tmux probe in this change degrades.
+      The body moved to _detach_current_client(); the public function logs a warning
+      and returns False, i.e. "nothing to detach" (new test test_tmux_missing_does_not_crash_the_quit_path,
+      verified to fail with the guard removed). Validation on the integrated head:
+      full suite 4593 passed / 1 skipped (scratch pytest<9 + markdown on PYTHONPATH,
+      PATH without the push-proxy git, TMUX/TMUX_PANE/PM_*/PM_HOST_HOME cleared);
+      pm/specs/pr-073910f/session_start_smoke.py re-run end to end on a disposable
+      socket (private server, session env, global env, hooks correct; default server
+      untouched); pm session list re-verified end to end against disposable private/shared/legacy
+      servers (private + (shared) + (default server) rows, non-socket entry skipped,
+      column width from the data). No live session, server or shared host configuration
+      was touched. Residual notes unchanged and non-blocking (see the i3 section of
+      pm/specs/pr-073910f/impl.md).'
+    created_at: '2026-10-29T07:36:52Z'
+    last_edited: '2026-10-29T07:36:52Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
