@@ -4373,7 +4373,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-03-04T16:29:30.649058+00:00'
-  updated_at: '2026-10-29T11:37:39.462089+00:00'
+  updated_at: '2026-10-29T12:21:42.630422+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -5135,6 +5135,30 @@ prs:
       is empty.'
     created_at: '2026-10-29T11:37:39Z'
     last_edited: '2026-10-29T11:37:39Z'
+  - id: note-e4bba85
+    text: 'QA S5 (legacy default-server session) PASS 4/4 stories, no issues found.
+      Legacy fixture was genuine: L''s session created by the pre-change build (PYTHONPATH=/opt/pm-src,
+      system pm) on a scenario-private default server, verified no /tmp/pm-sessions/<tag>,
+      registry tui entry present. (1) `pm session` from a plain non-pm tmux shell
+      printed the migration note + "Attaching to session <LEGACY>~1...", rendered
+      L''s LEGACY-ONLY tree, added a client on the grouped session, left TUI pane
+      %0/pid unchanged, baseline client still attached, no private socket, one base
+      session on the default server. (2) `pm session list` showed the (default server)
+      row and the private row with its socket; `--print-connect` printed exactly `tmux
+      -S <default> attach -t <LEGACY>`; pasted verbatim into a shell pane INSIDE the
+      private session it attached L (client appeared on the default server) while
+      P kept only its own client. (3) `pm tui view/send -s <LEGACY>` from inside P
+      (where PM_TMUX_SOCKET names P and both servers have pane %0) drove L only: "Sent
+      keys ... to TUI pane %0 (session: <LEGACY>)", L showed Keyboard Shortcuts, P
+      unchanged, Escape dismissed. (4) `pm session kill` exited 0, removed base +
+      ~1 from the default server, left P and unrelated-shell untouched. Env gotcha
+      for future runs: with the venv editable install active, PYTHONPATH=/opt/pm-src
+      does NOT select the pre-change build (the PEP 660 meta-path finder outranks
+      sys.path) — use /usr/local/bin/pm for the legacy fixture; also `agg` is absent
+      from the container, fetch the aarch64 release binary to render casts. Captures:
+      /pm-captures/scenarios/5/{legacy-attach,session-list-connect,paste-connect,tui-cross-session,legacy-kill}/.'
+    created_at: '2026-10-29T12:21:42Z'
+    last_edited: '2026-10-29T12:21:42Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
