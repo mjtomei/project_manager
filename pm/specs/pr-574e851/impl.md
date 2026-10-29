@@ -553,3 +553,53 @@ scenario. That is host mode — no container was requested, so nothing is
 downgraded — and the `INPUT_REQUIRED` is deliberate there: it keeps the
 scenario from being silently lost, which could produce a false overall
 `PASS`.
+
+## Review iteration (74e7 i1)
+
+Re-audited the fail-closed boundary against the current head (`5c4d6f59`) and
+the post-review commits. No new downgrade path was found: fresh-run
+preflight, initial container launch, queued launch, relaunch, resume,
+`pm qa debug` and `pm qa run` all match R1–R7, and the only remaining
+container-mode gates in the tree (`wrap_claude_cmd`, `build_exec_cmd`,
+`container_is_running`) are fail-closed or display-only. Two things the spec
+had not recorded yet:
+
+- **The status pane wraps the error block to the pane width** (`d70a3138`,
+  found by QA S9 on a live fail-closed run). `qa_status._render`'s error
+  branch emitted each error line verbatim, so the ~190-column cause line
+  wrapped on its own at 100 columns, pushed the block past `rows`, and
+  scrolled the pane's own `QA Status: <pr>` header off the top — the title of
+  the error view was lost exactly when the run had failed. Each error line is
+  now wrapped with `textwrap.wrap` to `cols - 2` (leading indent preserved
+  and re-applied to continuations, long words broken), with a regression test
+  at 60/80/100/120 columns asserting the header stays visible, no line
+  exceeds the width, and the block fits 24 rows. This is the Status/UX
+  requirement (implicit 5) extended to the rendered pane, not new behaviour:
+  the same cause+remedy text is shown, just inside the pane. Blank lines in
+  the error text stay blank instead of gaining the red style, and nothing is
+  truncated, so the remedy is never cut off. (A block taller than a very
+  short pane still scrolls, as any long error did before; the messages this
+  PR produces fit a 24-row pane down to 60 columns, which the test pins.)
+- **QA S9's live container-mode verdict was NEEDS_WORK only because of that
+  pane-header defect.** The fail-closed behaviour it exercised passed: the
+  killed scenario window relaunched inside the same container, the
+  force-removed container failed the run closed with the cause+remedy in the
+  log, the status file and a single QA ERROR note (no invented verdict, no
+  host relaunch), and a TUI restart neither resumed nor re-ran it.
+
+Intentionally still `INPUT_REQUIRED` rather than a launch ERROR: a scenario
+whose *workdir clone* fails in container mode
+(`_launch_scenarios_in_containers` returns before any container is created).
+Nothing is allocated, so there is no container to leak and no host launch to
+refuse; `_poll_tmux_verdicts` marks the windowless scenario `INPUT_REQUIRED`,
+exactly as the host launcher does. The window-failure case is different and
+stays a launch ERROR (c534 i1) because the container already exists and
+nothing can run in it.
+
+Out of scope, already filed by earlier iterations and unchanged here:
+`pr-7abb052` (`pm pr auto-sequence` has no branch for `overall: "ERROR"`, so
+it reports `running: qa` forever) and `pr-7b1dd2e` (the TUI auto-start
+scheduler holds only on `PASS`/`INPUT_REQUIRED`, so a recorded `ERROR` is
+restartable and re-fails the preflight, writing another QA workdir and a
+duplicate QA ERROR note). Both are integration consequences of the new
+terminal status value, not of the launch boundary itself.
