@@ -935,3 +935,45 @@ as private for the socket-ownership check.  That is currently unreachable
 for a joining user (R5b requires a local pane registry, which a joiner
 does not have, so they never adopt the shared session) and harmless for
 the owner (they own the socket), so the guard is left as it is.
+
+## Review iteration (2026-10-29, review-loop d1c0 i9)
+
+Verification pass over the integrated head; no requirement changes.  One
+test gap in the PR's central requirement, one stale user-facing string, one
+"degrade, never crash" hole in discovery, one import tidy.
+
+1. **R1 had no automated coverage of the create path.**  Everything in the
+   suite asserted pieces (`_resolve_session_socket` exports the path,
+   `set_environment`/`set_global_environment` are called, …); nothing ran
+   `_session_start` and checked the result.  The end-to-end check lived
+   only in `pm/specs/pr-073910f/session_start_smoke.py`, which is not run
+   by the suite.  New `TestSessionStartCreatesPrivateServer` runs
+   `_session_start` against a disposable socket with an isolated `HOME`
+   (patched `SHARED_SOCKET_DIR` and `default_socket_path`, hooks install
+   and `attach` stubbed, the TUI pane replaced by `sleep`), then asserts:
+   the session and its `~1` grouped session exist on the deterministic
+   private socket; `create_session` received that socket and a
+   `PM_TMUX_SOCKET=<socket> pm _tui` command; the variable is exported in
+   the process, in the session environment and in the server's global
+   environment; the `after-kill-pane` hook is installed there; the client
+   attaches to `pm-…~1` on that socket; and nothing was created on the
+   default server (which is itself a disposable path, never the real one).
+2. **`_find_tui_pane()`'s in-tmux branch was the last unguarded probe.**
+   d1c0 i2 made the rest of the scan degrade when tmux cannot be run, but
+   `tmux_mod.get_session_name()` still raised `OSError` out of
+   `pm tui view` / `pm autostart` when `$TMUX` was set and no tmux binary
+   was available (a forwarded pane environment, or a container without
+   tmux).  It now falls through to the cwd/cross-server branches.  Test:
+   `test_tmux_missing_inside_a_pane_degrades_to_no_session`.
+3. **The TUI help still said "Show shared connect command"** although the
+   `C` screen now shows the connect command for every session (the i4
+   iteration fixed the docstring but not this user-facing row).
+4. `pm session mobile`'s `_select_session_socket` import moved from inside
+   the command to the module-level `pm_core.cli.helpers` import block,
+   matching the rest of the module (no circular-import constraint).
+
+Validation: full suite re-run after these edits; no live session, server
+or shared host configuration was touched (every fixture used a disposable
+socket and an isolated `HOME`).
+
+Residual notes unchanged and still non-blocking (see the i3 section).

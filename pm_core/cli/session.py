@@ -23,6 +23,7 @@ from pm_core.cli.helpers import (
     _get_current_pm_session,
     _get_session_name_for_cwd,
     _log,
+    _select_session_socket,
     _set_share_mode_env,
     state_root,
 )
@@ -895,7 +896,6 @@ def session_mobile(force: bool | None):
     session_name = _resolve_target_session()
     # Target the server that actually hosts the session (private socket, or
     # the legacy default server).
-    from pm_core.cli.helpers import _select_session_socket
     _select_session_socket(session_name)
 
     if force is not None:

@@ -769,6 +769,29 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == (None, None)
         assert helpers._find_live_tui_pane() == (None, None)
 
+    def test_tmux_missing_inside_a_pane_degrades_to_no_session(
+            self, monkeypatch):
+        """``$TMUX`` set but no tmux binary must not crash discovery.
+
+        The in-tmux branch resolves the current session first; that query
+        is a subprocess like every other probe in the scan, so it has to
+        degrade rather than raise when tmux cannot be run (a forwarded
+        pane environment, or a container without tmux installed).
+        """
+        from pm_core.cli import helpers
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: True)
+        monkeypatch.setattr(helpers.tmux_mod, "get_session_name",
+                            MagicMock(side_effect=OSError("no tmux")))
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+
+        assert helpers._find_tui_pane() == (None, None)
+
     def test_failed_scan_restores_ambient_socket(self, monkeypatch):
         """A lookup that finds nothing must not leave the env re-pointed."""
         from pm_core.cli import helpers
@@ -1616,6 +1639,104 @@ def _close(proc, sock):
         Path(sock).unlink(missing_ok=True)
     except OSError:
         pass
+
+
+@pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")
+class TestSessionStartCreatesPrivateServer:
+    """R1 end to end: a new session is created on its own server.
+
+    The manual smoke script (``pm/specs/pr-073910f/session_start_smoke.py``)
+    covers this too, but nothing in the suite asserted that
+    ``_session_start`` actually creates the private server and propagates
+    ``PM_TMUX_SOCKET`` to every surface (the TUI command, the session
+    environment, the server's global environment) while leaving the
+    default server alone.
+    """
+
+    def test_session_start_wires_every_surface_to_the_private_server(
+            self, short_sock_dir, tmp_path, monkeypatch):
+        from pm_core.cli import session as session_mod
+        from pm_core import hook_install
+
+        # Isolated HOME so the pane registry, pidfiles and pane_layout
+        # state land in tmp_path, never in the real ~/.pm.
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        # Pre-register the variables _session_start writes directly (or
+        # pops) so monkeypatch restores them after the test: an untracked
+        # set would leak PM_TMUX_SOCKET into every later test in the run.
+        for var in ("PM_TMUX_SOCKET", "PM_SHARE_MODE"):
+            monkeypatch.setenv(var, "")
+        for var in ("TMUX", "TMUX_PANE", "PM_IN_TMUX_SESSION", "PM_PROJECT"):
+            monkeypatch.delenv(var, raising=False)
+        # A disposable socket directory and a disposable "default server":
+        # the real one is never addressed.
+        monkeypatch.setattr(paths, "SHARED_SOCKET_DIR", short_sock_dir)
+        default_sock = short_sock_dir / "default"
+        monkeypatch.setattr(paths, "default_socket_path",
+                            lambda: default_sock)
+        monkeypatch.setattr(hook_install, "ensure_hooks_installed",
+                            lambda: None)
+        monkeypatch.setattr(session_mod, "state_root",
+                            MagicMock(side_effect=FileNotFoundError()))
+        monkeypatch.setattr(session_mod, "_get_session_name_for_cwd",
+                            lambda: "pm-iso-start")
+
+        # Keep the pane alive instead of launching a real TUI, but still
+        # create it on the socket _session_start chose.
+        created: dict = {}
+        real_create = tmux.create_session
+
+        def fake_create(name, cwd, cmd, socket_path=None, env=None):
+            created.update(name=name, cmd=cmd, socket_path=socket_path)
+            real_create(name, cwd, "sleep 300", socket_path=socket_path,
+                        env=env)
+
+        monkeypatch.setattr(tmux, "create_session", fake_create)
+        attached: list[tuple[str, str | None]] = []
+        monkeypatch.setattr(
+            tmux, "attach",
+            lambda name, socket_path=None: attached.append(
+                (name, socket_path)))
+
+        sock = str(short_sock_dir / "pm-iso-start")
+        try:
+            session_mod._session_start()
+
+            # The session was created on the deterministic private socket,
+            # with the socket exported into the TUI's own command.
+            assert created["name"] == "pm-iso-start"
+            assert created["socket_path"] == sock
+            assert (f"PM_TMUX_SOCKET={shlex.quote(sock)} pm _tui"
+                    in created["cmd"])
+            assert os.environ["PM_TMUX_SOCKET"] == sock
+
+            sessions = _tmux_out(sock, "list-sessions", "-F",
+                                 "#{session_name}").split()
+            assert "pm-iso-start" in sessions
+            assert "pm-iso-start~1" in sessions
+
+            # Every propagation surface names the private socket.
+            assert _tmux_out(sock, "show-environment", "-t", "pm-iso-start",
+                             "PM_TMUX_SOCKET").strip() == \
+                f"PM_TMUX_SOCKET={sock}"
+            assert _tmux_out(sock, "show-environment", "-g",
+                             "PM_TMUX_SOCKET").strip() == \
+                f"PM_TMUX_SOCKET={sock}"
+            # Hooks were installed on the private server (R1 implicit).
+            assert "after-kill-pane" in _tmux_out(sock, "show-hooks", "-g")
+
+            # The client attaches to the grouped session, on that socket.
+            assert attached == [("pm-iso-start~1", sock)]
+
+            # Nothing was created on the default server.
+            assert _tmux(default_sock, "has-session", "-t",
+                         "pm-iso-start").returncode != 0
+            assert not default_sock.exists()
+        finally:
+            _tmux(sock, "kill-server")
+            Path(sock).unlink(missing_ok=True)
 
 
 @pytest.mark.skipif(not tmux.has_tmux(), reason="tmux not installed")

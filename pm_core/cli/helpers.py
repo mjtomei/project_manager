@@ -1394,7 +1394,14 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():
-        current_session = tmux_mod.get_session_name()
+        try:
+            current_session = tmux_mod.get_session_name()
+        except OSError:
+            # tmux missing/unexecutable while $TMUX is set (a forwarded
+            # pane environment, or a container without tmux).  Discovery
+            # degrades to the cwd/cross-server branches instead of
+            # crashing, like every other probe in this scan.
+            current_session = ""
         if current_session.startswith("pm-"):
             base = pane_registry.base_session_name(current_session)
             pane_id = _registry_tui_pane(base)
