@@ -36252,11 +36252,19 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-13T05:59:42.051758+00:00'
-  updated_at: '2026-10-13T05:59:42.051758+00:00'
+  updated_at: '2026-10-22T18:44:28.831109+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-725fd9a
+    text: 'FYI from pr-a80bde5: review-loop INPUT_REQUIRED wait state fixed separately
+      (ReviewLoopState.input_required + HumanResponseWatch in verdict_transcript).
+      No PaneIdleTracker/permission_prompt changes there; if you need "human answered"
+      detection from a transcript, verdict_transcript.is_human_prompt_record / HumanResponseWatch
+      exclude tool_result/meta records.'
+    created_at: '2026-10-22T18:44:28Z'
+    last_edited: '2026-10-22T18:44:28Z'
 - id: pr-31413e8
   plan: bugs
   title: 'Bug: fresh-start (z t) logs the superseded QA run as "QA complete: INPUT_REQUIRED
@@ -37666,11 +37674,30 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-28T08:51:49.689657+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-607d399
+    text: 'Supersede variant of the transcript-collision bug (found in pr-a80bde5
+      QA scenario 4, 2026-10-28). Superseding a *running* review loop (zz d) can kill
+      the FRESH loop: the superseded loop keeps polling its killed pane for up to
+      15 s, then _on_complete_from_thread finalizes every review-<pr>-*.jsonl symlink
+      in the shared autostart transcript dir -- including the fresh loop''s review-<pr>-i1.jsonl
+      -- replacing it with a copy. The fresh loop then fails session_id_from_transcript
+      at its INPUT_REQUIRED follow-up wait and exits KILLED (status failed / review
+      loop ended KILLED). Repro: scripted review verdicts [INPUT_REQUIRED delay 0,
+      NEEDS_WORK delay 120]; start a loop (iteration 1 runs 120 s), reset the fake
+      cursor, send z,z,d; at ~20 s the new loop reads INPUT_REQUIRED then logs "could
+      not recover session_id from transcript=...review-<pr>-i1.jsonl" and dies KILLED.
+      Observed twice (08:36:44 and 08:47:40 UTC in the QA debug log); evidence /pm-captures/scenarios/4/evidence/50-repro-running-supersede.json.
+      Superseding a *waiting* loop is clean (it exits before the fresh symlink matters),
+      so pr-a80bde5 QA scenario 4 still passes. Same class as this PR; suggest also
+      keying the fresh loop''s transcripts by loop id or skipping finalize for superseded
+      loops.'
+    created_at: '2026-10-28T08:51:49Z'
+    last_edited: '2026-10-28T08:51:49Z'
 - id: pr-ccdec71
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
@@ -38150,7 +38177,7 @@ prs:
   title: 'Bug: review INPUT_REQUIRED stays visible after recovery while later iterations
     are working'
   branch: pm/pr-a80bde5-bug-review-input-required-stays-visible-after-reco
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'During supervised autostart on2026-10-22, #241/pr-1139060 continued
     reporting state=waiting, reason="review INPUT_REQUIRED (iteration N)", and review.input_required=true
@@ -38187,15 +38214,1515 @@ prs:
     the report redesign.
 
     '
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/248
+  gh_pr_number: 248
   created_at: '2026-10-22T17:19:46.224920+00:00'
-  updated_at: '2026-10-22T17:19:46.224920+00:00'
-  started_at: null
-  reviewed_at: null
+  updated_at: '2026-10-29T07:06:10.282609+00:00'
+  started_at: '2026-10-22T17:21:14.028691+00:00'
+  reviewed_at: '2026-10-22T18:46:07.130542+00:00'
   merged_at: null
-  notes: []
+  notes:
+  - id: note-f9941b6
+    text: 'impl done (75a221df, master merged 423a560d). Root cause: breadcrumb restart
+      during review INPUT_REQUIRED relaunched next iteration (--fresh killed question
+      pane) and never reset ReviewLoopState.input_required; answered follow-up stayed
+      waiting; repeated/stale IR auto-converted to NEEDS_WORK. Fix in review_loop.py
+      (adopt live IR wait on resume, clear flag on new iteration, HumanResponseWatch-driven
+      follow-up waiter), verdict_transcript.HumanResponseWatch/is_human_prompt_record
+      (tool_result never counts), autostart_state follow_up reason. Tests: tests/test_review_input_required_state.py
+      (7 fail pre-fix). Live pre/post captures under captures impl/pre-fix + impl/post-fix
+      (interactive stub-claude harness + poll.sh). tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      fails in container on master too (env). Ready for review: press d / pm pr review
+      pr-a80bde5 from base dir.'
+    created_at: '2026-10-22T18:44:26Z'
+    last_edited: '2026-10-22T18:44:26Z'
+  - id: note-resume-248-20261028
+    created_at: '2026-10-28T05:33:39.918891+00:00'
+    last_edited: '2026-10-28T05:33:39.918891+00:00'
+    text: 'User authorized resumption from the retained reviewed branch in the #249
+      controller session. Preserve existing source/specs/review history and all local
+      files. Fresh native review, then fresh QA/signoff; historical outcomes are not
+      new approval. DeepSeek 1017/high for implementation/review/QA/helpers, work
+      Opus 5.5/high for signoff; manual wait_for_merge and spec review OFF. No force
+      push or master rewrite.'
+  - id: note-3f2ea06
+    text: 'review i1 (581d): fix + handoff. (1) Hardened verdict_transcript.is_human_prompt_record:
+      a harness-written "type":"user" record no longer counts as a human answer —
+      <system-reminder> blocks are stripped (reminder-only = not a prompt), and <task-notification>,
+      /loop + autonomous-loop ticks, scheduled-prompt firings, "[Request interrupted
+      by user...]" and qa_loop verdict nudges are rejected. Pre-fix, any of those
+      landing after the INPUT_REQUIRED turn silently cleared input_required, i.e.
+      a false "answered" wait (the mirror of the bug this PR fixes). New tests: test_harness_records_are_not_answers,
+      test_prompt_with_appended_reminder_is_an_answer, test_harness_record_does_not_answer_the_question
+      (the last two fail without the hardening). (2) MASTER OVERLAP for sign-off:
+      origin/master has moved well ahead in the exact files this PR touches and already
+      has verdict_transcript.find_verdict_turn (task-scoped verdict scan) + _user_record_is_non_task
+      (the same "is this a real human prompt" predicate, richer). Python files still
+      auto-merge (only pm/project.yaml conflicts), but at sign-off the local _NON_TASK_PREFIXES/_NON_TASK_SENTINELS
+      copy and the latest-turn verdict reads should be reconciled onto those master
+      helpers instead of kept in parallel. Spec R4 + an edge-case bullet updated.
+      Full suite: 3382 passed.'
+    created_at: '2026-10-28T06:06:49Z'
+    last_edited: '2026-10-28T06:06:49Z'
+  - id: note-dec47aa
+    text: 'review i2 (581d): fix + handoff. Found a real bug in the wait state the
+      PR itself introduced: `_wait_for_follow_up_verdict` re-enters the hook wait
+      with `newer_than=0.0` (needed so a wait adopted after a TUI restart can see
+      the idle event that already landed). Consequence: an idle_prompt newer than
+      the human answer, while the latest assistant turn was still the question turn
+      just answered, was taken as a NEW INPUT_REQUIRED — `_await_input_resolution`
+      re-recorded it (history + latest_verdict + on_iteration → runtime_state write)
+      and looped. fake-claude re-emits idle every ~2s (`_HOOK_REFRESH`), so it was
+      a busy loop: probe measured 3035 on_iteration calls in 0.6s, each re-arming
+      the TUI INPUT_REQUIRED notification. Same false-state class as the bug this
+      PR fixes. Fix: `verdict_transcript.HumanResponseWatch.assistant_after_answer`
+      (byte order: an assistant record after the latest answer, kept by the back-scan
+      and poll(), reset by a new answer and by rearm()); `_wait_for_follow_up_verdict`
+      ignores an idle for the turn just answered, so only a real new turn re-raises
+      the wait — this also covers a verdict-less (prose) question. Regression tests
+      (both fail pre-fix): test_repeated_idle_after_answer_is_not_a_new_question,
+      test_repeated_idle_after_answering_a_prose_question, plus three HumanResponseWatch
+      unit tests; test_repeated_genuine_input_required_stays_visible now asserts exactly
+      one recorded round per question. Also `_adoptable_wait_transcript` now returns
+      None when no session_id can be recovered (R2s nobody-can-answer case) instead
+      of failing the wait and ending the loop KILLED. Spec R5 + edge-case bullet updated.
+      Suite: 3315 passed; the 55 failed/17 errors are all test_signoff_integration/test_merge_publish
+      and reproduce identically on a pristine origin/master tree in this sandbox (git
+      env), not this PR. Evidence: /pm-captures/review-a80bde5-i2/. MASTER OVERLAP
+      unchanged from i1: at sign-off reconcile is_human_prompt_record onto master
+      _user_record_is_non_task/find_verdict_turn.'
+    created_at: '2026-10-28T06:33:18Z'
+    last_edited: '2026-10-28T06:33:18Z'
+  - id: note-41afb5e
+    text: 'QA scenario 2 (repeated genuine questions / stale idles / non-human records):
+      PASS. Live TUI + interactive stub-claude run — harness `user` records (system-reminder-only,
+      task-notification, /loop + autonomous ticks, scheduled firing, [Request interrupted
+      by user...], qa_loop nudge) and a tool_result containing PASS/yes/INPUT_REQUIRED
+      never cleared or re-raised the wait; answer -> running in ~0.9 s and stayed
+      running through 6 stale idle refreshes; second genuine INPUT_REQUIRED re-raised
+      the same iteration-1 wait on the same pane (@2) with exactly one `follow-up
+      verdict=INPUT_REQUIRED`; a verdict-less prose question waited again with verdict
+      still INPUT_REQUIRED. Evidence: /pm-captures/scenarios/2/tui-input-required/
+      (cast+mp4+evidence.txt). NOTE for whoever reads the log next: the TUI notice
+      `interact with Claude in the review pane` appears only ONCE in the debug log
+      even though `log_message` ran once per question, because pm_core/tui/app.py:59
+      `_record_log_message` drops a message identical to the previous recorded one.
+      Do not read that single line as "notice not re-armed" — the per-question re-arm
+      is visible in the frame-capture triggers (/home/pm/.pm/debug/<session>-frames.json):
+      log_message:...INPUT_REQUIRED at 07:59:13, 08:00:34 and 08:05:00. Also: the
+      red notice line stays on screen after an answer (log lines are only replaced
+      by the next message); the persistent tree marker does flip to the cyan follow-up
+      spinner. tests/test_review_input_required_state.py 27 passed, tests/test_verdict_transcript.py
+      23 passed.'
+    created_at: '2026-10-28T08:08:46Z'
+    last_edited: '2026-10-28T08:08:46Z'
+  - id: note-12bc122
+    text: 'QA scenario 2 RERUN (after the first PASS was flagged for a skipped Then):
+      triple 2s runs-popup check was re-driven and captured. With the run on `waiting
+      / review INPUT_REQUIRED (iteration 1)`, typing `use option A` + Enter into the
+      review pane -> `running` in ~1.5 s; `pm tui view` showed the cyan `⟳1` marker,
+      and `pm tui send a` opened the runs popup in the same window showing `▶ ◎ pr-3d79a62
+      [stop-before-merge]  RUNNING  review  review #1  ⧉ review-pr-3d79a62` / `— review
+      iteration 1 (INPUT_REQUIRED answered; follow-up running)` (popup captured ~6
+      s into the 12 s stale-idle window). Remaining triples re-checked in the same
+      run: second genuine INPUT_REQUIRED -> waiting, same pane @2, still launch 0,
+      exactly one `follow-up verdict=INPUT_REQUIRED`; answer -> running; prose question
+      -> waiting with verdict still INPUT_REQUIRED; answer -> running. Evidence: /pm-captures/scenarios/2/tui-input-required-rerun/
+      (tui-popup-running.txt, frames/popup-running.png, mp4) plus the first runs /pm-captures/scenarios/2/tui-input-required/.
+      Verdict re-issued: PASS.'
+    created_at: '2026-10-28T08:27:34Z'
+    last_edited: '2026-10-28T08:27:34Z'
+  - id: note-8d0184a
+    text: 'QA scenario 4 (concurrent wait-flag readers) PASS 2026-10-28: answer-clears-wait,
+      zz d supersede of a waiting loop, and window-close-during-wait all behaved per
+      spec (captures /pm-captures/scenarios/4/). One incidental, out-of-scope finding:
+      superseding a RUNNING loop (not waiting) can kill the fresh loop via shared
+      review-<pr>-i1.jsonl transcript finalization -> failed/KILLED; tracked in pr-9ee4d64
+      (note-607d399). Not a regression from this PR (review_loop_ui.py untouched);
+      the documented waiting-loop supersede is clean.'
+    created_at: '2026-10-28T08:53:33Z'
+    last_edited: '2026-10-28T08:53:33Z'
+  - id: note-fdbd41e
+    text: 'QA scenario 3 (TUI restart during an INPUT_REQUIRED wait): PASS — all 5
+      stories verified at runtime against a live stand-in review pane. Breadcrumb
+      restart re-adopted the live wait (window/pane ids unchanged, question still
+      on screen, no --fresh relaunch), the answer cleared input_required and set follow_up,
+      gap-landing follow-ups were recorded, an unanswerable restored wait was cleared
+      (iteration N+1, last INPUT_REQUIRED), the pane-death control settled at failed/KILLED,
+      and a latched legacy resume file reconciled to iteration N+1 and PASS. Evidence:
+      /pm-captures/scenarios/3/ (manifest.md + story1 recording). Observation for
+      the next session: when the answer AND follow-up verdict both land inside the
+      restart gap, the pre-restart loop and the resumed loop each record the follow-up
+      and each launch the next iteration ~1s apart; the second --fresh launch replaces
+      the first, so the end state is correct but a redundant window launch occurs
+      (08:11:00 old loop, 08:11:01 resumed). Not a scenario failure. Stories 3-5 ran
+      one iteration later than the step text because in-flight iteration 3 had already
+      reached its wait; all asserted transitions hold with N+1.'
+    created_at: '2026-10-28T08:27:19Z'
+    last_edited: '2026-10-28T08:27:19Z'
+  - id: note-25cea85
+    text: 'QA S3 re-evaluation (Story 5 re-run, TUI capture). Reset the PR to in_review,
+      seeded the prescribed latched resume file (iteration 7, latest_verdict NEEDS_WORK,
+      input_required true, history NEEDS_WORK), review fake PASS, then a plain pm
+      tui restart. Result: the seeded file was consumed, the latched flag cleared,
+      and the restored loop launched iteration 8 immediately (no --fresh relaunch
+      of 7), recorded PASS and stopped. After re-adding the target the status settled
+      — and stayed stable over a minute — at state=waiting, reason="review passed;
+      QA transition pending", status=in_review, review={iteration 8, verdict PASS,
+      running false, input_required false, follow_up false}, qa=null, held_by=[] —
+      no review INPUT_REQUIRED reason and no QA hold. One extra user action: pm autostart
+      remove for the ~24s until the loop finished, then pm autostart add, because
+      with auto-start left on the TUI 1s scheduler moves the PR to qa about a second
+      after PASS (pre-existing autostart behavior, unrelated to the review-wait fix);
+      this pins the sample to the review-side settle the scenario specifies. Evidence
+      (TUI home-pane cast + mp4, settled snapshots): /pm-captures/scenarios/3/story5-rerun/.
+      Stories 1-4 unchanged and still PASS.'
+    created_at: '2026-10-28T08:59:09Z'
+    last_edited: '2026-10-28T08:59:09Z'
+  - id: note-a4f5681
+    text: 'Scenario 5 refinement (concretizer): the two drivable failure paths are
+      (a) stop via TUI z d — status ends paused/review "review loop stopped (last
+      INPUT_REQUIRED)", review.input_required=false, marker ⟳N⏸; and (b) review-window
+      death via tmux kill-window — status failed/review "review loop ended KILLED",
+      marker ⟳N☠. Kill the whole review window, not Ctrl+C in the Claude pane: the
+      diff pane keeps the window alive and the loop first-pane liveness check still
+      passes, so the wait would persist. The draft third story (follow-up wait raises
+      out → failed/error state) was dropped: no user action makes the wait raise (wait_for_event,
+      HumanResponseWatch.poll and the tmux lookups swallow errors), and if it did
+      raise, run_review_loop_sync finally clears input_required/running but leaves
+      latest_verdict=INPUT_REQUIRED, so status would read paused (last INPUT_REQUIRED),
+      not failed.'
+    created_at: '2026-10-28T07:54:07Z'
+    last_edited: '2026-10-28T07:54:07Z'
+  - id: note-c5ea6c8
+    text: 'S6/R11 refine (2026-10-28): the merge-window INPUT_REQUIRED hold is not
+      drivable here — a local-backend project never opens a merge-<pr> window (local
+      merges fast-forward the main repo in place; that window exists only for a failed
+      post-merge main-repo update on a remote backend), and fake-claude has no merge-session
+      verdicts. Refined S6 covers: spec_pending ("spec generation awaiting input"),
+      a QA run that ended INPUT_REQUIRED (steady state is the recorded reason "last
+      QA run ended INPUT_REQUIRED (see QA note); press t / z t to re-run QA"; the
+      live "QA INPUT_REQUIRED — answer in QA window" reason paints only for the tick
+      or two before it is recorded), and a signed-off PR held for manual merge (add
+      with --wait-for-merge; fresh SIGNOFF_MERGE). Review answers need the interactive
+      stand-in (/pm-captures/impl/pre-fix/stub-claude.py) installed as claude first
+      on the pm session PATH with fake-claude beside it; fake-claude cannot answer
+      follow-ups. Sign-off needs a real branch commit and real git (PATH=/usr/bin
+      before ~/.local/bin) or SIGNOFF_MERGE is coerced to SIGNOFF_BLOCKED.'
+    created_at: '2026-10-28T08:00:02Z'
+    last_edited: '2026-10-28T08:00:02Z'
+  - id: note-a17ffc9
+    text: 'SIGNOFF_IMPL (sign-off 2026-10-28, HEAD 95ebede0, base master@89e3c501).
+      Fix is well evidenced on the branch alone; integration needs code work. (1)
+      pm/project.yaml conflicts with master: merge master and keep both sides. (2)
+      Semantic overlap: master (pr-8efa789: 4f902f18, f5157153, afecb1fe, 374051fd)
+      made verdict reads task-scoped (find_verdict_turn returns hit.text; loop_shared.wait_for_follow_up_verdict
+      has a line-index baseline + pre-wait scan; _user_record_is_non_task is the harness-record
+      predicate). This PR bypasses that waiter with review_loop._wait_for_follow_up_verdict,
+      which returns read_latest_assistant_text(). Reproduced on the auto-merged candidate:
+      answer, then follow-up PASS, then a "# /loop tick" turn -> waiter returns the
+      tick reply text -> parse_review_verdict = NEEDS_WORK (a PASS recorded as NEEDS_WORK,
+      next iteration launched); master hit.text gives PASS. Probe: /pm-captures/signoff/loop-tick-probe.txt.
+      Also, the merged verdict_transcript.py defines _NON_TASK_SENTINELS twice (the
+      PR copy overwrites master; identical today). To do: build the waiter on find_verdict_turn/hit.text
+      (+ the line-index baseline alongside HumanResponseWatch, or extend the shared
+      loop_shared waiter with an answered hook), build is_human_prompt_record on _user_record_is_non_task
+      and delete the duplicate _NON_TASK_* lists, and add a regression for answer
+      -> PASS -> /loop tick. Targeted tests pass on the candidate (156 passed; test_installer_writes_standalone_receiver
+      is a pre-existing env failure). After rework, re-run review and QA S1-S3 at
+      least on the integrated code. Report: /pm-captures/report.html'
+    created_at: '2026-10-28T09:26:45Z'
+    last_edited: '2026-10-28T09:26:45Z'
+  - id: note-714c4af
+    text: 'review/integration i3 (impl, 2026-10-28): merged master@89e3c501 (merge
+      commit ce749f42) and reworked both sign-off findings. (1) pm/project.yaml resolved
+      with store.merge_3way — master''s newer registry state for every untouched entry,
+      this branch''s own PR entry+notes winning true conflicts; verified every id
+      from either side survives exactly once and all 12 notes are intact (store.load
+      validate=True OK). (2) _wait_for_follow_up_verdict now reads through verdict_transcript.find_verdict_turn
+      and returns hit.text — the sign-off bug (answer -> follow-up PASS -> a "# /loop
+      tick" turn made the waiter return the tick reply, parse_review_verdict=NEEDS_WORK,
+      relaunch) is fixed; task-scoping also means the question being answered can
+      never come back as its own follow-up. (3) is_human_prompt_record is built on
+      master''s _user_record_is_non_task; the duplicate _NON_TASK_PREFIXES/_NON_TASK_SENTINELS
+      and the duplicate _SYSTEM_REMINDER_BLOCK_RE are deleted. isMeta stays an explicit
+      check (the shared predicate treats a Stop-hook record as a task boundary, which
+      is not a human answer); a pasted image still counts as a prompt; a mixed tool_result+text
+      record is a prompt, same rule as the verdict scan. (4) Fixed a test-isolation
+      bug the full suite exposed: hook_events._HOOKS_BASE is frozen from $HOME at
+      import time and in a full run the first import can land inside another test''s
+      patched HOME, so TestHumanResponseWatch wrote into a deleted tmp_path — a module-level
+      autouse fixture now pins it per test. Tests: tests/test_review_input_required_state.py
+      29 passed; new test_follow_up_pass_survives_a_loop_tick_turn FAILS on the merged
+      pre-rework code (mock.call_count 2 vs 1, iteration 2 relaunched) and passes
+      after; new test_agrees_with_the_shared_task_boundary_predicate pins the predicate
+      alignment. Full suite: 55 failed / 36 errors / 4022 passed, identical to a pristine
+      origin/master@89e3c501 worktree in this sandbox (markdown_render 12, git_ops
+      1, hook_events 1, signoff_integration 22, merge_publish 19+17, sync_merge_integrity
+      19 errors) — none from this PR. Spec R4 + new R5b and the master-overlap edge
+      case updated. Evidence: /pm-captures/impl/post-fix/integration-signoff/ (pre/post
+      rework logs + both review_loop.py versions + manifest). The earlier impl/pre-fix
+      and impl/post-fix captures still hold for the original symptom (this rework
+      changes which turn the waiter reads, not the wait-state transitions). QA should
+      re-run S1-S3 at least on the integrated code, as the sign-off note asks.'
+    created_at: '2026-10-28T09:56:09Z'
+    last_edited: '2026-10-28T09:56:09Z'
+  - id: note-72dcc17
+    text: 'review 3bf4 i1 (9550f6ce): fix + handoff. The review i3 integration holds
+      up: the follow-up waiter reads find_verdict_turn/hit.text and is_human_prompt_record
+      is built on _user_record_is_non_task, so the SIGNOFF_IMPL demands are met (a
+      PASS follow-up followed by a /loop tick turn records PASS; regression test_follow_up_pass_survives_a_loop_tick_turn).
+      Found one real defect introduced by that rework: the "content but no text -
+      e.g. a pasted image" branch of is_human_prompt_record only required _record_text()
+      to strip to empty, so a type:"user" record whose only content is an empty/null/whitespace
+      text block counted as a human answer. That clears an INPUT_REQUIRED wait nobody
+      answered (the mirror of this PR bug) and disagreed with _user_record_is_non_task,
+      which the verdict scan uses for the same records. Fixed by requiring a real
+      non-text block and no tool_result; image-only records still count. New tests
+      test_record_with_no_text_is_not_an_answer (fails pre-fix) and test_pasted_image_is_an_answer.
+      Also added the missing regression for the 581d-i2 guard: a restored wait whose
+      transcript yields no session_id must clear and launch the next iteration, not
+      end KILLED (test_restart_wait_with_no_recoverable_session_clears, fails without
+      the guard). Documented why the review waiter is deliberately not loop_shared.wait_for_follow_up_verdict;
+      spec R4 + two edge-case bullets updated. Verification: 358 related tests pass;
+      full suite 4026 passed with the same 54 failed/36 errors as a pristine origin/master
+      tree in this sandbox (12 test_markdown_render = missing markdown dep, 19+22
+      git-env signoff/merge_publish, 1 test_hook_events installer, 36 errors test_sync_merge_integrity/test_merge_publish).
+      Scope unchanged: no report redesign, no PaneIdleTracker, holds untouched. Ready
+      for QA S1-S3+ on the integrated code, then sign-off.'
+    created_at: '2026-10-28T10:25:20Z'
+    last_edited: '2026-10-28T10:25:20Z'
+  - id: note-586f561
+    text: 'QA scenario 8 (repeated questions / stale idles / non-human records): PASS
+      on the integrated code (f31675d1), live TUI + interactive stand-in. Noise immunity:
+      8 harness records (system-reminder-only, <task-notification>, # /loop tick,
+      scheduled firing, [Request interrupted by user], qa_loop nudge, assistant tool_use
+      + tool_result containing PASS/yes/INPUT_REQUIRED, empty user record) each followed
+      by an idle left the run waiting on iteration 1 with the same review fields/window
+      (@3), red ⏸1, WAITING popup, one notice frame trigger, zero "follow-up verdict="
+      records and no relaunch. Answer -> running in ~1.5 s and stayed running across
+      6 samples of the stand-in 12 s stale-idle window (marker ⟳1). Second genuine
+      INPUT_REQUIRED re-raised the same iteration wait on the same pane with a new
+      notice trigger and exactly one follow-up verdict=INPUT_REQUIRED; verdict-less
+      prose question waited again with verdict still INPUT_REQUIRED; answer+NEEDS_WORK
+      in one read advanced to iteration 2 (new window @4, count 2); PASS followed
+      by a /loop tick turn recorded PASS and stopped (⟳2✓, "stopping — verdict=PASS",
+      no iteration 3, no NEEDS_WORK). Evidence: /pm-captures/scenarios/8/tui-input-required/
+      (cast+mp4+frames, per-step status JSON/text, evidence.txt). tests/test_review_input_required_state.py
+      + test_verdict_transcript.py: 78 passed. One scenario-text nit: `pm log grep
+      "follow-up verdict"` also matches the pre-noise "INPUT_REQUIRED — polling for
+      follow-up verdict" line logged when the wait starts; the invariant (no follow-up
+      verdict recorded) holds (zero "follow-up verdict=" records). Optional E6 (second
+      human line before any assistant turn) not driven; not required by the scenario.
+      (2026-10-28T12:35:00Z)'
+    created_at: '2026-10-28T12:32:00Z'
+    last_edited: '2026-10-28T12:32:00Z'
+  - id: note-72174ee
+    text: 'QA scenario 9 (restart/adoption during INPUT_REQUIRED wait): PASS, 6/6
+      stories at f31675d1 (integrated code). Captures /pm-captures/scenarios/9/. Two
+      harness notes for the next session: (1) the bundled fake-claude-style idle refresh
+      must fire only at the prompt, not mid-turn — a stand-in that refreshes idle
+      *and* writes tool_use records during a turn makes _wait_for_follow_up_verdict
+      take the "idle after the answer without a verdict — waiting on the user again"
+      branch for the whole follow-up turn (recovers at the real turn end, but shows
+      a wait meanwhile); the master-merged poller also needs the refresh at all (a
+      single idle per turn is consumed by the grace period and never re-read). (2)
+      Observation, not a failure: consume_breadcrumb restores app._review_loops and
+      paints before restarting the loop, so a pm autostart status served in that sub-second
+      window can report the restored row (waiting/review review #N — review INPUT_REQUIRED
+      (iteration N)) before the resume reconciles; the tree marker never renders a
+      stale wait marker and the row corrects as soon as the loop launches N+1. Sampled
+      from just after the resume line, the scenario thens all hold.'
+    created_at: '2026-10-28T12:38:04Z'
+    last_edited: '2026-10-28T12:38:04Z'
+  - id: note-0699bdd
+    text: 'QA scenario 9 re-evaluation (the first PASS was flagged): story 5 Then
+      genuinely failed on f31675d1 — after a plain restart with a restored iteration-6
+      INPUT_REQUIRED wait whose pane/transcript were gone, `pm autostart status` reported
+      waiting/review review #6 — review INPUT_REQUIRED (iteration 6) with input_required=true
+      from the TUI mount until the resumed loop reached its adopt check (~0.2-1s;
+      measured 12:22:42.441, 13:00:15.304, 13:16:21.061). Cause: consume_breadcrumb
+      restored the breadcrumb input_required verbatim, and run_review_loop_sync published
+      running=True before _adoptable_wait_transcript decided adoptability. Fixed in
+      09cadcee (restore no longer carries the flag; the resume clears it until the
+      pane is confirmed adoptable, then sets it so a genuine wait still publishes
+      immediately) with two regression tests that fail pre-fix. Runtime re-verification
+      on the fixed code: 0 waiting / 0 input_required=true samples in two continuous-sampler
+      runs across the restart (pre-fix: 1 in the same window); a genuine live wait
+      is still adopted (waiting, input_required=true, same pane, no relaunch) and
+      still answers -> follow-up NEEDS_WORK -> iteration 2 -> PASS; the latched-flag
+      story still reconciles to iteration 8; iteration 7 PASS and the pinned settle
+      verified. Residual, documented not a wait: for ~0.19s the row reads "review
+      iteration 6 (INPUT_REQUIRED answered; follow-up running)" while the resume runs.
+      Captures: /pm-captures/scenarios/9/{pre-fix,post-fix}/. Full suite 4039 passed,
+      43 failed/36 errors all in the documented git-env families.'
+    created_at: '2026-10-28T13:23:05Z'
+    last_edited: '2026-10-28T13:23:05Z'
+  - id: note-83c4539
+    text: 'review 484e i1 (fix + handoff, 7cb690d7). (1) Real gap closed: `_wait_for_follow_up_verdict`
+      only read the transcript when an `idle_prompt` hook event arrived, so after
+      a restart where the event file no longer held the follow-up idle (lost/overwritten)
+      the resumed loop blocked forever on "follow-up running" even though the PASS/NEEDS_WORK
+      verdict was already in the transcript. It now reads once when the wait starts
+      and returns such a verdict before blocking; at wait start the task scope newest
+      verdict is the INPUT_REQUIRED question, so it can only match a verdict emitted
+      after it. Regression `test_follow_up_verdict_resolves_without_a_hook_event`
+      times out pre-fix (verified) and passes after. (2) impl.md was stale: the breadcrumb
+      bullets still said the saved `input_required` is used for the first paint, which
+      09cadcee removed; documented the adopt gate + pre-wait verdict read and fixed
+      the R7/Background wording. (3) Committed the QA-spec refinement that was left
+      uncommitted in the workdir (R5b + R11 wording; d402f0be) — content matches the
+      QA notes already on this PR. Verification: full suite 4119 passed, 1 skipped,
+      0 failed (/pm-captures/review-a80bde5-484e-i1/full-suite.log); the 4 related
+      files 165 passed. Merge integrity re-checked: 509 PRs, no id lost or duplicated
+      vs origin/master, store.load(validate=True) OK. Known residual (documented in
+      impl.md, NOT a wait): for the sub-second adopt check after a restart the row
+      can read "review iteration N (INPUT_REQUIRED answered; follow-up running)" before
+      the resume reconciles it. Considered and deliberately not changed: a hook event
+      whose receipt is delayed past the answer and past a mid-turn assistant record
+      can flip the wait back to waiting (hook_receiver stamps receipt time); real
+      Claude emits idle_prompt once per turn so it needs a multi-second hook delay,
+      and the spec defines the idle-driven rule. Analogous issues already tracked:
+      pr-e0f54ca (watcher_base) and pr-4caa36a (slash-echo task boundary).'
+    created_at: '2026-10-28T13:50:34Z'
+    last_edited: '2026-10-28T13:50:34Z'
+  - id: note-fed385e
+    text: 'QA scenario 14 (concurrent readers / two simultaneous review waits): PASS
+      on 7b153815, live TUI + interactive stand-in, two PRs waiting at once. 279 one-second
+      samples from a JSON and a text reader plus the tree and runs popup never disagreed:
+      both waits at iteration 1 (one runs[] entry and one text row per PR with its
+      own window); answering A gave running/follow_up in ~1 s and held for 25 samples
+      across the 30 s window with B untouched and no re-armed INPUT_REQUIRED notice;
+      the NEEDS_WORK follow-up launched iteration 2 for A only (⏸2 vs ⏸1); a second
+      genuine question re-raised iteration 2 on the same window @10 / pane %13 / transcript
+      session with no iteration 3 and no flap over 14 samples; pm tui restart --breadcrumb
+      resumed both loops, adopted B and re-watched A (window/pane ids unchanged, 267
+      rc=0 samples across the restart, no phantom wait); three human lines typed in
+      a row left A running/follow_up with no new notice and B untouched. Story 2 runs-popup
+      check was sampled in the equivalent follow-up window at iteration 2 (popup showed
+      RUNNING review #2 with the follow-up reason); the iteration-1 window is covered
+      by the 34 JSON + text one-second samples. tests/test_review_input_required_state.py
+      + test_verdict_transcript.py: 80 passed. Evidence: /pm-captures/scenarios/14/
+      (recording.cast+mp4, transcript.log, evidence/ with per-story samples, poller
+      logs, debug log, manifest.md).'
+    created_at: '2026-10-28T16:12:32Z'
+    last_edited: '2026-10-28T16:12:32Z'
+  - id: note-9a43d5c
+    text: 'QA scenario 12 (reported-bug non-reproduction, HEAD dca1b7d7): PASS. Live
+      TUI + interactive stand-in, 5/5 stories. A: wait -> answer -> follow-up NEEDS_WORK
+      -> iteration 2; 50 consecutive status --json samples on iteration 2 all `running
+      / review iteration 2 (last NEEDS_WORK)`, zero `waiting`/INPUT_REQUIRED — the
+      reported bug does not reproduce. B: PASS follow-up with the target removed before
+      it landed -> `review passed; QA transition pending`, verdict PASS, input_required
+      false, green ⟳1✓. C: `pm tui restart --breadcrumb` during a fresh unanswered
+      wait re-adopted the same pane (%14), no --fresh relaunch, iteration stayed 1;
+      the ~0.9 s adoption gap read `running / follow-up running` once then resolved
+      to waiting with no answer; answering after the restart cleared the wait and
+      NEEDS_WORK advanced to iteration 2 with no waiting sample after the answer.
+      Reproduction tests: 23 passed. Evidence: /pm-captures/scenarios/12/. Two observations
+      for whoever reads next: (1) the story-5 restart also started a NEW review loop
+      for B at iteration 1 — B had no live loop in the breadcrumb and sat in in_review
+      with a PASS whose QA transition never fired (it was out of scope when it completed),
+      so the scheduler re-drove it on resume. Not a review-wait regression and out
+      of this PR scope, but it means an out-of-scope PASSed PR is re-reviewed after
+      any TUI restart; worth a look if autostart re-review churn matters. (2) Harness
+      note: fake-claude is NOT passed the review prompt (only --verdict/--session-id),
+      so a stand-in must key the PR off its workdir path (`pm-(pr-[0-9a-f]+)-`) and
+      the iteration off a per-PR launch counter — an adopted wait after a restart
+      does not relaunch, so the counter stays in step. (2026-10-28T16:30:00Z)'
+  - id: note-a789cb6
+    text: 'QA S13 (a follow-up that finishes while the TUI is restarting still resolves):
+      PASS, 5/5 stories at 7b153815, live TUI + interactive stand-in on a throwaway
+      local-backend project. (1) pr-95325c4: answer+NEEDS_WORK in the restart gap
+      -> iteration 2 within ~1s; one "follow-up verdict NEEDS_WORK already in transcript",
+      zero "hook-driven follow-up verdict", one "iteration 2 for"; iteration-1 transcript
+      has exactly one answer + one NEEDS_WORK turn. (2) pr-951cab9: answer+PASS in
+      the gap -> verdict PASS, running false, iteration 1, reason "review passed;
+      QA transition pending"; runs popup captured at the review PASS ("WAITING review
+      review #1 — review passed; QA transition pending") and at the QA phase, no "review
+      iteration 2"; exactly one PASS-already-in-transcript. (3) pr-553f224: restart
+      with NO answer -> 33 samples over 15.5s after the adopt all waiting/review INPUT_REQUIRED
+      (iteration 1), input_required true, follow_up false; runs popup WAITING review
+      #1; same pane %23, no relaunch; answering then -> follow-up running in 2.0s,
+      iteration stays 1. (4) pr-fa3ef27: answer+PASS then a non-task "# /loop tick"
+      turn + no-verdict reply in the gap -> recorded verdict is PASS (not NEEDS_WORK);
+      runs popup captured at the review PASS and at the QA phase; no iteration 2 and
+      no NEEDS_WORK in status, popup or log. (5) pr-8883f8c: hook file overwritten
+      with user_prompt_submit before the answer+NEEDS_WORK -> resolved from the transcript
+      alone, status and runs popup agree on running/review review #2 — review iteration
+      2 (last NEEDS_WORK). tests/test_review_input_required_state.py + tests/test_verdict_transcript.py:
+      80 passed. Evidence: /pm-captures/scenarios/13/. Harness note: the review->QA
+      handoff lands ~0.5s after the PASS, so stories 2/4 open the runs popup on the
+      TUI pane right after the restart and refresh it with `r` in a tight loop while
+      capture-pane samples it — that is how popup-review-pass.txt (review row, PASS,
+      no iteration 2) is captured, and the recordings show it at ~4.7s. In story 1
+      one sample at +0.37s after the restart still read waiting (the old loop last
+      reply during the re-exec) — the documented sub-second pre-adopt window; no sample
+      >=5s after the restart shows a wait.'
+    created_at: '2026-10-28T16:26:55Z'
+    last_edited: '2026-10-28T16:49:08Z'
+  - id: note-e5360bc
+    text: 'QA scenario 16 (adoption of an in-flight iteration, waits nobody can answer):
+      PASS at 7b153815. All five stories driven live (real TUI + interactive stand-in),
+      captures /pm-captures/scenarios/16/ (5 casts+mp4, per-story samples/logs). (1)
+      breadcrumb restart with iteration 2 in flight: "adopting in-flight iteration
+      2 ... pane %7, transcript=...review-pr-720da2d-i2.jsonl", no new iteration-2
+      launch, same window @5/pane %7, stand-in launch count 1; the held turn then
+      ends INPUT_REQUIRED and the wait is published for iteration 2 (text row waiting/review
+      review #2, ir=true, fu=false, marker ⏸2, popup WAITING); answer -> running in
+      ~0.5s, follow-up NEEDS_WORK read from that transcript -> iteration 3 -> PASS.
+      (2) restored iteration-6 wait whose pane/transcript are gone: "restored 1 review
+      loop state(s)", "INPUT_REQUIRED wait for pr-720da2d iteration 6 has no live
+      pane; continuing", "iteration 7 for"; 77 successful samples with 0 input_required=true
+      and 0 review INPUT_REQUIRED reasons; iteration 7 -> PASS, not KILLED. (3) latched
+      stale flag (iteration 7, NEEDS_WORK, input_required true): cleared at restore,
+      iteration 8 reports running (verdict NEEDS_WORK, fu=false, marker ⟳8, never
+      ⏸7), then PASS. (4) breadcrumb restart during a genuine live wait: the only
+      sample between mount and the adopt line (14.200 vs adopt 14.880) is the documented
+      resume row running ... (INPUT_REQUIRED answered; follow-up running) with input_required=false;
+      after adoption the wait is visible on the same window/pane %24, relauncher count
+      and stand-in count unchanged, marker ⏸1; answer -> follow-up NEEDS_WORK -> iteration
+      2 -> PASS. (5) kill-window during the wait: failed/review review #1 - review
+      loop ended KILLED 1.65s later (verdict=KILLED, ir=false, fu=false), "pane gone
+      during follow-up wait", "☠ KILLED (1 iteration)", marker ⟳1☠, runs popup FAILED,
+      stable 25s, no relaunch. Observations, not failures: (a) the consume_breadcrumb
+      resume debug line (pm_core/tui/auto_start.py:336, pre-existing since e7e8abdc7)
+      can print the already-advanced iteration because the resumed loop thread starts
+      before the line is built — saw "at iteration 8" for a seeded 7; the painted
+      sticky message is the correct "at iteration 7 loop=seeded" and the later line
+      is logged "(hidden by sticky message)"; (b) during the ~0.6s adopt check the
+      tree widget was not repainted, so the pane kept the pre-restart ⏸1 frame and
+      no ⟳1 frame rendered before adoption (the ⟳1 frames appear after the answer);
+      the status/runtime-state publication path never reported a wait, matching the
+      S9 post-fix capture.'
+    created_at: '2026-10-28T16:30:10Z'
+    last_edited: '2026-10-28T16:30:10Z'
+  - id: note-45ff9e7
+    text: 'QA scenario 14 RERUN (supersedes the caveat in my previous scenario-14
+      note): the review flag was right — story 2 had sampled only JSON/text inside
+      the iteration-1 follow-up window, and no CLI capture existed. Re-ran all five
+      stories on a fresh project (A pr-882760d, B pr-c936713) and sampled the window
+      properly: 17 one-second JSON+text+TREE samples plus 3 runs-popup samples inside
+      the 30 s window after answering A. Tree: ⏸1 + spinner (B) vs ⟳1 + spinner (A)
+      in 17/17 samples. Popup at 16:32:20/22/23: A "RUNNING review review #1 ⧉ review-pr-882760d"
+      with "review iteration 1 (INPUT_REQUIRED answered; follow-up running)", B "WAITING
+      review review #1 — review INPUT_REQUIRED (iteration 1)". No re-armed INPUT_REQUIRED
+      notice between answer (16:32:17) and follow-up verdict (16:32:47); NEEDS_WORK
+      then launched iteration 2 (⏸2 vs ⏸1). Stories 1, 3, 4, 5 re-verified in the
+      same run: second genuine question re-raised iteration 2 on the same window @12
+      / pane %15 / session b83c9fa5 with one "follow-up asked INPUT_REQUIRED again"
+      and no iteration 3; breadcrumb restart resumed both loops, adopted B and re-watched
+      A with ids unchanged (243 JSON-reader samples, zero non-zero rc, no phantom
+      wait); three typed lines left A running/follow_up with notice count 2→2. Tests:
+      80 passed. Captures now use a named subdirectory per recipe: /pm-captures/scenarios/14/tui-wait-surfaces/
+      (TUI cast+mp4; the story-2 popup frame is at ~77 s) and /pm-captures/scenarios/14/cli-status-readers/
+      (CLI cast+mp4 of pm autostart status at 1.5 s intervals across the answer, showing
+      waiting -> running for A while B stays waiting). Evidence: /pm-captures/scenarios/14/{manifest.md,evidence/};
+      the superseded first run is kept under evidence-run1-partial/. Note: agg has
+      no pause/refresh glyphs, so the mp4 shows fallback boxes — the cast carries
+      the real characters and the tui-view text samples are the authoritative marker
+      evidence.'
+    created_at: '2026-10-28T16:39:01Z'
+    last_edited: '2026-10-28T16:39:01Z'
+  - id: note-889e704
+    text: 'QA S15 (repeated questions / prose / noisy transcripts) PASS on 7b153815,
+      live TUI + interactive stand-in. Answer -> running (same window/pane, count
+      unchanged) -> second genuine INPUT_REQUIRED stayed waiting on the same iteration/pane:
+      exactly one "follow-up verdict=INPUT_REQUIRED", a second notice frame trigger,
+      no relaunch, no iteration 2, 8/8 identical samples over 10 s. Breadcrumb restart
+      adopted the live wait (mount trigger=initial + consume_breadcrumb resume + adopting
+      lines; same window/pane; 121/121 post-restart samples waiting, 0 follow-up-running;
+      no new follow-up verdict= or iteration 2) and answering in the same pane cleared
+      it. 8 harness/tool records in the unanswered wait (system-reminder, task-notification,
+      # /loop tick, scheduled firing, [Request interrupted by user], qa_loop nudge,
+      tool_use+tool_result with PASS/yes/INPUT_REQUIRED, empty user record) and user-record
+      records during the running holds never flipped either state or recorded a verdict.
+      A verdict-less prose question waited again with verdict still INPUT_REQUIRED
+      and its answer cleared the wait in ~0.6 s. PASS + "# /loop tick" recorded PASS
+      and stopped (hook-driven follow-up verdict PASS / follow-up verdict=PASS / stopping
+      — verdict=PASS; no NEEDS_WORK, no re-arm, no iteration 2). Evidence: /pm-captures/scenarios/15/tui-input-required/.
+      Harness notes for the next run: this build has no "pm pr review --no-window"
+      (used "pm pr edit --status in_review" to open no window); the second-question
+      notice frame trigger is content-deduped by frame_capture, so a byte-identical
+      screen can show only one trigger even though log_message ran again (judge re-arm
+      by the log_message call / 30 s sticky window); the documented sub-second adopt
+      residual (row reads "answered; follow-up running" between the resumed mount
+      and the adopt gate) was caught once by a 0.6 s sampler in an exploratory run
+      and not in the final 121-sample post-restart window.'
+    created_at: '2026-10-28T16:39:58Z'
+    last_edited: '2026-10-28T16:39:58Z'
+  - id: note-89c334b
+    text: 'QA scenario 16 RE-EVALUATION (first PASS flagged): story 4s marker Then
+      is NOT met. Then requires "the running-wait marker ⏸1<spinner> never renders
+      before the adopt log line — during the check the marker is ⟳1". Millisecond
+      evidence (pipe-pane sink stamping every terminal chunk, replayed through pyte)
+      across three runs of the same restart-with-a-live-wait: the pane keeps the PRE-RESTART
+      ⏸1<spinner> frame until the new app paints, and that first post-mount paint
+      lands AFTER the adopt line, so ⟳1 is never rendered at all. Run 1 (branch head):
+      old ⏸1◐ 14.070-14.858, adopt 14.880. Run 2 (precise): old ⏸1◐ 24.420 -> blank
+      node (in_review spark-42, no marker) 24.445/24.881 -> ⏸1◐ 24.881; samples residual
+      ir=false 24.245, waiting ir=true 24.795 (adopt ~24.4-24.7). Run 3 (+ forced
+      _refresh_tech_tree on loop start): blank 20.974 -> ⏸1 21.455; adopt ~21.0-21.3.
+      Run 4 (+ await asyncio.sleep(0) after _start_loop): blank 33.029 -> ⏸1 33.505;
+      adopt ~33.0-33.4. Both attempted fixes were reverted; branch unchanged. Why
+      they cannot work: the adopt check runs in the loop thread while consume_breadcrumb
+      is still doing the mount (heal_registry, hook install, watcher setup, tmux subprocesses),
+      which blocks the UI event loop; a node refresh or a zero-delay yield only marks
+      the node dirty and the actual paint is deferred until the mount yields, by which
+      time the thread has set input_required=True. What IS correct: the status/runtime-state
+      publication path never shows a pre-adopt wait (only the documented resume row
+      with input_required=false), and the wait is visible after adoption on the same
+      pane/window with no relaunch; answering still gives follow-up NEEDS_WORK ->
+      iteration 2. To make the Then pass the resume must paint before the adopt check
+      — defer the loop start (or the adopt check) until after the first post-mount
+      render — which changes the core resume path and needs its own regression tests
+      plus the S1-S3 re-run the PR notes ask for. Captures: /pm-captures/scenarios/16/story4-marker-evidence.md
+      + story4-rerun-precise/, story4-post-fix-precise/, story4-post-fix-yield/ (each
+      with pane-stamped.jsonl, samples.log, adopt.log). Verdict for this run: INPUT_REQUIRED.'
+    created_at: '2026-10-28T17:06:21Z'
+    last_edited: '2026-10-28T17:06:21Z'
+  - id: note-bb354d9
+    text: 'QA S15 re-evaluation (the earlier PASS was flagged; corrected to NEEDS_WORK,
+      fix pushed). Story 2 Then genuinely failed: after a breadcrumb restart during
+      an unanswered INPUT_REQUIRED wait the row read "review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running)" with input_required=false / follow_up=true for
+      the sub-second adopt check (sampled at 16:25:05.139 between waiting samples).
+      That is the residual documented in impl.md, but it is a false wait-state row
+      and the scenario forbids it. FIXED in 5b86f467: ReviewLoopState._adopting_wait
+      is set by run_review_loop_sync while a resumed loop checks whether its recorded
+      wait has a live pane and cleared when the decision is made; review_progress_input
+      reports resuming=true / follow_up=false while set, and _review_reason renders
+      "review resuming (iteration N)". Runtime before/after on the fixed code: the
+      same restart window samples "running | review resuming (iteration 1) | {input_required:false,
+      follow_up:false}" and the restart->answer window has 158 waiting + 1 resuming
+      + 0 follow-up-running samples, then settles waiting with the same window/panes.
+      Regression tests test_adopting_wait_is_not_reported_as_an_answered_follow_up
+      and test_restart_adopt_check_never_reads_as_follow_up_running fail pre-fix,
+      pass post-fix. Re-ran the whole scenario on the fixed code: story 3b now injects
+      the tool_use/tool_result pair (output "50 passed/yes/PASS/INPUT_REQUIRED") during
+      the answered 8 s prompt-hold (the pair suppresses prompt idles until the turn
+      ends, like a real working turn) — 20/20 running samples stayed running/follow_up:true,
+      the tool output was not recorded as a verdict, and the turn ended PASS; stories
+      1, 3a, 4, 5 hold. Evidence /pm-captures/scenarios/15/pre-fix/ and /post-fix/.
+      Full suite 4042 passed, 1 skipped, 43 failed + 36 errors = the documented git-env
+      families (git_ops 1, hook_events 1, signoff_integration 22, merge_publish 19+17,
+      sync_merge_integrity 19 errors), none in the touched files. Harness note: the
+      notice frame-trigger evidence channel is content-deduped by frame_capture and
+      the frame buffer resets on a TUI re-exec, so a per-question notice trigger can
+      be absent on a byte-identical screen (same notice line + same spinner glyph);
+      the status row and the follow-up verdict=/relaunch log lines are the primary
+      evidence.'
+    created_at: '2026-10-28T17:16:39Z'
+    last_edited: '2026-10-28T17:16:39Z'
+  - id: note-161d001
+    text: 'review baa8 i1 (PASS-with-fixes, 4de9868d). Reviewed the integrated branch
+      at 8a50c446. No correctness defects found in the wait state: master@89e3c501
+      is merged (ce749f42); _wait_for_follow_up_verdict reads through find_verdict_turn/hit.text
+      and is_human_prompt_record is built on _user_record_is_non_task with no duplicate
+      _NON_TASK_* / _SYSTEM_REMINDER_BLOCK_RE; the INPUT_REQUIRED->NEEDS_WORK auto-answer
+      is gone; _adopting_wait closes the adopt-check false state. Verified pre/post-fix
+      captures (/pm-captures/impl/) reproduce all three reported symptoms pre-fix
+      and clear them post-fix; project.yaml has 509 PRs with no id lost or duplicated
+      vs origin/master. Two fixes this iteration: (1) build_status dropped the resuming
+      flag that review_progress_input computes, so a status reader could only learn
+      the loop was mid-adopt-check by string-matching the reason — published it next
+      to follow_up and extended test_adopting_wait_is_not_reported_as_an_answered_follow_up
+      to assert the published value; (2) impl.md still described that window as a
+      live residual reading "INPUT_REQUIRED answered; follow-up running" — 7280536b
+      fixed it with ReviewLoopState._adopting_wait, so the edge case and R6 (now also
+      covering "review resuming (iteration N)") were updated. Full suite 4121 passed,
+      1 skipped, 0 failed (review-container recipe). Observation, not a defect: the
+      review waiter deliberately duplicates part of loop_shared.wait_for_follow_up_verdict
+      because it must also report whether the human answered; unifying them needs
+      an answered-hook on the shared waiter and would touch the QA/watcher paths (pr-e0f54ca,
+      pr-4caa36a are the tracked analogues). Not re-litigated: the open QA S16 story-4
+      item is a tech-tree paint-ordering concern (the status/runtime-state path never
+      shows a pre-adopt wait), not a wait-state defect — left to the QA gate.'
+    created_at: '2026-10-28T17:40:19Z'
+    last_edited: '2026-10-28T17:40:19Z'
+  - id: note-59bf6ca
+    text: 'review baa8 i2 (fix + handoff). Found and fixed a real false wait the PR
+      itself introduced: after the human answers, a harness wakeup turn (# /loop tick,
+      scheduled firing, <task-notification>) can start and finish an assistant turn
+      of its own with an idle_prompt and no verdict. The waiter treated that idle
+      as a prose question, re-armed, and published `waiting / review INPUT_REQUIRED
+      (iteration N)` while the reviewer was working — the false-wait class this PR
+      fixes, and what QA spec E9 forbids. Fix: verdict_transcript.is_wakeup_record
+      + HumanResponseWatch.wakeup_turn (newest non-tool_result user record); the prose
+      branch now keeps input_required=false for a wakeup turn. _NON_TASK_TEXT_PREFIXES
+      is now _WAKEUP_TEXT_PREFIXES + (interrupt/nudge) — same list, no duplicate literals.
+      Regression test_wakeup_turn_after_the_answer_does_not_rearm_the_wait fails pre-fix
+      (verified by removing the guard) and passes after; plus two watch-level tests.
+      Also: run_review_loop_sync now sets input_required=false and _adopting_wait
+      before running=True, so a concurrent status reader can never see the resumed
+      loop running with the restored flags. impl.md R3 + an edge-case bullet updated.
+      Verification: 360 related tests pass; full suite 4033 passed, 1 skipped, 55
+      failed/36 errors — the same documented git-env families (sync_merge_integrity
+      19, merge_publish 17+19, signoff_integration 3), none in touched files. Remaining,
+      NOT a code change: QA S16 story 4 marker Then (⏸1 never renders before the adopt
+      log line; ⟳1 during the check) is a stale-frame artifact — the pre-restart frame
+      stays on screen because consume_breadcrumb mount blocks the event loop, so no
+      post-mount paint can precede the adopt check. Both committed specs support current
+      behavior (impl.md documents the residual; qa.md R7 asks only that the pane is
+      kept, the question stays on screen, status shows the wait, and the iteration
+      does not advance) and the status path never reports a pre-adopt wait. Recommend
+      refining that Then to "no post-mount paint renders ⏸ before the adopt line"
+      rather than deferring the resume start (needs its own regressions + the S1-S3
+      re-run).'
+    created_at: '2026-10-28T18:06:12Z'
+    last_edited: '2026-10-28T18:06:12Z'
+  - id: note-d4a1384
+    text: 'review baa8 i3 (fix + handoff, 94dbf681). Found and fixed a real false-wait
+      the PR still allowed: a local slash command (/model, /cost) typed in the review
+      pane is echoed into the transcript as a type:"user" record. is_human_prompt_record
+      already rejected it as an answer, but _user_record_is_non_task treated it as
+      a task boundary, so find_verdict_turn stopped at the echo. A PASS/NEEDS_WORK
+      follow-up followed by an echo therefore read as "no verdict": _wait_for_follow_up_verdict
+      took the prose-question branch, re-armed `waiting / review INPUT_REQUIRED (iteration
+      N)` for a wait nobody was asked for, and — because Claude was idle and no further
+      idle_prompt came — blocked forever (reproduced: find_verdict_turn returns None
+      with assistant NEEDS_WORK then <command-name>/model</command-name>). Fix: _LOCAL_COMMAND_PREFIXES
+      moved into _NON_TASK_TEXT_PREFIXES so the answer predicate and the task-scoped
+      verdict scan agree exactly as R4 claims, and the now-redundant check in is_human_prompt_record
+      is dropped. Regressions: test_local_command_echo_is_transparent, test_new_task_after_a_local_command_echo_supersedes
+      (guard: a real task after an echo still supersedes), test_follow_up_verdict_survives_a_local_slash_command
+      (times out pre-fix: the resumed waiter never records the verdict and never launches
+      iteration 3); test_agrees_with_the_shared_task_boundary_predicate now covers
+      the echoes. Spec R4 + an edge-case bullet and QA E8 updated. Verification: full
+      suite 4127 passed, 1 skipped, 0 failed (/pm-captures/review-a80bde5-baa8-i3/full-suite.log);
+      project.yaml 509 PRs, no id lost or duplicated vs origin/master, store.load(validate=True)
+      OK. Remaining, NOT a code change: the QA S16 story-4 marker Then (⏸1 never renders
+      before the adopt log line; ⟳1 during the check) is a stale-frame artifact —
+      consume_breadcrumb mount blocks the UI event loop, so the pre-restart frame
+      stays on screen and no post-mount paint can precede the adopt check; the committed
+      qa.md R7 already asks only that the pane/question survive and status show the
+      wait, and the status/runtime-state path never reports a pre-adopt wait (input_required=false,
+      reason `review resuming (iteration N)`). Recommend the QA concretizer generate
+      that Then from qa.md R7 as written rather than requiring a paint ordering the
+      mount cannot provide. No other defects found in the wait-state logic: _wait_for_follow_up_verdict,
+      HumanResponseWatch, _await_input_resolution and the adopt gate were re-read
+      end to end.'
+    created_at: '2026-10-28T18:35:56Z'
+    last_edited: '2026-10-28T18:35:56Z'
+  - id: note-ed22e93
+    text: 'QA planning 2026-10-28 (fresh scenarios 17-20): the S16 story-4 marker
+      Then ("the running-wait marker ⟳1 renders during the adopt check and ⏸1 never
+      renders before the adopt log line") is not achievable and should not be re-emitted:
+      consume_breadcrumb mounts (heal_registry, hook install, watcher setup, tmux
+      calls) while the adopt check runs in the loop thread, blocking the UI event
+      loop, so the pane keeps the pre-restart frame until after the adopt line; no
+      post-mount paint can precede it. The correct surface for that window is the
+      published status state, which is now `running / review resuming (iteration N)`
+      with review.resuming=true, input_required=false, follow_up=false (7280536b +
+      4de9868d). Fresh scenario 19 asserts that (and the after-adoption waiting state
+      on the same pane), not paint ordering. Also note S15/S16 were re-run on pre-baa8
+      code; scenarios 17-20 target the baa8 i1-i3 additions (resuming flag, wakeup-turn-after-answer
+      guard, local slash-command echo transparency).'
+    created_at: '2026-10-28T19:01:36Z'
+    last_edited: '2026-10-28T19:01:36Z'
+  - id: note-33b77c3
+    text: 'QA scenario 20 (waits nobody can answer end cleanly; unrelated holds untouched):
+      PASS, 4/4 triples at d41ed19f, live TUI + interactive stand-in on a throwaway
+      local-backend project (A spec hold, B recorded QA INPUT_REQUIRED, C signed-off
+      hold, P review wait). (1) `z d` on a live wait: paused/review review #1 — review
+      loop stopped (last INPUT_REQUIRED), review {iteration 1, verdict INPUT_REQUIRED,
+      running/input_required/follow_up/resuming false}, win=review-<P>; popup PAUSED
+      with that detail; "Stopped review loop ... opening fresh review"; 0.2 s tree
+      sampling settles on ⟳1⏸ and it never returns; 3 reads + two scheduler passes
+      unchanged, no new Review loop started. (2) kill-window during the wait: failed/review
+      review #1 — review loop ended KILLED, win=<P> (impl-window fallback), verdict
+      KILLED, all flags false; ⟳1☠; popup FAILED; "Review loop done ... ☠ KILLED (1
+      iteration)"; stable at +10 s and after a scheduler pass, no relaunch. (3) answer
+      then kill-window during the follow-up: before = running/review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running) with popup RUNNING; ~1 s after the kill = failed/KILLED,
+      same field set, ⟳1☠, popup FAILED with no INPUT_REQUIRED/follow-up text; stable.
+      (4) three unrelated holds live at once (A waiting/implementation "spec generation
+      awaiting input"; B waiting/qa "last QA run ended INPUT_REQUIRED ..." qa.verdict
+      INPUT_REQUIRED recorded; C waiting/sign_off "signed off (fresh SIGNOFF_MERGE);
+      waiting for manual merge (held by pr-afeb59f)"): byte-identical in every field
+      across 11 JSON snapshots (baseline, 5 pre-answer idle samples, post-answer,
+      3 post samples); answering P flipped only P to running/follow_up after the typed
+      line (5/5 pre-answer samples still input_required=true), C stayed sign_off with
+      "auto_merge: <C> held (wait-for-merge ← <C>) — skipping merge", spec-mode restored
+      to prompt. Evidence /pm-captures/scenarios/20/{triple1..4}/ (cast+mp4+transcript+per-step
+      status JSON/text/popup/tree, marker samplers). Harness notes for the next run:
+      (a) the tree keeps painting the live ⏸1<spinner> form for ~1 s after the `z
+      d` chord because the loop state is still genuinely input_required until the
+      stop lands — bracket the keypress timestamp, not the sampler-arm time, or it
+      reads as a Then violation; (b) after answering, the TUI bottom log line keeps
+      the spec''d sticky(30) "⏸ INPUT_REQUIRED ... interact with Claude in the review
+      pane" notice until another log line replaces it (a log line, not a wait surface
+      — status/popup/tree all read running). No code changes made.'
+    created_at: '2026-10-28T19:45:31Z'
+    last_edited: '2026-10-28T19:45:31Z'
+  - id: note-a258cf3
+    text: 'QA scenario 17 (reported-bug non-reproduction) PASSED the wait lifecycle
+      but found and fixed an incidental bug. `pm autostart remove` of the last target
+      while a review loop is mid-follow-up ran `_finalize_all_transcripts`, replacing
+      the loop transcript symlink with a frozen copy; the loop then could not see
+      the follow-up verdict, read the next idle as a prose question and re-armed a
+      false `waiting / review INPUT_REQUIRED (iteration N)` (the PASS never landed).
+      Fixed in 07340d38: `_finalize_all_transcripts` keeps the symlink for a review
+      loop whose state is still `running` (the loop finalizes its own transcripts
+      on completion); tests/test_autostart_disable_transcripts.py fails pre-fix. Runtime
+      before/after: /pm-captures/scenarios/17/story4-pass-settles/{pre-fix,post-fix}/
+      — pre-fix settles on the false wait, post-fix logs `keeping transcript symlink
+      for a running review loop`, records `follow-up verdict=PASS` and settles at
+      `review passed; QA transition pending`. Stories 1-3 and 5 held unchanged; tests/test_review_input_required_state.py
+      + test_verdict_transcript.py + the new file: 91 passed, auto-start suites 214
+      passed.'
+    created_at: '2026-10-28T19:51:14Z'
+    last_edited: '2026-10-28T19:51:14Z'
+  - id: note-f5baf20
+    text: 'QA scenario 18 (non-human transcript traffic never re-arms or clears the
+      wait): PASS on d41ed19f, live TUI + interactive stand-in, all 5 stories. (1)
+      wakeup turn after the answer: `# /loop tick` and `<task-notification>` turns
+      with a no-verdict reply + idle left the run running / "review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running)" / ir=false / fu=true / ⟳1 for 9 samples each (runs
+      popup RUNNING review #1/#2), no ⏸ re-arm, no new notice, verdict stayed INPUT_REQUIRED;
+      the real NEEDS_WORK then advanced one iteration with exactly one "follow-up
+      verdict=NEEDS_WORK". (2) /model local-command echo after the PASS: verdict stayed
+      PASS, "Review loop done: ✓ PASS (1 iteration)", row `waiting | review passed;
+      QA skipped (skip_qa); awaiting sign-off (hand-off on next scheduler pass)` with
+      ir=false/fu=false, loop exited ~0.1 s after the idle — the baa8-i3 regression
+      no longer reproduces. (3) unanswered wait + empty / tool_use+tool_result("50
+      passed", "PASS", "yes", "INPUT_REQUIRED") / system-reminder-only / task-notification
+      / interrupted records, each with an idle: every sample stayed waiting / INPUT_REQUIRED
+      / ir=true / ⏸1 on the same window, one notice, one polling line, zero follow-up
+      verdicts; the typed answer cleared it in ~1 s. (4) three typed answers in a
+      row (NEEDS_WORK and PASS variants): no re-arm, no "waiting on the user again",
+      one verdict each, NEEDS_WORK advanced one iteration, PASS ended the loop with
+      no further iteration. (5) restart with a follow-up verdict but no fresh idle:
+      answer + NEEDS_WORK/PASS appended, ~/.pm/hooks/<sid>.json overwritten with a
+      `stop` event, `pm tui restart --breadcrumb` — resumed loop logged "adopting
+      INPUT_REQUIRED wait …", "follow-up verdict NEEDS_WORK/PASS already in transcript",
+      advanced to iteration 2 / stopped on PASS; the adopt check read `running | review
+      resuming (iteration N)` with resuming=true, ir=false, fu=false. Evidence /pm-captures/scenarios/18/
+      (one continuous 200x50 TUI cast+mp4 covering all stories, pipe-pane transcript,
+      per-second status JSON/text/tree/popup samples, per-story evidence.md + manifest.md).
+      tests/test_review_input_required_state.py + test_verdict_transcript.py: 88 passed.
+      Observations, not failures: (a) at the answer→follow-up transition the tech-tree
+      frame can keep the pre-answer ⏸N for up to ~1 s before repainting ⟳N while the
+      status row/popup already read running/answered (the documented tree repaint
+      lag; no re-arm — ir never went true, no new notice, no extra polling line);
+      (b) on the PASS stories the scheduler sign-off hand-off ran within the same
+      second, so the intermediate "review passed; QA skipped" row was sampled directly
+      only in story 2 and is otherwise superseded by the sign-off row. Harness notes
+      for the next run: the stand-in can be driven entirely through a control dir
+      (append raw records, emit/suppress idles) and must stop idling once the human
+      answers, or a mid-turn idle makes the waiter take the prose branch; a private
+      PM_TMUX_SOCKET + PM_HOST_HOME=/home/matt starts the session cleanly (hook install
+      skips with a warning, which is fine because the stand-in writes ~/.pm/hooks/<sid>.json
+      itself); to re-run a review loop after a PASS, set the PR back to in_review
+      and do a clean `pm tui restart` (a breadcrumb restart or an autostart re-arm
+      keeps the completed run state), then `pm autostart add`.'
+    created_at: '2026-10-28T19:56:34Z'
+    last_edited: '2026-10-28T19:56:34Z'
+  - id: note-ed0180a
+    text: 'QA scenario 19 (breadcrumb restart + neutral resuming state): PASS, 5/5
+      stories at d41ed19f, live TUI + interactive stand-in on a throwaway local-backend
+      project (pr-95325c4, second PR pr-6cd925d). (1) Story 1: breadcrumb restart
+      across a live iteration-1 INPUT_REQUIRED wait — four CLI readers (~50ms) caught
+      the adopt check at 19:37:25.044 as state=running, reason "review resuming (iteration
+      1)", resuming=true, input_required=false, follow_up=false; the wait was re-adopted
+      on the same window @4 / pane %5 pid 1913 with the question capture byte-identical,
+      stand-in launch count 1, no new relauncher line, +1 "adopting INPUT_REQUIRED
+      wait for pr-95325c4 iteration 1"; tree marker the live-wait form with spinner,
+      popup WAITING review #1; answering gave running/follow_up in 1.4s (ir=false,
+      fu=true, res=false), tree follow-up marker, ids and launch count unchanged.
+      (2) Story 2: answer+NEEDS_WORK inside the restart gap resolved from the transcript
+      ("follow-up verdict NEEDS_WORK already in transcript", "follow-up verdict=NEEDS_WORK"),
+      one "review_loop: iteration 2 for", one relauncher iteration=2, stand-in counter
+      1->2, no iteration 3, and zero follow_up=true samples. (3) Story 3: seeded stale
+      latched flag (history NEEDS_WORK, input_required true) — 157 samples, 0 waiting
+      / 0 input_required=true / 0 INPUT_REQUIRED reason; resumed at iteration 1, no
+      "adopting" line, iteration 2 reported running with verdict NEEDS_WORK, tree
+      marker 2 never the wait marker, popup RUNNING review #2, iteration-2 window
+      created. (4) Story 4: seeded wait with no pane and no transcript — "INPUT_REQUIRED
+      wait for pr-95325c4 iteration 1 has no live pane; continuing", no adopting line,
+      165 samples with 0 waiting / 0 ir=true / no KILLED, running review #2 (last
+      INPUT_REQUIRED), fresh iteration-2 window, old question not re-posted. (5) Story
+      5: two PRs waiting at once, two readers + popup — stable states agree, the text
+      reader caught B mid-adopt as "review resuming (iteration 1)" while A was already
+      waiting, B untouched (iteration 1, window @15, pane %25 pid 76150, same question,
+      launch count 2 unchanged), both re-adopted with no new relauncher (A 19, B 2),
+      both nodes waiting and both popup rows WAITING review #1 after the restart.
+      No code changes needed. Captures: /pm-captures/scenarios/19/ (tui-breadcrumb-restart/
+      cast+mp4+transcript, harness/stub-claude.py, evidence/ per-story text+JSON sampler
+      logs, tree/popup captures, manifest.md). Two observations, not failures: (a)
+      the TUI log line keeps the last message, so the "INPUT_REQUIRED ... interact
+      with Claude in the review pane" notice (sticky=30) can stay visible after the
+      answer until another message replaces it — it is a log line, not a status/marker
+      surface, and the tree/status/popup all show the follow-up state; (b) with the
+      stand-in script clamped per launch, story 2 iteration 2 asks its own INPUT_REQUIRED
+      about 20s after the NEEDS_WORK settle, so the running/review #2 row was stable
+      for ~22s rather than permanently.'
+    created_at: '2026-10-28T19:58:05Z'
+    last_edited: '2026-10-28T19:58:05Z'
+  - id: note-fbf668b
+    text: 'QA scenario 18 addendum: the CLI-recording capture required by the second
+      assigned recipe is now included. /pm-captures/scenarios/18/cli-status-readers/
+      has recording.cast (asciinema v2, 120x34, 292 events), recording.mp4 (H.264
+      2350x1568 yuv420p), manifest.md and cli-output.txt (de-ANSI''d stream). It re-drives
+      all five triples through the real CLI and shows the `pm autostart status` row
+      at each step: story 3 (five non-human records -> waiting/INPUT_REQUIRED/ir=true,
+      typed answer -> answered/follow-up running), story 1 (/loop tick and task-notification
+      wakeup turns -> still answered/follow-up running, NEEDS_WORK -> review iteration
+      2 (last NEEDS_WORK)), story 4 (three answers -> no re-arm, NEEDS_WORK -> iteration
+      3), story 2 (PASS + /model echo + idle -> state=waiting reason="review passed;
+      QA skipped (skip_qa); awaiting sign-off (hand-off on next scheduler pass)" verdict=PASS
+      running=False ir=False fu=False), story 5a/5b (answer + verdict with no idle
+      + stop hook + pm tui restart --breadcrumb -> "review resuming (iteration 1)"
+      resuming=True then iteration 2 (last NEEDS_WORK); PASS variant -> verdict=PASS
+      running=False). Behavioural results are unchanged: PASS. The TUI capture (tmux-screen-recording.md)
+      remains at /pm-captures/scenarios/18/story1-wakeup-turn/.'
+    created_at: '2026-10-28T20:26:52Z'
+    last_edited: '2026-10-28T20:26:52Z'
+  - id: note-0b7345b
+    text: 'review e386 i1 (fix + handoff). Reviewed the integrated HEAD 4149e0e6 (master@89e3c501
+      merged as ce749f42). No wait-state defects found: the sign-off reworks hold
+      (waiter reads find_verdict_turn/hit.text; is_human_prompt_record is built on
+      _user_record_is_non_task with no duplicate _NON_TASK_* lists; the PASS-follow-up-then-/loop-tick
+      case is a PASS, regression test_follow_up_pass_survives_a_loop_tick_turn), _adopting_wait/resuming
+      publishes correctly, and the baa8 i2/i3 wakeup-turn and local-command-echo guards
+      are sound. One code-quality fix (5d990958): _assistant_text_has_verdict carried
+      a second copy of the "verdict on its own line" predicate via loop_shared.match_verdict
+      next to the module own _text_line_is_verdict (the one find_verdict_turn uses)
+      — exactly the duplication class the sign-off flagged; it now builds on _text_line_is_verdict
+      so the watch anchor and the verdict scan cannot drift. Also documented the incidental
+      transcript-symlink invariant (07340d38) in impl.md, which the spec was missing.
+      Tests: 502 passed across the review/verdict/autostart/qa_loop files; broad suite
+      (excluding the documented git-env families) 4019 passed, 1 skipped, 0 failed.
+      QA gate: the outstanding scenario-17 NEEDS_WORK is the false-wait that session
+      found AND fixed in 07340d38 (test fails pre-fix) — a re-QA item, not an open
+      defect. Out of scope, left alone: _finalize_all_transcripts also freezes a running
+      watcher transcript before _disable stops it (same class, watcher subsystem,
+      stop is requested immediately); _adoptable_wait_transcript does not verify the
+      live pane is the transcript same session.'
+    created_at: '2026-10-28T20:55:47Z'
+    last_edited: '2026-10-28T20:55:47Z'
+  - id: note-6116d81
+    text: 'review e386 i2 (fix + handoff, 5adb471b). Reviewed the integrated HEAD
+      4149e0e6 (+5d990958). Two false-wait windows in the wait state this PR owns,
+      both fixed and both covered by tests that fail pre-fix. (1) Adopt gate: when
+      the resumed wait was adoptable, run_review_loop_sync cleared _adopting_wait
+      and only then set input_required=True, with a _log.info (file I/O, GIL release)
+      between the two writes, so a status reader sampling there saw running + no wait
+      + the recorded INPUT_REQUIRED history and published "INPUT_REQUIRED answered;
+      follow-up running" for a question nobody had answered (the exact phantom _adopting_wait
+      exists to prevent; QA flagged this class at sub-second granularity in S15).
+      The wait is now published before the flag clears; when the wait is NOT adoptable
+      the flag stays set until the next iteration has taken over, because clearing
+      it first made the recorded INPUT_REQUIRED history read as an answered wait.
+      review_progress_input now reads the fields in the writer order (_adopting_wait,
+      then iteration, then input_required) so the inference cannot observe the transient.
+      Regression test_adopt_decision_never_reads_as_an_answered_follow_up samples
+      the published state at the adopt decision own log line (the widest point of
+      the window). (2) Turn ownership: HumanResponseWatch.wakeup_turn was overwritten
+      by every non-tool_result user record, so a system-reminder-only record or a
+      local-command echo landing between a /loop (or task-notification) wakeup record
+      and its idle cleared the wakeup classification; the idle then read as a prose
+      question and re-armed waiting / review INPUT_REQUIRED (iteration N) while the
+      reviewer was working (R3/E9 false-wait class). New verdict_transcript._opens_assistant_turn:
+      only records that open a turn (a wakeup or a genuine human task) change the
+      classification; transparent records are injected around a turn. The Esc interrupt
+      marker stays the human own turn (not a wakeup), preserving today re-arm behaviour
+      after an interrupt. Regressions test_wakeup_turn_survives_transparent_records(+_in_back_scan),
+      test_transparent_records_do_not_rearm_a_wakeup_turn, plus test_interrupt_marker_keeps_the_turn_the_humans
+      pinning the preserved case. Spec impl.md R3 + the wakeup/adopt edge cases and
+      qa.md R5c updated. Tests: review/verdict/breadcrumb/autostart files 201 passed;
+      broad suite excluding the documented git-env families 3995 passed, 1 skipped,
+      0 failed. Observations, not changed: _finalize_all_transcripts still freezes
+      a running auto-start *watcher* transcript before _disable requests its stop
+      (same class, watcher subsystem; its follow-up wait honours stop_check, so the
+      impact is transient, and pr-e0f54ca tracks the watcher wait); _adoptable_wait_transcript
+      still does not verify the live pane runs the transcript session (tracked by
+      pr-7e00786). QA gate unchanged: the outstanding S17 NEEDS_WORK is the false-wait
+      fixed in 07340d38 and needs a re-QA run, not code.'
+    created_at: '2026-10-28T21:17:52Z'
+    last_edited: '2026-10-28T21:17:52Z'
+  - id: note-a928941
+    text: 'review e386 i3 (fix + handoff, 96b640e1). Reviewed the integrated HEAD
+      958c58fd (master@89e3c501 already merged; merge-base == origin/master). One
+      false-wait residual found in the adopt gate and fixed, covered by a test that
+      fails pre-fix. (1) The adopt branch of run_review_loop_sync assumed the resumed
+      wait was live (`input_required = True`) and only read the transcript afterwards
+      in _wait_for_follow_up_verdict. If the human answered BEFORE the restart, the
+      adopt decision published a phantom `waiting / review INPUT_REQUIRED (iteration
+      N)` — the same false-wait class this PR fixes — for the length of the decision
+      (a _log.info file write plus the full transcript read/parse in HumanResponseWatch),
+      where R2 requires the initial waiting/answered state to come from the transcript.
+      Verified by sampling the published state at the adopt decision log line: pre-fix
+      `input_required=True`, post-fix `input_required=False` / follow_up=true. Fix:
+      the adopt branch builds the HumanResponseWatch while _adopting_wait is still
+      set, publishes what it says, then clears the flag; the watch is passed into
+      _wait_for_follow_up_verdict/_await_input_resolution so the transcript is not
+      read twice (each repeated question still gets a fresh watch). review_progress_input
+      reader order (_adopting_wait, iteration, input_required) makes no transient
+      observable either way. Regression test_adopt_decision_of_an_answered_wait_never_reads_as_waiting
+      (waits on the decision, not a timer); fails pre-fix with "an answered wait was
+      published as a live human request", passes post-fix; 5/5 repeat runs stable.
+      Spec impl.md adopt-gate edge case and qa.md R13 + FAIL criteria updated for
+      the answered-at-adopt case. Tests: review/verdict/breadcrumb/autostart files
+      187 passed; FULL SUITE 4136 passed, 1 skipped, 0 failed (this container run
+      did not hit the documented git-env families). project.yaml 509 PRs, no id lost
+      or duplicated vs origin/master, store.load(validate=True) OK. No other wait-state
+      defects found: _wait_for_follow_up_verdict, HumanResponseWatch, _await_input_resolution
+      and the adopt gate re-read end to end; the e386 i1/i2 fixes hold (shared verdict-line
+      predicate, adopt-order, _opens_assistant_turn). QA gate unchanged: the outstanding
+      S17 NEEDS_WORK is the false-wait fixed in 07340d38 and needs a re-QA run, not
+      code. Observations, not changed: _await_input_resolution re-parses parse_review_verdict(hit.text)
+      instead of using find_verdict_turn hit.verdict (they can only disagree on a
+      turn carrying two contradictory verdict lines — not realistic output); _finalize_all_transcripts
+      still freezes a running watcher transcript (pr-e0f54ca); _adoptable_wait_transcript
+      still does not verify the pane runs the transcript session (pr-7e00786).'
+    created_at: '2026-10-28T21:48:43Z'
+    last_edited: '2026-10-28T21:48:43Z'
+  - id: note-d0b7d43
+    text: 'QA scenario 23 (turn ownership after the answer: which turns re-arm the
+      wait, and the verdict recorded when a wakeup lands after the verdict): PASS
+      at e9ec829e, all 4 stories driven live (real pm TUI + interactive stand-in,
+      throwaway local-backend project, one fresh PR per story). (1) Wakeup turns never
+      re-arm: `/loop tick` and `<task-notification>` wakeups, each with a no-verdict
+      reply plus transparent `system-reminder` + `/model` echo records injected BETWEEN
+      the wakeup and its idle, left the run at running / "review iteration 1 (INPUT_REQUIRED
+      answered; follow-up running)" / ir=false / fu=true / it=1 for 16 one-second
+      samples, marker cyan ⟳1, one notice only, no new iteration; the real PASS then
+      resolved once ("Review loop done: ✓ PASS (1 iteration)", PR -> [qa]). (2) PASS-followed-by-/loop-tick
+      (the e386-i1/baa8-i3 class): PASS + /model echo + /loop wakeup + no-verdict
+      reply + idle still completed PASS, iteration 1, ir=false, fu=false, no wait,
+      nothing recorded as NEEDS_WORK, PR -> [qa]. (3) NEEDS_WORK + wakeup launched
+      exactly one iteration 2 (running / "review iteration 2 (last NEEDS_WORK)" /
+      it=2 / verdict=NEEDS_WORK / ir=false / fu=false), marker ⟳2, stable for 10 samples
+      with the iteration-2 stand-in in hold mode emitting no verdict; new review window
+      for the same PR, no ⏸. (4) Interrupt re-arms: `::say Working on it.` + Esc stop
+      marker + no-verdict idle -> waiting / "review INPUT_REQUIRED (iteration 1)"
+      / ir=true / fu=false / it=1, marker red ⏸1, notice shown, SAME pane %3003, no
+      relaunch (--fresh never used; stand-in launch count unchanged), iteration did
+      not advance; answering again cleared it and PASS resolved. Regression cross-check:
+      test_review_input_required_state.py + test_verdict_transcript.py 94 passed;
+      the wakeup/transparent/interrupt/loop_tick/local_command selection 11 passed.
+      No code changes needed. Captures /pm-captures/scenarios/23/ (evidence.md for
+      all four stories, tui-story1/ cast+mp4+transcript, cli-full-cycle/ cast+mp4+cli-output.txt
+      which drives the whole wait->answer->wakeup->interrupt->answer->PASS cycle from
+      the CLI with set -x). Harness notes for the next run: (a) ffmpeg/ffprobe are
+      NOT on this container PATH (agg and asciinema are) - use /tmp/ffenv/bin for
+      the render, and ffmpeg 9 rejects -vsync (use -fps_mode vfr); (b) the pane registry
+      keys windows by window id, not name, so map id->name with tmux list-windows
+      before picking the review-claude pane or you get the previous story stale pane;
+      (c) a recorder attached to the TUI session follows the active window, so a long
+      TUI cast drifts into the review window when the loop transitions - keep the
+      marker assertions inside the first window and note the switch in the manifest;
+      (d) the sticky(30) "⏸ INPUT_REQUIRED ... interact with Claude in the review
+      pane" log line can still be on screen after the wait clears - judge re-arm by
+      the marker/status and by counting notices in the pane scrollback, not by that
+      line.'
+    created_at: '2026-10-28T23:09:01Z'
+    last_edited: '2026-10-28T23:09:01Z'
+  - id: note-0acdbd8
+    text: 'QA scenario 21 (autostart-disable while a review loop polls its transcript):
+      PASS, 4/4 stories at e9ec829e, live TUI + interactive stand-in on throwaway
+      local-backend projects. (1) answer then `pm autostart remove` mid-follow-up:
+      i1 stayed a symlink and received the typed answer + NEEDS_WORK written after
+      the disable, marker held ⟳1 (never ⏸1), NEEDS_WORK relaunched exactly one iteration
+      (⟳2, new window), PASS settled ⟳2✓ and both transcripts finalized; no new INPUT_REQUIRED
+      notice; no second loop/window; PR stayed in_review. (2) remove with the question
+      unanswered: mode=off/runs=[], marker stayed ⏸1, question on screen, same window/pane/iteration,
+      no new transcript; answering gave ⟳1 in ~1 s and PASS gave ⟳1✓ with no restart
+      and no QA. (3) remove while iteration 2 works (PASS --delay 45): same iteration-2
+      window/pane, marker ⟳2, i2 stayed a symlink, delayed PASS completed ⟳2✓ with
+      no ⏸ and both transcripts finalized. (4) remove then `pm autostart add`: exactly
+      one run entry, waiting / review INPUT_REQUIRED (iteration 1), ir=true/fu=false/resuming=false,
+      one review window, same window id and stand-in pane, no new transcript; answering
+      gave running/follow-up and NEEDS_WORK launched exactly one next iteration into
+      the loop original run dir (the re-add new run dir stayed empty). tests/test_autostart_disable_transcripts.py:
+      3 passed. Captures /pm-captures/scenarios/21/{summary.md,story1..4}/. Harness
+      notes for the next run: (a) panes inherit the *creating client process* environment,
+      not `tmux set-environment` — the stand-in must be in the session-creating shell
+      PATH before `pm session`, and a stale PM_QA_FOLLOWUP_FILE can leak across projects,
+      so have the stand-in read its verdict from a file in the pane cwd instead; (b)
+      in this build the review window layout is pane .0 = claude, .1 = git-diff pager,
+      so `send-keys` to `:review-<pr>.1` types into the pager — target .0 (or the
+      pane id); (c) re-arming a loop after a KILLED/complete run needs a clean `pm
+      tui restart` first (an autostart re-add keeps the finished run state); (d) ffmpeg
+      is not on PATH in this container — use the conda package at ~/.local/share/mamba/pkgs/ffmpeg-9.0.2-gpl_hf463c51_905/bin
+      with LD_LIBRARY_PATH over all pkgs/*/lib, and ffmpeg 9 rejects `-vsync` (use
+      `-fps_mode`).'
+    created_at: '2026-10-28T23:27:06Z'
+    last_edited: '2026-10-28T23:27:06Z'
+  - id: note-124011d
+    text: 'QA scenario 24 (concretizer) refined: the draft is drivable on this HEAD
+      with the interactive stand-in (the bundled fake-claude cannot answer a follow-up).
+      Harness/environment notes for the runner: (1) proven stand-in reference /home/matt/.pm/sessions/project_manager-5b29c418/captures/pr-a80bde5/scenarios/19/harness/stub-claude.py
+      (or /pm-captures/scenarios/19/harness/stub-claude.py if mounted) — adapt its
+      /workspace paths to the clone and bake the per-launch script path in so the
+      TUI process env needs no STUB_SCRIPT. (2) In this container the clone session
+      tag has ~/.pm/sessions/<tag>/override pointing at another workdir (pr-592e4bd),
+      so `pm which` run inside the clone prints that checkout, not the clone; verify
+      from the throwaway test project with PYTHONPATH=<clone>, and if the TUI still
+      runs another checkout write <clone> to ~/.pm/sessions/$(pm session tag)/override
+      (wrapper priority 1). (3) The breadcrumb is ~/.pm/autostart-resume.json with
+      marker ~/.pm/merge-restart (the spec’s ~/.pm/breadcrumb.json is stale). (4)
+      A breadcrumb restart during an answered follow-up publishes the neutral `review
+      resuming (iteration N)` (resuming=true, ir=false, fu=false) for the sub-second
+      adopt check — allow it; it is not a wait. (5) The TUI notice dedupes identical
+      consecutive log lines, so judge re-arm from pm tui frames --json triggers (raise
+      the buffer with pm tui capture -b 2000).'
+    created_at: '2026-10-28T22:53:25Z'
+    last_edited: '2026-10-28T22:53:25Z'
+  - id: note-29d57dc
+    text: 'QA scenario 24 (reported-bug non-reproduction, full wait lifecycle): PASS
+      at e9ec829e, live TUI + interactive stand-in on a throwaway local-backend project
+      (pr-95325c4). (1) answer -> follow-up running (ir=false/fu=true, ⟳1, popup RUNNING
+      #1, same pane, count 1, no new relauncher) -> breadcrumb restart mid-follow-up:
+      one `review resuming (iteration 1)` sample and no sample reading waiting / review
+      INPUT_REQUIRED / ir=true / fu=true -> adoption line `(…, answered)` -> NEEDS_WORK
+      -> iteration 2 with exactly one new `relauncher: … iteration=2`, count 2, tree
+      ⟳2, popup RUNNING #2; 30 s sustained sampling (3 popups + 6 tree captures) with
+      no wait, no ⏸2, no iteration 3. (2) iteration 2 ends INPUT_REQUIRED -> second
+      genuine question (iteration=2, ir=true, ⏸2, popup WAITING #2, frames notice
+      count 1->2, same pane, count still 2) -> answer -> 16 follow-up-running samples
+      -> PASS -> `review passed; QA transition pending` -> qa phase, tree ⟳2✓, no
+      iteration 3. (3) single-question cycle -> PASS, ⟳1✓, no iteration 2, count stays
+      1. (4) breadcrumb restart while unanswered -> only paused/resuming shapes, adoption
+      `(…, unanswered)`, same window/panes, pane capture byte-identical, wait neither
+      auto-answered nor converted; then answer -> PASS, ⟳1✓. No defects found; no
+      code changes. Harness notes: (a) the story-1 restart must land well inside the
+      follow-up - with the spec work:45 the first attempt landed 2 s before the verdict,
+      so the cycle was re-run with work:90; (b) use work>=6 s for the PASS response
+      or the answered/follow-up state is sub-poll (<0.4 s) and unobservable; (c) the
+      TUI frames buffer is in-memory and resets on a breadcrumb restart, so the notice-count
+      delta must be measured in a restart-free cycle (story 2 re-driven); (d) the
+      asciinema recorder must unset $TMUX (`env -u TMUX ... tmux attach`) or it dies
+      with "sessions should be nested with care"; (e) the bundled fake-claude QA session
+      never writes a QA spec, so every PASS is followed by "QA error: QA spec was
+      not generated during planning" - harness noise; the review object stays PASS.
+      Captures: scenarios/24/{story1,2,3,4}-cycle + manifest.md.'
+    created_at: '2026-10-28T23:27:18Z'
+    last_edited: '2026-10-28T23:27:18Z'
+  - id: note-d1451ef
+    text: 'QA scenario 22 (resuming state + adopt decision, sampled concurrently by
+      CLI text, CLI JSON and the runs popup): PASS at e9ec829e, live TUI + interactive
+      stand-in, 5/5 stories. (1) S1 unanswered live wait: 1 resuming sample (JSON
+      T0+0.20s, text T0+0.07s) `running / review resuming (iteration 1)` ir=false
+      fu=false res=true, text row `win=review-<P>`; then 99 waiting/INPUT_REQUIRED/ir=true;
+      adopt line `(unanswered)`; window/pane ids unchanged; no iteration 2. (2) S2
+      answered-before-restart: no waiting/ir=true sample; adopt `(answered)`; then
+      follow-up running; verdict -> exactly one hook-driven + one `iteration 2 for`.
+      (3) S3 verdict already in transcript, no idle: `follow-up verdict NEEDS_WORK
+      already in transcript` + iteration 2, no hook-driven line. (4) S4 seeded breadcrumb
+      with no live pane: `has no live pane; continuing` + iteration 2, popup RUNNING
+      review #2, never waiting. (5) S5 two targets: both resuming at T0+0.17s, then
+      P4 waiting / P5 follow-up, two adopt lines (unanswered/answered), P5 verdict
+      -> iteration 2 only, P4 untouched. Whole session: 7,735 runs[] samples, 0 flag<->reason
+      violations; 6,451 text/JSON pairs, 7 mismatches all within +/-0.13s at transition
+      instants. Captures /pm-captures/scenarios/22/. Harness notes: (a) run with a
+      private HOME - ~/.pm/autostart-resume.json and ~/.pm/merge-restart are global
+      to the machine and with several QA scenarios restarting concurrently on the
+      shared HOME our breadcrumb was consumed by someone else (written 18:06:08, gone
+      by the 18:06:09 mount, no consume line in our log, auto-start came back off
+      with no targets); private HOME + private PM_TMUX_SOCKET restored reliably every
+      time. (b) the adopt branch publishes the transcript answered state before it
+      writes `adopting ... (answered)` (e386-i3 ordering), so a reader can catch the
+      true answered state a fraction of a second before that log line - spec-consistent
+      (R13), just do not use the log line as a timestamp. (c) the sticky bottom log
+      line keeps `INPUT_REQUIRED ...` after the wait is answered/stopped (a log line,
+      not a status surface; status/popup/tree all read the follow-up state). No code
+      changes made.'
+    created_at: '2026-10-28T23:36:05Z'
+    last_edited: '2026-10-28T23:36:05Z'
+  - id: note-43460b5
+    text: 'QA scenario 21 capture addendum (re-recorded after the artifact flag; behaviour
+      unchanged, still PASS). The TUI casts for stories 2-4 have been re-recorded
+      against the real tech tree and a CLI capture added: /pm-captures/scenarios/21/{story1..4}/recording.{cast,mp4}
+      + transcript.log, and /pm-captures/scenarios/21/cli-autostart-remove-add/recording.{cast,mp4}
+      + cli-output.txt. Mechanical grep over the raw casts: story1 ⏸1×36 ⟳1×37 ⟳2×62
+      ✓×39 "Review loop done"×1 (117 s); story2 ⏸1×62 ⟳1×44 ✓×14 ×1 (92 s); story3
+      ⏸1×12 ⟳1×42 ⟳2×65 ✓×13 ×2 (90 s); story4 ⏸1×38 ⟳1×46 ⟳2×17 (66 s, loop still
+      running at cut); CLI cast shows status(waiting iter 2) → remove("removed: pr-a5fe37b",
+      "auto-start off; targets: (none)") → status(mode=off, runs=[]) → add("added:
+      pr-a5fe37b") → status(waiting iter 2 again, one run, same window @5, ir=true/fu=false/resuming=false).
+      Harness note that made the difference: a recorder attached to the pm session
+      follows the session active window, and the review loop moves it onto the review
+      pane (and selects it on completion) — pin the recorder to the main window with
+      a background `tmux select-window -t <sess>:main` loop. Do NOT create a grouped
+      `pm-rec` session for this: it changes what _get_pm_session() resolves, so the
+      loop launches a real `claude` instead of fake-claude and iteration 2 never emits
+      its verdict (observed: iteration 2 ran /usr/bin/claude and sat on a real session).'
+    created_at: '2026-10-29T00:03:31Z'
+    last_edited: '2026-10-29T00:03:31Z'
+  - id: note-a329c13
+    text: 'SIGNOFF_IMPL (sign-off 2026-10-28, HEAD 835e5454, base master@4a74d880).
+      The fix itself is sound and proven at this HEAD: QA 21-24 PASS on e9ec829e,
+      whose code is identical to HEAD; 182 targeted tests pass. Integration needs
+      code work. Candidate merge conflicts: review_loop.py (7 hunks), autostart_state.py
+      (3), project.yaml. Master #259/pr-e040aeb (failed-launch retry) rewrote run_review_loop_sync,
+      adoption and the follow-up waiter. Do: (1) MUST carry master _lease_keepalive
+      into the PR follow-up waiter. Master _wait_for_follow_up_verdict wraps stop_check
+      with _lease_keepalive(state); the PR custom waiter uses only state.stop_requested.
+      Without it, a wait longer than REVIEW_LAUNCH_CLAIM_TTL (180 s) drops the launch
+      lease and another driver can relaunch --fresh over the live question pane, which
+      is the bug this PR fixes. Rewrite master test_follow_up_wait_refreshes_the_launch_lease:
+      it patches _wait_for_follow_up_shared, which the PR deletes. (2) Re-thread the
+      adopt-wait gate (adopt_wait/_adopting_wait/wait_transcript/wait_watch, publish-then-clear
+      ordering) into master try/except with the ReviewClosedError/ReviewHoldError/ReviewLaunchError
+      branches, _run_iteration_with_retry and _reset_launch_retry after adoption.
+      Keep input_required set together with each recorded verdict. (3) Master _adopt_in_flight_review/_run_iteration_with_retry
+      can return output from discovery.transcript (another pane transcript). When
+      that output is INPUT_REQUIRED, wait on that transcript, not the hard-coded _iteration_transcript(state,
+      dir). (4) Use master workdir-aware _find_review_claude_pane in _adoptable_wait_transcript
+      and the waiter pane check. (5) Union the fields: ReviewLoopState (_adopting_wait
+      + retry fields); finally (_release_lease + clear _adopting_wait/input_required);
+      _derive (resuming/follow_up reasons + master "(last LAUNCH_FAILED)" suppression);
+      build_status review dict (follow_up/resuming + retryable/attempts/error/artifact);
+      review_progress_input (keep the reader order _adopting_wait -> iteration ->
+      input_required plus master HOLD/LAUNCH_FAILED normalisation). (6) auto_start.py
+      auto-merged with the input_required=False restore intact. Re-check consume_breadcrumb
+      after pr-c3bf868, and confirm the PR tests _run_claude_review patch point still
+      intercepts under _run_iteration_with_retry. (7) Resolve project.yaml with store.merge_3way.
+      Run the PR test files plus test_review_launch_retry.py, test_breadcrumb_review_loop.py,
+      test_review_loop.py, test_tui_pidfile.py, test_qa_input_required.py and test_autostart_multi_target.py.
+      Update impl.md for the R1/R2 launch path and the lease invariant. Re-QA after
+      integration: the S24 lifecycle, S22 restart/adopt, a new check that a wait held
+      longer than 180 s is never relaunched over, and a check that LAUNCH_FAILED never
+      leaves or invents input_required. Report: captures/pr-a80bde5/report.html'
+    created_at: '2026-10-29T00:24:33Z'
+    last_edited: '2026-10-29T00:24:33Z'
+  - id: note-3ffb53b
+    text: 'Integration done (merge commit 0685f677, master@4a74d880 merged; merge-base
+      == origin/master). All 7 SIGNOFF_IMPL items addressed. (1) The PR follow-up
+      waiter now refreshes the launch lease through _lease_keepalive wired into its
+      own stop_check, so a wait longer than REVIEW_LAUNCH_CLAIM_TTL (180 s) keeps
+      ownership and no other driver relaunches --fresh over the live question pane.
+      (2) The adopt-wait gate (adopt_wait/_adopting_wait/wait_transcript/wait_watch,
+      publish-then-clear ordering) is re-threaded in front of master try/except with
+      the ReviewClosedError/ReviewHoldError/ReviewLaunchError branches, _run_iteration_with_retry,
+      and _reset_launch_retry after adoption; input_required is still set with each
+      recorded verdict before on_iteration. (3) _adopt_in_flight_review and _run_iteration_with_retry
+      take an optional result dict and record the transcript the verdict actually
+      came from, so an adopted INPUT_REQUIRED waits on discovery transcript (another
+      pane possible) instead of assuming review-<pr>-i<N>.jsonl. (4) _adoptable_wait_transcript
+      and the waiter pane check use the workdir-aware _find_review_claude_pane. (5)
+      ReviewLoopState has _adopting_wait + all retry fields; finally does _release_lease
+      AND clears _adopting_wait/input_required; _derive has follow_up/resuming plus
+      master (last LAUNCH_FAILED) suppression; build_status review dict carries follow_up/resuming
+      + retryable/attempts/error/artifact; review_progress_input keeps the _adopting_wait
+      -> iteration -> input_required reader order plus master HOLD/LAUNCH_FAILED normalisation.
+      (6) auto_start.py auto-merged with the input_required=False restore intact (verified
+      at the ReviewLoopState construction in consume_breadcrumb) and the _run_claude_review
+      patch point still intercepts under _run_iteration_with_retry. (7) project.yaml
+      resolved with store.merge_3way: 517 PRs, no id lost or duplicated vs either
+      side, store.load(validate=True) OK, this PR entry + all 45 notes intact. Tests:
+      test_follow_up_wait_refreshes_the_launch_lease rewritten to drive the PR own
+      waiter (it patched _wait_for_follow_up_shared, which the PR deletes); the wait-state
+      live tests neutralise the retry layer and model a real breadcrumb restore (iteration_attempted=True).
+      FULL SUITE 4540 passed, 1 skipped, 0 failed; targeted files (test_review_input_required_state,
+      test_review_launch_retry, test_breadcrumb_review_loop, test_review_loop, test_tui_pidfile,
+      test_qa_input_required, test_autostart_multi_target, test_verdict_transcript,
+      test_autostart_disable_transcripts) 605 passed. impl.md updated: R1 now describes
+      the _run_iteration_with_retry launch path and the result-transcript contract,
+      R2 the workdir-aware pane check and adopted-transcript wait, plus a new lease-invariant
+      bullet and a Master overlap #2 edge case. Not run here: the live TUI/stand-in
+      QA (the re-QA items are unchanged from sign-off: S24 lifecycle, S22 restart/adopt,
+      a wait held longer than 180 s never relaunched over, and LAUNCH_FAILED never
+      leaving or inventing input_required).'
+    created_at: '2026-10-29T00:47:45Z'
+    last_edited: '2026-10-29T00:47:45Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-b522cdc
+    text: 'Implementation restart complete (2026-10-29). Integrated master SHA: 4a74d88085edffcc300cb21f31777a798d647782
+      — already merged by 0685f677 and still the tip of origin/master after a fresh
+      fetch, so merge-base == origin/master and no further merge was needed. Recovered
+      the interrupted session work (uncommitted at the test-session-leak incident,
+      01:04-01:08Z): image-only user records are now BOTH a human answer and a task
+      boundary. `_user_record_is_non_task` treats content with no text (a pasted image)
+      as a task via `_record_has_non_text_content`, so `is_human_prompt_record` (exactly
+      its negation) and the task-scoped `find_verdict_turn` can no longer disagree;
+      previously the image cleared the wait but the verdict scan crossed back to the
+      answered INPUT_REQUIRED question and re-delivered it on every idle (false wait
+      + notice). Committed dde08d1b (7 files): verdict_transcript predicate, review_loop
+      redundant local `import os` removed, 2 new regressions + 1 tightened predicate
+      test, impl.md R4/edge case, qa.md E8. Validation at dde08d1b: full suite 4542
+      passed, 1 skipped, 0 failed (403 s); targeted wait-state suites (test_review_input_required_state,
+      test_review_launch_retry, test_breadcrumb_review_loop, test_review_loop, test_tui_pidfile,
+      test_qa_input_required, test_autostart_multi_target, test_verdict_transcript,
+      test_autostart_disable_transcripts) 607 passed. Pre-fix check via a temp worktree
+      at 92dd7752: the 3 new/tightened tests fail there ("the image answer''s INPUT_REQUIRED
+      question was re-delivered"), so the regressions are real. Untracked verify-*-followup.md
+      evidence left in place (not committed). Not run in this phase: live TUI/stand-in
+      QA — prior QA evidence is not a pass for this head; handing off to native review.'
+    created_at: '2026-10-29T01:50:07Z'
+    last_edited: '2026-10-29T01:50:07Z'
+  - id: note-29a4ec4
+    text: 'review e2e9 i1 (fix + handoff, bc039d4c). Reviewed integrated HEAD 5703427a
+      (merge-base == origin/master@4a74d880). Found one real gap in the SIGNOFF_IMPL
+      item 3 rework: _discover_iteration returned "verdict" discoveries WITHOUT a
+      transcript, so the new result["transcript"] in _run_iteration_with_retry/_adopt_in_flight_review
+      fell back to the loop own review-<pr>-i<N>.jsonl. When the landed INPUT_REQUIRED
+      was read from another driver pane (or our symlink belongs to a failed attempt
+      different session), the follow-up waiter watched the wrong transcript + hook
+      stream: the answer never cleared the wait and the follow-up verdict was never
+      seen (stuck waiting). Fix: all three verdict returns set transcript=. Regressions
+      test_discovery_verdict_names_the_transcript_it_came_from + test_retry_reports_the_discovered_verdicts_transcript
+      (both fail pre-fix). impl.md R1 updated. 609 targeted tests pass. Residual for
+      next iteration (not fixed): _adoptable_wait_transcript only re-adopts a restarted
+      wait from the loop own review-<pr>-i<N>.jsonl; the wait transcript is not persisted
+      in the breadcrumb, so a restart during a wait on ANOTHER driver transcript finds
+      no own transcript, reports "no live pane" and launches the next iteration over
+      the live question pane. Consider falling back to pane_transcript_path(live claude
+      pane) when it holds the INPUT_REQUIRED turn, or persisting the wait transcript
+      in the breadcrumb.'
+    created_at: '2026-10-29T01:54:09Z'
+    last_edited: '2026-10-29T01:54:09Z'
+  - id: note-d92ccc2
+    text: 'review 5228 i1 (fix + handoff, 4dd40f69). Reviewed integrated HEAD bc039d4c
+      (merge-base == origin/master@4a74d880; registry diff vs master: 0 PRs/notes
+      lost). No defects in the wait state itself. Two false-wait residuals fixed,
+      both with regressions that fail pre-fix: (1) _adoptable_wait_transcript looked
+      only at the loop own review-<pr>-i<N>.jsonl. Discovery can adopt another driver
+      session for an iteration this loop did not launch, so after a restart during
+      that wait the own symlink is missing (-> "no live pane", relaunch over the live
+      question pane) or names a dead failed attempt (-> wait never sees the answer).
+      It now recovers the live pane own session via pane_transcript_path and uses
+      it whenever it names a different session (the human answers in the pane); regressions
+      test_restart_during_wait_on_another_drivers_transcript[missing|dead]. (2) _start_loop
+      marks a resumed loop running synchronously before the thread exists, so a restored
+      INPUT_REQUIRED history with input_required=False read as "INPUT_REQUIRED answered;
+      follow-up running" for that window; _adopting_wait is now raised before running
+      goes up (regression test_resume_of_a_restored_wait_publishes_resuming_before_running).
+      impl.md R2 + adopt-gate edge case and qa.md E3 updated. Validation: targeted
+      wait-state suites 672 passed; FULL SUITE 4535 passed, 1 skipped, 12 failed —
+      all 12 are tests/test_markdown_render.py (markdown not installed; 13/13 pass
+      after pip install markdown, so environment-only). Not run here: live TUI/stand-in
+      QA. For QA: re-run S24 lifecycle + S22 restart/adopt, add the new restart-during-a-wait-on-another-drivers-transcript
+      shape (qa.md E3), and the wait->answer->restart window. Also noted on pr-4caa36a
+      that its slash-command-echo bug is fixed here (baa8 i3).'
+    created_at: '2026-10-29T03:00:16Z'
+    last_edited: '2026-10-29T03:00:16Z'
+  - id: note-f474ed3
+    text: 'S25 concretizer 2026-10-29: scenario refined and live-verified end-to-end
+      at this HEAD (whole repro file 49 passed; TestLiveFlow + TestRestartAdoption
+      26 passed). Verified recipe corrections: (1) write the fake-claude config for
+      the pm session tag BEFORE any pane launches, or pm pr start launches a real
+      Claude session; (2) bootstrap the workdir with pm push, git merge of the printed
+      pm/sync-* branch, pm pr start (impl fake, no API), kill its impl window, pm
+      pr review <pr> --no-window, then pm autostart add <pr>; (3) fake-claude ignores
+      typed keys, so simulate the human answer by appending a user record (transcript
+      sessionId + ISO timestamp) to <TEST_DIR>/pm/transcripts/autostart-*/review-<pr>-iN.jsonl
+      and the follow-up verdict by appending an assistant record ending in **NEEDS_WORK**/**PASS**;
+      the loop reads it on the fake''s next idle-hook refresh (~2-4s); (4) with autostart
+      on, review PASS is handed to QA in the same poll tick, so do NOT assert the
+      reason "review passed; QA transition pending" or that the PR stays in_review;
+      park QA with empty-verdict qa_* fake entries and assert phase qa / reason "planning
+      scenarios" with the tech-tree marker still showing the finished review (glyph
+      iteration-2 PASS); (5) prove the INPUT_REQUIRED notice re-arm from the log_message
+      triggers in ~/.pm/debug/<session>-frames.json (pm tui frames --json), not pm
+      log grep (identical repeats are deduped); the old notice line can stay painted
+      mid-loop by design; (6) the reproduction tests live in the /workspace pm checkout,
+      not the throwaway project workdir.'
+    created_at: '2026-10-29T04:43:45Z'
+    last_edited: '2026-10-29T04:43:45Z'
+  - id: note-02d9c81
+    text: 'QA scenario 26 (restart during an INPUT_REQUIRED wait) PASS at 6faf7496,
+      all 5 stories driven live with a real TUI + interactive stand-in on a throwaway
+      local-backend project, private HOME and a dedicated tmux socket (no host state
+      touched). (1) Unanswered wait + `pm tui restart --breadcrumb`: save/consume
+      breadcrumb + `Review loop resumed at iteration 1`, one new adopt line `(transcript=<live
+      pane session>.jsonl, unanswered)`, no `has no live pane`, no new relauncher,
+      same window @4 / pane / pane_pid, question still on screen, launch counter 1.
+      231 tight text+JSON samples across the restart: 230 `waiting / review INPUT_REQUIRED
+      (iteration 1)` + exactly 1 `running / review resuming (iteration 1)` (resuming=true,
+      ir=false, fu=false); zero follow-up/phantom-answer shapes. Tree `⏸1<spinner>`
+      before and after. (2) Answered before restart: post-mount `INPUT_REQUIRED answered;
+      follow-up running` (ir=false, fu=true, resuming=false, never waiting), adopt
+      `(answered)`, one `follow-up verdict=NEEDS_WORK` + one `iteration 2 for`, iteration
+      stayed 2 for 20 s, transcript has exactly one answer record and one NEEDS_WORK
+      turn. (3) NEEDS_WORK in the restart gap with the idle suppressed: `follow-up
+      verdict NEEDS_WORK already in transcript` (no hook-driven line), iteration 2,
+      never answered/follow-up after mount. (4) PASS in the gap: `already in transcript`
+      PASS, `Review loop done ... ✓ PASS (1 iteration)`, review object verdict=PASS/running=false/iteration=1
+      (still so after the qa transition), iteration 2 never launched. (5) `z d` during
+      a wait: `Stopped review loop` + `z d killed running loop`, paused/review `review
+      loop stopped (last INPUT_REQUIRED)` with running=false/ir=false/fu=false/resuming=false/verdict=INPUT_REQUIRED,
+      tree settles `⟳1⏸`, no new follow-up verdict, fresh non-loop review window does
+      not re-arm the wait. No code changes. Harness notes for the next runner: (a)
+      the breadcrumb restart re-execs the TUI in place in ~0.2-0.4 s here, so the
+      scenario stories 3-4 timing (`sleep 0.5` + a 1 s response) lands AFTER the resumed
+      loop has already started its wait; drive the gap with `sleep 0.1` and a 0 s
+      response so the answer+verdict precede the adopt line. (b) Observation (not
+      a failed Then, outside qa.md E10 wording): when the verdict lands after the
+      wait starts and the idle_prompt is suppressed/overwritten, `_wait_for_follow_up_verdict`
+      never re-reads the transcript (it reads once at wait start and thereafter only
+      on idle_prompt events), so the loop stays in `INPUT_REQUIRED answered; follow-up
+      running` indefinitely; a periodic transcript re-read in the `ev is None` branch
+      when `watch.assistant_after_answer` is true would close it. (c) In the sampler
+      a JSON read and the text read ~0.2 s later can disagree at a transition instant
+      (e.g. JSON resuming=true then text already waiting) - that is two instants,
+      not a contradiction. (d) After PASS the QA phase fails with `QA spec was not
+      generated during planning` (bundled fake planner) - harness noise, the review
+      object stays PASS. Captures: /pm-captures/scenarios/26/ (story1 + story5 TUI
+      casts+mp4, story5 CLI status cast+mp4, per-story status/log/sample evidence).'
+    created_at: '2026-10-29T05:07:25Z'
+    last_edited: '2026-10-29T05:07:25Z'
+  - id: note-a77f163
+    text: 'QA scenario 27 (a wait in a pane the loop adopted from another driver)
+      PASS at 6faf7496 — live TUI + interactive stand-in, all five triples on a throwaway
+      local-backend project. (1) In-flight adoption: another driver replaced the review
+      window (pm pr review --fresh --review-loop --review-iteration 1 --transcript
+      <other-driver>/review-<PR>-i1.jsonl) while iteration 1 was in flight with no
+      verdict; pane A died, pane B asked INPUT_REQUIRED; `pm tui restart --breadcrumb`
+      2.4 s later logged `iteration 1 verdict=INPUT_REQUIRED`, status read waiting
+      / review INPUT_REQUIRED (iteration 1) ir=true fu=false resuming=false, tree
+      ⏸1, popup WAITING #1, one window, stand-in count 2, no new relauncher. (2) Answering
+      in pane B cleared the wait (answered; follow-up running, ⟳1) and NEEDS_WORK
+      was read from pane B''s transcript (`hook-driven follow-up verdict NEEDS_WORK`)
+      -> exactly one iteration 2 (⟳2). (3) Recorded-wait re-adoption: iteration 1
+      ended INPUT_REQUIRED in pane A, another driver replaced the window, the loop''s
+      own symlink still named dead session A; after `pm tui restart --breadcrumb`
+      the log read `adopting INPUT_REQUIRED wait for <PR> iteration 1 (transcript=~/.claude/projects/<mangled>/<session
+      B>.jsonl, unanswered)` — pane B''s session, NOT the loop''s own review-<PR>-i1.jsonl
+      — status stayed waiting with the same window/pane, count 2, no relauncher, no
+      iteration 2. (4) Second restart sampled at 0.2 s: 35 waiting samples + exactly
+      1 brief `running / review resuming (iteration 1)` (resuming=true, ir=false,
+      fu=false), no KILLED, pane text byte-identical. (5) `pm pr auto-sequence` ->
+      `running: review (owned by loop:<id>)`, no launch, no second loop, wait unchanged.
+      (6) Answer in pane B then PASS -> `Review loop done for <PR>: ✓ PASS (1 iteration)`,
+      no iteration 2. Tests: test_review_input_required_state + test_verdict_transcript
+      98 passed (incl. test_restart_during_wait_on_another_drivers_transcript). Captures
+      /pm-captures/scenarios/27/{storyA,storyB,cli-standdown}. Harness: private HOME
+      + PM_TMUX_SOCKET + a private bin dir holding the stand-in as `fake-claude` first
+      on PATH at `pm session` time (shared ~/.local/bin shim untouched); the other-driver
+      `pm pr review --fresh` must run from a pane inside the pm session (in_tmux gate)
+      and selects the new window, so pin the recorder to `<sess>:main`; the in-flight
+      restart has a ~15 s window (poll_for_verdict wait_for_event timeout) — chain
+      the replacement and the restart in one shell line; name the recorder session
+      non-pm-* and non-grouped (a grouped pm-rec session changes _get_pm_session()).'
+    created_at: '2026-10-29T06:02:09Z'
+    last_edited: '2026-10-29T06:04:29Z'
+  - id: note-d76eff7
+    text: 'QA scenario 28 (non-text answers) PASS at 6faf7496, live TUI + interactive
+      stand-in on a throwaway local-backend project, 5/5 triples. (1) An image-only
+      type:"user" record clears the wait (first new sample running / review iteration
+      1 (INPUT_REQUIRED answered; follow-up running), ir=false fu=true, running-wait
+      marker turns to the iteration marker; same window/pane, no relaunch); the verdict-less
+      prose reply re-arms ONCE (1 "idle after the answer" line, one extra notice,
+      frozen over 10 s of idle refreshes); the later text answer clears again and
+      NEEDS_WORK -> iteration 2 exactly once. (2) Image then a real verdict: only
+      running shapes between the image and iteration 2, one verdict line / one iteration
+      2 / one relauncher / one review window, 222 iteration-2 samples with no second
+      wait marker and no iteration 3. (3) empty text, whitespace, empty-string and
+      tool_result (50 passed/yes/PASS/INPUT_REQUIRED) records: wait unchanged after
+      each, counters byte-identical at all five steps, 276 waiting/input_required=true
+      samples with no flip back to running; PASS inside a tool result is not a verdict.
+      (4) a /model echo is neither an answer nor a task boundary; the real answer
+      then clears the wait. (5) verdict+echo in one read: NEEDS_WORK -> one iteration
+      2, never stuck on follow-up, no re-armed wait; PASS variant completes with a
+      PASS loop-done line and no iteration 2. Pre-fix 92dd7752: the three new regressions
+      fail ("the image answer INPUT_REQUIRED question was re-delivered"); at head
+      the two test files are 98 passed. Captures /pm-captures/scenarios/28/. Harness
+      notes for the next runner: (a) private HOME + dedicated PM_TMUX_SOCKET + a stand-in
+      at /scratch/s28/bin/fake-claude first on PATH (the shared /home/pm/.local/bin
+      shim was NOT touched) - the stub must delegate for any cwd outside the test
+      tag or parallel scenarios break; (b) the pm autostart status samplers must be
+      truncated per triple or the counts/transitions blur across resets; (c) a single-entry
+      stub-script.json is reused by later launches (script[min(n,len-1)]), so iteration
+      2 repeats the INPUT_REQUIRED question - give later iterations their own entry
+      when you need them quiet; (d) agg is not installed in the container: download
+      agg-aarch64-unknown-linux-gnu; (e) the TUI log pane is a split in the main window
+      and stays open - kill the pane id to restore the tree view before recording.'
+    created_at: '2026-10-29T06:33:02Z'
+    last_edited: '2026-10-29T06:33:02Z'
+  - id: note-e1e2b6f
+    text: 'QA scenario 29 PASS at 45835b9e3 (integrated head), four triples driven
+      live (private HOME=/scratch/s29/home, PM_TMUX_SOCKET=/tmp/pm-qa-s29.sock, interactive
+      stand-in; captures /pm-captures/scenarios/29/). (1) Long lease: 256 s unanswered
+      review wait — 24/24 JSON samples waiting/review INPUT_REQUIRED (iteration 1)
+      ir=true fu=false iteration=1; 9/9 `pm pr auto-sequence` printed "running: review
+      (owned by loop:5181)"; same window @9 / pane %12 / session throughout, only
+      relaunches i1 and (after the answer) i2; answer -> follow-up running in <=2
+      s -> NEEDS_WORK -> iteration 2 -> PASS. (2) Failing launch: read-only run dir
+      -> rc 1 PermissionError classified retryable; text progress "review #1 (launch
+      retry 2)" with review {running,retryable,attempts>=2,error}; exhaustion failed/"review
+      launch failed (retryable)" with {LAUNCH_FAILED,attempts 3,ir=false}; 0/227 episode
+      samples waiting/INPUT_REQUIRED and no "interact with Claude" line; chmod u+w
+      + ~60 s re-arm -> "review iteration 1" (no "(last LAUNCH_FAILED)") -> PASS.
+      (3) Holds: A spec-pending, B QA INPUT_REQUIRED (qa.recorded), C SIGNOFF_MERGE
+      (fresh, held, still sign_off) byte-identical before/after D answer; D waiting
+      -> follow-up running; text/JSON agree; runs popup shows all four targets. (4)
+      Autostart off mid-follow-up: remove last target -> "Auto-start: off"/"No auto-start
+      targets"; loop still records NEEDS_WORK, runs iteration 2 and completes PASS;
+      40/40 samples one review window; notice count 1->1; "keeping transcript symlink
+      for a running review loop"; i1/i2 finalized regular files; PR still in_review.
+      No code changes. Harness: PR ids derive from titles and pm leases are keyed
+      by PR id in $HOME/.pm — two scratch projects with the same PR title in one HOME
+      collide ("Review launch owned by another loop"); use distinct titles. Fake planner
+      QA noise ("QA spec was not generated") follows every review PASS — scope no-wait
+      checks to the review episode. (2026-10-29T07:06:00Z)'
+    created_at: '2026-10-29T07:06:10Z'
+    last_edited: '2026-10-29T07:06:10Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-a80bde5-bug-review-input-required-stays-visi-c740d896
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
 - id: pr-f98ac63
   plan: bugs
   title: 'Bug: prefix+P popup dispatch from a PR window resolves the session tag from
@@ -38250,75 +39777,78 @@ prs:
   notes: []
 - id: pr-592e4bd
   plan: improvements
-  title: Route QA scenario refinement and execution through claude-mixed work models; keep other
-    sessions on main Claude
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
   status: pending
   depends_on: []
-  description: 'The user expects the main Claude subscription to run out before reset. Integrate
-    the existing claude-mixed/work-model routing promptly so autonomous QA scenario refinement
-    and execution workers use the work account; all other PM sessions retain the main account
-    and plain Claude binary for remote control. Keep Opus5.5/high effort: work/claude-opus-5-5
-    for scenario refinement (qa_concretize) and execution (qa_scenario) workers, claude-opus-5-5
-    for the other roles unless the user changes that policy.
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
 
 
     Current integration points and gaps:
 
-    - PM already resolves models/providers independently for qa_planning, qa_scenario, qa_concretize,
-    qa_verification and qa_finalize via model_config.py, pm model set, and qa_loop._resolve_qa_model.
-    Reuse this configuration and the common launcher boundary rather than adding a parallel
-    scheduler.
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
 
-    - claude_launcher.py currently hardcodes the claude executable. The user''s host launcher
-    is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py with
-    ~/.config/claude-router/routes.json. The anthropic-work backend selects the work/ prefix,
-    strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
     on each request. Keep account credentials on the host; do not embed them in project.yaml,
     generated launch commands, logs or captures.
 
-    - Existing QA containers use slirp4netns. Probes from a real QA container failed to connect
-    to port8790 at both127.0.0.1 and host.containers.internal; the host router is up on127.0.0.1:8790.
-    Provide a tested container-compatible route/launcher using the existing host router without
-    publicly exposing the credential-bearing router or changing global networking for unrelated
-    sessions. Host QA must work too. Do not silently fall back to the main account when work
-    routing is unavailable.
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
 
-    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive QA
-    session from scenario-worker targeting so s0 stays on main/plain Claude and remains available
-    for remote control. Planning, verification, finalization, implementation, review, sign-off
-    and other interactive sessions also stay on main/plain Claude. Preserve fake-claude behavior,
-    hooks, transcript discovery and session identity.
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
 
 
     Acceptance:
 
-    A configured project can select the launcher/model route for QA scenario refinement and
-    execution workers only, with existing overrides and resumed/relaunched workers handled consistently.
-    Normal sessions retain their current main binary/account/model; no global claude replacement,
-    global account swap, or accidental model downgrade. Route selection is visible without exposing
-    credentials. Startup/auth/router errors explain the required remedy and leave a recoverable
-    state, not an unexplained human-judgment verdict or fallback billed to the main account.
-    Validate initial worker launch, replacement/retry and restart adoption, plus refinement
-    launch/retry paths and unaffected s0, planner, verifier, finalizer and review launch commands.
-    Add focused regressions and a real container/host smoke using a harmless prompt through
-    the work route when authentication is available; verify actual backend/model routing and
-    normal hooks/transcript output. Keep manual merge/spec-review gates.
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
 
 
-    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host smoke
-    through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result ok, reported model
-    work/claude-opus-5-5). Container transport and hooks/transcript smoke are still required.
-    Do not change login credentials yourself or copy tokens into containers. Host scripts claude-work-ping
-    / claude-work-expiry document the current refresh workflow; the router itself only reads
-    the token and does not refresh it.
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
 
 
-    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery changes;
-    keep this PR focused on role/account routing. No dependency on the larger Codex integration/refactor
-    is required. After merge, configure this project''s QA scenario refinement and execution
-    workers to the validated work route; leave already running sessions intact unless the user
-    requests migration.
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
 
     '
   agent_machine: null
@@ -38331,58 +39861,61 @@ prs:
   merged_at: null
   notes:
   - id: note-da1f854
-    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize) and execution
-      (qa_scenario) through the work account, retaining Opus5.5/high. All other roles, including
-      interactive QA s0, planning, verification and finalization, stay on main/plain Claude
-      for RC. User work login is complete; a host claude-mixed work/claude-opus-5-5 smoke returned
-      ok. Container/hook/transcript validation remains required. Main-account session limit
-      resets18:40UTC; supervisor will nudge the blocked non-QA runs after reset and shepherd
-      this PR to sign-off, preserving manual merge/spec gates.'
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
   - id: note-ae7cf29
-    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review. Three things
-      for this branch:
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
 
 
-      1. S127''s restart expectation is now the observable contract, not a cosmetic log: after
-      a plain TUI restart with auto-start off, the PR at qa whose return record says awaiting:
-      qa is started exactly once when the live `pm qa run` ends — one qa-<pr> window set, one
-      verifier, one finalizer, one qa_status.json — and no second loop ever starts over the
-      live run. master''s implementation also logs "Sign-off REQA for <pr> — QA starts once
-      the QA run another process drives ends" once per return episode (first poll tick or mount),
-      so an assertion on that line still holds there, but it is not the contract. Please relax
-      S127''s Then accordingly rather than requiring the line.
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
 
 
-      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the owed start
-      in app._pending_auto_qa + app._reqa_waiting — memory only, which is the bug pr-db3bf10
-      fixes. master now persists the obligation in signoff_return.awaiting + a qa_run.json run
-      record, reconciles it from qa_loop_ui.poll_qa_state and App.on_mount regardless of the
-      auto-start switch, and gates every starter (sign-off hop, auto-start pass, pm pr auto-sequence)
-      on signoff.claim_return_launch(..., require_status="qa"). On merge, route the REQA deferral
-      through qa_loop_ui.start_owed_reqa / reconcile_owed_reqa and drop the in-memory pending
-      entry: otherwise the durable path claims while the in-memory path calls start_qa directly,
-      and the two can each start a loop for the same obligation.
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
 
 
-      3. run_driven_elsewhere exists on both sides with the same signature and semantics. master''s
-      version has only qa_run.json (written at the top of run_qa_sync / resume_qa_sync, owner
-      pid + owner_start) and reuses resume_owned_elsewhere; this branch''s richer record set
-      (write_launch_record, own_run_driven_since, run_overlaps_own_run, launched_elsewhere)
-      should win on merge.'
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
     created_at: '2026-10-28T15:57:32Z'
     last_edited: '2026-10-28T15:57:32Z'
   - id: note-9b00f90
     text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
-      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd) but goes
-      further: a failed launch is retried up to 3 times and then reported as LAUNCH_FAILED (retryable)
-      instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
-      expects a single attempt and latest_verdict == "ERROR"; after both merge, update it to
-      expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR as an alias.
-      The no-traceback behavior is preserved (ReviewLaunchError is caught with _log.error, not
-      _log.exception), and _launch_review_window keeps the "Review window launch failed (rc=N):
-      <detail>" message shape.'
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
@@ -42036,3 +43569,76 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-e0f54ca
+  plan: bugs
+  title: 'Bug: watcher INPUT_REQUIRED stays waiting after the user answers until the
+    next verdict'
+  branch: pm/pr-e0f54ca-bug-watcher-input-required-stays-waiting-after-the
+  status: pending
+  depends_on: []
+  description: 'pm_core/watcher_base.py WatcherBase._handle_input_required sets state.input_required=True
+    for the whole follow-up wait and clears it only when loop_shared.wait_for_follow_up_verdict
+    returns. After the user answers in the watcher pane, the watcher keeps showing
+    input_required (TUI status bar WCH input_required / watcher_manager.any_input_required)
+    while Claude works on the follow-up. It also has no restart/adoption of the wait.
+    pr-a80bde5 fixed the same class for the review loop: review_loop._wait_for_follow_up_verdict
+    clears the flag when verdict_transcript.HumanResponseWatch sees a human prompt
+    after the INPUT_REQUIRED turn, and re-raises it on a verdict-less idle or a repeated
+    INPUT_REQUIRED. Reuse that here. Repro: start a watcher whose iteration ends INPUT_REQUIRED,
+    answer in its pane, observe the status still says input_required until the next
+    verdict.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-22T19:24:23.700453+00:00'
+  updated_at: '2026-10-22T19:24:23.700453+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-4caa36a
+  plan: bugs
+  title: 'Bug: a local slash-command echo after a verdict hides that verdict from
+    the task-scoped scan (loop keeps waiting)'
+  branch: pm/pr-4caa36a-bug-a-local-slash-command-echo-after-a-verdict-hid
+  status: pending
+  depends_on: []
+  description: 'pm_core/verdict_transcript.py `_user_record_is_non_task`. Claude Code
+    echoes local slash commands (/cost, /model, ...) into the transcript as `type:"user"`
+    records (`<command-name>`, `<local-command-stdout>`); `is_human_prompt_record`
+    correctly excludes them as answers, but the shared task-boundary predicate does
+    not classify them as non-task, so `find_verdict_turn` stops at the echo and returns
+    None for a verdict that sits before it. Repro (harness in tests/test_review_input_required_state.py):
+    review loop waiting on INPUT_REQUIRED -> human answers -> assistant emits PASS
+    -> a user record `{"type":"user","message":{"content":"<command-name>/cost</command-name>\n<local-command-stdout>$0.42</local-command-stdout>"}}`
+    lands before the poller scans -> idle_prompt. `_wait_for_follow_up_verdict` then
+    sees verdict=None and takes the "idle after the answer without a verdict" branch:
+    input_required flips back to true, status reads `waiting / review INPUT_REQUIRED
+    (iteration N)` with latest_verdict still INPUT_REQUIRED, and the PASS is lost
+    until Claude speaks again (local commands do not end a turn, so no new idle comes).
+    Window is the verdict turn''s idle to the waiter''s next poll (~2 s); the same
+    task scoping backs loop_shared.wait_for_follow_up_verdict (QA/watcher) and auto-sequence,
+    so the impact is not review-loop-only. Not fixed in pr-a80bde5 because a blanket
+    "<command-name> = non-task" rule is unsafe: a custom slash command (.claude/commands/*.md)
+    is also written with <command-name> but expands into a real new task, and crossing
+    it could resurrect a stale verdict (a false PASS). Needs a rule that distinguishes
+    CLI-handled commands from custom ones (e.g. local-command stdout/stderr and no
+    expanded prompt text), verified against real transcripts.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T11:05:47.288848+00:00'
+  updated_at: '2026-10-29T02:55:14.659116+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-b946b24
+    text: 'Fixed in pr-a80bde5 (review baa8 i3, commit 94dbf681): the local slash-command
+      echo prefixes (<command-name>, <local-command-message>, <local-command-stdout>,
+      <local-command-stderr>) joined the shared task-boundary predicate verdict_transcript._user_record_is_non_task,
+      so an echo after a verdict no longer stops the task-scoped scan. Covered by
+      test_local_command_echo_is_transparent and test_follow_up_verdict_survives_a_local_slash_command.
+      Close this as covered by pr-a80bde5 rather than re-fixing.'
+    created_at: '2026-10-29T02:55:14Z'
+    last_edited: '2026-10-29T02:55:14Z'

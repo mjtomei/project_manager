@@ -68,12 +68,25 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
     recover the real path by scanning ``~/.claude/projects/*/`` for the
     matching ``<session_id>.jsonl``.
     """
-    if not transcript_path:
+    real = _resolve_transcript_path(transcript_path)
+    if real is None:
         return ""
+    try:
+        return real.read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def _resolve_transcript_path(transcript_path: str | Path | None) -> Path | None:
+    """Return a readable path for *transcript_path* (see
+    :func:`_read_transcript_text` for the session-id fallback), or None."""
+    if not transcript_path:
+        return None
     p = Path(transcript_path)
     try:
-        return p.read_text(errors="replace")
-    except (OSError, FileNotFoundError):
+        if p.exists():
+            return p
+    except OSError:
         pass
     # Symlink target missing — fall back to a session-id glob.
     sid: str | None = None
@@ -85,21 +98,17 @@ def _read_transcript_text(transcript_path: str | Path | None) -> str:
     if not sid:
         sid = p.stem
     if not (len(sid) == 36 and sid.count("-") == 4):
-        return ""
+        return None
     projects_dir = Path.home() / ".claude" / "projects"
     try:
         matches = list(projects_dir.glob(f"*/{sid}.jsonl"))
     except OSError:
-        return ""
+        return None
     if not matches:
-        return ""
+        return None
     # Pick the most recently modified — handles edge cases where stale
     # files with the same sid linger from a prior run.
-    real = max(matches, key=lambda m: m.stat().st_mtime)
-    try:
-        return real.read_text(errors="replace")
-    except OSError:
-        return ""
+    return max(matches, key=lambda m: m.stat().st_mtime)
 
 
 @dataclass(frozen=True)
@@ -126,19 +135,29 @@ class VerdictHit:
 _SCHEDULED_TASK_PREFIX = (
     "[SCHEDULED TASK - AUTOMATED FIRING OF A CONFIGURED PROMPT]"
 )
-# Dynamic / loop.md loop ticks and the autonomous-loop sentinels.
-_NON_TASK_TEXT_PREFIXES = (
+# Harness *wakeups*: they start an assistant turn of their own — and so
+# produce an ``idle_prompt`` — without any human having said anything.
+_WAKEUP_TEXT_PREFIXES = (
     _SCHEDULED_TASK_PREFIX,
     "# /loop tick",
     "# Autonomous loop check",
     "# Autonomous loop tick",
     "<task-notification>",
-    # Harness marker written when the user hits Esc / stops the turn
-    # (``[Request interrupted by user]`` and the ``for tool use`` variant).
+)
+# Claude Code echoes local slash commands (``/model``, ``/cost`` …) into the
+# transcript as ``type:"user"`` records.  They are not prompts — the human
+# asked Claude nothing — so they neither answer a question nor start a task.
+_LOCAL_COMMAND_PREFIXES = ("<command-name>", "<command-message>",
+                           "<local-command-stdout>", "<local-command-stderr>")
+# Harness marker written when the user hits Esc / stops the turn
+# (``[Request interrupted by user]`` and the ``for tool use`` variant).
+_INTERRUPT_PREFIX = "[Request interrupted by user"
+# Dynamic / loop.md loop ticks and the autonomous-loop sentinels.
+_NON_TASK_TEXT_PREFIXES = _WAKEUP_TEXT_PREFIXES + _LOCAL_COMMAND_PREFIXES + (
     # It is not a new task: the user asked for nothing, so a verdict emitted
     # before the interruption still stands.  A follow-up instruction the user
     # types afterwards is a separate record and remains a task boundary.
-    "[Request interrupted by user",
+    _INTERRUPT_PREFIX,
     # qa_loop's own "your verdict must be alone on its line" nudge.
     "Reminder: your verdict must appear alone",
 )
@@ -176,6 +195,23 @@ def _record_text(rec: object) -> str:
             if isinstance(piece, str):
                 chunks.append(piece)
     return "\n".join(chunks)
+
+
+def _record_has_non_text_content(rec: dict) -> bool:
+    """True when a user record carries content other than text.
+
+    The only realistic case is a pasted image (``{"type": "image", …}``).
+    Such a record has no text to classify but is still a human input, so the
+    task-boundary predicate must treat it as a task (see
+    :func:`_user_record_is_non_task`); otherwise the answer predicate and the
+    verdict scan would disagree about it.
+    """
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") not in (None, "text")
+               for b in content)
 
 
 def _is_tool_result_record(rec: dict) -> bool:
@@ -223,9 +259,10 @@ def _user_record_is_non_task(rec: dict) -> bool:
     """True when a user record does not start a new task.
 
     Non-task records are transparent to the backward verdict scan:
-    system-injected wakeups/notifications and the loop's own nudges.  Any
-    other user text (the initial prompt, a retry, verifier feedback, a new
-    user task) is a task boundary.
+    system-injected wakeups/notifications, local slash-command echoes and
+    the loop's own nudges.  Any other user input — the initial prompt, a
+    retry, verifier feedback, a new user task, or a non-text input such as a
+    pasted image — is a task boundary.
     """
     if _is_tool_result_record(rec):
         return True
@@ -243,7 +280,12 @@ def _user_record_is_non_task(rec: dict) -> bool:
     if rec.get("isCompactSummary") is True:
         return True
     if not unwrapped:
-        return True
+        # A record whose only content is an empty/whitespace text block
+        # carries nothing.  Content with no text at all (a pasted image) is a
+        # genuine human input, though, so it opens a task — otherwise the
+        # verdict scan would cross the human's answer and re-deliver the
+        # question it answered (the false-wait class this predicate guards).
+        return not _record_has_non_text_content(rec)
     if unwrapped in _NON_TASK_SENTINELS:
         return True
     return any(unwrapped.startswith(p) for p in _NON_TASK_TEXT_PREFIXES)
@@ -507,3 +549,229 @@ def read_latest_assistant_text(transcript_path: str | Path | None) -> str:
         if piece:
             chunks.append(piece)
     return "\n".join(chunks)
+
+
+def is_human_prompt_record(rec: object) -> bool:
+    """True when a parsed JSONL record is a prompt the human submitted.
+
+    Tool results are ``"type":"user"`` records too — they carry command
+    output, never a human decision, so they never count.  (A *mixed* record
+    that also carries real user text is a prompt, the same rule the verdict
+    scan uses.)  A record carrying content but *no* text — e.g. a pasted
+    image — is a prompt, while a record whose only content is an empty or
+    whitespace text block carries nothing and is not.  Neither do meta,
+    sidechain and compact-summary records, local slash-command echoes, or any
+    harness record
+    :func:`_user_record_is_non_task` classifies as not starting a new task
+    (system reminders, task notifications, ``/loop`` ticks, scheduled firings,
+    the Esc interrupt marker, qa_loop's verdict nudge).  Counting one of those
+    as an answer would clear a wait nobody answered.
+
+    This is exactly ``not _user_record_is_non_task(rec)`` — the shared
+    task-boundary predicate behind :func:`find_verdict_turn` — so the answer
+    predicate and the verdict scan can never disagree about which records are
+    transparent.  Every record this returns True for is a task boundary, so
+    the verdict scan always stops at the answer and can never cross it back
+    to the question it answered.  It treats a Stop-hook record as a task
+    boundary (its instructions are new work), which is *not* a human answer,
+    so the ``isMeta`` check below stays explicit; ``isSidechain`` records are
+    sub-agent turns, not the human's prompt.
+    """
+    if not isinstance(rec, dict) or rec.get("type") != "user":
+        return False
+    if rec.get("isMeta") or rec.get("isSidechain"):
+        return False
+    return not _user_record_is_non_task(rec)
+
+
+def is_wakeup_record(rec: object) -> bool:
+    """True for a harness *wakeup*: a record that starts an assistant turn
+    of its own (a ``/loop`` tick, a scheduled prompt firing, a Monitor task
+    notification, an autonomous-loop sentinel) without any human input.
+
+    Such a turn ends with its own ``idle_prompt``, so an idle that belongs
+    to one is not Claude asking the human anything.  Tool results are
+    ``"type":"user"`` records too but belong to the assistant's turn and
+    never start one, so they are not wakeups.
+    """
+    if not isinstance(rec, dict) or rec.get("type") != "user":
+        return False
+    if _is_tool_result_record(rec):
+        return False
+    text = _unwrap_system_reminder(_record_text(rec))
+    if text is None:
+        return False
+    return text in _NON_TASK_SENTINELS or text.startswith(_WAKEUP_TEXT_PREFIXES)
+
+
+def _opens_assistant_turn(rec: dict) -> bool:
+    """True when *rec* opens an assistant turn of its own.
+
+    A harness wakeup and a genuine human task do.  The *transparent* records
+    — system reminders, local-command echoes, compact summaries, the loop's
+    own nudge, tool results — do not: they are injected around a turn, not a
+    turn of their own, so they must not change whose turn the assistant is
+    in.  (Treating one as a new turn made a reminder landing between a
+    wakeup and its idle look like a human-started turn, so the idle was read
+    as a prose question and re-armed a wait nobody was asked.)  The Esc
+    interrupt marker does end the human's turn, so it counts as theirs — and
+    is not a wakeup.
+    """
+    if is_wakeup_record(rec):
+        return True
+    if _is_tool_result_record(rec):
+        return False
+    text = _unwrap_system_reminder(_record_text(rec))
+    if text is not None and text.startswith(_INTERRUPT_PREFIX):
+        return True
+    return not _user_record_is_non_task(rec)
+
+
+def _record_epoch(rec: dict) -> float | None:
+    """The record's ISO ``timestamp`` as epoch seconds, or None."""
+    from datetime import datetime
+    ts = rec.get("timestamp")
+    if not isinstance(ts, str) or not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _assistant_text_has_verdict(line: str, verdict: str) -> bool:
+    """True when an assistant record's *text* blocks carry *verdict* on its
+    own line (tool_use inputs such as ``grep INPUT_REQUIRED`` don't count).
+
+    Uses the same line predicate as :func:`find_verdict_turn`, so the
+    response watch anchors on exactly the turn the verdict scan returns —
+    the two can never disagree about which assistant record is the
+    question.  (A second copy of the predicate here is the same duplication
+    that let the waiter and the scan drift apart before the sign-off
+    integration.)
+    """
+    try:
+        rec = json.loads(line)
+    except json.JSONDecodeError:
+        return False
+    msg = rec.get("message") if isinstance(rec, dict) else None
+    content = msg.get("content") if isinstance(msg, dict) else None
+    if isinstance(content, str):
+        return _text_line_is_verdict(content, verdict)
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(block, dict) and block.get("type") == "text"
+        and _text_line_is_verdict(str(block.get("text") or ""), verdict)
+        for block in content
+    )
+
+
+class HumanResponseWatch:
+    """Track whether the human answered after the assistant's *verdict* turn.
+
+    Built when a loop starts waiting on a verdict that needs a human (e.g.
+    INPUT_REQUIRED).  The constructor scans back from the end of the
+    transcript to the latest assistant record carrying *verdict*: a human
+    prompt after it means the question was already answered (a TUI restart
+    or a fast reply).  :meth:`poll` then reads only the bytes appended since
+    the last call.  :attr:`answered_at` is the epoch time of the latest
+    answer (the record's ``timestamp``, else the time it was seen), or None
+    while the question is unanswered.  :attr:`assistant_after_answer` says
+    whether Claude has produced any assistant record *after* that answer, so
+    a repeated idle for the turn just answered is distinguishable from a new
+    turn.  :attr:`wakeup_turn` says the newest *turn-opening* user record
+    (:func:`_opens_assistant_turn` — transparent records such as system
+    reminders and local-command echoes are injected around a turn and do not
+    change it) is a harness wakeup (a ``/loop`` tick, a task notification):
+    the assistant turn it started is not a response to the human, so its
+    idle is not a question either.
+    """
+
+    def __init__(self, transcript_path: str | Path | None, verdict: str):
+        self._transcript_path = transcript_path
+        self.answered_at: float | None = None
+        self.assistant_after_answer = False
+        self.wakeup_turn = False
+        self._offset = 0
+        self._partial = b""
+        path = _resolve_transcript_path(transcript_path)
+        if path is None:
+            return
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return
+        self._offset = len(data)
+        last_nl = data.rfind(b"\n")
+        self._partial = data[last_nl + 1:]
+        # Only an answer *after* the question counts: if the question record
+        # can't be found, the latest human prompt may be the iteration's own
+        # review prompt, so stay unanswered rather than guess.
+        answer = None
+        newest_user_seen = False
+        for line in reversed(data[:last_nl + 1].decode(errors="replace").splitlines()):
+            if _ASSISTANT_RE.search(line):
+                if verdict in line and _assistant_text_has_verdict(line, verdict):
+                    self.answered_at = answer
+                    break
+                # Walked past an assistant record while no answer had been
+                # seen yet: offsets only decrease here, so it sits *after*
+                # the latest answer — Claude has spoken since the human did.
+                if answer is None:
+                    self.assistant_after_answer = True
+            elif _USER_RE.search(line):
+                rec = _parse_record(line)
+                if (not newest_user_seen and rec is not None
+                        and _opens_assistant_turn(rec)):
+                    newest_user_seen = True
+                    self.wakeup_turn = is_wakeup_record(rec)
+                if answer is None:
+                    answer = self._answer_epoch(rec)
+
+    @staticmethod
+    def _answer_epoch(rec: dict | None) -> float | None:
+        """Epoch time of *rec* when it is a human prompt, else None."""
+        if rec is None or not is_human_prompt_record(rec):
+            return None
+        at = _record_epoch(rec)
+        if at is None:
+            import time
+            at = time.time()
+        return at
+
+    def poll(self) -> float | None:
+        """Read newly appended records; return :attr:`answered_at`."""
+        path = _resolve_transcript_path(self._transcript_path)
+        if path is None:
+            return self.answered_at
+        try:
+            with path.open("rb") as f:
+                f.seek(self._offset)
+                chunk = f.read()
+        except OSError:
+            return self.answered_at
+        if not chunk:
+            return self.answered_at
+        self._offset += len(chunk)
+        data = self._partial + chunk
+        last_nl = data.rfind(b"\n")
+        self._partial = data[last_nl + 1:]
+        for line in data[:last_nl + 1].decode(errors="replace").splitlines():
+            if _USER_RE.search(line):
+                rec = _parse_record(line)
+                if rec is not None and _opens_assistant_turn(rec):
+                    self.wakeup_turn = is_wakeup_record(rec)
+                at = self._answer_epoch(rec)
+                if at is not None:
+                    self.answered_at = max(self.answered_at or 0.0, at)
+                    self.assistant_after_answer = False
+                    self.wakeup_turn = False
+            elif _ASSISTANT_RE.search(line) and self.answered_at is not None:
+                self.assistant_after_answer = True
+        return self.answered_at
+
+    def rearm(self) -> None:
+        """The assistant is waiting on the human again: forget the answer."""
+        self.answered_at = None
+        self.assistant_after_answer = False

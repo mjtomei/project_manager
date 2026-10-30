@@ -824,6 +824,59 @@ def test_discovery_adopts_another_drivers_live_session(tmp_path, monkeypatch):
     assert disc.transcript == str(tmp_path / f"{theirs}.jsonl")
 
 
+def _another_drivers_question(tmp_path, monkeypatch) -> Path:
+    """Our failed attempt left ``review-pr-001-i1.jsonl``; another driver's
+    live review pane for the same iteration already asked INPUT_REQUIRED."""
+    monkeypatch.setattr(review_loop, "_discover_iteration", _ORIG_DISCOVER)
+    ours = str(uuid.uuid4())
+    theirs = str(uuid.uuid4())
+    _make_symlink(tmp_path, "review-pr-001-i1.jsonl", ours)
+    (tmp_path / f"{ours}.jsonl").write_text("")
+    pane_transcript = tmp_path / f"{theirs}.jsonl"
+    pane_transcript.write_text(json.dumps({
+        "type": "assistant", "sessionId": theirs,
+        "message": {"content": [{"type": "text",
+                                 "text": "Which option?\n\n**INPUT_REQUIRED**"}]},
+    }) + "\n")
+    monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%9")
+    monkeypatch.setattr("pm_core.claude_launcher.pane_transcript_path",
+                        lambda *_a, **_k: pane_transcript)
+    return pane_transcript
+
+
+def test_discovery_verdict_names_the_transcript_it_came_from(tmp_path,
+                                                             monkeypatch):
+    """A verdict read from another driver's pane carries that pane's
+    transcript: an INPUT_REQUIRED follow-up must be waited on in the session
+    that asked it, not in this loop's own (other-session) symlink
+    (pr-a80bde5 R1)."""
+    pane_transcript = _another_drivers_question(tmp_path, monkeypatch)
+    state = ReviewLoopState(pr_id=PR)
+    disc = review_loop._discover_iteration(state, _pr(tmp_path),
+                                           str(tmp_path), 1)
+    assert disc.kind == "verdict"
+    assert "INPUT_REQUIRED" in (disc.output or "")
+    assert disc.transcript == str(pane_transcript)
+
+
+def test_retry_reports_the_discovered_verdicts_transcript(tmp_path,
+                                                          monkeypatch):
+    """``_run_iteration_with_retry`` hands the follow-up waiter the transcript
+    the rediscovered verdict came from, not ``review-<pr>-i<N>.jsonl``."""
+    pane_transcript = _another_drivers_question(tmp_path, monkeypatch)
+    state = ReviewLoopState(pr_id=PR, iteration=1, retry_iteration=1,
+                            launch_attempts=1)
+    result: dict = {}
+    with patch.object(review_loop, "_run_claude_review") as run:
+        output = review_loop._run_iteration_with_retry(
+            state, str(tmp_path), _pr(tmp_path), str(tmp_path), 1, result)
+    assert run.call_count == 0
+    assert "INPUT_REQUIRED" in output
+    assert result["transcript"] == str(pane_transcript)
+
+
 def test_discovery_treats_the_last_adopted_session_as_historical(
         tmp_path, monkeypatch):
     """An iteration whose verdict was adopted from another driver's session
@@ -1393,17 +1446,43 @@ def test_running_progress_only_names_a_retry_after_the_first_attempt():
 
 def test_follow_up_wait_refreshes_the_launch_lease(tmp_path, monkeypatch):
     """An INPUT_REQUIRED wait can outlast the lease TTL; the loop must keep
-    ownership (and stop refreshing once it is stopping)."""
+    ownership (and stop refreshing once it is stopping).
+
+    pr-a80bde5 replaces ``loop_shared``'s waiter with its own poll loop (the
+    shared one cannot report whether the human answered), so this drives the
+    real waiter and inspects the ``stop_check`` it hands to
+    ``hook_events.wait_for_event``.
+    """
+    from pm_core import hook_events
+
+    sid = str(uuid.uuid4())
+    transcript = tmp_path / f"review-{PR}-i1.jsonl"
+    native = tmp_path / f"{sid}.jsonl"
+    native.write_text("")
+    transcript.symlink_to(native)
+    with native.open("a") as f:
+        f.write(json.dumps({"type": "user", "sessionId": sid, "message": {
+            "role": "user", "content": "<review prompt>"}}) + "\n")
+        f.write(json.dumps({"type": "assistant", "sessionId": sid,
+                            "message": {"role": "assistant", "content": [
+                                {"type": "text",
+                                 "text": "Which option?\n\n**INPUT_REQUIRED**"}
+                            ]}}) + "\n")
+
     state = ReviewLoopState(pr_id=PR, iteration=1)
     state._transcript_dir = str(tmp_path)
     captured: dict = {}
 
-    def fake_wait(session, window, transcript, **kw):
+    def fake_wait_for_event(session_id, **kw):
         captured["stop"] = kw["stop_check"]
+        # Leave the wait after the first poll so the test stays instant.
+        state.stop_requested = True
         return None
 
     monkeypatch.setattr(review_loop, "_get_pm_session", lambda: "pm-s")
-    monkeypatch.setattr(review_loop, "_wait_for_follow_up_shared", fake_wait)
+    monkeypatch.setattr(review_loop, "_find_review_claude_pane",
+                        lambda *a, **k: "%1")
+    monkeypatch.setattr(hook_events, "wait_for_event", fake_wait_for_event)
     monkeypatch.setattr(review_loop, "_LEASE_REFRESH_SECONDS", 0.0)
     claims: list = []
     monkeypatch.setattr("pm_core.runtime_state.claim_action_lease",
@@ -1412,8 +1491,12 @@ def test_follow_up_wait_refreshes_the_launch_lease(tmp_path, monkeypatch):
     assert review_loop._wait_for_follow_up_verdict(_pr(tmp_path),
                                                    state) is None
     stop = captured["stop"]
-    assert stop() is False
     assert claims, "the follow-up wait must keep the launch lease alive"
+
+    state.stop_requested = False
+    n = len(claims)
+    assert stop() is False
+    assert len(claims) > n, "the wait must keep refreshing the lease"
 
     state.stop_requested = True
     assert stop() is True

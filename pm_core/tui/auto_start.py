@@ -416,7 +416,14 @@ async def consume_breadcrumb(app) -> None:
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
                 loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
-                input_required=loop_data.get("input_required", False),
+                # The saved flag is not a live human request: it is only
+                # meaningful once the resumed loop has re-adopted the pane
+                # that asked the question (review_loop.run_review_loop_sync
+                # sets it there).  Publishing it here would show a phantom
+                # "review INPUT_REQUIRED (iteration N)" to status readers
+                # from the mount until the loop thread reaches its adopt
+                # check — exactly the stale wait this is meant to prevent.
+                input_required=False,
                 _transcript_dir=loop_data.get("_transcript_dir"),
                 retry_iteration=loop_data.get("retry_iteration", 0) or 0,
                 launch_attempts=loop_data.get("launch_attempts", 0) or 0,
@@ -560,14 +567,33 @@ def _adopt_live_qa(app) -> None:
 
 
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize transcript symlinks in the current run directory.
+
+    A review loop that is still running keeps its symlink: the loop polls
+    that path for the follow-up verdict (and for the next iteration's
+    verdict), so replacing it with a frozen copy strands the loop — it can
+    no longer see the turn the user answered, reads the next idle as a new
+    prose question and re-arms the INPUT_REQUIRED wait for a question
+    nobody was asked.  The loop finalizes its own transcripts when it
+    completes (``review_loop_ui._on_complete_from_thread``).
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
     from pm_core.claude_launcher import finalize_transcript
+    live = tuple(
+        f"review-{pr_id}-"
+        for pr_id, state in (getattr(app, "_review_loops", None) or {}).items()
+        if getattr(state, "running", False)
+    )
     for p in tdir.iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
-            finalize_transcript(p)
+        if not (p.is_symlink() and p.suffix == ".jsonl"):
+            continue
+        if live and p.name.startswith(live):
+            _log.info("auto_start: keeping transcript symlink for a running "
+                      "review loop: %s", p)
+            continue
+        finalize_transcript(p)
 
 
 def _disable(app) -> None:

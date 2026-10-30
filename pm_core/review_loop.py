@@ -11,12 +11,15 @@ Verdicts:
 
 The loop stops on PASS.
 
-When INPUT_REQUIRED is detected, the loop marks the PR as paused and
+When INPUT_REQUIRED is detected, the loop marks the PR as waiting and
 polls the existing review pane for a follow-up verdict.  The user
 interacts directly with Claude in the review pane (e.g. performing
-the requested tests and reporting results).  Once Claude emits a new
-verdict (PASS or NEEDS_WORK), the loop picks it up automatically and
-resumes normal flow — no TUI interaction required.
+the requested tests and reporting results).  Once the user answers, the
+wait is resolved (``input_required`` clears) while Claude works on the
+follow-up; once Claude emits a new verdict (PASS or NEEDS_WORK), the loop
+picks it up automatically and resumes normal flow — no TUI interaction
+required.  A follow-up that ends INPUT_REQUIRED again is a new question:
+the loop waits again on the same pane.
 """
 
 import os
@@ -37,7 +40,6 @@ from pm_core.loop_shared import (
     find_claude_pane as _find_claude_pane_shared,
     match_verdict,
     poll_for_verdict as _poll_for_verdict_shared,
-    wait_for_follow_up_verdict as _wait_for_follow_up_shared,
 )
 
 _log = configure_logger("pm.review_loop")
@@ -61,6 +63,10 @@ ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 # Claude reviews take minutes; verdicts found in the first few seconds are
 # almost certainly false positives from prompt text shown in the pane.
 _VERDICT_GRACE_PERIOD = 20
+
+# How often the INPUT_REQUIRED wait re-checks the transcript for the user's
+# answer between idle hook events, so status clears promptly.
+_FOLLOW_UP_POLL = 2.0
 
 # --- Failed-launch retry ---------------------------------------------------
 # A review iteration launch that fails before producing a transcript (e.g.
@@ -144,8 +150,17 @@ class ReviewLoopState:
     _ui_notified_input: bool = False
     _ui_notified_retry: int = 0
     _transcript_dir: str | None = None
-    # INPUT_REQUIRED: set to True while polling for follow-up verdict
+    # INPUT_REQUIRED: True while the review pane waits on the human — set
+    # when the verdict lands, cleared once the user answers in the pane (the
+    # follow-up is then Claude's work) or a new iteration takes over.
     input_required: bool = False
+    # A resumed loop is still checking whether its recorded INPUT_REQUIRED
+    # wait has a live pane to adopt.  During that check the loop is running
+    # but the wait is neither live nor answered, so status readers must not
+    # report "follow-up running" — that claims the user answered a question
+    # nobody has been shown yet.  Cleared as soon as the adopt decision is
+    # made (adoptable: input_required is re-set; not: the iteration reruns).
+    _adopting_wait: bool = False
     # Failed-launch retry episode (persisted in the breadcrumb).
     retry_iteration: int = 0
     launch_attempts: int = 0
@@ -557,6 +572,10 @@ class AttemptDiscovery:
     kind: str  # verdict | adopt | other_owner | pending | launch
     output: str | None = None
     pane_id: str | None = None
+    # The transcript the discovery read.  For ``verdict`` it is the one the
+    # verdict came from — possibly another driver's pane, not this loop's
+    # ``review-<pr>-i<N>.jsonl`` — so an INPUT_REQUIRED follow-up is waited
+    # on in the session that actually asked the question.
     transcript: str | None = None
     reason: str = ""
     owner: str = ""
@@ -671,6 +690,7 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
         output = _verdict_output_if_present(our_transcript)
         if output:
             return AttemptDiscovery("verdict", output=output,
+                                    transcript=our_transcript,
                                     session_id=our_sid)
 
     other = _other_loop_owner(state)
@@ -724,6 +744,7 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
             output = _verdict_output_if_present(pane_transcript)
             if output:
                 return AttemptDiscovery("verdict", output=output,
+                                        transcript=pane_transcript,
                                         session_id=pane_sid)
             return AttemptDiscovery("adopt", pane_id=pane_id,
                                     transcript=pane_transcript,
@@ -761,6 +782,7 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
         output = _verdict_output_if_present(pane_transcript)
         if output:
             return AttemptDiscovery("verdict", output=output,
+                                    transcript=pane_transcript,
                                     session_id=pane_sid)
         return AttemptDiscovery("adopt", pane_id=pane_id,
                                 transcript=pane_transcript,
@@ -947,7 +969,8 @@ def _poll_adopted_review(state: ReviewLoopState, pane_id: str,
 
 
 def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
-                            transcript_dir: str | None) -> str | None:
+                            transcript_dir: str | None,
+                            result: dict | None = None) -> str | None:
     """Collect the verdict of an iteration that was in flight at a TUI restart.
 
     A resumed loop (breadcrumb restore) whose counter was bumped but has
@@ -956,6 +979,13 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     kill it and start the next iteration).  Returns the verdict output,
     ``None`` when there is nothing to adopt (no window / transcript), and
     raises :class:`PaneKilledError` if the adopted pane dies first.
+
+    *result* receives ``transcript``: the transcript the returned verdict
+    actually came from.  Discovery can adopt another pane's transcript (a
+    review another driver launched for the same iteration), so the caller
+    must not assume the loop's own ``review-<pr>-i<N>.jsonl`` — an
+    INPUT_REQUIRED follow-up has to be waited on in the transcript that
+    asked the question.
     """
     if not transcript_dir:
         return None
@@ -970,6 +1000,10 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
         # than re-adopts) a still-live pane running that session.
         if discovery.session_id:
             state.last_session_id = discovery.session_id
+        if result is not None:
+            result["transcript"] = (discovery.transcript
+                                    or _iteration_transcript(state,
+                                                             transcript_dir))
         return discovery.output
     # A restart handoff trusts its own iteration transcript even when the
     # pane has not exposed its session id yet: poll it (the retry path,
@@ -978,6 +1012,8 @@ def _adopt_in_flight_review(state: ReviewLoopState, pr_data: dict,
     if discovery.kind not in ("adopt", "pending") or not discovery.pane_id \
             or not discovery.transcript:
         return None
+    if result is not None:
+        result["transcript"] = discovery.transcript
 
     _log.info("review_loop: adopting in-flight iteration %d for %s "
               "(pane %s, transcript=%s)", state.iteration, state.pr_id,
@@ -1137,12 +1173,19 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
 
 def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                               pr_data: dict, transcript_dir: str,
-                              iteration: int) -> str:
+                              iteration: int,
+                              result: dict | None = None) -> str:
     """Run (or adopt) one review iteration, retrying failed launches.
 
     Only a genuine launch failure is retried; a pane that disappears
     (cancellation/closure), a hold, a real verdict and a merged/closed PR
     all stop the retry.  The iteration number is never advanced by a retry.
+
+    *result* receives ``transcript``: the transcript the returned verdict
+    actually came from.  Rediscovery can adopt another pane's transcript (a
+    review another driver launched for the same iteration), so an
+    INPUT_REQUIRED follow-up must be waited on there and not on this loop's
+    own ``review-<pr>-i<N>.jsonl``.
     """
     pr_id = state.pr_id
     transcript = f"{transcript_dir}/review-{pr_id}-i{iteration}.jsonl"
@@ -1208,6 +1251,8 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
             state.last_session_id = discovery.session_id
         if discovery.kind == "verdict":
             _reset_launch_retry(state)
+            if result is not None:
+                result["transcript"] = discovery.transcript or transcript
             return discovery.output
         if discovery.kind == "adopt":
             # Discovery ran a moment ago; the adopted pane may have landed
@@ -1220,6 +1265,8 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                 raise PaneKilledError(
                     "Review pane disappeared during launch retry")
             _reset_launch_retry(state)
+            if result is not None:
+                result["transcript"] = discovery.transcript or transcript
             return content
         if discovery.kind == "other_owner":
             # Another native loop owns this PR: never launch over it.
@@ -1296,34 +1343,282 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
 
         state.last_session_id = info.get("session_id") or state.last_session_id
         _reset_launch_retry(state)
+        if result is not None:
+            result["transcript"] = transcript
         return output
 
 
-def _wait_for_follow_up_verdict(pr_data: dict,
-                                 state: ReviewLoopState) -> str | None:
-    """Poll the existing review pane for a follow-up verdict."""
+def _iteration_transcript(state: ReviewLoopState,
+                          transcript_dir: str | None = None) -> str:
+    tdir = transcript_dir or state._transcript_dir
+    return f"{tdir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+
+
+def _adoptable_wait_transcript(state: ReviewLoopState, pr_data: dict,
+                               transcript_dir: str | None) -> str | None:
+    """Transcript of an INPUT_REQUIRED wait still live after a TUI restart.
+
+    Returns None when the review pane or its transcript is gone — then
+    nobody can answer that question any more.
+
+    The question is not always in this loop's own
+    ``review-<pr>-i<N>.jsonl``: discovery can adopt *another driver's*
+    session for an iteration this loop did not launch, and the wait runs on
+    that transcript (R1).  A restarted loop used to look only at its own
+    symlink, find nothing, and relaunch the next iteration over the live
+    question pane — the false wait this loop exists to prevent (review e2e9
+    i1).  The live pane names its session in its start command, so recover
+    the transcript from there and use it whenever it names a different
+    session than our own symlink: the human answers in the pane, so the
+    pane's session is the one that receives the answer.
+    """
+    from pm_core.claude_launcher import session_id_from_transcript
+    session = _get_pm_session()
+    if not session or not transcript_dir:
+        return None
+    # Workdir-aware: the shared first-pane helper can return the review
+    # window's diff shell, which is not the pane that asked the question.
+    pane_id = _find_review_claude_pane(
+        session, _compute_review_window_name(pr_data), pr_data.get("workdir"))
+    if not pane_id:
+        return None
+    # The live pane's own session: where the human's answer will land.
+    pane_transcript: str | None = None
+    pane_sid: str | None = None
+    try:
+        from pm_core.claude_launcher import pane_transcript_path
+        path = pane_transcript_path(pane_id, pr_data.get("workdir"))
+        if path is not None:
+            pane_sid = session_id_from_transcript(path)
+            if pane_sid:
+                pane_transcript = str(path)
+    except Exception:  # pragma: no cover - tmux/pane lookup is best effort
+        pane_transcript = None
+        pane_sid = None
+    transcript = _iteration_transcript(state, transcript_dir)
+    own_sid = (session_id_from_transcript(transcript)
+               if os.path.lexists(transcript) else None)
+    # The human answers in the *pane*, so the pane's session is the one the
+    # follow-up lands in.  Our own symlink is only equivalent when it names
+    # the same session; otherwise it was left by a failed attempt (or an
+    # earlier driver) and waiting on it would never see the answer.  Waiting
+    # on the dead one hung the loop; finding no own transcript at all used to
+    # relaunch the next iteration over the live question pane (review e2e9
+    # i1).
+    if pane_transcript and pane_sid and pane_sid != own_sid:
+        return pane_transcript
+    return transcript if own_sid else None
+
+
+def _wait_for_follow_up_verdict(pr_data: dict, state: ReviewLoopState,
+                                transcript: str | None = None,
+                                watch=None) -> str | None:
+    """Wait in the existing review pane for the follow-up to INPUT_REQUIRED.
+
+    ``watch`` is a prebuilt :class:`~pm_core.verdict_transcript.HumanResponseWatch`
+    for *transcript*.  A resumed loop builds it while its adopt check is
+    still running (``_adopting_wait``), so the waiting/answered state it
+    publishes comes from the transcript and not from the recorded
+    INPUT_REQUIRED history; the adopt branch then passes the same watch in
+    rather than reading the transcript twice.
+
+    Returns the assistant text of the *verdict turn* once an idle turn
+    carries a verdict: PASS / NEEDS_WORK, or INPUT_REQUIRED asked *after*
+    the user answered (a new question).  An idle event for the same,
+    still-unanswered INPUT_REQUIRED turn is ignored, as is a repeated idle
+    for the turn the user just answered (Claude has not spoken since, so
+    there is no new question).  A verdict already in the transcript when the
+    wait starts is returned at once, so resolution never depends on a hook
+    event that may have been lost across a restart.  Returns None when the
+    pane disappears or a stop is requested.
+
+    The verdict comes from :func:`verdict_transcript.find_verdict_turn`,
+    which is task-scoped: it crosses non-task wakeups (``/loop`` ticks,
+    Monitor notifications) back to the verdict of the task they interrupted
+    and returns that turn's text.  Reading the transcript tail instead would
+    let a postscript after the verdict be parsed as the follow-up — a PASS
+    followed by a ``/loop`` wakeup turn would come back as NEEDS_WORK
+    (pr-a80bde5 sign-off).  The same scan stops at a genuine user prompt, so
+    the question being answered can never be re-delivered as its own
+    follow-up.
+
+    Keeps ``state.input_required`` in step with the pane: False once a
+    human prompt lands in the transcript (Claude is working on the
+    follow-up), True again if Claude goes idle after that answer without
+    a verdict (it asked something in prose).  An idle for a turn a harness
+    wakeup started (``/loop`` tick, task notification) is not a question and
+    does not re-arm the wait — the human answered and Claude was woken by
+    the harness, not by them.
+
+    Deliberately not :func:`pm_core.loop_shared.wait_for_follow_up_verdict`:
+    the QA/watcher waiters only need "the next verdict", while this one also
+    has to report whether the human has answered (the wait state the CLI, TUI
+    and scheduler read).  Both use ``find_verdict_turn`` for the verdict
+    itself, so their task-scoping cannot drift apart.
+    """
+    from pm_core import hook_events
+    from pm_core.claude_launcher import session_id_from_transcript
+    from pm_core.verdict_transcript import HumanResponseWatch, find_verdict_turn
+
     session = _get_pm_session()
     if not session:
         _log.warning("review_loop: no pm session for follow-up polling")
         return None
+    if transcript is None:
+        if not getattr(state, "_transcript_dir", None):
+            _log.warning("review_loop: no transcript_dir on state; cannot wait for follow-up")
+            return None
+        transcript = _iteration_transcript(state)
+    session_id = session_id_from_transcript(transcript)
+    if not session_id:
+        _log.warning("review_loop: could not recover session_id from transcript=%s",
+                     transcript)
+        return None
 
     window_name = _compute_review_window_name(pr_data)
-    if not getattr(state, "_transcript_dir", None):
-        _log.warning("review_loop: no transcript_dir on state; cannot wait for follow-up")
-        return None
-    iter_transcript = f"{state._transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
-    # The INPUT_REQUIRED wait can last minutes while the user interacts in
-    # the pane; keep refreshing the launch lease so another driver does not
-    # treat the loop as dead and relaunch over the live session.
+    # The watch anchors on the latest INPUT_REQUIRED turn, so an answer to an
+    # earlier round can never count as the answer to this one.
+    if watch is None:
+        watch = HumanResponseWatch(transcript, VERDICT_INPUT_REQUIRED)
+    state.input_required = watch.answered_at is None
+    # The follow-up verdict may already be in the transcript — an answer and
+    # its verdict landing during a TUI restart gap, or an idle hook event
+    # that was lost or overwritten before the resumed waiter looked.  Read it
+    # now instead of blocking for an idle event that will never come.  At
+    # wait start the task scope's newest verdict is the INPUT_REQUIRED
+    # question (the wait is entered right after recording it, or on a
+    # restored/adopted wait whose last verdict is that question), so this can
+    # only match a verdict emitted *after* it.
+    pre = find_verdict_turn(transcript, ALL_VERDICTS)
+    if pre and pre.verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK):
+        _log.info("review_loop: follow-up verdict %s already in transcript",
+                  pre.verdict)
+        state.input_required = False
+        return pre.text or pre.verdict
+    # Start from the current idle event, not from now: after a TUI restart
+    # the answer and the follow-up verdict may both have landed in the gap,
+    # and Claude won't idle again.  An idle older than the answer (e.g. the
+    # question's own) is ignored below.
+    hook_baseline = 0.0
+    # The wait can last minutes while the user interacts in the pane, which
+    # is far longer than REVIEW_LAUNCH_CLAIM_TTL.  Refresh the launch lease
+    # from the same stop_check the wait already polls: without it another
+    # driver treats the loop as dead and relaunches ``--fresh`` over the live
+    # question pane — the bug this loop exists to fix.  ``_lease_keepalive``
+    # always returns False, so it only ever adds the refresh.
     keepalive = _lease_keepalive(state)
 
-    def _stop() -> bool:
+    def stop_check() -> bool:
         return state.stop_requested or keepalive()
 
-    return _wait_for_follow_up_shared(
-        session, window_name, iter_transcript, verdicts=ALL_VERDICTS,
-        stop_check=_stop, log_prefix="review_loop",
-    )
+    while not stop_check():
+        # Workdir-aware: the review window's first pane can be the diff
+        # shell, and a pane that is not the reviewer never asked a question.
+        if not _find_review_claude_pane(session, window_name,
+                                        pr_data.get("workdir")):
+            _log.warning("review_loop: pane gone during follow-up wait")
+            return None
+        ev = hook_events.wait_for_event(
+            session_id, event_types={"idle_prompt"}, timeout=_FOLLOW_UP_POLL,
+            newer_than=hook_baseline, stop_check=stop_check,
+        )
+        if stop_check():
+            return None
+        answered_at = watch.poll()
+        if ev is None:
+            if answered_at is not None and state.input_required:
+                _log.info("review_loop: %s answered INPUT_REQUIRED — "
+                          "follow-up running", state.pr_id)
+                state.input_required = False
+            continue
+        idle_at = float(ev.get("timestamp") or 0) or time.time()
+        hook_baseline = idle_at
+        hit = find_verdict_turn(transcript, ALL_VERDICTS)
+        verdict = hit.verdict if hit else None
+        # PASS / NEEDS_WORK ends the wait whatever the idle's age: an answer
+        # record without a ``timestamp`` is dated when we saw it, which can
+        # postdate the follow-up's idle when both land within one poll.
+        if verdict in (VERDICT_PASS, VERDICT_NEEDS_WORK):
+            _log.info("review_loop: hook-driven follow-up verdict %s", verdict)
+            return hit.text or hit.verdict
+        if answered_at is None or idle_at < answered_at:
+            # Still the unanswered question (or an idle from before the
+            # answer while Claude now works on it).
+            state.input_required = answered_at is None
+            continue
+        if not watch.assistant_after_answer:
+            # The human answered and Claude has not spoken since.  A
+            # repeated idle_prompt for the turn just answered (fake-claude
+            # refreshes the hook every ~2 s) is a stale re-read, not a new
+            # question — and returning it would re-record INPUT_REQUIRED on
+            # every refresh.
+            state.input_required = False
+            continue
+        if verdict == VERDICT_INPUT_REQUIRED:
+            _log.info("review_loop: follow-up asked INPUT_REQUIRED again")
+            return hit.text or hit.verdict
+        if watch.wakeup_turn:
+            # The turn was started by a harness wakeup (``/loop`` tick, task
+            # notification), not by the human's answer: its idle is not a
+            # question, and re-arming would show a wait nobody asked for
+            # (the false-wait class this loop exists to prevent).
+            state.input_required = False
+            continue
+        _log.info("review_loop: %s idle after the answer without a verdict — "
+                  "waiting on the user again", state.pr_id)
+        watch.rearm()
+        state.input_required = True
+        state._ui_notified_input = False
+    return None
+
+
+def _await_input_resolution(state: ReviewLoopState, pr_data: dict,
+                            on_iteration: Callable[[ReviewLoopState], None] | None,
+                            transcript: str | None = None,
+                            watch=None) -> str | None:
+    """Hold the loop on an INPUT_REQUIRED iteration until its follow-up
+    verdict is PASS or NEEDS_WORK; returns it, or None (pane gone / stop).
+
+    A follow-up that is INPUT_REQUIRED again is a new question for the
+    user — record it and keep waiting on the same pane rather than
+    relaunching (which would kill the pane and drop the question).
+
+    ``watch`` is only used for the first round (a resumed loop's adopt-time
+    watch); each repeated question gets a fresh one anchored on that
+    question's turn.
+    """
+    while True:
+        # Reset so each INPUT_REQUIRED round shows a notification.
+        state._ui_notified_input = False
+        follow_up_output = _wait_for_follow_up_verdict(pr_data, state,
+                                                       transcript, watch)
+        watch = None
+        if follow_up_output is None:
+            state.input_required = False
+            return None
+
+        verdict = parse_review_verdict(follow_up_output)
+        # Set with the verdict, before on_iteration: a new question must
+        # never read as "answered; follow-up running" in between.
+        state.input_required = verdict == VERDICT_INPUT_REQUIRED
+        state.latest_verdict = verdict
+        state.latest_output = follow_up_output
+        # Record the follow-up as part of this iteration's history
+        state.history[-1] = ReviewIteration(
+            iteration=state.iteration,
+            verdict=verdict,
+            output=follow_up_output,
+        )
+        _log.info("review_loop: follow-up verdict=%s", verdict)
+
+        if on_iteration:
+            try:
+                on_iteration(state)
+            except Exception:
+                _log.exception("review_loop: on_iteration callback failed")
+
+        if verdict != VERDICT_INPUT_REQUIRED:
+            return verdict
 
 
 def should_stop(verdict: str) -> bool:
@@ -1361,6 +1656,29 @@ def run_review_loop_sync(
     saved_transcript_dir = state._transcript_dir or transcript_dir
     # Stash transcript_dir on state so _on_complete_from_thread can finalize
     state._transcript_dir = transcript_dir
+
+    last = state.history[-1] if state.history else None
+    last_done = last.iteration if last else 0
+    adopt = state.iteration > last_done
+    # A restart during an INPUT_REQUIRED wait: the verdict is recorded but
+    # its follow-up is still pending in the same review pane.
+    adopt_wait = bool(last and last.iteration == state.iteration
+                      and last.verdict == VERDICT_INPUT_REQUIRED)
+    # No human question is live until this loop has adopted the pane that
+    # asked it (below) or asked a new one.  A restored ``input_required`` is
+    # only the breadcrumb's copy of the wait: leaving it set while the adopt
+    # check runs reports a phantom "review INPUT_REQUIRED (iteration N)" to
+    # every status reader (CLI status, runs popup, scheduler) for as long as
+    # the resume takes — the same false-wait class this loop exists to
+    # prevent.  The adopted case re-sets it below.
+    state.input_required = False
+    # ... and until that check finishes the wait is not "answered" either:
+    # running + not input_required + a recorded INPUT_REQUIRED history would
+    # otherwise read as "INPUT_REQUIRED answered; follow-up running" for the
+    # length of the check.  Set both before ``running`` so a concurrent
+    # status reader never sees the new loop running with the flags of the
+    # state it was resumed from.
+    state._adopting_wait = adopt_wait
     state.running = True
     # ``stop_requested`` is owned by the caller, not reset here: ``_start_loop``
     # marks the loop running *before* it creates this thread (so a second
@@ -1370,139 +1688,175 @@ def run_review_loop_sync(
     # clears the flag for a resumed loop; a fresh state already defaults to
     # False.
 
-    last_done = state.history[-1].iteration if state.history else 0
-    adopt = state.iteration > last_done
-
     try:
-        while state.iteration < max_iterations or adopt:
+        while state.iteration < max_iterations or adopt or adopt_wait:
             if state.stop_requested:
                 _log.info("review_loop: stop requested after %d iterations", state.iteration)
                 break
 
-            try:
-                output = None
-                if adopt:
-                    adopt = False
-                    output = _adopt_in_flight_review(
-                        state, pr_data, saved_transcript_dir)
-                    if output is None:
-                        # Nothing live to adopt — rerun the same iteration.
-                        state.iteration -= 1
-                    else:
-                        # The adopted iteration is complete: clear its retry
-                        # episode and ``iteration_attempted`` here too.  The
-                        # counter is bumped below and only then does
-                        # ``_run_iteration_with_retry`` re-snapshot the next
-                        # episode; a merge restart in that window would
-                        # otherwise persist this iteration's ``True`` for the
-                        # *next* iteration number and let the restart handoff
-                        # adopt an earlier run's transcript for it.
-                        _reset_launch_retry(state)
-                if output is None:
-                    state.iteration += 1
-                    _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
-                    output = _run_iteration_with_retry(
-                        state, pm_root, pr_data, transcript_dir,
-                        state.iteration,
-                    )
-            except PaneKilledError as e:
-                _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
-                state.latest_verdict = VERDICT_KILLED
-                state.latest_output = str(e)
-                break
-            except ReviewClosedError as e:
-                _log.info("review_loop: %s", e)
-                state.latest_verdict = VERDICT_CLOSED
-                state.latest_output = str(e)
-                break
-            except ReviewHoldError as e:
-                _log.warning("review_loop: review held on iteration %d "
-                             "(permission/trust prompt): %s",
-                             state.iteration, e)
-                state.latest_verdict = VERDICT_HOLD
-                state.latest_output = str(e)
-                state.launch_retryable = False
-                break
-            except ReviewLaunchError as e:
-                # A genuine failed authorized launch.  Never fabricate an
-                # agent verdict: surface an explicit, retryable failure with
-                # the complete child output retained in its artifact.
-                _log.error("review_loop: review launch failed on iteration %d: %s",
-                           state.iteration, e)
-                state.latest_verdict = VERDICT_LAUNCH_FAILED
-                state.latest_output = str(e)
-                state.launch_retryable = e.retryable
-                state.last_launch_error = str(e)
-                state.last_launch_artifact = e.artifact
-                if e.retryable:
-                    state.retry_ready_at = time.time() + REVIEW_LAUNCH_REARM_SECONDS
-                break
-            except Exception as e:
-                _log.exception("review_loop: review failed on iteration %d", state.iteration)
-                state.latest_verdict = VERDICT_ERROR
-                state.latest_output = str(e)
-                break
-
-            verdict = parse_review_verdict(output)
-            state.latest_verdict = verdict
-            state.latest_output = output
-
-            iteration_result = ReviewIteration(
-                iteration=state.iteration,
-                verdict=verdict,
-                output=output,
-            )
-            state.history.append(iteration_result)
-
-            _log.info("review_loop: iteration %d verdict=%s", state.iteration, verdict)
-
-            if on_iteration:
-                try:
-                    on_iteration(state)
-                except Exception:
-                    _log.exception("review_loop: on_iteration callback failed")
-
-            # Handle INPUT_REQUIRED: poll the existing review pane for a
-            # follow-up verdict.  The user interacts with Claude directly
-            # in the review pane — no TUI interaction required.
-            if verdict == VERDICT_INPUT_REQUIRED:
-                _log.info("review_loop: INPUT_REQUIRED — polling for follow-up verdict")
-                state.input_required = True
-                # Reset UI notification flag so repeated INPUT_REQUIRED
-                # rounds within the same loop still show a notification.
-                state._ui_notified_input = False
-
-                follow_up_output = _wait_for_follow_up_verdict(pr_data, state)
+            wait_transcript = None
+            wait_watch = None
+            if adopt_wait:
+                adopt_wait = False
+                wait_transcript = _adoptable_wait_transcript(
+                    state, pr_data, saved_transcript_dir)
+                if wait_transcript is None:
+                    _log.info("review_loop: INPUT_REQUIRED wait for %s "
+                              "iteration %d has no live pane; continuing",
+                              state.pr_id, state.iteration)
+                    state.input_required = False
+                    # Keep ``_adopting_wait`` set: the recorded wait is gone
+                    # but the iteration has not been superseded yet, so
+                    # clearing it here would publish "INPUT_REQUIRED answered;
+                    # follow-up running" (running + no wait + a recorded
+                    # INPUT_REQUIRED history) for a question nobody answered.
+                    # The next-iteration branch clears it once the new
+                    # iteration owns the work.
+                    continue
+                # The question is live again.  Its waiting/answered state
+                # comes from the transcript (R2), not from the recorded
+                # INPUT_REQUIRED history: if the human answered before the
+                # restart, assuming the wait first would publish a phantom
+                # "review INPUT_REQUIRED (iteration N)" for a question nobody
+                # is waiting on.  Build the response watch here, while the
+                # resuming flag still covers the state, publish what it says,
+                # and only then clear the flag — ``review_progress_input``
+                # reads ``_adopting_wait`` before ``input_required``, so a
+                # reader can never observe the transient either way.
+                from pm_core.verdict_transcript import HumanResponseWatch
+                wait_watch = HumanResponseWatch(wait_transcript,
+                                                VERDICT_INPUT_REQUIRED)
+                state.input_required = wait_watch.answered_at is None
+                state._adopting_wait = False
+                _log.info("review_loop: adopting INPUT_REQUIRED wait for %s "
+                          "iteration %d (transcript=%s, %s)", state.pr_id,
+                          state.iteration, wait_transcript,
+                          "unanswered" if state.input_required else "answered")
+                verdict = VERDICT_INPUT_REQUIRED
+            else:
+                # A new or adopted in-flight iteration owns the work now.
                 state.input_required = False
-
-                if follow_up_output is None:
-                    # Pane died or stop requested
-                    if state.stop_requested:
-                        break
+                try:
+                    output = None
+                    adopted: dict = {}
+                    if adopt:
+                        adopt = False
+                        output = _adopt_in_flight_review(
+                            state, pr_data, saved_transcript_dir, adopted)
+                        if output is None:
+                            # Nothing live to adopt — rerun the same iteration.
+                            state.iteration -= 1
+                        else:
+                            # The adopted iteration is complete: clear its
+                            # retry episode and ``iteration_attempted`` here
+                            # too.  The counter is bumped below and only then
+                            # does ``_run_iteration_with_retry`` re-snapshot
+                            # the next episode; a merge restart in that window
+                            # would otherwise persist this iteration's
+                            # ``True`` for the *next* iteration number and let
+                            # the restart handoff adopt an earlier run's
+                            # transcript for it.
+                            _reset_launch_retry(state)
+                            # An INPUT_REQUIRED follow-up lives in the
+                            # transcript the verdict actually came from:
+                            # discovery can adopt another pane's transcript,
+                            # not necessarily this loop's own
+                            # ``review-<pr>-i<N>.jsonl``.
+                            wait_transcript = adopted.get("transcript")
+                    if output is None:
+                        state.iteration += 1
+                        # A new iteration owns the work: the resumed wait is
+                        # gone (a dead pane, above) and the stale history
+                        # entry no longer belongs to the current iteration,
+                        # so the resuming flag is cleared only now.
+                        state._adopting_wait = False
+                        _log.info("review_loop: iteration %d for %s",
+                                  state.iteration, state.pr_id)
+                        launched: dict = {}
+                        output = _run_iteration_with_retry(
+                            state, pm_root, pr_data, transcript_dir,
+                            state.iteration, launched,
+                        )
+                        wait_transcript = launched.get("transcript")
+                except PaneKilledError as e:
+                    _log.warning("review_loop: pane killed on iteration %d: %s",
+                                 state.iteration, e)
                     state.latest_verdict = VERDICT_KILLED
-                    state.latest_output = "Review pane disappeared during INPUT_REQUIRED wait"
+                    state.latest_output = str(e)
+                    break
+                except ReviewClosedError as e:
+                    _log.info("review_loop: %s", e)
+                    state.latest_verdict = VERDICT_CLOSED
+                    state.latest_output = str(e)
+                    break
+                except ReviewHoldError as e:
+                    _log.warning("review_loop: review held on iteration %d "
+                                 "(permission/trust prompt): %s",
+                                 state.iteration, e)
+                    state.latest_verdict = VERDICT_HOLD
+                    state.latest_output = str(e)
+                    state.launch_retryable = False
+                    break
+                except ReviewLaunchError as e:
+                    # A genuine failed authorized launch.  Never fabricate an
+                    # agent verdict: surface an explicit, retryable failure
+                    # with the complete child output retained in its artifact.
+                    _log.error("review_loop: review launch failed on "
+                               "iteration %d: %s", state.iteration, e)
+                    state.latest_verdict = VERDICT_LAUNCH_FAILED
+                    state.latest_output = str(e)
+                    state.launch_retryable = e.retryable
+                    state.last_launch_error = str(e)
+                    state.last_launch_artifact = e.artifact
+                    if e.retryable:
+                        state.retry_ready_at = (time.time()
+                                                + REVIEW_LAUNCH_REARM_SECONDS)
+                    break
+                except Exception as e:
+                    _log.exception(
+                        "review_loop: review failed on iteration %d",
+                        state.iteration)
+                    state.latest_verdict = VERDICT_ERROR
+                    state.latest_output = str(e)
                     break
 
-                verdict = parse_review_verdict(follow_up_output)
-                # Treat repeated INPUT_REQUIRED as NEEDS_WORK
-                if verdict == VERDICT_INPUT_REQUIRED:
-                    verdict = VERDICT_NEEDS_WORK
+                verdict = parse_review_verdict(output)
+                # Set with the verdict, before on_iteration: a new question
+                # must never read as "answered; follow-up running" in between.
+                state.input_required = verdict == VERDICT_INPUT_REQUIRED
                 state.latest_verdict = verdict
-                state.latest_output = follow_up_output
+                state.latest_output = output
 
-                # Record the follow-up as part of this iteration's history
-                state.history[-1] = ReviewIteration(
+                iteration_result = ReviewIteration(
                     iteration=state.iteration,
                     verdict=verdict,
-                    output=follow_up_output,
+                    output=output,
                 )
-                _log.info("review_loop: follow-up verdict=%s", verdict)
+                state.history.append(iteration_result)
+
+                _log.info("review_loop: iteration %d verdict=%s",
+                          state.iteration, verdict)
 
                 if on_iteration:
                     try:
                         on_iteration(state)
                     except Exception:
                         _log.exception("review_loop: on_iteration callback failed")
+
+            # Handle INPUT_REQUIRED: poll the existing review pane for a
+            # follow-up verdict.  The user interacts with Claude directly
+            # in the review pane — no TUI interaction required.
+            if verdict == VERDICT_INPUT_REQUIRED:
+                _log.info("review_loop: INPUT_REQUIRED — polling for follow-up verdict")
+                verdict = _await_input_resolution(
+                    state, pr_data, on_iteration, wait_transcript, wait_watch)
+                if verdict is None:
+                    # Pane died or stop requested
+                    if state.stop_requested:
+                        break
+                    state.latest_verdict = VERDICT_KILLED
+                    state.latest_output = "Review pane disappeared during INPUT_REQUIRED wait"
+                    break
 
             if should_stop(verdict):
                 _log.info("review_loop: stopping — verdict=%s", verdict)
@@ -1516,6 +1870,10 @@ def run_review_loop_sync(
 
     finally:
         state.running = False
+        state._adopting_wait = False
+        # Status reads input_required before running: a loop that died
+        # mid-wait must not report a human request nobody can answer.
+        state.input_required = False
         _release_lease(state)
 
     return state

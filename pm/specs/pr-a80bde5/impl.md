@@ -1,0 +1,431 @@
+# pr-a80bde5 — review INPUT_REQUIRED stays visible after recovery
+
+## Background: where the wait state lives
+
+There is one source of truth for "the review loop is waiting on a human":
+`ReviewLoopState.input_required` (`pm_core/review_loop.py`).  Every surface
+reads it:
+
+- `pm autostart status --json/text` → cmd-queue → `auto_start.collect_status_inputs`
+  → `autostart_state.review_progress_input` → `_derive` (`autostart_state.py`)
+  → `state=waiting, reason="review INPUT_REQUIRED (iteration N)"`,
+  `review.input_required=true`.
+- TUI runs view (`screens.AutoRunsScreen`) renders the same `build_status`.
+- TUI tech-tree marker (`tech_tree._get_loop_marker`) → red `⏸N`, and the
+  sticky log line in `review_loop_ui._poll_loop_state_inner`.
+- Breadcrumb (`auto_start.save_breadcrumb` / `consume_breadcrumb`) serialises
+  the loop state across merge-triggered TUI restarts.  It still *writes*
+  `input_required`, but the restore no longer publishes it: the saved flag is
+  informational, and only the resumed loop can declare a live wait (R2).
+
+So if the flag is wrong in the loop's state, the CLI, the TUI and the scheduler
+are all wrong together.  The fix belongs in the loop's state, not in formatting.
+
+## Root causes found
+
+1. **Restart during an INPUT_REQUIRED wait leaves the flag latched for good.**
+   `run_review_loop_sync` sets `input_required=True` before the follow-up wait
+   and clears it only when that wait returns.  On INPUT_REQUIRED the iteration's
+   history entry has already been appended, so the breadcrumb saves
+   `history[-1] = (N, INPUT_REQUIRED)`, `input_required=True`.  On restore,
+   `adopt = state.iteration > last_done` is False, so the resumed loop
+   **launches iteration N+1 with `--fresh`**: it kills the pane where the
+   human question was pending, and nothing ever resets `input_required`.  Every
+   later iteration then reports `review INPUT_REQUIRED (iteration N+k)` while the
+   reviewer is working.  This matches the incident: the reason carried an advancing
+   iteration number, and supervised autostart restarts the TUI on every sibling merge.
+2. **The answered follow-up still shows as waiting.**  After the user answers in
+   the pane, the reviewer may work for a long time (run tests, commit fixes)
+   before it emits the follow-up verdict.  `input_required` stays True for that
+   whole time, which gives a false red marker even with no restart.
+3. **A repeated, genuine INPUT_REQUIRED is auto-converted to NEEDS_WORK.**
+   `# Treat repeated INPUT_REQUIRED as NEEDS_WORK` makes the loop launch a
+   fresh iteration, which kills the pane and drops the second question.  The loop
+   also cannot tell a re-read of the *same* INPUT_REQUIRED turn (e.g. a second
+   idle hook event for the unchanged turn — fake-claude refreshes idle every ~2 s)
+   from a new one.  So a stale re-read also auto-answers the human.
+
+## Requirements
+
+R1. **New iteration owns the work.**  When the review loop launches a new
+    iteration or adopts an in-flight non-INPUT_REQUIRED iteration,
+    `state.input_required` is False.  (`review_loop.run_review_loop_sync`.)
+
+    Since the integration with master@4a74d880 (pr-e040aeb, failed-launch
+    retry) the launch is `_run_iteration_with_retry`, not a bare
+    `_run_claude_review`: the call may discover an existing attempt, adopt
+    another driver's transcript, or retry a failed launch with backoff
+    before a review is ever launched.  All of those are "the iteration owns
+    the work", so `run_review_loop_sync` clears `input_required` before it
+    enters that call and never re-sets it from the launch path — only from
+    the parsed verdict (and, for INPUT_REQUIRED, the follow-up waiter).
+    `_adopt_in_flight_review` and `_run_iteration_with_retry` take an
+    optional ``result`` dict and record there the transcript the returned
+    verdict actually came from: discovery can adopt *another pane's*
+    transcript, so the follow-up wait must not assume the loop's own
+    ``review-<pr>-i<N>.jsonl``.  That includes a `"verdict"` discovery:
+    `_discover_iteration` sets `AttemptDiscovery.transcript` to the
+    transcript the landed verdict was read from (another driver's pane
+    included).  Without it the caller fell back to the loop's own symlink —
+    after a failed attempt, a *different* session — and waited on a
+    transcript/hook stream that never sees the answer or the follow-up
+    verdict (review e2e9 i1; regressions
+    `test_discovery_verdict_names_the_transcript_it_came_from`,
+    `test_retry_reports_the_discovered_verdicts_transcript`).
+
+R2. **Restart/adoption of an INPUT_REQUIRED wait.**  A resumed state whose
+    `history[-1]` is `(state.iteration, INPUT_REQUIRED)` is a wait that was in
+    progress at the restart.  The loop must not relaunch.  It re-enters the
+    follow-up wait on the live review pane, using the saved transcript dir.  Its
+    initial waiting/answered state comes from the transcript (R4), not from the
+    breadcrumb flag.  If there is no live pane or no transcript, nobody can answer
+    any more: clear `input_required` and continue as before, launching the next
+    iteration.
+
+    The pane check is `_find_review_claude_pane` (workdir-aware), not the
+    shared first-pane helper: a review window's first pane can be the diff
+    shell, and a shell never asked the question.  An iteration adopted *in
+    flight* at the restart waits on the transcript its verdict came from
+    (`_adopt_in_flight_review`'s ``result["transcript"]``), which can be a
+    different dir than the resumed loop's own — a manual loop gets a fresh
+    ``manual-<token>`` dir on restart.
+
+    The wait transcript is likewise not always the loop's own
+    ``review-<pr>-i<N>.jsonl``: discovery can adopt another driver's session
+    for an iteration this loop did not launch (R1), and that session's
+    transcript is where the human's answer lands.  `_adoptable_wait_transcript`
+    therefore recovers the live pane's own session from its start command
+    (`pane_transcript_path`) and uses it whenever its session id differs from
+    the loop's own symlink.  The human answers in the *pane*, so a symlink
+    naming another session belongs to a failed attempt (or an earlier
+    driver), and waiting on it never sees the answer.  Before this, a restart
+    found no own transcript (or a dead one), reported "no live pane" and
+    relaunched the next iteration over the live question pane, or hung on the
+    dead session (review e2e9 i1; regression
+    `test_restart_during_wait_on_another_drivers_transcript`).
+
+R3. **Answered wait clears.**  While waiting for the follow-up, a *human prompt*
+    appended to the iteration's transcript after the INPUT_REQUIRED turn means
+    the native flow has resumed.  `state.input_required` becomes False and
+    status reports `running` with a reason that says the follow-up is running.
+    It becomes True again if the reviewer goes idle (idle_prompt hook newer than
+    that prompt) without a PASS/NEEDS_WORK verdict.  That includes a genuine
+    repeated INPUT_REQUIRED, or an idle turn with no verdict, which is a question
+    in prose.  It does *not* include an idle for a turn a harness wakeup started
+    (a `/loop` tick, a scheduled firing, a `<task-notification>`): those turns
+    have their own `idle_prompt` but nobody asked the human anything, so the wait
+    must not re-arm for them (`HumanResponseWatch.wakeup_turn`,
+    `verdict_transcript.is_wakeup_record`; QA spec E9).  Turn ownership is
+    decided by the newest record that *opens* an assistant turn
+    (`_opens_assistant_turn`): a wakeup or a genuine human task.  The
+    transparent records (system reminders, local-command echoes, compact
+    summaries, the loop's own nudge, tool results) are injected around a turn
+    and must not change it — a reminder landing between a wakeup and its idle
+    would otherwise make the wakeup's turn look human-started and re-arm the
+    wait.  The Esc interrupt marker ends the human's own turn, so it is
+    theirs, not a wakeup.
+
+R4. **What counts as a human response** (`verdict_transcript`): a JSONL record
+    with `"type":"user"` whose `message.content` is a string or contains a
+    non-`tool_result` block, and which is not `isMeta`, `isSidechain`, a local
+    slash-command echo (`<command-name>`, `<local-command-stdout>`), or any
+    record the shared task-boundary predicate `_user_record_is_non_task`
+    classifies as not starting a new task — `<system-reminder>` blocks
+    (stripped; a record that is *only* reminders is not a prompt),
+    `<task-notification>`, `/loop` and autonomous-loop ticks, scheduled prompt
+    firings, the `[Request interrupted by user…]` marker, qa_loop's verdict
+    nudge, local slash-command echoes, and compact summaries.  A record whose
+    only content is an empty/whitespace text block carries no prompt and does
+    not count, while content with no text at all — a pasted image — still
+    does *and* is a task boundary: `_user_record_is_non_task` treats it as a
+    task (`_record_has_non_text_content`) so the verdict scan stops at it
+    rather than crossing back to the question the image answered and
+    re-delivering it.  (Review-loop i1, HEAD after integration: the two
+    predicates disagreed on image-only records, so an image answer was
+    accepted as an answer but transparent to the verdict scan — the waiter
+    re-recorded the answered INPUT_REQUIRED on every idle.)  Tool results and
+    assistant output never count, so arbitrary tool
+    output is never treated as an answer, and a harness notice can never
+    clear a wait nobody answered.  (Hardened in review
+    i1: these record shapes are real — master's `_user_record_is_non_task` and
+    its scenario replays show them — and counting one as an answer is the same
+    false-state class this PR fixes.)  The predicate is *built on*
+    `_user_record_is_non_task` (integration, pr-a80bde5 SIGNOFF_IMPL) so the
+    answer predicate and the task-scoped verdict scan can never disagree about
+    which records are transparent; local slash-command echoes live in that
+    shared predicate too (review baa8 i3), because otherwise an echo landing
+    after the follow-up verdict stopped the verdict scan, the waiter read "no
+    verdict", and re-armed a wait nobody was asked.  `isMeta` stays an
+    explicit check because the shared predicate treats a Stop-hook record as
+    a task boundary, and a Stop hook is harness input, not a human answer.
+    Detection is driven by the transcript and hook events, with no timer.
+
+R5. **Repeated genuine INPUT_REQUIRED stays visible.**  When an idle follow-up
+    turn ends INPUT_REQUIRED *after* a human response, the loop records it
+    (history/latest_verdict/on_iteration), sets `input_required=True`, re-arms
+    the UI notification, and keeps waiting on the same pane.  It does not
+    convert to NEEDS_WORK or relaunch.  An idle event whose latest assistant
+    turn is the *same* unanswered INPUT_REQUIRED turn is ignored (stale re-read).
+    So is a repeated idle for the turn the human has *just answered*: with no
+    assistant record since the answer there is no new question, and treating it
+    as one re-records INPUT_REQUIRED on every refreshed hook event (fake-claude
+    re-emits `idle_prompt` every ~2 s), spinning `on_iteration` in a busy loop.
+    (Added in review i2: `HumanResponseWatch.assistant_after_answer`.)
+
+R5b. **The follow-up verdict is read task-scoped.**  The waiter resolves the
+    follow-up with `verdict_transcript.find_verdict_turn` and returns that
+    *verdict turn's* text, never the transcript tail.  `find_verdict_turn`
+    crosses non-task wakeups (`/loop` ticks, Monitor task notifications) back to
+    the verdict of the task they interrupted, and stops at a genuine user
+    prompt.  Reading the tail instead lets a postscript after the verdict be
+    parsed as the follow-up: a PASS follow-up followed by a `/loop` wakeup turn
+    came back as NEEDS_WORK and launched another iteration (pr-a80bde5
+    SIGNOFF_IMPL; regression `test_follow_up_pass_survives_a_loop_tick_turn`).
+    Task-scoping also means the question being answered can never be re-delivered
+    as its own follow-up, because the human prompt that answers it is a task
+    boundary.
+
+R6. **Status reason** (`autostart_state._derive`): when `review.running` and
+    not `input_required` and the iteration's last recorded verdict is
+    INPUT_REQUIRED (`review.follow_up=true`), the reason is
+    `review iteration N (INPUT_REQUIRED answered; follow-up running)` with
+    `state=running`.  An unresolved wait is unchanged:
+    `waiting / review INPUT_REQUIRED (iteration N)`.  While a resumed loop is
+    still deciding whether its recorded wait is adoptable
+    (`review.resuming=true`) the reason is `review resuming (iteration N)` —
+    neither a wait nor an answer is true yet (see the adopt-gate edge case).
+
+R7. **Agreement.**  Because the CLI, the TUI runs view and the tech-tree marker all
+    read `ReviewLoopState.input_required` (and the breadcrumb only serialises it
+    for forensics), R1–R5 make them agree.  No surface computes its own copy.
+
+## Implicit requirements
+
+- The follow-up wait still ends only on a verdict in the current *task scope*
+  (`find_verdict_turn`, R5b) — read on the next idle hook event, or straight
+  away when one is already in the transcript at wait start.  Detecting a human
+  response changes only the displayed wait state, never the verdict.
+- The breadcrumb keeps writing `input_required` (forensics and older
+  breadcrumbs), but the restore does **not** publish it: `consume_breadcrumb`
+  builds the restored state with `input_required=False`, and only the resumed
+  loop sets it again, once it has confirmed the pane that asked the question is
+  still live and adoptable (R2).  Publishing the saved flag would report a
+  phantom wait from the TUI mount until the loop thread reached its adopt
+  check.  (Added by 09cadcee after QA S9 story 5.)
+- Old breadcrumbs (`input_required=True` with `history[-1]=INPUT_REQUIRED`) take
+  the same R2 path.
+- Stop requests during the wait still exit cleanly with `input_required=False`.
+- Pane death during the wait still ends the loop with KILLED.
+- A loop that exits any other way, including an unexpected exception during the
+  wait, clears `input_required` when it exits.  `_derive` checks the flag before
+  `running`, so a dead loop would otherwise report a wait nobody can answer.
+  (Added in review i4.)
+- `input_required` is set together with each recorded verdict (True for
+  INPUT_REQUIRED), before `on_iteration` runs.  Otherwise a status read in
+  between would see an unanswered question as "answered; follow-up running".
+  (Added in review i5.)
+- The waiter must poll the transcript at a short cadence (~2 s) so status is
+  close to real time.  It reads incrementally (byte offset) so large transcripts
+  are not re-read on every tick.
+- **Lease invariant (integration with pr-e040aeb).**  Master's cross-driver
+  launch lease (`runtime_state` action lease ``review-loop``,
+  `REVIEW_LAUNCH_CLAIM_TTL` = 180 s) makes one driver own a PR's review
+  launch.  `_run_claude_review` and `_poll_adopted_review` refresh it through
+  `_lease_keepalive`; so does this PR's follow-up waiter, through the same
+  `stop_check` it already polls.  Without the refresh a wait longer than the
+  TTL looks like a dead loop to `pm pr auto-sequence`, which then launches
+  ``--fresh`` over the live question pane — the very bug this PR fixes.  A
+  stopping loop must not refresh (and must hand the lease straight back if a
+  refresh races the stop).  `run_review_loop_sync` releases the lease in its
+  ``finally``, alongside clearing `_adopting_wait` and `input_required`.
+
+## Ambiguities (resolved)
+
+- *Should the answered follow-up show as `running` or keep waiting until the next
+  verdict?*  → `running`.  The task says a resolved wait must clear once the native
+  flow has resumed, and a human prompt in the pane is exactly that.
+- *Resume with no live pane.*  → Clear the flag and launch the next iteration
+  (previous behaviour minus the stale flag).  Relaunching the *same* iteration
+  would be equivalent, because the new review re-asks if the issue is still there.
+- *Idle with no verdict after an answer.*  → Treat it as waiting again (R3), since the
+  reviewer is idle at its prompt.  To avoid a race with an idle event emitted
+  before the answer, the idle timestamp must be newer than the answer (record
+  `timestamp`, else the detection time).
+- *Scope vs pr-7b085a9.*  That PR covers the impl-pane `permission_prompt` /
+  `PaneIdleTracker` path.  This PR does not touch `PaneIdleTracker`.
+- *`pm pr auto-sequence`* reads verdicts straight from the latest iteration's
+  transcript, so it already reports `running: review` once the reviewer is
+  working.  Not changed.
+
+## Edge cases
+
+- Merge INPUT_REQUIRED (`_merge_input_required_prs`), spec-pending holds,
+  `wait_for_merge` holds and QA INPUT_REQUIRED are separate paths and stay
+  unchanged.  (Master removed the old `stop_before_merge` policy; only
+  `wait_for_merge` exists now — this PR never touched either.)
+- Superseded loops (`_is_active_loop`) still skip runtime_state mirroring.
+- A fast answer: the human prompt and the INPUT_REQUIRED/verdict turn can all
+  land between two polls.  Ordering is taken from the transcript scan done just
+  before each idle evaluation, so a repeated INPUT_REQUIRED after an answer is
+  still seen as genuine.
+- A stale idle after the answer: the hook fires again for the turn the human
+  already answered (fake-claude refreshes it every ~2 s).  Only an assistant
+  record *after* the answer makes an idle a new turn; otherwise it is ignored
+  and the wait stays answered.  Without this, each refresh re-recorded
+  INPUT_REQUIRED and `_await_input_resolution` spun on it.  (Added in review i2.)
+- A wakeup turn that ends before the follow-up verdict: after the human answers,
+  a `/loop` tick (or scheduled firing / task notification) can start and finish
+  an assistant turn of its own, with an `idle_prompt` and no verdict.  That idle
+  is not a prose question — nobody asked the human anything — so the wait must
+  not re-arm for it (QA spec E9).  `HumanResponseWatch.wakeup_turn` tracks
+  whether the newest *turn-opening* user record (`_opens_assistant_turn`) is
+  a wakeup (`is_wakeup_record`), so the answer keeps reading as
+  `running / … (INPUT_REQUIRED answered; follow-up running)`.  Transparent
+  records injected around the turn (a system reminder, a local-command echo)
+  do not change that classification — otherwise one landing between the
+  wakeup and its idle made the turn look human-started and re-armed the
+  wait.  Without this the
+  status flipped back to `waiting / review INPUT_REQUIRED (iteration N)` while
+  the reviewer was working — the same false wait this PR fixes.  (Added in
+  review baa8 i2, hardened in review e386 i2; regressions
+  `test_wakeup_turn_after_the_answer_does_not_rearm_the_wait`,
+  `test_wakeup_turn_survives_transparent_records`,
+  `test_transparent_records_do_not_rearm_a_wakeup_turn`.)
+- Answer and follow-up verdict both land during a TUI restart gap: Claude
+  won't idle again, so the resumed waiter starts from the current idle event
+  (not "newer than now") and accepts it when it is newer than the answer.
+  (Added in review.)
+- A local slash command typed in the review pane (`/model`, `/cost`, …) is
+  echoed into the transcript as a `type:"user"` record.  It is not a human
+  answer *and* not a task boundary: it neither clears the wait nor stops the
+  task-scoped verdict scan.  Before it joined the shared predicate, an echo
+  after the follow-up verdict made `find_verdict_turn` return None, so the
+  waiter re-armed a wait nobody was asked (and blocked forever with no further
+  idle event).  (Added in review baa8 i3; regressions
+  `test_local_command_echo_is_transparent`,
+  `test_follow_up_verdict_survives_a_local_slash_command`.)
+- A verdict already in the transcript when the wait starts is returned
+  immediately, before blocking on a hook event.  The resume path must not
+  depend on the event file still holding an `idle_prompt` — it can hold
+  another event (or none) by the time the resumed loop looks, and waiting for
+  an idle that never comes would leave the loop stuck on "follow-up running".
+  At wait start the task scope's newest verdict is the INPUT_REQUIRED
+  question, so this can only match a verdict emitted after it.
+  (Added in review 484e i1; regression
+  `test_follow_up_verdict_resolves_without_a_hook_event`.)
+- A restored wait is not published until the resume has confirmed it can be
+  adopted.  `consume_breadcrumb` restores the state with `input_required=False`
+  and `run_review_loop_sync` keeps it down until `_adoptable_wait_transcript`
+  succeeds, then sets it so a genuine wait is visible immediately.  Otherwise
+  a restart with a dead pane/transcript reported `waiting / review
+  INPUT_REQUIRED (iteration N)` for the whole adopt check.  (QA S9 story 5;
+  fixed in 09cadcee.)  During that check the wait is neither live nor answered,
+  so `run_review_loop_sync` sets `ReviewLoopState._adopting_wait` while the
+  decision is pending and clears it as soon as it is made;
+  `review_progress_input` then reports `resuming=true`,
+  `input_required=false`, `follow_up=false` and the reason reads
+  `review resuming (iteration N)`.  It must never read "INPUT_REQUIRED answered;
+  follow-up running" there, which would claim the user answered a question
+  nobody has been shown yet.  (QA S15 re-evaluation; fixed in 7280536b,
+  regressions `test_adopting_wait_is_not_reported_as_an_answered_follow_up` and
+  `test_restart_adopt_check_never_reads_as_follow_up_running`.)  The two flags
+  are written in an order that leaves no observable gap (review e386 i2):
+  the adopt branch builds the response watch while `_adopting_wait` is still
+  set, publishes what the transcript says (waiting when unanswered,
+  "answered; follow-up running" when the human replied before the restart),
+  and only then clears `_adopting_wait`; when the wait is not adoptable (dead
+  pane/transcript), `_adopting_wait` stays set until the next iteration has
+  taken over (`state.iteration` advanced), because the recorded
+  INPUT_REQUIRED history entry would otherwise read as an answered wait.
+  `review_progress_input` reads the fields in that same order
+  (`_adopting_wait`, then `iteration`, then `input_required`), so a reader
+  that sees the flag cleared is guaranteed to see the state the transcript
+  reported.  The flag is also raised by `_start_loop` when it resumes a
+  state whose history ends INPUT_REQUIRED, *before* it marks the loop
+  running: otherwise the window between that synchronous `running=True` and
+  the thread's first statement (which sets the same flag) read as
+  "INPUT_REQUIRED answered; follow-up running" for a question nobody had
+  answered.  (review 5228 i1; regression
+  `test_resume_of_a_restored_wait_publishes_resuming_before_running`.)
+  Assuming the wait first and reading the transcript after
+  (review e386 i3) published a phantom `waiting / review INPUT_REQUIRED
+  (iteration N)` at the adopt decision for a question the human had already
+  answered — the same false-wait class — for the length of the transcript
+  read; the adopt-time watch removes it.  Regressions
+  `test_adopt_decision_never_reads_as_an_answered_follow_up` and
+  `test_adopt_decision_of_an_answered_wait_never_reads_as_waiting`.  Residual,
+  not a wait and not repainted: the TUI tech-tree widget keeps its
+  pre-restart frame until the first post-mount paint, which can land after the
+  adopt line; the status/runtime-state publication path never reports a
+  pre-adopt wait.
+- The back-scan only counts a human prompt found *after* the INPUT_REQUIRED
+  record.  If that record can't be found, the wait stays unanswered, so the
+  iteration's own review prompt is never taken as the answer.  (Added in
+  review.)
+- An in-flight iteration adopted at a restart that then ends INPUT_REQUIRED
+  waits on the transcript it was launched under (the saved dir), not the
+  resumed loop's new dir — manual loops get a fresh `manual-<token>` dir.
+  (Added in review i3.)
+- Transcript symlink slug mismatch: the response watch resolves the path with the
+  same session-id fallback as `_read_transcript_text`.
+- An empty user record is not an answer.  A `type:"user"` record whose only
+  content is an empty or whitespace text block (or a `text: null` block) carries
+  nothing; counting it would clear a wait nobody answered — the mirror of the
+  bug this PR fixes.  Content with no text at all (a pasted image) still counts
+  *and* is a task boundary (see R4), so the verdict scan stops at it instead of
+  crossing back to the answered question.
+  (Added in review 3bf4 i1: the image branch of `is_human_prompt_record`
+  over-triggered on empty text blocks after the integration rework.  Corrected
+  in review-loop i1: `_user_record_is_non_task` treated an image-only record as
+  transparent, so an image answer cleared the wait and was then crossed by the
+  verdict scan, re-delivering the answered question as a new one on every idle.)
+- A restored wait whose transcript yields no session_id cannot be answered (no
+  hook stream).  `_adoptable_wait_transcript` returns None when neither the
+  loop's own symlink nor the live pane's session (`pane_transcript_path`)
+  yields one, so the resumed loop clears `input_required` and launches the
+  next iteration rather than failing the wait and ending KILLED.  (Guard
+  added in 581d i2; regression added in 3bf4 i1:
+  `test_restart_wait_with_no_recoverable_session_clears`.)
+- A running review loop's transcript symlink must never be finalized.
+  `pm autostart remove` of the last target (or any auto-start disable) runs
+  `auto_start._finalize_all_transcripts`, which replaces the run dir's
+  symlinks with frozen copies.  The loop polls that path for the follow-up
+  verdict (and for the next iteration's), so freezing it strands the loop:
+  the copy has no verdict turn, the next idle reads as a new prose question
+  and a `waiting / review INPUT_REQUIRED (iteration N)` wait nobody was asked
+  is re-armed (QA scenario 17 story 4 — the answer's PASS never landed).
+  `_finalize_all_transcripts` therefore keeps every `review-<pr>-` symlink
+  for a PR whose loop is still `running`; the loop finalizes its own
+  transcripts on completion (`review_loop_ui._on_complete_from_thread`).
+  (Incidental fix 07340d38; regressions in
+  `tests/test_autostart_disable_transcripts.py`.)
+- Master overlap (review i1, **resolved at integration**): current
+  `origin/master` grew `verdict_transcript.find_verdict_turn` /
+  `_user_record_is_non_task` (task-scoped verdict scan + "is this a real human
+  prompt" predicate) while this branch was based on an older master.  The
+  branch is now merged onto master@89e3c501 and the two are reconciled:
+  `is_human_prompt_record` is built on `_user_record_is_non_task` (no duplicate
+  `_NON_TASK_*` lists), the waiter reads verdicts through `find_verdict_turn`
+  and returns `hit.text` (R5b), and `_adopt_in_flight_review` uses the same
+  helper.  `pm/project.yaml` was resolved with `store.merge_3way` (master's
+  newer registry state for every untouched entry; this branch's own PR entry
+  and notes winning true conflicts).
+- Master overlap #2 (SIGNOFF_IMPL, **resolved at integration**): master
+  @4a74d880 grew the failed-launch retry layer (pr-e040aeb) — `ReviewLaunchError`
+  /`ReviewHoldError`/`ReviewClosedError`, `_run_iteration_with_retry`,
+  `_discover_iteration`/`AttemptDiscovery`, the cross-driver launch lease and
+  the extra `ReviewLoopState` retry fields.  It rewrote
+  `run_review_loop_sync`, adoption and the follow-up waiter, so the two
+  conflicted in `review_loop.py`, `autostart_state.py` and `pm/project.yaml`.
+  Reconciled by keeping master's loop body and retry/adopt machinery and
+  re-threading the PR's wait gate through it: the adopt-wait gate
+  (`adopt_wait`/`_adopting_wait`/`wait_transcript`/`wait_watch`, publish-then-
+  clear ordering) sits in front of master's try/except, the retry path hands
+  back the transcript it resolved, the waiter takes master's
+  `_lease_keepalive`, and the `finally` does both `_release_lease` and the
+  flag clears.  `autostart_state` unions `follow_up`/`resuming` with the
+  HOLD/LAUNCH_FAILED retry-field normalisation, and `review_progress_input`
+  keeps the `_adopting_wait` → `iteration` → `input_required` reader order.
+  `pm/project.yaml` was again resolved with `store.merge_3way`.
+  `test_follow_up_wait_refreshes_the_launch_lease` was rewritten to drive the
+  PR's waiter (it patched `_wait_for_follow_up_shared`, which the PR deletes).

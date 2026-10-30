@@ -477,13 +477,19 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
             if review.get("input_required"):
                 return phase, "waiting", f"review INPUT_REQUIRED (iteration {it})"
             if review.get("running"):
+                if review.get("resuming"):
+                    # A resumed loop is re-checking its recorded wait: no
+                    # question is live yet and nobody has answered one.
+                    return phase, "running", f"review resuming (iteration {it})"
                 reason = f"review iteration {it}"
-                # A re-armed retry keeps the previous episode's
-                # ``LAUNCH_FAILED`` verdict until the new iteration lands;
-                # "(last LAUNCH_FAILED)" would read as though the retry now
-                # running had already failed.  Any other verdict is the
-                # previous iteration's real outcome and stays useful.
-                if last and last != "LAUNCH_FAILED":
+                if review.get("follow_up"):
+                    reason += " (INPUT_REQUIRED answered; follow-up running)"
+                elif last and last != "LAUNCH_FAILED":
+                    # A re-armed retry keeps the previous episode's
+                    # ``LAUNCH_FAILED`` verdict until the new iteration lands;
+                    # "(last LAUNCH_FAILED)" would read as though the retry now
+                    # running had already failed.  Any other verdict is the
+                    # previous iteration's real outcome and stays useful.
                     reason += f" (last {last})"
                 return phase, "running", reason
             if last in _REVIEW_PASS:
@@ -643,6 +649,11 @@ def build_status(inp: dict) -> dict:
                 "verdict": review.get("verdict") or "",
                 "running": bool(review.get("running")),
                 "input_required": bool(review.get("input_required")),
+                "follow_up": bool(review.get("follow_up")),
+                # A resumed loop still deciding whether its recorded wait is
+                # adoptable: neither a wait nor an answer.  Published so a
+                # status reader never has to string-match the reason.
+                "resuming": bool(review.get("resuming")),
                 "retryable": bool(review.get("retryable")),
                 "attempts": review.get("attempts") or 0,
                 "error": review.get("error") or "",
@@ -881,14 +892,43 @@ def qa_progress_input(state) -> dict:
 
 
 def review_progress_input(state) -> dict:
-    """Summarise a ReviewLoopState-like object into a ``review_loops`` entry."""
+    """Summarise a ReviewLoopState-like object into a ``review_loops`` entry.
+
+    ``follow_up``: the current iteration ended INPUT_REQUIRED and the user
+    has answered — Claude is working on the follow-up in the same pane.
+    ``resuming``: a resumed loop is still checking whether its recorded
+    INPUT_REQUIRED wait has a live pane to adopt.  The wait is neither live
+    nor answered then, so neither ``input_required`` nor ``follow_up`` may
+    be reported (a status reader would otherwise show a phantom wait or a
+    phantom "answered; follow-up running" for the length of the check).
+
+    ``follow_up`` is inferred from the flags, so the fields are read in an
+    order that can never observe the transient between the loop's writes
+    (see ``run_review_loop_sync``): ``_adopting_wait`` first, then
+    ``iteration`` and ``input_required``.  A reader that sees the adopt flag
+    already cleared is guaranteed to see the wait it published, or the
+    iteration that superseded it.
+
+    The failed-launch retry evidence (``retryable``/``attempts``/``error``/
+    ``artifact``) is normalised the same way the runtime_state mirror does it
+    (``_on_complete_from_thread``): a HOLD carries only its own prompt
+    message, and only an exhausted launch retry (LAUNCH_FAILED) stays
+    retryable once the loop has stopped.
+    """
+    running = bool(getattr(state, "running", False))
+    # Read these in the order the writer updates them — do not reorder.
+    adopting_wait = bool(getattr(state, "_adopting_wait", False))
+    iteration = getattr(state, "iteration", 0) or 0
+    input_required = bool(getattr(state, "input_required", False))
+    history = getattr(state, "history", None) or []
+    last = history[-1] if history else None
+
     verdict = getattr(state, "latest_verdict", "") or ""
     # A HOLD is the trust/permission prompt the pane is sitting at.  Report
     # that, not an earlier attempt's launch error from the same episode —
     # matching the runtime_state mirror (`_on_complete_from_thread`).  The
     # artifact belongs to that failed attempt too, so a hold does not carry
     # one.
-    running = bool(getattr(state, "running", False))
     error = getattr(state, "last_launch_error", "") or ""
     artifact = getattr(state, "last_launch_artifact", "") or ""
     retryable = bool(getattr(state, "launch_retryable", False))
@@ -917,9 +957,14 @@ def review_progress_input(state) -> dict:
         attempts = 0
     return {
         "running": running,
-        "iteration": getattr(state, "iteration", 0) or 0,
+        "iteration": iteration,
         "verdict": verdict,
-        "input_required": bool(getattr(state, "input_required", False)),
+        "input_required": input_required,
+        "resuming": bool(running and adopting_wait),
+        "follow_up": bool(running and not input_required and not adopting_wait
+                          and last is not None
+                          and getattr(last, "iteration", None) == iteration
+                          and getattr(last, "verdict", "") == "INPUT_REQUIRED"),
         # Failed-launch retry evidence.  A HOLD keeps only its own prompt
         # message as ``error``; the retryable flag, attempt count and
         # artifact belong to a failed launch, not to a hold.
