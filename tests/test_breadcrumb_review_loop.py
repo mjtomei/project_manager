@@ -222,6 +222,28 @@ class TestSaveBreadcrumbReviewLoops:
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
         assert data["review_loops"]["pr-001"]["input_required"] is True
 
+    def test_iteration_sessions_round_trip(self, tmp_path):
+        """Per-iteration session ids survive a restart so a resumed loop's
+        completion still finalizes each transcript with its ownership check
+        (pr-9ee4d64).  JSON object keys are strings; the loop keys them by
+        the integer iteration number."""
+        sid = "11111111-1111-4111-8111-111111111111"
+        state = _make_running_state("pr-001", iteration=2)
+        state.iteration_sessions = {1: sid, 2: "22222222-2222-4222-8222-222222222222"}
+        app = _make_app(review_loops={"pr-001": state})
+        (tmp_path / "merge-restart").touch()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.watcher_ui.is_running", return_value=False):
+            from pm_core.tui.auto_start import save_breadcrumb
+            save_breadcrumb(app)
+
+        data = json.loads((tmp_path / "autostart-resume.json").read_text())
+        assert data["review_loops"]["pr-001"]["iteration_sessions"] == {
+            "1": sid,
+            "2": "22222222-2222-4222-8222-222222222222",
+        }
+
 
 # ---------------------------------------------------------------------------
 # consume_breadcrumb tests
@@ -241,6 +263,13 @@ class TestConsumeBreadcrumbReviewLoops:
                     "loop_id": "ab12",
                     "input_required": False,
                     "_transcript_dir": "/tmp/transcripts",
+                    "iteration_sessions": {
+                        "1": "11111111-1111-4111-8111-111111111111",
+                        "3": "33333333-3333-4333-8333-333333333333",
+                        "not-an-iteration": "44444444-4444-4444-8444-444444444444",
+                        "4": None,
+                        "5": ["not", "a", "session"],
+                    },
                     "history": [
                         {"iteration": 1, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:00:00"},
                         {"iteration": 2, "verdict": "NEEDS_WORK", "timestamp": "2025-01-01T00:01:00"},
@@ -276,11 +305,115 @@ class TestConsumeBreadcrumbReviewLoops:
         assert rstate.latest_verdict == "NEEDS_WORK"
         assert rstate.loop_id == "ab12"
         assert len(rstate.history) == 3
+        # Session ids are keyed by int; an unparsable key and a non-string
+        # value are dropped, not fatal (a falsy value would disable the
+        # ownership check on completion).
+        assert rstate.iteration_sessions == {
+            1: "11111111-1111-4111-8111-111111111111",
+            3: "33333333-3333-4333-8333-333333333333",
+        }
 
         # Check _start_loop was called with resume_state
         mock_start.assert_called_once()
         _, kwargs = mock_start.call_args
         assert kwargs.get("resume_state") is rstate
+
+    @pytest.mark.parametrize("restored", [
+        {},                        # key absent
+        {"loop_id": ""},           # blank
+        {"loop_id": None},         # wrong type
+        {"loop_id": 1234},         # wrong type
+    ])
+    def test_missing_or_blank_loop_id_is_regenerated(self, tmp_path, restored):
+        """The loop id is the ownership identity in every loop-scoped
+        iteration transcript name, so a restored loop must never run with a
+        blank or non-string one: it is replaced by a freshly generated id of
+        the same width as ``ReviewLoopState``'s factory (pr-9ee4d64)."""
+        loop_data = {
+            "iteration": 1,
+            "history": [],
+            **restored,
+        }
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {"pr-001": loop_data},
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop") as mock_start:
+            mock_store.get_pr.return_value = {
+                "id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        loop_id = app._review_loops["pr-001"].loop_id
+        assert isinstance(loop_id, str) and loop_id
+        assert len(loop_id) == 8
+        assert all(c in "0123456789abcdef" for c in loop_id)
+        mock_start.assert_called_once()
+
+    def test_valid_loop_id_is_preserved(self, tmp_path):
+        """A restored loop must reproduce its loop-scoped iteration path."""
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {"pr-001": {"iteration": 2, "loop_id": "deadbeef",
+                                        "history": []}},
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop"):
+            mock_store.get_pr.return_value = {
+                "id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert app._review_loops["pr-001"].loop_id == "deadbeef"
+
+    def test_malformed_iteration_sessions_does_not_abort_the_restore(self, tmp_path):
+        """A hand-edited breadcrumb with a non-object ``iteration_sessions``
+        must not raise: the loop is still restored and resumed."""
+        breadcrumb_data = {
+            "target": "pr-001",
+            "run_id": "autostart-pr-001-abcd1234",
+            "review_loops": {
+                "pr-001": {
+                    "iteration": 1,
+                    "loop_id": "ab12",
+                    "iteration_sessions": ["not", "an", "object"],
+                    "history": [],
+                }
+            },
+        }
+        (tmp_path / "autostart-resume.json").write_text(json.dumps(breadcrumb_data))
+        app = _make_app(auto_start=False, root=tmp_path)
+        app._update_display = MagicMock()
+        app.log_message = MagicMock()
+
+        with patch("pm_core.tui.auto_start.pm_home", return_value=tmp_path), \
+             patch("pm_core.tui.auto_start.check_and_start", new_callable=AsyncMock), \
+             patch("pm_core.tui.auto_start.store") as mock_store, \
+             patch("pm_core.tui.review_loop_ui._start_loop") as mock_start:
+            mock_store.get_pr.return_value = {
+                "id": "pr-001", "status": "in_review", "workdir": "/tmp/wd"}
+            from pm_core.tui.auto_start import consume_breadcrumb
+            _run_async(consume_breadcrumb(app))
+
+        assert app._review_loops["pr-001"].iteration_sessions == {}
+        mock_start.assert_called_once()
 
     def test_resume_summary_is_last_log_message(self, tmp_path):
         """The auto-start summary must not be overwritten by the per-loop

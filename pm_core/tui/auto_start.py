@@ -37,7 +37,7 @@ from pm_core import store, graph
 from pm_core import tui_pidfile
 from pm_core import autostart_state
 from pm_core.autostart_state import (
-    POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY,
+    POLICY_AUTO, POLICY_WAIT, REPLY_DIR, WAIT_KEY, _window_names,
 )
 from pm_core.tui._shell import _run_shell_async
 
@@ -245,6 +245,16 @@ def save_breadcrumb(app) -> None:
             "loop_id": rstate.loop_id,
             "input_required": rstate.input_required,
             "_transcript_dir": rstate._transcript_dir,
+            # Session ids per iteration survive the restart so a resumed
+            # loop's completion still finalizes each transcript with its
+            # ownership check (pr-9ee4d64).  JSON keys are strings.  Copied
+            # under the dict's own iteration: the loop thread records a new
+            # iteration's session while this runs (a merge restart), and a
+            # resize during iteration would abort the whole breadcrumb.
+            "iteration_sessions": {
+                str(k): v for k, v in
+                dict(getattr(rstate, "iteration_sessions", None) or {}).items()
+            },
             # Failed-launch retry episode: a restart mid-backoff must
             # continue the same bounded budget and deadline.
             "retry_iteration": rstate.retry_iteration,
@@ -401,7 +411,9 @@ async def consume_breadcrumb(app) -> None:
                      "(%s)", type(review_loops_data).__name__)
         review_loops_data = {}
     if review_loops_data:
-        from pm_core.review_loop import ReviewLoopState, ReviewIteration
+        from pm_core.review_loop import (
+            ReviewLoopState, ReviewIteration, _generate_loop_id,
+        )
         for pr_id, loop_data in review_loops_data.items():
             if not isinstance(loop_data, dict):
                 _log.warning("consume_breadcrumb: ignoring corrupt review "
@@ -411,11 +423,20 @@ async def consume_breadcrumb(app) -> None:
             history = loop_data.get("history")
             if not isinstance(history, list):
                 history = []
+            # The loop id is the ownership identity in every loop-scoped
+            # iteration transcript name, so a missing or blank one must be
+            # replaced with a freshly generated id at the same width as
+            # ``ReviewLoopState``'s own factory (pr-9ee4d64).  A legacy
+            # in-flight iteration is still adoptable through
+            # ``resolve_iteration_transcript``'s legacy-name fallback.
+            loop_id = loop_data.get("loop_id")
+            if not isinstance(loop_id, str) or not loop_id:
+                loop_id = _generate_loop_id()
             rstate = ReviewLoopState(
                 pr_id=pr_id,
                 iteration=loop_data.get("iteration", 0),
                 latest_verdict=loop_data.get("latest_verdict", ""),
-                loop_id=loop_data.get("loop_id", secrets.token_hex(2)),
+                loop_id=loop_id,
                 input_required=loop_data.get("input_required", False),
                 _transcript_dir=loop_data.get("_transcript_dir"),
                 retry_iteration=loop_data.get("retry_iteration", 0) or 0,
@@ -444,6 +465,27 @@ async def consume_breadcrumb(app) -> None:
                     output="",  # not stored in breadcrumb
                     timestamp=h.get("timestamp", ""),
                 ))
+            # JSON object keys are strings; iteration_sessions is keyed by
+            # the integer iteration number.  A malformed value must not abort
+            # the restore of the remaining loops and auto-start state.
+            recorded_sessions = loop_data.get("iteration_sessions")
+            if not isinstance(recorded_sessions, dict):
+                recorded_sessions = {}
+            for k, sid in recorded_sessions.items():
+                try:
+                    iteration = int(k)
+                except (TypeError, ValueError):
+                    _log.debug("consume_breadcrumb: bad iteration_sessions "
+                               "key %r for %s", k, pr_id)
+                    continue
+                # Only a real session id is usable: completion passes it as
+                # the ownership check, and a falsy value would silently
+                # disable that check on the shared legacy transcript name.
+                if not isinstance(sid, str) or not sid:
+                    _log.debug("consume_breadcrumb: bad iteration_sessions "
+                               "value %r for %s", sid, pr_id)
+                    continue
+                rstate.iteration_sessions[iteration] = sid
             app._review_loops[pr_id] = rstate
         _log.info("consume_breadcrumb: restored %d review loop state(s)", len(review_loops_data))
 
@@ -559,15 +601,96 @@ def _adopt_live_qa(app) -> None:
         _log.warning("auto_start: QA adoption scan failed", exc_info=True)
 
 
+def _live_transcript_owners(app) -> tuple[set[str], set[str]]:
+    """Transcript names/prefixes whose session may still be writing.
+
+    Returns ``(exact_names, prefixes)``.  A running review loop owns every
+    ``review-<pr>-<loop_id>-i*`` path; a running watcher loop owns its
+    ``<watcher-type>-i*`` paths; a live impl/review/sign-off/merge tmux
+    window owns the canonical path of that step.
+    """
+    exact: set[str] = set()
+    prefixes: set[str] = set()
+    # Snapshot: this also runs from a watcher's completion callback (a
+    # background thread) while the TUI thread adds/removes loops, and
+    # iterating a dict being resized raises RuntimeError.
+    loops = list((getattr(app, "_review_loops", None) or {}).items())
+    for pr_id, state in loops:
+        if getattr(state, "running", False):
+            prefixes.add(f"review-{pr_id}-{getattr(state, 'loop_id', '')}-i")
+            # A loop restored from a pre-upgrade breadcrumb adopts its
+            # in-flight iteration under the legacy shared name
+            # ``review-<pr>-i<N>.jsonl`` (see
+            # ``review_loop.resolve_iteration_transcript``).  Freezing
+            # that while the loop still polls would hide the verdict it
+            # appends later, so the legacy prefix counts as live for the
+            # whole run of a running loop.  Loop-scoped names can never
+            # match it: the loop id is hex, so it never starts with "i".
+            prefixes.add(f"review-{pr_id}-i")
+    manager = getattr(app, "_watcher_manager", None)
+    if manager is not None:
+        try:
+            for info in manager.list_watchers():
+                if info.get("running") and info.get("type"):
+                    prefixes.add(f"{info['type']}-i")
+        except Exception:
+            _log.debug("auto_start: list_watchers failed", exc_info=True)
+    # ``_app_session``, not the raw attribute: a stub app's ``_session_name``
+    # may be a non-string (see its docstring), which must not reach tmux.
+    session = _app_session(app)
+    prs = list((getattr(app, "_data", None) or {}).get("prs") or [])
+    if session:
+        from pm_core import tmux as tmux_mod
+        try:
+            windows = {w["name"] for w in tmux_mod.list_windows(session)}
+        except Exception:
+            _log.debug("auto_start: list_windows failed", exc_info=True)
+            windows = set()
+        for pr in prs:
+            pr_id = pr.get("id")
+            if not pr_id:
+                continue
+            names = _window_names(pr)
+            for window, name in (
+                (names["implementation"], f"impl-{pr_id}.jsonl"),
+                (names["review"], f"review-{pr_id}.jsonl"),
+                (names["sign_off"], f"signoff-{pr_id}.jsonl"),
+                (names["merge"], f"merge-{pr_id}.jsonl"),
+            ):
+                if window in windows:
+                    exact.add(name)
+    return exact, prefixes
+
+
+def _live_transcript_skip(app):
+    """Predicate: True when a transcript's session may still be writing.
+
+    Passed to :func:`pm_core.claude_launcher.finalize_transcript_dir` so a
+    bulk finalize never freezes a collector that is still polling
+    (pr-9ee4d64).
+    """
+    exact, prefixes = _live_transcript_owners(app)
+
+    def _live(name: str) -> bool:
+        return name in exact or any(name.startswith(p) for p in prefixes)
+
+    return _live
+
+
 def _finalize_all_transcripts(app) -> None:
-    """Finalize all transcript symlinks in the current run directory."""
+    """Finalize transcript symlinks in the current run directory.
+
+    Skips transcripts whose session is still live — a running review loop,
+    a running watcher loop, or an existing step window.  Freezing a live
+    collector would hide the verdict the session appends later
+    (pr-9ee4d64).  Symlinks already in the run archive are finalized too,
+    so superseded attempts survive Claude transcript pruning.
+    """
     tdir = get_transcript_dir(app)
     if not tdir or not tdir.is_dir():
         return
-    from pm_core.claude_launcher import finalize_transcript
-    for p in tdir.iterdir():
-        if p.is_symlink() and p.suffix == ".jsonl":
-            finalize_transcript(p)
+    from pm_core.claude_launcher import finalize_transcript_dir
+    finalize_transcript_dir(tdir, skip=_live_transcript_skip(app))
 
 
 def _disable(app) -> None:

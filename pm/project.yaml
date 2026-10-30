@@ -37650,7 +37650,7 @@ prs:
   title: 'Bug: auto-start run transcripts overwrite pre-return impl/sign-off/review
     transcripts after a sign-off return'
   branch: pm/pr-9ee4d64-bug-auto-start-run-transcripts-overwrite-pre-retur
-  status: pending
+  status: in_progress
   depends_on: []
   description: 'pm/transcripts/<autostart-run>/ keeps one file per (step, pr): impl-<pr>.jsonl,
     signoff-<pr>.jsonl, review-<pr>-i1.jsonl. When sign-off routes a PR back (SIGNOFF_IMPL/REVIEW)
@@ -37661,16 +37661,599 @@ prs:
     (QA pr-ac10f03 S15, 2026-10-22): two overlapping PRs, B returned SIGNOFF_IMPL
     at 03:39:55; after B merged, pm/transcripts/autostart-*/signoff-<B>.jsonl and
     impl-<B>.jsonl hold only the post-return sessions. Suggest suffixing by return
-    round (e.g. signoff-<pr>-r2.jsonl) or by session id.'
-  agent_machine: null
-  gh_pr: null
-  gh_pr_number: null
+    round (e.g. signoff-<pr>-r2.jsonl) or by session id.
+
+
+    2026-10-28 live collector failure: #241 old review completion finalized the shared
+    review-i1 transcript path before checking current loop ownership. A newer loop
+    (8101 i1) had reused the path; the obsolete callback froze its live symlink into
+    an early copy, so the collector saw no verdict even though the canonical newer
+    SID finished with its own NEEDS_WORK. Recovery preserved both and restored the
+    exact link before collecting the original reviewer outcome. Evidence: /home/matt/.local/state/pm-pr-shepherd/241-review-8101-i1-transcript-recovery.json
+    and check-20261028T122913Z/241-transcript-link-preservation. #248 S11 also exposed
+    loss of the earlier session_id from overwrite.
+
+
+    Extend acceptance to immutable per-attempt/loop/session archives and ownership-checked
+    finalization: superseded callbacks cannot freeze, replace, unlink or redirect
+    a current attempt''s live collector transcript. Keep both complete original sessions
+    across multiple sign-off returns, iteration resets, restart and late completion.
+    Current collectors must see later appended verdicts; never invent a verdict or
+    delete history. User authorized this PR to start2026-10-28 alongside the earlier
+    integration gate.'
+  agent_machine: spark-424d
+  gh_pr: https://github.com/mjtomei/project_manager/pull/275
+  gh_pr_number: 275
   created_at: '2026-10-22T03:54:03.261607+00:00'
-  updated_at: '2026-10-22T03:54:03.261607+00:00'
+  updated_at: '2026-10-29T10:17:55.917093+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-31dcb1a
+    text: 'Fix (2026-10-28): (1) build_claude_shell_cmd now archives the outgoing
+      transcript to <run>/archive/<stem>.<sid>.jsonl before reusing a canonical path,
+      so pre-return impl/signoff/review/merge sessions survive; (2) finalize_transcript(path,
+      session_id=...) is ownership-checked (sid mismatch or a link redirected mid-finalize
+      is left live) and writes a sid-keyed archive copy; (3) review-loop iteration
+      transcripts are loop-scoped: review-<pr>-<loop_id>-i<N>.jsonl, so a REVIEW return
+      that restarts at i1 and an obsolete loop callback cannot collide/freeze; (4)
+      retire_signoff_run archives instead of deleting; (5) bulk finalize skips live
+      loops/windows and finalizes archive/ links. Legacy review-<pr>-i<N>.jsonl still
+      resolves for pre-upgrade restart adoption. Tests: tests/test_transcript_archive.py
+      (15). Captures: impl/pre-fix and impl/post-fix transcript-archive (all three
+      symptoms reproduce pre-fix).'
+    created_at: '2026-10-28T14:17:46Z'
+    last_edited: '2026-10-28T14:17:46Z'
+  - id: note-eca2da0
+    text: 'Review-loop i1 (94dc): closed a spec-R2 gap — the TUI auto-start watcher
+      shares the run dir with auto-start review loops, so watcher completion (and
+      `_disable`, which finalizes before stopping the watcher) could freeze a loop
+      still polling. Both sweeps now go through `finalize_transcript_dir(dir, skip=...)`
+      with `auto_start._live_transcript_skip(app)`, which also treats running watcher
+      loops as live and reuses `autostart_state._window_names` instead of duplicating
+      window names. Also: `session_id_from_transcript` now reuses `_session_id_of_path`;
+      the archive-failure fallback unlinks with missing_ok. Tests 18 (archive) + 1
+      (review_loop): fixed `test_disable_skips_a_running_review_loop` which wrote
+      into a directory the sweep never visited (vacuously passing), added watcher-completion,
+      running-watcher and step-window coverage, and a loop-scoped-launch/session-recording
+      test.'
+    created_at: '2026-10-28T14:46:27Z'
+    last_edited: '2026-10-28T14:46:27Z'
+  - id: note-88872cd
+    text: 'Review-loop 8602 i2: `_live_transcript_owners` now snapshots `app._review_loops`/`app._data`
+      before iterating. The watcher-completion sweep calls it from a background thread
+      while the TUI thread adds/removes loops; a dict resize during iteration raises
+      RuntimeError (caught by on_complete, so it would silently skip finalization).
+      Spec pm/specs/pr-9ee4d64/impl.md updated: test counts (20 archive + 1 review_loop),
+      the 94dc/8602 hardening list, and two accepted limitations — step windows are
+      treated as live for the whole sweep (final session whose path is never reused
+      stays a symlink until Claude prunes it), and `_finalize_merge` passes no session
+      id (archive copy is still written first). Verified: all 20 archive tests fail
+      on pre-fix 3699f71a; affected suites 280 passed; full suite failures identical
+      to master (32F/36E, env-only). Captures impl/{pre,post}-fix show all three symptoms.'
+    created_at: '2026-10-28T16:01:49Z'
+    last_edited: '2026-10-28T16:01:49Z'
+  - id: note-907a024
+    text: 'Review-loop 8602 i3: closed the legacy-adoption hole in R2/R4. A loop restored
+      from a pre-upgrade breadcrumb polls the legacy `review-<pr>-i<N>.jsonl` name,
+      which the loop-scoped prefix did not cover: (a) `_live_transcript_owners` now
+      also marks `review-<pr>-i` live for a running loop, so a disable or watcher-completion
+      sweep cannot freeze the iteration it is still polling (the exact bug class this
+      PR fixes); (b) loop completion now finalizes that legacy path for each iteration
+      with a recorded session id (ownership-checked), so an adopted legacy iteration
+      is frozen and archived instead of lingering as a symlink. Both new tests (22
+      archive tests now) fail on the pre-fix code for the right reason. Also hoisted
+      the `session_id_from_transcript` import out of the iteration loop. Spec pm/specs/pr-9ee4d64/impl.md
+      updated (22 archive tests, legacy coverage, one new accepted limitation: a running
+      loop keeps legacy iteration links live for its whole run). Verified: 515 passed
+      across the affected suites; full suite 55F/36E, identical names to master (4014
+      passed = master 3991 + 23 new).'
+    created_at: '2026-10-28T16:30:40Z'
+    last_edited: '2026-10-28T16:30:40Z'
+  - id: note-515bb39
+    text: 'Review-loop 8602 i4: (a) `iteration_sessions` now round-trips through the
+      TUI breadcrumb (`save_breadcrumb`/`consume_breadcrumb`, JSON keys stringified
+      then restored as ints), so a resumed loop still finalizes each iteration with
+      its ownership check and an iteration adopted under the legacy `review-<pr>-i<N>`
+      name before a restart is still frozen/archived — the i3 guarantees no longer
+      stop at a restart. (b) The no-hardlink archive fallback creates the entry exclusively
+      (`open(dest,"xb")`) and only removes a partial copy of its own making; `shutil.copy2`
+      could overwrite a concurrent immutable entry. A `copystat` failure no longer
+      discards a complete content copy. (c) `finalize_transcript` freezes via a unique
+      temp copy + `os.replace` instead of `unlink`+`copy2`: a failed copy leaves the
+      live link in place, and readers never see a missing/truncated canonical. (d)
+      Shared `_transcript_stem`/`transcript_archive_dir` instead of re-deriving the
+      stem/archive dir in four places. Tests: 26 archive (4 new — incl. R4 "two sign-off
+      returns keep both pre-return sessions") + 1 review_loop + breadcrumb round-trip;
+      6 archive tests fail behaviourally on pre-fix 3699f71a. Verified: 432 passed
+      across affected suites; full suite 43F/36E with the same failure names as master
+      (4030 passed = master 4003 + 27 new). Commit 8b4ef4b8.'
+    created_at: '2026-10-28T17:19:29Z'
+    last_edited: '2026-10-28T17:19:29Z'
+  - id: note-d5fae70
+    text: 'Review-loop 8602 i5: (a) pinned the `resolve_iteration_transcript` precedence
+      with two tests — the loop-scoped path wins when both names exist (a resumed
+      post-upgrade loop must never poll an older loop''s legacy transcript), and a
+      *dangling* loop-scoped link (the launch creates the link before Claude writes
+      the native JSONL) is the current attempt''s transcript, not a reason to fall
+      back to legacy. (b) `consume_breadcrumb` now ignores a non-object `iteration_sessions`
+      value instead of raising AttributeError out of the async restore, which would
+      have abandoned the remaining loops and the auto-start state; a new test pins
+      it (fails without the guard). Spec updated (28 archive tests, i5 hardening note).
+      Verified: 188 focused tests pass (archive/review_loop/breadcrumb/watcher_loop/auto_start_qa);
+      full suite 55F/36E with failure names identical to master (markdown, signoff-integration,
+      merge-publish, sync-integrity, git — all env-only; the markdown 12 appear/disappear
+      with the dep, which explains the 43F in the i4 note). Captures re-verified:
+      pre-fix repro reproduces all three symptoms (A lost session, B frozen live link,
+      C shared i1 path) on a worktree at 3699f71a; post-fix repro reports all three
+      fixed. Commit 95867725.'
+    created_at: '2026-10-28T17:46:28Z'
+    last_edited: '2026-10-28T17:46:28Z'
+  - id: note-1fda63c
+    text: 'QA scenario 3 (ownership-checked finalization under concurrent loops) PASS:
+      verified end-to-end with two overlapping review loops on one PR plus a stale
+      pre-upgrade legacy review-<pr>-i1 link. Loop-scoped iteration paths, sid ownership
+      checks, freeze+archive of a superseded loop, untouched live link of the current
+      loop, and the legacy link left live all behaved as specified (captures /pm-captures/scenarios/3/).
+      Incidental, pre-existing on master 89e3c501, filed as pr-bac971d: pressing zz
+      d again within ~2s of a loop starting makes the superseded loop adopt the new
+      loop window pane (it re-finds the pane by window name after a 2s sleep), so
+      it does not complete until that window closes and its transcript stays an unfinalized
+      symlink meanwhile. A restart >=2s after start (the scenario window) behaves
+      correctly.'
+    created_at: '2026-10-28T19:36:35Z'
+    last_edited: '2026-10-28T19:36:35Z'
+  - id: note-40f0957
+    text: 'QA S5 (2026-10-28) — PASS on all four stories (breadcrumb resume, in-flight
+      adoption, ownership-checked finalization across restart, malformed-breadcrumb
+      resilience, legacy review-<pr>-i<N> adoption). Evidence: /pm-captures/scenarios/5/{tui,cli}/.
+      Notable: (a) a plain `pm tui restart` (no --breadcrumb) does NOT consume a hand-written
+      ~/.pm/autostart-resume.json only — it is consumed exactly as written, and the
+      TUI writes no breadcrumb of its own without the merge-restart marker, so the
+      hand-written file is what the new TUI reads; (b) malformed `"iteration_sessions":
+      "truncated"` is ignored cleanly (i5 guard) and the loop still adopts + completes;
+      (c) a legacy-named review-<pr>-i<N>.jsonl with `iteration_sessions: {}` is adopted,
+      frozen to a regular file and archived under the SID derived from the link target
+      (sha256-identical). Local-backend setup gotcha: `pm push` only commits a pm/sync-*
+      branch; `git merge --ff-only <branch>` is needed before `pm autostart add`,
+      else pr start fails with "not committed on master yet". Incidental bug found
+      and filed separately: pr-9966785 (SIGNOFF_IMPL return leaves auto-start idle
+      up to 5 min — the TUI keeps a stale signoff_return.awaiting after the rework
+      launch because _relaunch_impl runs after the step() reload).'
+    created_at: '2026-10-28T19:49:53Z'
+    last_edited: '2026-10-28T19:49:53Z'
+  - id: note-eea7a2e
+    text: 'QA S6 (two returns + two PRs in one run dir; two PRs at different steps;
+      a return relaunches only the returned PR) — the fix holds on all three. Story
+      1: two returns keep both pre-return impl sids (9606268e, c523fa7f) and both
+      SIGNOFF_IMPL routers (grep count 2), final rework is a distinct third sid, two
+      loop-scoped review files coexist, A/B sid sets disjoint, both merged, no merge-*.jsonl,
+      no error lines. Story 2: A sign_off vs B in_review simultaneously with per-(step,PR)
+      names and unique live sids. Story 3: X returned (new impl sid, pre-return archived,
+      router archived with SIGNOFF_IMPL, head gone) while Ys signoff link/head/stat
+      were byte-identical and Y stayed sign_off; return line matched X once, Y zero.
+
+
+      CONFLICT (why this run is INPUT_REQUIRED, not PASS): the scenario THEN asks
+      for exactly two impl-A/signoff-A archive entries and `readlink impl-A` naming
+      the third sid, measured after both merge. But the last target merging turns
+      auto-start OFF -> _disable -> _finalize_all_transcripts, which per impl.md R1/R2
+      freezes every canonical symlink and writes a sid-keyed archive copy first. End
+      state therefore has 3 impl-A / 3 signoff-A archive entries and `readlink` on
+      the canonical returns nothing. Both bullets hold only at the post-return checkpoint
+      (measured there: exactly 2/2 and readlink -> 114830c6). The extra archived final
+      session is the same class as pr-bab46cf (unbounded archive growth); the freeze
+      is spec-required, so I did not change it.
+
+
+      Observation (pre-existing, present on master, not filed to avoid touching project.yaml
+      during sign-off): after a sign-off IMPL return the review loop logs "impl_idle:
+      awaiting sign-off rework launch" for ~3-4 min until RETURN_LAUNCH_CLAIM_SECONDS
+      (180s) expires, then relaunches review. The CLI cleared signoff_return.awaiting
+      on disk at launch, but the TUI in-memory copy stayed stale (no reload after
+      the hop''s `pm pr start`), so each return costs ~3 min. Already filed by the
+      S5 run as pr-9966785 (same root cause: stale signoff_return.awaiting after the
+      rework launch); this run is a second reproduction.
+
+
+      Env: start `pm session` and the driving pane with /usr/bin ahead of ~/.local/bin
+      (the push-proxy git wrapper forwards local `git fetch <project-dir>` to a host
+      workdir, so the integration check records error/base_sha null and SIGNOFF_MERGE
+      is coerced to BLOCKED). Captures: /pm-captures/scenarios/6/{story1,story2,story3}/
+      (cast+mp4+transcripts+manifest).'
+    created_at: '2026-10-28T20:21:27Z'
+    last_edited: '2026-10-28T20:21:27Z'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
+  - id: note-65e6253
+    text: 'IMPLEMENTATION RESTART / MASTER INTEGRATION (2026-10-28): merged origin/master
+      4a74d880 into this branch as f0b83337 (no force-push, no master rewrite). Conflicts
+      resolved in pm_core/review_loop.py, pm_core/tui/auto_start.py and pm/project.yaml
+      (union of both PR registries; kept the base-synced status/note/signoff-model).
+      Master''s launch-retry/discovery refactor is combined with loop-scoped naming:
+      _run_iteration_with_retry, _discover_iteration, _wait_for_follow_up_verdict
+      and the adoption branch of run_review_loop_sync all resolve through resolve_iteration_transcript
+      (loop-scoped, legacy fallback); _is_historical_session also scans loop-scoped
+      names; ReviewLoopState and the TUI breadcrumb carry both the retry-episode fields
+      and iteration_sessions. One test fake updated for the new _run_claude_review
+      signature. Tests: 4515 passed / 1 skipped full suite; the only 2 failures (test_push_proxy)
+      pass in isolation and on master (load-related push-proxy daemon startup, env-only).
+      28 archive + review_loop/breadcrumb/signoff/launcher suites green (653 focused).
+      Earlier QA/verdict evidence preserved; prior holds released by the user. Ready
+      for native review then QA re-evaluation after integration.'
+    created_at: '2026-10-29T01:57:13Z'
+    last_edited: '2026-10-29T01:57:13Z'
+  - id: note-93cbd22
+    text: 'Review-loop d468 i1 (2026-10-29): no behavioural change to the fix. (a)
+      `_live_transcript_owners` now resolves the tmux session through `auto_start._app_session`
+      instead of the raw `_session_name` — a stub app attribute may be a non-string
+      and must not reach `tmux list-windows` from inside a bulk finalize; new test
+      `test_live_owners_ignore_a_stub_app_session` fails without it. (b) impl.md corrected
+      where it had drifted from the code: archive-on-replace is no-clobber create
+      + unlink, NOT an atomic `rename` (implicit requirement 1, the design and edge-case
+      bullets now say so with the failure/recoverability semantics), the non-UUID-symlink
+      archive key (`<stem>.<random-12-hex>.jsonl`) is documented, the container bullet
+      names `cwd` not `write_dir`, and the test count is 29. (c) Cross-PR note left
+      on pr-22ea6a2: its superseded-loop hunk ("do not finalize the transcripts either")
+      was written for shared `review-<pr>-i<n>.jsonl` names; with loop-scoped names
+      + the session-id ownership check, finalizing the superseded loop own paths is
+      safe, so that merge must keep this PR finalize block ahead of the early return.
+      Verified: 642 passed across affected suites; full suite 4518 passed / 1 skipped
+      (6m13s); pre/post-fix captures re-checked (repro.py: all three symptoms pre-fix,
+      all three fixed post-fix). Review observations for QA, not code defects: (1)
+      QA S6 INPUT_REQUIRED is a scenario-text conflict, not a code bug — the committed
+      qa.md R7 asks that superseded attempts be archived and entries never overwritten,
+      which the end state satisfies (3 impl-A / 3 signoff-A entries, canonical frozen
+      by the spec-required disable sweep); the "exactly two entries + readlink names
+      the third sid" expectation only holds at the post-return checkpoint, so the
+      scenario Then should be measured there. (2) qa.md R2 calls the launch stamp
+      `signoff-<pr>.jsonl.head`; the code (`signoff_launch_stamp`) writes `signoff-<pr>.head`.
+      (3) Known limitation unchanged: a live step window makes its canonical transcript
+      skipped for the whole sweep, so the final impl/signoff session of a run can
+      stay a symlink until Claude prunes it; unbounded archive growth is already filed
+      as pr-bab46cf. (2026-10-29T02:35:00Z)'
+    created_at: '2026-10-29T02:27:13Z'
+    last_edited: '2026-10-29T02:27:13Z'
+  - id: note-4a12120
+    text: 'Review-loop d468 i2 (2026-10-29): one behavioural fix + dedup + doc corrections.
+      (a) `review_loop.resolve_iteration_transcript` now falls back to the legacy
+      `review-<pr>-i<N>.jsonl` only while that path is a *symlink*. A frozen (regular-file)
+      legacy transcript is a completed iteration of an earlier loop — loop completion
+      and the bulk sweeps both freeze it — so the old `exists() or is_symlink()` fallback
+      handed every later fresh loop (e.g. the loop a REVIEW return starts) the shared
+      legacy name: the cross-loop collision this PR removes would reappear and the
+      legacy name became sticky for that iteration. Adopted pre-upgrade *links* still
+      resolve (adoption only ever applies to a live iteration). Tests: `test_resolve_iteration_transcript_falls_back_to_a_legacy_link`,
+      `..._ignores_a_frozen_legacy_file`, and `test_a_fresh_loop_does_not_reuse_a_finalized_legacy_iteration`
+      (end to end through `_on_complete_from_thread`). (b) `claude_launcher._copy_atomic`
+      — the unique-temp + `os.replace` copy that `finalize_transcript` and `_freeze_archive_copy`
+      each hand-rolled is now one helper (same semantics, same unique temp name per
+      call). (c) qa.md R2 named the launch stamp `signoff-<pr>.jsonl.head`; the code
+      (`signoff_launch_stamp`) writes `signoff-<pr>.head` — corrected so QA does not
+      fail a scenario for the wrong reason. impl.md updated: the resolve rule (design
+      + ambiguity 5), the d468-i2 hardening bullet, 31 archive tests. Verified: full
+      suite 4520 passed / 1 skipped (6m18s, markdown dep installed); 484 passed across
+      archive/review_loop/breadcrumb/signoff/launcher/auto-start/watcher suites; post-fix
+      repro still reports all three symptoms fixed, pre-fix cast still shows all three.
+      Carried over for QA, unchanged: S6 INPUT_REQUIRED is a scenario-text conflict
+      (the "exactly two entries + readlink" bullet only holds at the post-return checkpoint;
+      the disable sweep is spec-required); accepted limitation that a live step window
+      leaves that step canonical a link until the next launch reuses the path.'
+    created_at: '2026-10-29T02:59:08Z'
+    last_edited: '2026-10-29T02:59:08Z'
+  - id: note-a7abf81
+    text: 'Review-loop d468 i3 (2026-10-29): four behavioural/robustness fixes on
+      top of i2, plus one spec clarification. (a) `resolve_iteration_transcript(...,
+      allow_legacy=...)`: the legacy `review-<pr>-i<N>.jsonl` fallback is now restricted
+      to a loop *resuming* an iteration that was already in flight (`run_review_loop_sync`
+      derives the flag from its `adopt` decision). Before, a fresh loop (a REVIEW
+      return restarting at iteration 1) could resolve to another loop''s still-live
+      legacy link and launch over it — the cross-loop collision R1 exists to prevent.
+      `_run_iteration_with_retry` forwards the flag to `_discover_iteration`; discovery
+      and launch MUST name the same path, otherwise a launch under the loop-scoped
+      name is rediscovered through the legacy link and its stale verdict adopted as
+      this iteration''s (caught by test_review_launch_retry while developing this).
+      (b) `finalize_transcript` now re-checks the link *after* the freeze copy: `_copy_atomic(...,
+      guard=...)` runs the readlink check between `shutil.copy2` and `os.replace`,
+      so a redirect landing during a long copy is caught — previously the whole copy
+      window was unguarded (the #241 class). Remaining window is the single `os.replace`;
+      documented as a limitation. (c) `_archive_name`''s non-session-named fallback
+      key is deterministic (`sha256(<absolute link target>)[:12]`) instead of random,
+      so re-archiving the same attempt reuses its entry and `_freeze_archive_copy`/`archive_transcript`
+      agree on the name (implicit requirement 2: no duplicate entries). (d) `save_breadcrumb`
+      copies `iteration_sessions` before serialising and `review_loop_ui._on_complete_from_thread`
+      snapshots it and guards its `iterdir()`: the loop thread records a new iteration''s
+      session concurrently, and a dict resize or a vanished run dir must not abort
+      the breadcrumb write or the completion terminal mirror. Docs: `finalize_transcript`''s
+      ownership bullet now says a target with no session id cannot be compared (frozen
+      as usual), and `build_claude_shell_cmd`''s failed-archive comment states the
+      real R9 trade-off (a frozen regular file is the one copy a launch may drop;
+      a symlink only loses its link). `qa.md` R7 now states archive entry counts are
+      a *minimum* (the run-end disable sweep freezes the final canonical too: two
+      returns end with three impl/signoff entries and no canonical link) — that ambiguity,
+      not a code defect, is what produced the QA S6 INPUT_REQUIRED; the "exactly two
+      entries + readlink names the live attempt" reading only holds at the post-return
+      checkpoint. Tests: 34 archive tests (+2: a redirect landing *during* the freeze
+      copy, and a fresh loop never launching over a live legacy link; the non-session-link
+      test now also asserts the deterministic key); `test_review_launch_retry`''s
+      fake links the path it was given instead of a hardcoded legacy name, and the
+      stale-session-guard test now runs from a resumed loop so it still exercises
+      the guard. Verified: full suite (see next note), 589 passed across the affected
+      suites, post-fix repro still reports all three symptoms fixed.'
+    created_at: '2026-10-29T03:24:38Z'
+    last_edited: '2026-10-29T03:24:38Z'
+  - id: note-a621057
+    text: 'Review-loop d468 i4 (2026-10-29): two ownership-guarantee hardenings; the
+      archive/finalize behaviour is unchanged. (a) ReviewLoopState.loop_id is now
+      8 hex chars (secrets.token_hex(4)) instead of 4. The loop id is the ownership
+      identity in every loop-scoped iteration filename, and the loops it must separate
+      are deliberately concurrent (a REVIEW return starts a new loop while the superseded
+      one winds down), so 4 hex chars (65536 values) left the "a new loop never shares
+      a path" guarantee resting on a ~1/65536 collision — the exact cross-loop freeze
+      this PR removes. Old breadcrumbs keep their 4-char ids (the value is opaque
+      everywhere: leases, --review-loop-id, the commit prefix). (b) Loop completion
+      now finalizes a legacy review-<pr>-i<N>.jsonl only when a session id is recorded
+      for that iteration; with no id the ownership check cannot run and the legacy
+      name is shared with other loops, so it is left live. consume_breadcrumb also
+      drops a non-string/empty iteration_sessions value so a hand-edited breadcrumb
+      cannot silently disable the check. Docs: impl.md hardening bullets + test counts
+      (35 archive tests); qa.md''s "frozen canonical archived by rename" bullet corrected
+      to the real no-clobber-move semantics (impl.md was already corrected in i1).
+      Tests: 35 archive (1 new: a legacy link with no recorded sid stays live — fails
+      without the guard) + the breadcrumb consume test extended with None/list values
+      + review_loop loop-id length assertions. Verified: 638 focused tests; full suite
+      4524 passed / 1 skipped (6m28s, no failures). Post-fix repro still reports all
+      three symptoms fixed; the pre-fix capture still shows all three.'
+    created_at: '2026-10-29T04:14:09Z'
+    last_edited: '2026-10-29T04:14:09Z'
+  - id: note-7d63b3b
+    text: 'Review-loop d468 i5 (2026-10-29): one hardening; the archive/finalize behaviour
+      is unchanged. `consume_breadcrumb` now regenerates a restored loop loop_id when
+      the breadcrumb value is missing, blank or not a string, instead of falling back
+      to `secrets.token_hex(2)` (the 4-hex width the i4 entropy widening retired)
+      or keeping a wrong-typed value that would flow into every loop-scoped iteration
+      filename. A valid id is preserved verbatim (a resumed loop must reproduce its
+      loop-scoped path); a regenerated one still adopts a legacy in-flight iteration
+      through `resolve_iteration_transcript` legacy fallback. Tests: `tests/test_breadcrumb_review_loop.py`
+      +5 (parametrized regeneration over missing/blank/None/int, plus valid-id-preserved);
+      the four regeneration cases fail on the pre-fix restore path (verified in a
+      HEAD worktree). Spec `pm/specs/pr-9ee4d64/impl.md` updated (i5 bullet, verification
+      note). Verified: 593 passed across the affected suites; full suite 4528 passed
+      / 1 skipped with a single failure (`test_hook_events.py::test_installer_writes_standalone_receiver`)
+      that fails identically on master 4a74d880 — env-only, unrelated. Pre/post-fix
+      captures unchanged and re-run (post-fix repro reports all three symptoms fixed).'
+    created_at: '2026-10-29T04:39:59Z'
+    last_edited: '2026-10-29T04:39:59Z'
+  - id: note-68214b0
+    text: 'QA S9 (2026-10-29) PASS, all three stories, on integrated HEAD eb02bbbe
+      in a scenario-private env (own HOME/TMUX_TMPDIR, fake-Claude). One auto-start
+      run (autostart-pr-a711a5b-1efab848): impl ca8d118f -> review f6357633 -> SIGNOFF_IMPL
+      router dec2138f -> return 05:32:18 (archive impl ca8d118f, rework 96946ea7,
+      canonical signoff-*.jsonl+.head removed) -> rework -> review 5d2a2806 -> SIGNOFF_MERGE
+      router 514c04e3 -> merged 05:34:18, auto-start OFF. End state: impl/signoff
+      canonicals frozen to regular files, 2 impl + 2 review + 2 signoff archive entries
+      (one per sid), canonical signoff holds SIGNOFF_MERGE only, exactly one "routed
+      SIGNOFF_IMPL", 10 jsonl files all valid, no merge-*.jsonl, 0 ERROR lines. Tests:
+      35/35 pass at HEAD, 35/35 fail at 3699f71a. Story-3 text drift (not a code defect):
+      the scenario lists test_disable_skips_a_running_review_loop among the "behavioural,
+      no missing-symbol" pre-fix failures, but at this HEAD it fails pre-fix with
+      AttributeError (pm_core.review_loop has no iteration_transcript); the actual
+      assertion failures are 8 other tests (see /pm-captures/scenarios/9/tests/manifest.md).
+      Also, pr-9966785 did NOT reproduce: review loop 2 started 5s after rework idle,
+      no "impl_idle" line. Captures: /pm-captures/scenarios/9/{story12,verify,tests}/.'
+    created_at: '2026-10-29T05:54:41Z'
+    last_edited: '2026-10-29T05:54:41Z'
+  - id: note-51b895e
+    text: 'QA S11 (2026-10-29) PASS on all three stories. Evidence: /pm-captures/scenarios/11/{story1,story2,story3}/
+      (cast + mp4 + steps.log + pane captures). (1) A mid-session "pm tui restart
+      --breadcrumb" adopted the in-flight iteration on the same loop-scoped transcript:
+      same pane %9, exactly one "transcript: symlink" line for the path, canonical
+      still a symlink to sidA with no archive copy before the verdict, then the delayed
+      PASS froze it with one sha-identical archive/review-pr-d77afad-902353d9-i1.<sidA>.jsonl.
+      (2) After killing the review window and restarting in the same command, the
+      resumed loop found no live pane, re-ran iteration 1 on the same path, logged
+      "transcript: archived ...i1.<sidA>.jsonl" (dead content, 0 PASS) and then symlinked
+      the path to sidB; the delayed PASS produced a second, distinct archive entry
+      for sidB — the dead entry was not overwritten. (3) Supersede (loop A 4389dc6f
+      -> loop B 0642073d): loop A completed verdict=KILLED 14 s after the supersede
+      and froze only its own canonical (+ a sha-identical archive entry) while loop
+      B''s canonical stayed a live symlink to its own session with zero archive entries;
+      loop B then PASSed and froze with its own entry. Final run dir: four regular
+      files, valid JSONL, no duplicate names, no symlinks, no legacy review-<pr>-i1.jsonl.
+      Scenario-text drift for qa.md (not code defects): (a) the resume line is "Review
+      loop resumed for <PR> at iteration 1" with no loop=<id> suffix; (b) a superseding
+      fresh loop logs "Fresh review loop started for <PR> loop=<id>" — the plain "Review
+      loop started for ..." form is only the first loop; (c) a superseded loop deliberately
+      skips the completion mirror, so its KILLED end appears as "review_loop_ui: loop
+      complete for <PR> — verdict=KILLED iterations=1" and never as the TUI "Review
+      loop done for <PR>: KILLED" line — measure the KILLED Then on the "loop complete
+      ... verdict=KILLED" line instead. Observation, documented design, not filed:
+      the archive entry written when a launch reuses a still-live canonical path is
+      a symlink to the native JSONL (archive_transcript moves the outgoing attempt,
+      symlink or finalized copy), so a dead attempt archived at launch time stays
+      a link until a bulk finalize (auto-start disable / TUI shutdown) freezes it.
+      Tests: tests/test_transcript_archive.py + tests/test_review_loop.py = 99 passed.
+      Env: private tmux socket (PM_TMUX_SOCKET), isolated local-backend project, /usr/bin
+      ahead of ~/.local/bin.'
+    created_at: '2026-10-29T06:52:59Z'
+    last_edited: '2026-10-29T06:52:59Z'
+  - id: note-d4cdbf7
+    text: 'QA scenario 12 (legacy rules on the integrated branch) PASS — 5/5 stories,
+      all driven through the TUI/CLI surfaces with per-story isolated HOME + tmux
+      socket: (1) crash-breadcrumb resume ADOPTS the in-flight legacy review-<pr>-i1.jsonl
+      (no Killed existing review window, no second symlink, poll names the legacy
+      path), then freezes it to a regular file with an sid-keyed archive copy and
+      leaves PR in_review; (2) a fresh loop never reuses a FROZEN legacy file — writes
+      loop-scoped i1(NEEDS_WORK)/i2(PASS), 2 iterations, frozen file byte-identical
+      (sha256sum -c); (3) a fresh loop never takes over another session LIVE legacy
+      link — "now belongs to session X (not Y); leaving it live", readlink unchanged,
+      both transcripts intact; (4) blank / missing / wrong-type(1234) breadcrumb loop
+      ids each regenerate an 8-hex id (bf0859ee, 5d29c059, 0f45997f) and still adopt
+      + finalize the legacy iteration, no traceback; (5) a valid loop_id 93dc is preserved
+      verbatim, polls its own review-<pr>-93dc-i1.jsonl, freezes + archives it, and
+      creates no legacy file. Captures /pm-captures/scenarios/12/story{1..5}/ (story2
+      and story4 have cast+mp4). Also green: tests/test_transcript_archive.py 35 passed,
+      breadcrumb+review_loop 117 passed.'
+    created_at: '2026-10-29T07:40:46Z'
+    last_edited: '2026-10-29T07:40:46Z'
+  - id: note-52bb468
+    text: 'QA scenario 12 capture follow-up (2026-10-29, after the first verdict was
+      flagged): the three story captures that shipped only manifest+tui-pane+evidence
+      now have the full tmux-screen-recording artifact set, and all five stories carry
+      a cli-recording capture. Provenance: stories 1, 3 and 5 were fully RE-EXECUTED
+      in fresh isolated HOME/tmux-socket envs with the recorder attached (and each
+      also has a separate CLI-driven run); stories 2 and 4 keep their original tmux
+      recordings (genuine executions, not replays) and gained a separate CLI-driven
+      re-execution. Results: story1 crash-breadcrumb resume adopts the in-flight legacy
+      review-<pr>-i1.jsonl (no Killed existing review window, no second symlink, poll
+      names the legacy path), freezes it with an sid-keyed archive copy, PR stays
+      in_review; story2 a fresh loop never reuses a FROZEN legacy file (loop B i1
+      NEEDS_WORK / i2 PASS, 2 iterations, sha256sum -c OK, polls name only loop-scoped
+      paths); story3 a fresh loop never takes over another session LIVE legacy link
+      ("now belongs to session X (not Y); leaving it live", readlink unchanged, old
+      verdict intact); story4 blank/missing/wrong-type 1234 loop ids regenerate to
+      fd0a4971 / e47a209b / b1421218 at the 8-hex width, each still adopting and finalizing
+      its legacy iteration, no consume_breadcrumb failed, no traceback; story5 valid
+      loop_id 93dc preserved verbatim, own loop-scoped path polled, frozen + archived,
+      no legacy file created. Artifacts per story: transcript.log + recording.cast
+      + recording.mp4 (tmux recipe, h264 3892x2284) and cli/recording.cast + cli/recording.mp4
+      (cli recipe); manifests rewritten to describe both. /pm-captures/scenarios/12/story{1..5}/.
+      Test servers torn down; no processes left.'
+    created_at: '2026-10-29T08:40:19Z'
+    last_edited: '2026-10-29T08:40:33Z'
+  - id: note-ab1f802
+    text: 'QA S14 PASS (2026-10-29): failed archive and pruned native transcript never
+      block the workflow. Story 1 (archive/ chmod 0555 before the first return): the
+      rework launch logs "transcript: archiving .../impl-<pr>.jsonl -> archive/...
+      failed: [Errno 13] Permission denied" then "could not archive ... before reuse;
+      replacing it", and still re-points the canonical at the new session; canonical
+      is a live symlink to the rework sid, the pre-return session stays readable at
+      its native path, archive/ stays empty, no traceback/FileExistsError, run advances
+      to the next review loop and a second router launch. Story 2 (archive writable
+      again): the outgoing rework session is archived as archive/impl-<pr>.<sid>.jsonl
+      (symlink to the same native JSONL, cmp identical), canonical moves to a third
+      sid, two distinct readable archive entries, no duplicates. Story 3 (dangling
+      canonical signoff-<pr>.jsonl, native pruned): launch archives the dangling link
+      to archive/signoff-<pr>.<gone-sid>.jsonl (itself dangling), re-points the canonical
+      at the new session, never reads the pruned SIGNOFF_MERGE as a verdict (routes
+      SIGNOFF_IMPL -> impl, Status in_progress, no coerced line), and the new session
+      is later archived with SIGNOFF_IMPL. tests/test_transcript_archive.py 35 passed.
+      Captures /pm-captures/scenarios/14/{story1,story2,story3}/. Note: pr-9966785
+      (stale signoff_return.awaiting after a rework launch) reproduced in all three
+      stories; one R reload cleared it each time — unrelated to this PR.'
+    created_at: '2026-10-29T09:09:41Z'
+    last_edited: '2026-10-29T09:09:41Z'
+  - id: note-43a743e
+    text: 'QA S15 (2026-10-29) PASS — SIGNOFF_REQA return archives its router and
+      does not replay its verdict. Captures: /pm-captures/scenarios/15/story1-2-reqa-merge/
+      (cast+mp4+transcript+evidence+manifest). Verified end to end: router #1 sid1
+      archived (archive/signoff-<pr>.<sid1>.jsonl, SIGNOFF_REQA), canonical+head gone
+      during re-QA, owed re-QA planning->concretize->scenario->verification->finalize
+      PASS returns the PR to sign_off, router #2 is a fresh sid2 (canonical+head recreated),
+      SIGNOFF_MERGE -> ready_to_merge, exactly one routed SIGNOFF_REQA (no replay),
+      manual merge -> auto-start OFF; final run dir has one archive entry per session,
+      no duplicates, all JSONL valid. FIXTURE PREREQUISITE for any REQA re-run scenario:
+      the fake qa_planning stand-in emits QA_PLAN text but never writes the QA spec
+      file, and the qa_loop spec gate (pre-existing on master) requires one, so the
+      owed re-QA otherwise stops at QA spec missing after planning (INPUT_REQUIRED).
+      A completed-QA fixture must supply pm/specs/<pr>/qa.md before the run; I added
+      it to the fixture. Not a product bug — no source change.'
+    created_at: '2026-10-29T09:36:42Z'
+    last_edited: '2026-10-29T09:36:42Z'
+  - id: note-580e6a1
+    text: 'QA scenario 16 (CLI drivers keep history; a CLI sweep respects a live TUI
+      loop) — PASS on all three stories. Evidence: /pm-captures/scenarios/16/{story1-auto-sequence,story2-watcher,story3-live-loop-sweep}/
+      (cast+mp4+manifest). Verified: (1) auto-sequence tick sequence reached sign_off
+      -> return with impl link re-pointed to a new rework sid, archive/impl-<pr>.<old-sid>.jsonl
+      holding the pre-return session, archive/signoff-<pr>.<sid>.jsonl holding SIGNOFF_IMPL,
+      canonical signoff + signoff-<pr>.head gone, both "transcript: archived" lines
+      logged, nothing else removed/truncated; (2) pm watcher --max-iterations 2 --wait
+      0 froze both auto-start-i{1,2}.jsonl into regular files with sid-keyed archive
+      copies, zero symlinks under the run dir, two "transcript: finalized" log lines;
+      (3) with the TUI running and a review loop mid-iteration, the ws watcher start/stop
+      swept the shared run dir and left review-<pr>-<loop>-i1.jsonl a live link while
+      freezing auto-start-i1.jsonl, then the loop finished NEEDS_WORK->PASS (review_loop_ui:
+      loop complete verdict=PASS iterations=2) and finalized both iterations. One
+      deviation from the scenario text, already an accepted limitation in impl.md
+      (i2 note): after the sweep the impl canonical impl-pr-ee74dfd.jsonl is still
+      a symlink because the impl window is still open (live step window is skipped
+      for the whole sweep). Its target is readable and nothing was removed, so R5
+      holds; flagging it only so a later run does not read that bullet as a failure.
+      Also re-ran tests/test_transcript_archive.py: 35 passed.'
+    created_at: '2026-10-29T10:01:33Z'
+    last_edited: '2026-10-29T10:01:33Z'
+  - id: note-9fa37bd
+    text: 'QA scenario 16 RE-EVALUATION (corrects note-580e6a1, which reported PASS):
+      story 3 final Then is UNMET -> INPUT_REQUIRED. After the watcher sweep over
+      the shared auto-start run dir, impl-pr-ee74dfd.jsonl is still a symlink (find
+      -type l | wc -l = 1), so "every .jsonl still present in the run dir and its
+      archive/ is a readable, non-empty regular file" fails; the archive/ half passed
+      (3 regular sid-keyed copies, no symlinks) and every other check in that triple
+      passed. Cause isolated with a two-sweep probe (/pm-captures/scenarios/16/probe-step-window-sweep/,
+      cast+mp4): _live_transcript_owners marks a step canonical live whenever that
+      step tmux window EXISTS, not while the step is writing. Sweep A with the impl
+      step already finished (review loop polling) and the impl window still open left
+      impl-pr-<pr>.jsonl a symlink; closing the window and re-running the same bulk
+      sweep froze that same file immediately (transcript: finalized .../impl-pr-<pr>.jsonl,
+      archive copy written, canonical now a 430-byte regular file). Because auto-start
+      leaves the impl window open after impl finishes, this is systematic for any
+      auto-start run, not a timing artifact. It is consistent with the limitation
+      impl.md records (live step window skipped for the whole sweep, review-loop i2
+      note), so I did not change the sweep semantics in QA - changing the liveness
+      rule (e.g. keying on the PR step/status instead of window existence) is a design
+      decision for review, since it is the exact trade-off this PR was accepted with.
+      Stories 1 and 2 remain PASS with their captures unchanged. Note: my earlier
+      note-580e6a1 and commit 5a91db72 state PASS; this note supersedes them.'
+    created_at: '2026-10-29T10:17:55Z'
+    last_edited: '2026-10-29T10:17:55Z'
+  - id: note-ba2431f
+    text: 'QA S10 concretization (2026-10-29): (1) qa.md R7 "merge transcripts for
+      both PRs exist" is unreachable on a clean local merge — the local backend goes
+      _publish_approved -> _after_publish -> _finalize_merge with no repo-update window,
+      so no merge-<pr>.jsonl is created (confirmed by QA S1/S6). Assert the merge
+      by PR status, not a merge transcript. (2) A merge window exists only when a
+      post-publish main-repo pull fails (vanilla/github), and the user-facing relaunches
+      (TUI g, pm pr merge, pm pr signoff) pass no --transcript, so "close the merge
+      window, relaunch, both merge sessions readable" is not reachable from the user
+      surface. S10 story 3 was reshaped to the sign-off router (one canonical path):
+      SIGNOFF_BLOCKED, close the window, commit a fix (HEAD moves) -> the driver retires
+      the stale record, archives the router and relaunches; both router sessions readable,
+      PR still merges. (3) End state after auto-start OFF: _disable finalizes every
+      canonical and archive link, so a two-return run has 3 impl and 3 signoff archive
+      entries for the returned PR and no symlinks remain; count as minimums.'
+    created_at: '2026-10-29T05:33:13Z'
+    last_edited: '2026-10-29T05:33:13Z'
+  workdir: /home/matt/.pm/workdirs/project-manager-828c8d0a/pm-pr-9ee4d64-bug-auto-start-run-transcripts-overw-fb6d03d0
+  model: provider:deepseek-flash
+  effort: high
+  session_models:
+    signoff: provider:claude-work-xhigh-249
+  session_effort:
+    signoff: high
 - id: pr-ccdec71
   plan: bugs
   title: 'Bug: pm pr auto-sequence reports "advanced: review_relaunched" when the
@@ -38250,75 +38833,78 @@ prs:
   notes: []
 - id: pr-592e4bd
   plan: improvements
-  title: Route QA scenario refinement and execution through claude-mixed work models; keep other
-    sessions on main Claude
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
   status: pending
   depends_on: []
-  description: 'The user expects the main Claude subscription to run out before reset. Integrate
-    the existing claude-mixed/work-model routing promptly so autonomous QA scenario refinement
-    and execution workers use the work account; all other PM sessions retain the main account
-    and plain Claude binary for remote control. Keep Opus5.5/high effort: work/claude-opus-5-5
-    for scenario refinement (qa_concretize) and execution (qa_scenario) workers, claude-opus-5-5
-    for the other roles unless the user changes that policy.
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
 
 
     Current integration points and gaps:
 
-    - PM already resolves models/providers independently for qa_planning, qa_scenario, qa_concretize,
-    qa_verification and qa_finalize via model_config.py, pm model set, and qa_loop._resolve_qa_model.
-    Reuse this configuration and the common launcher boundary rather than adding a parallel
-    scheduler.
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
 
-    - claude_launcher.py currently hardcodes the claude executable. The user''s host launcher
-    is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py with
-    ~/.config/claude-router/routes.json. The anthropic-work backend selects the work/ prefix,
-    strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
     on each request. Keep account credentials on the host; do not embed them in project.yaml,
     generated launch commands, logs or captures.
 
-    - Existing QA containers use slirp4netns. Probes from a real QA container failed to connect
-    to port8790 at both127.0.0.1 and host.containers.internal; the host router is up on127.0.0.1:8790.
-    Provide a tested container-compatible route/launcher using the existing host router without
-    publicly exposing the credential-bearing router or changing global networking for unrelated
-    sessions. Host QA must work too. Do not silently fall back to the main account when work
-    routing is unavailable.
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
 
-    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive QA
-    session from scenario-worker targeting so s0 stays on main/plain Claude and remains available
-    for remote control. Planning, verification, finalization, implementation, review, sign-off
-    and other interactive sessions also stay on main/plain Claude. Preserve fake-claude behavior,
-    hooks, transcript discovery and session identity.
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
 
 
     Acceptance:
 
-    A configured project can select the launcher/model route for QA scenario refinement and
-    execution workers only, with existing overrides and resumed/relaunched workers handled consistently.
-    Normal sessions retain their current main binary/account/model; no global claude replacement,
-    global account swap, or accidental model downgrade. Route selection is visible without exposing
-    credentials. Startup/auth/router errors explain the required remedy and leave a recoverable
-    state, not an unexplained human-judgment verdict or fallback billed to the main account.
-    Validate initial worker launch, replacement/retry and restart adoption, plus refinement
-    launch/retry paths and unaffected s0, planner, verifier, finalizer and review launch commands.
-    Add focused regressions and a real container/host smoke using a harmless prompt through
-    the work route when authentication is available; verify actual backend/model routing and
-    normal hooks/transcript output. Keep manual merge/spec-review gates.
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
 
 
-    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host smoke
-    through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result ok, reported model
-    work/claude-opus-5-5). Container transport and hooks/transcript smoke are still required.
-    Do not change login credentials yourself or copy tokens into containers. Host scripts claude-work-ping
-    / claude-work-expiry document the current refresh workflow; the router itself only reads
-    the token and does not refresh it.
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
 
 
-    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery changes;
-    keep this PR focused on role/account routing. No dependency on the larger Codex integration/refactor
-    is required. After merge, configure this project''s QA scenario refinement and execution
-    workers to the validated work route; leave already running sessions intact unless the user
-    requests migration.
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
 
     '
   agent_machine: null
@@ -38331,58 +38917,61 @@ prs:
   merged_at: null
   notes:
   - id: note-da1f854
-    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize) and execution
-      (qa_scenario) through the work account, retaining Opus5.5/high. All other roles, including
-      interactive QA s0, planning, verification and finalization, stay on main/plain Claude
-      for RC. User work login is complete; a host claude-mixed work/claude-opus-5-5 smoke returned
-      ok. Container/hook/transcript validation remains required. Main-account session limit
-      resets18:40UTC; supervisor will nudge the blocked non-QA runs after reset and shepherd
-      this PR to sign-off, preserving manual merge/spec gates.'
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
   - id: note-ae7cf29
-    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review. Three things
-      for this branch:
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
 
 
-      1. S127''s restart expectation is now the observable contract, not a cosmetic log: after
-      a plain TUI restart with auto-start off, the PR at qa whose return record says awaiting:
-      qa is started exactly once when the live `pm qa run` ends — one qa-<pr> window set, one
-      verifier, one finalizer, one qa_status.json — and no second loop ever starts over the
-      live run. master''s implementation also logs "Sign-off REQA for <pr> — QA starts once
-      the QA run another process drives ends" once per return episode (first poll tick or mount),
-      so an assertion on that line still holds there, but it is not the contract. Please relax
-      S127''s Then accordingly rather than requiring the line.
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
 
 
-      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the owed start
-      in app._pending_auto_qa + app._reqa_waiting — memory only, which is the bug pr-db3bf10
-      fixes. master now persists the obligation in signoff_return.awaiting + a qa_run.json run
-      record, reconciles it from qa_loop_ui.poll_qa_state and App.on_mount regardless of the
-      auto-start switch, and gates every starter (sign-off hop, auto-start pass, pm pr auto-sequence)
-      on signoff.claim_return_launch(..., require_status="qa"). On merge, route the REQA deferral
-      through qa_loop_ui.start_owed_reqa / reconcile_owed_reqa and drop the in-memory pending
-      entry: otherwise the durable path claims while the in-memory path calls start_qa directly,
-      and the two can each start a loop for the same obligation.
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
 
 
-      3. run_driven_elsewhere exists on both sides with the same signature and semantics. master''s
-      version has only qa_run.json (written at the top of run_qa_sync / resume_qa_sync, owner
-      pid + owner_start) and reuses resume_owned_elsewhere; this branch''s richer record set
-      (write_launch_record, own_run_driven_since, run_overlaps_own_run, launched_elsewhere)
-      should win on merge.'
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
     created_at: '2026-10-28T15:57:32Z'
     last_edited: '2026-10-28T15:57:32Z'
   - id: note-9b00f90
     text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
-      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd) but goes
-      further: a failed launch is retried up to 3 times and then reported as LAUNCH_FAILED (retryable)
-      instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
-      expects a single attempt and latest_verdict == "ERROR"; after both merge, update it to
-      expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR as an alias.
-      The no-traceback behavior is preserved (ReviewLaunchError is caught with _log.error, not
-      _log.exception), and _launch_review_window keeps the "Review window launch failed (rc=N):
-      <detail>" message shape.'
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
@@ -39420,11 +40009,23 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-25T21:27:23.093198+00:00'
-  updated_at: '2026-10-25T21:27:23.093198+00:00'
+  updated_at: '2026-10-29T02:19:32.208181+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
-  notes: []
+  notes:
+  - id: note-78cadd9
+    text: 'Merge note from pr-9ee4d64 (run-transcript archives): this PR''s `_on_complete_from_thread`
+      hunk says "Do not finalize the transcripts either" for a superseded loop, because
+      the successor reuses `review-<pr>-i<n>.jsonl`. After pr-9ee4d64 lands, iteration
+      transcripts are loop-scoped (`review-<pr>-<loop_id>-i<n>.jsonl`) and finalization
+      is session-id ownership-checked, so a superseded loop CAN safely finalize its
+      own loop-scoped paths before the supersede early-return. When resolving the
+      merge conflict, keep 9ee4d64''s loop-scoped finalize block (with `state.iteration_sessions`)
+      ahead of the early return; dropping it leaves the superseded loop''s iteration
+      transcripts as unfinalized symlinks that nothing else finalizes.'
+    created_at: '2026-10-29T02:19:32Z'
+    last_edited: '2026-10-29T02:19:32Z'
 - id: pr-154595f
   plan: bugs
   title: QA scenario numbering leaks across projects that share a PR id
@@ -40391,6 +40992,29 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-bab46cf
+  plan: bugs
+  title: 'Bug: pm/transcripts run dirs and their archive/ entries grow without bound
+    (no retention or cleanup)'
+  branch: pm/pr-bab46cf-bug-pm-transcripts-run-dirs-and-their-archive-entr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/claude_launcher.py (TRANSCRIPT_ARCHIVE_DIR / archive_transcript)
+    and pm/transcripts/<autostart-run>/ generally. Every auto-start enablement creates
+    a new run dir, and since pr-9ee4d64 every superseded attempt is preserved as an
+    immutable <run>/archive/<stem>.<session-id>.jsonl entry plus per-loop review-<pr>-<loop_id>-i<N>.jsonl
+    files. Nothing ever prunes them: there is no retention policy, no size cap and
+    no pm CLI command to remove old run dirs, so a long-lived project accumulates
+    one archive entry per impl/review/sign-off/merge session per run forever. Repro:
+    run auto-start for a few days with sign-off returns, then du -sh pm/transcripts;
+    each archived session is a full copy of the Claude JSONL. Suggested: a retention
+    setting (keep last N runs / M days) enforced when a new run dir is created, plus
+    a pm command to list/prune transcripts.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T16:31:28.497958+00:00'
+  updated_at: '2026-10-28T16:31:28.497958+00:00'
 - id: pr-5d53171
   plan: bugs
   title: 'Bug: stopping a QA run while a scenario PASS is mid-verification still aggregates
@@ -40430,6 +41054,31 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-bac971d
+  plan: bugs
+  title: 'Bug: restarting a review loop within ~2s leaves the superseded loop polling
+    the new loop''s review pane'
+  branch: pm/pr-bac971d-bug-restarting-a-review-loop-within-2s-leaves-the-
+  status: pending
+  depends_on: []
+  description: 'Observed in QA scenario 3 of pr-9ee4d64 (2026-10-28). Repro: start
+    a review loop with ''zz d'' in the TUI, then press ''zz d'' again within ~2s (before
+    the loop''s 2s settle). pm_core/review_loop._run_claude_review does time.sleep(2)
+    and then re-finds the Claude pane by window NAME (_find_claude_pane(session, ''review-<pr>'')).
+    The supersede has already killed the old window and launched the replacement under
+    the same name, so the superseded loop adopts the NEW loop''s pane and blocks in
+    poll_for_verdict (its own dead session never emits an idle event). It therefore
+    does not complete (no KILLED) until the replacement window closes, so its iteration
+    transcript stays an unfinalized symlink (never archived) for that whole time and
+    a background thread leaks. Pressing ''zz d'' >=2s after start behaves correctly
+    (poller bails KILLED, transcript frozen+archived). Pre-existing on master 89e3c501.
+    Fix sketch: capture the pane/window id returned by _launch_review_window and poll
+    that, instead of re-finding by name; or bail before the pane lookup when stop_requested/superseded.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T19:36:19.523510+00:00'
+  updated_at: '2026-10-28T19:36:19.523510+00:00'
 - id: pr-2ed93e5
   plan: bugs
   title: 'Bug: TUI auto-start can launch a duplicate QA driver over a live detached
@@ -40475,6 +41124,46 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-9966785
+  plan: bugs
+  title: 'Bug: SIGNOFF_IMPL return leaves auto-start idle for up to 5 min — TUI keeps
+    stale signoff_return.awaiting after the rework launch'
+  branch: pm/pr-9966785-bug-signoff-impl-return-leaves-auto-start-idle-for
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/signoff_ui.py step(), hop == "impl" branch.
+    The hop calls app.run_worker(_relaunch_impl(...)) AFTER the _reload(app) at the
+    end of step() ("verdict record / hop status written behind the TUI''s back").
+    _relaunch_impl runs pm pr start --fresh in a subprocess, which calls clear_return_awaiting(root,
+    pr_id, "impl") and writes awaiting: null to project.yaml — but nothing reloads
+    app._data afterwards. review_loop_ui._poll_impl_idle reads return_awaiting(pr)
+    from the stale app._data, so it keeps logging "impl_idle: <pr> awaiting sign-off
+    rework launch" and skips auto-review until some other reload (the 300 s background
+    sync, a manual g, or a restart). Repro (QA S5 story 2, pr-9ee4d64, 2026-10-28):
+    fake-claude review {"PASS":100}, signoff [SIGNOFF_IMPL@5s, SIGNOFF_BLOCKED@5s];
+    pm autostart add <pr> --auto-merge; at 19:26:27 the log shows "Sign-off routed
+    <pr> back to implementation (SIGNOFF_IMPL)" and the rework impl session launches,
+    and project.yaml has signoff_return.awaiting: null, yet "awaiting sign-off rework
+    launch" repeats every 5 s from 19:28:57 until the 300 s sync at ~19:30:44 finally
+    reloads and the run advances. Expected: the rework launch should clear the guard
+    promptly (e.g. _reload(app) after _start_pr_quiet succeeds in _relaunch_impl).'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T19:49:24.430536+00:00'
+  updated_at: '2026-10-29T05:55:09.883859+00:00'
+  notes:
+  - id: note-a605f46
+    text: 'QA S9 of pr-9ee4d64 (2026-10-29, integrated HEAD eb02bbbe): the reported
+      symptom did not reproduce. Timeline: rework impl went idle 05:33:48 -> review
+      loop 2 logged "Review loop started for pr-a711a5b loop=5d2a2806" at 05:33:53
+      (5s later); zero "impl_idle" lines in the log; the run merged at 05:34:18. Earlier
+      QA on the pre-integration branch saw a ~3-4 min "impl_idle: awaiting sign-off
+      rework launch" stall after a SIGNOFF_IMPL return. Worth re-checking whether
+      the master integration already fixed the stale signoff_return.awaiting, or whether
+      this run just avoided the window.'
+    created_at: '2026-10-29T05:55:09Z'
+    last_edited: '2026-10-29T05:55:09Z'
 - id: pr-e040aeb
   plan: bugs
   title: 'Bug: failed review iteration launch strands an autostart target until a

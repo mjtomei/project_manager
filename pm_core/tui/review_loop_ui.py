@@ -342,17 +342,50 @@ def _on_complete_from_thread(app, state: ReviewLoopState) -> None:
     # Finalize review transcript symlinks for this loop's iterations.
     # Done before the supersede check because the transcripts are this
     # loop's own work — they need finalizing whether or not we still
-    # own the runtime_state entry.
+    # own the runtime_state entry.  Only this loop's loop-scoped paths are
+    # touched, and each with the session id recorded for its iteration:
+    # an obsolete loop's late completion must never freeze a newer loop's
+    # live collector transcript (pr-9ee4d64).
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
         from pathlib import Path
         from pm_core.claude_launcher import finalize_transcript
         tdir_path = Path(tdir)
         if tdir_path.is_dir():
-            for p in tdir_path.iterdir():
-                if (p.is_symlink() and p.suffix == ".jsonl"
-                        and p.name.startswith(f"review-{state.pr_id}-")):
-                    finalize_transcript(p)
+            prefix = f"review-{state.pr_id}-{state.loop_id}-i"
+            # Snapshot: the loop thread records a new iteration's session
+            # while this runs.
+            sessions = dict(getattr(state, "iteration_sessions", None) or {})
+            try:
+                entries = list(tdir_path.iterdir())
+            except OSError:
+                # The run dir vanished (or is unreadable): nothing to
+                # finalize, and this must not abort the completion mirror
+                # below.
+                _log.debug("review_loop_ui: cannot scan %s for transcripts",
+                           tdir_path, exc_info=True)
+                entries = []
+            for p in entries:
+                if not (p.is_symlink() and p.suffix == ".jsonl"
+                        and p.name.startswith(prefix)):
+                    continue
+                try:
+                    iteration = int(p.name[len(prefix):-len(".jsonl")])
+                except ValueError:
+                    iteration = None
+                finalize_transcript(p, session_id=sessions.get(iteration))
+            # A loop restored from a pre-upgrade breadcrumb ran its
+            # in-flight iteration under the legacy shared name; freeze
+            # that too, with the session id recorded for the iteration so
+            # a newer loop that took the path is never clobbered.  Without
+            # a recorded id the ownership check cannot run at all, and the
+            # legacy name is shared with other loops, so it is left live
+            # (the loop-scoped paths above are structurally this loop's
+            # own and need no id).
+            for iteration, sid in sessions.items():
+                legacy = tdir_path / f"review-{state.pr_id}-i{iteration}.jsonl"
+                if sid and legacy.is_symlink():
+                    finalize_transcript(legacy, session_id=sid)
 
     from pm_core import runtime_state as _rs
     # Release this loop's cross-driver launch lease (only if we still hold

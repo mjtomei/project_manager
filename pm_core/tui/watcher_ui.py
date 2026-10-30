@@ -270,16 +270,16 @@ def _on_complete_from_thread(app, state) -> None:
     _log.info("watcher_ui: loop complete -- verdict=%s iterations=%d",
               state.latest_verdict, state.iteration)
 
-    # Finalize transcripts
+    # Finalize transcripts (including archived per-attempt sessions).  The
+    # auto-start watcher shares its run directory with the auto-start review
+    # loops, so a completing watcher must leave a loop that is still polling
+    # live — freezing it would hide the verdict the session appends later
+    # (pr-9ee4d64).
     tdir = getattr(state, '_transcript_dir', None)
     if tdir:
-        from pathlib import Path
-        from pm_core.claude_launcher import finalize_transcript
-        tdir_path = Path(tdir)
-        if tdir_path.is_dir():
-            for p in tdir_path.iterdir():
-                if p.is_symlink() and p.suffix == ".jsonl":
-                    finalize_transcript(p)
+        from pm_core.claude_launcher import finalize_transcript_dir
+        from pm_core.tui import auto_start
+        finalize_transcript_dir(tdir, skip=auto_start._live_transcript_skip(app))
 
 
 # ---------------------------------------------------------------------------

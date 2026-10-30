@@ -91,8 +91,21 @@ class ReviewIteration:
 
 
 def _generate_loop_id() -> str:
-    """Generate a short random loop identifier (4 hex chars)."""
-    return secrets.token_hex(2)
+    """Generate a random loop identifier (8 hex chars).
+
+    The loop id is part of every iteration transcript's name
+    (``review-<pr>-<loop_id>-i<N>.jsonl``), and that name is the loop's
+    ownership identity (pr-9ee4d64).  Two loops for the same PR are meant
+    to be concurrent — a REVIEW return starts a new loop while the
+    superseded one may still be winding down — so the id must not
+    realistically collide: 8 hex chars (2**32) instead of the 4 the
+    lease/breadcrumb id started with, whose 65536 values would let a
+    superseded and a fresh loop share one iteration path and reintroduce
+    the cross-loop freeze this PR removes.  The value stays opaque and
+    hex-only (never starts with "i"), which the live-owner prefix
+    matching relies on.
+    """
+    return secrets.token_hex(4)
 
 
 class ReviewLaunchError(RuntimeError):
@@ -146,6 +159,10 @@ class ReviewLoopState:
     _transcript_dir: str | None = None
     # INPUT_REQUIRED: set to True while polling for follow-up verdict
     input_required: bool = False
+    # Claude session id of each iteration's transcript, recorded when the
+    # iteration starts.  Completion finalizes only these sessions, so a
+    # superseded loop can never freeze a newer loop's live transcript.
+    iteration_sessions: dict[int, str] = field(default_factory=dict)
     # Failed-launch retry episode (persisted in the breadcrumb).
     retry_iteration: int = 0
     launch_attempts: int = 0
@@ -176,6 +193,54 @@ class ReviewLoopState:
     # or earlier symlink to recognise it by.  Adopting it would record an
     # older review's verdict for an iteration that never ran.
     stale_pane_session_id: str = ""
+
+
+def iteration_transcript(transcript_dir: str | Path, pr_id: str,
+                         loop_id: str, iteration: int) -> str:
+    """Per-loop iteration transcript path.
+
+    The loop id makes every iteration's transcript unique to its loop.
+    A sign-off REVIEW return starts a fresh loop at iteration 1; without
+    the loop id it would reuse (and overwrite) the earlier loop's
+    ``review-<pr>-i1.jsonl``, erasing the pre-return review from the run
+    archive (pr-9ee4d64).  Unique paths also make finalization
+    structurally ownership-safe: an obsolete loop's callback can only
+    touch its own loop's files.
+    """
+    return str(Path(transcript_dir)
+               / f"review-{pr_id}-{loop_id}-i{iteration}.jsonl")
+
+
+def resolve_iteration_transcript(transcript_dir: str | Path, pr_id: str,
+                                 loop_id: str, iteration: int, *,
+                                 allow_legacy: bool = True) -> str:
+    """The iteration's transcript, preferring the loop-scoped path.
+
+    Falls back to the legacy ``review-<pr>-i<N>.jsonl`` when a loop
+    restored from a pre-upgrade breadcrumb has an in-flight iteration
+    under the old name.  New launches always use the loop-scoped name.
+
+    Only a *link* counts as that in-flight iteration: a frozen (regular
+    file) legacy transcript is a completed iteration of an earlier loop
+    (loop completion and the bulk sweeps both freeze it).  Falling back
+    to it would hand this loop the shared name — reintroducing the
+    cross-loop collision the loop-scoped name exists to prevent, and
+    making the legacy name sticky for every later loop at that iteration.
+
+    *allow_legacy* is False for a *new* iteration's launch: only a loop
+    resuming an iteration that was already in flight can own a legacy
+    link, and a fresh loop (a REVIEW return restarts at iteration 1) must
+    never launch over another loop's link even when one is still live.
+    """
+    path = Path(iteration_transcript(transcript_dir, pr_id, loop_id,
+                                     iteration))
+    if path.exists() or path.is_symlink():
+        return str(path)
+    if allow_legacy:
+        legacy = path.parent / f"review-{pr_id}-i{iteration}.jsonl"
+        if legacy.is_symlink():
+            return str(legacy)
+    return str(path)
 
 
 def _match_verdict(line: str) -> str | None:
@@ -620,15 +685,33 @@ def _is_historical_session(state: ReviewLoopState, transcript_dir: str,
         return True
     try:
         from pm_core.claude_launcher import session_id_from_transcript
-        pattern = re.compile(
-            rf"^review-{re.escape(state.pr_id)}-i(\d+)\.jsonl$")
-        for p in Path(transcript_dir).glob(f"review-{state.pr_id}-i*.jsonl"):
-            m = pattern.match(p.name)
-            if not m:
-                continue
-            if int(m.group(1)) < iteration \
-                    and session_id_from_transcript(p) == session_id:
-                return True
+        # Legacy (pre-upgrade) iteration names and this loop's own
+        # loop-scoped names; the loop id keeps a current attempt's
+        # transcript from ever being mistaken for an older iteration.
+        candidates = [
+            (f"review-{state.pr_id}-i*.jsonl",
+             re.compile(rf"^review-{re.escape(state.pr_id)}-i(\d+)\.jsonl$")),
+        ]
+        loop_id = getattr(state, "loop_id", "")
+        if loop_id:
+            candidates.append((
+                f"review-{state.pr_id}-{loop_id}-i*.jsonl",
+                re.compile(
+                    rf"^review-{re.escape(state.pr_id)}-"
+                    rf"{re.escape(loop_id)}-i(\d+)\.jsonl$"),
+            ))
+        seen: set[Path] = set()
+        for glob_pat, pattern in candidates:
+            for p in Path(transcript_dir).glob(glob_pat):
+                if p in seen:
+                    continue
+                seen.add(p)
+                m = pattern.match(p.name)
+                if not m:
+                    continue
+                if int(m.group(1)) < iteration \
+                        and session_id_from_transcript(p) == session_id:
+                    return True
     except Exception:
         _log.debug("review_loop: historical-session scan failed", exc_info=True)
     return False
@@ -636,7 +719,8 @@ def _is_historical_session(state: ReviewLoopState, transcript_dir: str,
 
 def _discover_iteration(state: ReviewLoopState, pr_data: dict,
                         transcript_dir: str, iteration: int,
-                        *, allow_recovery: bool = True) -> AttemptDiscovery:
+                        *, allow_recovery: bool = True,
+                        allow_legacy: bool = True) -> AttemptDiscovery:
     """Rediscover this iteration's live attempt before launching again.
 
     Looks for an already-landed verdict, a live pane/transcript that is
@@ -658,10 +742,18 @@ def _discover_iteration(state: ReviewLoopState, pr_data: dict,
     same reason (``state.stale_pane_session_id``): a launch that fails
     before ``--fresh`` replaces it leaves that window (and its older
     review's verdict) in place.
+
+    ``allow_legacy`` must match the launch's choice
+    (:func:`resolve_iteration_transcript`): discovery and launch have to
+    name the same path, or a launch that used the loop-scoped name would
+    be rediscovered through another loop's live legacy link and its
+    verdict adopted as this iteration's.
     """
     pr_id = state.pr_id
     workdir = pr_data.get("workdir")
-    our_transcript = f"{transcript_dir}/review-{pr_id}-i{iteration}.jsonl"
+    our_transcript = resolve_iteration_transcript(
+        transcript_dir, pr_id, state.loop_id, iteration,
+        allow_legacy=allow_legacy)
     our_sid = None
     if allow_recovery:
         our_sid = _transcript_session_id(our_transcript)
@@ -1137,15 +1229,25 @@ def _reset_launch_retry(state: ReviewLoopState) -> None:
 
 def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                               pr_data: dict, transcript_dir: str,
-                              iteration: int) -> str:
+                              iteration: int, *,
+                              allow_legacy: bool = True) -> str:
     """Run (or adopt) one review iteration, retrying failed launches.
 
     Only a genuine launch failure is retried; a pane that disappears
     (cancellation/closure), a hold, a real verdict and a merged/closed PR
     all stop the retry.  The iteration number is never advanced by a retry.
+
+    *allow_legacy* is passed to :func:`resolve_iteration_transcript`: only
+    a loop resuming an iteration that was already in flight can own the
+    legacy ``review-<pr>-i<N>.jsonl`` link, so a new iteration's launch
+    always uses the loop-scoped name.
     """
     pr_id = state.pr_id
-    transcript = f"{transcript_dir}/review-{pr_id}-i{iteration}.jsonl"
+    # Loop-scoped, so a REVIEW return's fresh loop at iteration 1 never
+    # reuses (and overwrites) an earlier loop's transcript.
+    transcript = resolve_iteration_transcript(
+        transcript_dir, pr_id, state.loop_id, iteration,
+        allow_legacy=allow_legacy)
 
     if state.retry_iteration != iteration:
         # A different iteration: start a fresh episode.  Nothing of ours
@@ -1200,7 +1302,8 @@ def _run_iteration_with_retry(state: ReviewLoopState, pm_root: str,
                                         iteration,
                                         allow_recovery=(
                                             state.iteration_attempted
-                                            or state.launch_attempts > 0))
+                                            or state.launch_attempts > 0),
+                                        allow_legacy=allow_legacy)
         # Remember whose session this iteration resolved to: the *next*
         # iteration must treat a still-live pane running it as historical
         # (replaced by ``--fresh``), never adopt its verdict a second time.
@@ -1311,7 +1414,8 @@ def _wait_for_follow_up_verdict(pr_data: dict,
     if not getattr(state, "_transcript_dir", None):
         _log.warning("review_loop: no transcript_dir on state; cannot wait for follow-up")
         return None
-    iter_transcript = f"{state._transcript_dir}/review-{state.pr_id}-i{state.iteration}.jsonl"
+    iter_transcript = resolve_iteration_transcript(
+        state._transcript_dir, state.pr_id, state.loop_id, state.iteration)
     # The INPUT_REQUIRED wait can last minutes while the user interacts in
     # the pane; keep refreshing the launch lease so another driver does not
     # treat the loop as dead and relaunch over the live session.
@@ -1361,6 +1465,7 @@ def run_review_loop_sync(
     saved_transcript_dir = state._transcript_dir or transcript_dir
     # Stash transcript_dir on state so _on_complete_from_thread can finalize
     state._transcript_dir = transcript_dir
+    from pm_core.claude_launcher import session_id_from_transcript
     state.running = True
     # ``stop_requested`` is owned by the caller, not reset here: ``_start_loop``
     # marks the loop running *before* it creates this thread (so a second
@@ -1381,13 +1486,25 @@ def run_review_loop_sync(
 
             try:
                 output = None
+                iter_transcript: str | None = None
+                # True only while resuming an iteration that was already in
+                # flight at a restart: that is the one case where this loop
+                # can own the legacy ``review-<pr>-i<N>.jsonl`` name.  A new
+                # iteration's launch must use the loop-scoped name even if
+                # another loop's legacy link is still live.
+                resuming = False
                 if adopt:
                     adopt = False
+                    resuming = True
+                    iter_transcript = resolve_iteration_transcript(
+                        saved_transcript_dir, state.pr_id, state.loop_id,
+                        state.iteration)
                     output = _adopt_in_flight_review(
                         state, pr_data, saved_transcript_dir)
                     if output is None:
                         # Nothing live to adopt — rerun the same iteration.
                         state.iteration -= 1
+                        iter_transcript = None
                     else:
                         # The adopted iteration is complete: clear its retry
                         # episode and ``iteration_attempted`` here too.  The
@@ -1403,8 +1520,18 @@ def run_review_loop_sync(
                     _log.info("review_loop: iteration %d for %s", state.iteration, state.pr_id)
                     output = _run_iteration_with_retry(
                         state, pm_root, pr_data, transcript_dir,
-                        state.iteration,
+                        state.iteration, allow_legacy=resuming,
                     )
+                    # The launch may have adopted an in-flight iteration
+                    # under the legacy name; record whichever transcript
+                    # this iteration actually used.
+                    iter_transcript = resolve_iteration_transcript(
+                        transcript_dir, state.pr_id, state.loop_id,
+                        state.iteration, allow_legacy=resuming)
+                if iter_transcript:
+                    sid = session_id_from_transcript(iter_transcript)
+                    if sid:
+                        state.iteration_sessions[state.iteration] = sid
             except PaneKilledError as e:
                 _log.warning("review_loop: pane killed on iteration %d: %s", state.iteration, e)
                 state.latest_verdict = VERDICT_KILLED
