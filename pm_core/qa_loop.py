@@ -38,7 +38,15 @@ from pm_core.loop_shared import (
     find_claude_pane,
     get_pm_session,
     poll_for_verdict,
+    build_block_outcome_request,
+    build_block_resume_request,
+    MissingOutputRecovery,
+    VerdictRecoveryExhausted,
+    recovery_max_attempts,
+    recovery_settle_seconds,
+    recovery_response_timeout,
     VERDICT_TAIL_LINES,
+    VERDICT_NO_VERDICT,
 )
 from pm_core.verdict_transcript import (
     VerdictHit,
@@ -55,6 +63,12 @@ _log = configure_logger("pm.qa_loop")
 VERDICT_PASS = "PASS"
 VERDICT_NEEDS_WORK = "NEEDS_WORK"
 VERDICT_INPUT_REQUIRED = "INPUT_REQUIRED"
+# Terminal state for a run the user stopped before it produced a QA result:
+# during planning, during execution before any scenario reported, or while the
+# finalizer was running.  It is deliberately not in ALL_VERDICTS: the run never
+# produced its outcome (no plan, incomplete coverage, or no finalize result),
+# so it must never parse as a result.
+VERDICT_STOPPED = "STOPPED"
 
 ALL_VERDICTS = (VERDICT_PASS, VERDICT_NEEDS_WORK, VERDICT_INPUT_REQUIRED)
 _QA_KEYWORDS = ("INPUT_REQUIRED", "NEEDS_WORK", "PASS")
@@ -92,9 +106,9 @@ def _get_verification_max_retries() -> int:
 def _get_verdict_reminder_timeout() -> int | None:
     """Read qa-verdict-reminder-timeout from global settings.
 
-    Returns the number of seconds of pane-output silence after which a
-    reminder about verdict formatting is sent to the scenario agent.
-    Returns ``None`` if the setting is absent or zero (disabled).
+    Retained for compatibility: when set (> 0) it overrides the settle
+    interval between bounded missing-output recovery nudges for QA scenario
+    workers.  Returns ``None`` if the setting is absent or zero.
     """
     from pm_core.paths import get_global_setting_value
     val = get_global_setting_value("qa-verdict-reminder-timeout", "").strip()
@@ -209,8 +223,9 @@ class QALoopState:
     latest_verdict: str = ""
     latest_output: str = ""
     # Result of the post-QA finalize pane: "FINALIZE_DONE",
-    # "FINALIZE_BLOCKED", or None if it didn't run (no workdir,
-    # missing pm session, polling timed out).
+    # "FINALIZE_BLOCKED", "NO_VERDICT" (bounded recovery exhausted: the
+    # finalizer idled without either outcome), or None if it didn't run
+    # (no workdir, missing pm session, polling timed out).
     finalize_verdict: str | None = None
     qa_workdir: str | None = None
     # Session tag derived from the orchestrator's tmux session name
@@ -789,6 +804,22 @@ def _run_qa_finalize_pane(state: "QALoopState", pr_data: dict,
     except WorkspaceTrustBlocked as e:
         _log.warning("QA finalize: %s", e)
         return None
+    except VerdictRecoveryExhausted as e:
+        if stop_check is not None and stop_check():
+            # A stop that landed while recovery was deciding is teardown,
+            # not a missing outcome: `handle` checks its deferral bound
+            # before its own ``stop_check``, so a stopped run could
+            # otherwise surface "[finalize: NO_VERDICT]" — a failure state
+            # for a run the user stopped.  Mirrors the ``not content`` path
+            # below (the poller returns None when stop_check fires).
+            _log.info("QA finalize: stopped during recovery")
+            return None
+        # The finalizer idled without FINALIZE_DONE/BLOCKED and bounded
+        # recovery is exhausted.  Surface the explicit terminal verdict
+        # (rendered as "[finalize: NO_VERDICT]") instead of silently
+        # treating the run as unfinalized.
+        _log.warning("QA finalize: no outcome: %s", e)
+        return VERDICT_NO_VERDICT
     except Exception:
         _log.warning("QA finalize: polling failed", exc_info=True)
         return None
@@ -856,6 +887,50 @@ def _write_status_file(status_path: Path, pr_id: str,
     tmp_path = status_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(data, indent=2))
     tmp_path.rename(status_path)
+
+
+def set_status_overall(qa_workdir: str | Path, overall: str) -> None:
+    """Rewrite only the ``overall`` field of ``qa_status.json``.
+
+    Used by restart recovery when the TUI re-interprets a completed snapshot
+    (a stop the interrupted daemon never got to convert to ``STOPPED``).  The
+    status pane reads this file, so it must agree with the verdict the TUI
+    records; touching only ``overall`` preserves the scenario table and any
+    error block the daemon wrote.
+    """
+    status_path = Path(qa_workdir) / "qa_status.json"
+    try:
+        data = json.loads(status_path.read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    data["overall"] = overall
+    tmp_path = status_path.with_suffix(".recovered.tmp")
+    try:
+        tmp_path.write_text(json.dumps(data, indent=2))
+        tmp_path.rename(status_path)
+    except OSError:
+        _log.warning("Could not rewrite qa_status.json overall to %s", overall,
+                     exc_info=True)
+
+
+def recovered_overall_verdict(state: "QALoopState", overall: str) -> str:
+    """The overall verdict a restart should record for a completed snapshot.
+
+    ``_execute_and_finalize`` writes ``overall`` *before* the blocking
+    finalize pane, so a run the user stopped while that pane was polling left
+    its pre-finalize ``PASS`` on disk; the live loop converts it to the
+    terminal ``STOPPED`` teardown afterwards.  A restart that recovers the
+    snapshot must reach the same verdict instead of recording a QA PASS (and
+    a QA note) for a run the user cancelled.  Only ``PASS`` is converted: a
+    ``NEEDS_WORK`` / ``INPUT_REQUIRED`` finding did determine something about
+    the PR, and a finalize that already produced an outcome keeps its PASS.
+    """
+    if (overall == VERDICT_PASS and state.stop_requested
+            and not state.finalize_verdict and state.scenarios):
+        return VERDICT_STOPPED
+    return overall
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1044,11 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
         },
         "held": bool(state.held),
         "completion_processed": bool(state.completion_processed),
+        # A user stop must survive a restart: without it a resumed run keeps
+        # collecting verdicts for a run the user cancelled (and a stop that
+        # landed while the finalize pane was polling would be reported as the
+        # pre-finalize PASS).  Restored by ``build_resume_state``.
+        "stop_requested": bool(state.stop_requested),
         "latest_verdict": state.latest_verdict or "",
         "input_wait_code_changes": list(state.input_wait_code_changes),
         "planner_head": state.planner_head,
@@ -987,11 +1067,17 @@ def _write_resume_file(state: QALoopState, use_containers: bool,
             # while this write was waiting for the lock.
             if state.superseded:
                 return
-            # These two are set by the TUI thread (mark_completion_processed)
-            # while the held loop writes snapshots.  Re-read them under the
-            # lock so a snapshot built from an older state cannot clobber a
-            # flag the TUI just persisted.
+            # These are set by the TUI thread (mark_completion_processed /
+            # mark_stop_requested) while the held loop writes snapshots.
+            # Re-read them under the lock so a snapshot built from an older
+            # state cannot clobber a flag the TUI just persisted.
             data["completion_processed"] = bool(state.completion_processed)
+            # ``stop_requested`` is set by the TUI thread too
+            # (``mark_stop_requested``) and must win the same way: a snapshot
+            # built before the stop landed must not clobber the flag the TUI
+            # just persisted, or a restart would recover the pre-stop verdict
+            # (the very window ``mark_stop_requested`` exists to close).
+            data["stop_requested"] = bool(state.stop_requested)
             data["latest_verdict"] = state.latest_verdict or ""
             tmp = path.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=2))
@@ -1176,6 +1262,40 @@ def clear_resume_file(qa_workdir: str | Path) -> None:
                    exc_info=True)
 
 
+def mark_stop_requested(state: QALoopState) -> None:
+    """Request a stop *and* persist it into the run's resume snapshot.
+
+    The snapshot is written before the blocking finalize pane (and once per
+    execution tick), so a stop that lands *after* that write would be lost if
+    the TUI restarted before the daemon could rewrite it.  The restart would
+    then recover the pre-stop ``overall`` (a ``PASS`` for a run the user
+    cancelled) and record a QA note / lifecycle hand-off for it.  Flipping the
+    flag the moment the stop is requested closes that window; the daemon's
+    later writes carry it too because ``_write_resume_file`` reads
+    ``state.stop_requested``.
+
+    Only ``stop_requested`` is touched (read-modify-write under the shared
+    snapshot lock) so a concurrently written snapshot keeps its verdicts,
+    panes and attempt identity.
+    """
+    state.stop_requested = True
+    if not state.qa_workdir or state.superseded:
+        return
+    path = _resume_file_path(state.qa_workdir)
+    try:
+        with _RESUME_WRITE_LOCK:
+            data = json.loads(path.read_text())
+            if not isinstance(data, dict) or data.get("stop_requested"):
+                return
+            data["stop_requested"] = True
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2))
+            tmp.rename(path)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        _log.debug("Failed to persist stop_requested in %s",
+                   state.qa_workdir, exc_info=True)
+
+
 def mark_completion_processed(state: QALoopState) -> None:
     """Persist that the TUI has processed the run's current result.
 
@@ -1321,6 +1441,10 @@ def build_resume_state(resume_data: dict) -> QALoopState:
     }
     state.held = bool(resume_data.get("held"))
     state.completion_processed = bool(resume_data.get("completion_processed"))
+    # The run was already being torn down when the snapshot was taken, so a
+    # resumed loop must finish as the same clean teardown rather than
+    # collecting verdicts for a run the user stopped.
+    state.stop_requested = bool(resume_data.get("stop_requested"))
     state.latest_verdict = resume_data.get("latest_verdict") or ""
     state.input_wait_code_changes = list(
         resume_data.get("input_wait_code_changes") or [])
@@ -1838,6 +1962,13 @@ def _resolve_qa_model(pr_data: dict, project_data: dict | None = None,
 _CONCRETIZE_VERDICTS = ("REFINED_STEPS_END", "REFINER_REJECT_END")
 _CONCRETIZE_KEYWORDS = ("REFINED_STEPS_START", "REFINED_STEPS_END",
                         "REFINER_REJECT_START", "REFINER_REJECT_END")
+# (START, END) marker pairs the refiner may emit; used for the bounded
+# missing-output recovery requests so they name the same vocabulary as
+# _CONCRETIZE_VERDICTS.
+_CONCRETIZE_BLOCKS = (
+    ("REFINED_STEPS_START", "REFINED_STEPS_END"),
+    ("REFINER_REJECT_START", "REFINER_REJECT_END"),
+)
 _CONCRETIZE_GRACE = 15
 
 
@@ -2017,11 +2148,14 @@ def _build_concretize_cmd(
 
 
 _TRUST_BLOCKED_PREFIX = "blocked at workspace-trust prompt: "
+_RECOVERY_EXHAUSTED_PREFIX = "no refiner outcome: "
 
 
 def _concretize_failure_label(reason: str) -> str:
     """Verdict reason for a scenario whose concretizer did not produce steps."""
-    if reason.startswith(_TRUST_BLOCKED_PREFIX):
+    # Trust-prompt blocks and recovery exhaustion are not refiner rejections:
+    # they name a distinct failure, so pass them through unchanged.
+    if reason.startswith((_TRUST_BLOCKED_PREFIX, _RECOVERY_EXHAUSTED_PREFIX)):
         return reason
     return f"refiner rejected: {reason}"
 
@@ -2034,6 +2168,7 @@ def _concretize_scenario(
     session_id: str,
     scenario_cwd: str,
     instruction_content: str | None = None,
+    stop_check: Callable[[], bool] | None = None,
 ) -> tuple[str | None, str | None]:
     """Poll a concretization pane and return its outcome.
 
@@ -2046,6 +2181,14 @@ def _concretize_scenario(
         caller falls back to the planner's draft steps.
 
     The pane is left open for user review.
+
+    *stop_check* makes a user stop a clean teardown: the poll stops
+    nudging/waiting immediately, and a bounded-recovery exhaustion that
+    lands during the stop returns ``(None, None)`` instead of a
+    ``no refiner outcome`` reason.  Otherwise a stopped run would record
+    a per-scenario INPUT_REQUIRED failure — and a QA note — for a run the
+    user cancelled (the same spurious-exhaustion-on-teardown class the
+    other pollers guard against).
     """
     from pm_core.claude_launcher import transcript_path_for
 
@@ -2060,9 +2203,25 @@ def _concretize_scenario(
             grace_period=_CONCRETIZE_GRACE,
             log_prefix=f"qa-concretize-{scenario.index}",
             workdir=scenario_cwd,
+            stop_check=stop_check,
+            outcome_request=build_block_outcome_request(_CONCRETIZE_BLOCKS),
+            resume_request=build_block_resume_request(_CONCRETIZE_BLOCKS),
         )
     except WorkspaceTrustBlocked as e:
         return None, _TRUST_BLOCKED_PREFIX + str(e)
+    except VerdictRecoveryExhausted as e:
+        if stop_check is not None and stop_check():
+            # The run is being torn down.  ``handle`` checks its deferral
+            # bound before its own ``stop_check``, so a stop that landed
+            # while it was deciding can surface here as an exhaustion;
+            # teardown is not a refiner failure, so record nothing.
+            _log.info("Concretization for scenario %d stopped during "
+                      "recovery", scenario.index)
+            return None, None
+        # The refiner never emitted REFINED_STEPS_END / REFINER_REJECT_END
+        # and bounded recovery is exhausted.  Surface a distinct reason so
+        # this is not mislabelled as a deliberate refiner rejection.
+        return None, _RECOVERY_EXHAUSTED_PREFIX + str(e)
 
     if not content:
         _log.warning("Concretization timed out or pane died for scenario %d",
@@ -2344,6 +2503,7 @@ def _launch_scenarios_in_tmux(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in its own tmux window (with worktree isolation).
 
@@ -2449,7 +2609,11 @@ def _launch_scenarios_in_tmux(
         t.join()
 
     # Write status with window names so the dashboard is navigable
-    # while concretizers run (before the polling loop starts).
+    # while concretizers run (before the polling loop starts).  Keep the
+    # still-queued scenarios visible (verdict "queued") — this write runs
+    # with ``state.scenarios`` narrowed to the launch batch, so the full
+    # list and the queued set have to be threaded in explicitly or the
+    # queued rows disappear from the dashboard.
     if state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
@@ -2457,6 +2621,7 @@ def _launch_scenarios_in_tmux(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2471,12 +2636,25 @@ def _launch_scenarios_in_tmux(
             win_name: str,
             instruction_content: str | None = None,
     ) -> None:
+        if state.stop_requested:
+            # A stop that landed between preparing this scenario and its
+            # concretizer thread starting: never launch a worker for a run
+            # that is being torn down.
+            return
         refined_steps, reject_reason = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
             scenario_cwd=scenario_cwd,
             instruction_content=instruction_content,
+            stop_check=lambda: state.stop_requested,
         )
+        if state.stop_requested:
+            # Teardown: no worker launch, no verdict, no reason — the run
+            # ends STOPPED (see ``_execute_and_finalize``'s
+            # ``stopped_clean``), not INPUT_REQUIRED.
+            _log.info("Scenario %d: stopped before worker launch",
+                      scenario.index)
+            return
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
@@ -2557,6 +2735,7 @@ def _launch_scenarios_in_containers(
     workdir_path: str,
     pm_root: Path | None = None,
     _status_scenarios: list | None = None,
+    _queued_indices: set[int] | None = None,
 ) -> None:
     """Launch each scenario in a Docker container, presented via a tmux window.
 
@@ -2697,7 +2876,11 @@ def _launch_scenarios_in_containers(
         t.join()
 
     # Write status with window names so the dashboard is navigable
-    # while concretizers run (before the polling loop starts).
+    # while concretizers run (before the polling loop starts).  Keep the
+    # still-queued scenarios visible (verdict "queued") — this write runs
+    # with ``state.scenarios`` narrowed to the launch batch, so the full
+    # list and the queued set have to be threaded in explicitly or the
+    # queued rows disappear from the dashboard.
     if state.qa_workdir and pending:
         _write_status_file(
             Path(state.qa_workdir) / "qa_status.json",
@@ -2705,6 +2888,7 @@ def _launch_scenarios_in_containers(
             _status_scenarios if _status_scenarios is not None else state.scenarios,
             state.scenario_verdicts,
             scenario_0=state.scenario_0,
+            queued_scenarios=_queued_indices,
             verdict_reasons=state.scenario_verdict_reasons,
         )
 
@@ -2718,12 +2902,25 @@ def _launch_scenarios_in_containers(
             clone_path: Path,
             instruction_content: str | None = None,
     ) -> None:
+        if state.stop_requested:
+            # A stop that landed between preparing this scenario and its
+            # concretizer thread starting: never launch a worker for a run
+            # that is being torn down.
+            return
         refined_steps, reject_reason = _concretize_scenario(
             scenario, pr_data, data, concretize_pane,
             session_id=scenario.concretize_session_id,
             scenario_cwd=container_workdir,
             instruction_content=instruction_content,
+            stop_check=lambda: state.stop_requested,
         )
+        if state.stop_requested:
+            # Teardown: no worker launch, no verdict, no reason — the run
+            # ends STOPPED (see ``_execute_and_finalize``'s
+            # ``stopped_clean``), not INPUT_REQUIRED.
+            _log.info("Scenario %d: stopped before worker launch",
+                      scenario.index)
+            return
         if reject_reason:
             state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
             state.scenario_verdict_reasons[scenario.index] = (
@@ -3288,6 +3485,29 @@ def _hold_for_follow_up(state: QALoopState, pm_root: Path | None,
     return False
 
 
+def _send_keys_if_alive(pane_id: str, msg: str) -> bool:
+    """Send *msg* (plus Enter) to *pane_id*, tolerating a pane that closes.
+
+    A follow-up message can end the session it is delivered to — a worker
+    that exits on input closes its pane, and a verifier pane can die between
+    the liveness check and the send.  ``send_keys`` raises
+    ``CalledProcessError`` for a target that no longer exists, so a send
+    racing that exit would crash the whole QA thread.  Report failure
+    instead: the dead pane is handed to the relaunch path on the next tick.
+    """
+    from pm_core import tmux as tmux_mod
+
+    if not tmux_mod.pane_exists(pane_id):
+        return False
+    try:
+        tmux_mod.send_keys(pane_id, msg)
+    except (subprocess.CalledProcessError, OSError):
+        _log.debug("send_keys to pane %s failed (closed?)", pane_id,
+                   exc_info=True)
+        return False
+    return True
+
+
 def _poll_tmux_verdicts(
     state: QALoopState,
     data: dict,
@@ -3313,6 +3533,17 @@ def _poll_tmux_verdicts(
     running scenarios complete, respecting *concurrency_cap*.
     """
     from pm_core import tmux as tmux_mod
+
+    if state.stop_requested:
+        # A stop that landed before polling begins is teardown, not a missing
+        # outcome.  The setup below would otherwise retire every scenario that
+        # never got a window (the launch skips a stopping run) as
+        # INPUT_REQUIRED — "worker window never created (launch failed)" — and
+        # fill open slots by launching queued workers, so a run the user
+        # cancelled would surface a missing-outcome failure and record a QA
+        # note instead of ending in the clean STOPPED state.  Leave everything
+        # unverdicted so the aggregation can see it is teardown.
+        return
 
     verify_enabled = _is_verification_enabled()
     verify_max_retries = _get_verification_max_retries()
@@ -3356,9 +3587,33 @@ def _poll_tmux_verdicts(
     # Results from background verification threads
     verification_results: dict[int, tuple[bool, str]] = {}
     verification_lock = threading.Lock()
-    # Idle-reminder state: when we last sent a reminder, keyed by scenario index.
+    # Idle-reminder / missing-output recovery state.  ``qa-verdict-reminder-timeout``
+    # (when set) tunes the settle interval between recovery nudges; otherwise
+    # the shared ``verdict-recovery-settle-seconds`` setting applies.
     _reminder_timeout = _get_verdict_reminder_timeout()
-    _last_reminder_sent: dict[int, float] = {}
+    _recovery_max = recovery_max_attempts()
+    _recovery_settle = (float(_reminder_timeout)
+                        if _reminder_timeout is not None
+                        else recovery_settle_seconds())
+    _recovery_response = recovery_response_timeout()
+    # Per-scenario bounded recovery: a worker that idles without a verdict is
+    # asked for its own standalone outcome (or to resume after an empty turn);
+    # after the configured attempts it is marked INPUT_REQUIRED with a
+    # specific reason instead of hanging QA forever.
+    _recoveries: dict[int, MissingOutputRecovery] = {}
+    # Wall-clock when each scenario's current "idle without a verdict"
+    # episode began.  The settle window is measured from here, not from the
+    # latest hook event: a session that keeps re-emitting idle_prompt (a
+    # held-open FakeClaude refreshes its hook every 2s) would otherwise keep
+    # pushing the window forward and QA would hang without ever nudging.
+    _no_verdict_since: dict[int, float] = {}
+    # Hook timestamp last handed to the scenario's recovery tracker.  The
+    # tracker decides "new turn" vs "refresh of the same turn" by comparing
+    # against this, so it must be the *previously handled* event, not the
+    # one just read: passing the current event would make every refresh look
+    # like no new event at all, and the worker would be nudged instead of
+    # exhausting with ``no_progress`` (a nudge closes a FakeClaude's stdin).
+    _recovery_ev_ts: dict[int, float] = {}
     # Hook-driven idle detection: gate verdict extraction on fresh
     # idle_prompt events for each scenario's Claude session.  Scenarios
     # without a session_id cannot be polled and are marked INPUT_REQUIRED.
@@ -3429,6 +3684,11 @@ def _poll_tmux_verdicts(
 
     def _launch_next_queued():
         """Launch the next queued scenario if concurrency allows."""
+        if state.stop_requested:
+            # Never spawn a worker for a run that is being torn down; a stop
+            # can land mid-iteration, after the ``while`` condition was
+            # evaluated.
+            return
         if not _launch_queue:
             return
         # Count currently active (pending + verifying)
@@ -3447,11 +3707,13 @@ def _poll_tmux_verdicts(
                 _launch_scenarios_in_containers(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
             else:
                 _launch_scenarios_in_tmux(
                     state, data, pr_data, session, repo_root, workdir_path,
                     pm_root=pm_root, _status_scenarios=orig,
+                    _queued_indices=_queued_indices,
                 )
         finally:
             state.scenarios = orig
@@ -3477,6 +3739,106 @@ def _poll_tmux_verdicts(
     for _ in range(len(_launch_queue)):
         _launch_next_queued()  # returns immediately once cap is reached
 
+    def _close_episode(idx: int) -> None:
+        """Close a scenario's no-verdict episode but keep its tracker.
+
+        The tracker outlives an episode on purpose: it carries the attempt
+        budget and the nudge deadline, so a worker that answers with another
+        verdictless turn keeps counting against ``max_attempts``.
+        """
+        _no_verdict_since.pop(idx, None)
+        _recovery_ev_ts.pop(idx, None)
+
+    def _drop_recovery(idx: int) -> None:
+        """Forget everything about a scenario's recovery.
+
+        The three dicts must always be cleared together — an episode left
+        open without its tracker (or a tracker without its episode) either
+        re-counts a stale turn or retires a healthy relaunched worker.
+        """
+        _recoveries.pop(idx, None)
+        _close_episode(idx)
+
+    def _recovery_for(scenario: QAScenario,
+                      pane_id: str) -> MissingOutputRecovery:
+        """Return the bounded recovery tracker for *scenario*.
+
+        A relaunched scenario gets a fresh tracker (new pane/session), so
+        attempt counts never leak across worker identities.
+        """
+        rec = _recoveries.get(scenario.index)
+        if (rec is None or rec.pane_id != pane_id
+                or rec.session_id != (scenario.session_id or "")):
+            rec = MissingOutputRecovery(
+                session_id=scenario.session_id or "",
+                pane_id=pane_id,
+                verdicts=ALL_VERDICTS,
+                send=lambda msg, p=pane_id: tmux_mod.send_keys(p, msg),
+                max_attempts=_recovery_max,
+                settle_seconds=_recovery_settle,
+                response_timeout=_recovery_response,
+                log_prefix=f"qa-scenario-{scenario.index}",
+            )
+            _recoveries[scenario.index] = rec
+        return rec
+
+    def _recovery_exhausted(scenario: QAScenario,
+                            exc: VerdictRecoveryExhausted) -> None:
+        """Mark a worker that never produced a verdict as INPUT_REQUIRED."""
+        _log.warning("Scenario %d: %s", scenario.index, exc)
+        state.scenario_verdicts[scenario.index] = VERDICT_INPUT_REQUIRED
+        # ``str(exc)`` already names the reason and the attempt/deferral
+        # count, so don't prefix a redundant "after N attempt(s)": a
+        # no-progress exhaustion (a session that only refreshed its hook)
+        # was never nudged, and "after 0 recovery attempt(s)" reads as if
+        # recovery never ran.
+        state.scenario_verdict_reasons[scenario.index] = (
+            f"worker produced no verdict ({exc.reason}): {exc}")
+        # Surface the transition like every other INPUT_REQUIRED path in
+        # this loop: the TUI log line is how the user learns a worker was
+        # retired, and it would otherwise only appear in the status pane.
+        state.latest_output = (
+            f"Scenario {scenario.index} ({scenario.title}): "
+            f"INPUT_REQUIRED (worker produced no verdict: {exc.reason})")
+        _notify()
+        _drop_recovery(scenario.index)
+
+    def _retire_if_exhausted(scenario: QAScenario,
+                             exc: VerdictRecoveryExhausted) -> VerdictHit | None:
+        """Retire a worker whose bounded recovery is exhausted.
+
+        Both exhaustion sites — the post-nudge response deadline
+        (``check_response``) and the attempt/deferral bound inside
+        ``handle`` — go through here so the teardown guard, the last-chance
+        transcript re-scan and the slot bookkeeping cannot drift apart.
+
+        Returns the verdict that landed while the deadline expired; the
+        caller records it normally.  ``None`` means nothing to record:
+        either the run is being torn down (the worker is left pending and
+        nothing is persisted into the resume snapshot) or the worker was
+        just retired as INPUT_REQUIRED.
+        """
+        nonlocal verdicts_changed
+        if state.stop_requested:
+            # A stop that landed while we were deciding (after the caller's
+            # ``stopping`` snapshot) is teardown, not a verdict: never
+            # persist a spurious INPUT_REQUIRED reason into the resume
+            # snapshot.
+            return None
+        # The scan at the idle event races the transcript write, and
+        # ``handle``'s ``no_progress`` bound is checked before its own
+        # ``verdict_check``, so an outcome that landed as the deadline
+        # expired must be recorded rather than retired — the "completed
+        # result treated as absent" failure this recovery exists to avoid.
+        hit = find_verdict_turn(scenario.transcript_path, ALL_VERDICTS)
+        if hit is not None:
+            return hit
+        _recovery_exhausted(scenario, exc)
+        pending.discard(scenario.index)
+        verdicts_changed = True
+        _launch_next_queued()
+        return None
+
     def _accept_hit(scenario: QAScenario, hit: VerdictHit, *,
                     override_verdict: str | None = None,
                     override_reason: str = "") -> None:
@@ -3490,6 +3852,10 @@ def _poll_tmux_verdicts(
         nonlocal verdicts_changed
         idx = scenario.index
         verdict = override_verdict or hit.verdict
+        # The scenario has an outcome: its missing-output episode (settle
+        # window, attempt budget and nudge deadline) is over, whatever path
+        # produced the verdict.
+        _drop_recovery(idx)
         state.scenario_verdicts[idx] = verdict
         # Record which attempt/turn produced the verdict so a resumed run
         # never trusts a verdict from a superseded attempt (see
@@ -3721,12 +4087,17 @@ def _poll_tmux_verdicts(
                             f"(PASS / NEEDS_WORK / INPUT_REQUIRED) alone "
                             f"on the last line."
                         )
-                        tmux_mod.send_keys(pane_id, followup_msg)
+                        # The follow-up can end the worker (a session that
+                        # exits on input closes its pane) — tolerate that
+                        # instead of crashing the loop; the next tick sees
+                        # the dead pane and relaunches it.
+                        _send_keys_if_alive(pane_id, followup_msg)
                         # Send extra Enters to ensure the message is
                         # submitted — sometimes newlines don't trigger.
                         for _ in range(2):
                             time.sleep(1)
-                            tmux_mod.send_keys(pane_id, "")
+                            if not _send_keys_if_alive(pane_id, ""):
+                                break
                         _log.info("Sent follow-up message to scenario %d pane",
                                   scenario_idx)
                         # Clear verdict and put back in pending.  Stamp the
@@ -3816,6 +4187,10 @@ def _poll_tmux_verdicts(
                         # Reset grace period for this retry
                         grace_start = time.monotonic()
                         _last_scenario_hook_ts.pop(scenario.index, None)
+                        # A relaunched worker is a new identity: drop the
+                        # old recovery tracker and its settle window so
+                        # attempt counts never leak across panes/sessions.
+                        _drop_recovery(scenario.index)
                         continue
                     # Relaunch failed — will retry on next poll iteration
                     continue
@@ -3875,45 +4250,158 @@ def _poll_tmux_verdicts(
                 verdicts_changed = True
                 _launch_next_queued()
                 continue
+
+            # A recovery nudge with no following turn means the worker has
+            # gone silent.  The check itself runs *after* the verdict scan
+            # below so it is caught even when no new idle_prompt ever
+            # arrives, but a verdict that landed in this same tick still
+            # wins: retiring a worker whose outcome is already in the
+            # transcript would be the "completed result treated as absent"
+            # failure this recovery exists to avoid.  Drop the tracker if
+            # the pane/session changed underneath us: a stale nudge deadline
+            # must never retire a healthy relaunched worker.
+            _rec = _recoveries.get(scenario.index)
+            if _rec is not None and (
+                    _rec.pane_id != pane_id
+                    or _rec.session_id != (scenario.session_id or "")):
+                _drop_recovery(scenario.index)
+                _rec = None
+
             ev = _hook_events.read_event(scenario.session_id)
             ev_ts = float((ev or {}).get("timestamp") or 0)
             last_ts = _last_scenario_hook_ts.get(scenario.index, 0.0)
-            if ev is None or ev_ts <= last_ts or ev.get("event_type") != "idle_prompt":
-                # No new idle_prompt — skip this scenario this tick.
-                # Stop fires per-turn (not just at session end); relying
-                # on it here would drift from spec R9 and introduce
-                # false turn-boundary signals for multi-turn work.
-                continue
-            _last_scenario_hook_ts[scenario.index] = ev_ts
+            fresh = (ev is not None and ev_ts > last_ts
+                     and ev.get("event_type") == "idle_prompt")
 
-            # Read verdict straight from the JSONL transcript.  The hook
-            # event is the turn-boundary gate; the transcript is the
-            # source of truth for what the agent actually said.  A verdict
-            # emitted before a trailing /loop wakeup or Monitor postscript
-            # is still found (pr-8efa789); a genuine new task, retry or
-            # verifier follow-up remains a boundary and supersedes it.
-            hit = find_verdict_turn(scenario.transcript_path, ALL_VERDICTS)
+            # Read the verdict from the JSONL transcript.  The hook event is
+            # the turn-boundary gate; the transcript is the source of truth
+            # for what the agent actually said.  A verdict emitted before a
+            # trailing /loop wakeup or Monitor postscript is still found
+            # (pr-8efa789); a genuine new task, retry or verifier follow-up
+            # remains a boundary and supersedes it.
+            #
+            # Only a *fresh* idle_prompt is a turn boundary — Stop fires
+            # per-turn too, so it is deliberately ignored here to avoid
+            # false turn-boundary signals.  A non-fresh tick still runs the
+            # bounded recovery below: a worker that emits one no-verdict
+            # idle and then goes silent would otherwise never be nudged.
+            hit = None
+            if fresh:
+                _last_scenario_hook_ts[scenario.index] = ev_ts
+                hit = find_verdict_turn(scenario.transcript_path, ALL_VERDICTS)
+                if hit is None:
+                    # A turn ended without its verdict: open (or continue)
+                    # a no-verdict episode.  Its settle window is measured
+                    # from when the episode began — not from the latest
+                    # event — so a hook refresh (a held-open FakeClaude
+                    # re-announcing the same turn) cannot push the nudge
+                    # forward forever.
+                    _no_verdict_since.setdefault(scenario.index, time.time())
+                    _recovery_ev_ts.setdefault(scenario.index, ev_ts)
             verdict = hit.verdict if hit else None
 
-            # Idle-reminder: when the agent emits idle_prompt without a
-            # verdict, nudge once per _reminder_timeout window.
-            if (verdict is None and _reminder_timeout is not None
-                    and scenario.pane_id):
-                now = time.monotonic()
-                last_reminded = _last_reminder_sent.get(scenario.index, 0.0)
-                if now - last_reminded >= _reminder_timeout:
-                    reminder = (
-                        "Reminder: your verdict must appear alone on its own "
-                        "line — the line must contain only PASS, NEEDS_WORK, "
-                        "or INPUT_REQUIRED with no other text. Please output "
-                        "your verdict now if you have reached a conclusion."
-                    )
-                    tmux_mod.send_keys(pane_id, reminder)
-                    _last_reminder_sent[scenario.index] = now
-                    _log.info(
-                        "Sent verdict-format reminder to scenario %d",
-                        scenario.index,
-                    )
+            # A stop ends the run cleanly: retiring a worker as
+            # INPUT_REQUIRED while the run is being torn down is noise, not
+            # a verdict (and its reason would be persisted into the resume
+            # snapshot).  The planner honours ``stop_requested`` the same
+            # way before its ``check_response``.  Both checks below are
+            # skipped on a stop — ``handle`` can otherwise raise
+            # ``no_progress`` from its settle branch *before* its own
+            # ``stop_check`` runs.
+            stopping = state.stop_requested
+
+            if _rec is not None and verdict is None and not stopping:
+                try:
+                    _rec.check_response()
+                except VerdictRecoveryExhausted as e:
+                    # A verdict that landed as the deadline expired falls
+                    # through to the recording block below; otherwise the
+                    # worker is retired (or the run is being torn down).
+                    hit = _retire_if_exhausted(scenario, e)
+                    verdict = hit.verdict if hit else None
+                    if hit is None:
+                        continue
+
+            # Bounded missing-output recovery: an idle turn without a
+            # verdict means the worker ended a turn without its outcome.
+            # Ask the same session for its own standalone outcome (or to
+            # resume after an empty/connection-loss turn), deferring to a
+            # newer hook event (native retry / queued input).  After the
+            # configured attempts the worker is marked INPUT_REQUIRED
+            # instead of hanging the whole QA run.
+            #
+            # This runs on *every* tick while an episode is open, not only
+            # when a new event arrives: a worker that emits one no-verdict
+            # idle and then goes silent (the common shape) would otherwise
+            # never be nudged at all, because no further idle_prompt would
+            # ever pass the fresh-event gate.
+            if (verdict is None and not stopping
+                    and scenario.index in _no_verdict_since):
+                # ``pane_id`` is always set here: the retry/retire block
+                # above continues for every ``pane_id is None`` case.
+                rec = _recovery_for(scenario, pane_id)
+                if not rec.enabled:
+                    # Recovery disabled: legacy behaviour — leave the
+                    # worker running; a later turn may still produce it.
+                    _close_episode(scenario.index)
+                elif (time.time()
+                      - _no_verdict_since[scenario.index]) >= _recovery_settle:
+                    try:
+                        result = rec.handle(
+                            scenario.transcript_path,
+                            # The tracker compares this against the hook
+                            # file to tell a genuine new turn from a refresh
+                            # of the same one, so hand it the event it has
+                            # already accounted for.
+                            _recovery_ev_ts.get(
+                                scenario.index, ev_ts or last_ts),
+                            # Never nudge a worker while the run is being
+                            # torn down (its pane is left for inspection).
+                            stop_check=lambda: state.stop_requested,
+                            # The verdict scan above runs when the idle hook
+                            # fires, which can precede the transcript write;
+                            # re-check right before nudging so a completed
+                            # worker is never asked to re-emit its outcome.
+                            verdict_check=lambda: find_verdict_turn(
+                                scenario.transcript_path, ALL_VERDICTS)
+                            is not None,
+                        )
+                    except VerdictRecoveryExhausted as e:
+                        # Same last-chance re-scan as the response-deadline
+                        # path: ``no_progress`` is raised from the settle
+                        # branch before ``handle``'s own ``verdict_check``,
+                        # so an outcome that landed during the settle could
+                        # still be in the transcript.
+                        hit = _retire_if_exhausted(scenario, e)
+                        verdict = hit.verdict if hit else None
+                        if verdict is None:
+                            continue
+                    else:
+                        if result.status == "deferred":
+                            # A newer turn landed while we settled: give *it*
+                            # the settle window rather than nudging straight
+                            # away.  Repeated refreshes cannot defer forever —
+                            # MissingOutputRecovery bounds them with
+                            # ``max_deferrals`` (no_progress exhaustion).  Record
+                            # the deferred event (not the one this tick started
+                            # from) as accounted for, so the next comparison is
+                            # against the turn we actually decided about.
+                            _no_verdict_since[scenario.index] = time.time()
+                            _recovery_ev_ts[scenario.index] = float(
+                                (result.event or {}).get("timestamp")
+                                or ev_ts or last_ts)
+                        elif result.status == "completed":
+                            # The verdict landed while we settled: record it
+                            # below instead of nudging a completed worker.
+                            hit = find_verdict_turn(
+                                scenario.transcript_path, ALL_VERDICTS,
+                            )
+                            verdict = hit.verdict if hit else None
+                        else:
+                            # A nudge was sent — or a stop was requested during
+                            # teardown — so the next no-verdict turn starts a
+                            # fresh settle window.
+                            _close_episode(scenario.index)
 
             if hit is not None:
                 _accept_hit(scenario, hit)
@@ -4122,6 +4610,26 @@ IMPORTANT: Your response must end with either VERIFIED or the FLAGGED_START...FL
 
 _VERIFICATION_VERDICTS = ("VERIFIED", "FLAGGED_END")
 _VERIFICATION_KEYWORDS = ("VERIFIED", "FLAGGED_START", "FLAGGED_END")
+# Missing-output recovery messages for the verifier.  The shared
+# ``build_outcome_request`` would list "VERIFIED / FLAGGED_END", which does
+# not tell the agent how to emit a flag (the FLAGGED block), so the verifier
+# names its own two shapes.  Recovery never supplies or infers a verdict: it
+# asks only for the agent's own conclusion from work already done.
+_VERIFIER_OUTCOME_REQUEST = (
+    "Your last turn ended without a standalone outcome. Re-emit only your "
+    "own conclusion from the work already completed: either VERIFIED alone "
+    "on its own line, or the complete FLAGGED_START ... FLAGGED_END block. "
+    "Do not redo work, re-run tests, or restate evidence. If you have not "
+    "finished, continue the task instead."
+)
+_VERIFIER_RESUME_REQUEST = (
+    "Your previous turn ended without any output (for example a provider "
+    "connection loss). Resume the same verification in this session from "
+    "where you left off: keep partial evidence and any queued input, and do "
+    "not restart completed work or repeat completed tests. When the task is "
+    "complete, end with VERIFIED alone on its own line, or the complete "
+    "FLAGGED_START ... FLAGGED_END block."
+)
 
 
 def _extract_flagged_reason(content: str) -> str:
@@ -4164,7 +4672,6 @@ def _verify_single_scenario(
     from pm_core.claude_launcher import (
         build_claude_shell_cmd, transcript_path_for,
     )
-    from pm_core.loop_shared import wait_for_follow_up_verdict
 
     if not session:
         _log.warning("Verification: missing session for scenario %d, "
@@ -4293,9 +4800,19 @@ def _verify_single_scenario(
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
                 workdir=verify_cwd,
+                outcome_request=_VERIFIER_OUTCOME_REQUEST,
+                resume_request=_VERIFIER_RESUME_REQUEST,
             )
         except WorkspaceTrustBlocked as e:
             return (False, _TRUST_BLOCKED_PREFIX + str(e),
+                    scenario.verifier_pane_id)
+        except VerdictRecoveryExhausted as e:
+            # Bounded recovery could not get VERIFIED / FLAGGED out of the
+            # verifier.  A failed verification blocks finalize, which is
+            # exactly the desired safety outcome.
+            _log.warning("Verification: no verdict for scenario %d: %s",
+                         scenario.index, e)
+            return (False, f"verifier produced no verdict: {e}",
                     scenario.verifier_pane_id)
         except Exception:
             _log.warning("Verification: initial polling failed for scenario %d",
@@ -4325,28 +4842,47 @@ def _verify_single_scenario(
             f"VERIFIED on its own line, or wrap an explanation in "
             f"FLAGGED_START / FLAGGED_END markers."
         )
-        # Snapshot the last verdict *before* prompting: the verifier can
-        # answer during the send/settle below, and a waiter that scanned at
-        # call time would then mistake that answer for the verdict that
-        # prompted the wait and block for a second one (pr-8efa789).
+        # Snapshot the verdict that prompted this re-check *before* sending:
+        # the verifier can answer during the send/settle below, and its idle
+        # event then predates the poller's hook baseline, so the poller would
+        # never be woken by it.  ``baseline_line`` makes the poller scan the
+        # transcript once and return the new answer, without mistaking the
+        # prompting verdict for it (pr-8efa789).
         _prior = find_verdict_turn(
             scenario.verifier_transcript, _VERIFICATION_VERDICTS)
         baseline_line = _prior.line_index if _prior else -1
-        tmux_mod.send_keys(scenario.verifier_pane_id, msg)
+        _send_keys_if_alive(scenario.verifier_pane_id, msg)
         for _ in range(2):
             time.sleep(1)
-            tmux_mod.send_keys(scenario.verifier_pane_id, "")
+            if not _send_keys_if_alive(scenario.verifier_pane_id, ""):
+                break
         _log.info("Verification: sent follow-up to scenario %d verifier pane=%s",
                   scenario.index, scenario.verifier_pane_id)
         try:
-            content = wait_for_follow_up_verdict(
-                session, scenario.window_name or "",
-                scenario.verifier_transcript,
+            # Reuse the shared verdict poller (bounded missing-output
+            # recovery included): a verifier that idles without
+            # VERIFIED/FLAGGED after the follow-up must not hang QA forever.
+            # ``wait_for_follow_up_verdict`` is deliberately unbounded — it
+            # is the human INPUT_REQUIRED wait — so it must not be used for
+            # this machine-driven re-check.
+            content = poll_for_verdict(
+                scenario.verifier_pane_id, scenario.verifier_transcript,
                 verdicts=_VERIFICATION_VERDICTS,
                 stop_check=stop_check,
                 log_prefix=f"qa-verify-{scenario.index}",
+                workdir=scenario.verifier_cwd,
+                outcome_request=_VERIFIER_OUTCOME_REQUEST,
+                resume_request=_VERIFIER_RESUME_REQUEST,
                 baseline_line=baseline_line,
             )
+        except VerdictRecoveryExhausted as e:
+            # Bounded recovery could not get VERIFIED / FLAGGED out of the
+            # verifier on the re-check either.  Block finalize with a
+            # specific reason instead of waiting forever.
+            _log.warning("Verification: no re-checked verdict for scenario "
+                         "%d: %s", scenario.index, e)
+            return (False, f"verifier produced no verdict: {e}",
+                    scenario.verifier_pane_id)
         except Exception:
             _log.warning("Verification: follow-up polling failed for scenario %d",
                          scenario.index, exc_info=True)
@@ -4582,6 +5118,11 @@ def _run_qa_sync(
     # the planner commits while planning (see _planner_code_changes).
     branch = pr_data.get("branch", "")
     pre_plan_head: str | None = None
+    # The QA window's planner pane, resolved by Phase 1 when it runs.  A run
+    # that skips planning (``pm qa run <instruction>`` builds its state with
+    # ``planning_phase=False`` and the scenario pre-loaded) has no planner
+    # pane at all, so Phase 2 must see ``None`` rather than an unbound name.
+    planner_pane: str | None = None
 
     # --- Phase 1: Planning (if no scenarios pre-loaded) ---
     if state.planning_phase and not state.scenarios:
@@ -4622,8 +5163,10 @@ def _run_qa_sync(
         # windows no longer exist.
         if use_containers:
             from pm_core import container as container_mod
+            from pm_core.cli.helpers import _pr_display_id
             container_mod.cleanup_orphaned_qa_containers(
-                session, state.pr_id, session_tag=state.session_tag)
+                session, state.pr_id, session_tag=state.session_tag,
+                display_id=_pr_display_id(pr_data))
 
         # Final out-of-band status guard, immediately before any QA window is
         # created (scenario 0 / planner).  Re-load fresh: a concurrent merge
@@ -4734,6 +5277,45 @@ def _run_qa_sync(
             transcript_path=transcript_path_for(workdir_path,
                                                 planner_session_id))
         trust_blocked: str | None = None
+        # Bounded missing-output recovery for the planner: an idle turn with
+        # no complete plan is asked to re-emit its own QA_PLAN block (or to
+        # resume after an empty/connection-loss turn).  Exhaustion surfaces
+        # an actionable INPUT_REQUIRED instead of burning the whole timeout.
+        _PLANNER_BLOCKS = (("QA_PLAN_START", "QA_PLAN_END"),)
+
+        def _planner_outcome_request() -> str:
+            """Ask only for the planner's own block, naming a rejection.
+
+            A generic "re-emit your completed result" invites the same
+            malformed block again: when the planner *did* emit a block that
+            ``qa_plan_problem`` refused to consume (e.g. non-contiguous
+            scenario numbering), say what was wrong so the retry can fix it.
+            The request still never supplies or infers a plan.  The problem
+            text is collapsed to one line because it is delivered through
+            ``tmux send-keys``.
+            """
+            request = build_block_outcome_request(_PLANNER_BLOCKS)
+            if plan_problem:
+                one_line = " ".join(plan_problem.split())
+                request += (
+                    " The last plan block you emitted was rejected: "
+                    f"{one_line}. Correct that and re-emit the complete "
+                    "block.")
+            return request
+
+        planner_recovery = MissingOutputRecovery(
+            session_id=planner_session_id,
+            pane_id=planner_pane,
+            verdicts=("QA_PLAN_END",),
+            send=lambda msg: tmux_mod.send_keys(planner_pane, msg),
+            max_attempts=recovery_max_attempts(),
+            settle_seconds=recovery_settle_seconds(),
+            response_timeout=recovery_response_timeout(),
+            outcome_request=_planner_outcome_request,
+            resume_request=build_block_resume_request(_PLANNER_BLOCKS),
+            log_prefix="qa-planner",
+        )
+        planner_exhausted: VerdictRecoveryExhausted | None = None
         while time.monotonic() < deadline:
             if state.stop_requested:
                 break
@@ -4769,6 +5351,22 @@ def _run_qa_sync(
             )
             if ev is None:
                 # No idle_prompt yet — loop so we re-check deadline/stop.
+                if state.stop_requested:
+                    # A stop must end the run cleanly; a recovery nudge that
+                    # never got an answer is not an exhaustion while tearing
+                    # down.
+                    break
+                try:
+                    planner_recovery.check_response()
+                except VerdictRecoveryExhausted as e:
+                    if state.stop_requested:
+                        # A stop that landed between the check above and
+                        # this raise is teardown, not a missing plan:
+                        # never surface INPUT_REQUIRED (and record a QA
+                        # note) for a run the user stopped.
+                        break
+                    planner_exhausted = e
+                    break
                 continue
             trust_watch = None
             _hook_baseline = float(ev.get("timestamp") or _hook_baseline)
@@ -4801,6 +5399,100 @@ def _run_qa_sync(
             else:
                 _log.info("planner poll: no QA_PLAN_END in latest turn "
                           "(elapsed=%.0fs) — continuing", elapsed)
+
+            # No complete plan this turn: ask the same planner session for
+            # its own complete QA_PLAN block (or to resume), deferring to a
+            # newer hook event instead of racing a native retry.
+            if state.stop_requested:
+                break
+            if not planner_recovery.enabled:
+                continue
+            try:
+                result = planner_recovery.handle(
+                    planner_transcript,
+                    float(ev.get("timestamp") or _hook_baseline),
+                    wait_for_newer=lambda timeout, ts: _hook_events.wait_for_event(
+                        planner_session_id,
+                        event_types={"idle_prompt"},
+                        timeout=timeout,
+                        newer_than=ts,
+                        stop_check=lambda: state.stop_requested,
+                    ),
+                    stop_check=lambda: state.stop_requested,
+                    # The plan read above runs when the idle hook fires,
+                    # which can precede the transcript write; re-check right
+                    # before nudging so a completed plan is never asked for
+                    # again.
+                    verdict_check=lambda: bool(_read_planner_plan(
+                        planner_transcript, None, pm_root,
+                        scenario_start).scenarios),
+                )
+            except VerdictRecoveryExhausted as e:
+                if state.stop_requested:
+                    # ``handle``'s deferral bound is checked before its own
+                    # ``stop_check``, so a stop that landed while it was
+                    # deciding can surface here as a spurious exhaustion.
+                    # Teardown is not a missing plan: end the run in the
+                    # clean STOPPED path below instead of INPUT_REQUIRED.
+                    break
+                planner_exhausted = e
+                break
+            if result.status == "stopped":
+                break
+            if result.status == "completed":
+                # The plan landed while we settled; accept it now rather
+                # than waiting for another idle event that may never come.
+                plan = _read_planner_plan(
+                    planner_transcript, None, pm_root, scenario_start)
+                if plan.scenarios:
+                    _log.info("planner poll: accepted %d scenario(s) from %s "
+                              "after recovery settle", len(plan.scenarios),
+                              plan.source)
+                    state.plan_output = plan.text
+                    state.scenarios = plan.scenarios
+                    plan_found = True
+                    break
+                continue
+
+        if planner_exhausted:
+            # The planner idled without ever emitting a complete plan and
+            # bounded recovery is spent.  Surface an actionable error; the
+            # pane is left open so a human can inspect / continue it.
+            _log.warning("QA planner for %s exhausted recovery: %s",
+                         state.pr_id, planner_exhausted)
+            state.latest_verdict = VERDICT_INPUT_REQUIRED
+            state.latest_output = (
+                "QA planner produced no complete plan after recovery — "
+                "no scenarios planned")
+            # A planner that DID emit a block which the validator rejected
+            # (e.g. non-contiguous scenario numbering) is the actionable
+            # case: name the rejection, exactly as the non-exhaustion
+            # "plan incomplete" surface does.  Without this the user only
+            # learns that no complete plan appeared.
+            problem_detail = (
+                f"\n\nA plan block the planner emitted was rejected: "
+                f"{plan_problem}"
+                if plan_problem else ""
+            )
+            state._error = (
+                "QA planning did not produce a complete QA_PLAN block."
+                f"{problem_detail}\n\n"
+                f"{planner_exhausted}\n\n"
+                "The planner pane was left open. Ask it to re-emit the full "
+                "QA_PLAN_START ... QA_PLAN_END block, or restart QA from the "
+                "TUI."
+            )
+            state.planning_phase = False
+            _write_status_file(status_path, state.pr_id, [],
+                               state.scenario_verdicts,
+                               overall=state.latest_verdict,
+                               scenario_0=state.scenario_0,
+                               error=state._error)
+            if planner_pane and tmux_mod.pane_exists(planner_pane):
+                _add_status_pane(session, planner_pane, status_path)
+            _notify()
+            state.running = False
+            return state
 
         if trust_blocked:
             # Planning never started.  Stop here: no execution phase and no
@@ -4849,6 +5541,22 @@ def _run_qa_sync(
         if plan_found:
             _log.info("QA plan parsed: %d scenario(s) for %s",
                       len(state.scenarios), state.pr_id)
+
+        if state.stop_requested and not state.scenarios:
+            # The user stopped the run while the planner was still working:
+            # nothing was planned, so there is no incomplete coverage and no
+            # missing plan to surface.  End in a terminal "stopped" state
+            # instead of falling into the no-scenarios path below, which
+            # would report INPUT_REQUIRED (and record a QA note) as if the
+            # planner had failed.  A stop must be a clean teardown.
+            _log.info("QA planning stopped for %s — no scenarios planned",
+                      state.pr_id)
+            state.latest_verdict = VERDICT_STOPPED
+            state.latest_output = "QA stopped during planning"
+            state.planning_phase = False
+            _notify()
+            state.running = False
+            return state
 
         if not state.scenarios:
             _log.warning("Planner produced no scenarios for %s", state.pr_id)
@@ -4989,7 +5697,25 @@ def _run_qa_sync(
     repo_root = Path(workdir_path) if workdir_path and Path(workdir_path).is_dir() else None
 
     # Ensure the main QA window exists (has the planner pane)
-    planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
+    if planner_pane and not tmux_mod.pane_exists(planner_pane):
+        # This run's planner pane is gone, so its QA window is gone with it
+        # (killing a window kills its panes).  A window with the same name
+        # now belongs to a *replacement* run for this PR — typically a
+        # `z t` / fresh start that killed this run's window.  Adopting it
+        # would split the replacement's planner pane and leave its window
+        # showing this dead run's status dashboard beside the live one, so
+        # only recreate a window when the name is actually free (the
+        # execution-only restart path).
+        if tmux_mod.find_window_by_name(session, window_name):
+            _log.info(
+                "QA window for %s was replaced by another run; not "
+                "adopting it for this run's status", state.pr_id)
+            planner_pane = None
+        else:
+            planner_pane = _ensure_qa_main_pane(
+                session, window_name, workdir_path)
+    else:
+        planner_pane = _ensure_qa_main_pane(session, window_name, workdir_path)
 
     # Write initial status file and add the status pane before launching
     # scenarios — scenario launch blocks until all concretizers finish, so
@@ -5013,12 +5739,14 @@ def _run_qa_sync(
     if use_containers:
         _launch_scenarios_in_containers(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _queued_indices=queued_indices,
         )
     else:
         _launch_scenarios_in_tmux(
             state, data, pr_data, session, repo_root, workdir_path,
-            pm_root=pm_root,
+            pm_root=pm_root, _status_scenarios=all_scenarios,
+            _queued_indices=queued_indices,
         )
     state.scenarios = all_scenarios
 
@@ -5095,7 +5823,21 @@ def _execute_and_finalize(
         # that coverage PASS.
         unverdicted = [s.index for s in state.scenarios
                        if s.index not in state.scenario_verdicts]
-        if (VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes
+        # A user stop that landed before *any* scenario produced an outcome
+        # is teardown, not a QA result: nothing about the PR was determined,
+        # so it must not be surfaced as an INPUT_REQUIRED missing-outcome
+        # failure (or record a QA note) — the same clean-teardown contract
+        # the planning phase honours with its terminal STOPPED state.  A
+        # stop *after* real verdicts keeps the INPUT_REQUIRED coverage
+        # warning below: coverage was genuinely incomplete, and discarding
+        # recorded verdicts would hide what the run did find.
+        stopped_clean = (
+            state.stop_requested and unverdicted and not verdicts
+            and not state._error and not state.planner_code_changes
+        )
+        if stopped_clean:
+            state.latest_verdict = VERDICT_STOPPED
+        elif (VERDICT_NEEDS_WORK in verdicts or state.planner_code_changes
                 or state.input_wait_code_changes):
             # Application code the planner committed, or a new source head
             # pushed while a scenario waited for input, was never reviewed:
@@ -5161,7 +5903,14 @@ def _execute_and_finalize(
                            queued_indices)
 
         if not was_held:
-            if not state.scenarios:
+            if stopped_clean:
+                # No scenario produced an outcome, so there is nothing for
+                # the finalizer to reconcile.  Spawning one during teardown
+                # would only add a session that immediately reports "pane
+                # vanished or stop_check fired".
+                _log.info("QA finalize: skipped for %s — stopped before any "
+                          "verdict", state.pr_id)
+            elif not state.scenarios:
                 # Nothing ran, so there are no scenario pushes to reconcile.
                 # A finalizer here only adds another session that can stall
                 # (#229: it blocked at the same trust prompt as the planner).
@@ -5177,6 +5926,35 @@ def _execute_and_finalize(
                 except Exception:
                     _log.exception("Failed to run QA finalize pane")
 
+        # A user stop that lands while the finalize pane is running is
+        # teardown, not a result.  Finalize is what confirms the scenario
+        # pushes and reconciles the PR workdir, so a run stopped there has
+        # not produced a QA outcome even when every scenario passed: report
+        # the same terminal STOPPED the planning and no-verdict paths use
+        # instead of the pre-finalize PASS (and the QA note a PASS records
+        # in the TUI).  Only a PASS is converted — a NEEDS_WORK /
+        # INPUT_REQUIRED finding stays reported, since the run did determine
+        # something about the PR before the stop.
+        stopped_in_finalize = (
+            not was_held
+            and state.stop_requested
+            and state.finalize_verdict is None
+            and state.latest_verdict == VERDICT_PASS
+            and bool(state.scenarios)
+        )
+        if stopped_in_finalize:
+            _log.info("QA finalize: stopped before an outcome for %s — "
+                      "reporting STOPPED", state.pr_id)
+            state.latest_verdict = VERDICT_STOPPED
+            # The status file was written with the pre-finalize PASS; rewrite
+            # it so the QA status pane does not keep showing a result the
+            # stop cancelled.
+            _write_status_file(status_path, state.pr_id, state.scenarios,
+                               state.scenario_verdicts,
+                               overall=state.latest_verdict,
+                               scenario_0=state.scenario_0, error=state._error,
+                               verdict_reasons=state.scenario_verdict_reasons)
+
         # A held run is the genuine input wait; a NEEDS_WORK/PASS result
         # leaves QA (review / sign-off takes over) and any remaining
         # INPUT_REQUIRED evidence is kept for the next run instead of
@@ -5186,7 +5964,13 @@ def _execute_and_finalize(
         finalize_suffix = ""
         if state.finalize_verdict:
             finalize_suffix = f" [finalize: {state.finalize_verdict}]"
-        if state.held:
+        if stopped_clean:
+            # Mirror the planning-phase wording: a stop is a teardown, not a
+            # completion with a per-scenario summary of "?" outcomes.
+            state.latest_output = "QA stopped during execution"
+        elif stopped_in_finalize:
+            state.latest_output = "QA stopped during finalize"
+        elif state.held:
             waiting = ", ".join(str(i) for i in sorted(state.waiting_for_input))
             state.latest_output = (
                 "QA INPUT_REQUIRED — waiting for input in scenario(s) "

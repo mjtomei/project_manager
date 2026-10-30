@@ -30,6 +30,8 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
+from pm_core.loop_shared import VERDICT_NO_VERDICT
+
 SCHEMA = "pm.autostart.status/1"
 
 POLICY_AUTO = "auto_merge"
@@ -512,7 +514,7 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                 return (phase, "failed",
                         "review held at a permission prompt" +
                         (f": {err}" if err else " — needs human input"))
-            if last in ("KILLED", "ERROR"):
+            if last in ("KILLED", "ERROR", VERDICT_NO_VERDICT):
                 return phase, "failed", f"review loop ended {last}"
             if last:
                 return phase, "paused", f"review loop stopped (last {last})"
@@ -550,6 +552,14 @@ def _derive(pr: dict, inp: dict, pr_map: dict,
                         _awaiting_signoff_reason(pr_id, inp, holds, "QA passed"))
             if verdict == "NEEDS_WORK":
                 return phase, "waiting", "QA NEEDS_WORK; returning to review"
+            if verdict == "STOPPED":
+                # A user stop that left no QA result (planning never finished,
+                # no scenario reported, or the finalizer never produced an
+                # outcome): the run has no verdict to act on, and auto-start
+                # deliberately does not relaunch it (``QA_HOLD_VERDICTS``), so
+                # name the manual re-run.
+                return (phase, "waiting",
+                        "last QA run was stopped; press t / z t to re-run QA")
             if verdict:
                 return phase, "paused", f"QA ended {verdict}"
         if inp.get("skip_qa"):

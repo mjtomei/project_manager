@@ -124,7 +124,11 @@ def _write_transcript(path: Path, turns: list[tuple[str, str]]) -> None:
 def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
                   transcript_turns: list[tuple[str, str]] | None,
                   idle_events: int = 1, grace: float | None = 0,
-                  extra_patches: tuple = ()):
+                  extra_patches: tuple = (),
+                  settle_transcript_turns: list[tuple[str, str]] | None = None,
+                  plan_after_nudge_turns: list[tuple[str, str]] | None = None,
+                  end_with_stop: bool = False,
+                  state_hook=None):
     """Drive run_qa_sync's planning phase with a fake tmux + hook layer.
 
     Returns the final state.  The PR has no QA spec, so when a plan is
@@ -132,6 +136,21 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     before any scenario launch — leaving ``state.scenarios`` as the
     accepted plan.  When no plan is accepted the spec gate is skipped and
     the harness stops at the first Phase 2 tmux call.
+
+    Once the scripted idle events run out the poll loop is ended by its
+    planner deadline (a fake qa_loop-local clock), i.e. the way a planner
+    that never produces a plan really ends.  ``end_with_stop=True`` ends it
+    with ``stop_requested`` instead, for tests that need the teardown path
+    (which skips the final gated read) rather than a timeout.
+
+    *settle_transcript_turns*, when given, is written to the planner's
+    transcript during the recovery settle wait (the "the plan landed just
+    after the idle hook" race) and the wait reports no newer event.
+
+    *plan_after_nudge_turns*, when given, is written to the planner's
+    transcript on the first idle event *after* a recovery nudge was sent
+    (the "the planner answered the nudge" path), so a test can assert the
+    retry is accepted instead of being counted as another missing output.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     if grace is not None:
@@ -144,22 +163,70 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
     data = {"project": {"name": "p"}, "prs": [pr]}
     state = QALoopState(pr_id="pr-001")
     state.qa_workdir = str(tmp_path / "qa")
+    if state_hook is not None:
+        # Let a test reach the state mid-run (e.g. to simulate a stop that
+        # lands while recovery is deciding).
+        state_hook(state)
+
+    transcript_paths: dict[str, Path] = {}
 
     def fake_build_cmd(**kw):
+        path = transcript_path_for(kw["cwd"], kw["session_id"])
+        transcript_paths["planner"] = path
         if transcript_turns is not None:
-            _write_transcript(
-                transcript_path_for(kw["cwd"], kw["session_id"]),
-                transcript_turns)
+            _write_transcript(path, transcript_turns)
         return "planner-cmd"
 
     calls = {"n": 0}
+    settle_writes = {"pending": settle_transcript_turns}
+    after_nudge = {"pending": plan_after_nudge_turns}
 
     def fake_wait_for_event(session_id, **kw):
         calls["n"] += 1
         if calls["n"] <= idle_events:
             return {"event_type": "idle_prompt", "timestamp": time.time()}
-        state.stop_requested = True
+        if settle_writes["pending"] is not None:
+            # The transcript write trails the idle hook: the plan lands
+            # while recovery is settling, with no newer event.
+            _write_transcript(transcript_paths["planner"],
+                              settle_writes["pending"])
+            settle_writes["pending"] = None
+            return None
+        if (after_nudge["pending"] is not None
+                and calls["n"] > idle_events + 1):
+            # The recovery nudge landed (the settle wait above — the call
+            # right after the last scripted idle — reported no newer event,
+            # so ``handle`` sent one).  The planner answers with its
+            # complete plan on a new turn.
+            _write_transcript(transcript_paths["planner"],
+                              after_nudge["pending"])
+            after_nudge["pending"] = None
+            return {"event_type": "idle_prompt",
+                    "timestamp": time.time() + 1}
+        if end_with_stop:
+            state.stop_requested = True
         return None
+
+    class _FakeClock:
+        """qa_loop-local clock: each monotonic() call advances one second.
+
+        Replacing ``pm_core.qa_loop.time`` (not the stdlib module) lets the
+        planner deadline pass after the scripted idle events without a
+        stop, while the recovery layer keeps real time.
+        """
+
+        def __init__(self):
+            self.now = 1000.0
+
+        def monotonic(self):
+            self.now += 1.0
+            return self.now
+
+        def time(self):
+            return 1_700_000_000.0
+
+        def sleep(self, _secs):
+            pass
 
     class _StopHarness(Exception):
         pass
@@ -189,7 +256,9 @@ def _run_planning(tmp_path, monkeypatch, *, pane_content: str,
         patch("pm_core.hook_events.wait_for_event",
               side_effect=fake_wait_for_event),
         patch("pm_core.tmux.new_window_get_pane", side_effect=_StopHarness),
-        patch("pm_core.qa_loop.time.sleep"),
+        patch("pm_core.tmux.send_keys"),
+        patch("pm_core.qa_loop.time", _FakeClock()),
+        patch.object(qa_loop, "_PLANNER_TIMEOUT", 3.0),
         *extra_patches,
     ]
     with ExitStack() as stack:
@@ -273,14 +342,19 @@ class TestPlannerReadsTranscript:
 
     def test_stale_turn_not_reparsed_without_fresh_idle(
             self, tmp_path, monkeypatch):
-        """Freshness: without an idle_prompt event nothing is read."""
+        """Freshness: without an idle_prompt event nothing is read.
+
+        The run is ended by a stop so the timeout's final gated read (which
+        deliberately does re-read a completed transcript) does not apply:
+        this test is about the *poll* read being event-gated.
+        """
         with patch("pm_core.qa_loop.read_latest_assistant_text"
                    ) as read_text:
             state = _run_planning(
                 tmp_path, monkeypatch, pane_content=PANE_TAIL_ONLY,
                 transcript_turns=[("user", TEMPLATE_PROMPT),
                                   ("assistant", FULL_PLAN)],
-                idle_events=0)
+                idle_events=0, end_with_stop=True)
         read_text.assert_not_called()
         assert state.scenarios == []
 
@@ -383,6 +457,133 @@ class TestRunQaSyncHandoff:
         assert launched["changes"] == ["app.py"]
 
 
+class TestDeadRunDoesNotAdoptReplacementWindow:
+    """A run whose QA window was replaced must not touch the new one.
+
+    Live failure (QA S30, story 2): `pm pr auto-sequence B` launches a
+    detached run; the user runs `pr qa fresh B` (``z t``), which kills the
+    old window and creates a new one for the replacement run.  The old run
+    noticed its planner pane gone, but Phase 2 re-resolved the QA window
+    *by name*, found the replacement's window, and split the
+    replacement's planner pane.  The replacement's window then showed the
+    dead run's "No parseable scenarios" dashboard beside the live one
+    (and a third pane once the replacement finished).
+    """
+
+    def test_replaced_window_is_left_to_the_new_run(
+            self, tmp_path, monkeypatch):
+        added = MagicMock()
+        (tmp_path / "qa").mkdir()
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=None, idle_events=0,
+            extra_patches=(
+                # The planner pane died (its window was killed by the
+                # fresh start) and a window with the QA name exists again.
+                patch("pm_core.tmux.pane_exists", return_value=False),
+                patch("pm_core.tmux.find_window_by_name",
+                      return_value={"index": 3, "id": "@99"}),
+                # The replacement window's live planner pane: pre-fix the
+                # dead run adopts this and splits it.
+                patch("pm_core.tmux.get_pane_indices",
+                      return_value=[("%50", 0)]),
+                patch("pm_core.qa_loop._add_status_pane", added),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux"),
+            ))
+        # The dead run still records its own verdict...
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert state.running is False
+        # ...but never splits the replacement run's pane.
+        added.assert_not_called()
+
+    def test_vanished_window_is_recreated_when_name_is_free(
+            self, tmp_path, monkeypatch):
+        """The execution-only restart path still recreates a missing window."""
+        added = MagicMock()
+        recreated = MagicMock(return_value="%77")
+        (tmp_path / "qa").mkdir()
+        # No window with the QA name: the run must recreate it and show its
+        # status, not silently drop the surface.
+        _run_planning(
+            tmp_path, monkeypatch, pane_content="",
+            transcript_turns=None, idle_events=0,
+            extra_patches=(
+                patch("pm_core.tmux.pane_exists", return_value=False),
+                patch("pm_core.tmux.new_window_get_pane", recreated),
+                patch("pm_core.qa_loop._add_status_pane", added),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux"),
+            ))
+        recreated.assert_called_once()
+        added.assert_called_once()
+        assert added.call_args[0][1] == "%77"
+
+
+class TestExecutionOnlyPhase2:
+    """Phase 2 must not depend on state the planning branch binds.
+
+    ``pm qa run <instruction>`` (``pm_core/cli/qa.py``) builds a
+    ``QALoopState(planning_phase=False)`` with the scenario pre-loaded and
+    calls ``run_qa_sync``, so the planning branch is skipped entirely in
+    that shape and Phase 2 may not read a planner pane it never looked for.
+    """
+
+    def _drive(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        workdir = tmp_path / "workdir"
+        workdir.mkdir()
+        (tmp_path / "qa").mkdir()
+        pr = {"id": "pr-001", "title": "t", "branch": "pm/pr-001",
+              "status": "qa", "workdir": str(workdir)}
+        data = {"project": {"name": "p"}, "prs": [pr]}
+        state = QALoopState(pr_id="pr-001")
+        state.planning_phase = False
+        state.qa_workdir = str(tmp_path / "qa")
+        state.scenarios = [qa_loop.QAScenario(index=1, title="T", focus="f")]
+        added = MagicMock()
+        launched = MagicMock()
+        finished = MagicMock(return_value=state)
+        resolution = MagicMock(model=None, provider=None, effort=None)
+        with ExitStack() as stack:
+            for p in (
+                patch("pm_core.qa_loop.get_pm_session",
+                      return_value="pm-test"),
+                patch("pm_core.store.load", return_value=data),
+                patch("pm_core.store.get_pr", return_value=pr),
+                patch("pm_core.qa_loop._resolve_qa_model",
+                      return_value=resolution),
+                patch("pm_core.qa_loop._get_qa_spec", return_value="spec"),
+                patch("pm_core.qa_loop._publish_planner_head",
+                      return_value="a" * 40),
+                patch("pm_core.qa_loop._planner_code_changes",
+                      return_value=[]),
+                patch("pm_core.qa_loop._write_status_file"),
+                patch("pm_core.container.is_container_mode_enabled",
+                      return_value=False),
+                patch("pm_core.tmux.find_window_by_name",
+                      return_value=None),
+                patch("pm_core.qa_loop._ensure_qa_main_pane",
+                      return_value="%77"),
+                patch("pm_core.qa_loop._add_status_pane", added),
+                patch("pm_core.qa_loop._launch_scenarios_in_tmux", launched),
+                patch("pm_core.qa_loop._execute_and_finalize", finished),
+            ):
+                stack.enter_context(p)
+            qa_loop.run_qa_sync(state, tmp_path / "pm", pr)
+        return state, added, launched, finished
+
+    def test_preloaded_scenarios_reach_phase2(
+            self, tmp_path, monkeypatch):
+        """Regression: the Phase 2 window block read an unbound
+        ``planner_pane`` (only assigned inside the planning branch), so an
+        execution-only run raised ``UnboundLocalError`` before launching any
+        scenario."""
+        state, added, launched, finished = self._drive(tmp_path, monkeypatch)
+        assert finished.called
+        launched.assert_called_once()
+        added.assert_called_once()
+        assert added.call_args[0][1] == "%77"
+
+
 class TestQAPlanProblem:
     def test_complete_plan_ok(self):
         sc = parse_qa_plan(FULL_PLAN)
@@ -468,6 +669,254 @@ class TestQAPlanProblem:
         sc = parse_qa_plan(text)
         assert [s.index for s in sc] == [2, 3, 4, 5]
         assert qa_loop.qa_plan_problem(text, sc, 2) is None
+
+
+class TestPlannerRecovery:
+    def test_recovery_exhaustion_surfaces_input_required(
+            self, tmp_path, monkeypatch):
+        """A planner that never emits a complete plan must fail bounded.
+
+        The poll loop must stop with an actionable INPUT_REQUIRED instead of
+        waiting out the full one-hour planner timeout.
+        """
+
+        class _Exhausted:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "planner produced no complete QA_PLAN block",
+                    attempts=3)
+
+            def check_response(self):
+                pass
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery", _Exhausted)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+            ))
+
+        assert state.scenarios == []
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert "complete QA_PLAN block" in state._error
+        assert state.planning_phase is False
+        assert state.running is False
+
+    def test_exhaustion_names_the_rejected_plan_problem(
+            self, tmp_path, monkeypatch):
+        """A malformed plan's specific rejection survives into the error.
+
+        A planner that DID emit a QA_PLAN block which the validator rejected
+        (here: non-contiguous numbering) must not be reported as merely "no
+        complete plan": the validator's reason is the actionable part, and
+        the non-exhaustion "plan incomplete" surface already names it.
+        """
+
+        class _Exhausted:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "planner produced no complete QA_PLAN block",
+                    attempts=3)
+
+            def check_response(self):
+                pass
+
+        # Drop scenario 2 so the plan's numbering is not contiguous.
+        malformed = FULL_PLAN.replace(_scenario(2, TITLES[1]), "")
+        assert "contiguous" in qa_loop.qa_plan_problem(
+            malformed, parse_qa_plan(malformed), 1)
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery", _Exhausted)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", malformed)],
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+            ))
+
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+        assert "contiguous" in state._error
+
+    def test_recovery_nudge_names_the_rejected_plan_problem(
+            self, tmp_path, monkeypatch):
+        """The recovery request tells the planner what was wrong.
+
+        A generic "re-emit your completed result" invites the same malformed
+        block again, so a plan the validator refused (here: non-contiguous
+        numbering) must be named in the nudge.  The request still asks only
+        for the planner's own block — no plan is supplied or inferred — and
+        it must stay a single tmux line.
+        """
+        # Drop scenario 2 so the plan's numbering is not contiguous.
+        malformed = FULL_PLAN.replace(_scenario(2, TITLES[1]), "")
+        assert "contiguous" in qa_loop.qa_plan_problem(
+            malformed, parse_qa_plan(malformed), 1)
+
+        sent: list[str] = []
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", malformed)],
+            idle_events=1,
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+                patch("pm_core.tmux.send_keys",
+                      side_effect=lambda _p, msg: sent.append(msg)),
+            ))
+
+        assert sent, "the planner was never nudged for its malformed block"
+        assert "contiguous" in sent[0]
+        assert "QA_PLAN_START" in sent[0]
+        assert "\n" not in sent[0]
+        # The rejected plan was never consumed, and the run stays bounded.
+        assert state.scenarios == []
+        assert state.latest_verdict == qa_loop.VERDICT_INPUT_REQUIRED
+
+    def test_plan_landing_during_settle_is_accepted_not_renudged(
+            self, tmp_path, monkeypatch):
+        """A plan written after the idle hook (the transcript-write race) is
+        accepted from the settle re-read instead of being asked for again.
+
+        ``MissingOutputRecovery.handle`` returns ``"completed"`` when the
+        outcome appears while it settles; the planner must re-read and use
+        that plan rather than waiting for another idle turn that may never
+        come.
+        """
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            settle_transcript_turns=[("user", TEMPLATE_PROMPT),
+                                     ("assistant", FULL_PLAN)])
+
+        assert [s.title for s in state.scenarios] == TITLES
+        assert "QA_PLAN_START" in state.plan_output
+
+    def test_nudged_planner_plan_is_accepted_on_the_next_turn(
+            self, tmp_path, monkeypatch):
+        """A planner that answers the recovery nudge is not nudged again.
+
+        The nudge asks the planner to re-emit its own QA_PLAN block.  When
+        it does so on the following turn the loop must accept that plan and
+        move on — the "retried, then succeeded" half of the acceptance
+        criteria.  Without this the retry could look bounded while a
+        recovered plan was silently ignored.
+        """
+        sent: list[str] = []
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            idle_events=1,
+            plan_after_nudge_turns=[("user", TEMPLATE_PROMPT),
+                                    ("assistant", FULL_PLAN)],
+            extra_patches=(
+                patch("pm_core.qa_loop._add_status_pane"),
+                # The harness clock advances 1 s per monotonic() call, so the
+                # default 3 s planner deadline would end the loop before the
+                # answered turn arrives.
+                patch.object(qa_loop, "_PLANNER_TIMEOUT", 20.0),
+                patch("pm_core.tmux.send_keys",
+                      side_effect=lambda _p, msg: sent.append(msg)),
+            ))
+
+        assert sent, "the planner was never nudged for its missing plan"
+        assert len(sent) == 1, f"planner re-nudged after answering: {sent}"
+        assert [s.title for s in state.scenarios] == TITLES
+        assert "QA_PLAN_START" in state.plan_output
+
+    def test_stop_during_recovery_is_a_clean_teardown(
+            self, tmp_path, monkeypatch):
+        """A stop that lands while recovery is deciding must not be reported
+        as a missing plan.
+
+        ``MissingOutputRecovery.handle`` checks its deferral bound *before*
+        its own ``stop_check``, so a stop set from the TUI thread can surface
+        as ``VerdictRecoveryExhausted``.  Treating that as a real exhaustion
+        would end a user-stopped run with INPUT_REQUIRED (and record a QA
+        note), the same bug the non-recovery stop path fixed.
+        """
+        state_holder: dict = {}
+
+        class _ExhaustedWhileStopping:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                state_holder["state"].stop_requested = True
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "the session re-announced its idle turn 11 time(s)",
+                    attempts=0, reason="no_progress")
+
+            def check_response(self):
+                pass
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery",
+                            _ExhaustedWhileStopping)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            extra_patches=(patch("pm_core.qa_loop._add_status_pane"),),
+            state_hook=lambda s: state_holder.__setitem__("state", s))
+
+        assert state.latest_verdict == qa_loop.VERDICT_STOPPED
+        assert state.latest_verdict != qa_loop.VERDICT_INPUT_REQUIRED
+        assert state._error == ""
+        assert state.latest_output == "QA stopped during planning"
+
+    def test_stop_during_response_timeout_is_a_clean_teardown(
+            self, tmp_path, monkeypatch):
+        """The same guard on the ``check_response`` exhaustion path.
+
+        No idle event ever arrives, so the planner sits in the post-nudge
+        response deadline; a stop set just before it fires must not surface
+        INPUT_REQUIRED either.
+        """
+        state_holder: dict = {}
+
+        class _ResponseTimeoutWhileStopping:
+            enabled = True
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def handle(self, *args, **kwargs):
+                raise AssertionError("no idle event should reach handle()")
+
+            def check_response(self):
+                state_holder["state"].stop_requested = True
+                raise qa_loop.VerdictRecoveryExhausted(
+                    "no new turn arrived within 3600s", attempts=1,
+                    reason="no_response")
+
+        monkeypatch.setattr(qa_loop, "MissingOutputRecovery",
+                            _ResponseTimeoutWhileStopping)
+        state = _run_planning(
+            tmp_path, monkeypatch, pane_content=TEMPLATE_PROMPT,
+            transcript_turns=[("user", TEMPLATE_PROMPT),
+                              ("assistant", "Still reading the diff...")],
+            idle_events=0,
+            extra_patches=(patch("pm_core.qa_loop._add_status_pane"),),
+            state_hook=lambda s: state_holder.__setitem__("state", s))
+
+        assert state.latest_verdict == qa_loop.VERDICT_STOPPED
+        assert state._error == ""
 
 
 TEMPLATE_PLUS_SUFFIX = TEMPLATE_PROMPT + "\n...redraw...\n" + PANE_SUFFIX

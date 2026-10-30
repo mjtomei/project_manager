@@ -730,6 +730,15 @@ class TestBuildStatus:
         r = _run(_status([_pr("a", status="in_review")], ["a"]), "a")
         assert r["state"] == "queued"
 
+    def test_review_no_verdict_marks_failed(self):
+        """pr-6566901: NO_VERDICT is a terminal failure like ERROR/KILLED."""
+        s = _status([_pr("a", status="in_review")], ["a"],
+                    review_loops={"a": {"running": False, "iteration": 1,
+                                        "verdict": "NO_VERDICT"}})
+        r = _run(s, "a")
+        assert (r["phase"], r["state"]) == ("review", "failed")
+        assert "NO_VERDICT" in r["reason"]
+
     def test_qa_scenario_progress(self):
         s = _status([_pr("a", status="qa")], ["a"],
                     qa_loops={"a": {"running": True, "planning": False,
@@ -752,6 +761,14 @@ class TestBuildStatus:
         r = _run(_status([_pr("a", status="qa")], ["a"],
                          qa_loops={"a": {"verdict": "PASS"}}), "a")
         assert r["state"] == "waiting" and "sign-off" in r["reason"]
+
+    def test_qa_stopped_run_waits_for_manual_rerun(self):
+        """A user-stopped QA run is reported as waiting, not relaunched."""
+        r = _run(_status([_pr("a", status="qa")], ["a"],
+                         qa_loops={"a": {"verdict": "STOPPED",
+                                         "recorded": True}}), "a")
+        assert (r["phase"], r["state"]) == ("qa", "waiting")
+        assert "stopped" in r["reason"] and "re-run QA" in r["reason"]
 
     def test_qa_held_run_points_at_the_worker_pane(self):
         """A held run (pr-2c67d50) is still watching its scenario pane, so
@@ -1253,13 +1270,15 @@ def test_qa_pass_with_fresh_signoff_reports_signed_off():
 @pytest.mark.parametrize("recorded,relaunch", [
     ({"state": "done", "verdict": "PASS"}, False),
     ({"state": "done", "verdict": "INPUT_REQUIRED"}, False),
+    ({"state": "done", "verdict": "STOPPED"}, False),
     ({"state": "done", "verdict": "NEEDS_WORK"}, True),
     ({"state": "running"}, True),
     ({}, True),
 ])
 def test_finished_qa_not_relaunched_by_scheduler(tmp_path, recorded, relaunch):
     """Restart / extra scheduler passes must not re-run a QA run that
-    already finished PASS (awaiting sign-off) or INPUT_REQUIRED."""
+    already finished PASS (awaiting sign-off), INPUT_REQUIRED, or that the
+    user stopped before it planned anything."""
     app = _enabled_app([_pr("a", status="qa", workdir="/w/a")], ["a"], tmp_path)
     with patch("pm_core.runtime_state.get_action_state", return_value=recorded), \
          patch("pm_core.tui.qa_loop_ui.start_qa") as sq:

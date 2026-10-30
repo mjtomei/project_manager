@@ -31,6 +31,8 @@ from pm_core.loop_shared import (
     find_claude_pane,
     poll_for_verdict as _poll_for_verdict_shared,
     wait_for_follow_up_verdict as _wait_for_follow_up_shared,
+    VerdictRecoveryExhausted,
+    VERDICT_NO_VERDICT,
 )
 
 _log = configure_logger("pm.watcher_base")
@@ -266,6 +268,39 @@ class BaseWatcher(ABC):
                                  self.WATCHER_TYPE, state.iteration, e)
                     state.latest_verdict = "KILLED"
                     state.latest_summary = str(e)
+                    break
+                except VerdictRecoveryExhausted as e:
+                    if state.stop_requested:
+                        # A stop that landed while recovery was deciding is
+                        # teardown, not a missing verdict.  Mirror the
+                        # PaneKilledError stop convention instead of
+                        # recording NO_VERDICT for a user-stopped run.
+                        _log.info("watcher[%s]: stopped during recovery on "
+                                  "iteration %d", self.WATCHER_TYPE,
+                                  state.iteration)
+                        state.latest_verdict = "KILLED"
+                        state.latest_summary = "Watcher stopped by user"
+                        break
+                    # The watcher session idled without emitting its
+                    # expected verdict and bounded recovery is exhausted.
+                    _log.warning("watcher[%s]: no verdict on iteration %d: %s",
+                                 self.WATCHER_TYPE, state.iteration, e)
+                    state.latest_verdict = VERDICT_NO_VERDICT
+                    state.latest_summary = str(e)
+                    state.history.append(WatcherIteration(
+                        iteration=state.iteration,
+                        verdict=VERDICT_NO_VERDICT,
+                        summary=str(e),
+                    ))
+                    if len(state.history) > _MAX_HISTORY:
+                        state.history = state.history[-_MAX_HISTORY:]
+                    if on_iteration:
+                        try:
+                            on_iteration(state)
+                        except Exception:
+                            _log.exception(
+                                "watcher[%s]: on_iteration callback failed",
+                                self.WATCHER_TYPE)
                     break
                 except Exception as e:
                     _log.exception("watcher[%s]: iteration %d failed",

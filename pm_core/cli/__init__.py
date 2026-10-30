@@ -15,6 +15,7 @@ Command groups are split into submodules:
 - cli.container — Container isolation management
 """
 
+import math
 from pathlib import Path
 
 import click
@@ -261,7 +262,11 @@ _BOOLEAN_SETTINGS = {"hide-assist", "hide-merged", "beginner-mode", "auto-cleanu
                      "qa-verify-pass"}
 _INT_SETTINGS = {"min-pane-width", "mobile-width-threshold",
                  "qa-max-scenarios", "qa-verify-retries",
-                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds"}
+                 "qa-verdict-reminder-timeout", "trust-prompt-grace-seconds",
+                 "verdict-recovery-max-attempts"}
+# Seconds-valued settings read as floats (sub-second values are valid).
+_FLOAT_SETTINGS = {"verdict-recovery-settle-seconds",
+                   "verdict-recovery-response-timeout"}
 _ENUM_SETTINGS = {"spec-mode": {"auto", "review", "prompt"},
                   "container-runtime": {"docker", "podman"}}
 _SETTING_DEFAULTS = {
@@ -276,6 +281,9 @@ _SETTING_DEFAULTS = {
     "qa-verify-retries": "(unset)",
     "qa-verdict-reminder-timeout": "(unset)",
     "trust-prompt-grace-seconds": str(DEFAULT_PROMPT_GRACE_SECONDS),
+    "verdict-recovery-max-attempts": "3",
+    "verdict-recovery-settle-seconds": "5",
+    "verdict-recovery-response-timeout": "3600",
     "spec-mode": "prompt",
 }
 _LIST_ALIASES = {"list", "ls", "l"}
@@ -284,7 +292,8 @@ _LIST_ALIASES = {"list", "ls", "l"}
 def _list_settings():
     """Print all settings and their current values."""
     from pm_core.paths import get_global_setting, get_global_setting_value
-    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS))
+    all_settings = sorted(_BOOLEAN_SETTINGS | _INT_SETTINGS | _FLOAT_SETTINGS
+                          | set(_ENUM_SETTINGS))
     width = max(map(len, all_settings))
     for name in all_settings:
         if name in _BOOLEAN_SETTINGS:
@@ -327,8 +336,18 @@ def set_cmd(setting, value):
 
       qa-verify-retries    Max verification retries before marking NEEDS_WORK (default 3)
 
-      qa-verdict-reminder-timeout  Seconds of pane silence before sending a verdict-format
-                                   reminder to a scenario agent (0 or unset = disabled)
+      qa-verdict-reminder-timeout  Retained for compatibility: overrides the settle interval
+                                   (seconds) between QA scenario-worker recovery nudges
+                                   (0 or unset = use verdict-recovery-settle-seconds)
+
+      verdict-recovery-max-attempts  Recovery nudges a loop session gets when it idles
+                                     without its expected verdict (default 3; 0 = off)
+
+      verdict-recovery-settle-seconds  Seconds to wait for a newer idle event (native
+                                       retry / queued input) before nudging (default 5)
+
+      verdict-recovery-response-timeout  Seconds from a recovery nudge to the next idle
+                                         before declaring NO_VERDICT (default 3600; 0 = off)
 
       qa-verify-pass       Enable/disable PASS verdict verification (on/off, default on)
 
@@ -343,7 +362,8 @@ def set_cmd(setting, value):
     if value is None:
         raise click.UsageError("Missing argument 'VALUE'.")
     from pm_core.paths import set_global_setting, set_global_setting_value
-    known = _BOOLEAN_SETTINGS | _INT_SETTINGS | set(_ENUM_SETTINGS)
+    known = (_BOOLEAN_SETTINGS | _INT_SETTINGS | _FLOAT_SETTINGS
+             | set(_ENUM_SETTINGS))
     if setting not in known:
         click.echo(f"Unknown setting: {setting}", err=True)
         click.echo(f"Available: {', '.join(sorted(known))}", err=True)
@@ -363,7 +383,18 @@ def set_cmd(setting, value):
         try:
             int(value)
         except ValueError:
-            click.echo(f"Setting '{setting}' takes a number", err=True)
+            click.echo(f"Setting '{setting}' takes an integer", err=True)
+            raise SystemExit(1)
+        set_global_setting_value(setting, value)
+    elif setting in _FLOAT_SETTINGS:
+        try:
+            parsed = float(value)
+        except ValueError:
+            parsed = float("nan")
+        if not math.isfinite(parsed):
+            # ``float()`` also accepts nan/inf, which are meaningless as a
+            # duration (and inf would make a settle window unbounded).
+            click.echo(f"Setting '{setting}' takes a finite number", err=True)
             raise SystemExit(1)
         set_global_setting_value(setting, value)
     click.echo(f"{setting} = {value}")

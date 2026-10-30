@@ -18,6 +18,7 @@ from pm_core.qa_loop import (
     VERDICT_PASS,
     VERDICT_NEEDS_WORK,
     VERDICT_INPUT_REQUIRED,
+    VERDICT_STOPPED,
     start_qa_background,
     _compute_qa_window_name,
     planner_code_changes_suffix,
@@ -94,7 +95,12 @@ def focus_or_start_qa(app, pr_id: str) -> None:
             suppress = _rs.consume_suppress_switch(pr_id, "qa")
             if not suppress:
                 tmux_mod.select_window(session, window_name)
-                app.log_message(f"Focused QA window for {pr_id}")
+                # A direct answer to the user's key must be visible even
+                # when a confirmation is holding the log line — e.g. the
+                # "QA loop started … — z t to stop" sticky a `zz t` sets
+                # just before a second `t` lands (QA s26).  Same rule as
+                # the dedup / focus-suppressed replies below.
+                app.log_message(f"Focused QA window for {pr_id}", force=True)
             else:
                 app.log_message(
                     f"QA window for {pr_id} ready (focus suppressed)",
@@ -174,7 +180,12 @@ def start_qa(app, pr_id: str, *, focus: bool = False) -> None:
 
     app._qa_loops[pr_id] = state
     _ensure_poll_timer(app)
-    app.log_message(f"Starting QA for {pr_id}...")
+    # A user-initiated start (*focus*, i.e. `t` / `/pr qa`) is a direct
+    # answer to the user's key, so it must paint over whatever is holding
+    # the log line — e.g. the 10 s sticky another PR's "Review loop done …
+    # PASS" set moments earlier (QA s39).  Scheduler-driven starts stay
+    # unforced so a confirmation in progress is not overwritten.
+    app.log_message(f"Starting QA for {pr_id}...", force=focus)
 
     start_qa_background(state, app._root, pr, on_update)
 
@@ -513,7 +524,11 @@ def start_or_stop_qa_loop(app, pr_id: str) -> None:
     # If a QA loop is running (or holding for input), stop it
     existing = app._qa_loops.get(pr_id)
     if existing and (existing.running or existing.held):
-        existing.stop_requested = True
+        from pm_core import qa_loop
+        # Persist the stop into the resume snapshot so a TUI restart before
+        # the daemon rewrites it still recovers the STOPPED teardown instead
+        # of the pre-stop PASS (see qa_loop.mark_stop_requested).
+        qa_loop.mark_stop_requested(existing)
         # Also remove self-driving registration
         app._self_driving_qa.pop(pr_id, None)
         app.log_message(f"[bold]QA loop stopping[/] for {pr_id} (finishing current run)...")
@@ -572,7 +587,11 @@ def stop_qa(app, pr_id: str) -> None:
     """Request graceful stop of QA for a PR."""
     state = app._qa_loops.get(pr_id)
     if state and (state.running or state.held):
-        state.stop_requested = True
+        from pm_core import qa_loop
+        # Persist the stop so a restart before the daemon rewrites its
+        # snapshot still recovers the clean STOPPED teardown rather than the
+        # pre-stop PASS (see qa_loop.mark_stop_requested).
+        qa_loop.mark_stop_requested(state)
         app.log_message(f"Stopping QA for {pr_id}...")
     else:
         app.log_message(f"No QA running for {pr_id}")
@@ -819,11 +838,39 @@ def _resume_incomplete_qa(app) -> None:
             # ended its hold without a follow-up: stop, PR left qa, last
             # attempt dropped) must not be noted/transitioned a second time.
             state.running = False
-            state.latest_verdict = overall
+            # A stop that landed while the (blocking) finalize pane was
+            # polling left the pre-finalize PASS on disk: the daemon converts
+            # it to the terminal STOPPED teardown, but it was interrupted
+            # first.  Record the same verdict the live loop would have, and
+            # keep the status pane agreeing with it.
+            state.latest_verdict = qa_loop.recovered_overall_verdict(
+                state, overall)
+            if state.latest_verdict != overall:
+                _log.info("Recovered QA for %s was stopped during finalize — "
+                          "reporting %s instead of %s", pr_id,
+                          state.latest_verdict, overall)
+                if state.qa_workdir:
+                    qa_loop.set_status_overall(state.qa_workdir,
+                                               state.latest_verdict)
             _log.info("Recovered completed QA from disk: %s → %s (processed=%s)",
-                      pr_id, overall, state.completion_processed)
+                      pr_id, state.latest_verdict, state.completion_processed)
             if not state.completion_processed:
                 _on_qa_complete(app, state)
+            # Mirror the verdict into runtime_state, exactly as the live
+            # completion path in ``poll_qa_state`` does.  A recovered run is
+            # not tracked in ``app._qa_loops``, so that path never sees it;
+            # without this record ``recorded_qa_verdict`` returns None and
+            # auto-start relaunches QA for a run the user stopped (STOPPED is
+            # a ``QA_HOLD_VERDICTS`` entry precisely so it does not).  It
+            # also keeps the popup's ``[done VERDICT]`` in step for the other
+            # recovered verdicts.
+            try:
+                from pm_core import runtime_state as _rs
+                _rs.set_action_state(pr_id, "qa", "done",
+                                     verdict=state.latest_verdict)
+            except Exception:
+                _log.debug("runtime_state qa verdict mirror failed for a "
+                           "recovered run", exc_info=True)
             state._ui_complete_notified = True
             if state.qa_workdir:
                 qa_loop.clear_resume_file(state.qa_workdir)
@@ -866,6 +913,9 @@ def _on_qa_complete(app, state: QALoopState) -> None:
         resumes this self-driving loop when one lands, so it is not
         "paused" unless the hold ends without a follow-up (stop, or the
         PR leaving qa).
+      - STOPPED: a user stop that left no QA result (no plan, no
+        scenario verdict, or a stop while the finalizer was running) —
+        clean teardown, no lifecycle transition and no QA note.
 
     Legacy mode (plain t or auto-start):
       - PASS: hand off to the sign-off step when auto-start is enabled
@@ -1008,6 +1058,14 @@ def _on_qa_complete(app, state: QALoopState) -> None:
                 "QA self-driving: INPUT_REQUIRED — %s",
                 "holding the run for a follow-up verdict" if state.held
                 else "loop paused")
+    elif verdict == VERDICT_STOPPED:
+        # The user stopped the run before it produced a QA result (during
+        # planning, before any scenario reported, or while the finalizer
+        # was running).  This is a clean teardown, not a QA result: no
+        # lifecycle transition, no INPUT_REQUIRED surface, and no QA note
+        # on the PR.
+        app.log_message(f"QA stopped for {pr_id} — no verdict recorded")
+        return
     else:
         app.log_message(f"QA finished for {pr_id}: {verdict}")
 

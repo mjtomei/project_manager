@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pm_core.paths import configure_logger
 from pm_core import store
+from pm_core.loop_shared import VERDICT_NO_VERDICT
 
 _log = configure_logger("pm.tui.watcher_ui")
 
@@ -172,6 +173,7 @@ def load_watcher_plan_prs(app) -> int:
 WATCHER_VERDICT_ICONS = {
     "READY": "[green bold]OK READY[/]",
     "INPUT_REQUIRED": "[red bold]!! INPUT_REQUIRED[/]",
+    VERDICT_NO_VERDICT: "[red bold]! NO_VERDICT[/]",
     "KILLED": "[red bold]X KILLED[/]",
     "ERROR": "[red bold]! ERROR[/]",
     "": "[dim]--[/]",
@@ -313,8 +315,13 @@ def poll_watcher_state(app) -> None:
                 f"{watcher.DISPLAY_NAME} stopped: {verdict_icon} "
                 f"({s.iteration} iteration{'s' if s.iteration != 1 else ''})"
             )
-            if s.latest_verdict == "ERROR" and s.latest_summary:
-                err_text = s.latest_summary[:300]
+            if s.latest_verdict in ("ERROR", VERDICT_NO_VERDICT) and s.latest_summary:
+                # The summary is arbitrary text (exception messages, agent
+                # output) and this message is Rich markup: an unescaped
+                # ``watcher[auto-start]:`` loses the qualifier to the tag
+                # parser, both on the log line and in the command log.
+                from rich.markup import escape as _escape
+                err_text = _escape(s.latest_summary[:300])
                 msg += f"\n  Error: {err_text}"
                 from pm_core.paths import command_log_file
                 msg += f"\n  See log: {command_log_file()}"

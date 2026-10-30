@@ -1209,7 +1209,7 @@ def _auto_start_review_loops(app, prs: list[dict] | None = None) -> None:
         _start_loop(app, pr_id, pr, transcript_dir=str(tdir))
 
 
-QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED")
+QA_HOLD_VERDICTS = ("PASS", "INPUT_REQUIRED", "STOPPED")
 
 
 def recorded_qa_verdict(pr_id: str, pr: dict | None = None) -> str | None:
@@ -1272,10 +1272,11 @@ def _auto_start_qa_loops(app, prs: list[dict] | None = None) -> None:
             continue
         # A finished run leaves _qa_loops one tick after completion; its
         # verdict is recorded in runtime_state.  PASS is handed to sign-off
-        # (signoff_ui.advance_all) and INPUT_REQUIRED waits for a human —
-        # re-running QA on every later scheduler pass (or restart) would
-        # only duplicate finished work.
-        # Any real QA start (review→qa, ``t``) overwrites this record.
+        # (signoff_ui.advance_all), INPUT_REQUIRED waits for a human and
+        # STOPPED is a run the user stopped on purpose — re-running QA on
+        # every later scheduler pass (or restart) would duplicate finished
+        # work or undo the stop.  Any real QA start (review→qa, ``t``)
+        # overwrites this record.
         recorded = recorded_qa_verdict(pr_id, pr)
         from pm_core.signoff import return_awaiting
         if recorded in QA_HOLD_VERDICTS and return_awaiting(pr) != "qa":

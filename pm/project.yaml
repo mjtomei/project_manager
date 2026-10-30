@@ -24363,6 +24363,20 @@ prs:
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-39a24fc
+    text: 'Merge coordination with pr-6566901 (bounded verdict recovery), from its
+      review: both PRs edit pm_core/loop_shared.poll_for_verdict at the same lines.
+      8efa789 swaps the verdict test to find_verdict_turn() and returns hit.text;
+      6566901 inserts a missing-output recovery block immediately after that check.
+      When resolving, KEEP find_verdict_turn as the verdict test and let recovery
+      run only when it finds no hit — a post-verdict /loop wakeup turn must never
+      be treated as an absent outcome (6566901 would otherwise nudge a session that
+      already completed). 6566901 classifies a no-verdict turn with read_latest_assistant_text
+      only after the verdict scan fails, so it needs no change; wait_for_follow_up_verdict
+      is untouched by 6566901. Recovery is bounded by verdict-recovery-max-attempts
+      (default 3) and surfaces NO_VERDICT / INPUT_REQUIRED.'
+    created_at: '2026-10-27T06:14:36Z'
+    last_edited: '2026-10-27T06:14:36Z'
   - id: note-163b8d7
     text: 'Impl 2026-10-27 (commit 4f902f18): task-scoped verdict scan in pm_core/verdict_transcript.py.
       extract_verdict_from_transcript now walks back across non-task user records
@@ -28631,7 +28645,7 @@ prs:
   title: 'Verdict-loop robustness: surface/retry when an expected verdict is never
     produced'
   branch: pm/pr-6566901-verdict-loop-robustness-surface-retry-when-an-expe
-  status: pending
+  status: in_progress
   depends_on: []
   description: "## Problem\n\n`loop_shared.poll_for_verdict()` (and the loops built\
     \ on it — review_loop,\nwatcher_loop, the QA loop) has no wall-clock deadline\
@@ -28662,11 +28676,787 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-05-23T03:14:54.863296+00:00'
-  updated_at: '2026-10-27T05:25:59.189527+00:00'
+  updated_at: '2026-10-29T15:34:22.414230+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
   notes:
+  - id: note-e44d642
+    text: 'Implementation (7c0cfdee): shared MissingOutputRecovery in loop_shared
+      bounds idle-without-verdict turns (verdict-recovery-max-attempts, default 3),
+      repairs completed-but-unformatted results by asking only for the agent''s own
+      standalone outcome, resumes the same session after empty/provider-error turns,
+      and defers to newer idle events (native retry/queued input) during a settle
+      window. Exhaustion surfaces NO_VERDICT (review/watcher, TUI failed state) or
+      INPUT_REQUIRED with a reason (QA planner/scenario/refiner/verifier/finalize).
+      INPUT_REQUIRED follow-up waits stay unbounded by design. Retry-original-prompt
+      is available via the retry_prompt kwarg; loops use targeted resume/outcome messages
+      to avoid replaying completed work per the recovery audit. Spec: pm/specs/pr-6566901/impl.md.
+      Full suite 3823 passed, 1 skipped.'
+    created_at: '2026-10-27T04:59:44Z'
+    last_edited: '2026-10-27T04:59:44Z'
+  - id: note-cd7ce6a
+    text: 'Review-loop efd5 i1 (5b479657): fixed a blocking hole — the settle deferral
+      reset on *every* newer idle_prompt, so a session refreshing the hook for the
+      same turn (FakeClaude re-emits every 2s while held open) deferred forever: no
+      nudge, no exhaustion. That is the PRs own motivating repro (verdictless fake
+      finalize) still hanging. Now only a newer event whose transcript text changed
+      counts as native recovery (defer+reset); a same-turn refresh counts against
+      max_deferrals (default 10) and raises no_progress -> NO_VERDICT without nudging
+      (a nudge closes a fakes stdin). QA tick loop measures its settle window from
+      episode start, not the latest event ts, and drops stale trackers on relaunch/pane
+      change. Also: stop_check during settle returns "stopped" (no teardown nudge),
+      planner/refiner resume messages name their block markers, autostart treats NO_VERDICT
+      as failed, qa-verdict-reminder-timeout help updated. Tests added (refresh bound
+      unit/poll/tick, stop-during-settle, block resume, verifier exhaustion, NO_VERDICT->failed,
+      autostart). Full suite: 3694 passed, 1 skipped excluding 4 files whose 43F+17E
+      reproduce identically on origin/master (git-version/env).'
+    created_at: '2026-10-27T05:38:42Z'
+    last_edited: '2026-10-27T05:38:42Z'
+  - id: note-d3976fa
+    text: 'Review-loop 7d34 i1 (15eaa55b): fixed a real gap vs the spec implicit requirement
+      "do not nudge a completed outcome". Recovery scanned the transcript only at
+      the idle event, which can race the transcript write; MissingOutputRecovery.handle
+      now takes verdict_check and returns "completed" when the outcome appears during
+      the settle window (unit + poll_for_verdict + QA-tick-loop tests; planner re-reads
+      and accepts the plan). Also: stop_check is honoured before nudging even with
+      settle=0 and is passed from the QA tick loop (no messages during teardown);
+      planner checks stop_requested before check_response so a stop cannot surface
+      a spurious INPUT_REQUIRED; exhaustion message names the pane left open; spec
+      updated (completed status, reason list incl. no_progress, scenario reason format).
+      Tests: 38 in test_loop_recovery.py, 453 across loop/QA/review/watcher/autostart
+      suites. Full suite: 3767 passed, 1 skipped; 55F+17E reproduce identically on
+      origin/master (test_merge_publish, test_signoff_integration, test_markdown_render,
+      test_hook_events; test_git_ops::test_keeps_unpushed_merge also fails on master
+      standalone). Merge coordination with pr-8efa789 stands: keep find_verdict_turn
+      as the verdict test in poll_for_verdict/_poll_tmux_verdicts and run recovery
+      only when it finds no hit; recovery classifies with read_latest_assistant_text
+      only after that scan fails.'
+    created_at: '2026-10-27T07:38:24Z'
+    last_edited: '2026-10-27T07:38:24Z'
+  - id: note-02c0aac
+    text: 'Review-loop 7d34 i2 (c9a7a9c0): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, the QA tick-loop
+      episode bookkeeping and the planner stop ordering all hold up under adversarial
+      tracing; merge coordination with pr-8efa789 is intact (recovery runs only after
+      the verdict scan, so swapping in find_verdict_turn needs no change here). Fixed:
+      QA scenario-worker exhaustion now sets state.latest_output + calls _notify()
+      like every other INPUT_REQUIRED transition (it was silent in the TUI log); refiner
+      marker pairs hoisted to _CONCRETIZE_BLOCKS; documented max_deferrals<=0 = unbounded
+      and that retry_prompt must be a single tmux line. Spec updated with the documented
+      residual: a poller that starts while its session is ALREADY idle (review-loop
+      adoption after a TUI restart) is bounded only by overall_timeout / pane death
+      — nudging the pre-existing turn was rejected because a session that already
+      started its next turn would get queued input. Full suite: 3716 passed, 1 skipped
+      (test_git_ops::test_keeps_unpushed_merge fails standalone here — git version,
+      untouched by this PR).'
+    created_at: '2026-10-27T08:06:19Z'
+    last_edited: '2026-10-27T08:06:19Z'
+  - id: note-dfbb915
+    text: 'Review-loop 0bb3 i1 (f4b15398): no blocking defects in the recovery machinery
+      — handle()/deferral bounds, the completed-verdict guard, the QA tick-loop episode
+      bookkeeping, planner stop ordering and merge coordination with pr-8efa789 all
+      hold up. Fixed one classifier inconsistency: _looks_like_provider_error() matched
+      a provider/transport error on ANY line, contradicting its "ended on" contract,
+      so a completed review quoting a log excerpt ("API Error: Connection lost" mid-output)
+      was classified no_output and asked to resume finished work; it now matches only
+      the turn''s last non-empty line (new test). Spec updated to document max_deferrals<=0
+      = unbounded and that retry_prompt/resume_request must be a single tmux line
+      (i2 note claimed these but the spec lacked them). Full suite: 3717 passed, 1
+      skipped; test_git_ops::test_keeps_unpushed_merge fails on this git version (2.34.1)
+      as on master.'
+    created_at: '2026-10-27T08:30:10Z'
+    last_edited: '2026-10-27T08:30:10Z'
+  - id: note-0abe128
+    text: 'Review-loop 0bb3 i3 (4113650a): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, QA tick-loop
+      episode bookkeeping (_no_verdict_since/_recovery_ev_ts), planner stop ordering
+      and the pr-8efa789 merge coordination all hold under adversarial tracing. Fixed
+      a test gap and a spec inaccuracy: (1) new TestRecoverySettings covers the three
+      verdict-recovery settings end to end through `pm set` — the _FLOAT_SETTINGS
+      branch had no coverage at all, so a sub-second settle value (0.5), rejection
+      of non-numeric values without clobbering the stored one, negative-settle clamping,
+      and corrupt hand-edited settings falling back to defaults are now asserted;
+      (2) the spec poll_for_verdict step list now says the settle window + classification
+      live inside MissingOutputRecovery.handle (it previously read as if the poller
+      settled then called handle), and the review/watcher bullets say they rely on
+      the settings-driven defaults instead of passing recovery kwargs. Full suite:
+      3786 passed, 1 skipped; 43F+17E all reproduce identically on origin/master (git
+      2.34.1 / hook-install env; test_git_ops::test_keeps_unpushed_merge included).'
+    created_at: '2026-10-27T09:21:27Z'
+    last_edited: '2026-10-27T09:21:27Z'
+  - id: note-38c3283
+    text: 'Review-loop 0bb3 i4 (55aa5f41): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts), planner
+      stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one bound-defeating hole: MissingOutputRecovery.handle() decided
+      "did the transcript advance?" against the text of its PREVIOUS decision. The
+      poller calls handle() once per idle turn, so when it was already deciding about
+      a newer turn (the normal case) that comparison was True, and a same-turn hook
+      refresh landing during the settle took the native-recovery branch: reset() zeroed
+      BOTH the nudge budget and the deferral count. Both bounds defeated at once,
+      so a session that answers with a new verdictless turn and refreshes its hook
+      could defer forever without ever nudging or exhausting. It now re-reads after
+      the settle and resets only when the text changed during the wait; otherwise
+      the event counts against max_deferrals. The unused _seen_text bookkeeping is
+      gone and the docstring states the rule. Tests: test_refresh_after_a_new_turn_does_not_reset_the_budget
+      fails on the previous code (attempts 0 vs 1); test_retry_prompt_is_sent_instead_of_the_resume_request
+      covers the poll_for_verdict(retry_prompt=...) wiring for the "original prompt
+      is retried" acceptance criterion (only the tracker-level override was tested).
+      Spec updated (deferral rule, finalize bullet now says settings-driven defaults,
+      new tests recorded). Full suite in a clean venv: 3847 passed, 1 skipped, 1 failed
+      — the only failure is the pre-existing env failure tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      (fails standalone; touches no code this PR changed). Known residual unchanged:
+      verdict-recovery-response-timeout (1 h default) can retire a worker that is
+      silently busy (e.g. a >1 h test run) as no_response; it is documented, configurable,
+      and 0 disables it.'
+    created_at: '2026-10-27T09:42:15Z'
+    last_edited: '2026-10-27T09:42:15Z'
+  - id: note-e1eaf6e
+    text: 'Review-loop d476 i1 (910b2178): found and fixed a residual hang of the
+      exact class this PR targets. poll_for_verdict discarded an idle_prompt that
+      arrived inside the grace window (after advancing hook_baseline), so a session
+      whose ONLY idle landed early — a verdict in a few seconds, or an immediate provider
+      connection loss (the audited shape) — left the poller waiting for a turn that
+      never came: no verdict scan, no recovery, no bound. Repro: one idle at t=0 with
+      grace=20 spun forever on the pre-fix commit, returns the verdict now (/pm-captures/review-d476-i1/repro_grace.before.txt
+      vs .after.txt). The grace is still honoured (accept/nudge only post-grace):
+      the poller waits out the remaining grace while checking stop_check, pane death
+      and overall_timeout, then processes that same event. Verdicts come from the
+      transcript latest assistant turn, so an early idle is a real turn boundary,
+      not the pane echoing the prompt (the original grace rationale). Also fixed:
+      the QA tick loop recorded the tick starting event ts as accounted for after
+      a deferral instead of the deferred event ts, so the next comparison could re-count
+      the same refresh (and with a timestamp-less hook event could retire a healthy
+      worker with no_progress instead of nudging it). Tests: test_idle_inside_grace_window_is_processed_not_dropped;
+      test_plan_landing_during_settle_is_accepted_not_renudged (the planner completed
+      branch had no integration coverage — the harness can now write the plan during
+      the settle). Full suite: 3850 passed, 1 skipped (log /pm-captures/review-d476-i1/full-suite.log).
+      Spec updated (grace bullet + tests).'
+    created_at: '2026-10-27T16:31:04Z'
+    last_edited: '2026-10-27T16:31:04Z'
+  - id: note-35c6868
+    text: 'Review-loop d476 i2 (4fec787d): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      the grace-window idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts),
+      planner stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one remaining hang of this PR''s own class: the QA verifier RE-CHECK
+      follow-up (_verify_single_scenario re-verification branch) asked the verifier
+      pane for a new VERIFIED/FLAGGED outcome through wait_for_follow_up_verdict,
+      which is deliberately unbounded because it is the human INPUT_REQUIRED wait.
+      That follow-up is machine-driven, so a verifier idling without a verdict there
+      hung QA forever (spec ambiguity 3 only justified leaving the human wait unbounded).
+      It now uses the shared poll_for_verdict, so the re-check gets the same settle/nudge/exhaustion
+      and surfaces "verifier produced no verdict: …" (blocks finalize); it also checks
+      the verifier pane instead of the window first pane. Hoisted the verifier outcome
+      request to _VERIFIER_OUTCOME_REQUEST and added _VERIFIER_RESUME_REQUEST naming
+      VERIFIED / FLAGGED_START..FLAGGED_END (the initial poll had the generic resume
+      message, unlike planner/refiner block variants). New test drives the re-check
+      branch. Spec updated (design, ambiguity 3, tests). Full suite: 3851 passed,
+      1 skipped. Residual unchanged: verdict-recovery-response-timeout (1 h) can retire
+      a silently-busy worker; a poller that starts while its session is already idle
+      (review adoption) is bounded only by overall_timeout/pane death.'
+    created_at: '2026-10-27T16:55:05Z'
+    last_edited: '2026-10-27T16:55:05Z'
+  - id: note-a6eacbb
+    text: 'Review-loop d476 i3 (3ec04b77): found and fixed one remaining instance
+      of this PR''s own failure class in the QA tick loop. `_poll_tmux_verdicts` ran
+      `check_response()` (post-nudge response deadline) BEFORE the fresh-event/verdict
+      scan, so a worker whose verdict landed in the same 5 s tick as its deadline
+      was retired as INPUT_REQUIRED/no_response although the outcome was already in
+      the transcript — a completed result treated as absent. The check now runs after
+      the scan and is skipped when a verdict was found (it still runs every tick when
+      none appears, so a silent worker is still retired). Regression test `test_verdict_landing_on_the_response_timeout_tick_is_recorded`
+      fails on the previous ordering (INPUT_REQUIRED vs PASS). Also: per-scenario
+      recovery bookkeeping now goes through `_close_episode` (episode dicts only,
+      keeps the attempt budget) / `_drop_recovery` (all three dicts) so `_recoveries`/`_no_verdict_since`/`_recovery_ev_ts`
+      cannot drift apart; `pm set` rejects non-finite values for the two float recovery
+      settings and `_setting_float` ignores them from a hand-edited file (inf as a
+      settle window would be unbounded); `finalize_verdict` comment documents NO_VERDICT;
+      spec updated (bookkeeping helpers, check_response ordering, finite-value rule,
+      new test). Full suite: 3840 passed, 1 skipped, 13 failed — all 13 reproduce
+      on the unmodified tree here (12 x missing `markdown` module, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can still land
+      in a permission hold that begins during an open episode (documented queued-input
+      residual). (2026-10-27T17:20:00Z)'
+    created_at: '2026-10-27T18:12:21Z'
+    last_edited: '2026-10-27T18:12:21Z'
+  - id: note-e46cb9c
+    text: 'Review-loop d476 i4 (d9eb238c): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      the grace-window idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts),
+      planner stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one remaining spurious-exhaustion path: _poll_tmux_verdicts ran
+      check_response() (and the settle/nudge block) unconditionally, so a stop set
+      by the TUI thread between two ticks — after the while condition was evaluated
+      — retired the worker as INPUT_REQUIRED/no_response during teardown, with the
+      reason persisted into the resume snapshot; handle() has the same hole because
+      its no_progress deferral bound is checked before its own stop_check. Both are
+      now skipped when state.stop_requested is set, matching the planner loop. Regression
+      test test_scenario_worker_stop_does_not_surface_a_spurious_exhaustion fails
+      on the previous code and passes now; spec updated. Full suite: 3853 passed,
+      1 skipped, 1 failed — the only failure is the pre-existing env failure tests/test_hook_events.py::test_installer_writes_standalone_receiver
+      (fails standalone). Residuals unchanged: verdict-recovery-response-timeout (1
+      h) can retire a silently-busy worker; a poller that starts while its session
+      is already idle (review adoption) is bounded only by overall_timeout/pane death;
+      a recovery nudge can still land in a permission hold that begins during an open
+      episode. (2026-10-27T18:45:00Z)'
+    created_at: '2026-10-27T18:44:33Z'
+    last_edited: '2026-10-27T18:44:33Z'
+  - id: note-27055cc
+    text: 'Review-loop d476 i5 (4bdb8776): no other functional defects found in the
+      recovery machinery — handle()/deferral bounds, the completed-verdict guard,
+      the grace-window idle processing, QA tick-loop episode bookkeeping, planner
+      stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing. Fixed one remaining spurious-exhaustion window of the class i4 addressed:
+      the `stopping` guard in `_poll_tmux_verdicts` is a snapshot taken just before
+      the check, and handle()''s deferral/attempt bound runs before its own stop_check,
+      so a stop landing *while* handle decides could still retire the worker as INPUT_REQUIRED
+      and persist the reason into the resume snapshot. Both `except VerdictRecoveryExhausted`
+      handlers now re-check state.stop_requested and leave the worker pending during
+      teardown; new regression test sets the stop inside handle and fails on the previous
+      code. Also: the planner exhaustion `_error` now names the validator''s rejection
+      when the planner emitted a QA_PLAN block that could not be consumed (e.g. non-contiguous
+      numbering), matching the non-exhaustion "plan incomplete" surface (new test);
+      dropped an unreachable `if not pane_id: continue` in the tick loop. Spec updated.
+      Full suite: 3796 passed, 1 skipped; 42 failed + 17 errors all reproduce on the
+      unmodified tree here (41 in test_merge_publish/test_signoff_integration, plus
+      test_git_ops::test_keeps_unpushed_merge on git 2.34.1). Note: pr-f2fee05 (verifier
+      re-check hang) is now covered by this PR''s i2 change (the re-check uses poll_for_verdict),
+      so that bug PR looks redundant — flagged for the planner.'
+    created_at: '2026-10-27T19:55:38Z'
+    last_edited: '2026-10-27T19:55:38Z'
+  - id: note-2b98e19
+    text: 'QA scenario 3 (2026-10-27): found+fixed a dashboard gap while testing slot
+      freeing — queued QA scenarios vanished from qa_status.json/the status pane at
+      launch. _launch_scenarios_in_tmux/_containers wrote the status file while state.scenarios
+      was narrowed to the launch batch and without queued_scenarios, overwriting the
+      correct initial write; still-queued rows then showed as pending on each relaunch.
+      Threaded _status_scenarios + _queued_indices through both launchers and pass
+      queued_scenarios= to _write_status_file at the initial launch and each queued
+      relaunch; regression test TestQueuedScenariosStayVisible in tests/test_qa_loop.py.
+      Commit 8ae71190 (pushed). End-to-end verified: 4 scenarios/cap 2 shows Gamma+Delta
+      queued at launch, both dequeue, all four verdictless workers retire individually
+      as INPUT_REQUIRED (distinct reasons/panes), overall INPUT_REQUIRED; happy path
+      (2 PASS, verified, FINALIZE_DONE) and a genuine INPUT_REQUIRED worker (empty
+      reason, pane+session left alive, no recovery lines) are unaffected. Captures:
+      /pm-captures/scenarios/3/.'
+    created_at: '2026-10-27T21:21:28Z'
+    last_edited: '2026-10-27T21:21:28Z'
+  - id: note-3aeb377
+    text: 'QA S2 (2026-10-27): found and fixed a clean-teardown hole in story 2. Stopping
+      a QA run while the verdictless planner was still planning fell through to the
+      no-scenarios path and surfaced INPUT_REQUIRED ("Planner produced no parseable
+      scenarios — needs human review" / "QA complete: INPUT_REQUIRED — …" / "QA INPUT_REQUIRED
+      … paused for human input") plus a QA note. The planner now ends a stopped run
+      in a terminal STOPPED state and qa_loop_ui logs "QA stopped for <pr> — no verdict
+      recorded" with no lifecycle transition and no note. Verified end-to-end (stop
+      mid-planning, then restart) with pre/post captures at /pm-captures/scenarios/2/{pre-fix,post-fix}/;
+      story 1 (bounded planner exhaustion -> actionable INPUT_REQUIRED) passed, capture
+      at /pm-captures/scenarios/2/story1-plan-verdictless/. Full suite after rebase:
+      3861 passed, 1 skipped. The planner-handoff test harness now ends its poll loop
+      via the planner deadline (qa_loop-local fake clock) instead of faking a user
+      stop.'
+    created_at: '2026-10-27T21:35:18Z'
+    last_edited: '2026-10-27T21:35:18Z'
+  - id: note-1757cc5
+    text: 'Review-loop 3dd4 i1 (a65e6799): found and fixed one remaining instance
+      of the spurious-exhaustion-on-teardown class (i4/i5 covered the QA tick loop;
+      the planner, review and watcher loops did not). handle() checks its deferral
+      bound *before* its own stop_check, so a stop that lands while recovery is deciding
+      surfaces VerdictRecoveryExhausted for a run the user stopped: the planner then
+      ended INPUT_REQUIRED with a QA note (the S2 bug again), the review loop recorded
+      a NO_VERDICT history entry, and the watcher recorded NO_VERDICT instead of its
+      KILLED stop convention. Both planner except handlers (check_response and handle)
+      now re-check state.stop_requested and fall through to the clean STOPPED path;
+      the review loop breaks like its top-of-loop stop check (no NO_VERDICT iteration);
+      the watcher mirrors PaneKilledError (KILLED). Regression tests added for all
+      four paths (planner handle-path, planner response-timeout path, review, watcher)
+      — each fails on the pre-fix code. Spec updated. Full suite: 3865 passed, 1 skipped.
+      No other functional defects found in the recovery machinery (handle() bounds,
+      completed-verdict guard, grace-window idle processing, QA tick-loop episode
+      bookkeeping, merge coordination with pr-8efa789 all hold). Residuals unchanged:
+      verdict-recovery-response-timeout (1 h) can retire a silently-busy worker; a
+      poller that starts while its session is already idle (review adoption) is bounded
+      only by overall_timeout/pane death; a recovery nudge can still land in a permission
+      hold that begins during an open episode. Note: pr-f2fee05 (verifier re-check
+      hang) is subsumed by this PRs i2 change (the re-check uses poll_for_verdict),
+      so that bug PR is redundant. (2026-10-27T22:28:00Z)'
+    created_at: '2026-10-27T22:22:37Z'
+    last_edited: '2026-10-27T22:22:37Z'
+  - id: note-32e3505
+    text: 'Review-loop 3dd4 i2 (3dfd8fe8): no other functional defects found in the
+      recovery machinery — handle() bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping, planner stop ordering and
+      the pr-8efa789 merge coordination all hold under adversarial tracing. Fixed
+      four remaining instances of the classes this PR targets: (1) STOPPED was not
+      a hold verdict — auto_start.QA_HOLD_VERDICTS listed only PASS/INPUT_REQUIRED,
+      so a QA run the user stopped during planning was relaunched by the scheduler
+      on the next pass (silently undoing the S2 clean-teardown fix; every stop used
+      to end INPUT_REQUIRED, which held). STOPPED is now held and autostart_state._derive
+      reports it as waiting with "last QA run was stopped; press t / z t to re-run
+      QA". (2) _run_qa_finalize_pane surfaced [finalize: NO_VERDICT] for a user-stopped
+      run (handle checks its deferral bound before its own stop_check) — it now re-checks
+      stop_check and returns None, the same spurious-teardown-failure class i1/i4/i5
+      fixed elsewhere. (3) Both QA tick-loop exhaustion handlers now re-scan the transcript
+      before marking a scenario INPUT_REQUIRED: the scan runs at the idle hook (races
+      the transcript write) and no_progress is raised before handle verdict_check,
+      so a verdict landing just after the deadline tick scan was retired as no_response/no_progress
+      — i3 fixed the ordering, not the write race. (4) max_deferrals is documented
+      as bounding *consecutive* refreshes but accumulated over the tracker lifetime;
+      a nudge now starts a fresh budget so an answered session cannot later be retired
+      with no_progress. Also combined the duplicated pass-through branches in _concretize_failure_label.
+      New tests all fail on the pre-fix code. Full suite: 3810 passed, 1 skipped;
+      43F+17E reproduce identically on origin/master here (test_signoff_integration/test_merge_publish,
+      test_git_ops::test_keeps_unpushed_merge on git 2.34.1, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can still land
+      in a permission hold that begins during an open episode. Note: pr-f2fee05 (verifier
+      re-check hang) is subsumed by this PR i2 change (the re-check uses poll_for_verdict),
+      so that bug PR is redundant.'
+    created_at: '2026-10-27T22:52:24Z'
+    last_edited: '2026-10-27T22:52:24Z'
+  - id: note-ec35a02
+    text: 'Review-loop 3dd4 i3 (fd1218d1): no functional defects found in the recovery
+      machinery — handle() bounds, the completed-verdict guard, grace-window idle
+      processing, QA tick-loop episode bookkeeping, planner stop ordering and the
+      pr-8efa789 merge coordination all hold under adversarial tracing. Fixed two
+      gaps: (1) the planner recovery nudge ignored the validator rejection, so a planner
+      whose QA_PLAN block was refused (non-contiguous numbering/truncated) got the
+      same generic "re-emit your completed result" request as a planner that emitted
+      nothing and could repeat the malformed block until exhaustion; the outcome request
+      is now a callable naming the current plan_problem on one line (no plan supplied
+      or inferred), with a regression test that fails on the old message. (2) the
+      retained qa-verdict-reminder-timeout settle override had zero coverage; new
+      tick-loop test proves a 1 s override nudges within a couple of ticks against
+      a 100 s shared settle (old behavior: tick 51). Spec updated. Full suite: 3784
+      passed, 1 skipped; 43F+17E reproduce identically on origin/master here (test_signoff_integration/test_merge_publish,
+      test_git_ops::test_keeps_unpushed_merge on git 2.34.1, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can still land
+      in a permission hold that begins during an open episode. Note: pr-f2fee05 (verifier
+      re-check hang) remains subsumed by this PR i2. (2026-10-27T23:20:26Z)'
+    created_at: '2026-10-27T23:20:26Z'
+    last_edited: '2026-10-27T23:20:26Z'
+  - id: note-bce0d4e
+    text: 'Refiner (scenario 9, teardown): verified in code that a stop during QA
+      execution with unverdicted scenarios still aggregates overall INPUT_REQUIRED
+      (tests/test_qa_loop.py::TestStoppedRunAggregation) and _on_qa_complete then
+      records a QA INPUT_REQUIRED note; only per-worker retirement and recovery nudges
+      are stop-guarded. A stop inside qa_finalize returns None (no [finalize: NO_VERDICT])
+      but leaves the pre-finalize PASS as the run verdict. Scenario 9 asserts the
+      clean-teardown / no-note requirement, so an observed INPUT_REQUIRED or PASS
+      terminal line, or a QA note, is a real finding rather than a setup error.'
+    created_at: '2026-10-28T00:45:58Z'
+    last_edited: '2026-10-28T00:45:58Z'
+  - id: note-37d3c80
+    text: 'QA S11 (watcher NO_VERDICT surface + pane-gone teardown): fixed two defects
+      found driving the scenario. (1) In-scope: the new NO_VERDICT stop line interpolated
+      the VerdictRecoveryExhausted summary into a Rich-markup log message, so `watcher[auto-start]`
+      was eaten as a style tag - pm log grep / the L pane showed `Error: watcher:`
+      while the raw [watcher_base] line in the same file kept the qualifier. The summary
+      is now escaped. (2) Pre-existing but it broke the scenario stop step: `ws` started
+      a second watcher instead of stopping the running one once an earlier instance
+      had finished. WatcherManager.find_by_type() returned the first registered (dead)
+      instance, so _action_watcher_toggle saw running=False and took the start branch;
+      the two loops then fought over the single watcher window (each kills/recreates
+      it at iteration start) and the newer one was reported X KILLED. find_by_type
+      now prefers a running instance (also repairs the start_watcher duplicate guard,
+      stop_watcher and the auto-start scope update). Regression tests for both, each
+      failing on the prior code. Captures: /pm-captures/scenarios/11/pre-fix/ (story2
+      shows the double start) and post-fix/. Not fixed, out of scope: the L pane recap
+      pattern is `Auto-(start|sequence|merge)` (lowercase s) so it never matches the
+      watcher''s `Auto-Start Watcher ...` lines; the backlog still shows them.'
+    created_at: '2026-10-28T01:07:16Z'
+    last_edited: '2026-10-28T01:07:16Z'
+  - id: note-276eaeb
+    text: 'QA S9 (73ea40b9): a stop during QA execution that leaves every scenario
+      unverdicted now ends the run in STOPPED ("QA stopped during execution", no QA
+      note, finalize skipped) instead of INPUT_REQUIRED + a note; a stop after some
+      verdicts still reports INPUT_REQUIRED (never PASS). Verified live: stop 34 s
+      after both workers launched into their no-verdict episode — no recovery text
+      in either pane, no note, status stays qa, and a following /pr qa fresh plans
+      anew to PASS [finalize: FINALIZE_DONE]. Supersedes note-bce0d4e (pre-fix behaviour).
+      Captures: /pm-captures/scenarios/9/.'
+    created_at: '2026-10-28T01:41:13Z'
+    last_edited: '2026-10-28T01:41:13Z'
+  - id: note-eccf022
+    text: 'Review-loop 9b1b i1 (5668aec6): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping, planner stop ordering and
+      the pr-8efa789 merge coordination all hold under adversarial tracing. Fixed
+      a drift risk and a test gap: (1) the two QA tick-loop exhaustion sites (post-nudge
+      response deadline and the handle() no_progress bound) were byte-identical copies
+      of teardown-guard + last-chance transcript re-scan + retire + slot bookkeeping;
+      they now share _retire_if_exhausted, which returns the verdict that landed during
+      the deadline so the caller records it normally; (2) new test_every_recovery_request_is_a_single_line
+      pins the documented tmux send-keys invariant (no newline / no surrounding whitespace)
+      across the four builders and the verifier two role-specific requests — nothing
+      asserted it, so a wrapped literal would have silently submitted partial input.
+      Also committed the QA session uncommitted qa.md update (R10-R12 scenarios, residuals,
+      ambiguity notes), which matches the shipped behaviour; verify-s10-followup.md
+      stays untracked (scenario-authoring scratch). Full suite after the edits: 3806
+      passed, 1 skipped, 55 failed + 17 errors — identical to the pre-edit run and
+      all reproduce on the unmodified tree here (test_markdown_render x12: markdown
+      module missing; test_merge_publish/test_signoff_integration x41: git env; test_git_ops::test_keeps_unpushed_merge
+      on git 2.34.1; test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can land in
+      a permission hold that begins during an open episode. pr-f2fee05 (verifier re-check
+      hang) remains subsumed by this PR i2.'
+    created_at: '2026-10-28T02:49:15Z'
+    last_edited: '2026-10-28T02:49:15Z'
+  - id: note-4d0f6af
+    text: 'Review-loop 9b1b i2 (42666a7f): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), planner stop ordering and the pr-8efa789
+      merge coordination all hold under adversarial tracing. Fixed a documentation
+      drift: three comments still described STOPPED as "a user stop before any plan
+      existed" although a stop during execution that leaves every scenario unverdicted
+      also ends in STOPPED (stopped_clean, i2/73ea40b9) — qa_loop.VERDICT_STOPPED,
+      autostart_state._derive and qa_loop_ui._on_qa_complete now name both phases.
+      Comments only, no behaviour change. Full suite: 3807 passed, 1 skipped; 54F+17E
+      reproduce in the known environment groups (12 markdown-module, 1 hook-installer,
+      39 git-env in test_merge_publish/test_signoff_integration), none in files this
+      PR touches. Residuals unchanged: verdict-recovery-response-timeout (1 h) can
+      retire a silently-busy worker; a poller that starts while its session is already
+      idle (review adoption) is bounded only by overall_timeout/pane death; a recovery
+      nudge can land in a permission hold that begins during an open episode. pr-f2fee05
+      (verifier re-check hang) remains subsumed by this PR i2 change. verify-s10-followup.md
+      stays untracked (scenario-authoring scratch). (2026-10-28)'
+    created_at: '2026-10-28T03:30:17Z'
+    last_edited: '2026-10-28T03:30:17Z'
+  - id: note-7356239
+    text: 'Review-loop 9b1b i3 (6848ee54): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), planner stop ordering and the pr-8efa789
+      merge coordination all hold under adversarial tracing. Fixed one remaining instance
+      of the markup class S11 fixed in the watcher: review_loop_ui interpolated state.latest_output
+      (arbitrary exception/agent text) unescaped into the Rich-markup stop line, so
+      a "[...]" in an ERROR detail was parsed as a style tag and dropped; extracted
+      _format_completion_message() (also unit-testable) and escaped it, with new TestCompletionMessage.
+      Spec updated (TUI wiring bullet + tests). Full suite: 3869 passed, 1 skipped,
+      12 failed — all 12 are tests/test_markdown_render.py (markdown module absent
+      in this container) and reproduce on the unmodified tree. Log: /pm-captures/review-9b1b-i3/.
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can land in
+      a permission hold that begins during an open episode. pr-f2fee05 (verifier re-check
+      hang) remains subsumed by this PR i2.'
+    created_at: '2026-10-28T04:06:17Z'
+    last_edited: '2026-10-28T04:06:17Z'
+  - id: note-f8b3443
+    text: 'QA S16 refiner note (HEAD 25d2b5a7): steps verified against the code. Execution-stop
+      and auto-start-hold stories match the stopped_clean aggregation and QA_HOLD_VERDICTS.
+      Finalize-stop story: _run_qa_finalize_pane suppresses ''[finalize: NO_VERDICT]''
+      on a user stop, but when every scenario PASSed the run still aggregates to PASS
+      (latest_verdict=PASS, finalize_verdict=None), so the TUI logs ''QA complete:
+      PASS''/''QA PASS'' and records a ''QA PASS: …'' note. R10 and this scenario''s
+      focus require a terminal STOPPED teardown with no QA note, so an observed PASS+note
+      in that story is a requirement mismatch, not a harness artifact. (Fixed in 4effd362:
+      a finalize-phase stop now ends STOPPED with no note.)'
+    created_at: '2026-10-28T05:40:46Z'
+    last_edited: '2026-10-28T06:16:00Z'
+  - id: note-78bfa40
+    text: 'QA scenario 19 PASS (self-driving QA loop start / PASS hand-off / no-plan
+      pause). Captures: /pm-captures/scenarios/19/{story1-loop-pass,story2-no-plan-pause,story3-recovery-pass}
+      + evidence.txt. Note for the next run: scenario 19 story 2 says "no qa-<B>-s*
+      windows" after a failed plan, but `qa-<B>-s0` always exists — it is the pre-existing
+      "Scenario 0 (interactive)" helper session launched for every QA run right after
+      stale cleanup (qa_loop.py), not a scenario worker. The real check is: no qa-<B>-s1+
+      window and no "QA execution phase" log line for that run. Observed: exactly
+      one INPUT_REQUIRED with the "re-announced its idle turn 11 time(s) … recovery
+      made no progress" detail, status pane ERROR block, planner pane left open, one
+      note, B stayed qa; a following happy-config re-run replaced the stale window
+      and completed PASS with a second QA PASS note.'
+    created_at: '2026-10-28T06:03:24Z'
+    last_edited: '2026-10-28T06:03:24Z'
+  - id: note-f4fe340
+    text: 'QA S16 (stop mid-episode + auto-start hold): found and fixed 89fdf570 —
+      a user stop that landed while the finalize pane was polling was still reported
+      as the pre-finalize aggregate, so a run whose scenarios had all passed logged
+      "QA complete: PASS"/"QA PASS" and recorded a QA PASS note for a cancelled run.
+      _execute_and_finalize now converts that case to STOPPED (latest_output "QA stopped
+      during finalize"), rewrites qa_status.json so the status pane shows Overall:
+      STOPPED, and records no note; only a PASS is converted (NEEDS_WORK/INPUT_REQUIRED
+      findings and a completed FINALIZE_DONE keep their verdict). Stories 1-3 passed
+      unchanged: execution stop -> STOPPED with no INPUT_REQUIRED/NO_VERDICT/recovery
+      nudge, autostart holds it as waiting/qa with "last QA run was stopped", fresh
+      rerun -> PASS -> sign_off (SIGNOFF_BLOCKED). Captures: /pm-captures/scenarios/16/{pre-fix,post-fix,run}/.
+      Full suite 3824 passed, 1 skipped; 43F+17E in the known env groups.'
+    created_at: '2026-10-28T06:17:45Z'
+    last_edited: '2026-10-28T06:17:45Z'
+  - id: note-9c4e5a8
+    text: 'Review-loop 81f7 i1 (10222bc7): no functional defects found in the recovery
+      machinery — handle() bounds, the completed-verdict guard, grace-window idle
+      processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), planner stop ordering and the pr-8efa789
+      merge coordination all hold under adversarial tracing, and the spec/QA spec
+      match the shipped code. Closed one test gap in the acceptance criteria''s second
+      half ("the retry can succeed"): nothing asserted that a *nudged* planner or
+      scenario worker which answers on the next turn is accepted rather than counted
+      as another missing output. New `plan_after_nudge_turns` harness knob + TestPlannerRecovery::test_nudged_planner_plan_is_accepted_on_the_next_turn
+      (exactly one nudge, plan accepted; planner deadline widened because the harness
+      clock advances 1 s per monotonic call) and test_nudged_scenario_worker_verdict_on_the_next_turn_is_recorded
+      (verdict recorded with one nudge, not retired). Spec tests section updated.
+      Full suite: 3886 passed, 1 skipped. Residuals unchanged: verdict-recovery-response-timeout
+      (1 h) can retire a silently-busy worker; a poller that starts while its session
+      is already idle (review adoption) is bounded only by overall_timeout/pane death;
+      a recovery nudge can land in a permission hold that begins during an open episode.
+      pr-f2fee05 (verifier re-check hang) remains subsumed by this PR i2.'
+    created_at: '2026-10-28T06:59:31Z'
+    last_edited: '2026-10-28T06:59:31Z'
+  - id: note-07e2f05
+    text: 'Review-loop 81f7 i2 (b7a1ba7b): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), planner stop ordering, the _retire_if_exhausted
+      last-chance re-scan and the pr-8efa789 merge coordination all hold under adversarial
+      tracing, and pm/specs/pr-6566901/impl.md matches the shipped code (no [UNRESOLVED]
+      ambiguities). Fixed a documentation drift left by 89fdf570: qa_loop.VERDICT_STOPPED
+      and autostart_state._derive still described STOPPED as "during planning, or
+      during execution before any scenario reported", omitting the finalize-phase
+      teardown (the case with full scenario coverage), and the qa_loop comment said
+      "nothing was determined about the PR" which is untrue when scenarios reported
+      before a finalize stop. Comments only, no behaviour change. Full suite in a
+      clean venv: 3826 passed, 1 skipped; 43 failed + 17 errors all reproduce on the
+      unmodified tree here (test_merge_publish/test_signoff_integration git env, test_git_ops::test_keeps_unpushed_merge
+      on git 2.34.1, test_hook_events::test_installer_writes_standalone_receiver).
+      Residuals unchanged: verdict-recovery-response-timeout (1 h) can retire a silently-busy
+      worker; a poller that starts while its session is already idle (review adoption)
+      is bounded only by overall_timeout/pane death; a recovery nudge can land in
+      a permission hold that begins during an open episode. pr-f2fee05 (verifier re-check
+      hang) remains subsumed by this PR i2 (note already left on it); pr-8efa789 (post-verdict
+      wakeup turn) is unaffected because the completed-verdict guard returns "completed"
+      before any nudge.'
+    created_at: '2026-10-28T07:50:05Z'
+    last_edited: '2026-10-28T07:50:05Z'
+  - id: note-6a4a3a0
+    text: 'Review-loop 81f7 i3 (e453ad25): no functional defects found in the recovery
+      machinery — handle()/deferral bounds, the completed-verdict guard, grace-window
+      idle processing, QA tick-loop episode bookkeeping (_no_verdict_since/_recovery_ev_ts
+      via _close_episode/_drop_recovery), _retire_if_exhausted last-chance re-scan,
+      planner stop ordering and the pr-8efa789 merge coordination all hold under adversarial
+      tracing, and the spec/QA spec match the shipped code (no [UNRESOLVED] ambiguities).
+      Fixed a spec gap: the queued-scenario dashboard fix (8ae71190, QA scenario 3)
+      shipped in this PR but was never documented — added the QA-loop bullet plus
+      the TestQueuedScenariosStayVisible test entry. Comments/docs only, no behaviour
+      change. Verified the full suite matches the known environment baseline here:
+      3815 passed, 1 skipped, 54 failed + 17 errors, all in the pre-existing git-env
+      (test_signoff_integration/test_merge_publish, git 2.34.1), missing-markdown-module
+      and hook-installer groups; the focused suites (test_loop_recovery, test_qa_planner_handoff,
+      test_review_loop_terminal_state, test_watcher_loop, test_autostart_multi_target,
+      test_qa_loop) are 438 passed. Residuals unchanged: verdict-recovery-response-timeout
+      (1 h) can retire a silently-busy worker; a poller that starts while its session
+      is already idle (review adoption) is bounded only by overall_timeout/pane death;
+      a recovery nudge can land in a permission hold that begins during an open episode.
+      pr-f2fee05 (verifier re-check hang) remains subsumed by this PR i2. Note: _poll_tmux_verdicts
+      is now ~960 lines (pre-existing structure, +~150 here) — a future extraction
+      of the recovery closures into a helper would be worthwhile but is too risky
+      to do inside a review iteration.'
+    created_at: '2026-10-28T08:17:17Z'
+    last_edited: '2026-10-28T08:17:17Z'
+  - id: note-40c21d8
+    text: 'QA S24 refiner (2026-10-28): verified live against the fake — review PASS
+      after 45s, watcher READY after 35s, and two QA workers streaming ~16s were all
+      accepted with no recovery nudge (empty `pm log grep -i "recovery request"`).
+      Two fixture facts for the worker: (1) the review window does NOT close when
+      the loop ends PASS — it stays open, so assert the TUI log line "Review loop
+      done for <pr>: ✓ PASS (1 iteration)" (via `pm log grep "log: Review loop done"`)
+      rather than a closed pane; (2) QA has a post-planning spec gate, so seed `$TEST_DIR/pm/specs/<pr>/qa.md`
+      (or run `pm pr spec <pr> qa` with the fake config set) before starting QA, else
+      it surfaces INPUT_REQUIRED "QA spec was not generated". QA grace is 30s, so
+      worker verdicts are accepted ~30s after the poll starts and the whole QA run
+      takes ~2 min.'
+    created_at: '2026-10-28T09:35:25Z'
+    last_edited: '2026-10-28T09:35:25Z'
+  - id: note-03f8c96
+    text: 'QA S24 (2026-10-28): PASS — all three roles accepted long legitimate turns
+      without a recovery nudge. Live: review PASS after 45s -> "Review loop done for
+      pr-cf29563: ✓ PASS (1 iteration)"; watcher READY after 35s (past the 30s grace)
+      -> "Watcher finished: 1 iteration(s), last verdict: READY"; two QA workers streaming
+      ~16s -> PASS (verified), FINALIZE_DONE, QA PASS note, no INPUT_REQUIRED/relaunch/window-died.
+      `pm log grep -i "recovery request"` empty throughout. One fixture fact for the
+      next run: QA scenario windows/numbering start at s3/s4, not s1/s2 — PR ids are
+      deterministic (sha256(title)[:7]) so an earlier run of this scenario on the
+      shared $HOME left ~/.pm/workdirs/qa/pr-cf29563-*/s-1,s-2, and qa_loop._next_scenario_offset
+      deliberately continues numbering from previous runs for the same PR. Not a defect;
+      do not flag it. Also: QA has a post-planning spec gate, so seed pm/specs/<pr>/qa.md
+      (or run `pm pr spec <pr> qa` with the fake config) before `pr qa`.'
+    created_at: '2026-10-28T09:49:08Z'
+    last_edited: '2026-10-28T09:49:08Z'
+  - id: note-eb02086
+    text: 'QA S20 (pr-6566901, 2026-10-28): both recovery request shapes and the empty-turn
+      classification verified live on the TUI. Story 1: a planner stand-in with zero
+      output (qa_planning verdicts=[], preamble 0, delay 5) gets exactly one single-line
+      RESUME request ("...Resume the same task in this session... emit your own result
+      wrapped in QA_PLAN_START ... QA_PLAN_END..."), log `qa-planner: idle turn without
+      outcome (no_output) — recovery request 1/3`, no prompt replay, pane exits on
+      the request, run ends INPUT_REQUIRED in ~21 s with "No parseable scenarios found
+      in planner output.", no scenarios/finalizer/verification, one qa window with
+      the placeholder main pane, PR stays qa. Story 2: a review stand-in writing 3
+      prose lines and no standalone verdict gets exactly one OUTCOME request ("exactly
+      one of PASS / NEEDS_WORK / INPUT_REQUIRED, alone on its own line..."), log `review_loop:
+      idle turn without outcome (no_verdict) — recovery request 1/3`, prose not mined,
+      ends `☠ KILLED (1 iteration)` at ~38 s on the pane-gone path, one iteration.
+      Story 3: default 5 s settle + a silent review stand-in -> zero bytes typed,
+      11 no-progress deferrals, `! NO_VERDICT (1 iteration)` with "re-announced its
+      idle turn 11 time(s) ... recovery made no progress", pane left open, one iteration.
+      FIXED a dashboard gap found in story 1: qa_status._render error branch returned
+      before the `Overall:` line, so a run ending INPUT_REQUIRED showed only the ERROR
+      block and never named its verdict (qa.md R4 asks the status pane to report it).
+      It now renders `Overall: <verdict>` after the error text when the status file
+      has one; commit fc1975e5 + tests/test_qa_status_render.py (the overall assertion
+      fails on the previous renderer; verified against origin/master). Captures: /pm-captures/scenarios/20/{story1,story2,story3,pre-fix,post-fix}
+      + manifest.md (single 484 s cast of the whole session with a video-time timeline).
+      Env notes: `t` on a PR that already has a QA window only focuses it — use `z
+      t` to re-run; test_signoff_integration failures in this container reproduce
+      on unmodified origin/master.'
+    created_at: '2026-10-28T10:01:05Z'
+    last_edited: '2026-10-28T10:01:05Z'
+  - id: note-b0859f7
+    text: 'QA scenario 22 PASS (2026-10-28): STOPPED/NO_VERDICT holds survive a TUI
+      restart, and z t overrides them. Two harness caveats for the next run of this
+      scenario: (1) a run stopped during planning leaves its qa-<pr>-s0 "Scenario
+      0 (interactive)" helper window open, so the literal `tmux list-windows | grep
+      -c "^qa-<pr>"` check returns 1 during the post-restart scheduler passes — assert
+      on window IDs instead (no new window/pane); (2) the TUI log tail shows one line,
+      so "Planning QA scenarios..." can read "(hidden by sticky message)" while the
+      log file has it — grep `pm log grep` for the sequence. Captures: /pm-captures/scenarios/22/.'
+    created_at: '2026-10-28T10:03:17Z'
+    last_edited: '2026-10-28T10:03:17Z'
+  - id: note-c61a7c5
+    text: 'QA S25 (concurrent surfaces + stop): the QA status dashboard dropped the
+      scenario table and the overall verdict whenever qa_status.json carried an error,
+      so a planner-recovery exhaustion showed only the ERROR block. Fixed on top of
+      fc1975e5 (which added the Overall line): the error branch now falls through
+      to the table + Overall when scenarios/overall exist, error-only otherwise; regression
+      tests in tests/test_qa_status_render.py (merged with fc1975e5''s). Verified
+      live: post-fix pane shows QA Status / ERROR / "0 Interactive Session interactive"
+      / Overall: INPUT_REQUIRED. Concurrent runs otherwise passed: two loops ended
+      on their own (review ! NO_VERDICT 1 iter, QA INPUT_REQUIRED), a mid-episode
+      stop gave ☠ KILLED + STOPPED with no note/lifecycle, and healthy restarts gave
+      ✓ PASS / QA PASS with per-PR window isolation.'
+    created_at: '2026-10-28T10:11:07Z'
+    last_edited: '2026-10-28T10:11:07Z'
+  - id: note-71c88d1
+    text: 'QA scenario 23 (pane death during recovery) — PASS. Host-mode, fake Claude,
+      3 scenarios / qa-max-scenarios 2 (verdict-recovery-settle 5 s, reminder 0, response-timeout
+      3600, qa-verify-pass on).
+
+
+      Story 1 (worker pane death, pr-397f32a): killed qa-<pr>-s2 at deferral 9/10
+      while s1/s2 idled without a verdict. Log: "Scenario 2 window died — retry 1/10
+      (backoff 5s)" at 09:48:10, then "Relaunched scenario 2 in window qa-<pr>-s2"
+      at 09:48:15. New worker pane %10 (old %8 gone from list-panes -a) and a new
+      transcript session 5d2c98e7… (old 8bac35e5…). The relaunched worker restarted
+      its own budget (deferral 1/10 for session 5d2c98e7…, first line at +50 s, i.e.
+      past its own 30 s grace) and was retired 101 s after relaunch — comparable to
+      s1''s 115 s window — so it was not retired on the next tick. Every retirement
+      reason named its own session+pane: s1 c55f76db/%9 (untouched throughout the
+      kill), s2 5d2c98e7/%10, s3 f14d3734/%12. Queued s3 launched the moment s1 freed
+      a slot. The run ended on its own in 3 m 51 s with all three rows INPUT_REQUIRED
+      + a reason line and Overall INPUT_REQUIRED, TUI "QA INPUT_REQUIRED … paused
+      for human input", PR still in qa. A later zt logged "Killing stale QA window
+      qa-<pr>[-s0/-s1/-s2/-s3]" and recreated every window with new pane ids (%14/%15/%16/%17/%18);
+      every pre-zt pane id (%3 %4 %5 %6 %8 %9 %10 %11 %12 %13) was absent afterwards;
+      zzt stopped the extra run cleanly (STOPPED, no note).
+
+
+      Story 2 (planner death, pr-8beeff5, fresh project): planner configured to never
+      emit QA_PLAN; qa-<pr> killed 20 s into planning. The run ended 5 s later with
+      exactly one "qa-planner: recovery request could not be delivered", then "Planner
+      pane exited", "Planner produced no scenarios", "QA finalize: skipped … no scenarios
+      ran" and "QA INPUT_REQUIRED … paused for human input". No qa-<pr>-s1 window,
+      dead planner pane %37 gone, recreated qa-<pr>.0 is the plain "QA execution"
+      pane, dashboard ERROR block "No parseable scenarios found in planner output.",
+      qa_status.json overall INPUT_REQUIRED, PR still qa. Healthy restart (fake _all
+      + QA_PLAN, then zt) killed the stale windows, logged "QA planning phase" / "QA
+      plan parsed: 1 scenario(s)", and the run went PASS -> VERIFIED -> FINALIZE_DONE
+      with dashboard Overall: PASS and "QA PASS … press i to sign off".
+
+
+      Observations (pre-existing, not defects): (1) the dashboard reason line is width-truncated
+      (qa_status._truncate, dashboard pane 100 cols), so a 36-char session id pushes
+      the trailing "Pane %N" off-screen; the stored verdict_reason and the debug log
+      both carry the pane id. (2) A killed scenario window stays in the pane registry
+      until the next launch calls prune_dead_windows ("removed [@3..@8]"); harmless
+      here because registration is window-scoped and the relaunched pane registered
+      under its own window.
+
+
+      Captures: /pm-captures/scenarios/23/{story1-pane-death,story1-dashboard,story2-planner-death}/
+      (cast + mp4 + transcript + evidence). No code changes were needed.'
+    created_at: '2026-10-28T10:09:48Z'
+    last_edited: '2026-10-28T10:09:48Z'
+  - id: note-recovery-master-20261029
+    text: 'USER AUTHORIZED RECOVERY: restart through implementation to merge the latest
+      batch from origin/master before further review or QA. Preserve all existing
+      dirty source, local PR registry/routing, notes, stashes, QA planner/spec edits,
+      untracked evidence and transcripts; interrupted changes are owned work, not
+      disposable noise. First inspect the saved prior review/QA evidence and current
+      git state. Safely preserve and reconcile that work, fetch origin/master, merge
+      it INTO this existing PR branch, resolve conflicts preserving both master fixes
+      and this PR''s behavior, run relevant checks, commit and push only this PR branch
+      when complete. Do not reset/force-push master or merge the PR into master. Record
+      exact integrated master SHA and validation; do not hand off until integration
+      and needed checks are complete. All pending user decisions remain unwaived;
+      if any blocks implementation, report INPUT_REQUIRED. Keep primary DeepSeek1017/high
+      and explicit work Opus5.5/xhigh signoff override. Native review/QA must follow
+      implementation; prior QA evidence is not a pass for the integrated head.
+
+
+      Incident 2026-10-29 01:06 UTC: #267 QA S10 refiner inherited the REAL tmux session,
+      launched a scratch PR there, then mistakenly killed pm-project_manager-5b29c418
+      as test cleanup. S9/S12 recreated scratch TUIs under that real session and S12
+      polluted shared tmux PATH/PYTHONPATH and shared autostart breadcrumb state.
+      Original transcripts, dirty patches, untracked files and QA results are preserved
+      under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z.
+      This was infrastructure interruption, not an acceptance verdict. NEVER operate
+      on the user''s real tmux session or shared host configuration for test setup/cleanup.
+      Test with an explicit dedicated tmux socket, isolated PM state/config paths,
+      and verified fixture identity; inherited TMUX/TMUX_PANE, global tmux set-environment,
+      shared ~/.pm breadcrumbs and broad cleanup are unsafe. If isolation cannot be
+      established, stop and report INPUT_REQUIRED. #278 is the existing per-session
+      tmux isolation PR; this is concrete incident evidence for its coverage.
+
+      The interrupted QA run 9b18489809bdfda2 contains partial verdicts and source
+      changes; inspect its current snapshots/transcripts and preserve them. No all-scenario
+      PASS is implied.'
+    created_at: '2026-10-29T01:30:33.195814+00:00'
+  - id: note-user-restart-all-20261029
+    text: 'NEW USER AUTHORIZATION 2026-10-29: Following the test-session leak, restart
+      this PR in implementation and merge latest origin/master INTO this existing
+      PR branch before any new review/QA. User explicitly released old review/QA holds
+      for this restart; preserve all earlier questions, answers, verdicts and evidence
+      and re-evaluate after integration rather than invent answers or waive acceptance.
+      Preserve dirty source, planner/spec edits, local registry/routing, stashes,
+      untracked files and all evidence. The interrupted work is retained under /home/matt/.local/state/pm-pr-shepherd/test-session-leak-20261029T012237Z;
+      inspect its per-PR backup and original transcripts as needed. Safely reconcile
+      interrupted changes and current master, test, commit and push only this PR branch.
+      Never force-push/reset master or merge the PR into master. Report integrated
+      master SHA and tests; only then hand off to native review/QA. Keep assigned
+      primary/helper model and explicit work Opus5.5/xhigh signoff override. No new
+      dependencies or unrelated work are authorized.
+
+      Test isolation is mandatory: #267 S10 refiner killed the REAL pm-project_manager-5b29c418
+      session after mistaking a test PR launch for ownership of that session. S9/S12
+      inherited ambient tmux context and recreated test TUIs under that real name;
+      S12 changed global tmux PATH/PYTHONPATH and shared ~/.pm breadcrumb files. Use
+      an explicit dedicated test tmux socket and isolated state/config, verify fixture
+      ownership; never mutate the user''s real session or shared host configuration
+      as test cleanup. Preserve the failed-run evidence. #278 is the existing per-session
+      tmux-isolation fix. Do not relaunch old QA fixture workers.'
+    created_at: '2026-10-29T01:33:53.678599+00:00'
+    last_edited: '2026-10-29T01:33:53.678599+00:00'
   - id: note-c3eb1e0
     text: 'From pr-e040aeb (failed review-launch recovery): the loop now distinguishes
       (a) a failed launch with no transcript/session id (ReviewLaunchError, retryable,
@@ -28696,6 +29486,628 @@ prs:
       markdown dep).'
     created_at: '2026-10-27T04:50:44Z'
     last_edited: '2026-10-27T04:50:44Z'
+  - id: note-28c9fb8
+    text: 'QA S27 PASS (dashboard truth, R18 + error-block rendering): verified live
+      that (a) a planner that never emits a complete QA_PLAN ends INPUT_REQUIRED and
+      the status pane keeps the ERROR block, the recovery detail (session uuid + Pane
+      %3284), the guidance line, the "0 Interactive Session interactive" row AND "Overall:
+      INPUT_REQUIRED" — the table/verdict are no longer hidden by the error; (b) with
+      qa-max-scenarios 2 a three-scenario run renders rows 1/2 pending + row 3 queued
+      + "Progress: 0/3 (1 queued)", retires the verdictless worker with its own reason
+      line (uuid bded507b… = that pane Pane %3313), dequeues Gamma (queued→pending→PASS),
+      and ends INPUT_REQUIRED / finalize FINALIZE_DONE with Overall INPUT_REQUIRED,
+      PR still qa, no sign-off. Captures: ~/.pm/sessions/project_manager-5b29c418/captures/pr-6566901/scenarios/27/{story1,story2}.
+      Two scenario-step mismatches (NOT defects): (1) pm log grep "QA finalize: skipped
+      for prA" never matches on the no-plan path — the planner-exhaustion branch returns
+      before _execute_and_finalize, so no finalize log line is emitted (check for
+      the absence of a FINALIZE/finalizer pane instead); (2) pm log grep "exhausted
+      recovery" matches only the planner path; a retired scenario worker logs "Scenario
+      N: qa-scenario-N: session <uuid> … Pane %N was left open for inspection" at
+      WARNING. Env notes for the next run: create the throwaway project session with
+      `env -u TMUX -u TMUX_PANE pm session` (otherwise it adopts the enclosing orchestrator
+      session); `pm which` from the clone depends on ~/.pm/sessions/<repo-tag>/override
+      — a stale one pointed at pr-592e4bd and had to be repointed; ffmpeg is not on
+      PATH (use /tmp/ffmpeg-7.0.2-arm64-static).'
+    created_at: '2026-10-29T01:09:14Z'
+    last_edited: '2026-10-29T01:09:14Z'
+  - id: note-4eddcc1
+    text: 'QA S30 (one run per PR): found+fixed 57773bbf — a QA run whose window was
+      replaced by "pr qa fresh" (z t) re-resolved the QA window by NAME in Phase 2
+      (_ensure_qa_main_pane -> find_window_by_name) and adopted the replacement run
+      window, splitting its planner pane: the live run window ended with 3 panes (replacement
+      planner + the dead run status dashboard showing "No parseable scenarios" + the
+      replacement own dashboard). run_qa_sync now adopts the window only when this
+      run own planner pane is still alive; a vanished window with the name free is
+      still recreated (execution-only restart). Tests: TestDeadRunDoesNotAdoptReplacementWindow
+      (replacement case fails pre-fix). Verified live pre/post (captures /pm-captures/scenarios/30/{pre-fix,post-fix}).
+      Other stories passed: TUI "pr qa" focuses the detached run window (no second
+      run, one planning phase); killed driver ends on pane-gone with its own status
+      in its own loop dir; finished detached run held by auto-sequence (paused: input_required)
+      with picker [done INPUT_REQUIRED]; concurrent E/F kept their own outcomes (INPUT_REQUIRED
+      vs PASS) with per-PR windows and status dirs, both PRs stay qa. Caveats: (1)
+      a planner-failure run logs no "QA complete for <pr>" line (returns before _execute_and_finalize)
+      — the picker/status pane carry the verdict, as story 3 states; (2) a no-plan
+      run creates no qa-<pr>-s0 window; (3) fixture note: a test project with an empty
+      git repo cannot pass the happy-path planner handoff ("PR branch ... not found
+      in workdir") — commit master before a PASS-path QA run.'
+    created_at: '2026-10-29T01:12:45Z'
+    last_edited: '2026-10-29T01:12:45Z'
+  - id: note-3fa2b74
+    text: 'QA S28 (stop during QA finalize) — PASS, no code changes. Verified live
+      on the TUI with fake-claude: a `zz t` stop while the finalize pane is polling
+      ends the run as STOPPED, not the pre-finalize PASS — "QA finalize: stopped before
+      an outcome ... reporting STOPPED", "QA complete for <pr>: STOPPED (finalize=None)",
+      TUI log "QA stopped during finalize" + "QA stopped for <pr> — no verdict recorded",
+      dashboard Overall: STOPPED bold+dim with no ERROR block and the scenario row
+      still PASS, no QA note, PR stays qa, and the finalize pane is left open (3 panes
+      alive). Auto-start then holds it ("waiting/qa qa STOPPED — last QA run was stopped;
+      press t / z t to re-run QA") across three idempotent `pm autostart add` passes
+      with no relaunch (same qa window id and pane ids). A following `z t` fresh start
+      kills the stale windows, replans, and completes PASS [finalize: FINALIZE_DONE]
+      → hand-off to sign_off with a QA PASS note. Captures: /pm-captures/scenarios/28/.
+      Two harness caveats for the next run: (1) /tmp/pm-venv is shared across parallel
+      QA scenarios and its editable pointer gets rewritten by other runs, so always
+      `export PYTHONPATH=<this clone>` — without it `pm set verdict-recovery-max-attempts`
+      reports "Unknown setting" and `pm` silently runs another scenario''s clone;
+      (2) with several clients attached to the shared tmux server, `pm autostart ...`
+      run from a helper pane can resolve `_get_current_pm_session()` to another client''s
+      session (it printed the outer project''s 17 targets once) — use `env -u TMUX
+      -u TMUX_PANE pm autostart ...` to pin it. Also: `pipe-pane -o` does not replace
+      an existing pipe, so a re-armed transcript pipe keeps writing to the old (deleted)
+      inode.'
+    created_at: '2026-10-29T01:12:36Z'
+    last_edited: '2026-10-29T01:12:36Z'
+  - id: note-71fabd2
+    text: 'QA S29 refiner (HEAD ffddba35) — harness facts, verified in code and with
+      a live probe:
+
+      1) `zz d` refuses without a PR workdir ("No workdir for <pr>. Start the PR first.");
+      `pm pr start` in turn needs project.yaml committed on the base branch, so bootstrap-commit
+      the throwaway project after `pm pr add`.
+
+      2) Fake fidelity: while held open the fake re-announces `idle_prompt` every
+      ~2 s but never writes a new assistant turn. The human follow-up wait (`wait_for_follow_up_verdict`)
+      therefore re-reads the same INPUT_REQUIRED turn ~2 s after entering it — the
+      review loop converts the repeat to NEEDS_WORK and starts iteration 2 (fresh
+      review window), the watcher converts it to READY and continues. This is a fake
+      artifact (a real turn ends once), not a recovery nudge/exhaustion. So "the loop
+      holds the pause with the pane open" is NOT observable with the fake; assert
+      no recovery-request text in the pane, no NO_VERDICT, and INPUT_REQUIRED recorded/surfaced.
+
+      3) The pane-gone path is reliably drivable only by killing the pane while the
+      poller waits for the verdict (20 s review grace / 30 s watcher grace); "pane
+      disappeared during INPUT_REQUIRED wait" needs the ~2 s follow-up window and
+      is racy — KILLED either way.
+
+      4) The fake cannot emit a `Reason:` line for a single-line verdict, so a legitimate
+      INPUT_REQUIRED QA scenario row has no reason sub-line; assert the absence of
+      "worker produced no verdict", not a specific reason.
+
+      5) QA spec gate: seed `$TEST_DIR/pm/specs/<pr>/qa.md` before `t`, else the run
+      ends INPUT_REQUIRED "QA spec was not generated". Graces: review 20 s, watcher
+      30 s, QA worker 30 s.'
+    created_at: '2026-10-29T00:53:29Z'
+    last_edited: '2026-10-29T00:53:29Z'
+  - id: note-5907e42
+    text: 'QA S29 PASS (2026-10-28, HEAD ffddba35): a genuine INPUT_REQUIRED is never
+      treated as a missing outcome, in all three roles. Live, fake-driven, host mode,
+      throwaway project (pr-95325c4).
+
+
+      Story 1 (review): zz d -> loop logs "INPUT_REQUIRED — polling for follow-up
+      verdict", TUI "⏸ INPUT_REQUIRED for pr-95325c4: interact with Claude in the
+      review pane"; the review pane keeps only the fake''s verdict — no "Re-emit only
+      your own conclusion"/"Resume the same task in this session" ever typed; `pm
+      log grep -i NO_VERDICT` and `-i recovery` both empty over the whole session.
+      As the refiner note predicted, the fake''s ~2 s idle re-announcement makes the
+      follow-up wait re-read the same turn, so the loop rolls to iteration 2 (NEEDS_WORK)
+      — fake shape, not a nudge.
+
+
+      Story 2 (review pane closed mid-poll): kill-window during the 20 s grace ->
+      TUI "Review loop done for pr-95325c4: ☠ KILLED (7 iterations)", log "pane killed
+      on iteration 7: Review pane disappeared (window: review-pr-95325c4)", no new
+      review window, no NO_VERDICT; a following zz d logged "Review loop started ...
+      loop=a88b" with a fresh window.
+
+
+      Story 3 (QA): seeded pm/specs/pr-95325c4/qa.md, fake qa_scenario INPUT_REQUIRED,
+      pressed t -> dashboard row "3 Basic functionality INPUT_REQUIRED" + "Overall:
+      INPUT_REQUIRED"; "QA complete: INPUT_REQUIRED [finalize: FINALIZE_DONE]"; TUI
+      "QA INPUT_REQUIRED ... paused for human input"; `pm log grep "worker produced
+      no verdict"` empty, no NO_VERDICT/recovery, worker pane clean; PR stayed in
+      qa (no lifecycle transition). Worker window is qa-<pr>-s3 / row 3, not s1: scenario
+      numbering continues per PR from earlier runs on the shared $HOME (expected,
+      see S24 note).
+
+
+      Story 4 (watcher): pm watcher --max-iterations 1 --wait 5 -> CLI "[20:10:59]
+      Iteration 1: INPUT_REQUIRED" then "Watcher finished: 1 iteration(s), last verdict:
+      READY"; log has "iteration 1 verdict=INPUT_REQUIRED" + "INPUT_REQUIRED -- polling
+      for follow-up"; no recovery text in the watcher pane; no NO_VERDICT. The trailing
+      READY is the documented "treat repeated INPUT_REQUIRED as READY (continue loop)"
+      conversion of the fake''s re-announced turn.
+
+
+      Story 5 (watcher pane closed mid-wait): kill-window ~20 s into the 30 s grace
+      -> "Watcher finished: 1 iteration(s), last verdict: KILLED", log "pane killed
+      on iteration 1: Pane disappeared (window: watcher)", no NO_VERDICT/recovery;
+      a second pm watcher run recreated the window and completed normally.
+
+
+      No code changes needed. Captures: /pm-captures/scenarios/29/ (per-story cast+mp4+transcript+pm-log
+      extracts, plus a top-level manifest with the story table). Two env notes: a
+      stale ~/.pm/sessions/project_manager-6b61fb37/override pointed this clone''s
+      session tag at an unrelated PR workdir and had to be repointed before `pm which`
+      resolved to the clone (original kept as override.bak-s29); ffmpeg 9.0.2 dropped
+      -vsync, so renders used -fps_mode vfr.'
+    created_at: '2026-10-29T01:16:46Z'
+    last_edited: '2026-10-29T01:16:46Z'
+  - id: note-f30e8f3
+    text: 'QA S26 refiner: scenario 26 refined (staging notes for the worker). (1)
+      The literal ''loop-completion line holding the log'' plus a same-PR run in flight
+      with NO qa-<pr> window is only reachable in the sub-100 ms gap while a restart
+      kills the old main window before creating the replacement; the refined story
+      stages the visible ''QA already running for <pr>'' answer on a still-launching
+      FIRST run behind the sticky ''QA loop started ... - z t to stop'' line instead
+      (same force=True path in qa_loop_ui.start_qa). (2) For the still-launching scheduler
+      start, the steps delete the PR''s workdir directory (keeping the recorded path
+      in project.yaml) so the QA launch re-clones before creating the window, and
+      fire the user''s ''t'' by tailing the pm log for ''Auto-start: QA for <pr>''.
+      (3) Run ''pm session'' and ''pm pr start'' with TMUX/TMUX_PANE unset or inside
+      the test session''s own pane: this container''s shell is already inside another
+      pm session and _get_current_pm_session() would otherwise target it.'
+    created_at: '2026-10-29T00:46:54Z'
+    last_edited: '2026-10-29T00:46:54Z'
+  - id: note-02dd776
+    text: 'Implementation restart (2026-10-29): origin/master 4a74d88085edffcc300cb21f31777a798d647782
+      merged into this branch, then reconciled with the concurrent QA session''s 7
+      commits (the branch had diverged: QA work had been force-pushed on the pre-merge
+      base). No force-push, no history rewrite. Integrated head after both merges:
+      full suite 4584 passed, 1 skipped, 0 failed, 0 errors (381 s); focused recovery/QA/review/watcher/autostart
+      suites 493 passed.
+
+
+      Integration summary: master''s task-scoped find_verdict_turn is now the single
+      scan primitive — recovery''s verdict_check, the "completed during settle" re-scan
+      and _retire_if_exhausted all use it, and a hit is recorded through master''s
+      _accept_hit (which drops the episode). loop_shared''s two leftover calls to
+      the removed extract_verdict_from_transcript were a silent auto-merge break (the
+      module no longer imports it) and are fixed. Master''s INPUT_REQUIRED hold loop
+      / waiting_for_input (pr-2c67d50) is kept: a held worker is excluded from pending
+      and never nudged. The STOPPED teardown is layered onto the hold loop (stopped_clean
+      skips the finalizer, stopped_in_finalize converts a pre-finalize PASS and rewrites
+      the status file); input_wait_code_changes routes a head that moved during an
+      input wait back to review. The verifier re-check uses the bounded poll_for_verdict
+      rather than the unbounded human wait; master''s baseline_line snapshot is unnecessary
+      there because the poller waits for a new idle and the scan is task-scoped. Review
+      launch-retry / LAUNCH_FAILED / HOLD handlers and their TUI text are kept alongside
+      NO_VERDICT. pm/project.yaml is a union of both sides (518 PRs, no duplicate
+      ids, no lost notes; active_pr = master''s value). Spec updated: pm/specs/pr-6566901/impl.md
+      "Integration with master (2026-10-29)".
+
+
+      Prior QA evidence is NOT a pass for this head: native review and QA must follow.'
+    created_at: '2026-10-29T02:20:51Z'
+    last_edited: '2026-10-29T02:20:51Z'
+  - id: note-5a3d1b3
+    text: 'Review-loop 345f i1 (94cc53b0): found and fixed the last poller that could
+      turn a user stop into a missing-outcome failure — the QA concretizer. `_concretize_scenario`
+      now takes `stop_check`, passes it to `poll_for_verdict` (no nudging during teardown)
+      and returns `(None, None)` instead of a `no refiner outcome` reason when an
+      exhaustion lands while stopping; `_concretize_and_launch` (tmux + container)
+      returns before the concretizer runs and again before the worker is split on
+      `state.stop_requested`, so a stop during concretization leaves the scenario
+      unverdicted and the run ends STOPPED rather than INPUT_REQUIRED + a QA note.
+      Also fixed `_retire_if_exhausted`s return annotation (VerdictHit, not str).
+      New test: test_concretize_stop_during_recovery_is_not_a_refiner_failure. Full
+      suite: 4506 passed, 43 failed, 36 errors — all 43F/36E reproduce identically
+      on the pre-change tree in this container (git push proxy rejects every non-PR-branch
+      push; test_signoff_integration + test_hook_events::test_installer_writes_standalone_receiver
+      + test_git_ops::TestPullRebase are environment failures), so no regressions;
+      focused recovery/QA/review/watcher/autostart suites 494 passed.'
+    created_at: '2026-10-29T03:18:58Z'
+    last_edited: '2026-10-29T03:18:58Z'
+  - id: note-dbd1694
+    text: 'Review-loop 345f i1 follow-up: the full suite IS green in this container
+      when run with the documented review-container env (env -u PM_HOST_HOME PATH=/usr/bin:/bin,
+      PYTHONPATH=/workspace, scratchpad pytest 8.4.2): 4585 passed, 1 skipped, 0 failed,
+      0 errors (393 s) at 94cc53b0. The earlier 43F/36E came from running without
+      those flags (PM_HOST_HOME makes the hook-receiver test skip its copy; the container
+      git push proxy rejects every push except this PR branch). No regressions either
+      way.'
+    created_at: '2026-10-29T03:26:21Z'
+    last_edited: '2026-10-29T03:26:21Z'
+  - id: note-4c5e005
+    text: 'Review-loop 345f i2 (65960976): found and fixed two residual instances
+      of this PR own failure class. (1) `_poll_tmux_verdicts` retired every scenario
+      that never got a window as INPUT_REQUIRED ("worker window never created (launch
+      failed)") and filled open slots by launching queued workers even when the run
+      was already stopping — a stop landing between "plan parsed" and "workers launched"
+      (the launch skips a stopping run, so its scenarios have no window) surfaced
+      a missing-outcome failure + QA note instead of STOPPED, because a launch-failure
+      verdict defeats `stopped_clean`. It now returns immediately when stopping and
+      `_launch_next_queued` refuses to launch during teardown. (2) The verifier re-check
+      replaced `wait_for_follow_up_verdict` (which pre-scanned the transcript) with
+      `poll_for_verdict`, which only scans after a *newer* idle; an answer that landed
+      during the send/settle window (its idle predates the poll baseline) was never
+      seen, hanging the re-check until the 3600 s response timeout. `poll_for_verdict`
+      now takes an optional `baseline_line`: when set it scans once before blocking
+      and returns a verdict newer than the snapshot, and every later scan (`_scan`)
+      filters out the prompting verdict at or below the baseline; the re-check snapshots
+      the prompting verdict before sending. Tests: `TestStoppedRunBeforeLaunch` (3),
+      baseline_line pre-scan/filter (2), re-check baseline_line assertion. Full suite
+      4590 passed, 1 skipped, 0 failed (4591 collected).'
+    created_at: '2026-10-29T03:57:37Z'
+    last_edited: '2026-10-29T03:57:37Z'
+  - id: note-9e11f1d
+    text: 'Review-loop 345f i3 (c6167bb1): found and fixed a crash regression plus
+      one remaining instance of this PR''s own failure class. (1) `_run_qa_sync` Phase
+      2 read `planner_pane`, bound only inside the Phase 1 planning branch, so every
+      execution-only run (`pm qa run <instruction>`, which builds QALoopState(planning_phase=False)
+      with the scenario pre-loaded) died with UnboundLocalError before launching its
+      scenario. Fixed by initialising it to None; TestExecutionOnlyPhase2 fails pre-fix
+      with that exact error. (2) poll_for_verdict raised overall_timeout / no_response
+      without the last-chance transcript scan the QA tick loop does in _retire_if_exhausted,
+      so a verdict flushed as the deadline expired was reported absent as NO_VERDICT.
+      Both raise sites now scan first; two new tests. Spec corrected where it no longer
+      matched the code (_lease_keepalive is passed as the review poller stop_check
+      but always returns False). Full suite with the review-container env (pytest
+      8.4.2): 4593 passed, 1 skipped, 0 failed, 0 errors (368 s).'
+    created_at: '2026-10-29T04:30:11Z'
+    last_edited: '2026-10-29T04:30:11Z'
+  - id: note-fbc398f
+    text: 'Review-loop 345f i5 (2d82474a): closed two residual "stop survives a TUI
+      restart" windows in the QA STOPPED teardown. (1) mark_stop_requested(state)
+      persists stop_requested into the existing qa_resume.json at stop time (read-modify-write
+      under _RESUME_WRITE_LOCK) from qa_loop_ui.stop_qa and start_or_stop_qa_loop,
+      and _write_resume_file re-reads stop_requested under the lock — so a stop that
+      lands during the finalize poll (after the pre-finalize snapshot) no longer recovers
+      as the pre-stop PASS on restart. (2) _resume_incomplete_qa now mirrors the recovered
+      verdict into runtime_state (set_action_state qa=done) as the live completion
+      path does; without it a recovered STOPPED run left recorded_qa_verdict None
+      and _auto_start_qa_loops relaunched QA. Tests in tests/test_qa_resume.py (3
+      new). Full suite: 4600 passed, 1 skipped, 0 failed (362 s).'
+    created_at: '2026-10-29T05:51:55Z'
+    last_edited: '2026-10-29T05:51:55Z'
+  - id: note-ad107d5
+    text: 'QA S33 (execution-only QA path) PASS, no code changes. Story 1: `pm qa
+      run direct-qa-smoke --pr pr-038f7db` skipped planning entirely (no "Planning
+      QA scenarios" anywhere), provisioned the workdir, concretized REFINED_STEPS
+      + worker PASS + verifier VERIFIED, printed "QA complete: PASS [finalize: FINALIZE_DONE]"
+      / "Result: PASS"; the qa window main pane is the "QA execution" placeholder
+      (no planner), the dashboard showed "1 Direct QA smoke PASS" / "Overall: PASS";
+      the TUI adopted the finished CLI run 4 s later ("Recovered completed QA from
+      disk" -> "QA PASS for pr-038f7db — press i to sign off") and wrote the QA PASS
+      note; status stayed qa, no sign-off. Story 2: a verdictless worker (qa_scenario
+      verdicts []) was retired on its own in ~132 s with "Scenario 1 ...: INPUT_REQUIRED
+      (worker produced no verdict: no_progress)", dashboard row + dim "↳ worker produced
+      no verdict (no_progress): qa-scenario-1: session ..." + "Overall: INPUT_REQUIRED",
+      worker pane left open, no traceback, PR still qa, TUI adoption 3 s after completion
+      with the QA INPUT_REQUIRED note naming the scenario. Captures: /pm-captures/scenarios/33/{story1-execution-only,story2-verdictless}.
+      Three PRE-EXISTING (also on master) bugs found in the surrounding TUI adoption
+      code and filed separately, none blocking this PR: pr-d7d8929 (a running TUI
+      deletes another project QA resume snapshot from the global ~/.pm/workdirs/qa,
+      so that project CLI run is never adopted), pr-1c48ae3 (a repeat pm qa run on
+      the same PR with the previous windows open duplicates panes/windows: 5 panes,
+      two qa-<pr>-s1 windows, two dashboards), pr-7d94f02 (_resumed_qa_pr_ids is one-shot
+      per PR per TUI lifetime, so a second completed CLI run is never adopted or noted).
+      Harness notes: (1) parallel TUIs for two projects in one HOME interfere via
+      the global qa workdir scan — isolate one project per session when testing adoption;
+      (2) agg is not installed in this container (downloaded v1.9.0 aarch64 to /scratch/qa33/tools)
+      and this ffmpeg is 4.4.2, so the recipe needs -vsync vfr, not -fps_mode; (3)
+      a fresh `pm session` gives a clean QA window set after earlier runs leave their
+      windows open.'
+    created_at: '2026-10-29T07:36:44Z'
+    last_edited: '2026-10-29T07:36:44Z'
+  - id: note-cadd495
+    text: 'QA S34 (2026-10-29) PASS: stop-during-finalize survives a TUI restart as
+      STOPPED (recovery logs "reporting STOPPED instead of PASS", status file + dashboard
+      flip PASS->STOPPED), three autostart passes relaunch nothing (waiting/qa qa
+      STOPPED, picker [open] [done STOPPED]), and z t fresh start replaces the stopped
+      windows and hands PASS off to sign-off. Harness notes: keep /home/pm/.local/bin
+      on PATH (fake-claude shim lives there; without it every fake pane dies and the
+      run ends ERROR "Could not find planner pane"); the prefix+P picker anchors on
+      the PR of the session current window, so select a window of the PR under test
+      before reading its row; agg must be fetched (aarch64 -gnu v1.9.0) to render
+      casts.'
+    created_at: '2026-10-29T08:32:47Z'
+    last_edited: '2026-10-29T08:32:47Z'
+  - id: note-4be11ed
+    text: 'S35 refine findings (verified live): (1) A planner-phase stop has NO status
+      dashboard — the qa status pane is only added after planning succeeds, so do
+      not expect ''Overall: STOPPED'' for a planner-episode stop; assert the TUI log
+      ''QA stopped for <pr> — no verdict recorded'' + runtime/<pr>.json qa done STOPPED
+      + ''last QA run was stopped'' in pm autostart status. (2) The fake planner''s
+      no-verdict episode is only ~20-25s (11 deferrals x ~2s refresh), so send the
+      QA-loop stop as soon as the qa-<A> window appears; if it exhausts first the
+      run ends INPUT_REQUIRED and records a QA note. (3) A finished ''pm qa run''
+      is adopted by the live TUI''s resume scan within ~5s (runtime_state done/PASS
+      + a QA note) without a restart. (4) When auto-start later targets a qa PR with
+      a recorded PASS, signoff_ui.advance_all hands it to sign_off (a signoff-<pr>
+      window, not a QA rerun) — configure signoff: SIGNOFF_BLOCKED to park it deterministically.
+      (5) Command-bar text must be sent in small chunks (~0.3s apart); fast tmux send-keys
+      drops characters (''loop'' -> ''oop'').'
+    created_at: '2026-10-29T08:28:59Z'
+    last_edited: '2026-10-29T08:28:59Z'
+  - id: note-3297fa0
+    text: 'QA S35 (concurrent CLI + TUI QA runs) — found+fixed 02e5b004. Story 1 exposed
+      that the shared 1 s poll timer stopped at the end of the tick that processed
+      a TUI QA stop: both its arm and stop predicates required an active PR to carry
+      a `workdir` in the in-memory `_data`, and QA creates that workdir itself, so
+      `_data` never had it. Consequence on the pre-fix head: `~/.pm/runtime/<pr>.json`
+      was never written for the stopped run, and a concurrent `pm qa run` finishing
+      PASS was not adopted (no `QA PASS for <pr>`, no runtime record, no note) for
+      82 s — until an unrelated state reload. Fix: `_has_active_pr` (status-only)
+      + `_qa_poll_needed` (running/held/verdict-awaiting-cleanup) back both `ensure_animation_timer`
+      and the stop check; live re-run adopts in the same second. 3 new tests in tests/test_qa_self_driving.py
+      (each fails pre-fix) + a control; full suite 4604 passed, 1 skipped. Story 2
+      (restart holds A as "last QA run was stopped", B handed to sign-off BLOCKED,
+      no spurious INPUT_REQUIRED/NO_VERDICT, no cross-mentions) passed unchanged.
+      Captures: /pm-captures/scenarios/35/{pre-fix,post-fix}. Harness notes: (1) with
+      an isolated HOME the tmux server must keep /home/pm/.local/bin on PATH (fake-claude
+      shim) and use PM_TMUX_SOCKET for isolation; (2) a QA stop that lands within
+      3 s of the loop start has its stop log lines suppressed by the "QA loop started
+      … z t to stop" sticky (pm log marks them "(hidden by sticky message)") — wait
+      ~5 s if the lines must be visible; (3) `markdown` must be installed into the
+      pytest --target dir or 13 test_markdown_render tests fail as an env gap.'
+    created_at: '2026-10-29T09:05:06Z'
+    last_edited: '2026-10-29T09:05:06Z'
+  - id: note-1d93f28
+    text: 'QA S36 (recovery budget honoured exactly) PASS at 21b3af16 — no code changes.
+      Verified live on an isolated host-mode TUI (private HOME + TMUX_TMPDIR, fake-claude):
+      max-attempts 1 → exactly one request ("recovery request 1/1", pane log 336 B
+      = 1 line, no 2/1), self-ending NO_VERDICT in 22 s, tree ⟳1!, picker review [failed];
+      max-attempts 3 → 1/3, 2/3, 3/3 and no 4/3 (pane log = 3 lines), bounded NO_VERDICT
+      in 27 s; max-attempts 0 → no qa_loop recovery request ever (worker pane log
+      0 bytes over an ~80 s idle), dashboard row pending with no ↳ and no Overall,
+      zz t stop → "QA loop stopping…" then "QA stopped for pr-12f37a8 — no verdict
+      recorded", dashboard Overall: STOPPED with the row still pending, no "worker
+      produced no verdict"/INPUT_REQUIRED/NO_VERDICT, no QA note, PR stays qa, worker
+      pane left open, and z t fresh start kills the stale qa windows and replans.
+      Captures: /pm-captures/scenarios/36/{story1-one-attempt,story2-three-attempts,story3-recovery-off}.
+      Harness notes for the next run of this scenario: (1) zz d refuses until the
+      PR has a workdir — run `pm pr start <pr>` first (it also opens a pr-<id> impl
+      window with the fake) and set the status back to in_review; (2) `pm log grep
+      --source review_loop "recovery request"` matches nothing — the shared machinery
+      logs under source loop_shared with a "review_loop:" message prefix, so grep
+      --source loop_shared; (3) the TUI sticky is a single-line widget, so the Error:/See
+      log: detail only appears in the log (pm log or the L pane); (4) the prefix+P
+      picker anchors on the session''s current window — select a window of the PR
+      under test before opening it.'
+    created_at: '2026-10-29T10:39:12Z'
+    last_edited: '2026-10-29T10:39:12Z'
+  - id: note-d7e3bdc
+    text: 'QA S37 PASS (recovery settings as shared global state). All four stories
+      verified live on the TUI with fake-claude in an isolated harness (private HOME
+      + PM_TMUX_SOCKET; the host tmux server was never touched). (1) Mid-episode change
+      is safe: settle 5->0 and max-attempts 3->2 applied at +25 s left the A episode
+      untouched — same window @15 / Claude pane %21 before, after and at completion,
+      one "Review loop started" line, row kept ⟳1, ended at 42 s on the no-progress
+      path ("re-announced its idle turn 11 time(s)"), no "recovery request" line and
+      no outcome request in the pane. (2) Next run reads them: B got "recovery request
+      1/2" then "2/2" (never 3), the outcome request echoed twice in its pane, ended
+      22 s after the window launch with "the session idled 2 time(s) ... recovery
+      attempts are exhausted". (3) Hand-edited junk: settle "inf" and budget "abc"
+      stored (pm set list shows them without a (default) marker), the loop still ended
+      at 42 s on the no-progress path (inf fell back to the 5 s default) and the log
+      carried both "loop_shared: ignoring invalid ..." warnings; no traceback. (4)
+      Junk budget falls back to 3: settle set to a valid 0, D got "1/3", "2/3", "3/3"
+      and "the session idled 3 time(s) ... recovery attempts are exhausted" at 27
+      s. Captures: /pm-captures/scenarios/37/ (per-story casts + mp4 + TUI frames
+      + window/pane snapshots + log extracts, plus a top-level manifest). Harness
+      notes for the next run: (a) tmux send-keys -l needs "--" before the literal
+      string — a chunk starting with "-" (e.g. "-loop ") is parsed as an option and
+      silently dropped, which turns "review-loop start <pr>" into "reviewstart"; (b)
+      the recorder tmux attach starts on the session current window, so create the
+      shell window first and select-window -t "$SESS:0" before attaching; (c) a finished
+      review loop leaves an in-memory ⟳N<verdict> marker on the board (app._review_loops)
+      that survives killing the window, deleting ~/.pm/runtime/<pr>.json and `pm pr
+      edit --status in_progress` — only a TUI restart (C-r) clears it; (d) agg is
+      not preinstalled: the aarch64 asset is "agg-aarch64-unknown-linux-gnu" (no v
+      prefix, no .tar.gz) from the v1.9.0 release, and this ffmpeg 4.4.2 wants -vsync
+      vfr.'
+    created_at: '2026-10-29T10:48:45Z'
+    last_edited: '2026-10-29T10:48:45Z'
+  - id: note-0d27572
+    text: 'QA S38 PASS (held run keeps shared surfaces live; viewing never duplicates).
+      All four stories verified live on an isolated HOME + private tmux socket with
+      fake-claude: (1) A held on INPUT_REQUIRED (dashboard "1 Basic functionality
+      INPUT_REQUIRED (waiting)", "QA INPUT_REQUIRED for <A> — waiting for input in
+      the scenario worker pane") while a separate `pm qa run direct-qa-b --pr <B>`
+      in a session shell pane finished PASS and the TUI adopted it with no restart
+      — "Recovered completed QA from disk: pr-ee11bbd → PASS" 2s after completion,
+      runtime actions.qa done/PASS, exactly one QA PASS note, picker row "[open] [done
+      PASS]"; A untouched (dashboard still (waiting), same worker pids, no new qa-<A>
+      window, one note, no B verdict in its runtime). (2) Plain `t` on A and on B
+      each logged "Focused QA window for <pr>" and moved the client to the existing
+      qa window with no second run (window list + pane pids unchanged, hold intact).
+      (3) `zz t` on the held run logged "QA loop stopping for <A> (finishing current
+      run)..." then "QA complete: INPUT_REQUIRED [finalize: FINALIZE_DONE]" in 3s
+      — no STOPPED, no NO_VERDICT, no second note, runtime done/INPUT_REQUIRED, worker
+      pane left open, PR stayed qa. (4) `z t` replaced the stale windows and ran planner→concretizer→worker
+      PASS→verifier VERIFIED→finalizer FINALIZE_DONE to "Overall: PASS" + "QA PASS
+      for <A>", no sign-off window, PR stayed qa. Zero NO_VERDICT/recovery/exhaustion
+      lines in the whole session log. Harness notes for a re-run: (a) `tmux send-keys
+      -t <pane> C-b P` does NOT trigger prefix+P — send-keys bypasses the client prefix
+      table and types literal ^BP into the pane; write the prefix to the attached
+      client tty instead (`printf "\002P" > /dev/pts/N`) or run `pm _popup-show picker
+      <client> <session>`; (b) scenario numbering continues per PR, so a fresh start
+      after a stop uses qa-<pr>-s2, not -s1; (c) agg is absent from this container
+      — v1.9.0 aarch64 from the upstream release works, and this ffmpeg 4.4.2 needs
+      -vsync vfr not -fps_mode; (d) unset PM_HOST_HOME and use a fresh HOME or pm
+      installs hooks into the real user home.'
+    created_at: '2026-10-29T11:21:23Z'
+    last_edited: '2026-10-29T11:21:23Z'
+  - id: note-98d27bc
+    text: 'QA S37 addendum (artifact fix, re-verified): the reviewer flagged that
+      story 3/4 manifests listed a transcript.log that was never written — the first
+      pass armed `tmux pipe-pane` only in the story 1/2 drivers. Stories 3 and 4 were
+      re-recorded end-to-end on the same harness with an `arm_transcript` helper (close
+      any open pipe, open a fresh one, abort if the file stays empty — `pipe-pane
+      -o` does not replace an already-open pipe) and with the shell pane cleared via
+      `clear` then `clear-history` so the captured pane text belongs only to that
+      story. All four stories now carry a real transcript.log that contains their
+      own run (start + completion lines verified per loop id), and every file named
+      in each manifest ## Files section exists. Results unchanged: C still ends at
+      42 s on the no-progress path ("re-announced its idle turn 11 time(s)") with
+      both "ignoring invalid" warnings and no nudge in pane %39; D still shows "recovery
+      request 1/3", "2/3", "3/3" and "the session idled 3 time(s) ... recovery attempts
+      are exhausted" at 27 s in pane %42; no traceback in either. Captures regenerated
+      (casts + mp4 + frames + log extracts) under /pm-captures/scenarios/37/.'
+    created_at: '2026-10-29T11:25:20Z'
+    last_edited: '2026-10-29T11:25:20Z'
+  - id: note-2d088bb
+    text: 'QA S39 (sticky-line ack, fixed a377a040): a user-initiated QA start that
+      had to CREATE the qa window (t / `/pr qa <pr>` on a PR with no window yet) was
+      acknowledged only in the command log — `Starting QA for <pr>... (hidden by sticky
+      message)` — while an unrelated PR''s "Review loop done … PASS" held the 10 s
+      sticky line; the qa window was created and focused anyway. The focus path already
+      forced its reply (`Focused QA window for <pr>`, force=True); start_qa''s fresh-start
+      line did not. Fix: `app.log_message(f"Starting QA for {pr_id}...", force=focus)`
+      — user starts force, scheduler starts stay unforced. Tests: test_qa_start_visible_over_sticky_completion
+      (fails pre-fix) + test_background_qa_start_still_defers_to_sticky. Full suite
+      4606 passed, 1 skipped. Stories 1/2 (background auto-QA keeps focus; user /pr
+      qa on a live run focuses + forces "Focused QA window", no second run, same planner
+      pid) passed unchanged. Captures: /pm-captures/scenarios/39/{pre-fix,post-fix}.
+      Harness notes: `tmux send-keys -l` needs `--` (a "review-loop" chunk arrives
+      as `-lo` and tmux eats it as an option); `pm log grep` must run with the test
+      project as cwd; `pm tui restart` re-execs in place so the pid is unchanged —
+      confirm from the log; agg v1.9.0 asset is `agg-aarch64-unknown-linux-gnu` with
+      no .tar.gz suffix.'
+    created_at: '2026-10-29T12:25:30Z'
+    last_edited: '2026-10-29T12:25:30Z'
+  - id: note-ba054bc
+    text: 'QA S40 (launch-failure recovery) PASS 5/5 — no code changes. Harness notes
+      for a re-run: (1) `pm session` must be started ONCE — a second `pm session`
+      finds the TUI pidfile taken and its pane dies, taking the session with it; (2)
+      `pm pr start` refuses until project state is on master — run `pm push`, then
+      `git merge --no-edit pm/sync-<stamp>`; (3) `tmux capture-pane -p -t <pane>`
+      can return empty for a split-second after pm writes; use `-S - -E -` and retry;
+      (4) the completion-line detail (Error:/Artifact:/See log:) is not in the sticky
+      line — open the `L` log pane or read `pm log grep`; (5) `pm log grep` treats
+      `\|` literally, so run one grep per pattern; (6) a stale ~/.pm/runtime/<pr>.json
+      failure record makes a later `pm autostart add` RE-ARM that episode (no "Review
+      loop started" line) instead of starting a fresh loop — expected, and it is the
+      same-loop-id resume the scenario describes; (7) agg is not preinstalled (v1.9.0
+      aarch64 asset is `agg-aarch64-unknown-linux-gnu`), ffmpeg 4.4.2 needs `-vsync
+      vfr`. Captures: /pm-captures/scenarios/40/{story1-launch-failed,story2-autostart-retry,story3-restart-midbackoff,story4-concurrent-ownership,story5-recovery-after-launcher-fixed}.'
+    created_at: '2026-10-29T14:16:01Z'
+    last_edited: '2026-10-29T14:16:01Z'
+  - id: note-5d7c3f1
+    text: 'QA S41 (container mode: verdictless worker beside a healthy one; stop during
+      recovery; fresh-start cleanup) — found+fixed 90341407.
+
+
+      Defect (story 3): `cleanup_orphaned_qa_containers` (pm_core/container.py) treated
+      a QA container as live if ANY `qa-*` window name ended in the same `-s{N}` suffix.
+      Scenario indices are per PR, so with `qa-pr-6bcd131-s1` and `qa-pr-4521a07-s1`
+      open from the other stories, the stopped run''s `…-qa-pr-7a5e27a-<loop>-s1`
+      container survived the fresh start and no `Cleaned up N orphaned QA container(s)`
+      line was logged (the container stayed Up while its window had been killed).
+      Pre-existing on origin/master, but it is exactly what this scenario''s fresh-start
+      Then requires. Fix: match the exact window name for the run''s own PR (`qa-<display_id>-s{N}`),
+      passing the display id from the QA loop so GitHub PRs (`#116`) map correctly.
+      Tests: TestCleanupOrphanedQaContainers (5 cases; the cross-PR case fails pre-fix).
+      Live post-fix: `Cleaned up 3 orphaned QA container(s) for pr-7a5e27a`, only
+      the new container left.
+
+
+      Stories 1-2 passed unchanged: healthy container run (dashboard ⠏ verifying ->
+      PASS/Overall PASS, `QA complete: PASS [finalize: FINALIZE_DONE]`, worker/refiner
+      panes are `podman exec -it`, verifier host, `QA PASS` note, PR stays qa); verdictless
+      worker beside a healthy one (one row retired by the loop itself in ~90 s as
+      INPUT_REQUIRED with `worker produced no verdict (no_progress): qa-scenario-1:
+      … Pane %17 was left open for inspection.`, other row PASS with no reason line,
+      `QA complete: INPUT_REQUIRED … Alpha: INPUT_REQUIRED; Beta: PASS`, `QA INPUT_REQUIRED`
+      note, no relaunch/retry). Story 3 stop half also passed: STOPPED, no finalize,
+      no note, no queued launch 25 s later.
+
+
+      Harness notes for the next run: (1) the QA loop runs in a thread inside the
+      long-lived TUI process, so a source edit is not live until `pm tui restart`
+      (re-execs in place, same pid); (2) `pm set qa-max-scenarios`/`pm container enable`
+      are per-HOME globals and this container shares HOME=/home/pm with a sibling
+      QA session — use a private HOME + PM_TMUX_SOCKET if two container runs need
+      different values; (3) scripted `qa_scenario` slots are consumed in launch order
+      and the two workers'' windows were created `-s2` before `-s1`, so which title
+      is verdictless can differ from the prompt''s wording; (4) detect a shell-pane
+      command''s completion from a marker written into its output FILE — a marker
+      in the typed command line matches immediately; (5) agg ships in pm-dev:latest
+      (`podman cp <cid>:/usr/local/bin/agg`), ffmpeg 4.4.2 wants `-vsync vfr`.
+
+
+      Captures: /pm-captures/scenarios/41/{story1-healthy,story2-verdictless,pre-fix,post-fix}
+      + README.md.'
+    created_at: '2026-10-29T14:35:12Z'
+    last_edited: '2026-10-29T14:35:12Z'
+  - id: note-43ad5a7
+    text: 'QA S40 re-evaluation (supersedes the "PASS 5/5" note above on two points).
+      (1) Stories 2 and 4 were re-executed from a reset state — stale ~/.pm/runtime/<A>.json
+      removed, plain `pm tui restart`, board confirmed free of the ⟳ marker — so the
+      scheduler itself starts the loop: observed `Auto-start: targets += …`, `Auto-start:
+      review loop for pr-95325c4`, `Review loop started for pr-95325c4 loop=ef24`,
+      then the 60 s re-arm `Auto-start: retrying review launch` + `Review loop resumed
+      … loop=ef24` (same id, no second start line), and the idempotent `pm autostart
+      add` printing `unchanged:` / `(already a target)` with no new resume. The earlier
+      run only re-armed the manual episode left by story 1 and was not valid evidence
+      for those Givens; superseded casts are kept under prior-rearm-only-run/ in each
+      story dir. (2) Story 1 prompt:/prompt_copy: was excused by code reading before;
+      it is now OBSERVED — the fake backend never writes a prompt file (find for pm_prompt_*.txt
+      is empty, no <workdir>/pm/prompts), so the same window-killed failure was re-run
+      on the real launch branch with the fake config disabled and a sleeping stub
+      `claude` first on PATH (no API call); that artifact carries prompt: <workdir>/pm/prompts/pm_prompt_<sid>.txt
+      and prompt_copy: …attempt3-….prompt.txt (7438 B). Remaining literal deviation
+      only: window-not-found artifacts record `returncode: None` where the Then prose
+      says the child exited 0 — None is that branch code for "no child failure observed".
+      Captures: /pm-captures/scenarios/40/ (each story manifest lists its files; story1
+      has real-launch-branch-observation/).'
+    created_at: '2026-10-29T14:46:03Z'
+    last_edited: '2026-10-29T14:46:03Z'
+  - id: note-722cc35
+    text: 'QA S42 (flagged verification re-check) — NEEDS_WORK, fixed 36342563. Found+fixed:
+      the FLAGGED re-evaluation follow-up is typed into the worker pane and then two
+      extra Enters are sent; a worker that ends on input closes its pane, so the second
+      send-keys raised CalledProcessError and crashed the whole QA thread (run ended
+      ERROR, dashboard frozen on "verifying", the expected pending(1) retry never
+      happened). Same unguarded pattern in the verifier re-check follow-up. New _send_keys_if_alive()
+      guards both sites; the dead pane now falls through to the existing relaunch
+      path. Post-fix live run: FLAGGED -> "re-evaluating after verification" -> worker
+      relaunched -> re-check follow-up into the held verifier pane -> bounded exhaustion
+      in 24 s -> NEEDS_WORK with the exact expected reason, PR back to in_review,
+      no merge/sign-off; then a fresh config + z t reached PASS with FINALIZE_DONE
+      and "QA PASS — press i to sign off". Captures /pm-captures/scenarios/42/{pre-fix,post-fix}.
+      Incidental (pre-existing, out of scope, filed pr-2a541db): _relaunch_scenario_window
+      leaves a DUPLICATE qa-<pr>-sN window and returns a pane id from the old window,
+      because new_window_get_pane re-resolves by name (find_window_by_name returns
+      the first match) instead of using the window it just created. Harness notes:
+      keep a private HOME + PM_TMUX_SOCKET (sibling QA sessions share /home/pm); the
+      fake worker exits on the first keystroke of the follow-up (select() on stdin),
+      so the pane death is deterministic; scenario numbering leaks across projects
+      sharing a PR id (known pr-154595f), so a re-run numbers s2/s3 not s1.'
+    created_at: '2026-10-29T15:28:14Z'
+    last_edited: '2026-10-29T15:28:14Z'
+  - id: note-c484fbf
+    text: 'QA S42 follow-up: full suite green at 8e255d04 with the review-container
+      env (env -u PM_HOST_HOME PATH=/tmp/pm-venv/bin:/usr/bin:/bin PYTHONPATH=/workspace,
+      pytest 8.4.2): 4615 passed, 1 skipped, 0 failed, 0 errors (372 s). Focused recovery/QA/review/tmux
+      suites 890+ passed. Commits on the branch from this run: 36342563 (fix + 4 tests),
+      f1dfa4d2 (pr-2a541db bug entry), 8e255d04 (this note).'
+    created_at: '2026-10-29T15:34:22Z'
+    last_edited: '2026-10-29T15:34:22Z'
+  model: provider:deepseek-flash
+  session_models:
+    impl: provider:deepseek-flash
+    review: provider:deepseek-flash
+    qa: provider:deepseek-flash
+    qa_planning: provider:deepseek-flash
+    qa_scenario: provider:deepseek-flash
+    qa_concretize: provider:deepseek-flash
+    qa_verification: provider:deepseek-flash
+    qa_finalize: provider:deepseek-flash
+    qa_interactive: provider:deepseek-flash
+    merge: provider:deepseek-flash
+    signoff: provider:claude-work-xhigh-249
 - id: pr-cfb0b3a
   plan: improvements
   title: 'Improvement: prompt sessions to use pm PR notes for cross-session handoff
@@ -38250,75 +39662,78 @@ prs:
   notes: []
 - id: pr-592e4bd
   plan: improvements
-  title: Route QA scenario refinement and execution through claude-mixed work models; keep other
-    sessions on main Claude
+  title: Route QA scenario refinement and execution through claude-mixed work models;
+    keep other sessions on main Claude
   branch: pm/pr-592e4bd-route-qa-execution-workers-through-claude-mixed-wo
   status: pending
   depends_on: []
-  description: 'The user expects the main Claude subscription to run out before reset. Integrate
-    the existing claude-mixed/work-model routing promptly so autonomous QA scenario refinement
-    and execution workers use the work account; all other PM sessions retain the main account
-    and plain Claude binary for remote control. Keep Opus5.5/high effort: work/claude-opus-5-5
-    for scenario refinement (qa_concretize) and execution (qa_scenario) workers, claude-opus-5-5
-    for the other roles unless the user changes that policy.
+  description: 'The user expects the main Claude subscription to run out before reset.
+    Integrate the existing claude-mixed/work-model routing promptly so autonomous
+    QA scenario refinement and execution workers use the work account; all other PM
+    sessions retain the main account and plain Claude binary for remote control. Keep
+    Opus5.5/high effort: work/claude-opus-5-5 for scenario refinement (qa_concretize)
+    and execution (qa_scenario) workers, claude-opus-5-5 for the other roles unless
+    the user changes that policy.
 
 
     Current integration points and gaps:
 
-    - PM already resolves models/providers independently for qa_planning, qa_scenario, qa_concretize,
-    qa_verification and qa_finalize via model_config.py, pm model set, and qa_loop._resolve_qa_model.
-    Reuse this configuration and the common launcher boundary rather than adding a parallel
-    scheduler.
+    - PM already resolves models/providers independently for qa_planning, qa_scenario,
+    qa_concretize, qa_verification and qa_finalize via model_config.py, pm model set,
+    and qa_loop._resolve_qa_model. Reuse this configuration and the common launcher
+    boundary rather than adding a parallel scheduler.
 
-    - claude_launcher.py currently hardcodes the claude executable. The user''s host launcher
-    is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py with
-    ~/.config/claude-router/routes.json. The anthropic-work backend selects the work/ prefix,
-    strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
+    - claude_launcher.py currently hardcodes the claude executable. The user''s host
+    launcher is /home/matt/.local/bin/claude-mixed. It uses ~/.local/lib/claude-router/router.py
+    with ~/.config/claude-router/routes.json. The anthropic-work backend selects the
+    work/ prefix, strips it before upstream delivery and reads credentials from ~/.claude-work/.credentials.json
     on each request. Keep account credentials on the host; do not embed them in project.yaml,
     generated launch commands, logs or captures.
 
-    - Existing QA containers use slirp4netns. Probes from a real QA container failed to connect
-    to port8790 at both127.0.0.1 and host.containers.internal; the host router is up on127.0.0.1:8790.
-    Provide a tested container-compatible route/launcher using the existing host router without
-    publicly exposing the credential-bearing router or changing global networking for unrelated
-    sessions. Host QA must work too. Do not silently fall back to the main account when work
-    routing is unavailable.
+    - Existing QA containers use slirp4netns. Probes from a real QA container failed
+    to connect to port8790 at both127.0.0.1 and host.containers.internal; the host
+    router is up on127.0.0.1:8790. Provide a tested container-compatible route/launcher
+    using the existing host router without publicly exposing the credential-bearing
+    router or changing global networking for unrelated sessions. Host QA must work
+    too. Do not silently fall back to the main account when work routing is unavailable.
 
-    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive QA
-    session from scenario-worker targeting so s0 stays on main/plain Claude and remains available
-    for remote control. Planning, verification, finalization, implementation, review, sign-off
-    and other interactive sessions also stay on main/plain Claude. Preserve fake-claude behavior,
-    hooks, transcript discovery and session identity.
+    - _launch_scenario_0 resolves qa_scenario today. Separate the persistent interactive
+    QA session from scenario-worker targeting so s0 stays on main/plain Claude and
+    remains available for remote control. Planning, verification, finalization, implementation,
+    review, sign-off and other interactive sessions also stay on main/plain Claude.
+    Preserve fake-claude behavior, hooks, transcript discovery and session identity.
 
 
     Acceptance:
 
-    A configured project can select the launcher/model route for QA scenario refinement and
-    execution workers only, with existing overrides and resumed/relaunched workers handled consistently.
-    Normal sessions retain their current main binary/account/model; no global claude replacement,
-    global account swap, or accidental model downgrade. Route selection is visible without exposing
-    credentials. Startup/auth/router errors explain the required remedy and leave a recoverable
-    state, not an unexplained human-judgment verdict or fallback billed to the main account.
-    Validate initial worker launch, replacement/retry and restart adoption, plus refinement
-    launch/retry paths and unaffected s0, planner, verifier, finalizer and review launch commands.
-    Add focused regressions and a real container/host smoke using a harmless prompt through
-    the work route when authentication is available; verify actual backend/model routing and
-    normal hooks/transcript output. Keep manual merge/spec-review gates.
+    A configured project can select the launcher/model route for QA scenario refinement
+    and execution workers only, with existing overrides and resumed/relaunched workers
+    handled consistently. Normal sessions retain their current main binary/account/model;
+    no global claude replacement, global account swap, or accidental model downgrade.
+    Route selection is visible without exposing credentials. Startup/auth/router errors
+    explain the required remedy and leave a recoverable state, not an unexplained
+    human-judgment verdict or fallback billed to the main account. Validate initial
+    worker launch, replacement/retry and restart adoption, plus refinement launch/retry
+    paths and unaffected s0, planner, verifier, finalizer and review launch commands.
+    Add focused regressions and a real container/host smoke using a harmless prompt
+    through the work route when authentication is available; verify actual backend/model
+    routing and normal hooks/transcript output. Keep manual merge/spec-review gates.
 
 
-    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host smoke
-    through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result ok, reported model
-    work/claude-opus-5-5). Container transport and hooks/transcript smoke are still required.
-    Do not change login credentials yourself or copy tokens into containers. Host scripts claude-work-ping
-    / claude-work-expiry document the current refresh workflow; the router itself only reads
-    the token and does not refresh it.
+    Auth readiness updated2026-10-22: the user signed in again. A tools-disabled host
+    smoke through claude-mixed with work/claude-opus-5-5 succeeded (exit0, result
+    ok, reported model work/claude-opus-5-5). Container transport and hooks/transcript
+    smoke are still required. Do not change login credentials yourself or copy tokens
+    into containers. Host scripts claude-work-ping / claude-work-expiry document the
+    current refresh workflow; the router itself only reads the token and does not
+    refresh it.
 
 
-    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery changes;
-    keep this PR focused on role/account routing. No dependency on the larger Codex integration/refactor
-    is required. After merge, configure this project''s QA scenario refinement and execution
-    workers to the validated work route; leave already running sessions intact unless the user
-    requests migration.
+    Coordinate with active #241 container lifecycle changes and #245/#247 QA recovery
+    changes; keep this PR focused on role/account routing. No dependency on the larger
+    Codex integration/refactor is required. After merge, configure this project''s
+    QA scenario refinement and execution workers to the validated work route; leave
+    already running sessions intact unless the user requests migration.
 
     '
   agent_machine: null
@@ -38331,58 +39746,61 @@ prs:
   merged_at: null
   notes:
   - id: note-da1f854
-    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize) and execution
-      (qa_scenario) through the work account, retaining Opus5.5/high. All other roles, including
-      interactive QA s0, planning, verification and finalization, stay on main/plain Claude
-      for RC. User work login is complete; a host claude-mixed work/claude-opus-5-5 smoke returned
-      ok. Container/hook/transcript validation remains required. Main-account session limit
-      resets18:40UTC; supervisor will nudge the blocked non-QA runs after reset and shepherd
-      this PR to sign-off, preserving manual merge/spec gates.'
+    text: 'User scope update2026-10-22: route BOTH scenario refinement (qa_concretize)
+      and execution (qa_scenario) through the work account, retaining Opus5.5/high.
+      All other roles, including interactive QA s0, planning, verification and finalization,
+      stay on main/plain Claude for RC. User work login is complete; a host claude-mixed
+      work/claude-opus-5-5 smoke returned ok. Container/hook/transcript validation
+      remains required. Main-account session limit resets18:40UTC; supervisor will
+      nudge the blocked non-QA runs after reset and shepherd this PR to sign-off,
+      preserving manual merge/spec gates.'
     created_at: '2026-10-22T17:46:12Z'
     last_edited: '2026-10-22T17:46:12Z'
   - id: note-ae7cf29
-    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review. Three things
-      for this branch:
+    text: 'pr-db3bf10 (durable owed-REQA recovery, based on master) is in review.
+      Three things for this branch:
 
 
-      1. S127''s restart expectation is now the observable contract, not a cosmetic log: after
-      a plain TUI restart with auto-start off, the PR at qa whose return record says awaiting:
-      qa is started exactly once when the live `pm qa run` ends — one qa-<pr> window set, one
-      verifier, one finalizer, one qa_status.json — and no second loop ever starts over the
-      live run. master''s implementation also logs "Sign-off REQA for <pr> — QA starts once
-      the QA run another process drives ends" once per return episode (first poll tick or mount),
-      so an assertion on that line still holds there, but it is not the contract. Please relax
-      S127''s Then accordingly rather than requiring the line.
+      1. S127''s restart expectation is now the observable contract, not a cosmetic
+      log: after a plain TUI restart with auto-start off, the PR at qa whose return
+      record says awaiting: qa is started exactly once when the live `pm qa run` ends
+      — one qa-<pr> window set, one verifier, one finalizer, one qa_status.json —
+      and no second loop ever starts over the live run. master''s implementation also
+      logs "Sign-off REQA for <pr> — QA starts once the QA run another process drives
+      ends" once per return episode (first poll tick or mount), so an assertion on
+      that line still holds there, but it is not the contract. Please relax S127''s
+      Then accordingly rather than requiring the line.
 
 
-      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the owed start
-      in app._pending_auto_qa + app._reqa_waiting — memory only, which is the bug pr-db3bf10
-      fixes. master now persists the obligation in signoff_return.awaiting + a qa_run.json run
-      record, reconciles it from qa_loop_ui.poll_qa_state and App.on_mount regardless of the
-      auto-start switch, and gates every starter (sign-off hop, auto-start pass, pm pr auto-sequence)
-      on signoff.claim_return_launch(..., require_status="qa"). On merge, route the REQA deferral
-      through qa_loop_ui.start_owed_reqa / reconcile_owed_reqa and drop the in-memory pending
-      entry: otherwise the durable path claims while the in-memory path calls start_qa directly,
-      and the two can each start a loop for the same obligation.
+      2. Merge reconciliation (important): this branch''s defer_reqa_start keeps the
+      owed start in app._pending_auto_qa + app._reqa_waiting — memory only, which
+      is the bug pr-db3bf10 fixes. master now persists the obligation in signoff_return.awaiting
+      + a qa_run.json run record, reconciles it from qa_loop_ui.poll_qa_state and
+      App.on_mount regardless of the auto-start switch, and gates every starter (sign-off
+      hop, auto-start pass, pm pr auto-sequence) on signoff.claim_return_launch(...,
+      require_status="qa"). On merge, route the REQA deferral through qa_loop_ui.start_owed_reqa
+      / reconcile_owed_reqa and drop the in-memory pending entry: otherwise the durable
+      path claims while the in-memory path calls start_qa directly, and the two can
+      each start a loop for the same obligation.
 
 
-      3. run_driven_elsewhere exists on both sides with the same signature and semantics. master''s
-      version has only qa_run.json (written at the top of run_qa_sync / resume_qa_sync, owner
-      pid + owner_start) and reuses resume_owned_elsewhere; this branch''s richer record set
-      (write_launch_record, own_run_driven_since, run_overlaps_own_run, launched_elsewhere)
-      should win on merge.'
+      3. run_driven_elsewhere exists on both sides with the same signature and semantics.
+      master''s version has only qa_run.json (written at the top of run_qa_sync /
+      resume_qa_sync, owner pid + owner_start) and reuses resume_owned_elsewhere;
+      this branch''s richer record set (write_launch_record, own_run_driven_since,
+      run_overlaps_own_run, launched_elsewhere) should win on merge.'
     created_at: '2026-10-28T15:57:32Z'
     last_edited: '2026-10-28T15:57:32Z'
   - id: note-9b00f90
     text: 'From pr-e040aeb (failed review-launch recovery): this branch adds a ReviewLaunchError
-      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd) but goes
-      further: a failed launch is retried up to 3 times and then reported as LAUNCH_FAILED (retryable)
-      instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
-      expects a single attempt and latest_verdict == "ERROR"; after both merge, update it to
-      expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR as an alias.
-      The no-traceback behavior is preserved (ReviewLaunchError is caught with _log.error, not
-      _log.exception), and _launch_review_window keeps the "Review window launch failed (rc=N):
-      <detail>" message shape.'
+      class to pm_core/review_loop.py (same name/intent as the S84 fix on pr-592e4bd)
+      but goes further: a failed launch is retried up to 3 times and then reported
+      as LAUNCH_FAILED (retryable) instead of a one-shot ERROR. Your test_launch_failure_is_an_error_verdict_without_traceback
+      expects a single attempt and latest_verdict == "ERROR"; after both merge, update
+      it to expect up to 3 attempts and LAUNCH_FAILED (retryable=True), or keep ERROR
+      as an alias. The no-traceback behavior is preserved (ReviewLaunchError is caught
+      with _log.error, not _log.exception), and _launch_review_window keeps the "Review
+      window launch failed (rc=N): <detail>" message shape.'
     created_at: '2026-10-27T05:26:04Z'
     last_edited: '2026-10-27T05:26:04Z'
 - id: pr-891fd39
@@ -39550,6 +40968,79 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-f2fee05
+  plan: bugs
+  title: 'Bug: QA verifier re-verification follow-up wait hangs when the verifier
+    emits no verdict'
+  branch: pm/pr-f2fee05-bug-qa-verifier-re-verification-follow-up-wait-han
+  status: pending
+  depends_on: []
+  description: "## Location\n\n`pm_core/qa_loop.py` `_verify_single_scenario` (re-verification\
+    \ branch) →\n`pm_core/loop_shared.wait_for_follow_up_verdict`.\n\n## Symptom\n\
+    \nThe initial verification poll is bounded by pr-6566901's MissingOutputRecovery,\n\
+    but the re-verification follow-up (after a FLAGGED verdict sends the scenario\n\
+    back to run again) waits on `wait_for_follow_up_verdict`, which loops until a\n\
+    verdict newer than the baseline appears, the pane disappears, or the run is\n\
+    stopped. It has no deadline and no recovery, so a verifier that ends its\nfollow-up\
+    \ turn without `VERIFIED` or a complete `FLAGGED_START … FLAGGED_END`\nblock leaves\
+    \ QA's verification phase blocked indefinitely.\n\n## Repro\n\n1. A scenario emits\
+    \ PASS; the verifier flags it (FLAGGED_END).\n2. The scenario re-runs and is re-verified:\
+    \ `_verify_single_scenario` sends the\n   follow-up message and calls `wait_for_follow_up_verdict`.\n\
+    3. The verifier replies with prose (no standalone VERIFIED / FLAGGED block) and\n\
+    \   goes idle → QA waits forever (until `z t`/stop or the pane dies).\n\n## Why\
+    \ pr-6566901 left it\n\nThat PR deliberately leaves `wait_for_follow_up_verdict`\
+    \ unbounded because the\nsame helper serves the genuine human INPUT_REQUIRED follow-up\
+    \ wait (audit: a\nreal INPUT_REQUIRED is not a missing-output failure). The verifier\
+    \ use is\nmachine-driven, not a human wait.\n\n## Suggested fix\n\nBound the machine-driven\
+    \ follow-up only (e.g. reuse MissingOutputRecovery or an\nexplicit deadline in\
+    \ the re-verification branch), keeping the human\nINPUT_REQUIRED follow-up waits\
+    \ unbounded. Preserve the baseline-line snapshot\nsemantics from pr-8efa789."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T08:55:07.647281+00:00'
+  updated_at: '2026-10-27T19:56:07.792693+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes:
+  - id: note-a9b7ecf
+    text: 'Heads-up from pr-6566901 (review-loop d476 i2, 4fec787d): the QA verifier
+      re-verification follow-up no longer uses wait_for_follow_up_verdict. `_verify_single_scenario`
+      now calls the shared poll_for_verdict for that machine-driven re-check, so a
+      verifier that idles without VERIFIED/FLAGGED there gets the same settle/nudge/exhaustion
+      and surfaces "verifier produced no verdict: ..." (blocking finalize) instead
+      of hanging. Regression test: tests/test_loop_recovery.py::TestQARecoveryWiring::test_verifier_recheck_exhaustion_blocks_finalize.
+      When this bug PR is picked up, verify against current master first — it may
+      already be fixed and the PR can be closed.'
+    created_at: '2026-10-27T19:56:07Z'
+    last_edited: '2026-10-27T19:56:07Z'
+- id: pr-950dafa
+  plan: bugs
+  title: 'Bug: pm set list shows qa-verify-pass off on a fresh store although its
+    default is on'
+  branch: pm/pr-950dafa-bug-pm-set-list-shows-qa-verify-pass-off-on-a-fres
+  status: pending
+  depends_on: []
+  description: "Location: pm_core/cli/__init__.py:_list_settings (boolean branch)\
+    \ + pm_core/paths.py:get_global_setting.\n\nRepro (fresh ~/.pm/settings/, i.e.\
+    \ no qa-verify-pass file):\n  pm set list\n  -> \"  qa-verify-pass off\"   (no\
+    \ \"(default)\" marker)\n\nExpected: \"  qa-verify-pass on (default)\".\n\nWhy\
+    \ it is wrong: _SETTING_DEFAULTS[\"qa-verify-pass\"] = \"on\" and the pm set help\
+    \ text says \"default on\", and pm_core/qa_loop.py:_is_verification_enabled()\
+    \ returns True when the setting is unset. But _list_settings renders booleans\
+    \ via get_global_setting(), which returns False for a missing file, so the listing\
+    \ reports \"off\" and omits the \"(default)\" marker because \"off\" != the declared\
+    \ default \"on\". The result reads as if the user had explicitly turned PASS-verification\
+    \ off, and contradicts the actual behavior.\n\nFix sketch: in the boolean branch\
+    \ of _list_settings, fall back to _SETTING_DEFAULTS.get(name, \"off\") when has_global_setting(name)\
+    \ is False (or compare against the resolved default rather than the raw file read).\n\
+    \nFound incidentally during QA scenario 5 for pr-6566901; unrelated to that PR."
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-27T21:05:33.812344+00:00'
+  updated_at: '2026-10-27T21:05:33.812344+00:00'
 - id: pr-25f4038
   plan: bugs
   title: Use wait-for-merge as the only manual autostart merge policy
@@ -40391,6 +41882,27 @@ prs:
   reviewed_at: null
   merged_at: null
   notes: []
+- id: pr-a965833
+  plan: bugs
+  title: pm set list reports qa-verify-pass as off on a fresh install despite its
+    on default
+  branch: pm/pr-a965833-pm-set-list-reports-qa-verify-pass-as-off-on-a-fre
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/cli/__init__.py _list_settings() boolean branch.
+    Repro: on a fresh install with no ~/.pm/settings/qa-verify-pass file, `pm set
+    list` prints "qa-verify-pass off" with no (default) marker. The documented default
+    (--help text and _SETTING_DEFAULTS) is "on", and qa_loop._is_verification_enabled()
+    treats an absent file as enabled, so the listing contradicts both the docs and
+    runtime behaviour. Cause: for booleans the listing derives the value from get_global_setting()
+    (absent file -> False -> "off") instead of falling back to _SETTING_DEFAULTS when
+    has_global_setting() is False. Noticed while running QA scenario 21 (pr-6566901);
+    unrelated to that PR.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-28T09:53:07.108901+00:00'
+  updated_at: '2026-10-28T09:53:07.108901+00:00'
 - id: pr-5d53171
   plan: bugs
   title: 'Bug: stopping a QA run while a scenario PASS is mid-verification still aggregates
@@ -42032,6 +43544,177 @@ prs:
   gh_pr_number: null
   created_at: '2026-10-28T18:02:48.130836+00:00'
   updated_at: '2026-10-28T18:02:48.130836+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-d7d8929
+  plan: bugs
+  title: 'Bug: a running TUI deletes another project''s QA resume snapshot, so that
+    project''s completed CLI QA run is never adopted'
+  branch: pm/pr-d7d8929-bug-a-running-tui-deletes-another-project-s-qa-res
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py::_resume_incomplete_qa — the scan
+    root is the GLOBAL ~/.pm/workdirs/qa, but the "PR is not in QA / unknown" branch
+    (if not pr or pr.get("status") != "qa": ... qa_loop.clear_resume_file(resume_file.parent))
+    cannot tell "this PR left QA" from "this PR belongs to another project".
+
+
+    Repro (verified 2026-10-29, QA S33 on pr-6566901):
+
+    1. Two pm projects A and B in one HOME; project A has a pm TUI running.
+
+    2. In B, run `pm qa run <instruction> --pr <prB>` from a shell pane of B session.
+
+    3. B run finishes (qa_status.json has overall, qa_resume.json still on disk, unprocessed).
+
+    4. A TUI scans, store.get_pr(A.project, prB) -> None, so it DELETES B qa_resume.json.
+
+    Result: B TUI never logs "Recovered completed QA from disk"/"QA INPUT_REQUIRED
+    for <pr> — paused for human input" and never writes the QA PR note; the same deletion
+    also destroys restart-recovery for a genuinely orphaned B run.
+
+
+    Probe: writing {"pr_id": "pr-deadbeef", ...} to ~/.pm/workdirs/qa/pr-deadbeef-cli-probe/qa_resume.json
+    while any TUI runs makes the file disappear within ~6 s.
+
+
+    Evidence: /pm-captures/scenarios/33/story2-verdictless/attempt1-crossproject-interference/
+    (no adoption line in the pm log while story 1 TUI ran; identical flow adopts 2-3
+    s after completion once that TUI is stopped — attempt2-repeat-run/).
+
+
+    Suggested fix: only clear when the PR is known to THIS project (pr is None ->
+    skip, do not delete); treat unknown-PR snapshots as not-ours.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:35:57.589701+00:00'
+  updated_at: '2026-10-29T07:35:57.589701+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-1c48ae3
+  plan: bugs
+  title: 'Bug: a repeat pm qa run on the same PR adds panes/windows to the previous
+    run''s QA windows instead of replacing them'
+  branch: pm/pr-1c48ae3-bug-a-repeat-pm-qa-run-on-the-same-pr-adds-panes-w
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/qa_loop.py execution path — _cleanup_stale_scenario_windows
+    has 3 call sites but none runs for a repeat execution-only run that finds the
+    previous run windows still open (the worker is deliberately left open for inspection
+    after an INPUT_REQUIRED/no-verdict retirement).
+
+
+    Repro (verified 2026-10-29, QA S33 on pr-6566901, host mode, fake-claude):
+
+    1. `pm qa run direct-qa-verdictless --pr pr-9a20a46` -> ends INPUT_REQUIRED, worker
+    pane left open (qa-pr-9a20a46 has 3 panes, qa-pr-9a20a46-s1 has 2).
+
+    2. Without closing those windows, run the same command again.
+
+    Result: qa-pr-9a20a46 grows to 5 panes (two qa_status dashboards, two finalize
+    panes), a SECOND window named qa-pr-9a20a46-s1 is created (windows 3 and 4), and
+    a second concretizer pane (%24) runs REFINED_STEPS. The run itself still ends
+    correctly (INPUT_REQUIRED), but the windows and dashboards are duplicated and
+    one dashboard renders truncated.
+
+
+    Evidence: /pm-captures/scenarios/33/story2-verdictless/attempt2-repeat-run/pane-map.txt
+    (+ pm-log.log). A third run after manually killing windows 2/3/4 produced the
+    clean 3+2 layout (attempt3-clean-windows/).
+
+
+    Note: identical call sites exist on master, so this is pre-existing, not introduced
+    by the verdict-recovery work.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:36:09.547316+00:00'
+  updated_at: '2026-10-29T07:36:09.547316+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-7d94f02
+  plan: bugs
+  title: 'Bug: a second completed CLI QA run for the same PR is never adopted by a
+    long-lived TUI (_resumed_qa_pr_ids is one-shot per PR per TUI lifetime)'
+  branch: pm/pr-7d94f02-bug-a-second-completed-cli-qa-run-for-the-same-pr-
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tui/qa_loop_ui.py::_resume_incomplete_qa — `if pr_id
+    in app._qa_loops or pr_id in app._resumed_qa_pr_ids: continue` adds every scanned
+    PR to _resumed_qa_pr_ids and never removes it when a NEW run for that PR starts,
+    so only the first completed run of a PR in a TUI lifetime is recovered/noted.
+
+
+    Repro (verified 2026-10-29, QA S33 on pr-6566901): fresh session, `pm qa run direct-qa-verdictless
+    --pr pr-9a20a46` -> adoption works 3 s after completion ("Recovered completed
+    QA from disk: pr-9a20a46 -> INPUT_REQUIRED", TUI "QA INPUT_REQUIRED for pr-9a20a46
+    — paused for human input", PR note written). Run the same command a second time
+    in the same session: the run completes with Result: INPUT_REQUIRED and leaves
+    an unprocessed qa_resume.json, but the TUI logs nothing, writes no note, and never
+    clears the snapshot (verified: resume file still on disk with completion_processed=false
+    after the second run).
+
+
+    Evidence: /pm-captures/scenarios/33/story2-verdictless/attempt3-clean-windows/
+    (run completed, no adoption line in pm-log.log) vs the recorded run (adoption
+    line at 07:32:57).
+
+
+    Suggested fix: drop the pr_id from _resumed_qa_pr_ids when a new run record for
+    it appears (qa_run.json started_at newer than the processed snapshot), or key
+    the guard on loop_id/started_at instead of pr_id alone.
+
+    Note: the same guard exists on master; pre-existing.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T07:36:11.280445+00:00'
+  updated_at: '2026-10-29T07:36:11.280445+00:00'
+  started_at: null
+  reviewed_at: null
+  merged_at: null
+  notes: []
+- id: pr-2a541db
+  plan: bugs
+  title: 'Bug: QA scenario relaunch creates a duplicate qa-<pr>-sN window and returns
+    a pane from the old one'
+  branch: pm/pr-2a541db-bug-qa-scenario-relaunch-creates-a-duplicate-qa-pr
+  status: pending
+  depends_on: []
+  description: 'Location: pm_core/tmux.py new_window_get_pane (232-270), used by pm_core/qa_loop.py
+    _relaunch_scenario_window (3112).
+
+
+    new_window_get_pane always runs `tmux new-window`, then resolves the window it
+    just created with find_window_by_name(), which returns the FIRST window carrying
+    that name. When a window with that name already exists it therefore (a) leaves
+    a duplicate window behind and (b) returns a pane id belonging to the OLD window.
+
+
+    Repro (QA scenario 42, fake Claude): a QA scenario whose PASS is FLAGGED while
+    the scenario window is still alive (its concretizer + verifier panes keep it up)
+    relaunches the worker into the same window name. Observed live: windows `qa-pr-95325c4-s2`
+    existed twice (indices 3 and 4), and the log line `new_window_get_pane: ... name=qa-pr-95325c4-s2
+    id=@5 index=3` shows the OLD window being resolved, so `scenario.pane_id` was
+    set to the old window first pane (the concretizer), not the relaunched worker
+    pane. Verdicts still arrived because polling is hook/transcript-driven, so the
+    run looked correct apart from the stray window and the wrong follow-up target.
+
+
+    Suggested fix: have new-window return its own pane id (`new-window -P -F "#{pane_id}"`)
+    instead of re-resolving by name.'
+  agent_machine: null
+  gh_pr: null
+  gh_pr_number: null
+  created_at: '2026-10-29T15:27:09.967003+00:00'
+  updated_at: '2026-10-29T15:27:09.967003+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null

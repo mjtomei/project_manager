@@ -57,6 +57,10 @@ _VERDICT_COLORS = {
     "INPUT_REQUIRED": _RED,
     "interactive": _DIM,
     "queued": _DIM,
+    # A run the user stopped before it produced a result (no plan, no
+    # scenario verdict, or no finalize outcome).  Dim like the other
+    # non-results so it cannot read as a missing/unknown verdict.
+    "STOPPED": _DIM,
     # Sign-off router verdicts (shown when a sign-off verdict surfaces here).
     "SIGNOFF_MERGE": _GREEN,
     "SIGNOFF_REQA": _YELLOW,
@@ -116,18 +120,29 @@ def _render(status: dict | None, selected: int, rows: int, cols: int,
     lines.append(f"{_BOLD}QA Status: {pr_id}{_RESET}")
     lines.append("")
 
-    # Show error block if present (spec missing, no scenarios, etc.)
+    # Show error block if present (spec missing, no scenarios, etc.).
+    # A run can still have scenarios and a terminal verdict alongside the
+    # error — a planner-recovery exhaustion leaves the interactive
+    # Scenario 0 listed with an overall INPUT_REQUIRED — so only take the
+    # error-only view when there is nothing else to show.
     if error:
         lines.append(f"  {_RED}{_BOLD}ERROR{_RESET}")
         lines.append("")
         for err_line in error.split("\n"):
             lines.append(f"  {_RED}{err_line}{_RESET}")
         lines.append("")
-        lines.append(f"{_DIM}  q: quit{_RESET}")
-        padded = [_pad_line(l, cols) for l in lines]
-        while len(padded) < rows:
-            padded.append(" " * cols)
-        return _CLEAR_SCREEN + "\n".join(padded)
+        # The error block explains *why* the run stopped without naming the
+        # outcome, but the run still has a verdict (e.g. INPUT_REQUIRED when
+        # planning produced no plan) and may still list scenarios.  Keep both
+        # visible below the error — that is exactly what the user needs to
+        # see — and only take the error-only view when there is nothing else
+        # to show.
+        if not scenarios and not overall:
+            lines.append(f"{_DIM}  q: quit{_RESET}")
+            padded = [_pad_line(l, cols) for l in lines]
+            while len(padded) < rows:
+                padded.append(" " * cols)
+            return _CLEAR_SCREEN + "\n".join(padded)
 
     # Fixed columns: prefix(2) + idx(3) + gap(2) + gap(2) + verdict(14) = 23.
     # A scenario waiting for input appends " (waiting)" to its verdict, so

@@ -707,3 +707,82 @@ def test_focus_suppressed_answer_visible_over_sticky():
                return_value=True):
         qa_loop_ui.focus_or_start_qa(app, "pr-001")
     assert shown[-1] == " QA window for pr-001 ready (focus suppressed)"
+
+
+def test_focus_answer_visible_over_sticky():
+    """QA s26: `zz t` then a second `t` while the loop-start sticky is up.
+
+    ``focus_or_start_qa`` finds the window the just-started loop created
+    and focuses it.  That answer is a direct reply to the user's key, so
+    it must paint over the "QA loop started … — z t to stop" sticky
+    instead of being recorded as "(hidden by sticky message)".
+    """
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    _log(app, "QA loop started for pr-001 — z t to stop", sticky=3)
+    until = app._log_sticky_until
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "qa"}), \
+         patch.object(qa_loop_ui, "get_pm_session", return_value="pm-x"), \
+         patch("pm_core.tmux.find_window_by_name", return_value="@3"), \
+         patch("pm_core.tmux.select_window") as select, \
+         patch("pm_core.runtime_state.consume_suppress_switch",
+               return_value=False):
+        qa_loop_ui.focus_or_start_qa(app, "pr-001")
+    assert shown[-1] == " Focused QA window for pr-001"
+    select.assert_called_once_with("pm-x", "qa-pr-001")
+    assert app._log_sticky_until == until  # forcing doesn't extend it
+
+
+# QA s39 (pr-6566901): a user's `/pr qa X` sent inside the 10 s sticky
+# window of *another* PR's loop-completion line.  The start had no window
+# yet, so it took the fresh-start path, whose "Starting QA for X..." was
+# recorded as "(hidden by sticky message)" — the log line kept showing the
+# other PR's "Review loop done ... PASS".  The focus path already forced its
+# answer (see test_focus_answer_visible_over_sticky); the start must too.
+
+def test_qa_start_visible_over_sticky_completion():
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    _log(app, "Review loop done for pr-other: ✓ PASS (1 iteration)",
+         sticky=10)
+    until = app._log_sticky_until
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "in_review"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_poll_timer"), \
+         patch.object(qa_loop_ui, "_consume_owed_reqa_in_memory"), \
+         patch("pm_core.signoff.clear_return_awaiting"), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_qa(app, "pr-001", focus=True)
+    assert shown[-1] == " Starting QA for pr-001..."
+    assert app._log_sticky_until == until  # forcing doesn't extend it
+
+
+def test_background_qa_start_still_defers_to_sticky():
+    """The scheduler's own start is not a reply to the user's key: it must
+    not paint over a confirmation that is still holding the log line."""
+    from pm_core.tui import qa_loop_ui
+
+    app, shown = _stub_app()
+    app._root = "/unused"
+    app._qa_loops = {}
+    _log(app, "Review loop done for pr-other: ✓ PASS (1 iteration)",
+         sticky=10)
+    with patch.object(qa_loop_ui.store, "load", return_value={}), \
+         patch.object(qa_loop_ui.store, "get_pr",
+                      return_value={"id": "pr-001", "status": "in_review"}), \
+         patch.object(qa_loop_ui, "_enter_qa_status", return_value=True), \
+         patch.object(qa_loop_ui, "_ensure_poll_timer"), \
+         patch.object(qa_loop_ui, "_consume_owed_reqa_in_memory"), \
+         patch("pm_core.signoff.clear_return_awaiting"), \
+         patch.object(qa_loop_ui, "start_qa_background"):
+        qa_loop_ui.start_qa(app, "pr-001")
+    assert shown[-1] == (" Review loop done for pr-other: ✓ PASS (1 iteration)")
