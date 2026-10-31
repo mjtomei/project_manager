@@ -803,6 +803,63 @@ container cleared it and kept its files.  Running state is not health.
     mounts as `trigger=merge_restart` after `save_breadcrumb` consumed the
     marker.
 
+- A12 *Routed QA workers and refiner splits after merging master@eaf3372e*
+  (#249, pr-592e4bd; user-authorized restart note of 2026-10-31). Master
+  routes QA refiner/worker (and impl/review/sign-off) sessions through host
+  router bridges, splits workers off a surviving refiner, relaunches dead
+  workers into that window and re-ensures their containers (S78), discards a
+  same-name earlier run's container (S130), and resumes runs across clones
+  (S39–S49). Integration rules:
+  - Provider setup errors (`ProviderNotFoundError`: a route or provider that
+    cannot be set up) stop the run at concretizer/worker command build,
+    worker relaunch and verifier, as on master. A container the launch
+    already created is released through the ownership-checked
+    `discard_unowned_container` (captured id/generation), never master's raw
+    `remove_container` by name. Route mounts flow through `wrap_claude_cmd`,
+    `create_qa_container` and the relaunch re-ensure. A sign-off
+    `ContainerError` (including a classified `ContainerLaunchError`)
+    propagates to `pm pr signoff`, which prints it on stderr with rc 1
+    (master); impl/review keep their rc 1 path. The route-mount pre-check's
+    unanswered state probe is a `timeout` launch error.
+  - A failed worker split stays a launch failure (R3/R6: tmux's real error,
+    no agent verdict, ownership-checked release, not polled as a worker).
+    Master's refiner-gone pre-check (no worker command is built for a closed
+    window) and closing a live refiner pane after an unexpected split
+    failure are kept for host workers; for container workers the refiner is
+    ended by the ownership-checked discard instead, and kept with its
+    container while the window is viewed.
+  - A dead worker's relaunch splits into the window its refiner keeps alive
+    (master) and re-ensures the container by verified reuse of the captured
+    allocation (R5, IR2), else recreates it. A classified transient cause
+    (`keyring`, `memory`, `pids`, `timeout`, `proxy`, `incomplete`,
+    `runtime`) is a launch failure without a verdict, so the retry ladder
+    can recover once the pressure clears. A cause retrying cannot fix (the
+    scenario clone is gone, `image`, `config`, an unclassified error)
+    settles the scenario as `INPUT_REQUIRED` with the launch-failure reason
+    and ends the ladder (master's S78 fail-fast). The poll treats any
+    relaunch that newly settles a verdict as final.
+  - S130 (every `pm qa run` of a PR shares loop id `cli-<pr>` and re-clones
+    the scenario workdir): a fresh container launch first discards an
+    earlier container of that name with the ownership-checked discard;
+    a live, retained or pending owner keeps it, and the create then refuses
+    that allocation with its cause instead of reusing a deleted mount.
+  - TUI resume scan: master's candidate selection (another project's runs
+    and other clones' runs are left alone, per-session newest run by its
+    first scenario index, superseded snapshots dropped, atomic claim)
+    replaces the branch's `resume_order` sort; the branch's deferred spawn
+    is kept, so every resumed or re-adopted held run restores its floor
+    claim before any resumed poll starts (A10, IR3). `supersede_run` sets
+    `superseded` before `stop_requested`, like `discard_qa_state`.
+  - `_viewed_window_ids` also counts a user's own view grouped with the pm
+    session under another name (`#{session_group}`, master S121/S124), so a
+    window watched through it keeps its container at run end.
+  - `kill_windows_of_run` (master S136) uses the printable `:` separator, as
+    the ownership and viewed-window queries do (a tab is rewritten to `_`
+    for a non-UTF-8 client, and no window would ever match).
+  - The verdict-format reminder is submitted with master's follow-up Enters
+    (`_send_submitted`) but stays best effort as on the branch: only a tmux
+    refusal is swallowed; a fork failure still reaches the poll's handback.
+
 ## 4. Edge cases
 
 - E1 Same scenario number on different PRs/runs: ownership is exact name
