@@ -1182,6 +1182,47 @@ class TestFindTuiPaneAcrossServers:
         assert helpers._find_tui_pane() == ("%7", "pm-a")
         assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-a"
 
+    def test_last_resort_scans_the_cwd_server_without_a_socket_file(
+            self, monkeypatch):
+        """The cwd branch's server is scanned too when its socket file is gone.
+
+        Same gap as the ambient case above, one branch earlier: from a plain
+        shell whose cwd names a live private session, `list_pm_sessions`
+        cannot report a server whose socket file was removed, and the
+        last-resort scan is the only way to reach a TUI whose registry entry
+        is gone as well.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-b")
+
+        def select(name):
+            # What the real helper does for a session it finds on its own
+            # private socket.
+            os.environ["PM_TMUX_SOCKET"] = "/tmp/pm-sessions/pm-b"
+            return "/tmp/pm-sessions/pm-b"
+
+        monkeypatch.setattr(helpers, "_select_session_socket", select)
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: True)
+        # No socket files left to enumerate.
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [])
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **kw: MagicMock(
+                returncode=0, stdout="%4 pm-b~2 pm _tui\n"))
+
+        assert helpers._find_tui_pane() == ("%4", "pm-b")
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/pm-sessions/pm-b"
+
     def test_fallback_never_crosses_to_another_pm_session(self, monkeypatch):
         """A fallback must stay on the identified session's server.
 

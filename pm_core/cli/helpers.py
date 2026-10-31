@@ -1458,12 +1458,12 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # *different* pm session's live ``pm _tui`` pane would drive the wrong
     # TUI — the cross-session damage this whole change exists to prevent.
     identified: str | None = None
-    # The server this process is attached to, when it is a pm one.  Used
-    # only by the scan below, which normally finds it through
-    # `list_pm_sessions`: that enumerates *socket files*, so a server whose
-    # socket was unlinked while it kept running (an old pm's kill, or a
-    # cleaned /tmp/pm-sessions) would be invisible to it.
-    ambient_server: str | None = None
+    # The server that hosts the identified session (the ambient one, or the
+    # cwd session's).  Used only by the scan below, which normally finds it
+    # through `list_pm_sessions`: that enumerates *socket files*, so a
+    # server whose socket was unlinked while it kept running (an old pm's
+    # kill, or a cleaned /tmp/pm-sessions) would be invisible to it.
+    identified_server: str | None = None
 
     # If in a pm session, use current
     if tmux_mod.in_tmux():
@@ -1490,7 +1490,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
         if current_session.startswith("pm-"):
             base = pane_registry.base_session_name(current_session)
             identified = base
-            ambient_server = tmux_mod.resolve_ambient_socket()
+            identified_server = tmux_mod.resolve_ambient_socket()
             pane_id = _registry_tui_pane(base)
             if pane_id:
                 return pane_id, base
@@ -1506,7 +1506,11 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # makes ``pm tui view`` work outside a pm session.
     if identified is None:
         expected_session = _get_session_name_for_cwd()
-        _select_session_socket(expected_session)
+        # Remember the server the cwd session was found on, for the same
+        # reason as the ambient branch above: `list_pm_sessions` enumerates
+        # socket files, so a live server whose socket file was removed would
+        # otherwise be unreachable by the last-resort scan.
+        cwd_server = _select_session_socket(expected_session)
         try:
             session_running = tmux_mod.session_exists(expected_session)
         except OSError:
@@ -1515,6 +1519,7 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             session_running = False
         if session_running:
             identified = expected_session
+            identified_server = cwd_server
             pane_id = _registry_tui_pane(expected_session)
             if pane_id:
                 return pane_id, expected_session
@@ -1530,13 +1535,14 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     servers = tmux_mod.list_pm_sessions()
     if identified is not None:
         servers = [info for info in servers if info["name"] == identified]
-        if not servers and ambient_server is not None:
-            # The identified session is the one this process is attached to
-            # and its socket file is gone (or lives outside the pm socket
-            # directory), so the enumeration above cannot see it.  Scan the
-            # ambient server directly: the last-resort scan below exists
-            # precisely for a live TUI with no registry entry.
-            servers = [{"name": identified, "socket": ambient_server,
+        if not servers and identified_server is not None:
+            # The identified session's server is not reported by the
+            # enumeration above: either this process is attached to it and
+            # its socket file is gone, or the cwd session's socket lives
+            # outside the pm socket directory.  Scan it directly: the
+            # last-resort scan below exists precisely for a live TUI with no
+            # registry entry.
+            servers = [{"name": identified, "socket": identified_server,
                         "attached": 0, "shared": False}]
     else:
         # No session context at all (a plain shell).  Only this user's
