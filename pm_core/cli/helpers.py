@@ -1345,6 +1345,31 @@ def _select_session_socket(session_name: str) -> str | None:
     return sock if on_private else None
 
 
+def _server_owned_by_us(socket_path: str | None) -> bool:
+    """True when *socket_path* is absent or owned by the current user.
+
+    The pm socket directory is world-writable and ``--global`` sockets are
+    world-accessible, so ``/tmp/pm-sessions`` can hold *other users'*
+    servers.  Discovery that has no session context of its own (a plain
+    shell) must not auto-select one of those: ``pm tui send`` delivers keys
+    to a bare pane id, so resolving to a stranger's TUI would drive it.
+    Their sessions stay reachable explicitly (``pm tui view -s pm-<tag>``)
+    and from inside them (the in-tmux branch), which is where a joining
+    user actually needs them.
+
+    The default server (``socket_path is None``) is per-uid by
+    construction.  A socket file that cannot be ``lstat``-ed counts as ours:
+    the row came from a scan that already talked to that server, and an
+    unreadable entry must not silently hide the user's own session.
+    """
+    if socket_path is None:
+        return True
+    try:
+        return os.lstat(socket_path).st_uid == os.getuid()
+    except OSError:
+        return True
+
+
 def _iter_registry_tui_panes(session: str):
     """Yield the pane ids the registry records with ``role="tui"``."""
     data = pane_registry.load_registry(session)
@@ -1410,7 +1435,9 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
       session wins, see the comment on the cwd branch)
     - Falls back to scanning pm servers for a live TUI pane; when one of the
       two branches above identified a session, only *that* session's server
-      is scanned (see the note on ``identified`` below).
+      is scanned (see the note on ``identified`` below).  With no session
+      identified, only *this user's* servers are scanned, so the lookup can
+      never resolve to another user's TUI (see ``_server_owned_by_us``).
     """
     # The scan below re-points PM_TMUX_SOCKET at each server it probes, and
     # the cwd branch selects a server before that scan runs, so read the
@@ -1495,8 +1522,9 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
     # Fall back to scanning pm servers (private sockets + legacy default)
     # for a session with a live registered TUI pane.  Only the identified
     # session's own server is eligible when there is one; with no session
-    # identified at all (a plain shell) every server is scanned, which is
-    # what makes `pm tui view` work from outside a pm session.  The scan
+    # identified at all (a plain shell) every server *this user owns* is
+    # scanned, which is what makes `pm tui view` work from outside a pm
+    # session without ever resolving to another user's TUI.  The scan
     # re-points PM_TMUX_SOCKET at each server in turn; the value captured
     # on entry is restored below if nothing is found.
     servers = tmux_mod.list_pm_sessions()
@@ -1510,6 +1538,16 @@ def _find_tui_pane(session: str | None = None) -> tuple[str | None, str | None]:
             # precisely for a live TUI with no registry entry.
             servers = [{"name": identified, "socket": ambient_server,
                         "attached": 0, "shared": False}]
+    else:
+        # No session context at all (a plain shell).  Only this user's
+        # servers are eligible: the socket directory is world-writable and
+        # `--global` sockets are world-accessible, so an unfiltered scan
+        # could resolve to *another user's* live TUI and hand its pane to
+        # `pm tui send` — the cross-session damage this change exists to
+        # prevent, one level up.  A shared session stays reachable with an
+        # explicit `-s`, and from inside it.
+        servers = [info for info in servers
+                   if _server_owned_by_us(info["socket"])]
     for info in servers:
         _use_tmux_socket(info["socket"])
         pane_id = _registry_tui_pane(info["name"])

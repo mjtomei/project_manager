@@ -97,10 +97,15 @@ sessions today).
    lookup only applies when the process is *not* inside a pm session: there
    the ambient session wins, because a running session derived from the cwd
    would otherwise be resolved from inside a different pm session (review
-   loop 7af7 i3). The final scan covers *all* servers only when neither
-   branch above identified a session (a plain shell); when one did, it is
-   scoped to that session's server, because pane ids are per server and
-   `pm tui send` delivers keys unscoped (review-loop 7af7 i1).  When the
+   loop 7af7 i3). When one of the two branches above identified a session,
+   the final scan is scoped to *that* session's server, because pane ids
+   are per server and `pm tui send` delivers keys unscoped (review-loop
+   7af7 i1).  With no session identified (a plain shell), the scan runs
+   across this user's servers only (`_server_owned_by_us`): `/tmp/pm-sessions`
+   is world-writable and `--global` sockets are world-accessible, so an
+   unfiltered scan could resolve to another user's live TUI and hand its
+   pane to `pm tui send` (review-loop 703c i4); such a session stays
+   reachable with an explicit `-s` and from inside it.  When the
    identified session is the ambient one, its server is scanned even if
    `list_pm_sessions()` does not report it — that function enumerates
    socket *files*, and a live server can outlive an unlinked socket
@@ -1170,7 +1175,9 @@ exists to remove, reintroduced by the R3.4 fallback:
    in-tmux pm session, else a running cwd-derived session) and scopes both
    the registry scan and the last-resort `pm _tui` scan to that session's
    server.  With no session identified (a plain shell) every server is
-   still scanned, so `pm tui view` from outside pm keeps working.  Test:
+   still scanned, so `pm tui view` from outside pm keeps working.  (703c i4
+   later narrowed that to the servers the current user owns; see R3.4.)
+   Test:
    `test_fallback_never_crosses_to_another_pm_session` (verified to fail
    without the scope: it returned `pm-b`'s pane).
 
@@ -1579,3 +1586,45 @@ the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
 re-run end to end on a disposable socket; no live session, server or
 shared host configuration was touched, and the new test is unit-level (it
 binds no tmux server).
+
+## Review iteration (2026-10-31, review-loop 703c i4)
+
+Verification pass over the integrated head; no requirement changes.  One
+cross-*user* hazard in TUI-pane discovery — the same class of damage the
+earlier iterations closed between sessions, one level up:
+
+1. **The unscoped scan could resolve to *another user's* TUI.**
+   `/tmp/pm-sessions` is 1777 and `--global` sessions chmod their socket
+   0777 (group mode 0770 + group chown), so `list_pm_sessions()` legitimately
+   reports other users' servers.  When neither the in-tmux nor the cwd
+   branch identified a session (a plain shell), `_find_tui_pane()` scanned
+   *every* row and returned the first live `pm _tui` pane whose session name
+   matched — including a stranger's.  `pm tui send` delivers keys to a bare
+   pane id, so `pm tui view` / `send` / `restart` run from a plain shell
+   with no pm session of its own could drive another user's TUI.  Before
+   this change the fallback ran on the *ambient* server, which is
+   per-uid (`/tmp/tmux-<uid>/default`), so this surface is new.  The scan is
+   now filtered by `_server_owned_by_us()` (the row's socket is absent, the
+   per-uid default server, or `lstat`-owned by the current uid; an
+   unreadable entry counts as ours so a race cannot hide the user's own
+   session).  A shared session another user owns stays reachable with an
+   explicit `-s` (the explicit branch resolves it by path, without the
+   ownership filter) and from inside it (the in-tmux branch).  The
+   identified-session branches are deliberately *not* filtered: there the
+   answer is the session this process is attached to, which for a joining
+   user belongs to the owner.  Tests:
+   `TestServerOwnedByUs` (own/default/missing vs another uid) and
+   `test_unscoped_scan_skips_another_users_server` (verified to fail
+   without the filter: it returned the other user's `%1`).
+
+Nothing else surfaced.  The socket derivation and default-server
+addressing (R4.3), discovery scoping (7af7 i1–i3, 3cc7 i1, 703c i1/i4),
+the precise detach (R5, 703c i3), the rollout path (R6) and the
+socket-directory/ownership checks (d1c0 i10/i12, 703c i2) all match the
+spec, and every new helper has direct coverage.
+
+Validation on the integrated head: full suite re-run after the edit (see
+the PR note for this iteration); `pm/specs/pr-073910f/session_start_smoke.py`
+re-run end to end on a disposable socket; no live session, server or
+shared host configuration was touched, and the new tests are unit-level
+(they bind no tmux server).

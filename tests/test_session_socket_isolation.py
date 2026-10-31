@@ -919,6 +919,31 @@ class TestGetPmSessionSelectsServer:
 # CLI: TUI pane discovery across servers
 # ---------------------------------------------------------------------------
 
+class TestServerOwnedByUs:
+    """Discovery with no session context only scans this user's servers."""
+
+    def test_own_and_missing_sockets_are_ours(self, tmp_path):
+        from pm_core.cli import helpers
+
+        sock = tmp_path / "pm-x"
+        sock.write_text("")
+        # ``None`` is the default server, which is per-uid by construction.
+        assert helpers._server_owned_by_us(None) is True
+        assert helpers._server_owned_by_us(str(sock)) is True
+        # A row that cannot be lstat-ed must not hide the user's own
+        # session: the scan already talked to that server to produce it.
+        assert helpers._server_owned_by_us(str(tmp_path / "gone")) is True
+
+    def test_another_users_socket_is_not(self, tmp_path, monkeypatch):
+        from pm_core.cli import helpers
+
+        sock = tmp_path / "pm-x"
+        sock.write_text("")
+        monkeypatch.setattr(helpers.os, "getuid",
+                            lambda: sock.stat().st_uid + 1)
+        assert helpers._server_owned_by_us(str(sock)) is False
+
+
 class TestFindTuiPaneAcrossServers:
     def test_scans_private_servers(self, monkeypatch):
         from pm_core.cli import helpers
@@ -1234,6 +1259,45 @@ class TestFindTuiPaneAcrossServers:
                 returncode=0, stdout='%2 pm-b "pm _tui"\n'))
 
         assert helpers._find_tui_pane() == (None, None)
+
+    def test_unscoped_scan_skips_another_users_server(self, monkeypatch):
+        """A plain shell must never auto-select another user's TUI.
+
+        ``/tmp/pm-sessions`` is world-writable and ``--global`` sockets are
+        world-accessible, so the cross-server scan can see other users'
+        servers.  ``pm tui send`` delivers keys to a bare pane id, so
+        resolving to a stranger's TUI would drive it — the cross-session
+        damage this change exists to prevent, one level up.  A shared
+        session stays reachable with an explicit ``-s`` and from inside it.
+        """
+        from pm_core.cli import helpers
+        from pm_core import pane_registry
+
+        monkeypatch.delenv("PM_TMUX_SOCKET", raising=False)
+        monkeypatch.setattr(helpers.tmux_mod, "in_tmux", lambda: False)
+        monkeypatch.setattr(helpers, "_get_session_name_for_cwd",
+                            lambda: "pm-other")
+        monkeypatch.setattr(helpers.tmux_mod, "session_exists",
+                            lambda *a, **kw: False)
+        monkeypatch.setattr(helpers.tmux_mod, "list_pm_sessions", lambda: [
+            {"name": "pm-theirs", "socket": "/tmp/theirs", "attached": 1,
+             "shared": True},
+            {"name": "pm-mine", "socket": "/tmp/mine", "attached": 1,
+             "shared": False}])
+        monkeypatch.setattr(helpers, "_server_owned_by_us",
+                            lambda sock: sock != "/tmp/theirs")
+        monkeypatch.setattr(pane_registry, "load_registry",
+                            lambda name: {"windows": {}})
+        monkeypatch.setattr(helpers.tmux_mod, "_tmux_cmd",
+                            lambda *a, **kw: ["tmux"])
+        monkeypatch.setattr(
+            helpers.subprocess, "run",
+            lambda *a, **kw: MagicMock(
+                returncode=0, stdout='%1 pm-theirs "pm _tui"\n'
+                                     '%2 pm-mine "pm _tui"\n'))
+
+        assert helpers._find_tui_pane() == ("%2", "pm-mine")
+        assert os.environ["PM_TMUX_SOCKET"] == "/tmp/mine"
 
     def test_own_grouped_view_resolves_the_ambient_session(self, monkeypatch):
         """A user's own view of a pm session still identifies that session.
