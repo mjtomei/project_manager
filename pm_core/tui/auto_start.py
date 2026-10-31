@@ -308,6 +308,21 @@ def save_breadcrumb(app) -> None:
     _log.info("save_breadcrumb: wrote %s", data)
 
 
+def _saved_stop_marks(data: dict) -> bool:
+    """Whether validated saved state carried per-PR merge-gate marks.
+
+    ``consume_breadcrumb`` calls this only after a successful parse, so a
+    non-empty list here is a *valid* ``stop_before_merge`` set.  When no
+    target was restored (auto-start off, or an explicit ``auto_start:
+    false``) the marks cannot be folded into wait targets — with no
+    scheduler there is no merge path to gate — but the bytes are the only
+    record of the holds, so they must be preserved rather than deleted with
+    the breadcrumb.
+    """
+    raw = data.get("stop_before_merge")
+    return isinstance(raw, list) and bool(raw)
+
+
 def _reset_autostart_state(app) -> None:
     """Clear the in-memory auto-start scope (fail-closed reset).
 
@@ -319,7 +334,7 @@ def _reset_autostart_state(app) -> None:
     app._auto_start_run_id = None
 
 
-def _quarantine_breadcrumb(path: Path) -> Path | None:
+def _quarantine_breadcrumb(path: Path, reason: str = "rejected") -> Path | None:
     """Preserve a rejected/corrupt saved-state file instead of deleting it.
 
     Malformed evidence may explain an incident or carry merge-gate intent;
@@ -338,8 +353,8 @@ def _quarantine_breadcrumb(path: Path) -> Path | None:
             f"{path.stem}.rejected-{stamp}-{n}{path.suffix}")
     try:
         os.replace(path, dest)
-        _log.warning("consume_breadcrumb: preserved rejected saved state "
-                     "at %s", dest)
+        _log.warning("consume_breadcrumb: preserved %s saved state at %s",
+                     reason, dest)
         return dest
     except OSError:
         _log.warning("consume_breadcrumb: could not move rejected saved "
@@ -493,7 +508,9 @@ async def consume_breadcrumb(app) -> None:
     empty, targetless, all-mode or unreadable state leaves auto-start OFF,
     emits an actionable diagnostic and preserves the evidence (quarantined
     file); a valid ``stop_before_merge`` set migrates to wait targets when
-    auto-start resumes, so a merge hold is never silently dropped.  A
+    auto-start resumes, so a merge hold is never silently dropped.  When
+    nothing is restored but the file carried such marks (auto-start off),
+    the file is quarantined as evidence instead of being deleted.  A
     breadcrumb owned by another session is left untouched for its own mount.
     """
     breadcrumb = pm_home() / _BREADCRUMB_FILE
@@ -577,6 +594,15 @@ async def consume_breadcrumb(app) -> None:
                         "Re-add targets with `pm autostart add PR_ID...`.",
                         force=True, sticky=10)
         targets = {}
+    elif not targets and _saved_stop_marks(data):
+        # Nothing to restore, but the file records valid merge-gate marks
+        # that cannot be applied (auto-start off).  Quarantine it instead of
+        # deleting it: the saved holds are evidence, and "never silently
+        # drop a merge gate" does not stop being true just because there is
+        # no scheduler this time.
+        _log.info("consume_breadcrumb: saved merge-gate marks not applied "
+                  "(auto-start remains off); preserving the saved state")
+        _quarantine_breadcrumb(breadcrumb, reason="unapplied merge-gate")
     else:
         breadcrumb.unlink(missing_ok=True)
 

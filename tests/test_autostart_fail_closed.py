@@ -278,6 +278,30 @@ class TestBreadcrumbParserFailClosed:
         assert list(result.targets) == ["pr-a"]
         assert result.migrated is True and result.error is None
 
+    @pytest.mark.parametrize("bad", [
+        "../escaped", "/etc/transcripts", "a/../../b", ".", "..",
+        "nul\x00byte",
+    ])
+    def test_unsafe_run_id_rejected(self, bad):
+        """The run id names a directory under ``transcripts/``.  An absolute
+        path, a ``..`` component or a control character would escape it (or
+        raise out of the mount), so it is malformed saved state."""
+        result = st.targets_from_breadcrumb({
+            "auto_start": True, "targets": [{"pr_id": "pr-a"}],
+            "run_id": bad})
+        assert result.targets == {} and result.error
+        assert "run_id" in result.error
+
+    def test_safe_run_id_accepted(self):
+        # ``""`` is the old "no run id" shape: it names nothing, so it keeps
+        # restoring (the consumer makes a fresh directory).
+        for ok in ("autostart-pr-a-1a2b", "manual-abc123", "a/b", ""):
+            result = st.targets_from_breadcrumb({
+                "auto_start": True, "targets": [{"pr_id": "pr-a"}],
+                "run_id": ok})
+            assert list(result.targets) == ["pr-a"], ok
+            assert result.error is None, ok
+
     def test_null_run_id_with_no_targets_is_off_without_error(self):
         """A ``null`` run_id is not an autostart request (the pre-multi-target
         writer always emitted a string), so it carries no authority to
@@ -580,6 +604,51 @@ class TestConsumeFailClosed:
         preserved = json.loads(rejected[0].read_text())
         assert preserved["stop_before_merge"] == ["pr-a"]
 
+    def test_valid_stop_marks_without_targets_are_preserved_as_evidence(
+            self, tmp_path):
+        """Auto-start off: the marks cannot be applied, but the file is the
+        only record of the holds — quarantine it, never delete it."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "targets": [], "stop_before_merge": ["pr-a"]})
+        _consume(app, tmp_path)
+        assert app._auto_start is False and app.launched == []
+        assert not (tmp_path / "autostart-resume.json").exists()
+        rejected = _rejected_files(tmp_path)
+        assert len(rejected) == 1
+        preserved = json.loads(rejected[0].read_text())
+        assert preserved["stop_before_merge"] == ["pr-a"]
+
+    def test_explicit_off_with_stop_marks_is_preserved_as_evidence(
+            self, tmp_path):
+        """``auto_start: false`` restores nothing, but a saved merge-gate set
+        is still evidence and must not be deleted with the breadcrumb."""
+        app = FakeApp([_pr("pr-a")], tmp_path)
+        _write_breadcrumb(tmp_path, {
+            "auto_start": False, "targets": [{"pr_id": "pr-a"}],
+            "stop_before_merge": ["pr-a"]})
+        _consume(app, tmp_path)
+        assert app._auto_start is False and app.launched == []
+        rejected = _rejected_files(tmp_path)
+        assert len(rejected) == 1
+        assert json.loads(rejected[0].read_text())["stop_before_merge"] == [
+            "pr-a"]
+
+    def test_unsafe_run_id_rejects_restore_without_creating_it(self, tmp_path):
+        """A ``..`` run id would create a directory outside ``transcripts/``;
+        it rejects the restore instead and is quarantined."""
+        root = tmp_path / "proj"
+        root.mkdir()
+        app = FakeApp([_pr("pr-a")], root)
+        _write_breadcrumb(root, {
+            "auto_start": True, "targets": [{"pr_id": "pr-a"}],
+            "run_id": "../escaped"})
+        _consume(app, root)
+        assert app._auto_start is False and app.launched == []
+        assert any("run_id" in m for m in app.logs)
+        assert not (tmp_path / "escaped").exists()
+        assert _rejected_files(root)
+
     def test_malformed_review_loop_history_does_not_abort_restore(self, tmp_path):
         """A malformed history entry must not raise out of startup; the loop
         state is restored with the entries that are well formed."""
@@ -694,6 +763,8 @@ class TestSaveNeverPersistsWildcard:
             auto_start.save_breadcrumb(app)
         data = json.loads((tmp_path / "autostart-resume.json").read_text())
         assert "all_mode" not in data
+        # The removed policy is gone: a hold rides on the record's flag.
+        assert "stop_before_merge" not in data
         assert [t["pr_id"] for t in data["targets"]] == ["pr-a"]
 
     def test_save_while_off_writes_no_autostart_fields(self, tmp_path):

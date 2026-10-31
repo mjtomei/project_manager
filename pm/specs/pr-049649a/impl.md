@@ -84,7 +84,12 @@ Rules, in order:
    `all_mode` is an explicit request for wildcard authority and is never
    narrowed into a partial restore.
 3. `auto_start` present and not a `bool` → reject (wrong type).
-4. `run_id` present and not `str`/`None` → reject.
+4. `run_id` present and not `str`/`None` → reject. A non-empty string must
+   name a directory under `<root>/transcripts/` (`valid_run_id`): no
+   control characters, not absolute, no `..` component. The restore
+   creates that directory, so a path that could escape the transcript root
+   is malformed saved state (reject; never create it). `""` keeps its old
+   "no run id" meaning (a fresh directory is made).
 5. `targets` **key present**:
    - must be a `list`; `dict`, `str`, `None`, number, bool → reject. This is
      the incident shape and must never fall through to legacy parsing.
@@ -183,6 +188,13 @@ Rules, in order:
   targets cannot be validated → remain OFF with a diagnostic. (`on_mount`
   loads state before `_deferred_startup` runs `consume_breadcrumb`, so this
   is only a defensive path.)
+- A successfully parsed file that restores nothing (`targets: []` with no
+  autostart request, an explicit `auto_start: false`, or stop marks alone)
+  is consumed normally — **unless** it carries a valid non-empty
+  `stop_before_merge` set.  Those marks cannot be applied with no
+  scheduler, but they are the only record of the saved holds, so that file
+  is quarantined as evidence instead of being deleted (never silently drop
+  a merge gate).
 - `had_auto_start = bool(targets)` only. Resume summary says
   `→ <targets>` (plus "migrated legacy breadcrumb" when applicable); never
   "all". It reports the targets still active *after* the scheduler pass:
@@ -341,6 +353,11 @@ No **[UNRESOLVED]** ambiguities.
   the whole restore with the malformed merge-gate diagnostic.
 - Valid `stop_before_merge` on a restored target set → marks become wait
   targets; terminal ids are dropped.
+- Valid `stop_before_merge` with nothing restored (`targets: []`, or an
+  explicit `auto_start: false`) → the file is quarantined so the saved
+  holds stay in the evidence.
+- `run_id` absolute / `..` / control-character path → reject the restore;
+  no directory is created outside `transcripts/`.
 - Valid current-format multi-target with `wait_for_merge` → exact restore;
   held PRs never merge, unrelated PRs never start.
 - `all` via command bar/IPC → error result, no state change, no worker.
@@ -390,6 +407,12 @@ New `tests/test_autostart_fail_closed.py` (isolated `FakeApp`, fake
     evidence).
 13. `pm autostart status --json` carries `ok: true` on success and
     `ok: false` with `error`/`message` on an owner-side failure.
+14. An unsafe `run_id` (absolute / `..` / control character) rejects the
+    restore, is quarantined, and creates no directory outside
+    `transcripts/`; safe ids (including nested `a/b`) still restore.
+15. A valid `stop_before_merge` set that cannot be applied (no targets, or
+    explicit `auto_start: false`) is quarantined so the saved holds stay in
+    the evidence.
 
 Updated existing tests: remove `_auto_start_all` fields and all-mode
 assertions; replace targetless fixtures with explicit targets; update

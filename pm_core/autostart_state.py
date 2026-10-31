@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 
 from pm_core.pr_utils import usable_prs
 
@@ -236,6 +237,25 @@ def valid_pr_id(value) -> bool:
             and not any(c.isspace() for c in value))
 
 
+def valid_run_id(value) -> bool:
+    """A saved run id must stay inside ``<root>/transcripts/``.
+
+    The id names the run's transcript directory, so a value that is absolute
+    or carries a ``..`` component would make the restore create (and later
+    write transcripts into) a directory outside the project's transcript
+    root — malformed saved state, not a path to act on.  Our own writer only
+    emits ``autostart-…`` / ``manual-…`` components.  Control characters are
+    rejected too: a NUL would raise out of the mount instead of failing
+    closed.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    if any(ord(c) < 32 for c in value):
+        return False
+    path = PurePosixPath(value)
+    return bool(path.parts) and not path.is_absolute() and ".." not in path.parts
+
+
 def _legacy_ids(value) -> list[str]:
     """String ids from a legacy field, defensively typed.
 
@@ -416,6 +436,9 @@ def targets_from_breadcrumb(data, prs: list[dict] | None = None
       diagnostic.
     - Legacy ``auto_start``/``run_id`` with no ``target`` is rejected; it
       must never become all-mode.
+    - A non-empty ``run_id`` must name a directory under ``transcripts/``
+      (see :func:`valid_run_id`); a path that could escape it rejects the
+      restore.  ``""`` means "no run id" (a fresh directory is made).
     - ``auto_start: false`` restores nothing (explicit off).
     - A malformed ``stop_before_merge`` set rejects everything (its holds
       are evidence; auto-start must not resume without them).  Valid marks
@@ -441,9 +464,16 @@ def targets_from_breadcrumb(data, prs: list[dict] | None = None
                   "flag")
 
     run_id = data.get("run_id")
-    if "run_id" in data and not (run_id is None or isinstance(run_id, str)):
-        return BreadcrumbTargets(
-            error="saved auto-start state has a non-string run_id")
+    if "run_id" in data:
+        if run_id is not None and not isinstance(run_id, str):
+            return BreadcrumbTargets(
+                error="saved auto-start state has a non-string run_id")
+        # ``""`` is treated as "no run id" (a fresh directory is made), as
+        # before: it names nothing and cannot escape the transcript root.
+        if isinstance(run_id, str) and run_id and not valid_run_id(run_id):
+            return BreadcrumbTargets(
+                error="saved auto-start state has a malformed run_id "
+                      "(it must name a directory under transcripts/)")
 
     stop_ids, stop_error = _parse_stop_ids(data.get("stop_before_merge"))
     if stop_error:
