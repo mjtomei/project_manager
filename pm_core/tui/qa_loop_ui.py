@@ -1331,10 +1331,14 @@ def _resume_incomplete_qa(app) -> None:
             continue
 
         # Is the run already complete (daemon wrote overall, TUI died
-        # before processing)?  Read the display status file, keeping the
-        # daemon's published cause so a recovered "QA ERROR" carries it
-        # into the QA note.
-        overall = ""
+        # before processing)?  *overall* comes from the display status file
+        # read while ordering the snapshots.  Re-read it only to keep the
+        # daemon's published cause so a recovered "QA ERROR" carries it into
+        # the QA note: the snapshot is written before the poll, so a failure
+        # raised from inside it never reaches the snapshot.  A failed or
+        # corrupt re-read keeps the *overall* already known, so a transient
+        # read error cannot turn a completed run into one that is resumed
+        # (and re-aggregated, losing the ERROR cause).
         status_error = ""
         try:
             sdata = json.loads((resume_file.parent / "qa_status.json").read_text())
@@ -1345,7 +1349,7 @@ def _resume_incomplete_qa(app) -> None:
         # raise AttributeError on .get() and abort the whole scan for every
         # other PR's snapshot.  Same guard as the ended-run scan above.
         if isinstance(sdata, dict):
-            overall = sdata.get("overall", "")
+            overall = sdata.get("overall", "") or overall
             status_error = sdata.get("error", "") or ""
 
         # The ownership check above read the snapshot earlier; another TUI

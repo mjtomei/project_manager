@@ -389,6 +389,39 @@ def test_resume_tolerates_a_non_dict_status_file(tmp_path):
     assert "pr-001" in app._qa_loops
 
 
+def test_resume_keeps_overall_when_the_status_reread_fails(tmp_path):
+    """The completed-run scan re-reads qa_status.json for the published
+    cause; a failure of that second read must not discard the ``overall``
+    the ordering scan already read.  Otherwise a transient read error turns
+    a completed run into one that is resumed and re-aggregated, losing the
+    ERROR cause the first read had."""
+    from pathlib import Path
+
+    app = _make_app(tmp_path)
+    qa_dir = _seed_run(tmp_path, overall="ERROR")
+    status_path = qa_dir / "qa_status.json"
+    orig_read = Path.read_text
+    calls = {"n": 0}
+
+    def _flaky_read(self, *args, **kwargs):
+        if self == status_path:
+            calls["n"] += 1
+            if calls["n"] >= 2:  # the ordering read succeeds; the re-read fails
+                raise OSError("transient read failure")
+        return orig_read(self, *args, **kwargs)
+
+    with patch("pathlib.Path.read_text", _flaky_read), \
+         patch("pathlib.Path.home", return_value=tmp_path), \
+         patch.object(qa_loop, "resume_qa_background") as resume_bg, \
+         patch.object(qa_loop_ui, "_on_qa_complete") as on_complete:
+        qa_loop_ui._resume_incomplete_qa(app)
+
+    resume_bg.assert_not_called()
+    on_complete.assert_called_once()
+    assert on_complete.call_args[0][1].latest_verdict == "ERROR"
+    assert not _resume_file_path(qa_dir).exists()
+
+
 def test_resume_skips_non_qa_pr(tmp_path):
     app = _make_app(tmp_path, pr_status="merged")
     qa_dir = _seed_run(tmp_path, overall="")

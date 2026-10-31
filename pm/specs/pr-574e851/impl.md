@@ -729,3 +729,33 @@ return), and `test_qa_debug_reports_a_raising_window_creation` (exception),
 both asserting the exact container is released and "Launched" is not
 printed. Focused suites: `tests/test_container_fail_closed.py` 27 passed,
 `tests/test_qa_resume.py` 92 passed.
+
+## Review iteration (421e i4)
+
+Re-audited the integrated head against R1-R7 and the acceptance list (fresh
+run, initial container launch, queued launch, relaunch, resume, `pm qa
+debug`, `pm qa run`). The fail-closed boundary is unchanged and no new
+downgrade path was found: the only remaining container-mode gates in the
+tree (`wrap_claude_cmd`, `build_exec_cmd`, `container_is_running`,
+`container_preflight_error`) are fail-closed or display-only, and
+`model_settings` / `pm model show` only read the setting to describe routes.
+
+One robustness gap on the recovered-`ERROR` path is closed:
+
+- **A transient failure of the completed-run status re-read no longer
+  discards the known `overall`.** `_resume_incomplete_qa` re-reads
+  `qa_status.json` in the completed-run branch to keep the daemon's
+  published cause (421e i1). That block reset `overall = ""` before the
+  re-read, so a transient `OSError`/`JSONDecodeError` on the *second* read
+  (the ordering scan's first read had already succeeded) turned a completed
+  run into one that was resumed and re-aggregated — losing the `ERROR`
+  cause the first read held. The branch now keeps the ordering read's
+  `overall` as a fallback (`sdata.get("overall", "") or overall`); a
+  corrupt/missing re-read leaves the known result intact.
+
+Tests added: `test_resume_keeps_overall_when_the_status_reread_fails` (a
+`read_text` that succeeds for the ordering read and raises for the re-read;
+asserts the completed `ERROR` is processed and the snapshot cleared, and
+fails on the pre-fix reset). Focused suites after the change:
+`tests/test_qa_resume.py` 93 passed; full pytest on this workdir: see the
+review-loop commit.
