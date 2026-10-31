@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T18:35:33.170618+00:00'
+  updated_at: '2026-10-31T19:51:08.623215+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -48986,6 +48986,21 @@ prs:
       the native entry points against this combined head (e99193e1/65c1b86a).'
     created_at: '2026-10-31T18:35:33Z'
     last_edited: '2026-10-31T18:35:33Z'
+  - id: note-5fdb4bd
+    text: 'Review 421e i1: no blocking defects in the integrated fail-closed boundary.
+      Fixed: (1) the poll loop post-relaunch verdict guard no longer claims a lost
+      container recorded an INPUT_REQUIRED (the relaunch now fails closed with ContainerLaunchError);
+      it reports the recorded verdict and that the relaunch failed. (2) Spec impl.md
+      R4 / edge-case table / R5 synced to the integrated container-recreation behaviour
+      (lost container recreated first; resume preflight publishes via _fail_run_infrastructure,
+      not _abort(error=...)). (3) Test gap closed for R7: a two-scenario test proves
+      a failed container launch releases only the failed attempt''s container and
+      keeps the other scenario''s container/window. Full pytest: 5229 passed, 1 skipped.
+      No host-launch path found; the only remaining container-mode gates are fail-closed
+      or display-only. Out of scope and already filed: pr-7abb052 (auto-sequence ERROR
+      status) and pr-7b1dd2e (auto-start relaunches a recorded ERROR).'
+    created_at: '2026-10-31T19:51:08Z'
+    last_edited: '2026-10-31T19:51:08Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false
