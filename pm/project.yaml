@@ -14331,7 +14331,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/272
   gh_pr_number: 272
   created_at: '2026-05-03T13:10:13.371978+00:00'
-  updated_at: '2026-10-31T21:34:11.999541+00:00'
+  updated_at: '2026-10-31T22:18:39.500088+00:00'
   started_at: '2026-10-28T05:41:56.289601+00:00'
   reviewed_at: null
   merged_at: null
@@ -15169,6 +15169,33 @@ prs:
       {}}` for the session tag so impl/review launches do not call the real model.'
     created_at: '2026-10-31T20:31:59Z'
     last_edited: '2026-10-31T20:31:59Z'
+  - id: note-3bf0e50
+    text: 'QA S24 (sign-off after the guard change, head a9a02e120): PASS 5/5 stories,
+      no code change. Sandbox: private HOME + dedicated PM_TMUX_SOCKET, PYTHONPATH=/workspace,
+      fake-claude signoff session with no verdicts. (1) `pm pr signoff <B>` from qa
+      prints `PR <B> marked as sign_off.`, clones+creates the missing workdir (`Workdir
+      missing — cloning ...` / `Workdir created at ...`), opens exactly one `signoff-<B>`
+      window, rc 0; show keeps Status/Branch/Workdir and the `sign-off note for B`;
+      `list -t` puts B first with the advanced timestamp and `list --open` still includes
+      it. (2) repeat prints only `Switched to existing sign-off window`, same window
+      id, no re-claim; `--fresh` prints `Killed existing ...` then `Opened ...` with
+      a new window id; show still sign_off with the same workdir. (3) pending/merged/in_review
+      refuse with the exact sentences (`is pending — sign-off runs after QA (expected
+      qa or sign_off).`, `is already merged.`, `is in_review — sign-off runs after
+      QA (expected qa or sign_off).`), rc 1, no windows, no traceback. (4) with skip-qa
+      on, an in_review PR is accepted, workdir provisioned, window opened. (5) two
+      concurrent `pm pr signoff <G>` launched in one tmux invocation: exactly one
+      `marked as sign_off`, one `Opened sign-off window`, the other `Switched to existing
+      sign-off window`, both rc 0, exactly one `signoff-<G>` window, single list row
+      — the per-PR launch lock holds. Evidence: /pm-captures/scenarios/24/{story1-launch,story2-repeat-fresh,story3-refusals,story4-skipqa,story5-concurrent}/
+      (cast + mp4 + pane logs + manifests) and final-state.txt. Harness note for the
+      next run: asciinema `-c bash` (interactive) in a tmux pane records correctly
+      but `tmux capture-pane` renders blank — use the one-shot `-c \x27<script>\x27`
+      form when the pane scrollback is the evidence; and `--fresh` leaves a parked
+      `pm-home` window (home_window.park_if_on), which is expected and is not a signoff
+      window.'
+    created_at: '2026-10-31T22:18:39Z'
+    last_edited: '2026-10-31T22:18:39Z'
   model: provider:deepseek-flash
   session_models:
     signoff: provider:claude-work-xhigh-249
