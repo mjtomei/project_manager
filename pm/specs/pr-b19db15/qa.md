@@ -369,6 +369,18 @@ recording-recipe bugs that any worker following the recipe hits:
   exists, aborting" on 2.1.0) instead of "recording already exists", which the
   tool does not print.
 
+- the merged render's own guarantees had no case (review loop 928f i1, test
+  coverage only): `render_cast` (merged from #249) publishes by renaming
+  `recording.mp4.partial.mp4`, and this PR's step-0/`render_fail`/pre-render
+  cleanups for that partial were removable without a failing test — the same
+  for the rename's failure guard, the "cannot probe the gif" check and the
+  `-nostdin`/VFR encode options. Five new/extended cases pin them, and the
+  comment above the block's final mp4 check now says what that check actually
+  is (a backstop: `render_cast` already refuses an encoder that wrote
+  nothing). No behavioural change, so no scenario gains a new surface; S21
+  and S22 may re-observe that a failed render leaves no
+  `recording.mp4.partial.mp4` beside no mp4.
+
 Recipes render in the foreground, exactly as on master. Nothing in this PR
 changes `pm_core/`.
 

@@ -403,6 +403,13 @@ class TestRecipes:
         ``recording.gif`` removes and checks a file nothing ever writes, and
         the earlier run's real intermediate survives. That is what the
         pre-fix recipes did.
+
+        The interrupted render's partial goes with them. ``render_cast``
+        encodes to ``"$part"`` (``$mp4.partial.mp4``) and renames it only
+        after a successful encode, so a render killed before that rename
+        leaves ``recording.mp4.partial.mp4`` behind and no failure path of
+        that render ever runs; a later capture that fails before its own
+        render would present the earlier partial as this run's evidence.
         """
         text = _recipe_text(name)
         render = _render_block(name)
@@ -410,7 +417,11 @@ class TestRecipes:
         assert '"$cast.gif"' in render, (
             f"{name}: the render block no longer renders to `$cast.gif`; this "
             "test derives the intermediate's name from that expression")
+        assert '"$mp4.partial.mp4"' in render, (
+            f"{name}: the render block no longer encodes to `$mp4.partial.mp4`; "
+            "this test derives the partial's name from that expression")
         intermediate = cast_rel + ".gif"
+        partial = Path(cast_rel).stem + ".mp4.partial.mp4"
         section = text.split("## Capture", 1)[1].split("## Render to video", 1)[0]
         first_block = re.findall(r"```[a-z]*\n(.*?)```", section, re.S)[0]
         rm = _statement(first_block, "rm -f ")
@@ -423,6 +434,10 @@ class TestRecipes:
             f"{intermediate} (the file the render block actually writes), so "
             "a capture that fails before the render step leaves the previous "
             "run's video as this run's")
+        assert partial in rm, (
+            f"{name}: the first capture block keeps an interrupted render's "
+            f"{partial}, so a later capture that fails before its own render "
+            "presents the earlier partial as this run's evidence")
         scaffold_rm = _statement(_scaffold_block(text), "rm -f ")
         assert "recording.mp4" in scaffold_rm, (
             f"{name}: the scaffold's own cleanup keeps an earlier run's "
@@ -430,6 +445,9 @@ class TestRecipes:
         assert intermediate in scaffold_rm, (
             f"{name}: the scaffold's own cleanup keeps an earlier run's "
             f"{intermediate}")
+        assert partial in scaffold_rm, (
+            f"{name}: the scaffold's own cleanup keeps an interrupted "
+            f"render's {partial}")
         assert "recording.gif" not in rm + scaffold_rm, (
             f"{name}: the cleanup names `recording.gif`, which nothing writes "
             f"— the intermediate is `{intermediate}`")
@@ -1222,7 +1240,8 @@ def test_failed_render_leaves_no_video(name, tmp_path):
 
 def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
                 ffmpeg_body=None, with_cast=True, cast_body=None,
-                capture=None, capdir_mode=None, create_capture_dir=True):
+                capture=None, capdir_mode=None, create_capture_dir=True,
+                mv_body=None):
     """Run a recipe's render block against stubbed ``agg``/``ffprobe``/``ffmpeg``.
 
     Returns ``(proc, mp4_path, gif_path)``. The stubs are the real stage
@@ -1235,7 +1254,9 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
     mode, so a case can model a capture directory that exists and cannot be
     written (the mode is restored before the run returns);
     ``create_capture_dir=False`` leaves the directory absent, so a case can
-    model a path that is not there.
+    model a path that is not there. ``mv_body`` stubs ``mv``, which the render
+    uses only to publish the finished mp4, so a case can model a rename that
+    fails.
     """
     capture = tmp_path if capture is None else capture
     block = _render_block(name)
@@ -1257,6 +1278,8 @@ def _run_render(name, tmp_path, agg_body=None, ffprobe_body=None,
         'case "$*" in *width,height*) echo 640,480 ;; *) echo h264 ;; esac\n'))
     _stub_tool(bindir, "ffmpeg", ffmpeg_body or (
         'for a in "$@"; do last=$a; done\nprintf mp4 > "$last"\n'))
+    if mv_body is not None:
+        _stub_tool(bindir, "mv", mv_body)
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
     if capdir_mode is not None:
         cast.parent.chmod(capdir_mode)
@@ -1349,9 +1372,15 @@ def test_failed_encode_does_not_leave_a_partial_mp4(name, tmp_path):
     mp4 that the manifest and the report present as this run's recording —
     the same header-only-cast bug as the recorder step, one artifact over.
     The encoder's own exit status is the handle, and its partial output goes.
+    ``render_cast`` writes that output to ``recording.mp4.partial.mp4``, so
+    the file this case has to see removed is the *partial* — the render's
+    failure path (``render_fail``) is the only thing that removes it, and
+    without that removal the interrupted video stays in the capture
+    directory beside no mp4 at all.
     """
     r, mp4, gif = _run_render(name, tmp_path, ffmpeg_body=(
         'for a in "$@"; do last=$a; done\nprintf partial > "$last"\nexit 1\n'))
+    partial = Path(str(mp4) + ".partial.mp4")
 
     assert r.returncode != 0, (
         f"{name}: an encoder that failed on a partial mp4 was reported as a "
@@ -1361,6 +1390,9 @@ def test_failed_encode_does_not_leave_a_partial_mp4(name, tmp_path):
         f"{name}: the failure does not name the stage that broke: " + r.stderr)
     assert not mp4.exists(), (
         f"{name}: a failed encode left its partial mp4 as this run's video")
+    assert not partial.exists(), (
+        f"{name}: a failed encode left {partial.name} behind, so an "
+        "interrupted render's video survives as this run's evidence")
     assert not gif.exists()
 
 
@@ -1372,6 +1404,37 @@ def test_render_succeeds_with_a_playable_mp4(name, tmp_path):
     assert r.returncode == 0, r.stderr
     assert mp4.read_bytes() == b"mp4"
     assert not gif.exists(), "the intermediate gif is left behind"
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_publishes_through_a_partial_name(name, tmp_path):
+    """A render is published by a rename, not by encoding to the final name.
+
+    ``render_cast`` writes ``recording.mp4.partial.mp4`` and renames it to
+    ``recording.mp4`` only after a successful encode, so a render stopped on
+    purpose or killed before that rename cannot leave a partial video under
+    the name the manifest presents (that is the guarantee the step-0 cleanup
+    and ``render_fail``'s partial removal exist for). Nothing pinned it: the
+    failed-encode case is cleaned up by ``render_fail`` either way, so
+    encoding straight to ``recording.mp4`` left the whole file green while
+    an interrupted render would publish its partial.
+    """
+    out = tmp_path / "ffmpeg-output"
+    r, mp4, gif = _run_render(name, tmp_path, ffmpeg_body=(
+        'for a in "$@"; do last=$a; done\n'
+        f'printf "%s" "$last" > "{out}"\n'
+        'printf mp4 > "$last"\n'))
+    partial = Path(str(mp4) + ".partial.mp4")
+
+    assert r.returncode == 0, r.stderr
+    assert out.read_text() == str(partial), (
+        f"{name}: the encoder wrote to {out.read_text()}, not to the partial "
+        "name, so an interrupted render publishes a partial video under the "
+        "name the manifest presents")
+    assert mp4.read_bytes() == b"mp4"
+    assert not partial.exists(), (
+        f"{name}: a successful render left its partial beside the published "
+        "mp4")
 
 
 def _run_render_without_ffmpeg(name, tmp_path):
@@ -1398,6 +1461,9 @@ def _run_render_without_ffmpeg(name, tmp_path):
     cast.write_text('{"version": 2}\n')
     cast.with_suffix(".mp4").write_bytes(b"previous run's video")
     cast.with_name(cast.name + ".gif").write_bytes(b"previous run's gif")
+    # The interrupted render's partial is the third output the pre-render `rm`
+    # owns (see the docstring): a render killed before the rename leaves it.
+    cast.with_suffix(".mp4.partial.mp4").write_bytes(b"previous partial")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     _stub_tool(bindir, "agg", (
@@ -1431,12 +1497,14 @@ def test_render_names_a_missing_encoder(name, tmp_path):
     This stop is also the one render failure that does not go through
     ``render_fail`` (it exits before ``agg`` runs), so the block's own
     pre-render ``rm`` is the only thing that removes a *previous* run's
-    ``recording.mp4`` and gif here: without it the block exits 1 with the
-    same message and leaves both in the capture directory, where the manifest
-    and the report present them as this run's evidence (verified live). The
-    seeded files below are what pins that ordering.
+    ``recording.mp4``, gif and interrupted partial here: without it the block
+    exits 1 with the same message and leaves all three in the capture
+    directory, where the manifest and the report present them as this run's
+    evidence (verified live). The seeded files below are what pins that
+    ordering.
     """
     r, mp4, gif = _run_render_without_ffmpeg(name, tmp_path)
+    partial = Path(str(mp4) + ".partial.mp4")
 
     assert r.returncode != 0, r.stderr
     assert "ffmpeg is not installed" in r.stderr, (
@@ -1451,6 +1519,10 @@ def test_render_names_a_missing_encoder(name, tmp_path):
         f"{name}: a render that could not run left the previous run's "
         "recording.mp4 behind, so the capture looks successful with a stale "
         "video")
+    assert not partial.exists(), (
+        f"{name}: a render that could not run left an interrupted render's "
+        f"{partial.name} behind, so the capture looks like a render in "
+        "progress")
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -1509,6 +1581,59 @@ def test_render_names_a_renderer_that_writes_no_gif(name, tmp_path, agg_shape):
         "failure: " + r.stderr)
     assert not mp4.exists()
     assert not gif.exists()
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_gif_it_cannot_probe(name, tmp_path):
+    """A gif the block cannot read is not an encoder failure.
+
+    ``render_cast`` reads the gif's frame count and duration to build the
+    final-frame hold. An unreadable gif (agg wrote it, ffprobe cannot parse
+    it) leaves both empty, the filter expression becomes malformed, and
+    ffmpeg rejects it — so the run reports "ffmpeg failed on the gif" and
+    sends the worker to the encoder for an input nothing can read. The probe
+    check names the file where it fails, and no case exercised it (the
+    ``ffprobe`` stub answers every query).
+    """
+    r, mp4, gif = _run_render(name, tmp_path, ffprobe_body="exit 0\n")
+
+    assert r.returncode != 0, (
+        f"{name}: a render whose gif could not be probed was reported as a "
+        "successful render")
+    assert "cannot probe the gif" in r.stderr, (
+        f"{name}: the failure does not name the gif that could not be read: "
+        + r.stderr)
+    assert "ffmpeg failed on the gif" not in r.stderr, (
+        f"{name}: a gif nothing could probe is reported as an encoder "
+        "failure: " + r.stderr)
+    assert not mp4.exists()
+    assert not gif.exists()
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_names_a_publish_that_failed(name, tmp_path):
+    """A rename that fails is not an encoder that wrote nothing.
+
+    The encode succeeds and the mp4 is written to its partial name; publishing
+    it is the rename. If that rename fails (the directory went read-only, the
+    disk filled), the render must say so — the block's final ``test -s`` on
+    the mp4 would otherwise report "ffmpeg wrote no mp4" for an encode that
+    ran and wrote a complete video, sending the worker back to the encoder.
+    No case exercised the rename's own failure path.
+    """
+    r, mp4, gif = _run_render(name, tmp_path, mv_body="exit 1\n")
+
+    assert r.returncode != 0, (
+        f"{name}: a render whose publish failed was reported as a successful "
+        "render")
+    assert "could not publish" in r.stderr, (
+        f"{name}: the failure does not name the step that broke: " + r.stderr)
+    assert "ffmpeg wrote no mp4" not in r.stderr, (
+        f"{name}: a failed rename is reported as an encoder that wrote "
+        "nothing: " + r.stderr)
+    assert not mp4.exists()
+    assert not gif.exists()
+    assert not Path(str(mp4) + ".partial.mp4").exists()
 
 
 @pytest.mark.parametrize("name", RECIPES)
@@ -1612,6 +1737,26 @@ def test_render_documents_how_to_get_the_renderer(name):
     assert (install_block.index("agg --version")
             < install_block.index("curl -fsSL")), (
         f"{name}: the agg install guard comes after the download")
+
+
+@pytest.mark.parametrize("name", RECIPES)
+def test_render_keeps_the_vfr_and_nostdin_encode(name):
+    """The encode's load-bearing options are part of the shipped block.
+
+    The render notes tell a worker to keep these, and dropping any of them is
+    silent: ``-nostdin`` keeps a batch loop's file names out of ffmpeg's
+    interactive stdin (QA S46 lost characters of the next path to it), and
+    ``-vsync vfr`` with the centisecond timebase keeps the GIF's frame delays
+    as durations instead of padding them out to a constant rate (a sparse TUI
+    cast took more than 10 minutes at ~900% CPU that way, against about 2
+    minutes). No case pinned them, so a block that lost them stayed green.
+    """
+    block = _render_block(name)
+    for option in ("-nostdin", "-vsync vfr", "-enc_time_base 1/100",
+                   "-video_track_timescale 100"):
+        assert option in block, (
+            f"{name}: the render block no longer carries `{option}`, which "
+            "the render notes tell a worker to keep")
 
 
 def _install_block(name):
@@ -4004,14 +4149,22 @@ class TestCaptureFlowExecution:
         ``recording.gif``, so seeding that name proved nothing: the run
         cleared a file nothing writes and left the real intermediate behind
         (verified live in this container).
+
+        The interrupted render's partial (``recording.mp4.partial.mp4``) is
+        seeded with them for the same reason: ``render_cast`` renames it only
+        after a successful encode, so a render killed before the rename
+        leaves it in the capture directory, and this is the one path that
+        clears it before a later capture fails.
         """
         raw = _scaffold_block(_recipe_text(name))
         cast_rel = re.search(r"^cast=(\S+)$", _render_block(name), re.M).group(1)
         intermediate = Path(cast_rel).name + ".gif"
+        partial = Path(cast_rel).stem + ".mp4.partial.mp4"
         r, cast = _run_block(
             raw, "norec", tmp_path, target=True,
             files={"recording.mp4": "previous run",
-                   intermediate: "previous gif"})
+                   intermediate: "previous gif",
+                   partial: "previous partial"})
         cap = cast.parent
         assert r.returncode != 0, r.stderr
         assert not (cap / "recording.mp4").exists(), (
@@ -4021,6 +4174,10 @@ class TestCaptureFlowExecution:
             f"{name}: a failed capture left the previous run's "
             f"{intermediate} (the intermediate the render block writes) "
             "behind")
+        assert not (cap / partial).exists(), (
+            f"{name}: a failed capture left an interrupted render's "
+            f"{partial} behind, so a later capture presents it as this run's "
+            "evidence")
 
     @pytest.mark.parametrize("name", RECIPES)
     def test_a_failed_capture_leaves_no_previous_manifest(self, name, tmp_path):

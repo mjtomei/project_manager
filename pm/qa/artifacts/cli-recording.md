@@ -645,8 +645,11 @@ render_cast "$cast" || render_fail \
     "the renderer's message above says which stage broke"
 # The mp4 is the required artifact: fail here, visibly, rather than leaving
 # the caller to notice the video is missing (or stale) later. The exit status
-# above is what proves the encode ran; this catches a renderer that reports
-# success and writes nothing.
+# above is what proves the encode ran, and `render_cast` already refuses an
+# encoder that wrote nothing (`[ -s "$part" ]`, which is the check that names
+# it); this is the backstop for a render that reported success without the
+# published file being there (another process removing it between the rename
+# and this line).
 test -s "${cast%.cast}.mp4" || render_fail "ffmpeg wrote no mp4"
 ```
 

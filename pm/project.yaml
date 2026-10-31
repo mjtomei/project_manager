@@ -34921,7 +34921,7 @@ prs:
   gh_pr: null
   gh_pr_number: null
   created_at: '2026-10-12T23:04:43.463024+00:00'
-  updated_at: '2026-10-31T18:35:03.358143+00:00'
+  updated_at: '2026-10-31T20:00:52.082688+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -37624,6 +37624,39 @@ prs:
       a fresh review/QA/sign-off.'
     created_at: '2026-10-31T18:35:03Z'
     last_edited: '2026-10-31T18:35:03Z'
+  - id: note-2c6b82a
+    text: 'Review loop 928f i1: one finding, test-only plus one comment correction
+      — the merged render_cast block''s own guarantees had no case. Mutating the recipe
+      text and re-running tests/test_qa_artifact_recording_recipes.py (239 passed
+      at HEAD) showed five removable guarantees: (1) the interrupted render''s recording.mp4.partial.mp4
+      is cleared in five places (tmux step 0, CLI preamble, CLI scaffold, the render
+      block''s pre-render rm, render_fail) and removing all five left the file green;
+      (2) encoding straight to recording.mp4 (part="$mp4") was silent; (3) the mv
+      guard ("could not publish") was silent; (4) the [ -n "$n" ] && [ -n "$dur" ]
+      probe check was silent (an unreadable gif then surfaces as "ffmpeg failed on
+      the gif"); (5) -nostdin / -vsync vfr / -enc_time_base 1/100 / -video_track_timescale
+      100 were unpinned. Fix: test_capture_section_clears_the_previous_video and test_a_failed_capture_leaves_no_previous_video
+      now require the partial (name derived from the block''s local part="$mp4.partial.mp4");
+      test_render_names_a_missing_encoder seeds it (the pre-render rm is the only
+      cleanup on that path); test_failed_encode_does_not_leave_a_partial_mp4 requires
+      render_fail to remove it; new test_render_publishes_through_a_partial_name,
+      test_render_names_a_publish_that_failed (new mv_body knob), test_render_names_a_gif_it_cannot_probe
+      and test_render_keeps_the_vfr_and_nostdin_encode. Mutation check: the six mutations
+      fail 8/4/2/2/2/2 cases respectively; unmutated 247 passed. One recipe change,
+      comment only: the text above the final test -s on the mp4 said it catches "a
+      renderer that reports success and writes nothing", but render_cast''s [ -s "$part"
+      ] is that check now, so the comment says the final check is the backstop for
+      a published file that is not there. Real-tool probe: merged tmux render block
+      with agg 1.9.0 + ffmpeg 4.4.2, healthy cast -> rc 0, H.264 1580x1120 3.70 s;
+      corrupt cast with previous mp4/gif/partial seeded -> rc 1 and all three cleared.
+      Related suites 145 passed; full suite env -u PM_HOST_HOME PATH=/usr/bin:/bin
+      pytest tests/ -q --deselect tests/test_merge_publish.py --deselect tests/test_signoff_integration.py
+      -> 5323 passed, 1 skipped, 121 deselected, 0 failed (443.00 s). Evidence: /pm-captures/review-928f-i1/
+      (mutation-check.log, probe.log, suite.log, README.md, scripts/). impl.md R61
+      + Files/verification and qa.md updated. No pm_core/ change; the dropped helper/prompt/verifier
+      work stays dropped.'
+    created_at: '2026-10-31T20:00:51Z'
+    last_edited: '2026-10-31T20:00:51Z'
   model: provider:deepseek-flash
   session_models:
     impl: provider:deepseek-flash
