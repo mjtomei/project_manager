@@ -308,7 +308,11 @@ keyring quota exhaustion with its remediation, and the retry must proceed.
 A scenario container is put at a process limit (bounded synthetic failure,
 e.g. a lowered pids limit or a wrapper returning "Cannot fork"). The surfaced
 cause must name the PID/process limit and the `podman restart <name>`
-remediation; a healthy sibling must keep moving meanwhile.
+remediation; a healthy sibling must keep moving meanwhile. Exercise **both**
+shapes: a running worker whose `exec` dies (`exec` kind) and a scenario whose
+container creation fails before any pane exists (`create` kind). The live
+keyring case was covered by an earlier run; the process-limit case — in
+particular the create-kind variant — has not been covered yet.
 
 ### E7 — Host mode (no container)
 A worker pane dies with no container to probe. The cause must be a sensible
@@ -337,6 +341,16 @@ the old transcript. Repeat with the drop noticed by the held run's follow-up
 scan and with a TUI restart before the retry fires: the persisted guard must
 still force a relaunch. A worker that keeps asking and dying must hit the
 bounded relaunch budget and end terminally `INPUT_REQUIRED`.
+
+### E9b — The dropped wait's window outlives its worker
+The same drop, but the worker exits on its own and the scenario *window*
+survives with its concretizer (and possibly verifier) pane. The worker-pane
+fallback would resolve to the window's first pane and poll the dead attempt's
+transcript through it, so while a dropped wait is in recovery and no worker
+pane is recorded the loop must not adopt a sibling pane: it must record the
+`exit` launch failure and relaunch. A reopened loop that re-records the old
+`INPUT_REQUIRED` after the verdict grace — with no worker left to answer — is
+a finding (this was the S11 defect fixed in 9966dcb6).
 
 ### E10 — Restart during a create-kind backoff
 A scenario whose container/workdir/window creation failed (no pane ever
@@ -381,6 +395,15 @@ list. Specific failures:
 - A restart during a create-kind backoff loses the instruction steps (the
   retried concretizer runs without them), or a restart during a flagged
   re-evaluation makes the flagged PASS final without re-running verification.
+
+## Coverage status (2026-10-29)
+
+Scenarios 1–13 exercised these requirements. Still open for a fresh run: the
+"dead worker's stale verdict is never resurrected" story (R9a/R10) is
+NEEDS_WORK pending re-test on the current HEAD (the S11 defect was fixed in
+9966dcb6), and process-limit (PID) exhaustion — both the running-worker
+`exec` and the no-pane `create` variants — has not been covered live (the
+keyring variant was).
 
 ## Ambiguities (resolved)
 
@@ -450,3 +473,13 @@ A11. **The E2 finding is fixed.** The dead-pane branch now collects a verdict
 from the transcript and settles the scenario instead of spending a retry, with
 the R9a guards preventing a resurrected `INPUT_REQUIRED`/flagged PASS. A run
 that still relaunches a worker which already emitted a verdict is a finding.
+
+A12. **Fake-claude stdin/hold semantics (2026-10-29).** A fake session with no
+`hold` exits on *any* stdin input, so a follow-up or re-evaluation typed into a
+live worker kills it. Choose `hold` per role: `hold: 0` for a worker that must
+die right after its verdict, a short hold (~50 s) for one that must outlive the
+30 s verdict grace but be gone before a later re-evaluation follow-up, and a
+long hold (~600 s) for concretizer/verifier panes that must ignore input. The
+interactive scenario 0 consumes the first `qa_scenario` slot, so a scripted
+`qa_scenario` sequence needs a leading throwaway entry (a weighted
+`{"verdicts": {"PASS": 100}}`-style config does not).
