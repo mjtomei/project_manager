@@ -48690,7 +48690,7 @@ prs:
   gh_pr: https://github.com/mjtomei/project_manager/pull/280
   gh_pr_number: 280
   created_at: '2026-10-29T02:00:23.323053+00:00'
-  updated_at: '2026-10-31T19:51:08.623215+00:00'
+  updated_at: '2026-10-31T20:04:58.643573+00:00'
   started_at: null
   reviewed_at: null
   merged_at: null
@@ -49001,6 +49001,23 @@ prs:
       status) and pr-7b1dd2e (auto-start relaunches a recorded ERROR).'
     created_at: '2026-10-31T19:51:08Z'
     last_edited: '2026-10-31T19:51:08Z'
+  - id: note-4f22732
+    text: 'Review 421e i2: no code change; spec-only sync. R5, the edge-case table
+      and the implementation plan still described the resume preflight as publishing
+      through the local `_abort(...)`, but the integrated code (and the 421e i1 note)
+      publishes it through `_fail_run_infrastructure`; those three references are
+      corrected in pm/specs/pr-574e851/impl.md. Re-verified the boundary at d2e98209:
+      fresh-run preflight, initial container launch, queued launch, relaunch, resume
+      re-validation, `pm qa debug` and `pm qa run` all fail closed with cause+remedy
+      and no host launch; healthy runtime still launches in-container; explicitly
+      disabled mode still runs on the host. Full pytest: 5229 passed, 1 skipped, 0
+      failed (408s). Observation, not changed (pre-existing and out of scope for this
+      container-mode PR): `pm qa debug` ignores the return of `new_window_get_pane`,
+      so in the rare None case it prints "Launched debug session" and leaks the container
+      it just created; when the pm session is actually gone the call raises instead.
+      The host branch has the same message behaviour.'
+    created_at: '2026-10-31T20:04:58Z'
+    last_edited: '2026-10-31T20:04:58Z'
   model: provider:deepseek-flash
   effort: high
   review_spec: false

@@ -234,9 +234,10 @@ The raise propagates through `_poll_tmux_verdicts` to the
 In `_resume_qa_sync`, after reading `use_containers` from the snapshot
 (`qa_loop.py:5358`):
 
-- if `use_containers` is True and `_runtime_status()` fails → `_abort(...)`
-  with `container_unavailable_message`, and set `state._error` so diagnostics
-  survive. Do not enter `_execute_and_finalize`; do not relaunch on host.
+- if `use_containers` is True and `_runtime_status()` fails →
+  `_fail_run_infrastructure(...)` with `container_unavailable_message`, which
+  sets `state._error` so the diagnostics survive. Do not enter
+  `_execute_and_finalize`; do not relaunch on host.
 - if the snapshot says False, keep host execution even if container mode is
   now enabled (the run's mode was explicitly host; live host workers are not
   retroactively containerized).
@@ -325,7 +326,7 @@ No **[UNRESOLVED]** ambiguities.
 | enabled + queued scenario create failure | ERROR from inside `_execute_and_finalize`; no host launch |
 | enabled + worker pane dies, container still running | existing retry → relaunch in the same container |
 | enabled + worker pane dies, container gone | recreated under the same name and the worker relaunched inside it (no downgrade); only when recreation fails → `ContainerLaunchError` → ERROR, no host relaunch |
-| enabled + resume snapshot True + runtime now down | ERROR via `_abort`; no host; `_error` preserved |
+| enabled + resume snapshot True + runtime now down | ERROR via `_fail_run_infrastructure`; no host; `_error` preserved |
 | enabled + resume snapshot False | host resume (run mode preserved) |
 | disabled + resume snapshot False | host resume unchanged |
 | `pm qa debug` enabled + runtime down | exit 1 with remedy; no clone/claude launch |
@@ -342,7 +343,8 @@ No **[UNRESOLVED]** ambiguities.
    - R3 failure capture + raise in `_launch_scenarios_in_containers`; catch in
      `_run_qa_sync` and `_execute_and_finalize`.
    - R4 `_relaunch_scenario_window(..., use_containers)` + caller.
-   - R5 resume preflight + `_abort(error=...)`.
+   - R5 resume preflight + `_fail_run_infrastructure` (the local `_abort`
+     stays for the other resume failures).
 3. `pm_core/cli/qa.py`: R6.
 4. Tests (new file `tests/test_container_fail_closed.py` plus additions to
    `tests/test_container.py`):
