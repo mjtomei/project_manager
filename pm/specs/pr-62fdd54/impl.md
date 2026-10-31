@@ -49,7 +49,10 @@ R1. **Refresh before planning.** In `run_qa_sync`'s planning phase, after
     logged command string.  (Integration with master@89e3c501, which added
     that transport at the old build site; re-integrated with
     master@4a74d880, which reworked the surrounding planning loop but kept
-    the transport at the same build site.)
+    the transport at the same build site; re-integrated with
+    master@eaf3372e, whose planning-loop changes still keep the build site
+    — the merge kept this PR's post-sync position and carried master's new
+    `state.scenario_start = scenario_start` bookkeeping to it.)
 
 R2. **Behind-only fast-forwards automatically.** L ancestor of U →
     `git merge --ff-only U` in the workdir (the branch is checked out).
@@ -118,7 +121,10 @@ R6. **Early exits are visible to every driver.** Each sync exit writes
 R7. **Planner/worker revision consistency.** `pre_plan_head` is taken after
     the sync, so it is the revision the planner reads (recorded as
     `state.planning_base`, logged and persisted in the resume file), and
-    `_planner_code_changes` stays planner-only.  The existing guard in
+    `_planner_code_changes` stays planner-only.  Master's
+    `state.scenario_start` (persisted for TUI resume ordering) is assigned
+    at the same post-sync build site, so it reflects the same planning
+    attempt.  The existing guard in
     `_publish_planner_head` + `expected_head` stays: if the upstream moves
     during planning (a lost/active writer, pr-3201ea8) the handoff still
     refuses and no worker launches.  Its "behind" message changes from
